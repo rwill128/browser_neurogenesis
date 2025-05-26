@@ -3,20 +3,134 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Simulation (Spring-Mass System)</title>
+    <title>2D Soft Body Simulation with Fluid & Particles</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #f0f0f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: sans-serif; }
-        canvas { border: 1px solid black; background-color: #ffffff; }
-        #controls { position: absolute; top: 10px; left: 10px; background-color: rgba(255,255,255,0.8); padding: 10px; border-radius: 5px; }
-        #controls label { display: block; margin-bottom: 5px;}
+        body {
+            margin: 0;
+            overflow-y: auto; 
+            background-color: #111;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start; 
+            align-items: center;    
+            min-height: 100vh;
+            font-family: sans-serif;
+            color: #eee;
+            padding: 20px 0; 
+            box-sizing: border-box; 
+        }
+        canvas {
+            border: 1px solid #444;
+            background-color: #222; 
+        }
+        #controls {
+            background-color: rgba(50,50,50,0.8);
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom:10px; 
+            display: flex;
+            flex-wrap: wrap; 
+            gap: 10px;
+            max-width: 800px; 
+            width: calc(100% - 40px); /* Adjust for body padding */
+            box-sizing: border-box;
+            justify-content: center; /* Center control groups if they don't fill the row */
+        }
+        #controls div.control-group { 
+            padding: 15px; /* Increased padding */
+            border: 1px solid #555;
+            border-radius: 6px; /* Slightly more rounded */
+            background-color: rgba(40,40,40,0.7); 
+            flex-grow: 1; 
+            min-width: 200px; /* Adjusted min-width */
+            max-width: 250px; /* Added max-width for better control on wider screens */
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column; /* Ensure items stack vertically */
+        }
+        #controls label.slider-label { /* Specific class for slider labels */
+            display: block;
+            margin-bottom: 3px; /* Space between label and value */
+            font-size: 0.9em;
+            font-weight: bold;
+            color: #ddd;
+            text-align: left; /* Align label text to the left */
+        }
+        #controls span.slider-value { /* Specific class for slider values */
+            display: block; /* Make span take its own line */
+            font-size: 0.85em;
+            text-align: right; /* Align value to the right */
+            color: #00aeff; /* Brighter color for value */
+            margin-bottom: 5px; /* Space between value and slider */
+            min-height: 1em; 
+        }
+        #controls input[type="range"] {
+            width: 100%; 
+            margin-top: 0; /* Removed top margin as span handles spacing */
+            box-sizing: border-box;
+        }
+        #controls button {
+            padding: 10px 15px; /* Slightly larger buttons */
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px; /* More space above buttons */
+            width: 100%; /* Make buttons take full width of control group */
+            box-sizing: border-box;
+        }
+        #controls button:hover {
+            background-color: #0056b3;
+        }
+        .control-group h4 {
+            margin-top: 0;
+            margin-bottom: 15px; /* More space below heading */
+            text-align: center;
+            color: #00aeff; 
+            width: 100%; /* Ensure heading spans width */
+        }
     </style>
 </head>
 <body>
     <div id="controls">
-        <label for="gravity">Gravity Y: <input type="range" id="gravity" min="-200" max="1000" value="300" step="10"> <span id="gravityValue">300</span></label>
-        <label for="stiffness">Stiffness: <input type="range" id="stiffness" min="100" max="10000" value="2000" step="100"> <span id="stiffnessValue">2000</span></label>
-        <label for="damping">Damping: <input type="range" id="damping" min="1" max="100" value="30" step="1"> <span id="dampingValue">30</span></label>
-        <button id="resetButton">Reset Simulation</button>
+        <div class="control-group">
+            <h4>Soft Body</h4>
+            <label for="gravity" class="slider-label">Gravity Y:</label>
+            <span id="gravityValue" class="slider-value">150</span>
+            <input type="range" id="gravity" min="-200" max="1000" value="150" step="10">
+
+            <label for="stiffness" class="slider-label">Stiffness:</label>
+            <span id="stiffnessValue" class="slider-value">2000</span>
+            <input type="range" id="stiffness" min="100" max="10000" value="2000" step="100">
+
+            <label for="damping" class="slider-label">Damping:</label>
+            <span id="dampingValue" class="slider-value">30</span>
+            <input type="range" id="damping" min="1" max="100" value="30" step="1">
+            <button id="resetButton">Reset Soft Body</button>
+        </div>
+        <div class="control-group">
+            <h4>Fluid</h4>
+            <label for="fluidDiffusion" class="slider-label">Diffusion:</label>
+            <span id="fluidDiffusionValue" class="slider-value">1.0e-5</span>
+            <input type="range" id="fluidDiffusion" min="0" max="0.001" value="0.00001" step="0.00001">
+
+            <label for="fluidViscosity" class="slider-label">Viscosity:</label>
+            <span id="fluidViscosityValue" class="slider-value">1.0e-6</span>
+            <input type="range" id="fluidViscosity" min="0" max="0.0001" value="0.000001" step="0.000001">
+
+            <label for="fluidFade" class="slider-label">Fade Rate:</label>
+            <span id="fluidFadeValue" class="slider-value">0.01</span>
+            <input type="range" id="fluidFade" min="0.001" max="0.1" value="0.01" step="0.001">
+            <button id="clearFluidButton">Clear Fluid</button>
+        </div>
+         <div class="control-group">
+            <h4>Particles</h4>
+            <label for="numParticles" class="slider-label">Particles:</label>
+            <span id="numParticlesValue" class="slider-value">500</span>
+            <input type="range" id="numParticles" min="0" max="2000" value="500" step="10">
+            <button id="resetParticlesButton">Reset Particles</button>
+        </div>
     </div>
     <canvas id="simulationCanvas"></canvas>
 
@@ -24,12 +138,11 @@
         const canvas = document.getElementById('simulationCanvas');
         const ctx = canvas.getContext('2d');
 
-        // --- Control Panel ---
+        // --- Soft Body Controls ---
         const gravitySlider = document.getElementById('gravity');
         const stiffnessSlider = document.getElementById('stiffness');
         const dampingSlider = document.getElementById('damping');
         const resetButton = document.getElementById('resetButton');
-
         const gravityValueSpan = document.getElementById('gravityValue');
         const stiffnessValueSpan = document.getElementById('stiffnessValue');
         const dampingValueSpan = document.getElementById('dampingValue');
@@ -38,66 +151,134 @@
         let DEFAULT_STIFFNESS = parseFloat(stiffnessSlider.value);
         let DEFAULT_DAMPING = parseFloat(dampingSlider.value);
 
-        gravitySlider.oninput = function() {
-            GRAVITY_Y = parseFloat(this.value);
-            gravityValueSpan.textContent = this.value;
+        // Function to update slider value display
+        function updateSliderDisplay(slider, span) {
+            let value = parseFloat(slider.value);
+            if (slider.id === 'fluidDiffusion' || slider.id === 'fluidViscosity') {
+                span.textContent = value.toExponential(1);
+            } else {
+                span.textContent = value;
+            }
         }
+
+        gravitySlider.oninput = function() { GRAVITY_Y = parseFloat(this.value); updateSliderDisplay(this, gravityValueSpan); }
         stiffnessSlider.oninput = function() {
             DEFAULT_STIFFNESS = parseFloat(this.value);
-            stiffnessValueSpan.textContent = this.value;
-            // Update existing springs or re-initialize if needed
+            updateSliderDisplay(this, stiffnessValueSpan);
             springs.forEach(spring => spring.stiffness = DEFAULT_STIFFNESS);
         }
         dampingSlider.oninput = function() {
             DEFAULT_DAMPING = parseFloat(this.value);
-            dampingValueSpan.textContent = this.value;
+            updateSliderDisplay(this, dampingValueSpan);
             springs.forEach(spring => spring.dampingFactor = DEFAULT_DAMPING);
         }
-        resetButton.onclick = function() {
-            initSimulation();
+        resetButton.onclick = function() { initSoftBodySimulation(); }
+
+        // --- Fluid Controls ---
+        const fluidDiffusionSlider = document.getElementById('fluidDiffusion');
+        const fluidViscositySlider = document.getElementById('fluidViscosity');
+        const fluidFadeSlider = document.getElementById('fluidFade');
+        const clearFluidButton = document.getElementById('clearFluidButton');
+        const fluidDiffusionValueSpan = document.getElementById('fluidDiffusionValue');
+        const fluidViscosityValueSpan = document.getElementById('fluidViscosityValue');
+        const fluidFadeValueSpan = document.getElementById('fluidFadeValue');
+
+        let FLUID_DIFFUSION = parseFloat(fluidDiffusionSlider.value);
+        let FLUID_VISCOSITY = parseFloat(fluidViscositySlider.value);
+        let FLUID_FADE_RATE = parseFloat(fluidFadeSlider.value);
+
+        fluidDiffusionSlider.oninput = function() { FLUID_DIFFUSION = parseFloat(this.value); updateSliderDisplay(this, fluidDiffusionValueSpan); if(fluidField) fluidField.diffusion = FLUID_DIFFUSION;}
+        fluidViscositySlider.oninput = function() { FLUID_VISCOSITY = parseFloat(this.value); updateSliderDisplay(this, fluidViscosityValueSpan); if(fluidField) fluidField.viscosity = FLUID_VISCOSITY;}
+        fluidFadeSlider.oninput = function() { FLUID_FADE_RATE = parseFloat(this.value); updateSliderDisplay(this, fluidFadeValueSpan);}
+        clearFluidButton.onclick = function() { if(fluidField) fluidField.clear(); }
+        
+        // --- Particle Controls ---
+        const numParticlesSlider = document.getElementById('numParticles');
+        const numParticlesValueSpan = document.getElementById('numParticlesValue');
+        const resetParticlesButton = document.getElementById('resetParticlesButton');
+
+        let NUM_PARTICLES = parseInt(numParticlesSlider.value);
+        numParticlesSlider.oninput = function() {
+            NUM_PARTICLES = parseInt(this.value);
+            updateSliderDisplay(this, numParticlesValueSpan);
+            initParticles(); 
         }
+        resetParticlesButton.onclick = function() { initParticles(); }
+
+        // Initialize slider display values
+        updateSliderDisplay(gravitySlider, gravityValueSpan);
+        updateSliderDisplay(stiffnessSlider, stiffnessValueSpan);
+        updateSliderDisplay(dampingSlider, dampingValueSpan);
+        updateSliderDisplay(fluidDiffusionSlider, fluidDiffusionValueSpan);
+        updateSliderDisplay(fluidViscositySlider, fluidViscosityValueSpan);
+        updateSliderDisplay(fluidFadeSlider, fluidFadeValueSpan);
+        updateSliderDisplay(numParticlesSlider, numParticlesValueSpan);
 
 
         // --- Simulation Parameters ---
         canvas.width = 800;
         canvas.height = 600;
-        const restitution = 0.5; // Bounciness
+        const restitution = 0.5; 
 
         let massPoints = [];
         let springs = [];
+        let fluidField;
+        let particles = [];
 
         let lastTime = 0;
         let deltaTime = 0;
 
         // --- Mouse Interaction ---
         let selectedPoint = null;
-        let mouse = { x: 0, y: 0, isDown: false };
+        let mouse = { x: 0, y: 0, prevX: 0, prevY: 0, isDown: false, dx:0, dy:0 };
+
+        function updateMouse(e) {
+            const rect = canvas.getBoundingClientRect();
+            mouse.prevX = mouse.x;
+            mouse.prevY = mouse.y;
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+            mouse.dx = mouse.x - mouse.prevX;
+            mouse.dy = mouse.y - mouse.prevY;
+        }
 
         canvas.addEventListener('mousedown', (e) => {
             mouse.isDown = true;
-            const rect = canvas.getBoundingClientRect();
-            mouse.x = e.clientX - rect.left;
-            mouse.y = e.clientY - rect.top;
+            updateMouse(e);
 
             for (let point of massPoints) {
                 const dist = Math.sqrt((point.pos.x - mouse.x)**2 + (point.pos.y - mouse.y)**2);
-                if (dist < point.radius * 2) { // Increased grab radius
+                if (dist < point.radius * 2.5) { 
                     selectedPoint = point;
-                    selectedPoint.isFixed = true; // Temporarily fix the point while dragging
-                    break;
+                    selectedPoint.isFixed = true;
+                    return; 
                 }
             }
         });
 
         canvas.addEventListener('mousemove', (e) => {
-            const rect = canvas.getBoundingClientRect();
-            mouse.x = e.clientX - rect.left;
-            mouse.y = e.clientY - rect.top;
-            if (selectedPoint && mouse.isDown) {
-                selectedPoint.pos.x = mouse.x;
-                selectedPoint.pos.y = mouse.y;
-                selectedPoint.vel.x = 0; // Stop its movement while dragging
-                selectedPoint.vel.y = 0;
+            updateMouse(e);
+            if (mouse.isDown) {
+                if (selectedPoint) {
+                    selectedPoint.pos.x = mouse.x;
+                    selectedPoint.pos.y = mouse.y;
+                    selectedPoint.vel.x = 0;
+                    selectedPoint.vel.y = 0;
+                } else if (fluidField) { 
+                    const fluidGridX = Math.floor(mouse.x / fluidField.scale);
+                    const fluidGridY = Math.floor(mouse.y / fluidField.scale);
+                    const r1 = Math.random() * 100 + 155; 
+                    const g1 = Math.random() * 50 + 25; 
+                    const b1 = Math.random() * 100 + 100; 
+                    fluidField.addDensity(fluidGridX, fluidGridY, r1, g1, b1, 100 + Math.random()*50);
+                    
+                    const r2 = Math.random() * 50 + 25; 
+                    const g2 = Math.random() * 100 + 155; 
+                    const b2 = Math.random() * 100 + 155; 
+                    fluidField.addDensity(fluidGridX, fluidGridY, r2, g2, b2, 100 + Math.random()*50);
+                    
+                    fluidField.addVelocity(fluidGridX, fluidGridY, mouse.dx * 5, mouse.dy * 5);
+                }
             }
         });
 
@@ -108,38 +289,31 @@
                 selectedPoint = null;
             }
         });
-         canvas.addEventListener('mouseleave', () => { // Handle mouse leaving canvas
+         canvas.addEventListener('mouseleave', () => {
             if (selectedPoint) {
                 selectedPoint.isFixed = false;
                 selectedPoint = null;
-                mouse.isDown = false;
             }
+            mouse.isDown = false; 
         });
 
 
-        // --- Vector2D Class (Optional, but helpful) ---
+        // --- Vector2D Class ---
         class Vec2 {
-            constructor(x = 0, y = 0) {
-                this.x = x;
-                this.y = y;
-            }
+            constructor(x = 0, y = 0) { this.x = x; this.y = y; }
             add(other) { return new Vec2(this.x + other.x, this.y + other.y); }
             sub(other) { return new Vec2(this.x - other.x, this.y - other.y); }
             mul(scalar) { return new Vec2(this.x * scalar, this.y * scalar); }
             div(scalar) { return scalar !== 0 ? new Vec2(this.x / scalar, this.y / scalar) : new Vec2(); }
             mag() { return Math.sqrt(this.x * this.x + this.y * this.y); }
-            normalize() {
-                const m = this.mag();
-                return m > 0 ? this.div(m) : new Vec2();
-            }
+            normalize() { const m = this.mag(); return m > 0 ? this.div(m) : new Vec2(); }
             static dot(v1, v2) { return v1.x * v2.x + v1.y * v2.y; }
         }
 
-        // --- MassPoint Class ---
+        // --- MassPoint Class (Soft Body) ---
         class MassPoint {
-            constructor(x, y, mass = 1, radius = 5, color = 'blue') {
+            constructor(x, y, mass = 1, radius = 5, color = 'rgba(0,150,255,0.8)') { 
                 this.pos = new Vec2(x, y);
-                this.prevPos = new Vec2(x,y); // For Verlet integration if you switch
                 this.vel = new Vec2();
                 this.force = new Vec2();
                 this.mass = mass;
@@ -148,200 +322,395 @@
                 this.color = color;
                 this.isFixed = false;
             }
-
-            applyForce(f) {
-                this.force = this.force.add(f);
-            }
-
+            applyForce(f) { this.force = this.force.add(f); }
             update(dt) {
-                if (this.isFixed || this.invMass === 0) {
-                    this.force = new Vec2(); // Clear forces if fixed
-                    return;
-                }
-
-                // Euler Integration
+                if (this.isFixed || this.invMass === 0) { this.force = new Vec2(); return; }
                 const acceleration = this.force.mul(this.invMass);
                 this.vel = this.vel.add(acceleration.mul(dt));
                 this.pos = this.pos.add(this.vel.mul(dt));
-
-                this.force = new Vec2(); // Reset force accumulator
+                this.force = new Vec2();
             }
-
             draw(ctx) {
                 ctx.beginPath();
                 ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
-                ctx.fillStyle = this.isFixed ? 'red' : this.color;
+                ctx.fillStyle = this.isFixed ? 'rgba(255,0,0,0.9)' : this.color;
                 ctx.fill();
                 ctx.closePath();
             }
         }
 
-        // --- Spring Class ---
+        // --- Spring Class (Soft Body) ---
         class Spring {
             constructor(p1, p2, stiffness, dampingFactor, restLength = null) {
-                this.p1 = p1; // MassPoint 1
-                this.p2 = p2; // MassPoint 2
-                this.stiffness = stiffness; // Spring constant (k)
-                this.dampingFactor = dampingFactor; // Damping coefficient
-                if (restLength === null) {
-                    this.restLength = p1.pos.sub(p2.pos).mag();
-                } else {
-                    this.restLength = restLength;
-                }
+                this.p1 = p1; this.p2 = p2;
+                this.stiffness = stiffness; this.dampingFactor = dampingFactor;
+                this.restLength = restLength === null ? p1.pos.sub(p2.pos).mag() : restLength;
             }
-
             applyForce() {
-                const diffPos = this.p1.pos.sub(this.p2.pos); // Vector from p2 to p1
+                const diffPos = this.p1.pos.sub(this.p2.pos);
                 const currentLength = diffPos.mag();
-                
-                if (currentLength === 0) return; // Avoid division by zero
-
+                if (currentLength === 0) return;
                 const displacement = currentLength - this.restLength;
                 const direction = diffPos.normalize();
-
-                // Spring force (Hooke's Law: F = -k * x)
                 const springForceMagnitude = -this.stiffness * displacement;
                 const springForce = direction.mul(springForceMagnitude);
-
-                // Damping force (F_damping = -d * v_relative)
-                // Relative velocity along the spring axis
                 const relVel = this.p1.vel.sub(this.p2.vel);
                 const velAlongSpring = Vec2.dot(relVel, direction);
                 const dampingForceMagnitude = -this.dampingFactor * velAlongSpring;
                 const dampingForce = direction.mul(dampingForceMagnitude);
-
                 const totalForce = springForce.add(dampingForce);
-
                 this.p1.applyForce(totalForce);
-                this.p2.applyForce(totalForce.mul(-1)); // Equal and opposite force
+                this.p2.applyForce(totalForce.mul(-1));
             }
-
             draw(ctx) {
                 ctx.beginPath();
                 ctx.moveTo(this.p1.pos.x, this.p1.pos.y);
                 ctx.lineTo(this.p2.pos.x, this.p2.pos.y);
-                ctx.strokeStyle = 'grey';
+                ctx.strokeStyle = 'rgba(150,150,150,0.6)'; 
                 ctx.lineWidth = 2;
                 ctx.stroke();
                 ctx.closePath();
             }
         }
 
+        // --- FluidField Class (Simplified) ---
+        class FluidField {
+            constructor(size, diffusion, viscosity, dt, scale) {
+                this.size = size; 
+                this.dt = dt;
+                this.diffusion = diffusion; 
+                this.viscosity = viscosity; 
+                this.scale = scale; 
+
+                this.densityR = new Float32Array(size * size).fill(0);
+                this.densityG = new Float32Array(size * size).fill(0);
+                this.densityB = new Float32Array(size * size).fill(0);
+                this.densityR0 = new Float32Array(size * size).fill(0);
+                this.densityG0 = new Float32Array(size * size).fill(0);
+                this.densityB0 = new Float32Array(size * size).fill(0);
+                
+                this.Vx = new Float32Array(size * size).fill(0); 
+                this.Vy = new Float32Array(size * size).fill(0); 
+                this.Vx0 = new Float32Array(size * size).fill(0); 
+                this.Vy0 = new Float32Array(size * size).fill(0); 
+                
+                this.iterations = 4; 
+            }
+
+            IX(x, y) { 
+                x = Math.max(0, Math.min(x, this.size - 1));
+                y = Math.max(0, Math.min(y, this.size - 1));
+                return Math.floor(x) + Math.floor(y) * this.size;
+            }
+
+            addDensity(x, y, r, g, b, amount) {
+                const idx = this.IX(x,y);
+                this.densityR[idx] = Math.min(255, this.densityR[idx] + r * (amount/255));
+                this.densityG[idx] = Math.min(255, this.densityG[idx] + g * (amount/255));
+                this.densityB[idx] = Math.min(255, this.densityB[idx] + b * (amount/255));
+            }
+
+            addVelocity(x, y, amountX, amountY) {
+                const idx = this.IX(x, y);
+                this.Vx[idx] += amountX;
+                this.Vy[idx] += amountY;
+            }
+            
+            lin_solve(b, x, x0, a, c) {
+                const cRecip = 1.0 / c;
+                for (let k = 0; k < this.iterations; k++) {
+                    for (let j = 1; j < this.size - 1; j++) {
+                        for (let i = 1; i < this.size - 1; i++) {
+                            x[this.IX(i, j)] =
+                                (x0[this.IX(i, j)] +
+                                a * (x[this.IX(i + 1, j)] + x[this.IX(i - 1, j)] +
+                                     x[this.IX(i, j + 1)] + x[this.IX(i, j - 1)])) *
+                                cRecip;
+                        }
+                    }
+                    this.set_bnd(b, x);
+                }
+            }
+
+            diffuse(b, x, x0, diff_rate, dt) {
+                const a = dt * diff_rate * (this.size - 2) * (this.size - 2);
+                this.lin_solve(b, x, x0, a, 1 + 4 * a);
+            }
+            
+            project(velocX, velocY, p, div) { // p and div are temp arrays, typically Vx0, Vy0 or similar
+                for (let j = 1; j < this.size - 1; j++) {
+                    for (let i = 1; i < this.size - 1; i++) {
+                        div[this.IX(i, j)] = -0.5 * (
+                            velocX[this.IX(i + 1, j)] - velocX[this.IX(i - 1, j)] +
+                            velocY[this.IX(i, j + 1)] - velocY[this.IX(i, j - 1)]
+                        ) / this.size;
+                        p[this.IX(i, j)] = 0;
+                    }
+                }
+                this.set_bnd(0, div);
+                this.set_bnd(0, p);
+                this.lin_solve(0, p, div, 1, 4); // Solve for p
+
+                for (let j = 1; j < this.size - 1; j++) {
+                    for (let i = 1; i < this.size - 1; i++) {
+                        velocX[this.IX(i, j)] -= 0.5 * (p[this.IX(i + 1, j)] - p[this.IX(i - 1, j)]) * this.size;
+                        velocY[this.IX(i, j)] -= 0.5 * (p[this.IX(i, j + 1)] - p[this.IX(i, j - 1)]) * this.size;
+                    }
+                }
+                this.set_bnd(1, velocX);
+                this.set_bnd(2, velocY);
+            }
+
+            advect(b, d, d0, velocX, velocY, dt) {
+                let i0, i1, j0, j1;
+                const dtx = dt * (this.size - 2); // Scale factor for advection
+                const dty = dt * (this.size - 2);
+                let s0, s1, t0, t1;
+                let tmp1, tmp2, x, y;
+
+                for (let j = 1; j < this.size - 1; j++) {
+                    for (let i = 1; i < this.size - 1; i++) {
+                        tmp1 = dtx * velocX[this.IX(i, j)];
+                        tmp2 = dty * velocY[this.IX(i, j)];
+                        x = i - tmp1; 
+                        y = j - tmp2;
+
+                        if (x < 0.5) x = 0.5;
+                        if (x > this.size - 1.5) x = this.size - 1.5; 
+                        i0 = Math.floor(x);
+                        i1 = i0 + 1.0;
+                        
+                        if (y < 0.5) y = 0.5;
+                        if (y > this.size - 1.5) y = this.size - 1.5; 
+                        j0 = Math.floor(y);
+                        j1 = j0 + 1.0;
+
+                        s1 = x - i0; s0 = 1.0 - s1;
+                        t1 = y - j0; t0 = 1.0 - t1;
+
+                        d[this.IX(i, j)] =
+                            s0 * (t0 * d0[this.IX(i0, j0)] + t1 * d0[this.IX(i0, j1)]) +
+                            s1 * (t0 * d0[this.IX(i1, j0)] + t1 * d0[this.IX(i1, j1)]);
+                    }
+                }
+                this.set_bnd(b, d);
+            }
+
+            set_bnd(b, x) { // Boundary conditions
+                for (let i = 1; i < this.size - 1; i++) {
+                    x[this.IX(i, 0)] = b === 2 ? -x[this.IX(i, 1)] : x[this.IX(i, 1)];
+                    x[this.IX(i, this.size - 1)] = b === 2 ? -x[this.IX(i, this.size - 2)] : x[this.IX(i, this.size - 2)];
+                }
+                for (let j = 1; j < this.size - 1; j++) {
+                    x[this.IX(0, j)] = b === 1 ? -x[this.IX(1, j)] : x[this.IX(1, j)];
+                    x[this.IX(this.size - 1, j)] = b === 1 ? -x[this.IX(this.size - 2, j)] : x[this.IX(this.size - 2, j)];
+                }
+                x[this.IX(0, 0)] = 0.5 * (x[this.IX(1, 0)] + x[this.IX(0, 1)]);
+                x[this.IX(0, this.size - 1)] = 0.5 * (x[this.IX(1, this.size - 1)] + x[this.IX(0, this.size - 2)]);
+                x[this.IX(this.size - 1, 0)] = 0.5 * (x[this.IX(this.size - 2, 0)] + x[this.IX(this.size - 1, 1)]);
+                x[this.IX(this.size - 1, this.size - 1)] = 0.5 * (x[this.IX(this.size - 2, this.size - 1)] + x[this.IX(this.size - 1, this.size - 2)]);
+            }
+            
+            step() {
+                // Velocities
+                this.diffuse(1, this.Vx0, this.Vx, this.viscosity, this.dt); // Diffuse current Vx into Vx0
+                this.diffuse(2, this.Vy0, this.Vy, this.viscosity, this.dt); // Diffuse current Vy into Vy0
+                
+                // After diffusion, Vx0 and Vy0 hold the diffused velocities.
+                // Project needs the "before advection" velocities, which are now in Vx0, Vy0.
+                // The result of projection will be written back to Vx0, Vy0.
+                // p and div for project are temporary storage, can reuse other arrays if careful.
+                // Here, we use Vx and Vy as temp storage for p and div during projection.
+                this.project(this.Vx0, this.Vy0, this.Vx, this.Vy); // Result in Vx0, Vy0 (now divergence-free)
+                
+                // Advect using the now divergence-free velocities (Vx0, Vy0)
+                // Store advected result in Vx, Vy
+                this.advect(1, this.Vx, this.Vx0, this.Vx0, this.Vy0, this.dt);
+                this.advect(2, this.Vy, this.Vy0, this.Vx0, this.Vy0, this.dt);
+
+                // Project again the advected velocities (now in Vx, Vy)
+                // Result will be in Vx, Vy. Use Vx0, Vy0 as temp for p, div.
+                this.project(this.Vx, this.Vy, this.Vx0, this.Vy0);
+
+                // Densities
+                // Diffuse current densities (densityR/G/B) into their respective '0' buffers
+                this.diffuse(0, this.densityR0, this.densityR, this.diffusion, this.dt);
+                this.diffuse(0, this.densityG0, this.densityG, this.diffusion, this.dt);
+                this.diffuse(0, this.densityB0, this.densityB, this.diffusion, this.dt);
+
+                // Advect using the final projected velocities (Vx, Vy)
+                // Store advected result back into densityR/G/B, using densityR0/G0/B0 as source
+                this.advect(0, this.densityR, this.densityR0, this.Vx, this.Vy, this.dt);
+                this.advect(0, this.densityG, this.densityG0, this.Vx, this.Vy, this.dt);
+                this.advect(0, this.densityB, this.densityB0, this.Vx, this.Vy, this.dt);
+
+
+                // Fade density (applied to the current display densities)
+                for (let i = 0; i < this.densityR.length; i++) {
+                    this.densityR[i] = Math.max(0, this.densityR[i] - FLUID_FADE_RATE * 255 * this.dt);
+                    this.densityG[i] = Math.max(0, this.densityG[i] - FLUID_FADE_RATE * 255 * this.dt);
+                    this.densityB[i] = Math.max(0, this.densityB[i] - FLUID_FADE_RATE * 255 * this.dt);
+                }
+
+                // No need to swap density buffers here as advection writes to densityR/G/B from densityR0/G0/B0
+                // and diffusion writes to densityR0/G0/B0 from densityR/G/B.
+                // The next frame will use densityR/G/B as the source for diffusion.
+            }
+
+            draw(ctx) {
+                for (let y = 0; y < this.size; y++) {
+                    for (let x = 0; x < this.size; x++) {
+                        const idx = this.IX(x, y);
+                        const r = Math.min(255, Math.max(0, Math.floor(this.densityR[idx])));
+                        const g = Math.min(255, Math.max(0, Math.floor(this.densityG[idx])));
+                        const b = Math.min(255, Math.max(0, Math.floor(this.densityB[idx])));
+                        if (r > 0 || g > 0 || b > 0) { 
+                             ctx.fillStyle = `rgb(${r},${g},${b})`;
+                             ctx.fillRect(x * this.scale, y * this.scale, this.scale, this.scale);
+                        }
+                    }
+                }
+            }
+            clear() {
+                this.densityR.fill(0); this.densityG.fill(0); this.densityB.fill(0);
+                this.densityR0.fill(0); this.densityG0.fill(0); this.densityB0.fill(0);
+                this.Vx.fill(0); this.Vy.fill(0);
+                this.Vx0.fill(0); this.Vy0.fill(0);
+            }
+        }
+
+        // --- Particle Class (for fluid visualization) ---
+        class Particle {
+            constructor(x, y, fluidFieldRef) {
+                this.pos = new Vec2(x, y);
+                this.vel = new Vec2(Math.random() * 0.2 - 0.1, Math.random() * 0.2 - 0.1); 
+                this.fluidField = fluidFieldRef;
+                this.life = 1.0; 
+                this.lifeDecay = 0.005 + Math.random() * 0.01;
+                this.size = Math.random() * 1.5 + 0.5;
+            }
+
+            update(dt) {
+                if (!this.fluidField) return; 
+                const fluidGridX = Math.floor(this.pos.x / this.fluidField.scale);
+                const fluidGridY = Math.floor(this.pos.y / this.fluidField.scale);
+                const idx = this.fluidField.IX(fluidGridX, fluidGridY);
+
+                // Use the *current* velocities from the fluid field (Vx, Vy)
+                const fluidVelX = this.fluidField.Vx[idx];
+                const fluidVelY = this.fluidField.Vy[idx];
+
+                this.vel.x += (fluidVelX * 0.5 - this.vel.x) * 0.1; 
+                this.vel.y += (fluidVelY * 0.5 - this.vel.y) * 0.1;
+
+                this.pos = this.pos.add(this.vel.mul(dt * 100)); 
+
+                if (this.pos.x < 0) this.pos.x = canvas.width;
+                if (this.pos.x > canvas.width) this.pos.x = 0;
+                if (this.pos.y < 0) this.pos.y = canvas.height;
+                if (this.pos.y > canvas.height) this.pos.y = 0;
+                
+                this.life -= this.lifeDecay * dt * 60; 
+                if (this.life <=0) { 
+                    this.pos.x = Math.random() * canvas.width;
+                    this.pos.y = Math.random() * canvas.height;
+                    this.vel = new Vec2(Math.random() * 0.2 - 0.1, Math.random() * 0.2 - 0.1);
+                    this.life = 1.0;
+                }
+            }
+
+            draw(ctx) {
+                const alpha = Math.max(0, this.life * 0.7); 
+                ctx.fillStyle = `rgba(220, 220, 250, ${alpha})`; 
+                ctx.beginPath();
+                ctx.arc(this.pos.x, this.pos.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+
         // --- Simulation Setup ---
-        function initSimulation() {
+        function initSoftBodySimulation() {
             massPoints = [];
             springs = [];
-
-            // Create a deformable square (or line, or blob)
             const startX = canvas.width / 2 - 50;
-            const startY = canvas.height / 3;
-            const pointDist = 50;
+            const startY = canvas.height / 4; 
+            const pointDist = 40;
             const numPointsX = 3;
             const numPointsY = 3;
-
-            // Create points in a grid
             let gridPoints = [];
             for (let i = 0; i < numPointsY; i++) {
                 gridPoints[i] = [];
                 for (let j = 0; j < numPointsX; j++) {
-                    const point = new MassPoint(startX + j * pointDist, startY + i * pointDist, 1, 7);
-                     // if (i === 0 && (j === 0 || j === numPointsX -1)) point.isFixed = true; // Fix top corners
+                    const point = new MassPoint(startX + j * pointDist, startY + i * pointDist, 1, 6);
                     massPoints.push(point);
                     gridPoints[i][j] = point;
                 }
             }
-            // Fix the top-left point of the grid
-            // if (gridPoints[0] && gridPoints[0][0]) {
-            //    gridPoints[0][0].isFixed = true;
-            //    gridPoints[0][0].color = 'green';
-            // }
+            for (let i = 0; i < numPointsY; i++) for (let j = 0; j < numPointsX - 1; j++) springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], DEFAULT_STIFFNESS, DEFAULT_DAMPING));
+            for (let j = 0; j < numPointsX; j++) for (let i = 0; i < numPointsY - 1; i++) springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], DEFAULT_STIFFNESS, DEFAULT_DAMPING));
+            for (let i = 0; i < numPointsY - 1; i++) for (let j = 0; j < numPointsX - 1; j++) {
+                springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], DEFAULT_STIFFNESS * 0.7, DEFAULT_DAMPING));
+                springs.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], DEFAULT_STIFFNESS * 0.7, DEFAULT_DAMPING));
+            }
+            lastTime = performance.now();
+        }
 
+        function initFluidSimulation() {
+            const fluidGridSize = 64; 
+            const fluidScale = canvas.width / fluidGridSize; 
+            fluidField = new FluidField(fluidGridSize, FLUID_DIFFUSION, FLUID_VISCOSITY, 1/60, fluidScale); 
+        }
 
-            // Connect points with springs
-            // Horizontal springs
-            for (let i = 0; i < numPointsY; i++) {
-                for (let j = 0; j < numPointsX - 1; j++) {
-                    springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], DEFAULT_STIFFNESS, DEFAULT_DAMPING));
-                }
+        function initParticles() {
+            particles = [];
+            if (!fluidField) { 
+                console.warn("Fluid field not initialized when trying to create particles. Initializing now.");
+                initFluidSimulation();
             }
-            // Vertical springs
-            for (let j = 0; j < numPointsX; j++) {
-                for (let i = 0; i < numPointsY - 1; i++) {
-                    springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], DEFAULT_STIFFNESS, DEFAULT_DAMPING));
-                }
+            for (let i = 0; i < NUM_PARTICLES; i++) {
+                particles.push(new Particle(Math.random() * canvas.width, Math.random() * canvas.height, fluidField));
             }
-            // Shear springs (diagonals)
-            for (let i = 0; i < numPointsY - 1; i++) {
-                for (let j = 0; j < numPointsX - 1; j++) {
-                    springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], DEFAULT_STIFFNESS * 0.7, DEFAULT_DAMPING));
-                    springs.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], DEFAULT_STIFFNESS * 0.7, DEFAULT_DAMPING));
-                }
-            }
-             // Bending springs (connect points distance 2, optional for more rigidity)
-            for (let i = 0; i < numPointsY; i++) {
-                for (let j = 0; j < numPointsX - 2; j++) {
-                    springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+2], DEFAULT_STIFFNESS * 0.5, DEFAULT_DAMPING));
-                }
-            }
-            for (let j = 0; j < numPointsX; j++) {
-                for (let i = 0; i < numPointsY - 2; i++) {
-                    springs.push(new Spring(gridPoints[i][j], gridPoints[i+2][j], DEFAULT_STIFFNESS * 0.5, DEFAULT_DAMPING));
-                }
-            }
-
-            lastTime = performance.now(); // Reset timer
         }
 
 
         // --- Physics Update ---
         function updatePhysics(dt) {
-            // Apply gravity to all points
-            for (let point of massPoints) {
-                if (!point.isFixed) {
-                    point.applyForce(new Vec2(0, GRAVITY_Y * point.mass));
-                }
+            if (fluidField) {
+                fluidField.dt = dt; 
+                fluidField.step();
             }
 
-            // Apply spring forces
-            for (let spring of springs) {
-                spring.applyForce();
+            for (let particle of particles) {
+                particle.update(dt);
             }
 
-            // Update point positions
-            for (let point of massPoints) {
-                point.update(dt);
-            }
-
-            // Handle collisions with canvas boundaries
-            for (let point of massPoints) {
+            for (let point of massPoints) if (!point.isFixed) point.applyForce(new Vec2(0, GRAVITY_Y * point.mass));
+            for (let spring of springs) spring.applyForce();
+            for (let point of massPoints) point.update(dt);
+            for (let point of massPoints) { 
                 if (point.isFixed) continue;
-
-                if (point.pos.x - point.radius < 0) {
-                    point.pos.x = point.radius;
-                    point.vel.x *= -restitution;
-                } else if (point.pos.x + point.radius > canvas.width) {
-                    point.pos.x = canvas.width - point.radius;
-                    point.vel.x *= -restitution;
-                }
-
-                if (point.pos.y - point.radius < 0) {
-                    point.pos.y = point.radius;
-                    point.vel.y *= -restitution;
-                } else if (point.pos.y + point.radius > canvas.height) {
-                    point.pos.y = canvas.height - point.radius;
-                    point.vel.y *= -restitution;
-                }
+                if (point.pos.x - point.radius < 0) { point.pos.x = point.radius; point.vel.x *= -restitution; }
+                else if (point.pos.x + point.radius > canvas.width) { point.pos.x = canvas.width - point.radius; point.vel.x *= -restitution; }
+                if (point.pos.y - point.radius < 0) { point.pos.y = point.radius; point.vel.y *= -restitution; }
+                else if (point.pos.y + point.radius > canvas.height) { point.pos.y = canvas.height - point.radius; point.vel.y *= -restitution; }
             }
         }
 
         // --- Drawing ---
         function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#222'; 
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+            if (fluidField) {
+                fluidField.draw(ctx);
+            }
+            for (let particle of particles) {
+                particle.draw(ctx);
+            }
             for (let spring of springs) {
                 spring.draw(ctx);
             }
-
             for (let point of massPoints) {
                 point.draw(ctx);
             }
@@ -349,22 +718,21 @@
 
         // --- Game Loop ---
         function gameLoop(timestamp) {
-            deltaTime = (timestamp - lastTime) / 1000; // Delta time in seconds
+            deltaTime = (timestamp - lastTime) / 1000;
+            if (isNaN(deltaTime)) deltaTime = 1/60; // Handle first frame or tab-out issues
             lastTime = timestamp;
-
-            // Cap delta time to prevent physics explosions if tab is inactive for a long time
-            const maxDeltaTime = 1/30; // Max step for 30fps
+            const maxDeltaTime = 1/20; 
             deltaTime = Math.min(deltaTime, maxDeltaTime);
-
 
             updatePhysics(deltaTime);
             draw();
-
             requestAnimationFrame(gameLoop);
         }
 
         // Start the simulation
-        initSimulation();
+        initSoftBodySimulation();
+        initFluidSimulation(); 
+        initParticles();
         requestAnimationFrame(gameLoop);
     </script>
 </body>

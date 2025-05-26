@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Simulation with Verlet Integration</title>
+    <title>2D Soft Body with Instability Detection & Motor Toggle</title>
     <style>
         body {
             margin: 0;
@@ -16,7 +16,7 @@
             min-height: 100vh;
             font-family: sans-serif;
             color: #eee;
-            padding: 20px 0; 
+            padding: 10px 0; 
             box-sizing: border-box; 
         }
         canvas {
@@ -32,36 +32,44 @@
             flex-wrap: wrap; 
             gap: 10px;
             max-width: 800px; 
-            width: calc(100% - 40px); 
+            width: calc(100% - 20px); 
             box-sizing: border-box;
             justify-content: center; 
         }
         #controls div.control-group { 
-            padding: 15px; 
+            padding: 10px; 
             border: 1px solid #555;
             border-radius: 6px; 
             background-color: rgba(40,40,40,0.7); 
             flex-grow: 1; 
-            min-width: 200px; 
-            max-width: 250px; 
+            min-width: 180px; 
+            max-width: 240px; 
             box-sizing: border-box;
             display: flex;
             flex-direction: column; 
         }
-        #controls label.slider-label { 
+        #controls label.slider-label, #controls label.checkbox-label { 
             display: block;
-            margin-bottom: 3px; 
-            font-size: 0.9em;
+            margin-bottom: 2px; 
+            font-size: 0.85em; 
             font-weight: bold;
             color: #ddd;
             text-align: left; 
         }
+        #controls label.checkbox-label {
+            margin-top: 8px;
+            display: flex; /* Align checkbox and text */
+            align-items: center;
+        }
+        #controls input[type="checkbox"] {
+            margin-left: 5px;
+        }
         #controls span.slider-value { 
             display: block; 
-            font-size: 0.85em;
+            font-size: 0.8em; 
             text-align: right; 
             color: #00aeff; 
-            margin-bottom: 5px; 
+            margin-bottom: 3px; 
             min-height: 1em; 
         }
         #controls input[type="range"] {
@@ -70,13 +78,13 @@
             box-sizing: border-box;
         }
         #controls button {
-            padding: 10px 15px; 
+            padding: 8px 12px; 
             background-color: #007bff;
             color: white;
             border: none;
             border-radius: 4px;
             cursor: pointer;
-            margin-top: 10px; 
+            margin-top: 8px; 
             width: 100%; 
             box-sizing: border-box;
         }
@@ -85,10 +93,45 @@
         }
         .control-group h4 {
             margin-top: 0;
-            margin-bottom: 15px; 
+            margin-bottom: 10px; 
             text-align: center;
             color: #00aeff; 
             width: 100%; 
+            font-size: 1em; 
+        }
+        #energyMeterContainer {
+            margin-top: 10px;
+            padding: 8px;
+            background-color: rgba(50,50,50,0.8);
+            border-radius: 6px;
+            width: 300px;
+            text-align: center;
+            color: #eee;
+            font-size: 0.9em;
+        }
+        #energyBar {
+            width: 80%;
+            height: 15px;
+            margin-left: 5px;
+        }
+        .indicator-label {
+            font-size: 0.85em;
+            color: #ddd;
+            margin-top: 8px;
+        }
+        .indicator-light {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #4CAF50; /* Green by default */
+            margin-left: 5px;
+            vertical-align: middle;
+            border: 1px solid #222;
+            transition: background-color 0.3s;
+        }
+        .indicator-light.unstable {
+            background-color: #F44336; /* Red when unstable */
         }
     </style>
 </head>
@@ -104,19 +147,27 @@
             <span id="dampingValue" class="slider-value">15.0</span> 
             <input type="range" id="damping" min="0.1" max="50" value="15" step="0.1"> 
             
-            <label for="bodyFluidEntrainment" class="slider-label">Body Fluid Entrainment:</label>
+            <label for="bodyFluidEntrainment" class="slider-label">Fluid Entrainment:</label>
             <span id="bodyFluidEntrainmentValue" class="slider-value">0.05</span>
-            <input type="range" id="bodyFluidEntrainment" min="0.0" max="1.0" value="0.05" step="0.01">
+            <input type="range" id="bodyFluidEntrainment" min="0.0" max="0.5" value="0.05" step="0.005"> 
             
             <label for="fluidCurrentStrength" class="slider-label">Fluid Current Strength:</label>
             <span id="fluidCurrentStrengthValue" class="slider-value">10.0</span>
-            <input type="range" id="fluidCurrentStrength" min="0.0" max="50.0" value="10.0" step="0.5">
+            <input type="range" id="fluidCurrentStrength" min="0.0" max="25.0" value="10.0" step="0.1"> 
             
-            <label for="bodyPushStrength" class="slider-label">Body Push Strength:</label>
+            <label for="bodyPushStrength" class="slider-label">Body Push (Drag):</label>
             <span id="bodyPushStrengthValue" class="slider-value">2.0</span>
             <input type="range" id="bodyPushStrength" min="0.0" max="10.0" value="2.0" step="0.1">
 
+            <label for="motorStrength" class="slider-label">Motor Strength:</label>
+            <span id="motorStrengthValue" class="slider-value">0.50</span> 
+            <input type="range" id="motorStrength" min="0.0" max="1.5" value="0.5" step="0.01"> 
+            
+            <label for="motorToggle" class="checkbox-label">Motor Active:
+                <input type="checkbox" id="motorToggle" checked>
+            </label>
 
+            <div class="indicator-label">Instability: <span id="instabilityLight" class="indicator-light"></span></div>
             <button id="resetButton">Reset Soft Body</button>
         </div>
         <div class="control-group">
@@ -139,76 +190,39 @@
             <label for="numParticles" class="slider-label">Particles:</label>
             <span id="numParticlesValue" class="slider-value">500</span>
             <input type="range" id="numParticles" min="0" max="2000" value="500" step="10">
-             <label for="particleFluidInfluence" class="slider-label">Fluid Influence:</label>
+             <label for="particleFluidInfluence" class.slider-label="slider-label">Fluid Influence:</label>
              <span id="particleFluidInfluenceValue" class="slider-value">0.3</span>
              <input type="range" id="particleFluidInfluence" min="0.01" max="1.0" value="0.3" step="0.01">
+             <label for="particleLifeDecay" class="slider-label">Life Decay Rate:</label>
+             <span id="particleLifeDecayValue" class="slider-value">0.005</span>
+             <input type="range" id="particleLifeDecay" min="0.0001" max="0.02" value="0.005" step="0.0001">
             <button id="resetParticlesButton">Reset Particles</button>
         </div>
     </div>
     <canvas id="simulationCanvas"></canvas>
+    <div id="energyMeterContainer">Energy: <progress id="energyBar" value="0" max="100"></progress> <span id="energyValue">0</span> / 100</div>
 
     <script>
         const canvas = document.getElementById('simulationCanvas');
         const ctx = canvas.getContext('2d');
 
-        // --- Soft Body Controls ---
+        // --- Controls ---
         const stiffnessSlider = document.getElementById('stiffness');
         const dampingSlider = document.getElementById('damping');
         const bodyFluidEntrainmentSlider = document.getElementById('bodyFluidEntrainment'); 
         const fluidCurrentStrengthSlider = document.getElementById('fluidCurrentStrength'); 
         const bodyPushStrengthSlider = document.getElementById('bodyPushStrength'); 
+        const motorStrengthSlider = document.getElementById('motorStrength'); 
+        const motorToggle = document.getElementById('motorToggle'); // New motor toggle
+        const instabilityLight = document.getElementById('instabilityLight'); // New instability indicator
         const resetButton = document.getElementById('resetButton');
         const stiffnessValueSpan = document.getElementById('stiffnessValue');
         const dampingValueSpan = document.getElementById('dampingValue');
         const bodyFluidEntrainmentValueSpan = document.getElementById('bodyFluidEntrainmentValue'); 
         const fluidCurrentStrengthValueSpan = document.getElementById('fluidCurrentStrengthValue'); 
         const bodyPushStrengthValueSpan = document.getElementById('bodyPushStrengthValue'); 
+        const motorStrengthValueSpan = document.getElementById('motorStrengthValue'); 
 
-
-        let DEFAULT_STIFFNESS = parseFloat(stiffnessSlider.value);
-        let DEFAULT_DAMPING = parseFloat(dampingSlider.value); 
-        let BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(bodyFluidEntrainmentSlider.value); 
-        let FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(fluidCurrentStrengthSlider.value); 
-        let SOFT_BODY_PUSH_STRENGTH = parseFloat(bodyPushStrengthSlider.value); 
-
-        // Function to update slider value display
-        function updateSliderDisplay(slider, span) {
-            let value = parseFloat(slider.value);
-            if (slider.id === 'fluidDiffusion' || slider.id === 'fluidViscosity') {
-                span.textContent = value.toExponential(1);
-            } else if (slider.id === 'particleFluidInfluence' || slider.id === 'damping' || slider.id === 'bodyFluidEntrainment' || slider.id === 'fluidCurrentStrength' || slider.id === 'bodyPushStrength') {
-                span.textContent = value.toFixed( (slider.id === 'bodyFluidEntrainment' || slider.id === 'bodyPushStrength') ? 2 : 1); 
-            }
-            else {
-                span.textContent = value;
-            }
-        }
-
-        stiffnessSlider.oninput = function() {
-            DEFAULT_STIFFNESS = parseFloat(this.value);
-            updateSliderDisplay(this, stiffnessValueSpan);
-            springs.forEach(spring => spring.stiffness = DEFAULT_STIFFNESS);
-        }
-        dampingSlider.oninput = function() { 
-            DEFAULT_DAMPING = parseFloat(this.value);
-            updateSliderDisplay(this, dampingValueSpan);
-            springs.forEach(spring => spring.dampingFactor = DEFAULT_DAMPING);
-        }
-        bodyFluidEntrainmentSlider.oninput = function() {
-            BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(this.value);
-            updateSliderDisplay(this, bodyFluidEntrainmentValueSpan);
-        }
-        fluidCurrentStrengthSlider.oninput = function() { 
-            FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(this.value);
-            updateSliderDisplay(this, fluidCurrentStrengthValueSpan);
-        }
-        bodyPushStrengthSlider.oninput = function() { 
-            SOFT_BODY_PUSH_STRENGTH = parseFloat(this.value);
-            updateSliderDisplay(this, bodyPushStrengthValueSpan);
-        }
-        resetButton.onclick = function() { initSoftBodySimulation(); }
-
-        // --- Fluid Controls ---
         const fluidDiffusionSlider = document.getElementById('fluidDiffusion');
         const fluidViscositySlider = document.getElementById('fluidViscosity');
         const fluidFadeSlider = document.getElementById('fluidFade');
@@ -216,49 +230,115 @@
         const fluidDiffusionValueSpan = document.getElementById('fluidDiffusionValue');
         const fluidViscosityValueSpan = document.getElementById('fluidViscosityValue');
         const fluidFadeValueSpan = document.getElementById('fluidFadeValue');
+        
+        const numParticlesSlider = document.getElementById('numParticles');
+        const numParticlesValueSpan = document.getElementById('numParticlesValue');
+        const particleFluidInfluenceSlider = document.getElementById('particleFluidInfluence');
+        const particleFluidInfluenceValueSpan = document.getElementById('particleFluidInfluenceValue');
+        const particleLifeDecaySlider = document.getElementById('particleLifeDecay'); 
+        const particleLifeDecayValueSpan = document.getElementById('particleLifeDecayValue'); 
+        const resetParticlesButton = document.getElementById('resetParticlesButton');
 
+        // --- Energy Meter Elements ---
+        const energyBar = document.getElementById('energyBar');
+        const energyValueSpan = document.getElementById('energyValue');
+
+
+        // --- Global Variables & Constants ---
+        let DEFAULT_STIFFNESS = parseFloat(stiffnessSlider.value);
+        let DEFAULT_DAMPING = parseFloat(dampingSlider.value); 
+        let BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(bodyFluidEntrainmentSlider.value); 
+        let FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(fluidCurrentStrengthSlider.value); 
+        let SOFT_BODY_PUSH_STRENGTH = parseFloat(bodyPushStrengthSlider.value); 
+        let MOTOR_STRENGTH = parseFloat(motorStrengthSlider.value); 
+        let IS_MOTOR_ACTIVE = motorToggle.checked; // Motor active state
         let FLUID_DIFFUSION = parseFloat(fluidDiffusionSlider.value);
         let FLUID_VISCOSITY = parseFloat(fluidViscositySlider.value);
         let FLUID_FADE_RATE = parseFloat(fluidFadeSlider.value);
+        let NUM_PARTICLES = parseInt(numParticlesSlider.value);
+        let PARTICLE_FLUID_INFLUENCE = parseFloat(particleFluidInfluenceSlider.value);
+        let PARTICLE_BASE_LIFE_DECAY = parseFloat(particleLifeDecaySlider.value);
+        const PARTICLE_LIFE_DECAY_RANDOM_FACTOR = 0.002; 
+
+        const EATING_RADIUS_MULTIPLIER = 3.5; 
+        const ENERGY_PER_PARTICLE = 2;
+        const MAX_CREATURE_ENERGY = 100;
+        let creatureEnergy = 0;
+
+        let isSoftBodyUnstable = false; // Flag for instability
+        const MAX_DISPLACEMENT_SQ_THRESHOLD = (canvas.width / 3) * (canvas.width / 3); // Max squared displacement per frame
+
+        // Function to update slider value display
+        function updateSliderDisplay(slider, span) {
+            let value = parseFloat(slider.value);
+            if (slider.id === 'fluidDiffusion' || slider.id === 'fluidViscosity') {
+                span.textContent = value.toExponential(1);
+            } else if (slider.id === 'particleFluidInfluence' || slider.id === 'damping' || slider.id === 'fluidCurrentStrength' || slider.id === 'bodyPushStrength') {
+                 span.textContent = value.toFixed(1); 
+            } else if (slider.id === 'bodyFluidEntrainment' || slider.id === 'motorStrength') {
+                span.textContent = value.toFixed(2); 
+            } else if (slider.id === 'particleLifeDecay') {
+                span.textContent = value.toFixed(4);
+            }
+            else {
+                span.textContent = value;
+            }
+        }
+
+        // --- Event Listeners ---
+        stiffnessSlider.oninput = function() { DEFAULT_STIFFNESS = parseFloat(this.value); updateSliderDisplay(this, stiffnessValueSpan); springs.forEach(spring => spring.stiffness = DEFAULT_STIFFNESS); }
+        dampingSlider.oninput = function() { DEFAULT_DAMPING = parseFloat(this.value); updateSliderDisplay(this, dampingValueSpan); springs.forEach(spring => spring.dampingFactor = DEFAULT_DAMPING); }
+        bodyFluidEntrainmentSlider.oninput = function() { BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(this.value); updateSliderDisplay(this, bodyFluidEntrainmentValueSpan); }
+        fluidCurrentStrengthSlider.oninput = function() { FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(this.value); updateSliderDisplay(this, fluidCurrentStrengthValueSpan); }
+        bodyPushStrengthSlider.oninput = function() { SOFT_BODY_PUSH_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, bodyPushStrengthValueSpan); }
+        motorStrengthSlider.oninput = function() { MOTOR_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, motorStrengthValueSpan); }
+        motorToggle.onchange = function() { IS_MOTOR_ACTIVE = this.checked; }
+        resetButton.onclick = function() { 
+            initSoftBodySimulation(); 
+            creatureEnergy = 0; 
+            updateEnergyMeter();
+            isSoftBodyUnstable = false; // Reset instability flag
+            updateInstabilityIndicator();
+        } 
 
         fluidDiffusionSlider.oninput = function() { FLUID_DIFFUSION = parseFloat(this.value); updateSliderDisplay(this, fluidDiffusionValueSpan); if(fluidField) fluidField.diffusion = FLUID_DIFFUSION;}
         fluidViscositySlider.oninput = function() { FLUID_VISCOSITY = parseFloat(this.value); updateSliderDisplay(this, fluidViscosityValueSpan); if(fluidField) fluidField.viscosity = FLUID_VISCOSITY;}
         fluidFadeSlider.oninput = function() { FLUID_FADE_RATE = parseFloat(this.value); updateSliderDisplay(this, fluidFadeValueSpan);}
         clearFluidButton.onclick = function() { if(fluidField) fluidField.clear(); }
         
-        // --- Particle Controls ---
-        const numParticlesSlider = document.getElementById('numParticles');
-        const numParticlesValueSpan = document.getElementById('numParticlesValue');
-        const particleFluidInfluenceSlider = document.getElementById('particleFluidInfluence');
-        const particleFluidInfluenceValueSpan = document.getElementById('particleFluidInfluenceValue');
-        const resetParticlesButton = document.getElementById('resetParticlesButton');
-
-
-        let NUM_PARTICLES = parseInt(numParticlesSlider.value);
-        let PARTICLE_FLUID_INFLUENCE = parseFloat(particleFluidInfluenceSlider.value);
-
-        numParticlesSlider.oninput = function() {
-            NUM_PARTICLES = parseInt(this.value);
-            updateSliderDisplay(this, numParticlesValueSpan);
-            initParticles(); 
-        }
-         particleFluidInfluenceSlider.oninput = function() {
-            PARTICLE_FLUID_INFLUENCE = parseFloat(this.value);
-            updateSliderDisplay(this, particleFluidInfluenceValueSpan);
-        }
+        numParticlesSlider.oninput = function() { NUM_PARTICLES = parseInt(this.value); updateSliderDisplay(this, numParticlesValueSpan); initParticles(); }
+        particleFluidInfluenceSlider.oninput = function() { PARTICLE_FLUID_INFLUENCE = parseFloat(this.value); updateSliderDisplay(this, particleFluidInfluenceValueSpan); }
+        particleLifeDecaySlider.oninput = function() { PARTICLE_BASE_LIFE_DECAY = parseFloat(this.value); updateSliderDisplay(this, particleLifeDecayValueSpan); }
         resetParticlesButton.onclick = function() { initParticles(); }
 
-        // Initialize slider display values
-        updateSliderDisplay(stiffnessSlider, stiffnessValueSpan);
-        updateSliderDisplay(dampingSlider, dampingValueSpan);
-        updateSliderDisplay(bodyFluidEntrainmentSlider, bodyFluidEntrainmentValueSpan); 
-        updateSliderDisplay(fluidCurrentStrengthSlider, fluidCurrentStrengthValueSpan); 
-        updateSliderDisplay(bodyPushStrengthSlider, bodyPushStrengthValueSpan); 
-        updateSliderDisplay(fluidDiffusionSlider, fluidDiffusionValueSpan);
-        updateSliderDisplay(fluidViscositySlider, fluidViscosityValueSpan);
-        updateSliderDisplay(fluidFadeSlider, fluidFadeValueSpan);
-        updateSliderDisplay(numParticlesSlider, numParticlesValueSpan);
-        updateSliderDisplay(particleFluidInfluenceSlider, particleFluidInfluenceValueSpan);
+        // --- Initialize all slider displays ---
+        function initializeAllSliderDisplays() {
+            updateSliderDisplay(stiffnessSlider, stiffnessValueSpan);
+            updateSliderDisplay(dampingSlider, dampingValueSpan);
+            updateSliderDisplay(bodyFluidEntrainmentSlider, bodyFluidEntrainmentValueSpan); 
+            updateSliderDisplay(fluidCurrentStrengthSlider, fluidCurrentStrengthValueSpan); 
+            updateSliderDisplay(bodyPushStrengthSlider, bodyPushStrengthValueSpan); 
+            updateSliderDisplay(motorStrengthSlider, motorStrengthValueSpan); 
+            updateSliderDisplay(fluidDiffusionSlider, fluidDiffusionValueSpan);
+            updateSliderDisplay(fluidViscositySlider, fluidViscosityValueSpan);
+            updateSliderDisplay(fluidFadeSlider, fluidFadeValueSpan);
+            updateSliderDisplay(numParticlesSlider, numParticlesValueSpan);
+            updateSliderDisplay(particleFluidInfluenceSlider, particleFluidInfluenceValueSpan);
+            updateSliderDisplay(particleLifeDecaySlider, particleLifeDecayValueSpan);
+        }
+        
+        function updateEnergyMeter() {
+            energyBar.value = creatureEnergy;
+            energyValueSpan.textContent = `${Math.floor(creatureEnergy)} / ${MAX_CREATURE_ENERGY}`;
+        }
+
+        function updateInstabilityIndicator() {
+            if (isSoftBodyUnstable) {
+                instabilityLight.classList.add('unstable');
+            } else {
+                instabilityLight.classList.remove('unstable');
+            }
+        }
 
 
         // --- Simulation Parameters ---
@@ -359,6 +439,7 @@
             mul(scalar) { return new Vec2(this.x * scalar, this.y * scalar); }
             div(scalar) { return scalar !== 0 ? new Vec2(this.x / scalar, this.y / scalar) : new Vec2(); }
             mag() { return Math.sqrt(this.x * this.x + this.y * this.y); }
+            magSq() { return this.x * this.x + this.y * this.y; } 
             normalize() { const m = this.mag(); return m > 0 ? this.div(m) : new Vec2(); }
             static dot(v1, v2) { return v1.x * v2.x + v1.y * v2.y; }
             clone() { return new Vec2(this.x, this.y); } 
@@ -375,6 +456,8 @@
                 this.radius = radius;
                 this.color = color;
                 this.isFixed = false;
+                this.isMotorNode = false; 
+                this.isEaterNode = false; 
             }
             applyForce(f) { this.force = this.force.add(f); }
             
@@ -401,7 +484,16 @@
             draw(ctx) {
                 ctx.beginPath();
                 ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
-                ctx.fillStyle = this.isFixed ? 'rgba(255,0,0,0.9)' : this.color;
+                if (this.isMotorNode && this.isEaterNode) {
+                     ctx.fillStyle = 'rgba(150,255,50,0.9)'; 
+                } else if (this.isMotorNode) {
+                    ctx.fillStyle = 'rgba(0,255,100,0.9)'; 
+                } else if (this.isEaterNode) {
+                    ctx.fillStyle = 'rgba(255,165,0,0.9)'; 
+                }
+                else {
+                    ctx.fillStyle = this.isFixed ? 'rgba(255,0,0,0.9)' : this.color;
+                }
                 ctx.fill();
                 ctx.closePath();
             }
@@ -637,11 +729,18 @@
                 this.vel = new Vec2(Math.random() * 0.2 - 0.1, Math.random() * 0.2 - 0.1); 
                 this.fluidField = fluidFieldRef;
                 this.life = 1.0; 
-                this.lifeDecay = 0.005 + Math.random() * 0.01;
+                this.lifeDecay = PARTICLE_BASE_LIFE_DECAY + Math.random() * PARTICLE_LIFE_DECAY_RANDOM_FACTOR;
                 this.size = Math.random() * 1.5 + 0.5;
+                this.isEaten = false; 
             }
 
             update(dt) {
+                if (this.isEaten) { 
+                    this.life -= 0.1 * dt * 60; 
+                     if (this.life <= 0) this.respawn();
+                    return;
+                }
+
                 if (!this.fluidField) return; 
                 const fluidGridX = Math.floor(this.pos.x / this.fluidField.scale);
                 const fluidGridY = Math.floor(this.pos.y / this.fluidField.scale);
@@ -662,17 +761,23 @@
                 if (this.pos.y < 0) { this.pos.y = canvas.height; this.life = 0;}
                 if (this.pos.y > canvas.height) { this.pos.y = 0; this.life = 0;}
                 
-                this.life -= this.lifeDecay * dt * 60; 
+                this.life -= (PARTICLE_BASE_LIFE_DECAY + Math.random() * PARTICLE_LIFE_DECAY_RANDOM_FACTOR) * dt * 60; 
                 if (this.life <=0) { 
-                    this.pos.x = Math.random() * canvas.width;
-                    this.pos.y = Math.random() * canvas.height;
-                    this.vel = new Vec2(Math.random() * 0.2 - 0.1, Math.random() * 0.2 - 0.1);
-                    this.life = 1.0  + Math.random() * 0.5; 
+                   this.respawn();
                 }
+            }
+            
+            respawn() {
+                this.pos.x = Math.random() * canvas.width;
+                this.pos.y = Math.random() * canvas.height;
+                this.vel = new Vec2(Math.random() * 0.2 - 0.1, Math.random() * 0.2 - 0.1);
+                this.life = 1.0  + Math.random() * 0.5; 
+                this.isEaten = false;
             }
 
             draw(ctx) {
                 const alpha = Math.max(0, this.life * 0.7); 
+                if (alpha <= 0.01) return; 
                 ctx.fillStyle = `rgba(220, 220, 250, ${alpha})`; 
                 ctx.beginPath();
                 ctx.arc(this.pos.x, this.pos.y, this.size, 0, Math.PI * 2);
@@ -699,6 +804,20 @@
                     gridPoints[i][j] = point;
                 }
             }
+            
+            const motorX = Math.floor(numPointsX / 2);
+            const motorY = Math.floor(numPointsY / 2);
+            if (gridPoints[motorY] && gridPoints[motorY][motorX]) {
+                gridPoints[motorY][motorX].isMotorNode = true;
+            }
+
+            const eaterX = Math.floor(numPointsX / 2); 
+            const eaterY = 0; 
+            if (gridPoints[eaterY] && gridPoints[eaterY][eaterX]) {
+                gridPoints[eaterY][eaterX].isEaterNode = true;
+            }
+
+
             for (let i = 0; i < numPointsY; i++) for (let j = 0; j < numPointsX - 1; j++) springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], DEFAULT_STIFFNESS, DEFAULT_DAMPING));
             for (let j = 0; j < numPointsX; j++) for (let i = 0; i < numPointsY - 1; i++) springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], DEFAULT_STIFFNESS, DEFAULT_DAMPING));
             for (let i = 0; i < numPointsY - 1; i++) for (let j = 0; j < numPointsX - 1; j++) {
@@ -706,6 +825,8 @@
                 springs.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], DEFAULT_STIFFNESS * 0.7, DEFAULT_DAMPING));
             }
             lastTime = performance.now();
+            isSoftBodyUnstable = false; // Reset on init
+            updateInstabilityIndicator();
         }
 
         function initFluidSimulation() {
@@ -728,98 +849,150 @@
 
         // --- Physics Update ---
         function updatePhysics(dt) {
-            if (fluidField) {
-                fluidField.dt = dt; 
-                fluidField.step();
-            }
+            if (!isSoftBodyUnstable) { // Only update physics if stable
+                if (fluidField) {
+                    fluidField.dt = dt; 
+                    fluidField.step();
+                }
 
-            for (let particle of particles) {
-                particle.update(dt);
-            }
-            
-            // Apply fluid entrainment to soft body points' momentum
-            if (fluidField) {
-                for (let point of massPoints) {
-                    if (!point.isFixed) {
-                        const fluidGridX = Math.floor(point.pos.x / fluidField.scale);
-                        const fluidGridY = Math.floor(point.pos.y / fluidField.scale);
-                        const idx = fluidField.IX(fluidGridX, fluidGridY);
+                for (let particle of particles) {
+                    particle.update(dt);
+                }
+                
+                // MOTOR NODE: Soft Body -> Fluid (Constant Push)
+                if (fluidField && IS_MOTOR_ACTIVE) { // Check IS_MOTOR_ACTIVE
+                    for (let point of massPoints) {
+                        if (point.isMotorNode && !point.isFixed && MOTOR_STRENGTH > 0.0001) { 
+                            const motorForceDirection = new Vec2(1, 0); 
+                            const motorPushVx = motorForceDirection.x * MOTOR_STRENGTH;
+                            const motorPushVy = motorForceDirection.y * MOTOR_STRENGTH;
 
-                        const rawFluidVx = fluidField.Vx[idx]; // Velocity in grid cells per fluid dt
-                        const rawFluidVy = fluidField.Vy[idx]; // Velocity in grid cells per fluid dt
+                            const fluidGridX = Math.floor(point.pos.x / fluidField.scale);
+                            const fluidGridY = Math.floor(point.pos.y / fluidField.scale);
 
-                        // Convert fluid velocity to pixel displacement for the current frame dt
-                        let fluidDisplacementPx = new Vec2(
-                            rawFluidVx * fluidField.scale,
-                            rawFluidVy * fluidField.scale
-                        );
-
-                        // Amplify this fluid-induced displacement
-                        let effectiveFluidDisplacementPx = fluidDisplacementPx.mul(FLUID_CURRENT_STRENGTH_ON_BODY);
-
-                        // Current displacement of the point (its implicit velocity * dt)
-                        let currentPointDisplacementPx = point.pos.sub(point.prevPos);
-
-                        // Blend the displacements
-                        let blendedDisplacementPx = currentPointDisplacementPx.mul(1.0 - BODY_FLUID_ENTRAINMENT_FACTOR)
-                                                         .add(effectiveFluidDisplacementPx.mul(BODY_FLUID_ENTRAINMENT_FACTOR));
-                                                
-                        // Update prevPos based on this blended displacement
-                        point.prevPos = point.pos.clone().sub(blendedDisplacementPx);
+                            fluidField.addVelocity(fluidGridX, fluidGridY, motorPushVx, motorPushVy);
+                            fluidField.addDensity(fluidGridX, fluidGridY, 50, 150, 50, 10); 
+                        }
                     }
                 }
-            }
-            
-            for (let spring of springs) spring.applyForce();
-            for (let point of massPoints) point.update(dt); 
-            
-            // Soft Body -> Fluid Interaction (when dragging)
-            if (selectedPoint && selectedPoint.isFixed && fluidField) { 
-                for (let point of massPoints) { // Iterate over all points of the soft body
-                    const displacementX = point.pos.x - point.prevPos.x; // Displacement of this point
-                    const displacementY = point.pos.y - point.prevPos.y;
 
-                    // Only apply push if the point actually moved (beyond a tiny threshold)
-                    const movementMagnitudeSq = displacementX*displacementX + displacementY*displacementY;
-                    const movementThresholdSq = 0.01 * 0.01; 
+                // Fluid -> Soft Body Entrainment
+                if (fluidField) {
+                    for (let point of massPoints) {
+                        if (!point.isFixed) {
+                            const fluidGridX = Math.floor(point.pos.x / fluidField.scale);
+                            const fluidGridY = Math.floor(point.pos.y / fluidField.scale);
+                            const idx = fluidField.IX(fluidGridX, fluidGridY);
 
-                    if (movementMagnitudeSq > movementThresholdSq) {
-                        const fluidGridX = Math.floor(point.pos.x / fluidField.scale);
-                        const fluidGridY = Math.floor(point.pos.y / fluidField.scale);
-                        
-                        // Add velocity to fluid proportional to point's displacement and push strength
-                        fluidField.addVelocity(fluidGridX, fluidGridY, 
-                                               displacementX * SOFT_BODY_PUSH_STRENGTH, 
-                                               displacementY * SOFT_BODY_PUSH_STRENGTH);
-                        // Add a bit of density to visualize the push
-                        fluidField.addDensity(fluidGridX, fluidGridY, 60, 60, 80, 15); // Subtle greyish-blue push
+                            const rawFluidVx = fluidField.Vx[idx]; 
+                            const rawFluidVy = fluidField.Vy[idx]; 
+
+                            let fluidDisplacementPx = new Vec2(
+                                rawFluidVx * fluidField.scale, 
+                                rawFluidVy * fluidField.scale
+                            );
+
+                            let effectiveFluidDisplacementPx = fluidDisplacementPx.mul(FLUID_CURRENT_STRENGTH_ON_BODY);
+                            let currentPointDisplacementPx = point.pos.sub(point.prevPos);
+                            let blendedDisplacementPx = currentPointDisplacementPx.mul(1.0 - BODY_FLUID_ENTRAINMENT_FACTOR)
+                                                            .add(effectiveFluidDisplacementPx.mul(BODY_FLUID_ENTRAINMENT_FACTOR));
+                                                    
+                            point.prevPos = point.pos.clone().sub(blendedDisplacementPx);
+                        }
                     }
                 }
-            }
-            
-            // Boundary Collisions with Verlet
-            for (let point of massPoints) { 
-                if (point.isFixed) continue;
-
-                const implicitVelX = point.pos.x - point.prevPos.x; 
-                const implicitVelY = point.pos.y - point.prevPos.y;
-
-                if (point.pos.x - point.radius < 0) {
-                    point.pos.x = point.radius;
-                    point.prevPos.x = point.pos.x + implicitVelX * restitution; 
-                } else if (point.pos.x + point.radius > canvas.width) {
-                    point.pos.x = canvas.width - point.radius;
-                    point.prevPos.x = point.pos.x + implicitVelX * restitution;
+                
+                for (let spring of springs) spring.applyForce();
+                for (let point of massPoints) point.update(dt); 
+                
+                // Instability Detection
+                if (!isSoftBodyUnstable) { // Check again before expensive calcs if already unstable
+                    for (let point of massPoints) {
+                        const displacementSq = point.pos.sub(point.prevPos).magSq();
+                        if (displacementSq > MAX_DISPLACEMENT_SQ_THRESHOLD || 
+                            isNaN(point.pos.x) || isNaN(point.pos.y) ||
+                            !isFinite(point.pos.x) || !isFinite(point.pos.y)) {
+                            isSoftBodyUnstable = true;
+                            updateInstabilityIndicator();
+                            console.warn("Soft body instability detected!", point);
+                            break; 
+                        }
+                    }
                 }
 
-                if (point.pos.y - point.radius < 0) {
-                    point.pos.y = point.radius;
-                    point.prevPos.y = point.pos.y + implicitVelY * restitution;
-                } else if (point.pos.y + point.radius > canvas.height) {
-                    point.pos.y = canvas.height - point.radius;
-                    point.prevPos.y = point.pos.y + implicitVelY * restitution;
+
+                // Eating Mechanism (only if stable)
+                if (!isSoftBodyUnstable) {
+                    for (let point of massPoints) {
+                        if (point.isEaterNode && !point.isFixed) {
+                            const eatingRadius = point.radius * EATING_RADIUS_MULTIPLIER;
+                            const eatingRadiusSq = eatingRadius * eatingRadius;
+                            for (let particle of particles) {
+                                if (particle.life > 0 && !particle.isEaten) {
+                                    const distSq = point.pos.sub(particle.pos).magSq();
+                                    if (distSq < eatingRadiusSq) {
+                                        particle.isEaten = true; 
+                                        particle.life = 0; 
+                                        creatureEnergy = Math.min(MAX_CREATURE_ENERGY, creatureEnergy + ENERGY_PER_PARTICLE);
+                                        updateEnergyMeter();
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-            }
+
+
+                // Soft Body -> Fluid Interaction (when dragging) (only if stable)
+                if (!isSoftBodyUnstable && selectedPoint && selectedPoint.isFixed && fluidField) { 
+                    for (let point of massPoints) { 
+                        const displacementX = point.pos.x - point.prevPos.x; 
+                        const displacementY = point.pos.y - point.prevPos.y;
+                        const movementMagnitudeSq = displacementX*displacementX + displacementY*displacementY;
+                        const movementThresholdSq = 0.01 * 0.01; 
+
+                        if (movementMagnitudeSq > movementThresholdSq) {
+                            const fluidGridX = Math.floor(point.pos.x / fluidField.scale);
+                            const fluidGridY = Math.floor(point.pos.y / fluidField.scale);
+                            
+                            fluidField.addVelocity(fluidGridX, fluidGridY, 
+                                                   displacementX * SOFT_BODY_PUSH_STRENGTH, 
+                                                   displacementY * SOFT_BODY_PUSH_STRENGTH);
+                            fluidField.addDensity(fluidGridX, fluidGridY, 60, 60, 80, 15); 
+                        }
+                    }
+                }
+                
+                // Boundary Collisions with Verlet (only if stable)
+                if (!isSoftBodyUnstable) {
+                    for (let point of massPoints) { 
+                        if (point.isFixed) continue;
+
+                        const implicitVelX = point.pos.x - point.prevPos.x; 
+                        const implicitVelY = point.pos.y - point.prevPos.y;
+
+                        if (point.pos.x - point.radius < 0) {
+                            point.pos.x = point.radius;
+                            point.prevPos.x = point.pos.x + implicitVelX * restitution; 
+                        } else if (point.pos.x + point.radius > canvas.width) {
+                            point.pos.x = canvas.width - point.radius;
+                            point.prevPos.x = point.pos.x + implicitVelX * restitution;
+                        }
+
+                        if (point.pos.y - point.radius < 0) {
+                            point.pos.y = point.radius;
+                            point.prevPos.y = point.pos.y + implicitVelY * restitution;
+                        } else if (point.pos.y + point.radius > canvas.height) {
+                            point.pos.y = canvas.height - point.radius;
+                            point.prevPos.y = point.pos.y + implicitVelY * restitution;
+                        }
+                    }
+                }
+            } // End of if(!isSoftBodyUnstable) physics block
+
+            // Always draw
+            draw();
+            requestAnimationFrame(gameLoop);
         }
 
         // --- Drawing ---
@@ -849,15 +1022,16 @@
             const maxDeltaTime = 1/30; 
             deltaTime = Math.min(deltaTime, maxDeltaTime);
 
-            updatePhysics(deltaTime);
-            draw();
-            requestAnimationFrame(gameLoop);
+            updatePhysics(deltaTime); // Drawing is now called at the end of updatePhysics
         }
 
         // Start the simulation
+        initializeAllSliderDisplays(); 
         initSoftBodySimulation();
         initFluidSimulation(); 
         initParticles();
+        updateEnergyMeter(); 
+        updateInstabilityIndicator(); // Initial indicator state
         requestAnimationFrame(gameLoop);
     </script>
 </body>

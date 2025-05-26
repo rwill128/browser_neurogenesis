@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Soft Body Simulation (Spring-Mass System)</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #f0f0f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: sans-serif; }
+        canvas { border: 1px solid black; background-color: #ffffff; }
+        #controls { position: absolute; top: 10px; left: 10px; background-color: rgba(255,255,255,0.8); padding: 10px; border-radius: 5px; }
+        #controls label { display: block; margin-bottom: 5px;}
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <label for="gravity">Gravity Y: <input type="range" id="gravity" min="-200" max="1000" value="300" step="10"> <span id="gravityValue">300</span></label>
+        <label for="stiffness">Stiffness: <input type="range" id="stiffness" min="100" max="10000" value="2000" step="100"> <span id="stiffnessValue">2000</span></label>
+        <label for="damping">Damping: <input type="range" id="damping" min="1" max="100" value="30" step="1"> <span id="dampingValue">30</span></label>
+        <button id="resetButton">Reset Simulation</button>
+    </div>
+    <canvas id="simulationCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('simulationCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // --- Control Panel ---
+        const gravitySlider = document.getElementById('gravity');
+        const stiffnessSlider = document.getElementById('stiffness');
+        const dampingSlider = document.getElementById('damping');
+        const resetButton = document.getElementById('resetButton');
+
+        const gravityValueSpan = document.getElementById('gravityValue');
+        const stiffnessValueSpan = document.getElementById('stiffnessValue');
+        const dampingValueSpan = document.getElementById('dampingValue');
+
+        let GRAVITY_Y = parseFloat(gravitySlider.value);
+        let DEFAULT_STIFFNESS = parseFloat(stiffnessSlider.value);
+        let DEFAULT_DAMPING = parseFloat(dampingSlider.value);
+
+        gravitySlider.oninput = function() {
+            GRAVITY_Y = parseFloat(this.value);
+            gravityValueSpan.textContent = this.value;
+        }
+        stiffnessSlider.oninput = function() {
+            DEFAULT_STIFFNESS = parseFloat(this.value);
+            stiffnessValueSpan.textContent = this.value;
+            // Update existing springs or re-initialize if needed
+            springs.forEach(spring => spring.stiffness = DEFAULT_STIFFNESS);
+        }
+        dampingSlider.oninput = function() {
+            DEFAULT_DAMPING = parseFloat(this.value);
+            dampingValueSpan.textContent = this.value;
+            springs.forEach(spring => spring.dampingFactor = DEFAULT_DAMPING);
+        }
+        resetButton.onclick = function() {
+            initSimulation();
+        }
+
+
+        // --- Simulation Parameters ---
+        canvas.width = 800;
+        canvas.height = 600;
+        const restitution = 0.5; // Bounciness
+
+        let massPoints = [];
+        let springs = [];
+
+        let lastTime = 0;
+        let deltaTime = 0;
+
+        // --- Mouse Interaction ---
+        let selectedPoint = null;
+        let mouse = { x: 0, y: 0, isDown: false };
+
+        canvas.addEventListener('mousedown', (e) => {
+            mouse.isDown = true;
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+
+            for (let point of massPoints) {
+                const dist = Math.sqrt((point.pos.x - mouse.x)**2 + (point.pos.y - mouse.y)**2);
+                if (dist < point.radius * 2) { // Increased grab radius
+                    selectedPoint = point;
+                    selectedPoint.isFixed = true; // Temporarily fix the point while dragging
+                    break;
+                }
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+            if (selectedPoint && mouse.isDown) {
+                selectedPoint.pos.x = mouse.x;
+                selectedPoint.pos.y = mouse.y;
+                selectedPoint.vel.x = 0; // Stop its movement while dragging
+                selectedPoint.vel.y = 0;
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            mouse.isDown = false;
+            if (selectedPoint) {
+                selectedPoint.isFixed = false;
+                selectedPoint = null;
+            }
+        });
+         canvas.addEventListener('mouseleave', () => { // Handle mouse leaving canvas
+            if (selectedPoint) {
+                selectedPoint.isFixed = false;
+                selectedPoint = null;
+                mouse.isDown = false;
+            }
+        });
+
+
+        // --- Vector2D Class (Optional, but helpful) ---
+        class Vec2 {
+            constructor(x = 0, y = 0) {
+                this.x = x;
+                this.y = y;
+            }
+            add(other) { return new Vec2(this.x + other.x, this.y + other.y); }
+            sub(other) { return new Vec2(this.x - other.x, this.y - other.y); }
+            mul(scalar) { return new Vec2(this.x * scalar, this.y * scalar); }
+            div(scalar) { return scalar !== 0 ? new Vec2(this.x / scalar, this.y / scalar) : new Vec2(); }
+            mag() { return Math.sqrt(this.x * this.x + this.y * this.y); }
+            normalize() {
+                const m = this.mag();
+                return m > 0 ? this.div(m) : new Vec2();
+            }
+            static dot(v1, v2) { return v1.x * v2.x + v1.y * v2.y; }
+        }
+
+        // --- MassPoint Class ---
+        class MassPoint {
+            constructor(x, y, mass = 1, radius = 5, color = 'blue') {
+                this.pos = new Vec2(x, y);
+                this.prevPos = new Vec2(x,y); // For Verlet integration if you switch
+                this.vel = new Vec2();
+                this.force = new Vec2();
+                this.mass = mass;
+                this.invMass = mass !== 0 ? 1 / mass : 0;
+                this.radius = radius;
+                this.color = color;
+                this.isFixed = false;
+            }
+
+            applyForce(f) {
+                this.force = this.force.add(f);
+            }
+
+            update(dt) {
+                if (this.isFixed || this.invMass === 0) {
+                    this.force = new Vec2(); // Clear forces if fixed
+                    return;
+                }
+
+                // Euler Integration
+                const acceleration = this.force.mul(this.invMass);
+                this.vel = this.vel.add(acceleration.mul(dt));
+                this.pos = this.pos.add(this.vel.mul(dt));
+
+                this.force = new Vec2(); // Reset force accumulator
+            }
+
+            draw(ctx) {
+                ctx.beginPath();
+                ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.isFixed ? 'red' : this.color;
+                ctx.fill();
+                ctx.closePath();
+            }
+        }
+
+        // --- Spring Class ---
+        class Spring {
+            constructor(p1, p2, stiffness, dampingFactor, restLength = null) {
+                this.p1 = p1; // MassPoint 1
+                this.p2 = p2; // MassPoint 2
+                this.stiffness = stiffness; // Spring constant (k)
+                this.dampingFactor = dampingFactor; // Damping coefficient
+                if (restLength === null) {
+                    this.restLength = p1.pos.sub(p2.pos).mag();
+                } else {
+                    this.restLength = restLength;
+                }
+            }
+
+            applyForce() {
+                const diffPos = this.p1.pos.sub(this.p2.pos); // Vector from p2 to p1
+                const currentLength = diffPos.mag();
+                
+                if (currentLength === 0) return; // Avoid division by zero
+
+                const displacement = currentLength - this.restLength;
+                const direction = diffPos.normalize();
+
+                // Spring force (Hooke's Law: F = -k * x)
+                const springForceMagnitude = -this.stiffness * displacement;
+                const springForce = direction.mul(springForceMagnitude);
+
+                // Damping force (F_damping = -d * v_relative)
+                // Relative velocity along the spring axis
+                const relVel = this.p1.vel.sub(this.p2.vel);
+                const velAlongSpring = Vec2.dot(relVel, direction);
+                const dampingForceMagnitude = -this.dampingFactor * velAlongSpring;
+                const dampingForce = direction.mul(dampingForceMagnitude);
+
+                const totalForce = springForce.add(dampingForce);
+
+                this.p1.applyForce(totalForce);
+                this.p2.applyForce(totalForce.mul(-1)); // Equal and opposite force
+            }
+
+            draw(ctx) {
+                ctx.beginPath();
+                ctx.moveTo(this.p1.pos.x, this.p1.pos.y);
+                ctx.lineTo(this.p2.pos.x, this.p2.pos.y);
+                ctx.strokeStyle = 'grey';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.closePath();
+            }
+        }
+
+        // --- Simulation Setup ---
+        function initSimulation() {
+            massPoints = [];
+            springs = [];
+
+            // Create a deformable square (or line, or blob)
+            const startX = canvas.width / 2 - 50;
+            const startY = canvas.height / 3;
+            const pointDist = 50;
+            const numPointsX = 3;
+            const numPointsY = 3;
+
+            // Create points in a grid
+            let gridPoints = [];
+            for (let i = 0; i < numPointsY; i++) {
+                gridPoints[i] = [];
+                for (let j = 0; j < numPointsX; j++) {
+                    const point = new MassPoint(startX + j * pointDist, startY + i * pointDist, 1, 7);
+                     // if (i === 0 && (j === 0 || j === numPointsX -1)) point.isFixed = true; // Fix top corners
+                    massPoints.push(point);
+                    gridPoints[i][j] = point;
+                }
+            }
+            // Fix the top-left point of the grid
+            // if (gridPoints[0] && gridPoints[0][0]) {
+            //    gridPoints[0][0].isFixed = true;
+            //    gridPoints[0][0].color = 'green';
+            // }
+
+
+            // Connect points with springs
+            // Horizontal springs
+            for (let i = 0; i < numPointsY; i++) {
+                for (let j = 0; j < numPointsX - 1; j++) {
+                    springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], DEFAULT_STIFFNESS, DEFAULT_DAMPING));
+                }
+            }
+            // Vertical springs
+            for (let j = 0; j < numPointsX; j++) {
+                for (let i = 0; i < numPointsY - 1; i++) {
+                    springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], DEFAULT_STIFFNESS, DEFAULT_DAMPING));
+                }
+            }
+            // Shear springs (diagonals)
+            for (let i = 0; i < numPointsY - 1; i++) {
+                for (let j = 0; j < numPointsX - 1; j++) {
+                    springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], DEFAULT_STIFFNESS * 0.7, DEFAULT_DAMPING));
+                    springs.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], DEFAULT_STIFFNESS * 0.7, DEFAULT_DAMPING));
+                }
+            }
+             // Bending springs (connect points distance 2, optional for more rigidity)
+            for (let i = 0; i < numPointsY; i++) {
+                for (let j = 0; j < numPointsX - 2; j++) {
+                    springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+2], DEFAULT_STIFFNESS * 0.5, DEFAULT_DAMPING));
+                }
+            }
+            for (let j = 0; j < numPointsX; j++) {
+                for (let i = 0; i < numPointsY - 2; i++) {
+                    springs.push(new Spring(gridPoints[i][j], gridPoints[i+2][j], DEFAULT_STIFFNESS * 0.5, DEFAULT_DAMPING));
+                }
+            }
+
+            lastTime = performance.now(); // Reset timer
+        }
+
+
+        // --- Physics Update ---
+        function updatePhysics(dt) {
+            // Apply gravity to all points
+            for (let point of massPoints) {
+                if (!point.isFixed) {
+                    point.applyForce(new Vec2(0, GRAVITY_Y * point.mass));
+                }
+            }
+
+            // Apply spring forces
+            for (let spring of springs) {
+                spring.applyForce();
+            }
+
+            // Update point positions
+            for (let point of massPoints) {
+                point.update(dt);
+            }
+
+            // Handle collisions with canvas boundaries
+            for (let point of massPoints) {
+                if (point.isFixed) continue;
+
+                if (point.pos.x - point.radius < 0) {
+                    point.pos.x = point.radius;
+                    point.vel.x *= -restitution;
+                } else if (point.pos.x + point.radius > canvas.width) {
+                    point.pos.x = canvas.width - point.radius;
+                    point.vel.x *= -restitution;
+                }
+
+                if (point.pos.y - point.radius < 0) {
+                    point.pos.y = point.radius;
+                    point.vel.y *= -restitution;
+                } else if (point.pos.y + point.radius > canvas.height) {
+                    point.pos.y = canvas.height - point.radius;
+                    point.vel.y *= -restitution;
+                }
+            }
+        }
+
+        // --- Drawing ---
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            for (let spring of springs) {
+                spring.draw(ctx);
+            }
+
+            for (let point of massPoints) {
+                point.draw(ctx);
+            }
+        }
+
+        // --- Game Loop ---
+        function gameLoop(timestamp) {
+            deltaTime = (timestamp - lastTime) / 1000; // Delta time in seconds
+            lastTime = timestamp;
+
+            // Cap delta time to prevent physics explosions if tab is inactive for a long time
+            const maxDeltaTime = 1/30; // Max step for 30fps
+            deltaTime = Math.min(deltaTime, maxDeltaTime);
+
+
+            updatePhysics(deltaTime);
+            draw();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start the simulation
+        initSimulation();
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>

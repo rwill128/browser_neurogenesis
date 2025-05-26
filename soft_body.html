@@ -156,20 +156,20 @@
         const dampingSlider = document.getElementById('damping');
         const bodyFluidEntrainmentSlider = document.getElementById('bodyFluidEntrainment'); 
         const fluidCurrentStrengthSlider = document.getElementById('fluidCurrentStrength'); 
-        const bodyPushStrengthSlider = document.getElementById('bodyPushStrength'); // New slider
+        const bodyPushStrengthSlider = document.getElementById('bodyPushStrength'); 
         const resetButton = document.getElementById('resetButton');
         const stiffnessValueSpan = document.getElementById('stiffnessValue');
         const dampingValueSpan = document.getElementById('dampingValue');
         const bodyFluidEntrainmentValueSpan = document.getElementById('bodyFluidEntrainmentValue'); 
         const fluidCurrentStrengthValueSpan = document.getElementById('fluidCurrentStrengthValue'); 
-        const bodyPushStrengthValueSpan = document.getElementById('bodyPushStrengthValue'); // New span
+        const bodyPushStrengthValueSpan = document.getElementById('bodyPushStrengthValue'); 
 
 
         let DEFAULT_STIFFNESS = parseFloat(stiffnessSlider.value);
         let DEFAULT_DAMPING = parseFloat(dampingSlider.value); 
         let BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(bodyFluidEntrainmentSlider.value); 
         let FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(fluidCurrentStrengthSlider.value); 
-        let SOFT_BODY_PUSH_STRENGTH = parseFloat(bodyPushStrengthSlider.value); // New variable
+        let SOFT_BODY_PUSH_STRENGTH = parseFloat(bodyPushStrengthSlider.value); 
 
         // Function to update slider value display
         function updateSliderDisplay(slider, span) {
@@ -202,7 +202,7 @@
             FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(this.value);
             updateSliderDisplay(this, fluidCurrentStrengthValueSpan);
         }
-        bodyPushStrengthSlider.oninput = function() { // Listener for new slider
+        bodyPushStrengthSlider.oninput = function() { 
             SOFT_BODY_PUSH_STRENGTH = parseFloat(this.value);
             updateSliderDisplay(this, bodyPushStrengthValueSpan);
         }
@@ -253,7 +253,7 @@
         updateSliderDisplay(dampingSlider, dampingValueSpan);
         updateSliderDisplay(bodyFluidEntrainmentSlider, bodyFluidEntrainmentValueSpan); 
         updateSliderDisplay(fluidCurrentStrengthSlider, fluidCurrentStrengthValueSpan); 
-        updateSliderDisplay(bodyPushStrengthSlider, bodyPushStrengthValueSpan); // Init new slider
+        updateSliderDisplay(bodyPushStrengthSlider, bodyPushStrengthValueSpan); 
         updateSliderDisplay(fluidDiffusionSlider, fluidDiffusionValueSpan);
         updateSliderDisplay(fluidViscositySlider, fluidViscosityValueSpan);
         updateSliderDisplay(fluidFadeSlider, fluidFadeValueSpan);
@@ -745,20 +745,27 @@
                         const fluidGridY = Math.floor(point.pos.y / fluidField.scale);
                         const idx = fluidField.IX(fluidGridX, fluidGridY);
 
-                        const rawFluidVx = fluidField.Vx[idx];
-                        const rawFluidVy = fluidField.Vy[idx];
+                        const rawFluidVx = fluidField.Vx[idx]; // Velocity in grid cells per fluid dt
+                        const rawFluidVy = fluidField.Vy[idx]; // Velocity in grid cells per fluid dt
 
-                        let currentPointDisplacement = point.pos.sub(point.prevPos);
-                        
-                        let fluidTargetDisplacement = new Vec2(
-                            rawFluidVx * dt * FLUID_CURRENT_STRENGTH_ON_BODY, 
-                            rawFluidVy * dt * FLUID_CURRENT_STRENGTH_ON_BODY 
+                        // Convert fluid velocity to pixel displacement for the current frame dt
+                        let fluidDisplacementPx = new Vec2(
+                            rawFluidVx * fluidField.scale,
+                            rawFluidVy * fluidField.scale
                         );
 
-                        let blendedDisplacement = currentPointDisplacement.mul(1.0 - BODY_FLUID_ENTRAINMENT_FACTOR)
-                                                     .add(fluidTargetDisplacement.mul(BODY_FLUID_ENTRAINMENT_FACTOR));
-                        
-                        point.prevPos = point.pos.clone().sub(blendedDisplacement);
+                        // Amplify this fluid-induced displacement
+                        let effectiveFluidDisplacementPx = fluidDisplacementPx.mul(FLUID_CURRENT_STRENGTH_ON_BODY);
+
+                        // Current displacement of the point (its implicit velocity * dt)
+                        let currentPointDisplacementPx = point.pos.sub(point.prevPos);
+
+                        // Blend the displacements
+                        let blendedDisplacementPx = currentPointDisplacementPx.mul(1.0 - BODY_FLUID_ENTRAINMENT_FACTOR)
+                                                         .add(effectiveFluidDisplacementPx.mul(BODY_FLUID_ENTRAINMENT_FACTOR));
+                                                
+                        // Update prevPos based on this blended displacement
+                        point.prevPos = point.pos.clone().sub(blendedDisplacementPx);
                     }
                 }
             }
@@ -768,17 +775,24 @@
             
             // Soft Body -> Fluid Interaction (when dragging)
             if (selectedPoint && selectedPoint.isFixed && fluidField) { 
-                for (let point of massPoints) {
-                    const displacementX = point.pos.x - point.prevPos.x;
+                for (let point of massPoints) { // Iterate over all points of the soft body
+                    const displacementX = point.pos.x - point.prevPos.x; // Displacement of this point
                     const displacementY = point.pos.y - point.prevPos.y;
 
-                    const movementThreshold = 0.01; // Adjusted threshold
-                    if (Math.sqrt(displacementX*displacementX + displacementY*displacementY) > movementThreshold) {
+                    // Only apply push if the point actually moved (beyond a tiny threshold)
+                    const movementMagnitudeSq = displacementX*displacementX + displacementY*displacementY;
+                    const movementThresholdSq = 0.01 * 0.01; 
+
+                    if (movementMagnitudeSq > movementThresholdSq) {
                         const fluidGridX = Math.floor(point.pos.x / fluidField.scale);
                         const fluidGridY = Math.floor(point.pos.y / fluidField.scale);
                         
-                        fluidField.addVelocity(fluidGridX, fluidGridY, displacementX * SOFT_BODY_PUSH_STRENGTH, displacementY * SOFT_BODY_PUSH_STRENGTH);
-                        fluidField.addDensity(fluidGridX, fluidGridY, 70, 70, 100, 20); // Subtle blueish push
+                        // Add velocity to fluid proportional to point's displacement and push strength
+                        fluidField.addVelocity(fluidGridX, fluidGridY, 
+                                               displacementX * SOFT_BODY_PUSH_STRENGTH, 
+                                               displacementY * SOFT_BODY_PUSH_STRENGTH);
+                        // Add a bit of density to visualize the push
+                        fluidField.addDensity(fluidGridX, fluidGridY, 60, 60, 80, 15); // Subtle greyish-blue push
                     }
                 }
             }

@@ -384,7 +384,7 @@
         const bodyRepulsionStrengthSlider = document.getElementById('bodyRepulsionStrength');
         const bodyRepulsionRadiusFactorSlider = document.getElementById('bodyRepulsionRadiusFactor');
         const baseNodeCostSlider = document.getElementById('baseNodeCost');
-        // const motorNodeCostSlider = document.getElementById('motorNodeCost'); // Removed
+        const motorNodeCostSlider = document.getElementById('motorNodeCost'); // Removed
         const eaterNodeCostSlider = document.getElementById('eaterNodeCost');
         const predatorNodeCostSlider = document.getElementById('predatorNodeCost');
         const instabilityLight = document.getElementById('instabilityLight');
@@ -447,7 +447,7 @@
         const EMITTER_MOUSE_DRAG_SCALE = 0.05;
 
         let BASE_NODE_EXISTENCE_COST = parseFloat(baseNodeCostSlider.value);
-        // let MOTOR_NODE_ENERGY_COST = parseFloat(motorNodeCostSlider.value); // Removed
+        let MOTOR_NODE_ENERGY_COST = parseFloat(motorNodeCostSlider.value); // Removed
         let EATER_NODE_ENERGY_COST = parseFloat(eaterNodeCostSlider.value);
         let PREDATOR_NODE_ENERGY_COST = parseFloat(predatorNodeCostSlider.value);
 
@@ -579,7 +579,7 @@
         bodyRepulsionRadiusFactorSlider.oninput = function() { BODY_REPULSION_RADIUS_FACTOR = parseFloat(this.value); updateSliderDisplay(this, bodyRepulsionRadiusFactorValueSpan); }
 
         baseNodeCostSlider.oninput = function() { BASE_NODE_EXISTENCE_COST = parseFloat(this.value); updateSliderDisplay(this, baseNodeCostValueSpan); }
-        // motorNodeCostSlider.oninput = function() { MOTOR_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, motorNodeCostValueSpan); } // Removed
+        motorNodeCostSlider.oninput = function() { MOTOR_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, motorNodeCostValueSpan); } // Removed
         eaterNodeCostSlider.oninput = function() { EATER_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, eaterNodeCostValueSpan); }
         predatorNodeCostSlider.oninput = function() { PREDATOR_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, predatorNodeCostValueSpan); }
 
@@ -621,7 +621,7 @@
             updateSliderDisplay(bodyRepulsionStrengthSlider, bodyRepulsionStrengthValueSpan);
             updateSliderDisplay(bodyRepulsionRadiusFactorSlider, bodyRepulsionRadiusFactorValueSpan);
             updateSliderDisplay(baseNodeCostSlider, baseNodeCostValueSpan);
-            // updateSliderDisplay(motorNodeCostSlider, motorNodeCostValueSpan); // Removed
+            updateSliderDisplay(motorNodeCostSlider, motorNodeCostValueSpan); // Removed
             updateSliderDisplay(eaterNodeCostSlider, eaterNodeCostValueSpan);
             updateSliderDisplay(predatorNodeCostSlider, predatorNodeCostValueSpan);
             updateSliderDisplay(emitterStrengthSlider, emitterStrengthValueSpan);

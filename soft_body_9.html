@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Inspector Panel</title>
+    <title>2D Soft Body Evolution - Inspector Panel (Left) & Fixes</title>
     <style>
         body {
             margin: 0;
@@ -18,6 +18,22 @@
             color: #eee;
             padding: 10px 0;
             box-sizing: border-box;
+        }
+        #pageContainer {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+        #simulationAndInfoWrapper {
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 15px;
+            width: 100%;
+            max-width: 1150px; /* Approx 280 for panel + 800 for canvas + gap */
+            margin-top: 10px;
         }
         canvas {
             border: 1px solid #444;
@@ -142,12 +158,8 @@
             margin-top: 5px;
         }
         #infoPanel {
-            position: fixed;
-            bottom: 10px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 90%;
-            max-width: 780px;
+            width: 280px; /* Fixed width for the panel */
+            max-height: 580px; /* Match canvas height approx */
             background-color: rgba(30,30,30,0.95);
             border: 1px solid #555;
             border-radius: 8px;
@@ -157,8 +169,9 @@
             color: #eee;
             font-size: 0.8em;
             display: none; /* Hidden by default */
-            max-height: 40vh;
             overflow-y: auto;
+            box-sizing: border-box;
+            position: relative; /* For the close button */
         }
         #infoPanel h5 {
             margin-top: 0;
@@ -198,148 +211,151 @@
     </style>
 </head>
 <body>
-    <div id="controls">
-        <div class="control-group">
-            <h4>Viewport & Sim</h4>
-            <div class="viewport-instructions">Use WASD to Pan View</div>
-            <label for="worldWrapToggle" class="checkbox-label">Wrap Edges:
-                <input type="checkbox" id="worldWrapToggle">
-            </label>
-            <label for="maxTimestep" class="slider-label">Max Timestep (ms):</label>
-            <span id="maxTimestepValue" class="slider-value">33</span>
-            <input type="range" id="maxTimestep" min="10" max="100" value="33" step="1">
-            <button id="pauseResumeButton">Pause</button>
+    <div id="pageContainer">
+        <div id="controls">
+            <div class="control-group">
+                <h4>Viewport & Sim</h4>
+                <div class="viewport-instructions">Use WASD to Pan View</div>
+                <label for="worldWrapToggle" class="checkbox-label">Wrap Edges:
+                    <input type="checkbox" id="worldWrapToggle">
+                </label>
+                <label for="maxTimestep" class="slider-label">Max Timestep (ms):</label>
+                <span id="maxTimestepValue" class="slider-value">33</span>
+                <input type="range" id="maxTimestep" min="10" max="100" value="33" step="1">
+                <button id="pauseResumeButton">Pause</button>
+            </div>
+            <div class="control-group">
+                <h4>Soft Body (Global)</h4>
+                <label for="bodyFluidEntrainment" class="slider-label">Fluid Entrainment (Floaters):</label>
+                <span id="bodyFluidEntrainmentValue" class="slider-value">0.05</span>
+                <input type="range" id="bodyFluidEntrainment" min="0.0" max="0.5" value="0.05" step="0.005">
+
+                <label for="fluidCurrentStrength" class="slider-label">Fluid Current Str (Floaters):</label>
+                <span id="fluidCurrentStrengthValue" class="slider-value">10.0</span>
+                <input type="range" id="fluidCurrentStrength" min="0.0" max="25.0" value="10.0" step="0.1">
+
+                <label for="bodyPushStrength" class="slider-label">Body Push Strength (Manual Drag):</label>
+                <span id="bodyPushStrengthValue" class="slider-value">2.0</span>
+                <input type="range" id="bodyPushStrength" min="0.0" max="10.0" value="2.0" step="0.1">
+
+                <label for="reproductionCooldown" class="slider-label">Repro. Cooldown (frames):</label>
+                <span id="reproductionCooldownValue" class="slider-value">300</span>
+                <input type="range" id="reproductionCooldown" min="50" max="1000" value="300" step="10">
+
+                <label for="bodyRepulsionStrength" class="slider-label">Body Repulsion Str:</label>
+                <span id="bodyRepulsionStrengthValue" class="slider-value">0.5</span>
+                <input type="range" id="bodyRepulsionStrength" min="0.0" max="50.0" value="0.5" step="0.1">
+
+                <label for="bodyRepulsionRadiusFactor" class="slider-label">Body Repulsion Radius Factor:</label>
+                <span id="bodyRepulsionRadiusFactorValue" class="slider-value">1.5</span>
+                <input type="range" id="bodyRepulsionRadiusFactor" min="0.5" max="3.0" value="1.5" step="0.1">
+
+                <div class="indicator-label">Any Unstable: <span id="instabilityLight" class="indicator-light"></span></div>
+                <div id="populationCount">Population: 0</div>
+                <button id="resetButton">Reset Population</button>
+            </div>
+            <div class="control-group">
+                <h4>Energy Costs / Frame</h4>
+                <label for="baseNodeCost" class="slider-label">Base Node Cost:</label>
+                <span id="baseNodeCostValue" class="slider-value">0.0010</span>
+                <input type="range" id="baseNodeCost" min="0.0" max="0.01" value="0.001" step="0.0001">
+
+                <label for="motorNodeCost" class="slider-label">Motor Node Cost:</label>
+                <span id="motorNodeCostValue" class="slider-value">0.0100</span>
+                <input type="range" id="motorNodeCost" min="0.0" max="0.1" value="0.01" step="0.001">
+
+                <label for="eaterNodeCost" class="slider-label">Eater Node Cost:</label>
+                <span id="eaterNodeCostValue" class="slider-value">0.0050</span>
+                <input type="range" id="eaterNodeCost" min="0.0" max="0.05" value="0.005" step="0.0005">
+
+                <label for="predatorNodeCost" class="slider-label">Predator Node Cost:</label>
+                <span id="predatorNodeCostValue" class="slider-value">0.0200</span>
+                <input type="range" id="predatorNodeCost" min="0.0" max="100.0" value="0.02" step="0.001">
+            </div>
+            <div class="control-group">
+                <h4>Fluid</h4>
+                <label for="fluidDiffusion" class="slider-label">Diffusion:</label>
+                <span id="fluidDiffusionValue" class="slider-value">1.0e-5</span>
+                <input type="range" id="fluidDiffusion" min="0" max="0.001" value="0.00001" step="0.00001">
+
+                <label for="fluidViscosity" class="slider-label">Viscosity:</label>
+                <span id="fluidViscosityValue" class="slider-value">1.0e-6</span>
+                <input type="range" id="fluidViscosity" min="0" max="0.0001" value="0.000068" step="0.000001">
+
+                <label for="fluidFade" class="slider-label">Fade Rate:</label>
+                <span id="fluidFadeValue" class="slider-value">0.030</span>
+                <input type="range" id="fluidFade" min="0.001" max="0.1" value="0.03" step="0.001">
+                <button id="clearFluidButton">Clear Fluid</button>
+            </div>
+            <div class="control-group">
+                <h4>Particles</h4>
+                <label for="numParticles" class="slider-label">Particles:</label>
+                <span id="numParticlesValue" class="slider-value">1110</span>
+                <input type="range" id="numParticles" min="0" max="2500" value="1110" step="10">
+
+                <label for="particleFluidInfluence" class.slider-label="slider-label">Fluid Influence:</label>
+                <span id="particleFluidInfluenceValue" class="slider-value">1.0</span>
+                <input type="range" id="particleFluidInfluence" min="0.0" max="1.0" value="0.97" step="0.01">
+
+                <label for="particleLifeDecay" id="particleLifeDecayLabel" class="slider-label">Life Decay Rate:</label>
+                <span id="particleLifeDecayValue" class="slider-value">0.0050</span>
+                <input type="range" id="particleLifeDecay" min="0.0001" max="0.02" value="0.005" step="0.0001">
+
+                <label for="infiniteParticleLifeToggle" class="checkbox-label">Infinite Life:
+                    <input type="checkbox" id="infiniteParticleLifeToggle">
+                </label>
+
+                <button id="resetParticlesButton">Reset Particles</button>
+            </div>
+            <div class="control-group">
+                <h4>Env. Emitters</h4>
+                <label for="emitterEditModeToggle" class="checkbox-label">Edit Emitters:
+                    <input type="checkbox" id="emitterEditModeToggle">
+                </label>
+                <label for="emitterStrength" class="slider-label">Emitter Strength:</label>
+                <span id="emitterStrengthValue" class="slider-value">1.0</span>
+                <input type="range" id="emitterStrength" min="0.0" max="5.0" value="1.0" step="0.1">
+                <button id="clearEmittersButton">Clear Emitters</button>
+            </div>
+            <div class="control-group">
+                <h4>Configuration</h4>
+                <button id="exportConfigButton">Export Config</button>
+                <input type="file" id="importConfigFile" accept=".json" style="display: none;">
+                <button id="importConfigButton">Import Config</button>
+            </div>
         </div>
-        <div class="control-group">
-            <h4>Soft Body (Global)</h4>
-            <label for="bodyFluidEntrainment" class="slider-label">Fluid Entrainment (Floaters):</label>
-            <span id="bodyFluidEntrainmentValue" class="slider-value">0.05</span>
-            <input type="range" id="bodyFluidEntrainment" min="0.0" max="0.5" value="0.05" step="0.005">
-
-            <label for="fluidCurrentStrength" class="slider-label">Fluid Current Str (Floaters):</label>
-            <span id="fluidCurrentStrengthValue" class="slider-value">10.0</span>
-            <input type="range" id="fluidCurrentStrength" min="0.0" max="25.0" value="10.0" step="0.1">
-
-            <label for="bodyPushStrength" class="slider-label">Body Push Strength (Manual Drag):</label>
-            <span id="bodyPushStrengthValue" class="slider-value">2.0</span>
-            <input type="range" id="bodyPushStrength" min="0.0" max="10.0" value="2.0" step="0.1">
-
-            <label for="reproductionCooldown" class="slider-label">Repro. Cooldown (frames):</label>
-            <span id="reproductionCooldownValue" class="slider-value">300</span>
-            <input type="range" id="reproductionCooldown" min="50" max="1000" value="300" step="10">
-
-            <label for="bodyRepulsionStrength" class="slider-label">Body Repulsion Str:</label>
-            <span id="bodyRepulsionStrengthValue" class="slider-value">0.5</span>
-            <input type="range" id="bodyRepulsionStrength" min="0.0" max="50.0" value="0.5" step="0.1">
-
-            <label for="bodyRepulsionRadiusFactor" class="slider-label">Body Repulsion Radius Factor:</label>
-            <span id="bodyRepulsionRadiusFactorValue" class="slider-value">1.5</span>
-            <input type="range" id="bodyRepulsionRadiusFactor" min="0.5" max="3.0" value="1.5" step="0.1">
-
-            <div class="indicator-label">Any Unstable: <span id="instabilityLight" class="indicator-light"></span></div>
-            <div id="populationCount">Population: 0</div>
-            <button id="resetButton">Reset Population</button>
-        </div>
-        <div class="control-group">
-            <h4>Energy Costs / Frame</h4>
-            <label for="baseNodeCost" class="slider-label">Base Node Cost:</label>
-            <span id="baseNodeCostValue" class="slider-value">0.0010</span>
-            <input type="range" id="baseNodeCost" min="0.0" max="0.01" value="0.001" step="0.0001">
-
-            <label for="motorNodeCost" class="slider-label">Motor Node Cost:</label>
-            <span id="motorNodeCostValue" class="slider-value">0.0100</span>
-            <input type="range" id="motorNodeCost" min="0.0" max="0.1" value="0.01" step="0.001">
-
-            <label for="eaterNodeCost" class="slider-label">Eater Node Cost:</label>
-            <span id="eaterNodeCostValue" class="slider-value">0.0050</span>
-            <input type="range" id="eaterNodeCost" min="0.0" max="0.05" value="0.005" step="0.0005">
-
-            <label for="predatorNodeCost" class="slider-label">Predator Node Cost:</label>
-            <span id="predatorNodeCostValue" class="slider-value">0.0200</span>
-            <input type="range" id="predatorNodeCost" min="0.0" max="100.0" value="0.02" step="0.001">
-        </div>
-        <div class="control-group">
-            <h4>Fluid</h4>
-            <label for="fluidDiffusion" class="slider-label">Diffusion:</label>
-            <span id="fluidDiffusionValue" class="slider-value">1.0e-5</span>
-            <input type="range" id="fluidDiffusion" min="0" max="0.001" value="0.00001" step="0.00001">
-
-            <label for="fluidViscosity" class="slider-label">Viscosity:</label>
-            <span id="fluidViscosityValue" class="slider-value">1.0e-6</span>
-            <input type="range" id="fluidViscosity" min="0" max="0.0001" value="0.000068" step="0.000001">
-
-            <label for="fluidFade" class="slider-label">Fade Rate:</label>
-            <span id="fluidFadeValue" class="slider-value">0.030</span>
-            <input type="range" id="fluidFade" min="0.001" max="0.1" value="0.03" step="0.001">
-            <button id="clearFluidButton">Clear Fluid</button>
-        </div>
-         <div class="control-group">
-            <h4>Particles</h4>
-            <label for="numParticles" class="slider-label">Particles:</label>
-            <span id="numParticlesValue" class="slider-value">1110</span>
-            <input type="range" id="numParticles" min="0" max="2500" value="1110" step="10">
-
-             <label for="particleFluidInfluence" class.slider-label="slider-label">Fluid Influence:</label>
-             <span id="particleFluidInfluenceValue" class="slider-value">1.0</span>
-             <input type="range" id="particleFluidInfluence" min="0.0" max="1.0" value="0.97" step="0.01">
-
-             <label for="particleLifeDecay" id="particleLifeDecayLabel" class="slider-label">Life Decay Rate:</label>
-             <span id="particleLifeDecayValue" class="slider-value">0.0050</span>
-             <input type="range" id="particleLifeDecay" min="0.0001" max="0.02" value="0.005" step="0.0001">
-
-             <label for="infiniteParticleLifeToggle" class="checkbox-label">Infinite Life:
-                <input type="checkbox" id="infiniteParticleLifeToggle">
-            </label>
-
-            <button id="resetParticlesButton">Reset Particles</button>
-        </div>
-        <div class="control-group">
-            <h4>Env. Emitters</h4>
-            <label for="emitterEditModeToggle" class="checkbox-label">Edit Emitters:
-                <input type="checkbox" id="emitterEditModeToggle">
-            </label>
-            <label for="emitterStrength" class="slider-label">Emitter Strength:</label>
-            <span id="emitterStrengthValue" class="slider-value">1.0</span>
-            <input type="range" id="emitterStrength" min="0.0" max="5.0" value="1.0" step="0.1">
-            <button id="clearEmittersButton">Clear Emitters</button>
-        </div>
-        <div class="control-group">
-            <h4>Configuration</h4>
-            <button id="exportConfigButton">Export Config</button>
-            <input type="file" id="importConfigFile" accept=".json" style="display: none;">
-            <button id="importConfigButton">Import Config</button>
-        </div>
-    </div>
-    <canvas id="simulationCanvas"></canvas>
-
-    <div id="infoPanel">
-        <button id="closeInfoPanel">X</button>
-        <div class="info-section">
-            <h5>Soft Body Info</h5>
-            <p><strong>ID:</strong> <span id="infoBodyId">-</span></p>
-            <p><strong>Stiffness:</strong> <span id="infoBodyStiffness">-</span></p>
-            <p><strong>Damping:</strong> <span id="infoBodyDamping">-</span></p>
-            <p><strong>Motor Impulse Interval:</strong> <span id="infoBodyMotorInterval">-</span></p>
-            <p><strong>Motor Impulse Cap:</strong> <span id="infoBodyMotorCap">-</span></p>
-            <p><strong>Motor Active:</strong> <span id="infoBodyMotorActive">-</span></p>
-            <p><strong>Motor Direction:</strong> X: <span id="infoBodyMotorDirX">-</span>, Y: <span id="infoBodyMotorDirY">-</span></p>
-            <p><strong>Energy:</strong> <span id="infoBodyEnergy">-</span></p>
-            <p><strong>Ticks Since Birth:</strong> <span id="infoBodyTicksBirth">-</span></p>
-            <p><strong>Can Reproduce:</strong> <span id="infoBodyCanReproduce">-</span></p>
-            <p><strong>Shape Type:</strong> <span id="infoBodyShapeType">-</span></p>
-        </div>
-        <div class="info-section">
-            <h5>Mass Point Info</h5>
-            <p><strong>Index:</strong> <span id="infoPointIndex">-</span></p>
-            <p><strong>Node Type:</strong> <span id="infoPointNodeType">-</span></p>
-            <p><strong>Mass:</strong> <span id="infoPointMass">-</span></p>
-            <p><strong>Radius:</strong> <span id="infoPointRadius">-</span></p>
-            <p><strong>World Pos:</strong> X: <span id="infoPointPosX">-</span>, Y: <span id="infoPointPosY">-</span></p>
-            <p><strong>Is Motor:</strong> <span id="infoPointIsMotor">-</span></p>
-            <p><strong>Is Eater:</strong> <span id="infoPointIsEater">-</span></p>
-            <p><strong>Is Predator:</strong> <span id="infoPointIsPredator">-</span></p>
-            <p><strong>Emits Dye:</strong> <span id="infoPointEmitsDye">-</span></p>
-            <p><strong>Dye Color:</strong> <span id="infoPointDyeColor">-</span></p>
+        <div id="simulationAndInfoWrapper">
+            <div id="infoPanel">
+                <button id="closeInfoPanel">X</button>
+                <div class="info-section">
+                    <h5>Soft Body Info</h5>
+                    <p><strong>ID:</strong> <span id="infoBodyId">-</span></p>
+                    <p><strong>Stiffness:</strong> <span id="infoBodyStiffness">-</span></p>
+                    <p><strong>Damping:</strong> <span id="infoBodyDamping">-</span></p>
+                    <p><strong>Motor Impulse Interval:</strong> <span id="infoBodyMotorInterval">-</span></p>
+                    <p><strong>Motor Impulse Cap:</strong> <span id="infoBodyMotorCap">-</span></p>
+                    <p><strong>Emitter Strength:</strong> <span id="infoBodyEmitterStrength">-</span></p>
+                    <p><strong>Emitter Direction:</strong> X: <span id="infoBodyEmitterDirX">-</span>, Y: <span id="infoBodyEmitterDirY">-</span></p>
+                    <p><strong>Energy:</strong> <span id="infoBodyEnergy">-</span></p>
+                    <p><strong>Ticks Since Birth:</strong> <span id="infoBodyTicksBirth">-</span></p>
+                    <p><strong>Can Reproduce:</strong> <span id="infoBodyCanReproduce">-</span></p>
+                    <p><strong>Shape Type:</strong> <span id="infoBodyShapeType">-</span></p>
+                </div>
+                <div class="info-section">
+                    <h5>Mass Point Info</h5>
+                    <p><strong>Index:</strong> <span id="infoPointIndex">-</span></p>
+                    <p><strong>Node Type:</strong> <span id="infoPointNodeType">-</span></p>
+                    <p><strong>Mass:</strong> <span id="infoPointMass">-</span></p>
+                    <p><strong>Radius:</strong> <span id="infoPointRadius">-</span></p>
+                    <p><strong>World Pos:</strong> X: <span id="infoPointPosX">-</span>, Y: <span id="infoPointPosY">-</span></p>
+                    <p><strong>Is Motor:</strong> <span id="infoPointIsMotor">-</span></p>
+                    <p><strong>Is Eater:</strong> <span id="infoPointIsEater">-</span></p>
+                    <p><strong>Is Predator:</strong> <span id="infoPointIsPredator">-</span></p>
+                    <p><strong>Emits Dye:</strong> <span id="infoPointEmitsDye">-</span></p>
+                    <p><strong>Dye Color:</strong> <span id="infoPointDyeColor">-</span></p>
+                </div>
+            </div>
+            <canvas id="simulationCanvas"></canvas>
         </div>
     </div>
 
@@ -656,9 +672,9 @@
                 document.getElementById('infoBodyDamping').textContent = selectedInspectBody.springDamping.toFixed(2);
                 document.getElementById('infoBodyMotorInterval').textContent = selectedInspectBody.motorImpulseInterval;
                 document.getElementById('infoBodyMotorCap').textContent = selectedInspectBody.motorImpulseMagnitudeCap.toFixed(2);
-                // document.getElementById('infoBodyMotorActive').textContent = selectedInspectBody.isMotorActive; // This is now per-point
-                // document.getElementById('infoBodyMotorDirX').textContent = selectedInspectBody.motorDirection.x.toFixed(2); // This is now per-point
-                // document.getElementById('infoBodyMotorDirY').textContent = selectedInspectBody.motorDirection.y.toFixed(2); // This is now per-point
+                document.getElementById('infoBodyEmitterStrength').textContent = selectedInspectBody.emitterStrength.toFixed(2);
+                document.getElementById('infoBodyEmitterDirX').textContent = selectedInspectBody.emitterDirection.x.toFixed(2);
+                document.getElementById('infoBodyEmitterDirY').textContent = selectedInspectBody.emitterDirection.y.toFixed(2);
                 document.getElementById('infoBodyEnergy').textContent = selectedInspectBody.creatureEnergy.toFixed(2);
                 document.getElementById('infoBodyTicksBirth').textContent = selectedInspectBody.ticksSinceBirth;
                 document.getElementById('infoBodyCanReproduce').textContent = selectedInspectBody.canReproduce;
@@ -864,12 +880,12 @@
                 this.radius = radius;
                 this.color = color;
                 this.isFixed = false;
-                this.nodeType = NodeType.NEUTRAL; // Default node type
+                this.nodeType = NodeType.NEUTRAL;
                 this.isMotor = false;
                 this.isEater = false;
                 this.isPredator = false;
                 this.emitsDye = false;
-                this.dyeColor = [0,0,0]; // Default black, means no emission
+                this.dyeColor = [0,0,0];
             }
             applyForce(f) { this.force = this.force.add(f); }
 
@@ -913,14 +929,14 @@
                 ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
                 if (this.isPredator) {
                     ctx.fillStyle = 'rgba(255, 50, 50, 0.9)';
-                } else if (this.isMotor && this.isEater) { // isMotor flag still used for general motor capability
+                } else if (this.isMotor && this.isEater) {
                      ctx.fillStyle = 'rgba(200,255,0,0.9)';
                 } else if (this.isMotor) {
                     ctx.fillStyle = 'rgba(0,255,100,0.9)';
                 } else if (this.isEater) {
                     ctx.fillStyle = 'rgba(255,165,0,0.9)';
                 } else if (this.nodeType === NodeType.FIXED_ROOT) {
-                    ctx.fillStyle = 'rgba(100, 70, 30, 0.9)'; // Brown for root
+                    ctx.fillStyle = 'rgba(100, 70, 30, 0.9)';
                 }
                 else {
                     ctx.fillStyle = this.isFixed ? 'rgba(255,0,0,0.9)' : this.color;
@@ -985,7 +1001,7 @@
 
                 this.motorImpulseInterval = 30 + Math.floor(Math.random() * 90);
                 this.motorImpulseMagnitudeCap = 0.5 + Math.random() * 2.0;
-                this.emitterStrength = 0.2 + Math.random() * 1.0; // For EMITTER_SWIMMER nodes
+                this.emitterStrength = 0.2 + Math.random() * 1.0;
                 this.emitterDirection = new Vec2(Math.random()*2-1, Math.random()*2-1).normalize();
 
 
@@ -999,7 +1015,7 @@
                     const angleMutation = (Math.random() - 0.5) * Math.PI * 0.2;
                     const cosA = Math.cos(angleMutation);
                     const sinA = Math.sin(angleMutation);
-                    this.emitterDirection = new Vec2( // Mutate emitter direction
+                    this.emitterDirection = new Vec2(
                         parentBody.emitterDirection.x * cosA - parentBody.emitterDirection.y * sinA,
                         parentBody.emitterDirection.x * sinA + parentBody.emitterDirection.y * cosA
                     ).normalize();
@@ -1207,7 +1223,7 @@
                 let currentFrameEnergyCost = 0;
                 for (const point of this.massPoints) {
                     currentFrameEnergyCost += BASE_NODE_EXISTENCE_COST;
-                    if (point.isMotor) { // Cost for having motor capability
+                    if (point.isMotor) {
                         currentFrameEnergyCost += MOTOR_NODE_ENERGY_COST;
                     }
                     if (point.isEater) {
@@ -1248,7 +1264,7 @@
                 // Fluid Interactions based on NodeType
                 if (fluidFieldRef) {
                     for (let point of this.massPoints) {
-                        if (point.isFixed) continue;
+                        if (point.isFixed || point.nodeType === NodeType.FIXED_ROOT) continue;
 
                         const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scale);
                         const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scale);
@@ -1263,17 +1279,14 @@
                             let blendedDisplacementPx = currentPointDisplacementPx.mul(1.0 - this.fluidEntrainment)
                                                              .add(effectiveFluidDisplacementPx.mul(this.fluidEntrainment));
                             point.prevPos = point.pos.clone().sub(blendedDisplacementPx);
-                        } else if (point.nodeType === NodeType.EMITTER_SWIMMER && this.isMotorActive && this.emitterStrength > 0.0001) {
+                        } else if (point.nodeType === NodeType.EMITTER_SWIMMER && this.emitterStrength > 0.0001) { // No longer checks body.isMotorActive for this
                             const emitterPushVx = this.emitterDirection.x * this.emitterStrength;
                             const emitterPushVy = this.emitterDirection.y * this.emitterStrength;
                             fluidFieldRef.addVelocity(fluidGridX, fluidGridY, emitterPushVx, emitterPushVy);
-                            // fluidFieldRef.addDensity(fluidGridX, fluidGridY, 50, 150, 50, 10); // Optional: visualize emitter output
                         }
-                        // FIXED_ROOT and NEUTRAL nodes have no direct velocity interaction here
 
-                        // Dye Emission
                         if (point.emitsDye) {
-                            fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], 50); // Amount of dye
+                            fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], 50);
                         }
                     }
                 }
@@ -1870,9 +1883,7 @@
             }
 
             if (fluidField) {
-                // Reset solid mask for this frame
                 fluidField.isSolid.fill(false);
-                // Mark cells occupied by soft bodies as solid
                 for (const body of softBodyPopulation) {
                     if (body.isUnstable) continue;
                     for (const point of body.massPoints) {
@@ -1884,12 +1895,8 @@
                 }
             }
 
-
-            // Apply environmental emitters before fluid step
             applyVelocityEmitters();
 
-
-            // --- Soft Body to Fluid (Dragging Interaction) ---
             if (selectedSoftBodyPoint && selectedSoftBodyPoint.point.isFixed && fluidField) {
                 const activeBody = selectedSoftBodyPoint.body;
                 const point = selectedSoftBodyPoint.point;
@@ -1909,14 +1916,11 @@
                 }
             }
 
-
-            // --- Fluid Simulation Step ---
             if (fluidField) {
                 fluidField.dt = dt;
                 fluidField.step();
             }
 
-            // --- Update Soft Bodies (Internal Physics, Motor, Fluid Entrainment, Interactions, Boundaries) ---
             let currentAnyUnstable = false;
             let newOffspring = [];
 
@@ -1933,7 +1937,6 @@
             }
             softBodyPopulation.push(...newOffspring);
 
-            // --- Particle Update ---
             for (let particle of particles) {
                 particle.update(dt);
             }

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Refined Boundaries & Viewport</title>
+    <title>2D Soft Body Evolution - World Boundary & Scaling Verification</title>
     <style>
         body {
             margin: 0;
@@ -332,8 +332,8 @@
         let offscreenFluidCanvas, offscreenFluidCtx; // For smoother fluid rendering
 
         // --- Viewport and World Dimensions ---
-        const WORLD_WIDTH = 1000;
-        const WORLD_HEIGHT = 800;
+        const WORLD_WIDTH = 1600; // Default, user might change this
+        const WORLD_HEIGHT = 1200; // Default, user might change this
         const VIEW_PAN_SPEED = 20;
 
         canvas.width = WORLD_WIDTH;
@@ -509,8 +509,9 @@
         document.addEventListener('keydown', (e) => {
             if (IS_SIMULATION_PAUSED && e.key.toLowerCase() !== 'p') return;
 
-            let maxPanX = Math.max(0, WORLD_WIDTH - canvas.clientWidth);
-            let maxPanY = Math.max(0, WORLD_HEIGHT - canvas.clientHeight);
+            // Calculate max pan based on current canvas display size
+            const maxPanX = Math.max(0, WORLD_WIDTH - canvas.clientWidth);
+            const maxPanY = Math.max(0, WORLD_HEIGHT - canvas.clientHeight);
 
             switch(e.key.toLowerCase()) {
                 case 'w': viewOffsetY = Math.max(0, viewOffsetY - VIEW_PAN_SPEED); break;
@@ -1277,7 +1278,6 @@
                 // Internal Motor Impulse
                 if (this.motorImpulseMagnitudeCap > 0.0001 && (this.ticksSinceBirth % this.motorImpulseInterval === 0)) {
                     for (let point of this.massPoints) {
-                        // Apply impulse to any non-fixed point, regardless of its nodeType, if the body has impulse capability
                         if (!point.isFixed && point.nodeType !== NodeType.FIXED_ROOT) {
                             const randomAngle = Math.random() * Math.PI * 2;
                             const impulseDir = new Vec2(Math.cos(randomAngle), Math.sin(randomAngle));
@@ -1294,8 +1294,8 @@
                     for (let point of this.massPoints) {
                         if (point.isFixed || point.nodeType === NodeType.FIXED_ROOT) continue;
 
-                        const fluidGridX = Math.floor(point.pos.x / fluidField.scaleX); // Use scaleX
-                        const fluidGridY = Math.floor(point.pos.y / fluidField.scaleY); // Use scaleY
+                        const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX); // Use scaleX
+                        const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY); // Use scaleY
                         const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
 
                         if (point.nodeType === NodeType.FLOATING) {

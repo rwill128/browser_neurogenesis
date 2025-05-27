@@ -4,9 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="CHeckpoint">
-      <change afterPath="$PROJECT_DIR$/soft_body_9.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Amazing Checkpoint">
+      <change beforePath="$PROJECT_DIR$/soft_body_9.html" beforeDir="false" afterPath="$PROJECT_DIR$/soft_body_9.html" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -19,6 +18,18 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
+  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
+  "lastFilter": {
+    "state": "OPEN",
+    "assignee": "rwill-ivim"
+  }
+}]]></component>
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/rwill128/browser_neurogenesis.git",
+    "accountId": "38bb4fe4-aab6-4fbe-9bfb-4902600c6d15"
+  }
+}]]></component>
   <component name="MacroExpansionManager">
     <option name="directoryName" value="esylqfma" />
   </component>
@@ -191,7 +202,7 @@
       <option name="presentableId" value="Default" />
       <updated>1748315119497</updated>
       <workItem from="1748315120538" duration="957000" />
-      <workItem from="1748367005646" duration="3348000" />
+      <workItem from="1748367005646" duration="3727000" />
     </task>
     <task id="LOCAL-00001" summary="Checkpoint">
       <option name="closed" value="true" />
@@ -209,7 +220,15 @@
       <option name="project" value="LOCAL" />
       <updated>1748370177243</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="Amazing Checkpoint">
+      <option name="closed" value="true" />
+      <created>1748371083056</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1748371083056</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -218,6 +237,7 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Checkpoint" />
     <MESSAGE value="CHeckpoint" />
-    <option name="LAST_COMMIT_MESSAGE" value="CHeckpoint" />
+    <MESSAGE value="Amazing Checkpoint" />
+    <option name="LAST_COMMIT_MESSAGE" value="Amazing Checkpoint" />
   </component>
 </project>

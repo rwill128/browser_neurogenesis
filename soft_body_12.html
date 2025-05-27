@@ -3,105 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Flyout Controls & Layout</title>
+    <title>2D Soft Body Evolution - Adjusted Slider Ranges</title>
     <style>
         body {
             margin: 0;
-            overflow: hidden; /* Prevent body scrollbars when flyout is open */
+            overflow: hidden;
             background-color: #111;
             font-family: sans-serif;
             color: #eee;
+            display: flex; /* Use flex for overall page layout */
+            flex-direction: column;
+            height: 100vh; /* Full viewport height */
         }
         #pageContainer {
-            display: flex;
-            flex-direction: column; /* Controls button on top, then sim area */
-            align-items: center;
-            width: 100vw;
-            height: 100vh;
+            display: flex; /* This will be the main container for controls and sim area */
+            flex-direction: row; /* Controls on right, sim+info on left */
+            width: 100%;
+            height: 100%;
             box-sizing: border-box;
-            padding: 10px;
-        }
-
-        #toggleControlsButton {
-            position: fixed;
-            top: 15px;
-            right: 15px;
-            z-index: 1002; /* Above flyout */
-            padding: 8px 12px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-        }
-        #toggleControlsButton:hover {
-            background-color: #0056b3;
-        }
-
-        #controls { /* This is now the flyout panel */
-            position: fixed;
-            top: 0;
-            right: -360px; /* Start off-screen, width + padding */
-            width: 330px;
-            height: 100vh;
-            background-color: rgba(40,40,40,0.95);
-            padding: 15px;
-            border-left: 1px solid #555;
-            box-shadow: -5px 0 15px rgba(0,0,0,0.3);
-            overflow-y: auto;
-            z-index: 1001;
-            transition: right 0.3s ease-in-out;
-            display: flex; /* To arrange control groups */
-            flex-direction: column; /* Stack control groups vertically */
-            gap: 10px;
-            box-sizing: border-box;
-        }
-        #controls.open {
-            right: 0; /* Slide in */
-        }
-        #controls div.control-group {
-            padding: 10px;
-            border: 1px solid #555;
-            border-radius: 6px;
-            background-color: rgba(50,50,50,0.8);
-            /* flex-grow: 1; Removed, let them take natural height */
-            min-width: auto; /* Allow them to be narrower in flyout */
-            max-width: 100%;
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
         }
 
         #simulationAndInfoWrapper {
             display: flex;
             flex-direction: row;
-            justify-content: center; /* Center canvas and info panel if space allows */
-            align-items: flex-start; /* Align items to the top */
-            gap: 15px;
-            width: 100%;
-            height: calc(100vh - 20px); /* Full height minus body padding */
-            margin-top: 0; /* Controls button is fixed */
-            padding: 5px; /* Small padding around sim area */
+            justify-content: flex-start; /* Align info panel and canvas to the left */
+            align-items: stretch; /* Make them take full height */
+            gap: 10px;
+            flex-grow: 1; /* Allow this wrapper to take remaining space */
+            padding: 10px;
             box-sizing: border-box;
+            height: 100%;
         }
-        canvas {
-            border: 1px solid #444;
-            background-color: #222;
-            cursor: default;
-            /* Canvas will take remaining space after info panel */
-            flex-grow: 1;
-            height: 100%; /* Take full height of its container */
-            max-width: calc(100% - 300px); /* Max width if info panel is visible */
-        }
-        canvas.emitter-edit-mode {
-            cursor: crosshair;
-        }
-
         #infoPanel {
             width: 280px;
-            min-width: 250px; /* Ensure it doesn't get too squished */
-            height: calc(100% - 10px); /* Match canvas height approx */
+            min-width: 250px;
+            height: 100%;
             background-color: rgba(30,30,30,0.95);
             border: 1px solid #555;
             border-radius: 8px;
@@ -115,43 +51,80 @@
             box-sizing: border-box;
             position: relative;
         }
-        #infoPanel h5 {
-            margin-top: 0;
-            margin-bottom: 8px;
-            color: #00aeff;
-            border-bottom: 1px solid #444;
-            padding-bottom: 5px;
+        #canvasContainer { /* New container for the canvas */
+            flex-grow: 1;
+            height: 100%;
+            display: flex; /* To center the canvas if it's smaller due to aspect ratio */
+            justify-content: center;
+            align-items: center;
+            overflow: hidden; /* Hide parts of the large canvas outside the viewport */
+            position: relative; /* For absolute positioning of the canvas if needed, or just for structure */
+            background-color: #222; /* Background for the canvas area */
+            border: 1px solid #444;
+            border-radius: 8px;
         }
-        #infoPanel p {
-            margin: 3px 0;
-            line-height: 1.4;
+        canvas {
+            /* width & height attributes set by JS to WORLD_WIDTH/HEIGHT */
+            /* CSS handles display scaling */
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain; /* Scales down to fit, maintaining aspect ratio */
+            cursor: default;
         }
-        #infoPanel strong {
-            color: #bbb;
-        }
-        #infoPanel .info-section {
-            margin-bottom: 10px;
-            padding-bottom: 10px;
-            border-bottom: 1px dashed #333;
-        }
-        #infoPanel .info-section:last-child {
-            border-bottom: none;
-            margin-bottom: 0;
-            padding-bottom: 0;
-        }
-        #closeInfoPanel {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: #555;
-            color: white;
-            border: none;
-            padding: 3px 7px;
-            cursor: pointer;
-            border-radius: 3px;
+        canvas.emitter-edit-mode {
+            cursor: crosshair;
         }
 
-        /* Slider and checkbox styling remains the same */
+        #toggleControlsButton {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            z-index: 1002;
+            padding: 8px 12px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+        #toggleControlsButton:hover {
+            background-color: #0056b3;
+        }
+
+        #controls {
+            position: fixed;
+            top: 0;
+            right: -360px;
+            width: 330px;
+            height: 100vh;
+            background-color: rgba(40,40,40,0.95);
+            padding: 15px;
+            border-left: 1px solid #555;
+            box-shadow: -5px 0 15px rgba(0,0,0,0.3);
+            overflow-y: auto;
+            z-index: 1001;
+            transition: right 0.3s ease-in-out;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            box-sizing: border-box;
+        }
+        #controls.open {
+            right: 0;
+        }
+        #controls div.control-group {
+            padding: 10px;
+            border: 1px solid #555;
+            border-radius: 6px;
+            background-color: rgba(50,50,50,0.8);
+            min-width: auto;
+            max-width: 100%;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+
         #controls label.slider-label, #controls label.checkbox-label { display: block; margin-bottom: 2px; font-size: 0.85em; font-weight: bold; color: #ddd; text-align: left; }
         #controls label.checkbox-label { margin-top: 8px; display: flex; align-items: center; }
         #controls input[type="checkbox"] { margin-left: 5px; }
@@ -166,49 +139,89 @@
         .indicator-light.unstable { background-color: #F44336; }
         #populationCount { margin-top: 10px; font-size: 0.9em; color: #ccc; text-align: center; width: 100%; }
         .viewport-instructions { font-size: 0.8em; color: #bbb; text-align: center; margin-top: 5px; }
-
+        #infoPanel h5 { margin-top: 0; margin-bottom: 8px; color: #00aeff; border-bottom: 1px solid #444; padding-bottom: 5px; }
+        #infoPanel p { margin: 3px 0; line-height: 1.4; }
+        #infoPanel strong { color: #bbb; }
+        #infoPanel .info-section { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #333; }
+        #infoPanel .info-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+        #closeInfoPanel { position: absolute; top: 10px; right: 10px; background: #555; color: white; border: none; padding: 3px 7px; cursor: pointer; border-radius: 3px; }
     </style>
 </head>
 <body>
     <div id="pageContainer">
-        <button id="toggleControlsButton">Controls</button>
+        <div id="simulationAndInfoWrapper">
+            <div id="infoPanel">
+                <button id="closeInfoPanel">X</button>
+                <div class="info-section">
+                    <h5>Soft Body Info</h5>
+                    <p><strong>ID:</strong> <span id="infoBodyId">-</span></p>
+                    <p><strong>Stiffness:</strong> <span id="infoBodyStiffness">-</span></p>
+                    <p><strong>Damping:</strong> <span id="infoBodyDamping">-</span></p>
+                    <p><strong>Motor Impulse Interval:</strong> <span id="infoBodyMotorInterval">-</span></p>
+                    <p><strong>Motor Impulse Cap:</strong> <span id="infoBodyMotorCap">-</span></p>
+                    <p><strong>Emitter Strength:</strong> <span id="infoBodyEmitterStrength">-</span></p>
+                    <p><strong>Emitter Direction:</strong> X: <span id="infoBodyEmitterDirX">-</span>, Y: <span id="infoBodyEmitterDirY">-</span></p>
+                    <p><strong>Energy:</strong> <span id="infoBodyEnergy">-</span></p>
+                    <p><strong>Ticks Since Birth:</strong> <span id="infoBodyTicksBirth">-</span></p>
+                    <p><strong>Can Reproduce:</strong> <span id="infoBodyCanReproduce">-</span></p>
+                    <p><strong>Shape Type:</strong> <span id="infoBodyShapeType">-</span></p>
+                </div>
+                <div class="info-section">
+                    <h5>Mass Point Info</h5>
+                    <p><strong>Index:</strong> <span id="infoPointIndex">-</span></p>
+                    <p><strong>Node Type:</strong> <span id="infoPointNodeType">-</span></p>
+                    <p><strong>Mass:</strong> <span id="infoPointMass">-</span></p>
+                    <p><strong>Radius:</strong> <span id="infoPointRadius">-</span></p>
+                    <p><strong>World Pos:</strong> X: <span id="infoPointPosX">-</span>, Y: <span id="infoPointPosY">-</span></p>
+                    <p><strong>Is Eater:</strong> <span id="infoPointIsEater">-</span></p>
+                    <p><strong>Is Predator:</strong> <span id="infoPointIsPredator">-</span></p>
+                    <p><strong>Emits Dye:</strong> <span id="infoPointEmitsDye">-</span></p>
+                    <p><strong>Dye Color:</strong> <span id="infoPointDyeColor">-</span></p>
+                </div>
+            </div>
+            <div id="canvasContainer">
+                <canvas id="simulationCanvas"></canvas>
+            </div>
+        </div>
 
-        <div id="controls"> <div class="control-group">
+        <button id="toggleControlsButton">Controls</button>
+        <div id="controls">
+            <div class="control-group">
                 <h4>Viewport & Sim</h4>
                 <div class="viewport-instructions">Use WASD to Pan View</div>
                 <label for="worldWrapToggle" class="checkbox-label">Wrap Edges:
                     <input type="checkbox" id="worldWrapToggle">
                 </label>
                 <label for="maxTimestep" class="slider-label">Max Timestep (ms):</label>
-                <span id="maxTimestepValue" class="slider-value">33</span>
-                <input type="range" id="maxTimestep" min="10" max="100" value="33" step="1">
+                <span id="maxTimestepValue" class="slider-value">10</span>
+                <input type="range" id="maxTimestep" min="1" max="50" value="10" step="1">
                 <button id="pauseResumeButton">Pause</button>
             </div>
             <div class="control-group">
                 <h4>Soft Body (Global)</h4>
                 <label for="bodyFluidEntrainment" class="slider-label">Fluid Entrainment (Floaters):</label>
-                <span id="bodyFluidEntrainmentValue" class="slider-value">0.05</span>
-                <input type="range" id="bodyFluidEntrainment" min="0.0" max="0.5" value="0.05" step="0.005">
+                <span id="bodyFluidEntrainmentValue" class="slider-value">0.47</span>
+                <input type="range" id="bodyFluidEntrainment" min="0.0" max="0.7" value="0.465" step="0.005">
 
                 <label for="fluidCurrentStrength" class="slider-label">Fluid Current Str (Floaters):</label>
-                <span id="fluidCurrentStrengthValue" class="slider-value">10.0</span>
-                <input type="range" id="fluidCurrentStrength" min="0.0" max="25.0" value="10.0" step="0.1">
+                <span id="fluidCurrentStrengthValue" class="slider-value">19.7</span>
+                <input type="range" id="fluidCurrentStrength" min="0.0" max="30.0" value="19.7" step="0.1">
 
                 <label for="bodyPushStrength" class="slider-label">Body Push Strength (Manual Drag):</label>
-                <span id="bodyPushStrengthValue" class="slider-value">2.0</span>
-                <input type="range" id="bodyPushStrength" min="0.0" max="10.0" value="2.0" step="0.1">
+                <span id="bodyPushStrengthValue" class="slider-value">1.3</span>
+                <input type="range" id="bodyPushStrength" min="0.0" max="2.0" value="1.3" step="0.05">
 
                 <label for="reproductionCooldown" class="slider-label">Repro. Cooldown (frames):</label>
-                <span id="reproductionCooldownValue" class="slider-value">300</span>
-                <input type="range" id="reproductionCooldown" min="50" max="1000" value="300" step="10">
+                <span id="reproductionCooldownValue" class="slider-value">1000</span>
+                <input type="range" id="reproductionCooldown" min="100" max="5000" value="1000" step="50">
 
                 <label for="bodyRepulsionStrength" class="slider-label">Body Repulsion Str:</label>
-                <span id="bodyRepulsionStrengthValue" class="slider-value">0.5</span>
-                <input type="range" id="bodyRepulsionStrength" min="0.0" max="50.0" value="0.5" step="0.1">
+                <span id="bodyRepulsionStrengthValue" class="slider-value">50.0</span>
+                <input type="range" id="bodyRepulsionStrength" min="0.0" max="100.0" value="50.0" step="0.5">
 
                 <label for="bodyRepulsionRadiusFactor" class="slider-label">Body Repulsion Radius Factor:</label>
-                <span id="bodyRepulsionRadiusFactorValue" class="slider-value">1.5</span>
-                <input type="range" id="bodyRepulsionRadiusFactor" min="0.5" max="3.0" value="1.5" step="0.1">
+                <span id="bodyRepulsionRadiusFactorValue" class="slider-value">3.0</span>
+                <input type="range" id="bodyRepulsionRadiusFactor" min="0.5" max="5.0" value="3.0" step="0.1">
 
                 <div class="indicator-label">Any Unstable: <span id="instabilityLight" class="indicator-light"></span></div>
                 <div id="populationCount">Population: 0</div>
@@ -217,33 +230,34 @@
             <div class="control-group">
                 <h4>Energy Costs / Frame</h4>
                 <label for="baseNodeCost" class="slider-label">Base Node Cost:</label>
-                <span id="baseNodeCostValue" class="slider-value">0.0010</span>
-                <input type="range" id="baseNodeCost" min="0.0" max="0.01" value="0.001" step="0.0001">
+                <span id="baseNodeCostValue" class="slider-value">1.0000</span>
+                <input type="range" id="baseNodeCost" min="0.0" max="50.0" value="1.0" step="0.1">
 
-                <label for="motorNodeCost" class="slider-label">Emitter Node Cost:</label> <span id="motorNodeCostValue" class="slider-value">0.0100</span>
-                <input type="range" id="motorNodeCost" min="0.0" max="0.1" value="0.01" step="0.001">
+                <label for="motorNodeCost" class="slider-label">Emitter Node Cost:</label>
+                <span id="motorNodeCostValue" class="slider-value">20.0000</span>
+                <input type="range" id="motorNodeCost" min="0.0" max="50.0" value="20.0" step="0.1">
 
                 <label for="eaterNodeCost" class="slider-label">Eater Node Cost:</label>
-                <span id="eaterNodeCostValue" class="slider-value">0.0050</span>
-                <input type="range" id="eaterNodeCost" min="0.0" max="0.05" value="0.005" step="0.0005">
+                <span id="eaterNodeCostValue" class="slider-value">1.0000</span>
+                <input type="range" id="eaterNodeCost" min="0.0" max="50.0" value="1.0" step="0.1">
 
                 <label for="predatorNodeCost" class="slider-label">Predator Node Cost:</label>
-                <span id="predatorNodeCostValue" class="slider-value">0.0200</span>
-                <input type="range" id="predatorNodeCost" min="0.0" max="100.0" value="0.02" step="0.001">
+                <span id="predatorNodeCostValue" class="slider-value">100.0000</span>
+                <input type="range" id="predatorNodeCost" min="0.0" max="100.0" value="100.0" step="0.1">
             </div>
             <div class="control-group">
                 <h4>Fluid</h4>
                 <label for="fluidDiffusion" class="slider-label">Diffusion:</label>
-                <span id="fluidDiffusionValue" class="slider-value">1.0e-5</span>
-                <input type="range" id="fluidDiffusion" min="0" max="0.001" value="0.00001" step="0.00001">
+                <span id="fluidDiffusionValue" class="slider-value">4.7e-4</span>
+                <input type="range" id="fluidDiffusion" min="0" max="0.001" value="0.00047" step="0.00001">
 
                 <label for="fluidViscosity" class="slider-label">Viscosity:</label>
-                <span id="fluidViscosityValue" class="slider-value">1.0e-6</span>
-                <input type="range" id="fluidViscosity" min="0" max="0.0001" value="0.000068" step="0.000001">
+                <span id="fluidViscosityValue" class="slider-value">6.8e-5</span>
+                <input type="range" id="fluidViscosity" min="0" max="0.00015" value="0.000068" step="0.000001">
 
                 <label for="fluidFade" class="slider-label">Fade Rate:</label>
-                <span id="fluidFadeValue" class="slider-value">0.030</span>
-                <input type="range" id="fluidFade" min="0.001" max="0.1" value="0.03" step="0.001">
+                <span id="fluidFadeValue" class="slider-value">0.500</span>
+                <input type="range" id="fluidFade" min="0.0" max="1.0" value="0.5" step="0.001">
                 <button id="clearFluidButton">Clear Fluid</button>
             </div>
             <div class="control-group">
@@ -282,37 +296,6 @@
                 <input type="file" id="importConfigFile" accept=".json" style="display: none;">
                 <button id="importConfigButton">Import Config</button>
             </div>
-        </div> <div id="simulationAndInfoWrapper">
-            <div id="infoPanel">
-                <button id="closeInfoPanel">X</button>
-                <div class="info-section">
-                    <h5>Soft Body Info</h5>
-                    <p><strong>ID:</strong> <span id="infoBodyId">-</span></p>
-                    <p><strong>Stiffness:</strong> <span id="infoBodyStiffness">-</span></p>
-                    <p><strong>Damping:</strong> <span id="infoBodyDamping">-</span></p>
-                    <p><strong>Motor Impulse Interval:</strong> <span id="infoBodyMotorInterval">-</span></p>
-                    <p><strong>Motor Impulse Cap:</strong> <span id="infoBodyMotorCap">-</span></p>
-                    <p><strong>Emitter Strength:</strong> <span id="infoBodyEmitterStrength">-</span></p>
-                    <p><strong>Emitter Direction:</strong> X: <span id="infoBodyEmitterDirX">-</span>, Y: <span id="infoBodyEmitterDirY">-</span></p>
-                    <p><strong>Energy:</strong> <span id="infoBodyEnergy">-</span></p>
-                    <p><strong>Ticks Since Birth:</strong> <span id="infoBodyTicksBirth">-</span></p>
-                    <p><strong>Can Reproduce:</strong> <span id="infoBodyCanReproduce">-</span></p>
-                    <p><strong>Shape Type:</strong> <span id="infoBodyShapeType">-</span></p>
-                </div>
-                <div class="info-section">
-                    <h5>Mass Point Info</h5>
-                    <p><strong>Index:</strong> <span id="infoPointIndex">-</span></p>
-                    <p><strong>Node Type:</strong> <span id="infoPointNodeType">-</span></p>
-                    <p><strong>Mass:</strong> <span id="infoPointMass">-</span></p>
-                    <p><strong>Radius:</strong> <span id="infoPointRadius">-</span></p>
-                    <p><strong>World Pos:</strong> X: <span id="infoPointPosX">-</span>, Y: <span id="infoPointPosY">-</span></p>
-                    <p><strong>Is Eater:</strong> <span id="infoPointIsEater">-</span></p>
-                    <p><strong>Is Predator:</strong> <span id="infoPointIsPredator">-</span></p>
-                    <p><strong>Emits Dye:</strong> <span id="infoPointEmitsDye">-</span></p>
-                    <p><strong>Dye Color:</strong> <span id="infoPointDyeColor">-</span></p>
-                </div>
-            </div>
-            <canvas id="simulationCanvas"></canvas>
         </div>
     </div>
 
@@ -321,14 +304,12 @@
         const ctx = canvas.getContext('2d');
 
         // --- Viewport and World Dimensions ---
-        const VIEWPORT_WIDTH = 800; // Canvas actual drawing width
-        const VIEWPORT_HEIGHT = 600; // Canvas actual drawing height
         const WORLD_WIDTH = 1600;
         const WORLD_HEIGHT = 1200;
         const VIEW_PAN_SPEED = 20;
 
-        canvas.width = VIEWPORT_WIDTH;
-        canvas.height = VIEWPORT_HEIGHT;
+        canvas.width = WORLD_WIDTH;
+        canvas.height = WORLD_HEIGHT;
 
         let viewOffsetX = 0;
         let viewOffsetY = 0;
@@ -338,8 +319,8 @@
         const maxTimestepSlider = document.getElementById('maxTimestep');
         const maxTimestepValueSpan = document.getElementById('maxTimestepValue');
         const pauseResumeButton = document.getElementById('pauseResumeButton');
-        const toggleControlsButton = document.getElementById('toggleControlsButton'); // New
-        const controlsPanel = document.getElementById('controls'); // The flyout panel
+        const toggleControlsButton = document.getElementById('toggleControlsButton');
+        const controlsPanel = document.getElementById('controls');
 
         const bodyFluidEntrainmentSlider = document.getElementById('bodyFluidEntrainment');
         const fluidCurrentStrengthSlider = document.getElementById('fluidCurrentStrength');
@@ -495,9 +476,9 @@
             if (IS_SIMULATION_PAUSED && e.key.toLowerCase() !== 'p') return;
             switch(e.key.toLowerCase()) {
                 case 'w': viewOffsetY = Math.max(0, viewOffsetY - VIEW_PAN_SPEED); break;
-                case 's': viewOffsetY = Math.min(WORLD_HEIGHT - VIEWPORT_HEIGHT, viewOffsetY + VIEW_PAN_SPEED); break;
+                case 's': viewOffsetY = Math.min(WORLD_HEIGHT - canvas.clientHeight, viewOffsetY + VIEW_PAN_SPEED); break; // Use clientHeight for visible area
                 case 'a': viewOffsetX = Math.max(0, viewOffsetX - VIEW_PAN_SPEED); break;
-                case 'd': viewOffsetX = Math.min(WORLD_WIDTH - VIEWPORT_WIDTH, viewOffsetX + VIEW_PAN_SPEED); break;
+                case 'd': viewOffsetX = Math.min(WORLD_WIDTH - canvas.clientWidth, viewOffsetX + VIEW_PAN_SPEED); break; // Use clientWidth for visible area
                 case 'p':
                     IS_SIMULATION_PAUSED = !IS_SIMULATION_PAUSED;
                     pauseResumeButton.textContent = IS_SIMULATION_PAUSED ? "Resume" : "Pause";
@@ -692,8 +673,12 @@
             mouse.isDown = true;
             updateMouse(e);
 
-            const simMouseX = mouse.x + viewOffsetX;
-            const simMouseY = mouse.y + viewOffsetY;
+            // Convert mouse click from displayed canvas space to world/simulation space
+            const scaleX = canvas.width / canvas.clientWidth;
+            const scaleY = canvas.height / canvas.clientHeight;
+            const simMouseX = (mouse.x * scaleX) + viewOffsetX;
+            const simMouseY = (mouse.y * scaleY) + viewOffsetY;
+
 
             if (IS_EMITTER_EDIT_MODE && fluidField) {
                 const gridX = Math.floor(simMouseX / fluidField.scale);
@@ -736,8 +721,13 @@
 
         canvas.addEventListener('mousemove', (e) => {
             updateMouse(e);
-            const simMouseX = mouse.x + viewOffsetX;
-            const simMouseY = mouse.y + viewOffsetY;
+            const scaleX = canvas.width / canvas.clientWidth;
+            const scaleY = canvas.height / canvas.clientHeight;
+            const simMouseX = (mouse.x * scaleX) + viewOffsetX;
+            const simMouseY = (mouse.y * scaleY) + viewOffsetY;
+            const simMouseDx = mouse.dx * scaleX; // Scale delta for fluid interaction
+            const simMouseDy = mouse.dy * scaleY;
+
 
             if (mouse.isDown) {
                 if (IS_EMITTER_EDIT_MODE && emitterDragStartCell) {
@@ -764,15 +754,18 @@
                     const b2 = Math.random() * 100 + 155;
                     fluidField.addDensity(fluidGridX, fluidGridY, r2, g2, b2, 150 + Math.random()*50);
 
-                    fluidField.addVelocity(fluidGridX, fluidGridY, mouse.dx * 10, mouse.dy * 10);
+                    fluidField.addVelocity(fluidGridX, fluidGridY, simMouseDx * 10, simMouseDy * 10); // Use scaled dx/dy
                 }
             }
         });
 
         canvas.addEventListener('mouseup', () => {
             if (IS_EMITTER_EDIT_MODE && emitterDragStartCell && fluidField) {
-                const simMouseX = mouse.x + viewOffsetX;
-                const simMouseY = mouse.y + viewOffsetY;
+                const scaleX = canvas.width / canvas.clientWidth;
+                const scaleY = canvas.height / canvas.clientHeight;
+                const simMouseX = (mouse.x * scaleX) + viewOffsetX;
+                const simMouseY = (mouse.y * scaleY) + viewOffsetY;
+
 
                 const forceX = (simMouseX - emitterDragStartCell.mouseStartX) * EMITTER_MOUSE_DRAG_SCALE;
                 const forceY = (simMouseY - emitterDragStartCell.mouseStartY) * EMITTER_MOUSE_DRAG_SCALE;
@@ -797,8 +790,8 @@
             if (selectedSoftBodyPoint) {
                 const point = selectedSoftBodyPoint.point;
                 point.isFixed = false;
-                point.prevPos.x = point.pos.x - mouse.dx * 1.0;
-                point.prevPos.y = point.pos.y - mouse.dy * 1.0;
+                point.prevPos.x = point.pos.x - (mouse.dx * (canvas.width / canvas.clientWidth)) * 1.0;
+                point.prevPos.y = point.pos.y - (mouse.dy * (canvas.height / canvas.clientHeight)) * 1.0;
                 selectedSoftBodyPoint = null; // Clear dragging reference
             }
         });
@@ -810,8 +803,8 @@
             if (selectedSoftBodyPoint) {
                 const point = selectedSoftBodyPoint.point;
                 point.isFixed = false;
-                point.prevPos.x = point.pos.x - mouse.dx * 1.0;
-                point.prevPos.y = point.pos.y - mouse.dy * 1.0;
+                point.prevPos.x = point.pos.x - (mouse.dx * (canvas.width / canvas.clientWidth)) * 1.0;
+                point.prevPos.y = point.pos.y - (mouse.dy * (canvas.height / canvas.clientHeight)) * 1.0;
                 selectedSoftBodyPoint = null;
             }
             mouse.isDown = false;
@@ -1187,7 +1180,7 @@
                 for (const point of this.massPoints) {
                     currentFrameEnergyCost += BASE_NODE_EXISTENCE_COST;
                     if (point.nodeType === NodeType.EMITTER_SWIMMER && this.emitterStrength > 0.0001) {
-                        currentFrameEnergyCost += MOTOR_NODE_ENERGY_COST; // Re-purpose motor cost for emitters
+                        currentFrameEnergyCost += MOTOR_NODE_ENERGY_COST;
                     }
                     if (point.isEater) {
                         currentFrameEnergyCost += EATER_NODE_ENERGY_COST;
@@ -1211,11 +1204,9 @@
                 }
 
                 // Internal Motor Impulse (if we want to keep this for non-emitter points)
-                // For now, this is effectively disabled as point.isMotor is not set.
-                // If we want it, we'd need to decide how/if `isMotor` is set on points.
                 // if (this.motorImpulseMagnitudeCap > 0.0001 && (this.ticksSinceBirth % this.motorImpulseInterval === 0)) {
                 //     for (let point of this.massPoints) {
-                //         if (point.isMotor && !point.isFixed && point.nodeType !== NodeType.FIXED_ROOT) {
+                //         if (point.isMotor && !point.isFixed && point.nodeType !== NodeType.FIXED_ROOT) { // Check if point has motor capability
                 //             const randomAngle = Math.random() * Math.PI * 2;
                 //             const impulseDir = new Vec2(Math.cos(randomAngle), Math.sin(randomAngle));
                 //             const impulseMag = Math.random() * this.motorImpulseMagnitudeCap;
@@ -1880,7 +1871,7 @@
         // --- Drawing ---
         function draw() {
             ctx.fillStyle = '#222';
-            ctx.fillRect(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
+            ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT); // Clear the entire large canvas
 
             ctx.save();
             ctx.translate(-viewOffsetX, -viewOffsetY);

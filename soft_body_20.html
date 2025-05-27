@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - World Boundary & Scaling Verification</title>
+    <title>2D Soft Body Evolution - Display/Viewport Focus</title>
     <style>
         body {
             margin: 0;
@@ -332,8 +332,8 @@
         let offscreenFluidCanvas, offscreenFluidCtx; // For smoother fluid rendering
 
         // --- Viewport and World Dimensions ---
-        let WORLD_WIDTH = 1600; // Default, can be changed by config
-        let WORLD_HEIGHT = 1200; // Default, can be changed by config
+        let WORLD_WIDTH = 2200;
+        let WORLD_HEIGHT = 1200;
         const VIEW_PAN_SPEED = 20;
 
         canvas.width = WORLD_WIDTH;
@@ -509,7 +509,6 @@
         document.addEventListener('keydown', (e) => {
             if (IS_SIMULATION_PAUSED && e.key.toLowerCase() !== 'p') return;
 
-            // Calculate max pan based on current canvas display size
             const maxPanX = Math.max(0, WORLD_WIDTH - canvas.clientWidth);
             const maxPanY = Math.max(0, WORLD_HEIGHT - canvas.clientHeight);
 
@@ -1407,10 +1406,20 @@
                             if (point.pos.y < 0) { point.pos.y += WORLD_HEIGHT; point.prevPos.y += WORLD_HEIGHT; }
                             else if (point.pos.y > WORLD_HEIGHT) { point.pos.y -= WORLD_HEIGHT; point.prevPos.y -= WORLD_HEIGHT; }
                         } else {
-                            if (point.pos.x - point.radius < 0) { point.pos.x = point.radius; point.prevPos.x = point.pos.x + (point.pos.x - point.prevPos.x) * -restitution; }
-                            else if (point.pos.x + point.radius > WORLD_WIDTH) { point.pos.x = WORLD_WIDTH - point.radius; point.prevPos.x = point.pos.x + (point.pos.x - point.prevPos.x) * -restitution; }
-                            if (point.pos.y - point.radius < 0) { point.pos.y = point.radius; point.prevPos.y = point.pos.y + (point.pos.y - point.prevPos.y) * -restitution; }
-                            else if (point.pos.y + point.radius > WORLD_HEIGHT) { point.pos.y = WORLD_HEIGHT - point.radius; point.prevPos.y = point.pos.y + (point.pos.y - point.prevPos.y) * -restitution; }
+                            if (point.pos.x - point.radius < 0) {
+                                point.pos.x = point.radius;
+                                point.prevPos.x = point.pos.x - implicitVelX * restitution; // Corrected bounce
+                            } else if (point.pos.x + point.radius > WORLD_WIDTH) {
+                                point.pos.x = WORLD_WIDTH - point.radius;
+                                point.prevPos.x = point.pos.x - implicitVelX * restitution; // Corrected bounce
+                            }
+                            if (point.pos.y - point.radius < 0) {
+                                point.pos.y = point.radius;
+                                point.prevPos.y = point.pos.y - implicitVelY * restitution; // Corrected bounce
+                            } else if (point.pos.y + point.radius > WORLD_HEIGHT) {
+                                point.pos.y = WORLD_HEIGHT - point.radius;
+                                point.prevPos.y = point.pos.y - implicitVelY * restitution; // Corrected bounce
+                            }
                         }
                     }
                 }
@@ -2034,6 +2043,8 @@
         // --- Config Import/Export ---
         function handleExportConfig() {
             const config = {
+                worldWidth: WORLD_WIDTH, // Save current world dimensions
+                worldHeight: WORLD_HEIGHT,
                 bodyFluidEntrainment: BODY_FLUID_ENTRAINMENT_FACTOR,
                 fluidCurrentStrength: FLUID_CURRENT_STRENGTH_ON_BODY,
                 softBodyPushStrength: SOFT_BODY_PUSH_STRENGTH,
@@ -2091,6 +2102,12 @@
         }
 
         function applyImportedConfig(config) {
+            if (config.worldWidth !== undefined) WORLD_WIDTH = config.worldWidth;
+            if (config.worldHeight !== undefined) WORLD_HEIGHT = config.worldHeight;
+            canvas.width = WORLD_WIDTH; // Update canvas internal size
+            canvas.height = WORLD_HEIGHT;
+
+
             if (config.bodyFluidEntrainment !== undefined) BODY_FLUID_ENTRAINMENT_FACTOR = config.bodyFluidEntrainment;
             if (config.fluidCurrentStrength !== undefined) FLUID_CURRENT_STRENGTH_ON_BODY = config.fluidCurrentStrength;
             if (config.softBodyPushStrength !== undefined) SOFT_BODY_PUSH_STRENGTH = config.softBodyPushStrength;
@@ -2145,9 +2162,11 @@
 
             initializeAllSliderDisplays();
 
-            // Re-initialize fluid and particles if grid size changed
+            // Re-initialize fluid and particles if grid size or world size changed
             initFluidSimulation();
             initParticles();
+            initializePopulation(); // Reset population for new world size
+            viewOffsetX = 0; viewOffsetY = 0; // Reset viewport
 
             console.log("Applied imported config. Reset population if needed for full effect on creatures.");
         }

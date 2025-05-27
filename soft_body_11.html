@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Fluid Interaction Reverted</title>
+    <title>2D Soft Body Evolution - Simplified Motors & Costs</title>
     <style>
         body {
             margin: 0;
@@ -32,7 +32,7 @@
             align-items: flex-start;
             gap: 15px;
             width: 100%;
-            max-width: 1150px; /* Approx 280 for panel + 800 for canvas + gap */
+            max-width: 1150px;
             margin-top: 10px;
         }
         canvas {
@@ -158,8 +158,8 @@
             margin-top: 5px;
         }
         #infoPanel {
-            width: 280px; /* Fixed width for the panel */
-            max-height: 580px; /* Match canvas height approx */
+            width: 280px;
+            max-height: 580px;
             background-color: rgba(30,30,30,0.95);
             border: 1px solid #555;
             border-radius: 8px;
@@ -168,10 +168,10 @@
             z-index: 100;
             color: #eee;
             font-size: 0.8em;
-            display: none; /* Hidden by default */
+            display: none;
             overflow-y: auto;
             box-sizing: border-box;
-            position: relative; /* For the close button */
+            position: relative;
         }
         #infoPanel h5 {
             margin-top: 0;
@@ -260,10 +260,6 @@
                 <span id="baseNodeCostValue" class="slider-value">0.0010</span>
                 <input type="range" id="baseNodeCost" min="0.0" max="0.01" value="0.001" step="0.0001">
 
-                <label for="motorNodeCost" class="slider-label">Motor Node Cost:</label>
-                <span id="motorNodeCostValue" class="slider-value">0.0100</span>
-                <input type="range" id="motorNodeCost" min="0.0" max="0.1" value="0.01" step="0.001">
-
                 <label for="eaterNodeCost" class="slider-label">Eater Node Cost:</label>
                 <span id="eaterNodeCostValue" class="slider-value">0.0050</span>
                 <input type="range" id="eaterNodeCost" min="0.0" max="0.05" value="0.005" step="0.0005">
@@ -284,7 +280,7 @@
 
                 <label for="fluidFade" class="slider-label">Fade Rate:</label>
                 <span id="fluidFadeValue" class="slider-value">0.030</span>
-                <input type="range" id="fluidFade" min="0.001" max="0.9" value="0.03" step="0.001">
+                <input type="range" id="fluidFade" min="0.001" max="0.1" value="0.03" step="0.001">
                 <button id="clearFluidButton">Clear Fluid</button>
             </div>
             <div class="control-group">
@@ -348,7 +344,6 @@
                     <p><strong>Mass:</strong> <span id="infoPointMass">-</span></p>
                     <p><strong>Radius:</strong> <span id="infoPointRadius">-</span></p>
                     <p><strong>World Pos:</strong> X: <span id="infoPointPosX">-</span>, Y: <span id="infoPointPosY">-</span></p>
-                    <p><strong>Is Motor:</strong> <span id="infoPointIsMotor">-</span></p>
                     <p><strong>Is Eater:</strong> <span id="infoPointIsEater">-</span></p>
                     <p><strong>Is Predator:</strong> <span id="infoPointIsPredator">-</span></p>
                     <p><strong>Emits Dye:</strong> <span id="infoPointEmitsDye">-</span></p>
@@ -389,7 +384,7 @@
         const bodyRepulsionStrengthSlider = document.getElementById('bodyRepulsionStrength');
         const bodyRepulsionRadiusFactorSlider = document.getElementById('bodyRepulsionRadiusFactor');
         const baseNodeCostSlider = document.getElementById('baseNodeCost');
-        const motorNodeCostSlider = document.getElementById('motorNodeCost');
+        // const motorNodeCostSlider = document.getElementById('motorNodeCost'); // Removed
         const eaterNodeCostSlider = document.getElementById('eaterNodeCost');
         const predatorNodeCostSlider = document.getElementById('predatorNodeCost');
         const instabilityLight = document.getElementById('instabilityLight');
@@ -402,7 +397,7 @@
         const bodyRepulsionStrengthValueSpan = document.getElementById('bodyRepulsionStrengthValue');
         const bodyRepulsionRadiusFactorValueSpan = document.getElementById('bodyRepulsionRadiusFactorValue');
         const baseNodeCostValueSpan = document.getElementById('baseNodeCostValue');
-        const motorNodeCostValueSpan = document.getElementById('motorNodeCostValue');
+        // const motorNodeCostValueSpan = document.getElementById('motorNodeCostValue'); // Removed
         const eaterNodeCostValueSpan = document.getElementById('eaterNodeCostValue');
         const predatorNodeCostValueSpan = document.getElementById('predatorNodeCostValue');
 
@@ -452,7 +447,7 @@
         const EMITTER_MOUSE_DRAG_SCALE = 0.05;
 
         let BASE_NODE_EXISTENCE_COST = parseFloat(baseNodeCostSlider.value);
-        let MOTOR_NODE_ENERGY_COST = parseFloat(motorNodeCostSlider.value);
+        // let MOTOR_NODE_ENERGY_COST = parseFloat(motorNodeCostSlider.value); // Removed
         let EATER_NODE_ENERGY_COST = parseFloat(eaterNodeCostSlider.value);
         let PREDATOR_NODE_ENERGY_COST = parseFloat(predatorNodeCostSlider.value);
 
@@ -520,7 +515,7 @@
             } else if (slider.id === 'bodyFluidEntrainment') {
                 span.textContent = value.toFixed(2);
             } else if (slider.id === 'particleLifeDecay' ||
-                       slider.id === 'baseNodeCost' || slider.id === 'motorNodeCost' ||
+                       slider.id === 'baseNodeCost' || /*slider.id === 'motorNodeCost' ||*/ // Removed
                        slider.id === 'eaterNodeCost' || slider.id === 'predatorNodeCost') {
                 span.textContent = value.toFixed(4);
             } else if (slider.id === 'fluidFade') {
@@ -584,7 +579,7 @@
         bodyRepulsionRadiusFactorSlider.oninput = function() { BODY_REPULSION_RADIUS_FACTOR = parseFloat(this.value); updateSliderDisplay(this, bodyRepulsionRadiusFactorValueSpan); }
 
         baseNodeCostSlider.oninput = function() { BASE_NODE_EXISTENCE_COST = parseFloat(this.value); updateSliderDisplay(this, baseNodeCostValueSpan); }
-        motorNodeCostSlider.oninput = function() { MOTOR_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, motorNodeCostValueSpan); }
+        // motorNodeCostSlider.oninput = function() { MOTOR_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, motorNodeCostValueSpan); } // Removed
         eaterNodeCostSlider.oninput = function() { EATER_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, eaterNodeCostValueSpan); }
         predatorNodeCostSlider.oninput = function() { PREDATOR_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, predatorNodeCostValueSpan); }
 
@@ -626,7 +621,7 @@
             updateSliderDisplay(bodyRepulsionStrengthSlider, bodyRepulsionStrengthValueSpan);
             updateSliderDisplay(bodyRepulsionRadiusFactorSlider, bodyRepulsionRadiusFactorValueSpan);
             updateSliderDisplay(baseNodeCostSlider, baseNodeCostValueSpan);
-            updateSliderDisplay(motorNodeCostSlider, motorNodeCostValueSpan);
+            // updateSliderDisplay(motorNodeCostSlider, motorNodeCostValueSpan); // Removed
             updateSliderDisplay(eaterNodeCostSlider, eaterNodeCostValueSpan);
             updateSliderDisplay(predatorNodeCostSlider, predatorNodeCostValueSpan);
             updateSliderDisplay(emitterStrengthSlider, emitterStrengthValueSpan);
@@ -686,7 +681,7 @@
                 document.getElementById('infoPointRadius').textContent = selectedInspectPoint.radius.toFixed(2);
                 document.getElementById('infoPointPosX').textContent = selectedInspectPoint.pos.x.toFixed(2);
                 document.getElementById('infoPointPosY').textContent = selectedInspectPoint.pos.y.toFixed(2);
-                document.getElementById('infoPointIsMotor').textContent = selectedInspectPoint.isMotor;
+                // document.getElementById('infoPointIsMotor').textContent = selectedInspectPoint.isMotor; // Removed
                 document.getElementById('infoPointIsEater').textContent = selectedInspectPoint.isEater;
                 document.getElementById('infoPointIsPredator').textContent = selectedInspectPoint.isPredator;
                 document.getElementById('infoPointEmitsDye').textContent = selectedInspectPoint.emitsDye;
@@ -881,7 +876,7 @@
                 this.color = color;
                 this.isFixed = false;
                 this.nodeType = NodeType.NEUTRAL;
-                this.isMotor = false;
+                // this.isMotor = false; // Removed
                 this.isEater = false;
                 this.isPredator = false;
                 this.emitsDye = false;
@@ -929,9 +924,9 @@
                 ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
                 if (this.isPredator) {
                     ctx.fillStyle = 'rgba(255, 50, 50, 0.9)';
-                } else if (this.isMotor && this.isEater) {
+                } else if (this.nodeType === NodeType.EMITTER_SWIMMER && this.isEater) { // Check nodeType for emitter
                      ctx.fillStyle = 'rgba(200,255,0,0.9)';
-                } else if (this.isMotor) {
+                } else if (this.nodeType === NodeType.EMITTER_SWIMMER) { // Check nodeType for emitter
                     ctx.fillStyle = 'rgba(0,255,100,0.9)';
                 } else if (this.isEater) {
                     ctx.fillStyle = 'rgba(255,165,0,0.9)';
@@ -1045,7 +1040,7 @@
                 const basePointDist = 20 + Math.random() * 10;
                 const baseRadius = 3 + Math.random() * 3;
 
-                const motorChance = 0.25;
+                // const motorChance = 0.25; // Not used for isMotor flag anymore
                 const eaterChance = 0.25;
                 const predatorChance = 0.15;
                 const dyeEmitterChance = 0.2;
@@ -1063,7 +1058,7 @@
                         for (let j = 0; j < numPointsX; j++) {
                             let mass = 0.3 + Math.random() * 0.4;
                             let nodeType = nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)];
-                            let isMotor = Math.random() < motorChance;
+                            // let isMotor = Math.random() < motorChance; // Removed
                             let isEater = Math.random() < eaterChance;
                             let isPredator = Math.random() < predatorChance;
                             let emitsDye = Math.random() < dyeEmitterChance;
@@ -1074,7 +1069,7 @@
                                 const parentPoint = parentBody.massPoints[i*numPointsX + j];
                                 mass = parentPoint.mass * (1 + (Math.random() - 0.5) * 2 * MUTATION_RATE_PERCENT);
                                 nodeType = Math.random() < MUTATION_CHANCE_NODE_TYPE ? nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)] : parentPoint.nodeType;
-                                isMotor = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isMotor : parentPoint.isMotor;
+                                // isMotor = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isMotor : parentPoint.isMotor; // Removed
                                 isEater = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isEater : parentPoint.isEater;
                                 isPredator = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isPredator : parentPoint.isPredator;
                                 emitsDye = Math.random() < MUTATION_CHANCE_BOOL ? !parentPoint.emitsDye : parentPoint.emitsDye;
@@ -1083,7 +1078,7 @@
                             mass = Math.max(0.1, Math.min(mass, 1.0));
                             const point = new MassPoint(startX + j * basePointDist, startY + i * basePointDist, mass, baseRadius);
                             point.nodeType = nodeType;
-                            point.isMotor = isMotor;
+                            // point.isMotor = isMotor; // Removed
                             point.isEater = isEater;
                             point.isPredator = isPredator;
                             point.emitsDye = emitsDye;
@@ -1108,7 +1103,7 @@
                         const y = startY + (isHorizontal ? 0 : i * basePointDist);
                         let mass = 0.3 + Math.random() * 0.4;
                         let nodeType = nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)];
-                        let isMotor = Math.random() < motorChance;
+                        // let isMotor = Math.random() < motorChance; // Removed
                         let isEater = Math.random() < eaterChance;
                         let isPredator = false;
                         let emitsDye = Math.random() < dyeEmitterChance;
@@ -1116,7 +1111,7 @@
                         if(parentBody && parentBody.massPoints[i]) {
                              mass = parentBody.massPoints[i].mass * (1 + (Math.random() - 0.5) * 2 * MUTATION_RATE_PERCENT);
                              nodeType = Math.random() < MUTATION_CHANCE_NODE_TYPE ? nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)] : parentBody.massPoints[i].nodeType;
-                             isMotor = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentBody.massPoints[i].isMotor : parentBody.massPoints[i].isMotor;
+                             // isMotor = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentBody.massPoints[i].isMotor : parentBody.massPoints[i].isMotor; // Removed
                              isEater = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentBody.massPoints[i].isEater : parentBody.massPoints[i].isEater;
                              isPredator = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentBody.massPoints[i].isPredator : parentBody.massPoints[i].isPredator;
                              emitsDye = Math.random() < MUTATION_CHANCE_BOOL ? !parentBody.massPoints[i].emitsDye : parentBody.massPoints[i].emitsDye;
@@ -1126,7 +1121,7 @@
                         mass = Math.max(0.1, Math.min(mass, 1.0));
                         const point = new MassPoint(x, y, mass, baseRadius);
                         point.nodeType = nodeType;
-                        point.isMotor = isMotor;
+                        // point.isMotor = isMotor; // Removed
                         point.isEater = isEater;
                         point.isPredator = isPredator;
                         point.emitsDye = emitsDye;
@@ -1145,7 +1140,7 @@
                     const numOuterPoints = parentBody ? parentBody.massPoints.length -1 : Math.floor(4 + Math.random() * 3);
                     let centerMass = (0.3 + Math.random() * 0.4) * 1.5;
                     let centerNodeType = nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)];
-                    let centerIsMotor = Math.random() < motorChance * 1.5;
+                    // let centerIsMotor = Math.random() < motorChance * 1.5; // Removed
                     let centerIsEater = Math.random() < eaterChance * 1.5;
                     let centerIsPredator = false;
                     let centerEmitsDye = Math.random() < dyeEmitterChance;
@@ -1155,7 +1150,7 @@
                         const parentPoint = parentBody.massPoints[0];
                         centerMass = parentPoint.mass * (1 + (Math.random() - 0.5) * 2 * MUTATION_RATE_PERCENT);
                         centerNodeType = Math.random() < MUTATION_CHANCE_NODE_TYPE ? nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)] : parentPoint.nodeType;
-                        centerIsMotor = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isMotor : parentPoint.isMotor;
+                        // centerIsMotor = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isMotor : parentPoint.isMotor; // Removed
                         centerIsEater = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isEater : parentPoint.isEater;
                         centerIsPredator = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isPredator : parentPoint.isPredator;
                         centerEmitsDye = Math.random() < MUTATION_CHANCE_BOOL ? !parentPoint.emitsDye : parentPoint.emitsDye;
@@ -1164,7 +1159,7 @@
                     centerMass = Math.max(0.1, Math.min(centerMass, 1.5));
                     const centralPoint = new MassPoint(startX, startY, centerMass, baseRadius * 1.2);
                     centralPoint.nodeType = centerNodeType;
-                    centralPoint.isMotor = centerIsMotor;
+                    // centralPoint.isMotor = centerIsMotor; // Removed
                     centralPoint.isEater = centerIsEater;
                     centralPoint.isPredator = centerIsPredator;
                     centralPoint.emitsDye = centerEmitsDye;
@@ -1179,7 +1174,7 @@
                         const y = startY + Math.sin(angle) * circleRadius;
                         let mass = 0.3 + Math.random() * 0.4;
                         let nodeType = nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)];
-                        let isMotor = Math.random() < motorChance;
+                        // let isMotor = Math.random() < motorChance; // Removed
                         let isEater = Math.random() < eaterChance;
                         let isPredator = false;
                         let emitsDye = Math.random() < dyeEmitterChance;
@@ -1188,7 +1183,7 @@
                              const parentPoint = parentBody.massPoints[i+1];
                              mass = parentPoint.mass * (1 + (Math.random() - 0.5) * 2 * MUTATION_RATE_PERCENT);
                              nodeType = Math.random() < MUTATION_CHANCE_NODE_TYPE ? nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)] : parentPoint.nodeType;
-                             isMotor = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isMotor : parentPoint.isMotor;
+                             // isMotor = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isMotor : parentPoint.isMotor; // Removed
                              isEater = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isEater : parentPoint.isEater;
                              isPredator = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isPredator : parentPoint.isPredator;
                              emitsDye = Math.random() < MUTATION_CHANCE_BOOL ? !parentPoint.emitsDye : parentPoint.emitsDye;
@@ -1197,7 +1192,7 @@
                         mass = Math.max(0.1, Math.min(mass, 1.0));
                         const point = new MassPoint(x, y, mass, baseRadius);
                         point.nodeType = nodeType;
-                        point.isMotor = isMotor;
+                        // point.isMotor = isMotor; // Removed
                         point.isEater = isEater;
                         point.isPredator = isPredator;
                         point.emitsDye = emitsDye;
@@ -1223,8 +1218,11 @@
                 let currentFrameEnergyCost = 0;
                 for (const point of this.massPoints) {
                     currentFrameEnergyCost += BASE_NODE_EXISTENCE_COST;
-                    if (point.isMotor) {
-                        currentFrameEnergyCost += MOTOR_NODE_ENERGY_COST;
+                    // if (point.isMotor) { // Removed direct motor cost, now tied to EMITTER_SWIMMER or internal impulse
+                    //     currentFrameEnergyCost += MOTOR_NODE_ENERGY_COST;
+                    // }
+                    if (point.nodeType === NodeType.EMITTER_SWIMMER && this.emitterStrength > 0.0001) { // Cost for active emitters
+                         currentFrameEnergyCost += MOTOR_NODE_ENERGY_COST; // Re-purpose motor cost for emitters
                     }
                     if (point.isEater) {
                         currentFrameEnergyCost += EATER_NODE_ENERGY_COST;
@@ -1247,18 +1245,10 @@
                     return;
                 }
 
-                // Internal Motor Impulse (for any node flagged as isMotor)
-                if (this.motorImpulseMagnitudeCap > 0.0001 && (this.ticksSinceBirth % this.motorImpulseInterval === 0)) {
-                    for (let point of this.massPoints) {
-                        if (point.isMotor && !point.isFixed && point.nodeType !== NodeType.FIXED_ROOT) {
-                            const randomAngle = Math.random() * Math.PI * 2;
-                            const impulseDir = new Vec2(Math.cos(randomAngle), Math.sin(randomAngle));
-                            const impulseMag = Math.random() * this.motorImpulseMagnitudeCap;
-                            const impulseForce = impulseDir.mul(impulseMag / dt);
-                            point.applyForce(impulseForce);
-                        }
-                    }
-                }
+                // Internal Motor Impulse (for any node *that has motor capability*, now tied to EMITTER_SWIMMER for simplicity or a new flag if needed)
+                // For now, let's assume only EMITTER_SWIMMER nodes have the *potential* for internal impulses if we re-add that.
+                // Or, we can keep the old `isMotor` flag on points for this specific internal kick, separate from fluid emission.
+                // Current implementation: No internal impulse logic, only fluid emission by EMITTER_SWIMMER.
 
 
                 // Fluid Interactions based on NodeType

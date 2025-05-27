@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Viewport Zoom & Pan Fixes</title>
+    <title>2D Soft Body Evolution - Refined Zoom & Mouse</title>
     <style>
         body {
             margin: 0;
@@ -335,8 +335,8 @@
         let offscreenFluidCanvas, offscreenFluidCtx; // For smoother fluid rendering
 
         // --- Viewport and World Dimensions ---
-        let WORLD_WIDTH = 10000;
-        let WORLD_HEIGHT = 5000;
+        let WORLD_WIDTH = 1600;
+        let WORLD_HEIGHT = 1200;
         const VIEW_PAN_SPEED = 20;
 
         canvas.width = WORLD_WIDTH;
@@ -543,12 +543,13 @@
             if (fluidField) fluidField.useWrapping = IS_WORLD_WRAPPING;
         }
         maxTimestepSlider.oninput = function() { MAX_DELTA_TIME_MS = parseInt(this.value); updateSliderDisplay(this, maxTimestepValueSpan); }
-        viewZoomSlider.oninput = function() { // New
+        viewZoomSlider.oninput = function() {
             viewZoom = parseFloat(this.value);
             updateSliderDisplay(this, viewZoomValueSpan);
-            // Recalculate panning limits if needed, or ensure they are dynamic
-            const maxPanX = Math.max(0, WORLD_WIDTH - (canvas.clientWidth / viewZoom));
-            const maxPanY = Math.max(0, WORLD_HEIGHT - (canvas.clientHeight / viewZoom));
+            const effectiveViewportWidth = canvas.clientWidth / viewZoom;
+            const effectiveViewportHeight = canvas.clientHeight / viewZoom;
+            const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
+            const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
             viewOffsetX = Math.min(viewOffsetX, maxPanX);
             viewOffsetY = Math.min(viewOffsetY, maxPanY);
         }
@@ -748,12 +749,11 @@
             const displayMouseX = e.clientX - rect.left;
             const displayMouseY = e.clientY - rect.top;
 
-            // Correct for letterboxing if canvas aspect ratio doesn't match world aspect ratio
             const canvasDisplayRatio = Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT);
-            const renderedWidth = WORLD_WIDTH * canvasDisplayRatio;
-            const renderedHeight = WORLD_HEIGHT * canvasDisplayRatio;
-            const letterboxOffsetX = (canvas.clientWidth - renderedWidth) / 2;
-            const letterboxOffsetY = (canvas.clientHeight - renderedHeight) / 2;
+            const renderedWorldWidthInCss = WORLD_WIDTH * canvasDisplayRatio;
+            const renderedWorldHeightInCss = WORLD_HEIGHT * canvasDisplayRatio;
+            const letterboxOffsetX = (canvas.clientWidth - renderedWorldWidthInCss) / 2;
+            const letterboxOffsetY = (canvas.clientHeight - renderedWorldHeightInCss) / 2;
 
             const mouseOnRenderedX = displayMouseX - letterboxOffsetX;
             const mouseOnRenderedY = displayMouseY - letterboxOffsetY;
@@ -782,7 +782,7 @@
                 for (let i = 0; i < body.massPoints.length; i++) {
                     const point = body.massPoints[i];
                     const dist = Math.sqrt((point.pos.x - simMouseX)**2 + (point.pos.y - simMouseY)**2);
-                    if (dist < point.radius * 2.5 * viewZoom) { // Scale click radius by zoom
+                    if (dist < point.radius * 2.5 ) { // Removed viewZoom from click radius for consistency
                         selectedSoftBodyPoint = { body: body, point: point };
                         selectedInspectBody = body;
                         selectedInspectPoint = point;
@@ -856,7 +856,7 @@
         canvas.addEventListener('mouseup', () => {
             if (IS_EMITTER_EDIT_MODE && emitterDragStartCell && fluidField) {
                 const rect = canvas.getBoundingClientRect();
-                const displayMouseX = mouse.x; // mouse.x is already display-relative from updateMouse
+                const displayMouseX = mouse.x;
                 const displayMouseY = mouse.y;
 
                 const canvasDisplayRatio = Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT);
@@ -2008,41 +2008,32 @@
 
         // --- Drawing ---
         function draw() {
+            // The main canvas (ctx) is WORLD_WIDTH x WORLD_HEIGHT.
+            // The CSS scales this down to fit the #canvasContainer.
+            // viewOffsetX, viewOffsetY, and viewZoom define the camera.
+
+            // Clear the entire world-sized canvas.
             ctx.fillStyle = '#222';
-            ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT); // Clear the entire large canvas
+            ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
             ctx.save();
-            // Apply viewport transformations
-            ctx.translate(-viewOffsetX * viewZoom, -viewOffsetY * viewZoom); // Pan first in zoomed units
-            ctx.scale(viewZoom, viewZoom); // Then scale
 
-            // OR: (More common camera model)
-            // ctx.scale(viewZoom, viewZoom); // Scale first
-            // ctx.translate(-viewOffsetX, -viewOffsetY); // Then pan the scaled world
-            // For this ^ to work, viewOffsetX/Y need to be in screen-space units or scaled world units.
-            // Let's stick to the first approach for now as it's simpler with current viewOffset.
-            // NO, the standard is translate then scale for zooming into a point.
-            // OR, scale first, then translate by scaled offset.
-            // Let's try:
-            // ctx.scale(viewZoom, viewZoom);
-            // ctx.translate(-viewOffsetX, -viewOffsetY); // viewOffsetX/Y are now effectively in "zoomed world units"
-            // This means panning speed and mouse calculations need to be aware of this.
-
-            // Corrected approach:
-            // 1. Translate to make the desired top-left corner of the viewport (viewOffsetX, viewOffsetY in world coords)
-            //    the new origin (0,0) of the canvas.
-            ctx.translate(-viewOffsetX, -viewOffsetY);
-            // 2. Scale everything from this new origin.
+            // Apply camera transformations:
+            // 1. Scale around the top-left of the viewport (viewOffsetX, viewOffsetY)
+            // 2. Then translate the viewport's top-left to the canvas's (0,0)
+            // This means: first translate so (viewOffsetX, viewOffsetY) is at (0,0), then scale.
             ctx.scale(viewZoom, viewZoom);
-
+            ctx.translate(-viewOffsetX, -viewOffsetY);
 
             if (fluidField) {
-                // The fluidField.draw method draws its internal offscreen canvas (size x size)
-                // onto the target context, scaled to targetWidth and targetHeight.
-                // Here, targetWidth/Height should be WORLD_WIDTH/WORLD_HEIGHT because fluid covers the whole world.
-                // The viewZoom and viewOffset are already applied to the main context.
+                // fluidField.draw now draws its internal grid (size x size)
+                // onto the provided context (which is already transformed),
+                // scaled to cover WORLD_WIDTH x WORLD_HEIGHT of the *unzoomed* world.
+                // Since the context is already scaled by viewZoom, we draw the fluid
+                // as if it's filling the entire world space.
                 fluidField.draw(ctx, WORLD_WIDTH, WORLD_HEIGHT);
             }
+
             for (let particle of particles) {
                 particle.draw(ctx);
             }
@@ -2055,10 +2046,9 @@
                 ctx.beginPath();
                 ctx.moveTo(currentEmitterPreview.startX, currentEmitterPreview.startY);
                 ctx.lineTo(currentEmitterPreview.endX, currentEmitterPreview.endY);
-                ctx.strokeStyle = 'rgba(255, 255, 0, 0.7)'; // Yellow preview
-                ctx.lineWidth = 2 / viewZoom; // Make line width appear constant regardless of zoom
+                ctx.strokeStyle = 'rgba(255, 255, 0, 0.7)';
+                ctx.lineWidth = 2 / viewZoom;
                 ctx.stroke();
-                // Arrowhead
                 const angle = Math.atan2(currentEmitterPreview.endY - currentEmitterPreview.startY, currentEmitterPreview.endX - currentEmitterPreview.startX);
                 const arrowSize = 10 / viewZoom;
                 ctx.lineTo(currentEmitterPreview.endX - arrowSize * Math.cos(angle - Math.PI / 6), currentEmitterPreview.endY - arrowSize * Math.sin(angle - Math.PI / 6));
@@ -2070,21 +2060,23 @@
             // Draw existing emitters
             if (fluidField && velocityEmitters.length > 0) {
                  for (const emitter of velocityEmitters) {
-                    const startX = (emitter.gridX + 0.5) * fluidField.scaleX; // Use scaleX
-                    const startY = (emitter.gridY + 0.5) * fluidField.scaleY; // Use scaleY
+                    const startX = (emitter.gridX + 0.5) * fluidField.scaleX;
+                    const startY = (emitter.gridY + 0.5) * fluidField.scaleY;
 
                     const forceMagnitude = Math.sqrt(emitter.forceX**2 + emitter.forceY**2);
-                    const endX = startX + (emitter.forceX / (forceMagnitude || 1)) * EMITTER_STRENGTH * 20 ; // Show direction scaled by fixed length
-                    const endY = startY + (emitter.forceY / (forceMagnitude || 1)) * EMITTER_STRENGTH * 20 ;
+                    // Visualize emitter force direction with a fixed length for clarity, scaled by EMITTER_STRENGTH
+                    const displayLength = 20 * EMITTER_STRENGTH;
+                    const endX = startX + (emitter.forceX / (forceMagnitude || 1)) * displayLength ;
+                    const endY = startY + (emitter.forceY / (forceMagnitude || 1)) * displayLength ;
 
 
                     ctx.beginPath();
                     ctx.moveTo(startX, startY);
                     ctx.lineTo(endX, endY);
-                    ctx.strokeStyle = 'rgba(0, 200, 255, 0.5)'; // Cyan
-                    ctx.lineWidth = (1 + Math.min(5, forceMagnitude * EMITTER_STRENGTH * 0.5)) / viewZoom; // Make line width appear somewhat constant
+                    ctx.strokeStyle = 'rgba(0, 200, 255, 0.5)';
+                    ctx.lineWidth = (1 + Math.min(5, forceMagnitude * EMITTER_STRENGTH * 0.5)) / viewZoom;
                     ctx.stroke();
-                     // Arrowhead
+
                     const angle = Math.atan2(endY - startY, endX - startX);
                     const arrowSize = 8 / viewZoom;
                     if (Math.abs(endX-startX) > 0.01 || Math.abs(endY-startY) > 0.01) {
@@ -2150,8 +2142,8 @@
                 isParticleLifeInfinite: IS_PARTICLE_LIFE_INFINITE,
                 emitterStrength: EMITTER_STRENGTH,
                 velocityEmitters: velocityEmitters,
-                viewZoom: viewZoom, // Save zoom
-                viewOffsetX: viewOffsetX, // Save pan
+                viewZoom: viewZoom,
+                viewOffsetX: viewOffsetX,
                 viewOffsetY: viewOffsetY
             };
             const jsonString = JSON.stringify(config, null, 2);

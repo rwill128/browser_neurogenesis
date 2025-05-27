@@ -1,0 +1,1814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Soft Body Evolution - Node Costs & Visual Radii</title>
+    <style>
+        body {
+            margin: 0;
+            overflow-y: auto; 
+            background-color: #111;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start; 
+            align-items: center;    
+            min-height: 100vh;
+            font-family: sans-serif;
+            color: #eee;
+            padding: 10px 0; 
+            box-sizing: border-box; 
+        }
+        canvas {
+            border: 1px solid #444;
+            background-color: #222; 
+        }
+        #controls {
+            background-color: rgba(50,50,50,0.8);
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom:10px; 
+            display: flex;
+            flex-wrap: wrap; 
+            gap: 10px;
+            max-width: 800px; 
+            width: calc(100% - 20px); 
+            box-sizing: border-box;
+            justify-content: center; 
+        }
+        #controls div.control-group { 
+            padding: 10px; 
+            border: 1px solid #555;
+            border-radius: 6px; 
+            background-color: rgba(40,40,40,0.7); 
+            flex-grow: 1; 
+            min-width: 150px; 
+            max-width: 210px; 
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column; 
+        }
+        #controls label.slider-label, #controls label.checkbox-label { 
+            display: block;
+            margin-bottom: 2px; 
+            font-size: 0.85em; 
+            font-weight: bold;
+            color: #ddd;
+            text-align: left; 
+        }
+        #controls label.checkbox-label {
+            margin-top: 8px;
+            display: flex; 
+            align-items: center;
+        }
+        #controls input[type="checkbox"] {
+            margin-left: 5px;
+        }
+        #controls span.slider-value { 
+            display: block; 
+            font-size: 0.8em; 
+            text-align: right; 
+            color: #00aeff; 
+            margin-bottom: 3px; 
+            min-height: 1em; 
+        }
+        #controls input[type="range"] {
+            width: 100%; 
+            margin-top: 0; 
+            box-sizing: border-box;
+        }
+        #controls input[type="range"]:disabled + span.slider-value, 
+        #controls input[type="range"]:disabled ~ label.slider-label,
+        #controls input[type="range"]:disabled {
+             color: #777; 
+             opacity: 0.6;
+        }
+        #controls button {
+            padding: 8px 12px; 
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 8px; 
+            width: 100%; 
+            box-sizing: border-box;
+        }
+        #controls button:hover {
+            background-color: #0056b3;
+        }
+        .control-group h4 {
+            margin-top: 0;
+            margin-bottom: 10px; 
+            text-align: center;
+            color: #00aeff; 
+            width: 100%; 
+            font-size: 1em; 
+        }
+        .indicator-label {
+            font-size: 0.85em;
+            color: #ddd;
+            margin-top: 8px;
+        }
+        .indicator-light {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #4CAF50; /* Green by default */
+            margin-left: 5px;
+            vertical-align: middle;
+            border: 1px solid #222;
+            transition: background-color 0.3s;
+        }
+        .indicator-light.unstable {
+            background-color: #F44336; /* Red when unstable */
+        }
+        #populationCount {
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #ccc;
+            text-align: center;
+            width: 100%;
+        }
+        .viewport-instructions {
+            font-size: 0.8em;
+            color: #bbb;
+            text-align: center;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <div class="control-group">
+            <h4>Viewport & Sim</h4>
+            <div class="viewport-instructions">Use WASD to Pan View</div>
+            <label for="worldWrapToggle" class="checkbox-label">Wrap Edges:
+                <input type="checkbox" id="worldWrapToggle"> 
+            </label>
+            <label for="maxTimestep" class="slider-label">Max Timestep (ms):</label>
+            <span id="maxTimestepValue" class="slider-value">33</span>
+            <input type="range" id="maxTimestep" min="10" max="100" value="33" step="1"> 
+            <button id="pauseResumeButton">Pause</button>
+        </div>
+        <div class="control-group">
+            <h4>Soft Body (Global)</h4>
+            <label for="bodyFluidEntrainment" class="slider-label">Fluid Entrainment:</label>
+            <span id="bodyFluidEntrainmentValue" class="slider-value">0.05</span>
+            <input type="range" id="bodyFluidEntrainment" min="0.0" max="0.5" value="0.05" step="0.005"> 
+            
+            <label for="fluidCurrentStrength" class="slider-label">Fluid Current Strength:</label>
+            <span id="fluidCurrentStrengthValue" class="slider-value">10.0</span>
+            <input type="range" id="fluidCurrentStrength" min="0.0" max="25.0" value="10.0" step="0.1"> 
+            
+            <label for="bodyPushStrength" class="slider-label">Body Push Strength:</label>
+            <span id="bodyPushStrengthValue" class="slider-value">2.0</span>
+            <input type="range" id="bodyPushStrength" min="0.0" max="10.0" value="2.0" step="0.1">
+
+            <label for="reproductionCooldown" class="slider-label">Repro. Cooldown (frames):</label>
+            <span id="reproductionCooldownValue" class="slider-value">300</span>
+            <input type="range" id="reproductionCooldown" min="50" max="1000" value="300" step="10">
+
+            <label for="bodyRepulsionStrength" class="slider-label">Body Repulsion Str:</label>
+            <span id="bodyRepulsionStrengthValue" class="slider-value">0.5</span>
+            <input type="range" id="bodyRepulsionStrength" min="0.0" max="50.0" value="0.5" step="0.1"> 
+
+            <label for="bodyRepulsionRadiusFactor" class="slider-label">Body Repulsion Radius Factor:</label>
+            <span id="bodyRepulsionRadiusFactorValue" class="slider-value">1.5</span>
+            <input type="range" id="bodyRepulsionRadiusFactor" min="0.5" max="3.0" value="1.5" step="0.1">
+
+            <label for="baseNodeCost" class="slider-label">Base Node Cost:</label>
+            <span id="baseNodeCostValue" class="slider-value">0.0010</span>
+            <input type="range" id="baseNodeCost" min="0.0" max="0.01" value="0.001" step="0.0001">
+            
+            <label for="motorNodeCost" class="slider-label">Motor Node Cost:</label>
+            <span id="motorNodeCostValue" class="slider-value">0.0100</span>
+            <input type="range" id="motorNodeCost" min="0.0" max="0.1" value="0.01" step="0.001">
+
+            <label for="eaterNodeCost" class="slider-label">Eater Node Cost:</label>
+            <span id="eaterNodeCostValue" class="slider-value">0.0050</span>
+            <input type="range" id="eaterNodeCost" min="0.0" max="0.05" value="0.005" step="0.0005">
+
+            <label for="predatorNodeCost" class="slider-label">Predator Node Cost:</label>
+            <span id="predatorNodeCostValue" class="slider-value">0.0200</span>
+            <input type="range" id="predatorNodeCost" min="0.0" max="100.0" value="0.02" step="0.001">
+            
+            <div class="indicator-label">Any Unstable: <span id="instabilityLight" class="indicator-light"></span></div>
+            <div id="populationCount">Population: 0</div>
+            <button id="resetButton">Reset Population</button>
+        </div>
+        <div class="control-group">
+            <h4>Fluid</h4>
+            <label for="fluidDiffusion" class="slider-label">Diffusion:</label>
+            <span id="fluidDiffusionValue" class="slider-value">1.0e-5</span>
+            <input type="range" id="fluidDiffusion" min="0" max="0.001" value="0.00001" step="0.00001">
+
+            <label for="fluidViscosity" class="slider-label">Viscosity:</label>
+            <span id="fluidViscosityValue" class="slider-value">1.0e-6</span>
+            <input type="range" id="fluidViscosity" min="0" max="0.0001" value="0.000068" step="0.000001">
+
+            <label for="fluidFade" class="slider-label">Fade Rate:</label>
+            <span id="fluidFadeValue" class="slider-value">0.030</span>
+            <input type="range" id="fluidFade" min="0.001" max="0.1" value="0.03" step="0.001">
+
+            <label for="cornerJetStrength" id="cornerJetStrengthLabel" class="slider-label">Corner Jet Strength:</label>
+            <span id="cornerJetStrengthValue" class="slider-value">0.0</span>
+            <input type="range" id="cornerJetStrength" min="0.0" max="2.0" value="0.0" step="0.01">
+
+            <button id="clearFluidButton">Clear Fluid</button>
+        </div>
+         <div class="control-group">
+            <h4>Particles</h4>
+            <label for="numParticles" class="slider-label">Particles:</label>
+            <span id="numParticlesValue" class="slider-value">1110</span>
+            <input type="range" id="numParticles" min="0" max="2500" value="1110" step="10">
+
+             <label for="particleFluidInfluence" class.slider-label="slider-label">Fluid Influence:</label>
+             <span id="particleFluidInfluenceValue" class="slider-value">1.0</span> 
+             <input type="range" id="particleFluidInfluence" min="0.0" max="1.0" value="0.97" step="0.01">
+
+             <label for="particleLifeDecay" id="particleLifeDecayLabel" class="slider-label">Life Decay Rate:</label>
+             <span id="particleLifeDecayValue" class="slider-value">0.0050</span>
+             <input type="range" id="particleLifeDecay" min="0.0001" max="0.02" value="0.005" step="0.0001">
+            
+             <label for="infiniteParticleLifeToggle" class="checkbox-label">Infinite Life:
+                <input type="checkbox" id="infiniteParticleLifeToggle"> 
+            </label>
+
+            <button id="resetParticlesButton">Reset Particles</button>
+        </div>
+        <div class="control-group">
+            <h4>Configuration</h4>
+            <button id="exportConfigButton">Export Config</button>
+            <input type="file" id="importConfigFile" accept=".json" style="display: none;">
+            <button id="importConfigButton">Import Config</button>
+        </div>
+    </div>
+    <canvas id="simulationCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById('simulationCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // --- Viewport and World Dimensions ---
+        const VIEWPORT_WIDTH = 800;
+        const VIEWPORT_HEIGHT = 600;
+        const WORLD_WIDTH = 1600;
+        const WORLD_HEIGHT = 1200;
+        const VIEW_PAN_SPEED = 20; 
+
+        canvas.width = VIEWPORT_WIDTH;
+        canvas.height = VIEWPORT_HEIGHT;
+
+        let viewOffsetX = 0;
+        let viewOffsetY = 0;
+
+        // --- Controls ---
+        const worldWrapToggle = document.getElementById('worldWrapToggle'); 
+        const maxTimestepSlider = document.getElementById('maxTimestep'); 
+        const maxTimestepValueSpan = document.getElementById('maxTimestepValue'); 
+        const pauseResumeButton = document.getElementById('pauseResumeButton'); 
+        
+        const bodyFluidEntrainmentSlider = document.getElementById('bodyFluidEntrainment'); 
+        const fluidCurrentStrengthSlider = document.getElementById('fluidCurrentStrength'); 
+        const bodyPushStrengthSlider = document.getElementById('bodyPushStrength'); 
+        const energyCostPerFrameSlider = document.getElementById('energyCostPerFrame'); 
+        const reproductionCooldownSlider = document.getElementById('reproductionCooldown'); 
+        const bodyRepulsionStrengthSlider = document.getElementById('bodyRepulsionStrength'); 
+        const bodyRepulsionRadiusFactorSlider = document.getElementById('bodyRepulsionRadiusFactor'); 
+        const baseNodeCostSlider = document.getElementById('baseNodeCost'); // New
+        const motorNodeCostSlider = document.getElementById('motorNodeCost'); // New
+        const eaterNodeCostSlider = document.getElementById('eaterNodeCost'); // New
+        const predatorNodeCostSlider = document.getElementById('predatorNodeCost'); // New
+        const instabilityLight = document.getElementById('instabilityLight'); 
+        const populationCountDisplay = document.getElementById('populationCount'); 
+        const resetButton = document.getElementById('resetButton');
+        const bodyFluidEntrainmentValueSpan = document.getElementById('bodyFluidEntrainmentValue'); 
+        const fluidCurrentStrengthValueSpan = document.getElementById('fluidCurrentStrengthValue'); 
+        const bodyPushStrengthValueSpan = document.getElementById('bodyPushStrengthValue'); 
+        const energyCostPerFrameValueSpan = document.getElementById('energyCostPerFrameValue'); 
+        const reproductionCooldownValueSpan = document.getElementById('reproductionCooldownValue'); 
+        const bodyRepulsionStrengthValueSpan = document.getElementById('bodyRepulsionStrengthValue'); 
+        const bodyRepulsionRadiusFactorValueSpan = document.getElementById('bodyRepulsionRadiusFactorValue'); 
+        const baseNodeCostValueSpan = document.getElementById('baseNodeCostValue'); // New
+        const motorNodeCostValueSpan = document.getElementById('motorNodeCostValue'); // New
+        const eaterNodeCostValueSpan = document.getElementById('eaterNodeCostValue'); // New
+        const predatorNodeCostValueSpan = document.getElementById('predatorNodeCostValue'); // New
+
+
+        const fluidDiffusionSlider = document.getElementById('fluidDiffusion');
+        const fluidViscositySlider = document.getElementById('fluidViscosity');
+        const fluidFadeSlider = document.getElementById('fluidFade');
+        const cornerJetStrengthSlider = document.getElementById('cornerJetStrength'); 
+        const cornerJetStrengthLabel = document.getElementById('cornerJetStrengthLabel');
+        const cornerJetStrengthValueSpan = document.getElementById('cornerJetStrengthValue');
+        const clearFluidButton = document.getElementById('clearFluidButton');
+        const fluidDiffusionValueSpan = document.getElementById('fluidDiffusionValue');
+        const fluidViscosityValueSpan = document.getElementById('fluidViscosityValue');
+        const fluidFadeValueSpan = document.getElementById('fluidFadeValue');
+        
+        const numParticlesSlider = document.getElementById('numParticles');
+        const numParticlesValueSpan = document.getElementById('numParticlesValue');
+        const particleFluidInfluenceSlider = document.getElementById('particleFluidInfluence');
+        const particleFluidInfluenceValueSpan = document.getElementById('particleFluidInfluenceValue');
+        const particleLifeDecaySlider = document.getElementById('particleLifeDecay'); 
+        const particleLifeDecayValueSpan = document.getElementById('particleLifeDecayValue'); 
+        const infiniteParticleLifeToggle = document.getElementById('infiniteParticleLifeToggle'); 
+        const particleLifeDecayLabel = document.getElementById('particleLifeDecayLabel'); 
+        const resetParticlesButton = document.getElementById('resetParticlesButton');
+
+        const exportConfigButton = document.getElementById('exportConfigButton');
+        const importConfigFile = document.getElementById('importConfigFile');
+        const importConfigButton = document.getElementById('importConfigButton');
+
+
+        // --- Global Variables & Constants ---
+        let BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(bodyFluidEntrainmentSlider.value); 
+        let FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(fluidCurrentStrengthSlider.value); 
+        let SOFT_BODY_PUSH_STRENGTH = parseFloat(bodyPushStrengthSlider.value); 
+        // let ENERGY_COST_PER_FRAME_BASE = parseFloat(energyCostPerFrameSlider.value); // Removed
+        let REPRODUCTION_COOLDOWN_TICKS = parseInt(reproductionCooldownSlider.value); 
+        let BODY_REPULSION_STRENGTH = parseFloat(bodyRepulsionStrengthSlider.value); 
+        let BODY_REPULSION_RADIUS_FACTOR = parseFloat(bodyRepulsionRadiusFactorSlider.value); 
+        let MAX_DELTA_TIME_MS = parseInt(maxTimestepSlider.value); 
+        let IS_SIMULATION_PAUSED = false; 
+
+        let BASE_NODE_EXISTENCE_COST = parseFloat(baseNodeCostSlider.value);
+        let MOTOR_NODE_ENERGY_COST = parseFloat(motorNodeCostSlider.value);
+        let EATER_NODE_ENERGY_COST = parseFloat(eaterNodeCostSlider.value);
+        let PREDATOR_NODE_ENERGY_COST = parseFloat(predatorNodeCostSlider.value);
+
+
+        let FLUID_DIFFUSION = parseFloat(fluidDiffusionSlider.value);
+        let FLUID_VISCOSITY = parseFloat(fluidViscositySlider.value);
+        let FLUID_FADE_RATE = parseFloat(fluidFadeSlider.value);
+        let CORNER_JET_STRENGTH = parseFloat(cornerJetStrengthSlider.value); 
+        let IS_WORLD_WRAPPING = worldWrapToggle.checked; 
+        const CORNER_JET_REGION_FACTOR = 0.15; 
+        let NUM_PARTICLES = parseInt(numParticlesSlider.value);
+        let PARTICLE_FLUID_INFLUENCE = parseFloat(particleFluidInfluenceSlider.value);
+        let PARTICLE_BASE_LIFE_DECAY = parseFloat(particleLifeDecaySlider.value);
+        let IS_PARTICLE_LIFE_INFINITE = infiniteParticleLifeToggle.checked; 
+        const PARTICLE_LIFE_DECAY_RANDOM_FACTOR = 0.002; 
+
+        const EATING_RADIUS_MULTIPLIER = 3.5; 
+        const PREDATION_RADIUS_MULTIPLIER = 2.5; 
+        const ENERGY_PER_PARTICLE = 25; 
+        const ENERGY_SAPPED_PER_PREDATION = 5; 
+        const MAX_CREATURE_ENERGY = 100;
+        const OFFSPRING_INITIAL_ENERGY_SHARE = 0.25; 
+        const REPRODUCTION_ADDITIONAL_COST_FACTOR = 0.1; 
+        const OFFSPRING_SPAWN_RADIUS = 70; 
+        const MUTATION_RATE_PERCENT = 0.1; 
+        const MUTATION_CHANCE_BOOL = 0.05; 
+        const MUTATION_CHANCE_NODE_TYPE = 0.1; 
+
+        let isAnySoftBodyUnstable = false; 
+        const MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5); 
+        const INITIAL_POPULATION_SIZE = 10; 
+
+        // Function to update slider value display
+        function updateSliderDisplay(slider, span) {
+            let value = parseFloat(slider.value);
+            if (slider.id === 'fluidDiffusion' || slider.id === 'fluidViscosity') {
+                span.textContent = value.toExponential(1);
+            } else if (slider.id === 'particleFluidInfluence' || slider.id === 'fluidCurrentStrength' || 
+                       slider.id === 'bodyPushStrength' || slider.id === 'cornerJetStrength' ||
+                       slider.id === 'bodyRepulsionStrength' || slider.id === 'bodyRepulsionRadiusFactor') { 
+                 span.textContent = value.toFixed(1); 
+            } else if (slider.id === 'bodyFluidEntrainment') {
+                span.textContent = value.toFixed(2); 
+            } else if (slider.id === 'particleLifeDecay' || 
+                       slider.id === 'baseNodeCost' || slider.id === 'motorNodeCost' || 
+                       slider.id === 'eaterNodeCost' || slider.id === 'predatorNodeCost') {
+                span.textContent = value.toFixed(4);
+            } else if (slider.id === 'fluidFade') { 
+                span.textContent = value.toFixed(3);
+            }
+            else { 
+                span.textContent = Math.floor(value);
+            }
+        }
+
+        // --- Event Listeners ---
+        document.addEventListener('keydown', (e) => {
+            if (IS_SIMULATION_PAUSED && e.key.toLowerCase() !== 'p') return; 
+            switch(e.key.toLowerCase()) {
+                case 'w': viewOffsetY = Math.max(0, viewOffsetY - VIEW_PAN_SPEED); break;
+                case 's': viewOffsetY = Math.min(WORLD_HEIGHT - VIEWPORT_HEIGHT, viewOffsetY + VIEW_PAN_SPEED); break;
+                case 'a': viewOffsetX = Math.max(0, viewOffsetX - VIEW_PAN_SPEED); break;
+                case 'd': viewOffsetX = Math.min(WORLD_WIDTH - VIEWPORT_WIDTH, viewOffsetX + VIEW_PAN_SPEED); break;
+                case 'p': 
+                    IS_SIMULATION_PAUSED = !IS_SIMULATION_PAUSED;
+                    pauseResumeButton.textContent = IS_SIMULATION_PAUSED ? "Resume" : "Pause";
+                    if (!IS_SIMULATION_PAUSED) { 
+                        lastTime = performance.now(); 
+                        requestAnimationFrame(gameLoop); 
+                    }
+                    break;
+            }
+        });
+
+
+        worldWrapToggle.onchange = function() {
+            IS_WORLD_WRAPPING = this.checked;
+            cornerJetStrengthSlider.disabled = IS_WORLD_WRAPPING;
+            cornerJetStrengthLabel.style.color = IS_WORLD_WRAPPING ? '#777' : '#ddd';
+            cornerJetStrengthValueSpan.style.color = IS_WORLD_WRAPPING ? '#777' : '#00aeff';
+            if (fluidField) fluidField.useWrapping = IS_WORLD_WRAPPING; 
+        }
+        maxTimestepSlider.oninput = function() { MAX_DELTA_TIME_MS = parseInt(this.value); updateSliderDisplay(this, maxTimestepValueSpan); }
+        pauseResumeButton.onclick = function() {
+            IS_SIMULATION_PAUSED = !IS_SIMULATION_PAUSED;
+            this.textContent = IS_SIMULATION_PAUSED ? "Resume" : "Pause";
+            if (!IS_SIMULATION_PAUSED) { 
+                lastTime = performance.now(); 
+                requestAnimationFrame(gameLoop); 
+            }
+        }
+
+
+        bodyFluidEntrainmentSlider.oninput = function() { BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(this.value); updateSliderDisplay(this, bodyFluidEntrainmentValueSpan); }
+        fluidCurrentStrengthSlider.oninput = function() { FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(this.value); updateSliderDisplay(this, fluidCurrentStrengthValueSpan); }
+        bodyPushStrengthSlider.oninput = function() { SOFT_BODY_PUSH_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, bodyPushStrengthValueSpan); }
+        // energyCostPerFrameSlider.oninput = function() { ENERGY_COST_PER_FRAME_BASE = parseFloat(this.value); updateSliderDisplay(this, energyCostPerFrameValueSpan); } // Removed
+        reproductionCooldownSlider.oninput = function() { REPRODUCTION_COOLDOWN_TICKS = parseInt(this.value); updateSliderDisplay(this, reproductionCooldownValueSpan); }
+        bodyRepulsionStrengthSlider.oninput = function() { BODY_REPULSION_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, bodyRepulsionStrengthValueSpan); }
+        bodyRepulsionRadiusFactorSlider.oninput = function() { BODY_REPULSION_RADIUS_FACTOR = parseFloat(this.value); updateSliderDisplay(this, bodyRepulsionRadiusFactorValueSpan); }
+        
+        baseNodeCostSlider.oninput = function() { BASE_NODE_EXISTENCE_COST = parseFloat(this.value); updateSliderDisplay(this, baseNodeCostValueSpan); }
+        motorNodeCostSlider.oninput = function() { MOTOR_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, motorNodeCostValueSpan); }
+        eaterNodeCostSlider.oninput = function() { EATER_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, eaterNodeCostValueSpan); }
+        predatorNodeCostSlider.oninput = function() { PREDATOR_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, predatorNodeCostValueSpan); }
+
+        resetButton.onclick = function() { 
+            initializePopulation(); 
+            isAnySoftBodyUnstable = false; 
+            updateInstabilityIndicator();
+        } 
+
+        fluidDiffusionSlider.oninput = function() { FLUID_DIFFUSION = parseFloat(this.value); updateSliderDisplay(this, fluidDiffusionValueSpan); if(fluidField) fluidField.diffusion = FLUID_DIFFUSION;}
+        fluidViscositySlider.oninput = function() { FLUID_VISCOSITY = parseFloat(this.value); updateSliderDisplay(this, fluidViscosityValueSpan); if(fluidField) fluidField.viscosity = FLUID_VISCOSITY;}
+        fluidFadeSlider.oninput = function() { FLUID_FADE_RATE = parseFloat(this.value); updateSliderDisplay(this, fluidFadeValueSpan);}
+        cornerJetStrengthSlider.oninput = function() { CORNER_JET_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, cornerJetStrengthValueSpan); }
+        clearFluidButton.onclick = function() { if(fluidField) fluidField.clear(); }
+        
+        numParticlesSlider.oninput = function() { NUM_PARTICLES = parseInt(this.value); updateSliderDisplay(this, numParticlesValueSpan); initParticles(); }
+        particleFluidInfluenceSlider.oninput = function() { PARTICLE_FLUID_INFLUENCE = parseFloat(this.value); updateSliderDisplay(this, particleFluidInfluenceValueSpan); }
+        particleLifeDecaySlider.oninput = function() { PARTICLE_BASE_LIFE_DECAY = parseFloat(this.value); updateSliderDisplay(this, particleLifeDecayValueSpan); }
+        infiniteParticleLifeToggle.onchange = function() { 
+            IS_PARTICLE_LIFE_INFINITE = this.checked;
+            particleLifeDecaySlider.disabled = IS_PARTICLE_LIFE_INFINITE;
+            particleLifeDecayLabel.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#ddd';
+            particleLifeDecayValueSpan.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
+            initParticles(); 
+        }
+        resetParticlesButton.onclick = function() { initParticles(); }
+
+        exportConfigButton.onclick = handleExportConfig;
+        importConfigButton.onclick = () => importConfigFile.click();
+        importConfigFile.onchange = handleImportConfig;
+
+
+        function initializeAllSliderDisplays() {
+            updateSliderDisplay(maxTimestepSlider, maxTimestepValueSpan);
+            updateSliderDisplay(bodyFluidEntrainmentSlider, bodyFluidEntrainmentValueSpan); 
+            updateSliderDisplay(fluidCurrentStrengthSlider, fluidCurrentStrengthValueSpan); 
+            updateSliderDisplay(bodyPushStrengthSlider, bodyPushStrengthValueSpan); 
+            // updateSliderDisplay(energyCostPerFrameSlider, energyCostPerFrameValueSpan); // Removed
+            updateSliderDisplay(reproductionCooldownSlider, reproductionCooldownValueSpan);
+            updateSliderDisplay(bodyRepulsionStrengthSlider, bodyRepulsionStrengthValueSpan);
+            updateSliderDisplay(bodyRepulsionRadiusFactorSlider, bodyRepulsionRadiusFactorValueSpan);
+            updateSliderDisplay(baseNodeCostSlider, baseNodeCostValueSpan);
+            updateSliderDisplay(motorNodeCostSlider, motorNodeCostValueSpan);
+            updateSliderDisplay(eaterNodeCostSlider, eaterNodeCostValueSpan);
+            updateSliderDisplay(predatorNodeCostSlider, predatorNodeCostValueSpan);
+            updateSliderDisplay(fluidDiffusionSlider, fluidDiffusionValueSpan);
+            updateSliderDisplay(fluidViscositySlider, fluidViscosityValueSpan);
+            updateSliderDisplay(fluidFadeSlider, fluidFadeValueSpan);
+            updateSliderDisplay(cornerJetStrengthSlider, cornerJetStrengthValueSpan);
+            updateSliderDisplay(numParticlesSlider, numParticlesValueSpan);
+            updateSliderDisplay(particleFluidInfluenceSlider, particleFluidInfluenceValueSpan);
+            updateSliderDisplay(particleLifeDecaySlider, particleLifeDecayValueSpan);
+
+            particleLifeDecaySlider.disabled = IS_PARTICLE_LIFE_INFINITE;
+            particleLifeDecayLabel.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#ddd';
+            particleLifeDecayValueSpan.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
+            
+            cornerJetStrengthSlider.disabled = IS_WORLD_WRAPPING;
+            cornerJetStrengthLabel.style.color = IS_WORLD_WRAPPING ? '#777' : '#ddd';
+            cornerJetStrengthValueSpan.style.color = IS_WORLD_WRAPPING ? '#777' : '#00aeff';
+        }
+        
+        function updateInstabilityIndicator() {
+            if (isAnySoftBodyUnstable) {
+                instabilityLight.classList.add('unstable');
+            } else {
+                instabilityLight.classList.remove('unstable');
+            }
+        }
+        function updatePopulationCount() {
+            populationCountDisplay.textContent = `Population: ${softBodyPopulation.length}`;
+        }
+
+
+        // --- Simulation Parameters ---
+        const restitution = 0.4; 
+
+        let softBodyPopulation = []; 
+        let fluidField;
+        let particles = [];
+
+        let lastTime = 0;
+        let deltaTime = 0;
+        let nextSoftBodyId = 0;
+
+
+        // --- Mouse Interaction ---
+        let selectedSoftBodyPoint = null; 
+        let mouse = { x: 0, y: 0, prevX: 0, prevY: 0, isDown: false, dx:0, dy:0 };
+
+        function updateMouse(e) {
+            const rect = canvas.getBoundingClientRect();
+            mouse.prevX = mouse.x;
+            mouse.prevY = mouse.y;
+            mouse.x = e.clientX - rect.left; 
+            mouse.y = e.clientY - rect.top;
+            mouse.dx = mouse.x - mouse.prevX;
+            mouse.dy = mouse.y - mouse.prevY;
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+            mouse.isDown = true;
+            updateMouse(e);
+            
+            const simMouseX = mouse.x + viewOffsetX; 
+            const simMouseY = mouse.y + viewOffsetY;
+
+            for (let body of softBodyPopulation) {
+                for (let i = 0; i < body.massPoints.length; i++) {
+                    const point = body.massPoints[i];
+                    const dist = Math.sqrt((point.pos.x - simMouseX)**2 + (point.pos.y - simMouseY)**2);
+                    if (dist < point.radius * 2.5) { 
+                        selectedSoftBodyPoint = { body: body, point: point };
+                        point.isFixed = true; 
+                        point.prevPos.x = point.pos.x;
+                        point.prevPos.y = point.pos.y;
+                        return; 
+                    }
+                }
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            updateMouse(e);
+            const simMouseX = mouse.x + viewOffsetX;
+            const simMouseY = mouse.y + viewOffsetY;
+
+            if (mouse.isDown) {
+                if (selectedSoftBodyPoint) {
+                    const point = selectedSoftBodyPoint.point;
+                    point.prevPos.x = point.pos.x; 
+                    point.prevPos.y = point.pos.y;
+                    point.pos.x = simMouseX; 
+                    point.pos.y = simMouseY;
+
+                } else if (fluidField) { 
+                    const fluidGridX = Math.floor(simMouseX / fluidField.scale);
+                    const fluidGridY = Math.floor(simMouseY / fluidField.scale);
+                    const r1 = Math.random() * 100 + 155; 
+                    const g1 = Math.random() * 50 + 25; 
+                    const b1 = Math.random() * 100 + 100; 
+                    fluidField.addDensity(fluidGridX, fluidGridY, r1, g1, b1, 150 + Math.random()*50); 
+                    
+                    const r2 = Math.random() * 50 + 25; 
+                    const g2 = Math.random() * 100 + 155; 
+                    const b2 = Math.random() * 100 + 155; 
+                    fluidField.addDensity(fluidGridX, fluidGridY, r2, g2, b2, 150 + Math.random()*50); 
+                    
+                    fluidField.addVelocity(fluidGridX, fluidGridY, mouse.dx * 10, mouse.dy * 10); 
+                }
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            mouse.isDown = false;
+            if (selectedSoftBodyPoint) {
+                const point = selectedSoftBodyPoint.point;
+                point.isFixed = false; 
+                point.prevPos.x = point.pos.x - mouse.dx * 1.0; 
+                point.prevPos.y = point.pos.y - mouse.dy * 1.0;
+                selectedSoftBodyPoint = null;
+            }
+        });
+         canvas.addEventListener('mouseleave', () => {
+            if (selectedSoftBodyPoint) {
+                const point = selectedSoftBodyPoint.point;
+                point.isFixed = false;
+                point.prevPos.x = point.pos.x - mouse.dx * 1.0;
+                point.prevPos.y = point.pos.y - mouse.dy * 1.0;
+                selectedSoftBodyPoint = null;
+            }
+            mouse.isDown = false; 
+        });
+
+
+        // --- Vector2D Class ---
+        class Vec2 {
+            constructor(x = 0, y = 0) { this.x = x; this.y = y; }
+            add(other) { return new Vec2(this.x + other.x, this.y + other.y); }
+            sub(other) { return new Vec2(this.x - other.x, this.y - other.y); }
+            mul(scalar) { return new Vec2(this.x * scalar, this.y * scalar); }
+            div(scalar) { return scalar !== 0 ? new Vec2(this.x / scalar, this.y / scalar) : new Vec2(); }
+            mag() { return Math.sqrt(this.x * this.x + this.y * this.y); }
+            magSq() { return this.x * this.x + this.y * this.y; } 
+            normalize() { const m = this.mag(); return m > 0 ? this.div(m) : new Vec2(); }
+            static dot(v1, v2) { return v1.x * v2.x + v1.y * v2.y; }
+            clone() { return new Vec2(this.x, this.y); } 
+        }
+
+        // --- MassPoint Class (Soft Body with Verlet Integration) ---
+        class MassPoint {
+            constructor(x, y, mass = 0.5, radius = 5, color = 'rgba(0,150,255,0.8)') { 
+                this.pos = new Vec2(x, y);
+                this.prevPos = new Vec2(x, y); 
+                this.force = new Vec2();
+                this.mass = mass; 
+                this.invMass = this.mass !== 0 ? 1 / this.mass : 0;
+                this.radius = radius;
+                this.color = color; 
+                this.isFixed = false;
+                this.isMotor = false; 
+                this.isEater = false; 
+                this.isPredator = false; 
+            }
+            applyForce(f) { this.force = this.force.add(f); }
+            
+            update(dt) {
+                if (this.isFixed || this.invMass === 0) { 
+                    this.force = new Vec2(); 
+                    return; 
+                }
+
+                const acceleration = this.force.mul(this.invMass);
+                
+                const tempX = this.pos.x;
+                const tempY = this.pos.y;
+                
+                this.pos.x = 2 * this.pos.x - this.prevPos.x + acceleration.x * dt * dt;
+                this.pos.y = 2 * this.pos.y - this.prevPos.y + acceleration.y * dt * dt;
+                
+                this.prevPos.x = tempX;
+                this.prevPos.y = tempY;
+                
+                this.force = new Vec2(); 
+            }
+
+            draw(ctx) {
+                // Draw interaction radii first (underneath the point)
+                if (this.isEater) {
+                    ctx.beginPath();
+                    ctx.arc(this.pos.x, this.pos.y, this.radius * EATING_RADIUS_MULTIPLIER, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(255, 165, 0, 0.05)'; // Fainter orange
+                    ctx.fill();
+                }
+                if (this.isPredator) {
+                    ctx.beginPath();
+                    ctx.arc(this.pos.x, this.pos.y, this.radius * PREDATION_RADIUS_MULTIPLIER, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(255, 50, 50, 0.05)'; // Fainter red
+                    ctx.fill();
+                }
+
+
+                ctx.beginPath();
+                ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
+                if (this.isPredator) {
+                    ctx.fillStyle = 'rgba(255, 50, 50, 0.9)'; 
+                } else if (this.isMotor && this.isEater) {
+                     ctx.fillStyle = 'rgba(200,255,0,0.9)'; 
+                } else if (this.isMotor) {
+                    ctx.fillStyle = 'rgba(0,255,100,0.9)'; 
+                } else if (this.isEater) {
+                    ctx.fillStyle = 'rgba(255,165,0,0.9)'; 
+                }
+                else {
+                    ctx.fillStyle = this.isFixed ? 'rgba(255,0,0,0.9)' : this.color;
+                }
+                ctx.fill();
+                ctx.closePath();
+            }
+        }
+
+        // --- Spring Class (Soft Body) ---
+        class Spring {
+            constructor(p1, p2, stiffness, dampingFactor, restLength = null) {
+                this.p1 = p1; this.p2 = p2;
+                this.stiffness = stiffness; 
+                this.dampingFactor = dampingFactor; 
+                this.restLength = restLength === null ? p1.pos.sub(p2.pos).mag() : restLength;
+            }
+            applyForce() {
+                const diffPos = this.p1.pos.sub(this.p2.pos); 
+                const currentLength = diffPos.mag();
+                if (currentLength === 0) return;
+                const displacement = currentLength - this.restLength;
+                const direction = diffPos.normalize();
+                
+                const springForceMagnitude = -this.stiffness * displacement;
+                const springForce = direction.mul(springForceMagnitude);
+
+                const p1_vel_implicit = this.p1.pos.sub(this.p1.prevPos);
+                const p2_vel_implicit = this.p2.pos.sub(this.p2.prevPos);
+                const relVel_implicit = p1_vel_implicit.sub(p2_vel_implicit);
+                
+                const velAlongSpring = Vec2.dot(relVel_implicit, direction);
+                const dampingForceMagnitude = -this.dampingFactor * velAlongSpring; 
+                const dampingForce = direction.mul(dampingForceMagnitude);
+
+                const totalForce = springForce.add(dampingForce);
+                this.p1.applyForce(totalForce);
+                this.p2.applyForce(totalForce.mul(-1));
+            }
+            draw(ctx) {
+                ctx.beginPath();
+                ctx.moveTo(this.p1.pos.x, this.p1.pos.y);
+                ctx.lineTo(this.p2.pos.x, this.p2.pos.y);
+                ctx.strokeStyle = 'rgba(150,150,150,0.6)'; 
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.closePath();
+            }
+        }
+        
+        // --- SoftBody Class ---
+        class SoftBody {
+            constructor(id, initialX, initialY, parentBody = null) {
+                this.id = id;
+                this.massPoints = [];
+                this.springs = [];
+                this.isUnstable = false;
+                this.creatureEnergy = MAX_CREATURE_ENERGY * OFFSPRING_INITIAL_ENERGY_SHARE; 
+                this.ticksSinceBirth = 0; 
+                this.canReproduce = false;
+
+                // Heritable traits for motor function
+                this.motorImpulseInterval = 30 + Math.floor(Math.random() * 90); 
+                this.motorImpulseMagnitudeCap = 0.5 + Math.random() * 200.0;
+
+                if (parentBody) {
+                    this.stiffness = parentBody.stiffness * (1 + (Math.random() - 0.5) * 2 * MUTATION_RATE_PERCENT);
+                    this.springDamping = parentBody.springDamping * (1 + (Math.random() - 0.5) * 2 * MUTATION_RATE_PERCENT);
+                    this.motorImpulseInterval = Math.max(10, Math.floor(parentBody.motorImpulseInterval * (1 + (Math.random() - 0.5) * 2 * MUTATION_RATE_PERCENT)));
+                    this.motorImpulseMagnitudeCap = parentBody.motorImpulseMagnitudeCap * (1 + (Math.random() - 0.5) * 2 * MUTATION_RATE_PERCENT);
+                } else { 
+                    this.stiffness = 500 + Math.random() * 2500; 
+                    this.springDamping = 5 + Math.random() * 20;  
+                }
+                this.stiffness = Math.max(100, Math.min(this.stiffness, 10000));
+                this.springDamping = Math.max(0.1, Math.min(this.springDamping, 50));
+                this.motorImpulseMagnitudeCap = Math.max(0, Math.min(this.motorImpulseMagnitudeCap, 5.0));
+                this.motorImpulseInterval = Math.max(10, Math.min(this.motorImpulseInterval, 300));
+
+
+                this.fluidEntrainment = BODY_FLUID_ENTRAINMENT_FACTOR; 
+                this.fluidCurrentStrength = FLUID_CURRENT_STRENGTH_ON_BODY;
+                this.bodyPushStrength = SOFT_BODY_PUSH_STRENGTH; 
+
+                this.createShape(initialX, initialY, parentBody);
+            }
+
+            createShape(startX, startY, parentBody = null) {
+                this.massPoints = []; 
+                this.springs = [];    
+
+                const shapeType = Math.floor(Math.random() * 3); 
+                const basePointDist = 20 + Math.random() * 10; 
+                const baseRadius = 3 + Math.random() * 3;   
+
+                const motorChance = 0.25; 
+                const eaterChance = 0.25; 
+                const predatorChance = 0.15; 
+
+                if (shapeType === 0) { 
+                    const numPointsX = 3;
+                    const numPointsY = 3;
+                    let gridPoints = [];
+                    for (let i = 0; i < numPointsY; i++) {
+                        gridPoints[i] = [];
+                        for (let j = 0; j < numPointsX; j++) {
+                            let mass = 0.3 + Math.random() * 0.4;
+                            let isMotor = Math.random() < motorChance;
+                            let isEater = Math.random() < eaterChance;
+                            let isPredator = Math.random() < predatorChance;
+
+                            if (parentBody && parentBody.massPoints[i*numPointsX + j]) { 
+                                const parentPoint = parentBody.massPoints[i*numPointsX + j];
+                                mass = parentPoint.mass * (1 + (Math.random() - 0.5) * 2 * MUTATION_RATE_PERCENT);
+                                isMotor = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isMotor : parentPoint.isMotor;
+                                isEater = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isEater : parentPoint.isEater;
+                                isPredator = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentPoint.isPredator : parentPoint.isPredator;
+                            }
+                            mass = Math.max(0.1, Math.min(mass, 1.0));
+                            const point = new MassPoint(startX + j * basePointDist, startY + i * basePointDist, mass, baseRadius);
+                            point.isMotor = isMotor;
+                            point.isEater = isEater;
+                            point.isPredator = isPredator;
+                            this.massPoints.push(point);
+                            gridPoints[i][j] = point;
+                        }
+                    }
+                    for (let i = 0; i < numPointsY; i++) for (let j = 0; j < numPointsX - 1; j++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], this.stiffness, this.springDamping));
+                    for (let j = 0; j < numPointsX; j++) for (let i = 0; i < numPointsY - 1; i++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], this.stiffness, this.springDamping));
+                    for (let i = 0; i < numPointsY - 1; i++) for (let j = 0; j < numPointsX - 1; j++) {
+                        this.springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], this.stiffness * 0.7, this.springDamping));
+                        this.springs.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], this.stiffness * 0.7, this.springDamping));
+                    }
+                } else if (shapeType === 1) { 
+                    const numLinePoints = Math.floor(3 + Math.random() * 3); 
+                    const isHorizontal = Math.random() < 0.5;
+                    let linePoints = [];
+                    for (let i = 0; i < numLinePoints; i++) {
+                        const x = startX + (isHorizontal ? i * basePointDist : 0);
+                        const y = startY + (isHorizontal ? 0 : i * basePointDist);
+                        let mass = 0.3 + Math.random() * 0.4;
+                        let isMotor = Math.random() < motorChance;
+                        let isEater = Math.random() < eaterChance;
+                        let isPredator = Math.random() < predatorChance;
+                        if(parentBody && parentBody.massPoints[i]) { 
+                             mass = parentBody.massPoints[i].mass * (1 + (Math.random() - 0.5) * 2 * MUTATION_RATE_PERCENT);
+                             isMotor = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentBody.massPoints[i].isMotor : parentBody.massPoints[i].isMotor;
+                             isEater = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentBody.massPoints[i].isEater : parentBody.massPoints[i].isEater;
+                             isPredator = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentBody.massPoints[i].isPredator : parentBody.massPoints[i].isPredator;
+                        }
+
+                        mass = Math.max(0.1, Math.min(mass, 1.0));
+                        const point = new MassPoint(x, y, mass, baseRadius);
+                        point.isMotor = isMotor;
+                        point.isEater = isEater;
+                        point.isPredator = isPredator;
+                        this.massPoints.push(point);
+                        linePoints.push(point);
+                    }
+                    for (let i = 0; i < numLinePoints - 1; i++) {
+                        this.springs.push(new Spring(linePoints[i], linePoints[i+1], this.stiffness, this.springDamping));
+                    }
+                    if (numLinePoints > 2) { 
+                         this.springs.push(new Spring(linePoints[0], linePoints[numLinePoints-1], this.stiffness * 0.5, this.springDamping));
+                    }
+                } else { 
+                    const numOuterPoints = Math.floor(4 + Math.random() * 3); 
+                    let centerMass = (0.3 + Math.random() * 0.4) * 1.5; 
+                    let centerIsMotor = Math.random() < motorChance * 1.5;
+                    let centerIsEater = Math.random() < eaterChance * 1.5;
+                    let centerIsPredator = Math.random() < predatorChance * 1.2; 
+                    if(parentBody && parentBody.massPoints[0]) {
+                        centerMass = parentBody.massPoints[0].mass * (1 + (Math.random() - 0.5) * 2 * MUTATION_RATE_PERCENT);
+                        centerIsMotor = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentBody.massPoints[0].isMotor : parentBody.massPoints[0].isMotor;
+                        centerIsEater = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentBody.massPoints[0].isEater : parentBody.massPoints[0].isEater;
+                        centerIsPredator = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentBody.massPoints[0].isPredator : parentBody.massPoints[0].isPredator;
+                    }
+                    centerMass = Math.max(0.1, Math.min(centerMass, 1.5));
+                    const centralPoint = new MassPoint(startX, startY, centerMass, baseRadius * 1.2); 
+                    centralPoint.isMotor = centerIsMotor;
+                    centralPoint.isEater = centerIsEater;
+                    centralPoint.isPredator = centerIsPredator;
+                    this.massPoints.push(centralPoint);
+
+                    const circleRadius = basePointDist * 1.5;
+                    for (let i = 0; i < numOuterPoints; i++) {
+                        const angle = (i / numOuterPoints) * Math.PI * 2;
+                        const x = startX + Math.cos(angle) * circleRadius;
+                        const y = startY + Math.sin(angle) * circleRadius;
+                        let mass = 0.3 + Math.random() * 0.4;
+                        let isMotor = Math.random() < motorChance;
+                        let isEater = Math.random() < eaterChance;
+                        let isPredator = Math.random() < predatorChance;
+                        if(parentBody && parentBody.massPoints[i+1]) { 
+                             mass = parentBody.massPoints[i+1].mass * (1 + (Math.random() - 0.5) * 2 * MUTATION_RATE_PERCENT);
+                             isMotor = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentBody.massPoints[i+1].isMotor : parentBody.massPoints[i+1].isMotor;
+                             isEater = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentBody.massPoints[i+1].isEater : parentBody.massPoints[i+1].isEater;
+                             isPredator = Math.random() < MUTATION_CHANCE_NODE_TYPE ? !parentBody.massPoints[i+1].isPredator : parentBody.massPoints[i+1].isPredator;
+                        }
+                        mass = Math.max(0.1, Math.min(mass, 1.0));
+                        const point = new MassPoint(x, y, mass, baseRadius);
+                        point.isMotor = isMotor;
+                        point.isEater = isEater;
+                        point.isPredator = isPredator;
+                        this.massPoints.push(point);
+                        this.springs.push(new Spring(centralPoint, point, this.stiffness, this.springDamping));
+                        if (i > 0) {
+                            this.springs.push(new Spring(this.massPoints[this.massPoints.length-2], point, this.stiffness * 0.8, this.springDamping));
+                        }
+                    }
+                    if (numOuterPoints > 1) { 
+                         this.springs.push(new Spring(this.massPoints[1], this.massPoints[this.massPoints.length-1], this.stiffness * 0.8, this.springDamping));
+                    }
+                }
+            }
+
+
+            updateSelf(dt, fluidFieldRef) {
+                if (this.isUnstable) return;
+
+                // Calculate and apply energy cost
+                let currentFrameEnergyCost = 0;
+                for (const point of this.massPoints) {
+                    currentFrameEnergyCost += BASE_NODE_EXISTENCE_COST;
+                    if (point.isMotor && this.isMotorActive) { // Use body's isMotorActive flag
+                        currentFrameEnergyCost += MOTOR_NODE_ENERGY_COST;
+                    }
+                    if (point.isEater) {
+                        currentFrameEnergyCost += EATER_NODE_ENERGY_COST;
+                    }
+                    if (point.isPredator) {
+                        currentFrameEnergyCost += PREDATOR_NODE_ENERGY_COST;
+                    }
+                }
+                this.creatureEnergy -= currentFrameEnergyCost * dt; // dt scaling for per-second cost
+
+
+                this.ticksSinceBirth++;
+                if (this.ticksSinceBirth > REPRODUCTION_COOLDOWN_TICKS) {
+                    this.canReproduce = true;
+                }
+
+                if (this.creatureEnergy <= 0) {
+                    this.isUnstable = true; 
+                    console.log(`Soft body ID ${this.id} died from energy depletion.`);
+                    return;
+                }
+
+                // Internal Motor Impulse
+                if (this.isMotorActive && this.motorImpulseMagnitudeCap > 0.0001 && (this.ticksSinceBirth % this.motorImpulseInterval === 0)) {
+                    for (let point of this.massPoints) {
+                        if (point.isMotor && !point.isFixed) {
+                            const randomAngle = Math.random() * Math.PI * 2;
+                            const impulseDir = new Vec2(Math.cos(randomAngle), Math.sin(randomAngle));
+                            const impulseMag = Math.random() * this.motorImpulseMagnitudeCap;
+                            const impulseForce = impulseDir.mul(impulseMag / dt); 
+                            point.applyForce(impulseForce);
+                        }
+                    }
+                }
+
+
+                // Fluid -> Soft Body Entrainment
+                if (fluidFieldRef) {
+                    for (let point of this.massPoints) {
+                        if (!point.isFixed) {
+                            const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scale);
+                            const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scale);
+                            const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
+                            const rawFluidVx = fluidFieldRef.Vx[idx]; 
+                            const rawFluidVy = fluidFieldRef.Vy[idx]; 
+                            let fluidDisplacementPx = new Vec2(rawFluidVx * fluidFieldRef.scale * dt, rawFluidVy * fluidFieldRef.scale * dt);
+                            let effectiveFluidDisplacementPx = fluidDisplacementPx.mul(this.fluidCurrentStrength);
+                            let currentPointDisplacementPx = point.pos.sub(point.prevPos);
+                            let blendedDisplacementPx = currentPointDisplacementPx.mul(1.0 - this.fluidEntrainment)
+                                                             .add(effectiveFluidDisplacementPx.mul(this.fluidEntrainment));
+                            point.prevPos = point.pos.clone().sub(blendedDisplacementPx);
+                        }
+                    }
+                }
+                
+                for (let spring of this.springs) spring.applyForce();
+                
+                // Inter-body repulsion
+                for (let i = 0; i < this.massPoints.length; i++) {
+                    const p1 = this.massPoints[i];
+                    if (p1.isFixed) continue;
+
+                    for (let otherBody of softBodyPopulation) {
+                        if (otherBody === this || otherBody.isUnstable) continue;
+                        for (let j = 0; j < otherBody.massPoints.length; j++) {
+                            const p2 = otherBody.massPoints[j];
+                            if (p2.isFixed) continue;
+
+                            const diff = p1.pos.sub(p2.pos);
+                            const distSq = diff.magSq();
+                            const interactionRadius = (p1.radius + p2.radius) * BODY_REPULSION_RADIUS_FACTOR;
+
+                            if (distSq < interactionRadius * interactionRadius && distSq > 0.0001) {
+                                const dist = Math.sqrt(distSq);
+                                const overlap = interactionRadius - dist;
+                                const forceDir = diff.normalize();
+                                const repulsionForceMag = BODY_REPULSION_STRENGTH * overlap * 0.5; 
+                                const repulsionForce = forceDir.mul(repulsionForceMag);
+                                
+                                p1.applyForce(repulsionForce); 
+                            }
+                        }
+                    }
+                }
+                
+                for (let point of this.massPoints) point.update(dt); 
+                
+                for (let point of this.massPoints) {
+                    const displacementSq = point.pos.sub(point.prevPos).magSq();
+                    if (displacementSq > MAX_DISPLACEMENT_SQ_THRESHOLD || 
+                        isNaN(point.pos.x) || isNaN(point.pos.y) ||
+                        !isFinite(point.pos.x) || !isFinite(point.pos.y)) {
+                        this.isUnstable = true;
+                        console.warn(`Soft body ID ${this.id} instability detected!`, point);
+                        break; 
+                    }
+                }
+
+                if (!this.isUnstable) {
+                    for (let point of this.massPoints) {
+                        if (point.isFixed) continue;
+
+                        if (point.isEater) { 
+                            const eatingRadius = point.radius * EATING_RADIUS_MULTIPLIER;
+                            const eatingRadiusSq = eatingRadius * eatingRadius;
+                            for (let particle of particles) { 
+                                if (particle.life > 0 && !particle.isEaten) {
+                                    const distSq = point.pos.sub(particle.pos).magSq();
+                                    if (distSq < eatingRadiusSq) {
+                                        particle.isEaten = true; 
+                                        particle.life = 0; 
+                                        this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + ENERGY_PER_PARTICLE);
+                                    }
+                                }
+                            }
+                        }
+
+                        if (point.isPredator) {
+                            const predationRadius = point.radius * PREDATION_RADIUS_MULTIPLIER;
+                            const predationRadiusSq = predationRadius * predationRadius;
+                            for (let otherBody of softBodyPopulation) {
+                                if (otherBody === this || otherBody.isUnstable) continue; 
+
+                                for (let victimPoint of otherBody.massPoints) {
+                                    const distSqToVictim = point.pos.sub(victimPoint.pos).magSq();
+                                    if (distSqToVictim < predationRadiusSq) {
+                                        const energyToSap = Math.min(otherBody.creatureEnergy, ENERGY_SAPPED_PER_PREDATION);
+                                        if (energyToSap > 0) {
+                                            otherBody.creatureEnergy -= energyToSap;
+                                            this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyToSap);
+                                            break; 
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+
+                if (!this.isUnstable) {
+                    for (let point of this.massPoints) { 
+                        if (point.isFixed) continue;
+                        const implicitVelX = point.pos.x - point.prevPos.x; 
+                        const implicitVelY = point.pos.y - point.prevPos.y;
+
+                        if (IS_WORLD_WRAPPING) {
+                            const prevX = point.pos.x; 
+                            const prevY = point.pos.y;
+                            point.pos.x = (point.pos.x % WORLD_WIDTH + WORLD_WIDTH) % WORLD_WIDTH;
+                            point.pos.y = (point.pos.y % WORLD_HEIGHT + WORLD_HEIGHT) % WORLD_HEIGHT;
+                            point.prevPos.x += (point.pos.x - prevX); 
+                            point.prevPos.y += (point.pos.y - prevY);
+                        } else { 
+                            if (point.pos.x - point.radius < 0) { point.pos.x = point.radius; point.prevPos.x = point.pos.x + implicitVelX * restitution; } 
+                            else if (point.pos.x + point.radius > WORLD_WIDTH) { point.pos.x = WORLD_WIDTH - point.radius; point.prevPos.x = point.pos.x + implicitVelX * restitution; }
+                            if (point.pos.y - point.radius < 0) { point.pos.y = point.radius; point.prevPos.y = point.pos.y + implicitVelY * restitution; } 
+                            else if (point.pos.y + point.radius > WORLD_HEIGHT) { point.pos.y = WORLD_HEIGHT - point.radius; point.prevPos.y = point.pos.y + implicitVelY * restitution; }
+                        }
+                    }
+                }
+            }
+
+            reproduce() {
+                if (this.isUnstable || !this.canReproduce) return []; 
+                
+                const energyForOneOffspring = MAX_CREATURE_ENERGY * OFFSPRING_INITIAL_ENERGY_SHARE;
+                const totalEnergyForOffspring = 3 * energyForOneOffspring;
+
+                if (this.creatureEnergy < totalEnergyForOffspring) return []; 
+
+                this.creatureEnergy -= totalEnergyForOffspring; 
+                this.creatureEnergy *= (1 - REPRODUCTION_ADDITIONAL_COST_FACTOR); 
+                if(this.creatureEnergy < 0) this.creatureEnergy = 0; 
+                this.ticksSinceBirth = 0; 
+                this.canReproduce = false;
+
+
+                let offspring = [];
+                for (let i = 0; i < 3; i++) {
+                    const avgPos = this.getAveragePosition();
+                    const offsetX = (Math.random() - 0.5) * 2 * OFFSPRING_SPAWN_RADIUS;
+                    const offsetY = (Math.random() - 0.5) * 2 * OFFSPRING_SPAWN_RADIUS;
+                    
+                    let spawnX = avgPos.x + offsetX;
+                    let spawnY = avgPos.y + offsetY;
+
+                    const margin = 20;
+                    spawnX = Math.max(margin, Math.min(spawnX, WORLD_WIDTH - margin));
+                    spawnY = Math.max(margin, Math.min(spawnY, WORLD_HEIGHT - margin));
+
+                    const child = new SoftBody(nextSoftBodyId++, spawnX, spawnY, this);
+                    child.creatureEnergy = energyForOneOffspring; 
+                    offspring.push(child);
+                }
+                return offspring;
+            }
+
+            getAveragePosition() {
+                if (this.massPoints.length === 0) return new Vec2(WORLD_WIDTH/2, WORLD_HEIGHT/2);
+                let sumX = 0, sumY = 0;
+                this.massPoints.forEach(p => { sumX += p.pos.x; sumY += p.pos.y; });
+                return new Vec2(sumX / this.massPoints.length, sumY / this.massPoints.length);
+            }
+
+            drawSelf(ctx) {
+                if (this.isUnstable) return; 
+                for (let spring of this.springs) spring.draw(ctx);
+                for (let point of this.massPoints) point.draw(ctx);
+            }
+        }
+
+
+        // --- FluidField Class (Simplified) ---
+        class FluidField {
+            constructor(size, diffusion, viscosity, dt, scale) {
+                this.size = size; 
+                this.dt = dt;
+                this.diffusion = diffusion; 
+                this.viscosity = viscosity; 
+                this.scale = scale; 
+                this.useWrapping = false; 
+
+                this.densityR = new Float32Array(size * size).fill(0);
+                this.densityG = new Float32Array(size * size).fill(0);
+                this.densityB = new Float32Array(size * size).fill(0);
+                this.densityR0 = new Float32Array(size * size).fill(0);
+                this.densityG0 = new Float32Array(size * size).fill(0);
+                this.densityB0 = new Float32Array(size * size).fill(0);
+                
+                this.Vx = new Float32Array(size * size).fill(0); 
+                this.Vy = new Float32Array(size * size).fill(0); 
+                this.Vx0 = new Float32Array(size * size).fill(0); 
+                this.Vy0 = new Float32Array(size * size).fill(0); 
+                
+                this.iterations = 4; 
+            }
+
+            IX(x, y) { 
+                if (this.useWrapping) {
+                    x = (Math.floor(x) % this.size + this.size) % this.size;
+                    y = (Math.floor(y) % this.size + this.size) % this.size;
+                } else {
+                    x = Math.max(0, Math.min(x, this.size - 1));
+                    y = Math.max(0, Math.min(y, this.size - 1));
+                }
+                return Math.floor(x) + Math.floor(y) * this.size;
+            }
+
+            addDensity(x, y, r, g, b, amount) {
+                const idx = this.IX(x,y);
+                this.densityR[idx] = Math.min(255, this.densityR[idx] + r * (amount/255));
+                this.densityG[idx] = Math.min(255, this.densityG[idx] + g * (amount/255));
+                this.densityB[idx] = Math.min(255, this.densityB[idx] + b * (amount/255));
+            }
+
+            addVelocity(x, y, amountX, amountY) {
+                const idx = this.IX(x, y);
+                this.Vx[idx] += amountX;
+                this.Vy[idx] += amountY;
+            }
+            
+            lin_solve(b, x, x0, a, c) {
+                const cRecip = 1.0 / c;
+                for (let k = 0; k < this.iterations; k++) {
+                    for (let j = 1; j < this.size - 1; j++) {
+                        for (let i = 1; i < this.size - 1; i++) {
+                            x[this.IX(i, j)] =
+                                (x0[this.IX(i, j)] +
+                                a * (x[this.IX(i + 1, j)] + x[this.IX(i - 1, j)] +
+                                     x[this.IX(i, j + 1)] + x[this.IX(i, j - 1)])) *
+                                cRecip;
+                        }
+                    }
+                    this.set_bnd(b, x);
+                }
+            }
+
+            diffuse(b, x_out, x_in, diff_rate, dt) { 
+                const a = dt * diff_rate * (this.size - 2) * (this.size - 2);
+                this.lin_solve(b, x_out, x_in, a, 1 + 4 * a);
+            }
+            
+            project(velocX_in_out, velocY_in_out, p_temp, div_temp) { 
+                for (let j = 1; j < this.size - 1; j++) {
+                    for (let i = 1; i < this.size - 1; i++) {
+                        div_temp[this.IX(i, j)] = -0.5 * (
+                            velocX_in_out[this.IX(i + 1, j)] - velocX_in_out[this.IX(i - 1, j)] +
+                            velocY_in_out[this.IX(i, j + 1)] - velocY_in_out[this.IX(i, j - 1)]
+                        ) / this.size;
+                        p_temp[this.IX(i, j)] = 0;
+                    }
+                }
+                this.set_bnd(0, div_temp);
+                this.set_bnd(0, p_temp);
+                this.lin_solve(0, p_temp, div_temp, 1, 4); 
+
+                for (let j = 1; j < this.size - 1; j++) {
+                    for (let i = 1; i < this.size - 1; i++) {
+                        velocX_in_out[this.IX(i, j)] -= 0.5 * (p_temp[this.IX(i + 1, j)] - p_temp[this.IX(i - 1, j)]) * this.size;
+                        velocY_in_out[this.IX(i, j)] -= 0.5 * (p_temp[this.IX(i, j + 1)] - p_temp[this.IX(i, j - 1)]) * this.size;
+                    }
+                }
+                this.set_bnd(1, velocX_in_out);
+                this.set_bnd(2, velocY_in_out);
+            }
+
+            advect(b, d_out, d_in, velocX_source, velocY_source, dt) { 
+                let i0, i1, j0, j1;
+                const dtx = dt * (this.size - 2); 
+                const dty = dt * (this.size - 2);
+                let s0, s1, t0, t1;
+                let tmp1, tmp2, x, y;
+
+                const N = this.size;
+
+                for (let j_cell = 1; j_cell < N - 1; j_cell++) {
+                    for (let i_cell = 1; i_cell < N - 1; i_cell++) {
+                        tmp1 = dtx * velocX_source[this.IX(i_cell, j_cell)];
+                        tmp2 = dty * velocY_source[this.IX(i_cell, j_cell)];
+                        x = i_cell - tmp1; 
+                        y = j_cell - tmp2;
+
+                        if (this.useWrapping) {
+                            x = (x % N + N) % N;
+                            y = (y % N + N) % N;
+                            i0 = Math.floor(x);
+                            j0 = Math.floor(y);
+                            i1 = (i0 + 1) % N;
+                            j1 = (j0 + 1) % N;
+                        } else {
+                            if (x < 0.5) x = 0.5;
+                            if (x > N - 1.5) x = N - 1.5; 
+                            i0 = Math.floor(x);
+                            i1 = i0 + 1.0;
+                            
+                            if (y < 0.5) y = 0.5;
+                            if (y > N - 1.5) y = N - 1.5; 
+                            j0 = Math.floor(y);
+                            j1 = j0 + 1.0;
+                        }
+                        
+                        s1 = x - i0; 
+                        if (this.useWrapping && i1 === 0 && i0 === N - 1) s0 = 1.0 - s1 + 1; else s0 = 1.0 - s1;
+
+                        t1 = y - j0;
+                        if (this.useWrapping && j1 === 0 && j0 === N - 1) t0 = 1.0 - t1 + 1; else t0 = 1.0 - t1;
+
+
+                        d_out[this.IX(i_cell, j_cell)] =
+                            s0 * (t0 * d_in[this.IX(i0, j0)] + t1 * d_in[this.IX(i0, j1)]) +
+                            s1 * (t0 * d_in[this.IX(i1, j0)] + t1 * d_in[this.IX(i1, j1)]);
+                    }
+                }
+                this.set_bnd(b, d_out);
+            }
+
+            set_bnd(b, x_arr) { 
+                if (this.useWrapping) {
+                    for (let i = 1; i < this.size - 1; i++) {
+                        x_arr[this.IX(i, 0)] = x_arr[this.IX(i, this.size - 2)]; 
+                        x_arr[this.IX(i, this.size - 1)] = x_arr[this.IX(i, 1)];   
+                    }
+                    for (let j = 1; j < this.size - 1; j++) {
+                        x_arr[this.IX(0, j)] = x_arr[this.IX(this.size - 2, j)]; 
+                        x_arr[this.IX(this.size - 1, j)] = x_arr[this.IX(1, j)];   
+                    }
+                    x_arr[this.IX(0, 0)] = x_arr[this.IX(this.size - 2, this.size - 2)];
+                    x_arr[this.IX(0, this.size - 1)] = x_arr[this.IX(this.size - 2, 1)];
+                    x_arr[this.IX(this.size - 1, 0)] = x_arr[this.IX(1, this.size - 2)];
+                    x_arr[this.IX(this.size - 1, this.size - 1)] = x_arr[this.IX(1, 1)];
+
+                } else { 
+                    for (let i = 1; i < this.size - 1; i++) {
+                        x_arr[this.IX(i, 0)] = b === 2 ? -x_arr[this.IX(i, 1)] : x_arr[this.IX(i, 1)];
+                        x_arr[this.IX(i, this.size - 1)] = b === 2 ? -x_arr[this.IX(i, this.size - 2)] : x_arr[this.IX(i, this.size - 2)];
+                    }
+                    for (let j = 1; j < this.size - 1; j++) {
+                        x_arr[this.IX(0, j)] = b === 1 ? -x_arr[this.IX(1, j)] : x_arr[this.IX(1, j)];
+                        x_arr[this.IX(this.size - 1, j)] = b === 1 ? -x_arr[this.IX(this.size - 2, j)] : x_arr[this.IX(this.size - 2, j)];
+                    }
+                    x_arr[this.IX(0, 0)] = 0.5 * (x_arr[this.IX(1, 0)] + x_arr[this.IX(0, 1)]);
+                    x_arr[this.IX(0, this.size - 1)] = 0.5 * (x_arr[this.IX(1, this.size - 1)] + x_arr[this.IX(0, this.size - 2)]);
+                    x_arr[this.IX(this.size - 1, 0)] = 0.5 * (x_arr[this.IX(this.size - 2, 0)] + x_arr[this.IX(this.size - 1, 1)]);
+                    x_arr[this.IX(this.size - 1, this.size - 1)] = 0.5 * (x_arr[this.IX(this.size - 2, this.size - 1)] + x_arr[this.IX(this.size - 1, this.size - 2)]);
+                }
+            }
+            
+            step() {
+                this.diffuse(1, this.Vx0, this.Vx, this.viscosity, this.dt);
+                this.diffuse(2, this.Vy0, this.Vy, this.viscosity, this.dt);
+                this.project(this.Vx0, this.Vy0, this.Vx, this.Vy); 
+                this.advect(1, this.Vx, this.Vx0, this.Vx0, this.Vy0, this.dt);
+                this.advect(2, this.Vy, this.Vy0, this.Vx0, this.Vy0, this.dt);
+                this.project(this.Vx, this.Vy, this.Vx0, this.Vy0);
+                this.diffuse(0, this.densityR0, this.densityR, this.diffusion, this.dt);
+                this.diffuse(0, this.densityG0, this.densityG, this.diffusion, this.dt);
+                this.diffuse(0, this.densityB0, this.densityB, this.diffusion, this.dt);
+                this.advect(0, this.densityR, this.densityR0, this.Vx, this.Vy, this.dt);
+                this.advect(0, this.densityG, this.densityG0, this.Vx, this.Vy, this.dt);
+                this.advect(0, this.densityB, this.densityB0, this.Vx, this.Vy, this.dt);
+
+                for (let i = 0; i < this.densityR.length; i++) {
+                    this.densityR[i] = Math.max(0, this.densityR[i] - FLUID_FADE_RATE * 255 * this.dt);
+                    this.densityG[i] = Math.max(0, this.densityG[i] - FLUID_FADE_RATE * 255 * this.dt);
+                    this.densityB[i] = Math.max(0, this.densityB[i] - FLUID_FADE_RATE * 255 * this.dt);
+                }
+            }
+
+            draw(ctx) {
+                for (let y = 0; y < this.size; y++) {
+                    for (let x = 0; x < this.size; x++) {
+                        const idx = this.IX(x, y);
+                        const r = Math.min(255, Math.max(0, Math.floor(this.densityR[idx])));
+                        const g = Math.min(255, Math.max(0, Math.floor(this.densityG[idx])));
+                        const b = Math.min(255, Math.max(0, Math.floor(this.densityB[idx])));
+                        if (r > 1 || g > 1 || b > 1) { 
+                             ctx.fillStyle = `rgb(${r},${g},${b})`;
+                             ctx.fillRect(x * this.scale, y * this.scale, this.scale, this.scale);
+                        }
+                    }
+                }
+            }
+            clear() {
+                this.densityR.fill(0); this.densityG.fill(0); this.densityB.fill(0);
+                this.densityR0.fill(0); this.densityG0.fill(0); this.densityB0.fill(0);
+                this.Vx.fill(0); this.Vy.fill(0);
+                this.Vx0.fill(0); this.Vy0.fill(0);
+            }
+        }
+
+
+        // --- Particle Class (for fluid visualization) ---
+        class Particle {
+            constructor(x, y, fluidFieldRef) {
+                this.pos = new Vec2(x, y);
+                this.vel = new Vec2(Math.random() * 0.2 - 0.1, Math.random() * 0.2 - 0.1); 
+                this.fluidField = fluidFieldRef;
+                this.life = 1.0; 
+                this.lifeDecay = PARTICLE_BASE_LIFE_DECAY + Math.random() * PARTICLE_LIFE_DECAY_RANDOM_FACTOR;
+                this.size = Math.random() * 1.5 + 0.5;
+                this.isEaten = false; 
+            }
+
+            update(dt) {
+                if (this.isEaten) { 
+                    this.life -= 0.1 * dt * 60; 
+                     if (this.life <= 0) this.respawn();
+                    return;
+                }
+
+                if (!this.fluidField) return; 
+                const fluidGridX = Math.floor(this.pos.x / this.fluidField.scale);
+                const fluidGridY = Math.floor(this.pos.y / this.fluidField.scale);
+                const idx = this.fluidField.IX(fluidGridX, fluidGridY);
+
+                const fluidVelX = this.fluidField.Vx[idx];
+                const fluidVelY = this.fluidField.Vy[idx];
+
+                this.vel.x = this.vel.x * (1.0 - PARTICLE_FLUID_INFLUENCE) + fluidVelX * PARTICLE_FLUID_INFLUENCE;
+                this.vel.y = this.vel.y * (1.0 - PARTICLE_FLUID_INFLUENCE) + fluidVelY * PARTICLE_FLUID_INFLUENCE;
+                this.vel.x += (Math.random() - 0.5) * 0.05;
+                this.vel.y += (Math.random() - 0.5) * 0.05;
+
+                this.pos = this.pos.add(this.vel.mul(dt * 100)); 
+
+                if (IS_WORLD_WRAPPING) {
+                    if (this.pos.x < 0) this.pos.x += WORLD_WIDTH;
+                    if (this.pos.x > WORLD_WIDTH) this.pos.x -= WORLD_WIDTH;
+                    if (this.pos.y < 0) this.pos.y += WORLD_HEIGHT;
+                    if (this.pos.y > WORLD_HEIGHT) this.pos.y -= WORLD_HEIGHT;
+                } else {
+                    if (this.pos.x < 0 || this.pos.x > WORLD_WIDTH || this.pos.y < 0 || this.pos.y > WORLD_HEIGHT) {
+                        if (!IS_PARTICLE_LIFE_INFINITE) this.life = 0; 
+                    }
+                }
+                
+                if (!IS_PARTICLE_LIFE_INFINITE) {
+                    this.life -= (PARTICLE_BASE_LIFE_DECAY + Math.random() * PARTICLE_LIFE_DECAY_RANDOM_FACTOR) * dt * 60; 
+                    if (this.life <=0) { 
+                       this.respawn();
+                    }
+                } else {
+                    this.life = 1.0; 
+                }
+            }
+            
+            respawn() {
+                this.pos.x = Math.random() * WORLD_WIDTH; 
+                this.pos.y = Math.random() * WORLD_HEIGHT;
+                this.vel = new Vec2(Math.random() * 0.2 - 0.1, Math.random() * 0.2 - 0.1);
+                this.life = 1.0  + Math.random() * 0.5; 
+                this.isEaten = false;
+            }
+
+            draw(ctx) {
+                const alpha = IS_PARTICLE_LIFE_INFINITE ? 0.7 : Math.max(0, this.life * 0.7); 
+                if (alpha <= 0.01 && !IS_PARTICLE_LIFE_INFINITE) return; 
+                ctx.fillStyle = `rgba(220, 220, 250, ${alpha})`; 
+                ctx.beginPath();
+                ctx.arc(this.pos.x, this.pos.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+
+        // --- Simulation Setup ---
+        function initializePopulation() {
+            softBodyPopulation = [];
+            isAnySoftBodyUnstable = false; 
+            updateInstabilityIndicator();
+            nextSoftBodyId = 0; 
+
+            for (let i = 0; i < INITIAL_POPULATION_SIZE; i++) { 
+                const margin = 50;
+                const randX = margin + Math.random() * (WORLD_WIDTH - margin * 2); 
+                const randY = margin + Math.random() * (WORLD_HEIGHT - margin * 2);
+                softBodyPopulation.push(new SoftBody(nextSoftBodyId++, randX, randY));
+            }
+            lastTime = performance.now();
+            updatePopulationCount();
+        }
+
+
+        function initFluidSimulation() {
+            const fluidGridSize = 128; 
+            const fluidScale = WORLD_WIDTH / fluidGridSize; 
+            fluidField = new FluidField(fluidGridSize, FLUID_DIFFUSION, FLUID_VISCOSITY, 1/60, fluidScale); 
+            fluidField.useWrapping = IS_WORLD_WRAPPING; 
+        }
+
+        function initParticles() {
+            particles = [];
+            if (!fluidField) { 
+                console.warn("Fluid field not initialized when trying to create particles. Initializing now.");
+                initFluidSimulation();
+            }
+            for (let i = 0; i < NUM_PARTICLES; i++) {
+                particles.push(new Particle(Math.random() * WORLD_WIDTH, Math.random() * WORLD_HEIGHT, fluidField));
+            }
+        }
+
+        function applyCornerJets() {
+            if (IS_WORLD_WRAPPING || !fluidField || CORNER_JET_STRENGTH <= 0) return; 
+
+            const cornerRegionWorldSizeX = WORLD_WIDTH * CORNER_JET_REGION_FACTOR;
+            const cornerRegionWorldSizeY = WORLD_HEIGHT * CORNER_JET_REGION_FACTOR;
+            const cornerRegionGridSizeX = Math.floor(cornerRegionWorldSizeX / fluidField.scale);
+            const cornerRegionGridSizeY = Math.floor(cornerRegionWorldSizeY / fluidField.scale);
+            const jetVel = CORNER_JET_STRENGTH;
+
+            // Top-left: pushes towards bottom-right
+            for (let y = 0; y < cornerRegionGridSizeY; y++) {
+                for (let x = 0; x < cornerRegionGridSizeX; x++) {
+                    fluidField.addVelocity(x, y, jetVel, jetVel);
+                    fluidField.addDensity(x,y, 10,10,20, 1); 
+                }
+            }
+            // Top-right: pushes towards bottom-left
+            for (let y = 0; y < cornerRegionGridSizeY; y++) {
+                for (let x = fluidField.size - cornerRegionGridSizeX; x < fluidField.size; x++) {
+                    fluidField.addVelocity(x, y, -jetVel, jetVel);
+                     fluidField.addDensity(x,y, 10,10,20, 1);
+                }
+            }
+            // Bottom-left: pushes towards top-right
+            for (let y = fluidField.size - cornerRegionGridSizeY; y < fluidField.size; y++) {
+                for (let x = 0; x < cornerRegionGridSizeX; x++) {
+                    fluidField.addVelocity(x, y, jetVel, -jetVel);
+                     fluidField.addDensity(x,y, 10,10,20, 1);
+                }
+            }
+            // Bottom-right: pushes towards top-left
+            for (let y = fluidField.size - cornerRegionGridSizeY; y < fluidField.size; y++) {
+                for (let x = fluidField.size - cornerRegionGridSizeX; x < fluidField.size; x++) {
+                    fluidField.addVelocity(x, y, -jetVel, -jetVel);
+                     fluidField.addDensity(x,y, 20,10,20, 1); 
+                }
+            }
+        }
+
+
+        // --- Physics Update ---
+        function updatePhysics(dt) {
+            if (IS_SIMULATION_PAUSED) {
+                requestAnimationFrame(gameLoop); 
+                return;
+            }
+
+            // Update Soft Bodies First (internal physics, then their effect on fluid)
+            let currentAnyUnstable = false;
+            let newOffspring = [];
+
+            for (let i = softBodyPopulation.length - 1; i >= 0; i--) {
+                const body = softBodyPopulation[i];
+                if (!body.isUnstable) {
+                    // Pass fluidField to updateSelf for body->fluid interactions
+                    body.updateSelf(dt, fluidField); 
+                    if (body.isUnstable) {
+                        currentAnyUnstable = true;
+                    } else if (body.creatureEnergy >= MAX_CREATURE_ENERGY && body.canReproduce) {
+                        newOffspring.push(...body.reproduce());
+                    }
+                }
+            }
+            softBodyPopulation.push(...newOffspring); 
+
+            // Now update fluid (which has been influenced by motors and potentially dragging)
+            if (fluidField) {
+                applyCornerJets(); 
+                fluidField.dt = dt; 
+                fluidField.step();
+            }
+
+            // Update particles based on the new fluid state
+            for (let particle of particles) {
+                particle.update(dt);
+            }
+            
+            // Final pass for soft bodies: fluid entrainment and boundary conditions
+            // This needs to happen *after* the fluid step so they react to the latest fluid state.
+            for (let body of softBodyPopulation) {
+                if (!body.isUnstable) {
+                     if (fluidField) {
+                        for (let point of body.massPoints) {
+                            if (!point.isFixed) {
+                                const fluidGridX = Math.floor(point.pos.x / fluidField.scale);
+                                const fluidGridY = Math.floor(point.pos.y / fluidField.scale);
+                                const idx = fluidField.IX(fluidGridX, fluidGridY);
+                                const rawFluidVx = fluidField.Vx[idx]; 
+                                const rawFluidVy = fluidField.Vy[idx]; 
+                                let fluidDisplacementPx = new Vec2(rawFluidVx * fluidField.scale * dt, rawFluidVy * fluidField.scale * dt);
+                                let effectiveFluidDisplacementPx = fluidDisplacementPx.mul(body.fluidCurrentStrength); 
+                                let currentPointDisplacementPx = point.pos.sub(point.prevPos);
+                                let blendedDisplacementPx = currentPointDisplacementPx.mul(1.0 - body.fluidEntrainment) 
+                                                                .add(effectiveFluidDisplacementPx.mul(body.fluidEntrainment));
+                                point.prevPos = point.pos.clone().sub(blendedDisplacementPx);
+                            }
+                        }
+                    }
+
+                    for (let point of body.massPoints) { 
+                        if (point.isFixed) continue;
+                        const implicitVelX = point.pos.x - point.prevPos.x; 
+                        const implicitVelY = point.pos.y - point.prevPos.y;
+
+                        if (IS_WORLD_WRAPPING) {
+                            const avgPos = body.getAveragePosition(); // Check average position for wrapping
+                            if (avgPos.x < 0 || avgPos.x > WORLD_WIDTH || avgPos.y < 0 || avgPos.y > WORLD_HEIGHT) {
+                                body.massPoints.forEach(p => {
+                                    const prevX = p.pos.x;
+                                    const prevY = p.pos.y;
+                                    p.pos.x = (p.pos.x % WORLD_WIDTH + WORLD_WIDTH) % WORLD_WIDTH;
+                                    p.pos.y = (p.pos.y % WORLD_HEIGHT + WORLD_HEIGHT) % WORLD_HEIGHT;
+                                    p.prevPos.x += (p.pos.x - prevX);
+                                    p.prevPos.y += (p.pos.y - prevY);
+                                });
+                                break; // Break after wrapping the whole body once
+                            }
+                        } else { 
+                            if (point.pos.x - point.radius < 0) { point.pos.x = point.radius; point.prevPos.x = point.pos.x + implicitVelX * restitution; } 
+                            else if (point.pos.x + point.radius > WORLD_WIDTH) { point.pos.x = WORLD_WIDTH - point.radius; point.prevPos.x = point.pos.x + implicitVelX * restitution; }
+                            if (point.pos.y - point.radius < 0) { point.pos.y = point.radius; point.prevPos.y = point.pos.y + implicitVelY * restitution; } 
+                            else if (point.pos.y + point.radius > WORLD_HEIGHT) { point.pos.y = WORLD_HEIGHT - point.radius; point.prevPos.y = point.pos.y + implicitVelY * restitution; }
+                        }
+                    }
+                }
+            }
+
+
+            if(currentAnyUnstable && !isAnySoftBodyUnstable) { 
+                isAnySoftBodyUnstable = true;
+                updateInstabilityIndicator();
+            }
+
+
+            if (selectedSoftBodyPoint && selectedSoftBodyPoint.point.isFixed && fluidField) { 
+                const activeBody = selectedSoftBodyPoint.body;
+                for (let point of activeBody.massPoints) { 
+                    const displacementX = point.pos.x - point.prevPos.x; 
+                    const displacementY = point.pos.y - point.prevPos.y;
+                    const movementMagnitudeSq = displacementX*displacementX + displacementY*displacementY;
+                    const movementThresholdSq = 0.01 * 0.01; 
+
+                    if (movementMagnitudeSq > movementThresholdSq) {
+                        const fluidGridX = Math.floor(point.pos.x / fluidField.scale);
+                        const fluidGridY = Math.floor(point.pos.y / fluidField.scale);
+                        
+                        fluidField.addVelocity(fluidGridX, fluidGridY, 
+                                               displacementX * SOFT_BODY_PUSH_STRENGTH, // Use global push strength
+                                               displacementY * SOFT_BODY_PUSH_STRENGTH);
+                        fluidField.addDensity(fluidGridX, fluidGridY, 60, 60, 80, 15); 
+                    }
+                }
+            }
+            
+            let removedCount = 0;
+            for (let i = softBodyPopulation.length - 1; i >= 0; i--) {
+                if (softBodyPopulation[i].isUnstable) {
+                    softBodyPopulation.splice(i, 1);
+                    removedCount++;
+                }
+            }
+            
+            const neededToMaintainTarget = INITIAL_POPULATION_SIZE - softBodyPopulation.length;
+            if (removedCount > 0 && neededToMaintainTarget > 0) {
+                 for (let i = 0; i < neededToMaintainTarget; i++) {
+                     if (softBodyPopulation.length < INITIAL_POPULATION_SIZE * 2) { 
+                         const margin = 50;
+                         const randX = margin + Math.random() * (WORLD_WIDTH - margin * 2);
+                         const randY = margin + Math.random() * (WORLD_HEIGHT - margin * 2);
+                         softBodyPopulation.push(new SoftBody(nextSoftBodyId++, randX, randY));
+                     }
+                 }
+            }
+
+
+            if (removedCount > 0 && !softBodyPopulation.some(b => b.isUnstable)) {
+                isAnySoftBodyUnstable = false;
+                updateInstabilityIndicator();
+            }
+            updatePopulationCount();
+
+
+            draw(); 
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Drawing ---
+        function draw() {
+            ctx.fillStyle = '#222'; 
+            ctx.fillRect(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT); 
+
+            ctx.save();
+            ctx.translate(-viewOffsetX, -viewOffsetY); 
+
+            if (fluidField) {
+                fluidField.draw(ctx);
+            }
+            for (let particle of particles) {
+                particle.draw(ctx);
+            }
+            for (let body of softBodyPopulation) {
+                body.drawSelf(ctx);
+            }
+            
+            ctx.restore(); 
+        }
+
+        // --- Game Loop ---
+        let animationFrameId = null;
+        function gameLoop(timestamp) {
+            if (IS_SIMULATION_PAUSED) {
+                animationFrameId = requestAnimationFrame(gameLoop); 
+                return;
+            }
+
+            deltaTime = (timestamp - lastTime) / 1000;
+            if (isNaN(deltaTime) || deltaTime <= 0) deltaTime = 1/60; 
+            lastTime = timestamp;
+            
+            const currentMaxDeltaTime = MAX_DELTA_TIME_MS / 1000.0;
+            deltaTime = Math.min(deltaTime, currentMaxDeltaTime);
+
+            updatePhysics(deltaTime); 
+        }
+
+        // --- Config Import/Export ---
+        function handleExportConfig() {
+            const config = {
+                bodyFluidEntrainment: BODY_FLUID_ENTRAINMENT_FACTOR,
+                fluidCurrentStrength: FLUID_CURRENT_STRENGTH_ON_BODY,
+                softBodyPushStrength: SOFT_BODY_PUSH_STRENGTH,
+                energyCostPerFrame: ENERGY_COST_PER_FRAME_BASE,
+                reproductionCooldown: REPRODUCTION_COOLDOWN_TICKS,
+                bodyRepulsionStrength: BODY_REPULSION_STRENGTH,
+                bodyRepulsionRadiusFactor: BODY_REPULSION_RADIUS_FACTOR,
+                maxTimestepMs: MAX_DELTA_TIME_MS,
+                baseNodeCost: BASE_NODE_EXISTENCE_COST,
+                motorNodeCost: MOTOR_NODE_ENERGY_COST,
+                eaterNodeCost: EATER_NODE_ENERGY_COST,
+                predatorNodeCost: PREDATOR_NODE_ENERGY_COST,
+                fluidDiffusion: FLUID_DIFFUSION,
+                fluidViscosity: FLUID_VISCOSITY,
+                fluidFadeRate: FLUID_FADE_RATE,
+                cornerJetStrength: CORNER_JET_STRENGTH,
+                isWorldWrapping: IS_WORLD_WRAPPING, 
+                numParticles: NUM_PARTICLES,
+                particleFluidInfluence: PARTICLE_FLUID_INFLUENCE,
+                particleBaseLifeDecay: PARTICLE_BASE_LIFE_DECAY,
+                isParticleLifeInfinite: IS_PARTICLE_LIFE_INFINITE
+            };
+            const jsonString = JSON.stringify(config, null, 2);
+            const blob = new Blob([jsonString], {type: "application/json"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'sim_config.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            console.log("Config exported.");
+        }
+
+        function handleImportConfig(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const importedConfig = JSON.parse(e.target.result);
+                    applyImportedConfig(importedConfig);
+                    console.log("Config imported successfully.");
+                } catch (error) {
+                    console.error("Error parsing imported config:", error);
+                    alert("Failed to import config. Make sure it's a valid JSON file.");
+                }
+            };
+            reader.readAsText(file);
+            importConfigFile.value = ''; 
+        }
+
+        function applyImportedConfig(config) {
+            if (config.bodyFluidEntrainment !== undefined) BODY_FLUID_ENTRAINMENT_FACTOR = config.bodyFluidEntrainment;
+            if (config.fluidCurrentStrength !== undefined) FLUID_CURRENT_STRENGTH_ON_BODY = config.fluidCurrentStrength;
+            if (config.softBodyPushStrength !== undefined) SOFT_BODY_PUSH_STRENGTH = config.softBodyPushStrength;
+            if (config.energyCostPerFrame !== undefined) ENERGY_COST_PER_FRAME_BASE = config.energyCostPerFrame; // Legacy, now node based
+            if (config.reproductionCooldown !== undefined) REPRODUCTION_COOLDOWN_TICKS = config.reproductionCooldown;
+            if (config.bodyRepulsionStrength !== undefined) BODY_REPULSION_STRENGTH = config.bodyRepulsionStrength;
+            if (config.bodyRepulsionRadiusFactor !== undefined) BODY_REPULSION_RADIUS_FACTOR = config.bodyRepulsionRadiusFactor;
+            if (config.maxTimestepMs !== undefined) MAX_DELTA_TIME_MS = config.maxTimestepMs;
+
+            if (config.baseNodeCost !== undefined) BASE_NODE_EXISTENCE_COST = config.baseNodeCost;
+            if (config.motorNodeCost !== undefined) MOTOR_NODE_ENERGY_COST = config.motorNodeCost;
+            if (config.eaterNodeCost !== undefined) EATER_NODE_ENERGY_COST = config.eaterNodeCost;
+            if (config.predatorNodeCost !== undefined) PREDATOR_NODE_ENERGY_COST = config.predatorNodeCost;
+            
+            if (config.fluidDiffusion !== undefined) FLUID_DIFFUSION = config.fluidDiffusion;
+            if (config.fluidViscosity !== undefined) FLUID_VISCOSITY = config.fluidViscosity;
+            if (config.fluidFadeRate !== undefined) FLUID_FADE_RATE = config.fluidFadeRate;
+            if (config.cornerJetStrength !== undefined) CORNER_JET_STRENGTH = config.cornerJetStrength;
+            if (config.isWorldWrapping !== undefined) IS_WORLD_WRAPPING = config.isWorldWrapping; 
+
+            if (config.numParticles !== undefined) NUM_PARTICLES = config.numParticles;
+            if (config.particleFluidInfluence !== undefined) PARTICLE_FLUID_INFLUENCE = config.particleFluidInfluence;
+            if (config.particleBaseLifeDecay !== undefined) PARTICLE_BASE_LIFE_DECAY = config.particleBaseLifeDecay;
+            if (config.isParticleLifeInfinite !== undefined) IS_PARTICLE_LIFE_INFINITE = config.isParticleLifeInfinite;
+
+            bodyFluidEntrainmentSlider.value = BODY_FLUID_ENTRAINMENT_FACTOR;
+            fluidCurrentStrengthSlider.value = FLUID_CURRENT_STRENGTH_ON_BODY;
+            bodyPushStrengthSlider.value = SOFT_BODY_PUSH_STRENGTH;
+            // energyCostPerFrameSlider.value = ENERGY_COST_PER_FRAME_BASE; // Removed
+            baseNodeCostSlider.value = BASE_NODE_EXISTENCE_COST;
+            motorNodeCostSlider.value = MOTOR_NODE_ENERGY_COST;
+            eaterNodeCostSlider.value = EATER_NODE_ENERGY_COST;
+            predatorNodeCostSlider.value = PREDATOR_NODE_ENERGY_COST;
+
+            reproductionCooldownSlider.value = REPRODUCTION_COOLDOWN_TICKS;
+            bodyRepulsionStrengthSlider.value = BODY_REPULSION_STRENGTH;
+            bodyRepulsionRadiusFactorSlider.value = BODY_REPULSION_RADIUS_FACTOR;
+            maxTimestepSlider.value = MAX_DELTA_TIME_MS;
+            fluidDiffusionSlider.value = FLUID_DIFFUSION;
+            fluidViscositySlider.value = FLUID_VISCOSITY;
+            fluidFadeSlider.value = FLUID_FADE_RATE;
+            cornerJetStrengthSlider.value = CORNER_JET_STRENGTH;
+            worldWrapToggle.checked = IS_WORLD_WRAPPING; 
+            numParticlesSlider.value = NUM_PARTICLES;
+            particleFluidInfluenceSlider.value = PARTICLE_FLUID_INFLUENCE;
+            particleLifeDecaySlider.value = PARTICLE_BASE_LIFE_DECAY;
+            infiniteParticleLifeToggle.checked = IS_PARTICLE_LIFE_INFINITE;
+
+            initializeAllSliderDisplays(); 
+            
+            if (fluidField) { 
+                fluidField.diffusion = FLUID_DIFFUSION;
+                fluidField.viscosity = FLUID_VISCOSITY;
+                fluidField.useWrapping = IS_WORLD_WRAPPING; 
+            }
+            initParticles(); 
+            
+            console.log("Applied imported config. Reset population if needed for full effect on creatures.");
+        }
+
+
+        // Start the simulation
+        initializeAllSliderDisplays(); 
+        initFluidSimulation(); 
+        initParticles();
+        initializePopulation(); 
+        updateInstabilityIndicator(); 
+        animationFrameId = requestAnimationFrame(gameLoop); // Store initial animation frame ID
+    </script>
+</body>
+</html>

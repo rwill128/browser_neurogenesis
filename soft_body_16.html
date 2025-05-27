@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Global Mutation Rate</title>
+    <title>2D Soft Body Evolution - Consistent World/Fluid Scaling</title>
     <style>
         body {
             margin: 0;
@@ -49,9 +49,9 @@
             z-index: 1000;
             color: #eee;
             font-size: 0.8em;
-            display: block; /* Keep as block, visibility controlled by 'open' class */
-            opacity: 0; /* Start hidden */
-            visibility: hidden; /* Start hidden */
+            display: block;
+            opacity: 0;
+            visibility: hidden;
             transition: left 0.3s ease-in-out, opacity 0.3s ease-in-out, visibility 0.3s ease-in-out;
             overflow-y: auto;
             box-sizing: border-box;
@@ -270,6 +270,10 @@
             </div>
             <div class="control-group">
                 <h4>Fluid</h4>
+                <label for="fluidGridSize" class="slider-label">Fluid Grid Resolution:</label>
+                <span id="fluidGridSizeValue" class="slider-value">128</span>
+                <input type="range" id="fluidGridSize" min="32" max="256" value="128" step="16">
+
                 <label for="fluidDiffusion" class="slider-label">Diffusion:</label>
                 <span id="fluidDiffusionValue" class="slider-value">4.7e-4</span>
                 <input type="range" id="fluidDiffusion" min="0" max="0.001" value="0.00047" step="0.00001">
@@ -325,6 +329,7 @@
     <script>
         const canvas = document.getElementById('simulationCanvas');
         const ctx = canvas.getContext('2d');
+        let offscreenFluidCanvas, offscreenFluidCtx; // For smoother fluid rendering
 
         // --- Viewport and World Dimensions ---
         const WORLD_WIDTH = 1600;
@@ -351,7 +356,7 @@
         const reproductionCooldownSlider = document.getElementById('reproductionCooldown');
         const bodyRepulsionStrengthSlider = document.getElementById('bodyRepulsionStrength');
         const bodyRepulsionRadiusFactorSlider = document.getElementById('bodyRepulsionRadiusFactor');
-        const globalMutationRateSlider = document.getElementById('globalMutationRate'); // New
+        const globalMutationRateSlider = document.getElementById('globalMutationRate');
         const baseNodeCostSlider = document.getElementById('baseNodeCost');
         const emitterNodeCostSlider = document.getElementById('emitterNodeCost');
         const eaterNodeCostSlider = document.getElementById('eaterNodeCost');
@@ -365,13 +370,15 @@
         const reproductionCooldownValueSpan = document.getElementById('reproductionCooldownValue');
         const bodyRepulsionStrengthValueSpan = document.getElementById('bodyRepulsionStrengthValue');
         const bodyRepulsionRadiusFactorValueSpan = document.getElementById('bodyRepulsionRadiusFactorValue');
-        const globalMutationRateValueSpan = document.getElementById('globalMutationRateValue'); // New
+        const globalMutationRateValueSpan = document.getElementById('globalMutationRateValue');
         const baseNodeCostValueSpan = document.getElementById('baseNodeCostValue');
         const emitterNodeCostValueSpan = document.getElementById('emitterNodeCostValue');
         const eaterNodeCostValueSpan = document.getElementById('eaterNodeCostValue');
         const predatorNodeCostValueSpan = document.getElementById('predatorNodeCostValue');
 
 
+        const fluidGridSizeSlider = document.getElementById('fluidGridSize');
+        const fluidGridSizeValueSpan = document.getElementById('fluidGridSizeValue');
         const fluidDiffusionSlider = document.getElementById('fluidDiffusion');
         const fluidViscositySlider = document.getElementById('fluidViscosity');
         const fluidFadeSlider = document.getElementById('fluidFade');
@@ -410,12 +417,13 @@
         let REPRODUCTION_COOLDOWN_TICKS = parseInt(reproductionCooldownSlider.value);
         let BODY_REPULSION_STRENGTH = parseFloat(bodyRepulsionStrengthSlider.value);
         let BODY_REPULSION_RADIUS_FACTOR = parseFloat(bodyRepulsionRadiusFactorSlider.value);
-        let GLOBAL_MUTATION_RATE_MODIFIER = parseFloat(globalMutationRateSlider.value); // New
+        let GLOBAL_MUTATION_RATE_MODIFIER = parseFloat(globalMutationRateSlider.value);
         let MAX_DELTA_TIME_MS = parseInt(maxTimestepSlider.value);
         let IS_SIMULATION_PAUSED = false;
         let IS_EMITTER_EDIT_MODE = emitterEditModeToggle.checked;
         let EMITTER_STRENGTH = parseFloat(emitterStrengthSlider.value);
-        const EMITTER_MOUSE_DRAG_SCALE = 0.05;
+        const EMITTER_MOUSE_DRAG_SCALE = 0.1; // Adjusted for grid velocity
+        const FLUID_MOUSE_DRAG_VELOCITY_SCALE = 0.1; // New scale for mouse fluid push
 
         let BASE_NODE_EXISTENCE_COST = parseFloat(baseNodeCostSlider.value);
         let EMITTER_NODE_ENERGY_COST = parseFloat(emitterNodeCostSlider.value);
@@ -423,6 +431,7 @@
         let PREDATOR_NODE_ENERGY_COST = parseFloat(predatorNodeCostSlider.value);
 
 
+        let FLUID_GRID_SIZE_CONTROL = parseInt(fluidGridSizeSlider.value);
         let FLUID_DIFFUSION = parseFloat(fluidDiffusionSlider.value);
         let FLUID_VISCOSITY = parseFloat(fluidViscositySlider.value);
         let FLUID_FADE_RATE = parseFloat(fluidFadeSlider.value);
@@ -440,7 +449,6 @@
         const MAX_CREATURE_ENERGY = 100;
         const OFFSPRING_INITIAL_ENERGY_SHARE = 0.25;
         const REPRODUCTION_ADDITIONAL_COST_FACTOR = 0.1;
-        // const OFFSPRING_SPAWN_RADIUS = 70; // Now heritable
         const OFFSPRING_PLACEMENT_ATTEMPTS = 10;
         const OFFSPRING_PLACEMENT_CLEARANCE_RADIUS = 50;
         const MUTATION_RATE_PERCENT = 0.1;
@@ -462,7 +470,7 @@
             NEUTRAL: 0,
             FLOATING: 1,
             FIXED_ROOT: 2,
-            SWIMMER: 3
+            EMITTER_SWIMMER: 3
         };
         const DYE_COLORS = {
             RED: [200, 50, 50],
@@ -482,7 +490,7 @@
                        slider.id === 'bodyPushStrength' ||
                        slider.id === 'bodyRepulsionStrength' || slider.id === 'bodyRepulsionRadiusFactor' ||
                        slider.id === 'emitterStrength' || slider.id === 'globalMutationRate') {
-                 span.textContent = value.toFixed(2); // Changed to toFixed(2) for mutation rate
+                 span.textContent = value.toFixed(2);
             } else if (slider.id === 'bodyFluidEntrainment') {
                 span.textContent = value.toFixed(2);
             } else if (slider.id === 'particleLifeDecay' ||
@@ -565,6 +573,13 @@
             updateInstabilityIndicator();
         }
 
+        fluidGridSizeSlider.oninput = function() {
+            FLUID_GRID_SIZE_CONTROL = parseInt(this.value);
+            updateSliderDisplay(this, fluidGridSizeValueSpan);
+            velocityEmitters = [];
+            initFluidSimulation();
+            initParticles();
+        }
         fluidDiffusionSlider.oninput = function() { FLUID_DIFFUSION = parseFloat(this.value); updateSliderDisplay(this, fluidDiffusionValueSpan); if(fluidField) fluidField.diffusion = FLUID_DIFFUSION;}
         fluidViscositySlider.oninput = function() { FLUID_VISCOSITY = parseFloat(this.value); updateSliderDisplay(this, fluidViscosityValueSpan); if(fluidField) fluidField.viscosity = FLUID_VISCOSITY;}
         fluidFadeSlider.oninput = function() { FLUID_FADE_RATE = parseFloat(this.value); updateSliderDisplay(this, fluidFadeValueSpan);}
@@ -602,6 +617,7 @@
             updateSliderDisplay(eaterNodeCostSlider, eaterNodeCostValueSpan);
             updateSliderDisplay(predatorNodeCostSlider, predatorNodeCostValueSpan);
             updateSliderDisplay(emitterStrengthSlider, emitterStrengthValueSpan);
+            updateSliderDisplay(fluidGridSizeSlider, fluidGridSizeValueSpan);
             updateSliderDisplay(fluidDiffusionSlider, fluidDiffusionValueSpan);
             updateSliderDisplay(fluidViscositySlider, fluidViscosityValueSpan);
             updateSliderDisplay(fluidFadeSlider, fluidFadeValueSpan);
@@ -631,7 +647,7 @@
             switch(nodeType) {
                 case NodeType.FLOATING: return "Floating";
                 case NodeType.FIXED_ROOT: return "Fixed Root";
-                case NodeType.SWIMMER: return "Swimmer";
+                case NodeType.EMITTER_SWIMMER: return "Emitter/Swimmer";
                 case NodeType.NEUTRAL: return "Neutral";
                 default: return "Unknown";
             }
@@ -713,12 +729,12 @@
 
 
             if (IS_EMITTER_EDIT_MODE && fluidField) {
-                const gridX = Math.floor(simMouseX / fluidField.scale);
-                const gridY = Math.floor(simMouseY / fluidField.scale);
+                const gridX = Math.floor(simMouseX / fluidField.scaleX); // Use scaleX
+                const gridY = Math.floor(simMouseY / fluidField.scaleY); // Use scaleY
                 emitterDragStartCell = { gridX, gridY, mouseStartX: simMouseX, mouseStartY: simMouseY };
                 currentEmitterPreview = {
-                    startX: (gridX + 0.5) * fluidField.scale,
-                    startY: (gridY + 0.5) * fluidField.scale,
+                    startX: (gridX + 0.5) * fluidField.scaleX, // Use scaleX
+                    startY: (gridY + 0.5) * fluidField.scaleY, // Use scaleY
                     endX: simMouseX,
                     endY: simMouseY
                 };
@@ -757,7 +773,7 @@
             const scaleY = canvas.height / canvas.clientHeight;
             const simMouseX = (mouse.x * scaleX) + viewOffsetX;
             const simMouseY = (mouse.y * scaleY) + viewOffsetY;
-            const simMouseDx = mouse.dx * scaleX; // Scale delta for fluid interaction
+            const simMouseDx = mouse.dx * scaleX;
             const simMouseDy = mouse.dy * scaleY;
 
 
@@ -773,8 +789,8 @@
                     point.pos.y = simMouseY;
                     // updateInfoPanel(); // Panel will be updated in draw() loop
                 } else if (fluidField) {
-                    const fluidGridX = Math.floor(simMouseX / fluidField.scale);
-                    const fluidGridY = Math.floor(simMouseY / fluidField.scale);
+                    const fluidGridX = Math.floor(simMouseX / fluidField.scaleX); // Use scaleX
+                    const fluidGridY = Math.floor(simMouseY / fluidField.scaleY); // Use scaleY
                     const r1 = Math.random() * 100 + 155;
                     const g1 = Math.random() * 50 + 25;
                     const b1 = Math.random() * 100 + 100;
@@ -785,7 +801,9 @@
                     const b2 = Math.random() * 100 + 155;
                     fluidField.addDensity(fluidGridX, fluidGridY, r2, g2, b2, 150 + Math.random()*50);
 
-                    fluidField.addVelocity(fluidGridX, fluidGridY, simMouseDx * 10, simMouseDy * 10); // Use scaled dx/dy
+                    const fluidVelX = simMouseDx * FLUID_MOUSE_DRAG_VELOCITY_SCALE;
+                    const fluidVelY = simMouseDy * FLUID_MOUSE_DRAG_VELOCITY_SCALE;
+                    fluidField.addVelocity(fluidGridX, fluidGridY, fluidVelX, fluidVelY);
                 }
             }
         });
@@ -798,19 +816,24 @@
                 const simMouseY = (mouse.y * scaleY) + viewOffsetY;
 
 
-                const forceX = (simMouseX - emitterDragStartCell.mouseStartX) * EMITTER_MOUSE_DRAG_SCALE;
-                const forceY = (simMouseY - emitterDragStartCell.mouseStartY) * EMITTER_MOUSE_DRAG_SCALE;
+                const worldForceX = (simMouseX - emitterDragStartCell.mouseStartX) * EMITTER_MOUSE_DRAG_SCALE;
+                const worldForceY = (simMouseY - emitterDragStartCell.mouseStartY) * EMITTER_MOUSE_DRAG_SCALE;
+
+                // Emitter forces should be in grid velocity units per step
+                const gridForceX = worldForceX / fluidField.scaleX;
+                const gridForceY = worldForceY / fluidField.scaleY;
+
 
                 const existingEmitter = velocityEmitters.find(em => em.gridX === emitterDragStartCell.gridX && em.gridY === emitterDragStartCell.gridY);
                 if (existingEmitter) {
-                    existingEmitter.forceX = forceX;
-                    existingEmitter.forceY = forceY;
+                    existingEmitter.forceX = gridForceX;
+                    existingEmitter.forceY = gridForceY;
                 } else {
                     velocityEmitters.push({
                         gridX: emitterDragStartCell.gridX,
                         gridY: emitterDragStartCell.gridY,
-                        forceX: forceX,
-                        forceY: forceY
+                        forceX: gridForceX,
+                        forceY: gridForceY
                     });
                 }
                 emitterDragStartCell = null;
@@ -916,9 +939,9 @@
                 ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
                 if (this.isPredator) {
                     ctx.fillStyle = 'rgba(255, 50, 50, 0.9)';
-                } else if (this.nodeType === NodeType.SWIMMER && this.isEater) {
+                } else if (this.nodeType === NodeType.EMITTER_SWIMMER && this.isEater) {
                      ctx.fillStyle = 'rgba(200,255,0,0.9)';
-                } else if (this.nodeType === NodeType.SWIMMER) {
+                } else if (this.nodeType === NodeType.EMITTER_SWIMMER) {
                     ctx.fillStyle = 'rgba(0,255,100,0.9)';
                 } else if (this.isEater) {
                     ctx.fillStyle = 'rgba(255,165,0,0.9)';
@@ -1050,7 +1073,7 @@
                 const predatorChance = 0.15;
                 const dyeEmitterChance = 0.2;
 
-                const nodeTypeChoices = [NodeType.NEUTRAL, NodeType.FLOATING, NodeType.FIXED_ROOT, NodeType.SWIMMER];
+                const nodeTypeChoices = [NodeType.NEUTRAL, NodeType.FLOATING, NodeType.FIXED_ROOT, NodeType.EMITTER_SWIMMER];
                 const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
 
 
@@ -1223,7 +1246,7 @@
                 let currentFrameEnergyCost = 0;
                 for (const point of this.massPoints) {
                     currentFrameEnergyCost += BASE_NODE_EXISTENCE_COST;
-                    if (point.nodeType === NodeType.SWIMMER && this.emitterStrength > 0.0001) {
+                    if (point.nodeType === NodeType.EMITTER_SWIMMER && this.emitterStrength > 0.0001) {
                         currentFrameEnergyCost += EMITTER_NODE_ENERGY_COST;
                     }
                     if (point.isEater) {
@@ -1266,20 +1289,20 @@
                     for (let point of this.massPoints) {
                         if (point.isFixed || point.nodeType === NodeType.FIXED_ROOT) continue;
 
-                        const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scale);
-                        const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scale);
+                        const fluidGridX = Math.floor(point.pos.x / fluidField.scaleX); // Use scaleX
+                        const fluidGridY = Math.floor(point.pos.y / fluidField.scaleY); // Use scaleY
                         const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
 
                         if (point.nodeType === NodeType.FLOATING) {
                             const rawFluidVx = fluidFieldRef.Vx[idx];
                             const rawFluidVy = fluidFieldRef.Vy[idx];
-                            let fluidDisplacementPx = new Vec2(rawFluidVx * fluidFieldRef.scale * dt, rawFluidVy * fluidFieldRef.scale * dt);
+                            let fluidDisplacementPx = new Vec2(rawFluidVx * fluidFieldRef.scaleX * dt, rawFluidVy * fluidFieldRef.scaleY * dt); // Use scaleX/Y
                             let effectiveFluidDisplacementPx = fluidDisplacementPx.mul(this.fluidCurrentStrength);
                             let currentPointDisplacementPx = point.pos.sub(point.prevPos);
                             let blendedDisplacementPx = currentPointDisplacementPx.mul(1.0 - this.fluidEntrainment)
                                                              .add(effectiveFluidDisplacementPx.mul(this.fluidEntrainment));
                             point.prevPos = point.pos.clone().sub(blendedDisplacementPx);
-                        } else if (point.nodeType === NodeType.SWIMMER && this.emitterStrength > 0.0001) {
+                        } else if (point.nodeType === NodeType.EMITTER_SWIMMER && this.emitterStrength > 0.0001) {
                             const emitterPushVx = this.emitterDirection.x * this.emitterStrength;
                             const emitterPushVy = this.emitterDirection.y * this.emitterStrength;
                             fluidFieldRef.addVelocity(fluidGridX, fluidGridY, emitterPushVx, emitterPushVy);
@@ -1480,14 +1503,14 @@
 
         // --- FluidField Class (Simplified) ---
         class FluidField {
-            constructor(size, diffusion, viscosity, dt, scale) {
+            constructor(size, diffusion, viscosity, dt, scaleX, scaleY) { // Added scaleX, scaleY
                 this.size = size;
                 this.dt = dt;
                 this.diffusion = diffusion;
                 this.viscosity = viscosity;
-                this.scale = scale;
+                this.scaleX = scaleX; // Store separate scales
+                this.scaleY = scaleY;
                 this.useWrapping = false;
-                // this.isSolid = new Array(size * size).fill(false); // Removed isSolid array
 
                 this.densityR = new Float32Array(size * size).fill(0);
                 this.densityG = new Float32Array(size * size).fill(0);
@@ -1534,7 +1557,6 @@
                     for (let j = 1; j < this.size - 1; j++) {
                         for (let i = 1; i < this.size - 1; i++) {
                              const idx = this.IX(i,j);
-                             // Removed isSolid check here
                             x[idx] =
                                 (x0[idx] +
                                 a * ( x[this.IX(i+1,j)] + x[this.IX(i-1,j)] +
@@ -1555,11 +1577,10 @@
                 for (let j = 1; j < this.size - 1; j++) {
                     for (let i = 1; i < this.size - 1; i++) {
                         const idx = this.IX(i,j);
-                        // Removed isSolid check here
                         div_temp[idx] = -0.5 * (
                             velocX_in_out[this.IX(i+1,j)] - velocX_in_out[this.IX(i-1,j)] +
                             velocY_in_out[this.IX(i,j+1)] - velocY_in_out[this.IX(i,j-1)]
-                        ) / this.size;
+                        ) / this.size; // Using this.size here assumes square cells for divergence calculation
                         p_temp[idx] = 0;
                     }
                 }
@@ -1570,7 +1591,6 @@
                 for (let j = 1; j < this.size - 1; j++) {
                     for (let i = 1; i < this.size - 1; i++) {
                         const idx = this.IX(i,j);
-                        // Removed isSolid check here
                         velocX_in_out[idx] -= 0.5 * (p_temp[this.IX(i+1,j)] - p_temp[this.IX(i-1,j)]) * this.size;
                         velocY_in_out[idx] -= 0.5 * (p_temp[this.IX(i,j+1)] - p_temp[this.IX(i,j-1)]) * this.size;
                     }
@@ -1591,7 +1611,6 @@
                 for (let j_cell = 1; j_cell < N - 1; j_cell++) {
                     for (let i_cell = 1; i_cell < N - 1; i_cell++) {
                         const current_idx = this.IX(i_cell, j_cell);
-                        // Removed isSolid check here
 
                         tmp1 = dtx * velocX_source[current_idx];
                         tmp2 = dty * velocY_source[current_idx];
@@ -1623,7 +1642,6 @@
                         t1 = y - j0;
                         if (this.useWrapping && j1 === 0 && j0 === N - 1) t0 = 1.0 - t1 + 1; else t0 = 1.0 - t1;
 
-                        // Removed isSolid checks for sampling, fluid flows through everything
                         d_out[current_idx] = s0 * (t0 * d_in[this.IX(i0,j0)] + t1 * d_in[this.IX(i0,j1)]) +
                                              s1 * (t0 * d_in[this.IX(i1,j0)] + t1 * d_in[this.IX(i1,j1)]);
                     }
@@ -1683,19 +1701,26 @@
                 }
             }
 
-            draw(ctx) {
-                for (let y = 0; y < this.size; y++) {
-                    for (let x = 0; x < this.size; x++) {
-                        const idx = this.IX(x, y);
-                        const r = Math.min(255, Math.max(0, Math.floor(this.densityR[idx])));
-                        const g = Math.min(255, Math.max(0, Math.floor(this.densityG[idx])));
-                        const b = Math.min(255, Math.max(0, Math.floor(this.densityB[idx])));
-                        if (r > 1 || g > 1 || b > 1) {
-                             ctx.fillStyle = `rgb(${r},${g},${b})`;
-                             ctx.fillRect(x * this.scale, y * this.scale, this.scale, this.scale);
-                        }
-                    }
+            draw(ctxToDrawOn, targetWidth, targetHeight) {
+                if (!offscreenFluidCanvas || offscreenFluidCanvas.width !== this.size) {
+                    offscreenFluidCanvas = document.createElement('canvas');
+                    offscreenFluidCanvas.width = this.size;
+                    offscreenFluidCanvas.height = this.size;
+                    offscreenFluidCtx = offscreenFluidCanvas.getContext('2d');
                 }
+
+                const imgData = offscreenFluidCtx.createImageData(this.size, this.size);
+                const data = imgData.data;
+                for (let i = 0; i < this.size * this.size; i++) {
+                    data[i * 4 + 0] = Math.min(255, Math.max(0, Math.floor(this.densityR[i])));
+                    data[i * 4 + 1] = Math.min(255, Math.max(0, Math.floor(this.densityG[i])));
+                    data[i * 4 + 2] = Math.min(255, Math.max(0, Math.floor(this.densityB[i])));
+                    data[i * 4 + 3] = (this.densityR[i] > 1 || this.densityG[i] > 1 || this.densityB[i] > 1) ? 255 : 0;
+                }
+                offscreenFluidCtx.putImageData(imgData, 0, 0);
+
+                ctxToDrawOn.imageSmoothingEnabled = true;
+                ctxToDrawOn.drawImage(offscreenFluidCanvas, 0, 0, this.size, this.size, 0, 0, targetWidth, targetHeight);
             }
             clear() {
                 this.densityR.fill(0); this.densityG.fill(0); this.densityB.fill(0);
@@ -1726,8 +1751,8 @@
                 }
 
                 if (!this.fluidField) return;
-                const fluidGridX = Math.floor(this.pos.x / this.fluidField.scale);
-                const fluidGridY = Math.floor(this.pos.y / this.fluidField.scale);
+                const fluidGridX = Math.floor(this.pos.x / this.fluidField.scaleX); // Use scaleX
+                const fluidGridY = Math.floor(this.pos.y / this.fluidField.scaleY); // Use scaleY
                 const idx = this.fluidField.IX(fluidGridX, fluidGridY);
 
                 const fluidVelX = this.fluidField.Vx[idx];
@@ -1799,10 +1824,15 @@
 
 
         function initFluidSimulation() {
-            const fluidGridSize = 128;
-            const fluidScale = WORLD_WIDTH / fluidGridSize;
-            fluidField = new FluidField(fluidGridSize, FLUID_DIFFUSION, FLUID_VISCOSITY, 1/60, fluidScale);
+            const scaleX = WORLD_WIDTH / FLUID_GRID_SIZE_CONTROL;
+            const scaleY = WORLD_HEIGHT / FLUID_GRID_SIZE_CONTROL;
+            fluidField = new FluidField(FLUID_GRID_SIZE_CONTROL, FLUID_DIFFUSION, FLUID_VISCOSITY, 1/60, scaleX, scaleY);
             fluidField.useWrapping = IS_WORLD_WRAPPING;
+            velocityEmitters = [];
+            if (offscreenFluidCanvas) {
+                offscreenFluidCanvas.width = FLUID_GRID_SIZE_CONTROL;
+                offscreenFluidCanvas.height = FLUID_GRID_SIZE_CONTROL;
+            }
         }
 
         function initParticles() {
@@ -1844,12 +1874,12 @@
                 const movementThresholdSq = 0.01 * 0.01;
 
                 if (movementMagnitudeSq > movementThresholdSq) {
-                    const fluidGridX = Math.floor(point.pos.x / fluidField.scale);
-                    const fluidGridY = Math.floor(point.pos.y / fluidField.scale);
+                    const fluidGridX = Math.floor(point.pos.x / fluidField.scaleX);
+                    const fluidGridY = Math.floor(point.pos.y / fluidField.scaleY);
 
                     fluidField.addVelocity(fluidGridX, fluidGridY,
-                                           displacementX * SOFT_BODY_PUSH_STRENGTH,
-                                           displacementY * SOFT_BODY_PUSH_STRENGTH);
+                                           displacementX * SOFT_BODY_PUSH_STRENGTH / fluidField.scaleX, // Scale to grid velocity
+                                           displacementY * SOFT_BODY_PUSH_STRENGTH / fluidField.scaleY);
                     fluidField.addDensity(fluidGridX, fluidGridY, 60, 60, 80, 15);
                 }
             }
@@ -1921,7 +1951,9 @@
             ctx.translate(-viewOffsetX, -viewOffsetY);
 
             if (fluidField) {
-                fluidField.draw(ctx);
+                // Draw fluid to main canvas, scaled and smoothed
+                ctx.imageSmoothingEnabled = true;
+                fluidField.draw(ctx, WORLD_WIDTH, WORLD_HEIGHT);
             }
             for (let particle of particles) {
                 particle.draw(ctx);
@@ -1949,10 +1981,12 @@
             // Draw existing emitters
             if (fluidField && velocityEmitters.length > 0) {
                  for (const emitter of velocityEmitters) {
-                    const startX = (emitter.gridX + 0.5) * fluidField.scale;
-                    const startY = (emitter.gridY + 0.5) * fluidField.scale;
-                    const endX = startX + emitter.forceX * EMITTER_STRENGTH * 20; // Scale for visibility
-                    const endY = startY + emitter.forceY * EMITTER_STRENGTH * 20;
+                    const startX = (emitter.gridX + 0.5) * fluidField.scaleX; // Use scaleX
+                    const startY = (emitter.gridY + 0.5) * fluidField.scaleY; // Use scaleY
+                    // Scale the force for visualization based on an average scale, or pick one.
+                    const visualScale = (fluidField.scaleX + fluidField.scaleY) / 2;
+                    const endX = startX + emitter.forceX * EMITTER_STRENGTH * visualScale * 5; // Adjusted scaling for visibility
+                    const endY = startY + emitter.forceY * EMITTER_STRENGTH * visualScale * 5;
 
                     ctx.beginPath();
                     ctx.moveTo(startX, startY);
@@ -1971,7 +2005,7 @@
                 }
             }
 
-            if (selectedInspectBody && selectedInspectPoint) { // Update info panel content if an item is selected
+            if (selectedInspectBody && selectedInspectPoint) {
                 updateInfoPanel();
             }
 
@@ -2012,6 +2046,7 @@
                 bodyRepulsionRadiusFactor: BODY_REPULSION_RADIUS_FACTOR,
                 maxTimestepMs: MAX_DELTA_TIME_MS,
                 globalMutationRate: GLOBAL_MUTATION_RATE_MODIFIER,
+                fluidGridSize: FLUID_GRID_SIZE_CONTROL,
                 fluidDiffusion: FLUID_DIFFUSION,
                 fluidViscosity: FLUID_VISCOSITY,
                 fluidFadeRate: FLUID_FADE_RATE,
@@ -2071,6 +2106,7 @@
             if (config.predatorNodeCost !== undefined) PREDATOR_NODE_ENERGY_COST = config.predatorNodeCost;
             if (config.emitterStrength !== undefined) EMITTER_STRENGTH = config.emitterStrength;
             if (config.velocityEmitters !== undefined) velocityEmitters = config.velocityEmitters;
+            if (config.fluidGridSize !== undefined) FLUID_GRID_SIZE_CONTROL = config.fluidGridSize;
 
             if (config.fluidDiffusion !== undefined) FLUID_DIFFUSION = config.fluidDiffusion;
             if (config.fluidViscosity !== undefined) FLUID_VISCOSITY = config.fluidViscosity;
@@ -2091,6 +2127,7 @@
             predatorNodeCostSlider.value = PREDATOR_NODE_ENERGY_COST;
             emitterStrengthSlider.value = EMITTER_STRENGTH;
             globalMutationRateSlider.value = GLOBAL_MUTATION_RATE_MODIFIER;
+            fluidGridSizeSlider.value = FLUID_GRID_SIZE_CONTROL;
 
             reproductionCooldownSlider.value = REPRODUCTION_COOLDOWN_TICKS;
             bodyRepulsionStrengthSlider.value = BODY_REPULSION_STRENGTH;
@@ -2108,11 +2145,8 @@
 
             initializeAllSliderDisplays();
 
-            if (fluidField) {
-                fluidField.diffusion = FLUID_DIFFUSION;
-                fluidField.viscosity = FLUID_VISCOSITY;
-                fluidField.useWrapping = IS_WORLD_WRAPPING;
-            }
+            // Re-initialize fluid and particles if grid size changed
+            initFluidSimulation();
             initParticles();
 
             console.log("Applied imported config. Reset population if needed for full effect on creatures.");

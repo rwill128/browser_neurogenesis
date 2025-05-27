@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Heritable Reproduction Traits</title>
+    <title>2D Soft Body Evolution - Flyout Inspector Panel</title>
     <style>
         body {
             margin: 0;
@@ -11,65 +11,36 @@
             background-color: #111;
             font-family: sans-serif;
             color: #eee;
-            display: flex; /* Use flex for overall page layout */
+            display: flex;
             flex-direction: column;
-            height: 100vh; /* Full viewport height */
+            height: 100vh;
         }
         #pageContainer {
-            display: flex; /* This will be the main container for controls and sim area */
-            flex-direction: row; /* Controls on right, sim+info on left */
+            display: flex;
+            flex-direction: row;
             width: 100%;
             height: 100%;
             box-sizing: border-box;
         }
 
-        #simulationAndInfoWrapper {
-            display: flex;
-            flex-direction: row;
-            justify-content: flex-start; /* Align info panel and canvas to the left */
-            align-items: stretch; /* Make them take full height */
-            gap: 10px;
-            flex-grow: 1; /* Allow this wrapper to take remaining space */
-            padding: 10px;
-            box-sizing: border-box;
-            height: 100%;
-        }
-        #infoPanel {
-            width: 280px;
-            min-width: 250px;
-            height: 100%;
-            background-color: rgba(30,30,30,0.95);
-            border: 1px solid #555;
-            border-radius: 8px;
-            padding: 15px;
-            box-shadow: 0 0 15px rgba(0,0,0,0.5);
-            z-index: 100;
-            color: #eee;
-            font-size: 0.8em;
-            display: none;
-            overflow-y: auto;
-            box-sizing: border-box;
-            position: relative;
-        }
-        #canvasContainer { /* New container for the canvas */
+        #canvasContainer {
             flex-grow: 1;
             height: 100%;
-            display: flex; /* To center the canvas if it's smaller due to aspect ratio */
+            display: flex;
             justify-content: center;
             align-items: center;
-            overflow: hidden; /* Hide parts of the large canvas outside the viewport */
-            position: relative; /* For absolute positioning of the canvas if needed, or just for structure */
-            background-color: #222; /* Background for the canvas area */
-            border: 1px solid #444;
-            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            background-color: #1a1a1a; /* Slightly different from body for visual separation */
+            padding: 10px;
+            box-sizing: border-box;
         }
         canvas {
-            /* width & height attributes set by JS to WORLD_WIDTH/HEIGHT */
-            /* CSS handles display scaling */
             max-width: 100%;
             max-height: 100%;
-            object-fit: contain; /* Scales down to fit, maintaining aspect ratio */
+            object-fit: contain;
             cursor: default;
+            border: 1px solid #444;
         }
         canvas.emitter-edit-mode {
             cursor: crosshair;
@@ -125,6 +96,46 @@
             flex-direction: column;
         }
 
+        #infoPanel {
+            position: fixed;
+            top: 15px; /* Align with controls button */
+            left: -330px; /* Start off-screen (width + padding) */
+            width: 300px;
+            max-height: calc(100vh - 30px); /* Allow some padding from top/bottom */
+            background-color: rgba(30,30,30,0.95);
+            border: 1px solid #555;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.5);
+            z-index: 1000; /* Below controls button but above canvas content */
+            color: #eee;
+            font-size: 0.8em;
+            display: block; /* Always block, controlled by left position */
+            overflow-y: auto;
+            box-sizing: border-box;
+            transition: left 0.3s ease-in-out;
+        }
+        #infoPanel.open {
+            left: 15px; /* Slide in */
+        }
+        #infoPanel h5 { margin-top: 0; margin-bottom: 8px; color: #00aeff; border-bottom: 1px solid #444; padding-bottom: 5px; }
+        #infoPanel p { margin: 3px 0; line-height: 1.4; }
+        #infoPanel strong { color: #bbb; }
+        #infoPanel .info-section { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #333; }
+        #infoPanel .info-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+        #closeInfoPanel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #555;
+            color: white;
+            border: none;
+            padding: 3px 7px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+
+        /* Slider and checkbox styling remains the same */
         #controls label.slider-label, #controls label.checkbox-label { display: block; margin-bottom: 2px; font-size: 0.85em; font-weight: bold; color: #ddd; text-align: left; }
         #controls label.checkbox-label { margin-top: 8px; display: flex; align-items: center; }
         #controls input[type="checkbox"] { margin-left: 5px; }
@@ -139,19 +150,12 @@
         .indicator-light.unstable { background-color: #F44336; }
         #populationCount { margin-top: 10px; font-size: 0.9em; color: #ccc; text-align: center; width: 100%; }
         .viewport-instructions { font-size: 0.8em; color: #bbb; text-align: center; margin-top: 5px; }
-        #infoPanel h5 { margin-top: 0; margin-bottom: 8px; color: #00aeff; border-bottom: 1px solid #444; padding-bottom: 5px; }
-        #infoPanel p { margin: 3px 0; line-height: 1.4; }
-        #infoPanel strong { color: #bbb; }
-        #infoPanel .info-section { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #333; }
-        #infoPanel .info-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-        #closeInfoPanel { position: absolute; top: 10px; right: 10px; background: #555; color: white; border: none; padding: 3px 7px; cursor: pointer; border-radius: 3px; }
     </style>
 </head>
 <body>
     <div id="pageContainer">
         <div id="simulationAndInfoWrapper">
-            <div id="infoPanel">
-                <button id="closeInfoPanel">X</button>
+            <div id="infoPanel"> <button id="closeInfoPanel">X</button>
                 <div class="info-section">
                     <h5>Soft Body Info</h5>
                     <p><strong>ID:</strong> <span id="infoBodyId">-</span></p>
@@ -331,7 +335,7 @@
         const bodyRepulsionStrengthSlider = document.getElementById('bodyRepulsionStrength');
         const bodyRepulsionRadiusFactorSlider = document.getElementById('bodyRepulsionRadiusFactor');
         const baseNodeCostSlider = document.getElementById('baseNodeCost');
-        const motorNodeCostSlider = document.getElementById('emitterNodeCost');
+        const emitterNodeCostSlider = document.getElementById('emitterNodeCost');  // Corrected ID
         const eaterNodeCostSlider = document.getElementById('eaterNodeCost');
         const predatorNodeCostSlider = document.getElementById('predatorNodeCost');
         const instabilityLight = document.getElementById('instabilityLight');
@@ -344,7 +348,7 @@
         const bodyRepulsionStrengthValueSpan = document.getElementById('bodyRepulsionStrengthValue');
         const bodyRepulsionRadiusFactorValueSpan = document.getElementById('bodyRepulsionRadiusFactorValue');
         const baseNodeCostValueSpan = document.getElementById('baseNodeCostValue');
-        const motorNodeCostValueSpan = document.getElementById('motorNodeCostValue');
+        const emitterNodeCostValueSpan = document.getElementById('emitterNodeCostValue'); // Corrected ID
         const eaterNodeCostValueSpan = document.getElementById('eaterNodeCostValue');
         const predatorNodeCostValueSpan = document.getElementById('predatorNodeCostValue');
 
@@ -394,7 +398,7 @@
         const EMITTER_MOUSE_DRAG_SCALE = 0.05;
 
         let BASE_NODE_EXISTENCE_COST = parseFloat(baseNodeCostSlider.value);
-        let MOTOR_NODE_ENERGY_COST = parseFloat(motorNodeCostSlider.value);
+        let EMITTER_NODE_ENERGY_COST = parseFloat(emitterNodeCostSlider.value);
         let EATER_NODE_ENERGY_COST = parseFloat(eaterNodeCostSlider.value);
         let PREDATOR_NODE_ENERGY_COST = parseFloat(predatorNodeCostSlider.value);
 
@@ -461,7 +465,7 @@
             } else if (slider.id === 'bodyFluidEntrainment') {
                 span.textContent = value.toFixed(2);
             } else if (slider.id === 'particleLifeDecay' ||
-                       slider.id === 'baseNodeCost' || slider.id === 'motorNodeCost' ||
+                       slider.id === 'baseNodeCost' || slider.id === 'emitterNodeCost' ||
                        slider.id === 'eaterNodeCost' || slider.id === 'predatorNodeCost') {
                 span.textContent = value.toFixed(4);
             } else if (slider.id === 'fluidFade') {
@@ -529,7 +533,7 @@
         bodyRepulsionRadiusFactorSlider.oninput = function() { BODY_REPULSION_RADIUS_FACTOR = parseFloat(this.value); updateSliderDisplay(this, bodyRepulsionRadiusFactorValueSpan); }
 
         baseNodeCostSlider.oninput = function() { BASE_NODE_EXISTENCE_COST = parseFloat(this.value); updateSliderDisplay(this, baseNodeCostValueSpan); }
-        motorNodeCostSlider.oninput = function() { MOTOR_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, motorNodeCostValueSpan); }
+        emitterNodeCostSlider.oninput = function() { EMITTER_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, emitterNodeCostValueSpan); }
         eaterNodeCostSlider.oninput = function() { EATER_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, eaterNodeCostValueSpan); }
         predatorNodeCostSlider.oninput = function() { PREDATOR_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, predatorNodeCostValueSpan); }
 
@@ -559,7 +563,7 @@
         exportConfigButton.onclick = handleExportConfig;
         importConfigButton.onclick = () => importConfigFile.click();
         importConfigFile.onchange = handleImportConfig;
-        closeInfoPanelButton.onclick = () => { infoPanel.style.display = 'none'; selectedInspectBody = null; selectedInspectPoint = null; }
+        closeInfoPanelButton.onclick = () => { infoPanel.classList.remove('open'); selectedInspectBody = null; selectedInspectPoint = null; }
 
 
         function initializeAllSliderDisplays() {
@@ -571,7 +575,8 @@
             updateSliderDisplay(bodyRepulsionStrengthSlider, bodyRepulsionStrengthValueSpan);
             updateSliderDisplay(bodyRepulsionRadiusFactorSlider, bodyRepulsionRadiusFactorValueSpan);
             updateSliderDisplay(baseNodeCostSlider, baseNodeCostValueSpan);
-            updateSliderDisplay(motorNodeCostSlider, motorNodeCostValueSpan);
+            updateSliderDisplay(emitterNodeCostSlider, emitterNodeCostValueSpan);
+            updateSliderDisplay(emitterNodeCostSlider, emitterNodeCostValueSpan);
             updateSliderDisplay(eaterNodeCostSlider, eaterNodeCostValueSpan);
             updateSliderDisplay(predatorNodeCostSlider, predatorNodeCostValueSpan);
             updateSliderDisplay(emitterStrengthSlider, emitterStrengthValueSpan);
@@ -639,9 +644,9 @@
                 document.getElementById('infoPointEmitsDye').textContent = selectedInspectPoint.emitsDye;
                 document.getElementById('infoPointDyeColor').textContent = selectedInspectPoint.emitsDye ? `R:${selectedInspectPoint.dyeColor[0]} G:${selectedInspectPoint.dyeColor[1]} B:${selectedInspectPoint.dyeColor[2]}` : "N/A";
 
-                infoPanel.style.display = 'block';
+                infoPanel.classList.add('open');
             } else {
-                infoPanel.style.display = 'none';
+                infoPanel.classList.remove('open');
             }
         }
 
@@ -840,7 +845,6 @@
                 this.color = color;
                 this.isFixed = false;
                 this.nodeType = NodeType.NEUTRAL;
-                // this.isMotor = false; // Removed
                 this.isEater = false;
                 this.isPredator = false;
                 this.emitsDye = false;
@@ -1190,7 +1194,7 @@
                 for (const point of this.massPoints) {
                     currentFrameEnergyCost += BASE_NODE_EXISTENCE_COST;
                     if (point.nodeType === NodeType.EMITTER_SWIMMER && this.emitterStrength > 0.0001) {
-                        currentFrameEnergyCost += MOTOR_NODE_ENERGY_COST;
+                        currentFrameEnergyCost += EMITTER_NODE_ENERGY_COST;
                     }
                     if (point.isEater) {
                         currentFrameEnergyCost += EATER_NODE_ENERGY_COST;
@@ -1966,7 +1970,7 @@
                 fluidCurrentStrength: FLUID_CURRENT_STRENGTH_ON_BODY,
                 softBodyPushStrength: SOFT_BODY_PUSH_STRENGTH,
                 baseNodeCost: BASE_NODE_EXISTENCE_COST,
-                motorNodeCost: MOTOR_NODE_ENERGY_COST,
+                motorNodeCost: EMITTER_NODE_ENERGY_COST,
                 eaterNodeCost: EATER_NODE_ENERGY_COST,
                 predatorNodeCost: PREDATOR_NODE_ENERGY_COST,
                 reproductionCooldown: REPRODUCTION_COOLDOWN_TICKS,
@@ -2026,7 +2030,7 @@
             if (config.maxTimestepMs !== undefined) MAX_DELTA_TIME_MS = config.maxTimestepMs;
 
             if (config.baseNodeCost !== undefined) BASE_NODE_EXISTENCE_COST = config.baseNodeCost;
-            if (config.motorNodeCost !== undefined) MOTOR_NODE_ENERGY_COST = config.motorNodeCost;
+            if (config.motorNodeCost !== undefined) EMITTER_NODE_ENERGY_COST = config.motorNodeCost;
             if (config.eaterNodeCost !== undefined) EATER_NODE_ENERGY_COST = config.eaterNodeCost;
             if (config.predatorNodeCost !== undefined) PREDATOR_NODE_ENERGY_COST = config.predatorNodeCost;
             if (config.emitterStrength !== undefined) EMITTER_STRENGTH = config.emitterStrength;
@@ -2046,7 +2050,7 @@
             fluidCurrentStrengthSlider.value = FLUID_CURRENT_STRENGTH_ON_BODY;
             bodyPushStrengthSlider.value = SOFT_BODY_PUSH_STRENGTH;
             baseNodeCostSlider.value = BASE_NODE_EXISTENCE_COST;
-            motorNodeCostSlider.value = MOTOR_NODE_ENERGY_COST;
+            emitterNodeCostSlider.value = EMITTER_NODE_ENERGY_COST;
             eaterNodeCostSlider.value = EATER_NODE_ENERGY_COST;
             predatorNodeCostSlider.value = PREDATOR_NODE_ENERGY_COST;
             emitterStrengthSlider.value = EMITTER_STRENGTH;

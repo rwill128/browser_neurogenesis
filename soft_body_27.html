@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Spatial Partitioning for Interactions</title>
+    <title>2D Soft Body Evolution - Spatial Partitioning Fix</title>
     <style>
         body {
             margin: 0;
@@ -222,7 +222,7 @@
         <div id="controls">
             <div class="control-group">
                 <h4>Viewport & Sim</h4>
-                <div class="viewport-instructions">Use WASD to Pan View, Scroll to Zoom</div>
+                <div class="viewport-instructions">WASD/Right-Drag to Pan, Scroll to Zoom</div>
                 <label for="worldWrapToggle" class="checkbox-label">Wrap Edges:
                     <input type="checkbox" id="worldWrapToggle">
                 </label>
@@ -291,7 +291,7 @@
                 <h4>Fluid</h4>
                 <label for="fluidGridSize" class="slider-label">Fluid Grid Resolution:</label>
                 <span id="fluidGridSizeValue" class="slider-value">128</span>
-                <input type="range" id="fluidGridSize" min="32" max="2048" value="128" step="16">
+                <input type="range" id="fluidGridSize" min="32" max="256" value="128" step="16">
 
                 <label for="fluidDiffusion" class="slider-label">Diffusion:</label>
                 <span id="fluidDiffusionValue" class="slider-value">4.7e-4</span>
@@ -362,24 +362,24 @@
         let viewOffsetY = 0;
         let viewZoom = 1.0;
         const ZOOM_SENSITIVITY = 0.02;
-        const MAX_ZOOM = 4.0;
+        const MAX_ZOOM = 8.0;
         let MIN_ZOOM = 0.1;
 
         // Spatial Grid for optimization
-        const GRID_CELL_SIZE = 100; // Adjust as needed, should be > typical interaction radius
+        const GRID_CELL_SIZE = 100;
         let GRID_COLS = Math.ceil(WORLD_WIDTH / GRID_CELL_SIZE);
         let GRID_ROWS = Math.ceil(WORLD_HEIGHT / GRID_CELL_SIZE);
         let spatialGrid = [];
 
         function initializeSpatialGrid() {
-            GRID_COLS = Math.ceil(WORLD_WIDTH / GRID_CELL_SIZE);
-            GRID_ROWS = Math.ceil(WORLD_HEIGHT / GRID_CELL_SIZE);
+            GRID_COLS = Math.max(1, Math.ceil(WORLD_WIDTH / GRID_CELL_SIZE)); // Ensure at least 1
+            GRID_ROWS = Math.max(1, Math.ceil(WORLD_HEIGHT / GRID_CELL_SIZE)); // Ensure at least 1
             spatialGrid = new Array(GRID_COLS * GRID_ROWS);
             for (let i = 0; i < spatialGrid.length; i++) {
                 spatialGrid[i] = [];
             }
         }
-        initializeSpatialGrid();
+
 
         function populateSpatialGrid() {
             for (let i = 0; i < spatialGrid.length; i++) {
@@ -388,10 +388,14 @@
             softBodyPopulation.forEach(body => {
                 if (body.isUnstable) return;
                 body.massPoints.forEach(point => {
+                    if (isNaN(point.pos.x) || isNaN(point.pos.y) || !isFinite(point.pos.x) || !isFinite(point.pos.y)) {
+                        return;
+                    }
                     const gx = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(point.pos.x / GRID_CELL_SIZE)));
                     const gy = Math.max(0, Math.min(GRID_ROWS - 1, Math.floor(point.pos.y / GRID_CELL_SIZE)));
+
                     const gridIndex = gx + gy * GRID_COLS;
-                    if(spatialGrid[gridIndex]) { // Check if grid cell is valid
+                    if(spatialGrid[gridIndex] && Number.isFinite(gridIndex) && gridIndex < spatialGrid.length) {
                         spatialGrid[gridIndex].push({ pointRef: point, bodyRef: body });
                     }
                 });
@@ -403,8 +407,6 @@
         const worldWrapToggle = document.getElementById('worldWrapToggle');
         const maxTimestepSlider = document.getElementById('maxTimestep');
         const maxTimestepValueSpan = document.getElementById('maxTimestepValue');
-        // const viewZoomSlider = document.getElementById('viewZoom'); // Removed
-        // const viewZoomValueSpan = document.getElementById('viewZoomValue'); // Removed
         const pauseResumeButton = document.getElementById('pauseResumeButton');
         const toggleControlsButton = document.getElementById('toggleControlsButton');
         const controlsPanel = document.getElementById('controls');
@@ -524,8 +526,8 @@
         const NEW_POINT_OFFSET_RADIUS = 15;
 
         let isAnySoftBodyUnstable = false;
-        const MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5);
-        const INITIAL_POPULATION_SIZE = 10;
+        let MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5);
+        let INITIAL_POPULATION_SIZE = 10;
 
         let velocityEmitters = [];
         let currentEmitterPreview = null;
@@ -533,6 +535,10 @@
         let selectedInspectBody = null;
         let selectedInspectPoint = null;
         let selectedInspectPointIndex = -1;
+        isRightDragging = false;
+        lastPanMouseX = 0;
+        lastPanMouseY = 0;
+
 
         const NodeType = {
             NEUTRAL: 0,
@@ -564,7 +570,7 @@
             } else if (slider.id === 'particleFluidInfluence' || slider.id === 'fluidCurrentStrength' ||
                        slider.id === 'bodyPushStrength' ||
                        slider.id === 'bodyRepulsionStrength' || slider.id === 'bodyRepulsionRadiusFactor' ||
-                       slider.id === 'emitterStrength' || slider.id === 'globalMutationRate' /*|| slider.id === 'viewZoom'*/) {
+                       slider.id === 'emitterStrength' || slider.id === 'globalMutationRate') {
                  span.textContent = value.toFixed(2);
             } else if (slider.id === 'bodyFluidEntrainment') {
                 span.textContent = value.toFixed(2);
@@ -588,13 +594,14 @@
             const effectiveViewportHeight = canvas.clientHeight / viewZoom;
             const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
             const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
+            const panSpeed = VIEW_PAN_SPEED / viewZoom;
 
 
             switch(e.key.toLowerCase()) {
-                case 'w': viewOffsetY = Math.max(0, viewOffsetY - (VIEW_PAN_SPEED / viewZoom)); break;
-                case 's': viewOffsetY = Math.min(maxPanY, viewOffsetY + (VIEW_PAN_SPEED / viewZoom)); break;
-                case 'a': viewOffsetX = Math.max(0, viewOffsetX - (VIEW_PAN_SPEED / viewZoom)); break;
-                case 'd': viewOffsetX = Math.min(maxPanX, viewOffsetX + (VIEW_PAN_SPEED / viewZoom)); break;
+                case 'w': viewOffsetY = Math.max(0, viewOffsetY - panSpeed); break;
+                case 's': viewOffsetY = Math.min(maxPanY, viewOffsetY + panSpeed); break;
+                case 'a': viewOffsetX = Math.max(0, viewOffsetX - panSpeed); break;
+                case 'd': viewOffsetX = Math.min(maxPanX, viewOffsetX + panSpeed); break;
                 case 'p':
                     IS_SIMULATION_PAUSED = !IS_SIMULATION_PAUSED;
                     pauseResumeButton.textContent = IS_SIMULATION_PAUSED ? "Resume" : "Pause";
@@ -704,7 +711,7 @@
             updateSliderDisplay(emitterNodeCostSlider, emitterNodeCostValueSpan);
             updateSliderDisplay(eaterNodeCostSlider, eaterNodeCostValueSpan);
             updateSliderDisplay(predatorNodeCostSlider, predatorNodeCostValueSpan);
-            updateSliderDisplay(neuronNodeCostSlider, neuronNodeCostValueSpan); // New
+            updateSliderDisplay(neuronNodeCostSlider, neuronNodeCostValueSpan);
             updateSliderDisplay(emitterStrengthSlider, emitterStrengthValueSpan);
             updateSliderDisplay(fluidGridSizeSlider, fluidGridSizeValueSpan);
             updateSliderDisplay(fluidDiffusionSlider, fluidDiffusionValueSpan);
@@ -737,7 +744,7 @@
                 case NodeType.FLOATING: return "Floating";
                 case NodeType.FIXED_ROOT: return "Fixed Root";
                 case NodeType.EMITTER_SWIMMER: return "Emitter/Swimmer";
-                case NodeType.NEURON: return "Neuron"; // New
+                case NodeType.NEURON: return "Neuron";
                 case NodeType.NEUTRAL: return "Neutral";
                 default: return "Unknown";
             }
@@ -827,6 +834,12 @@
         // --- Mouse Interaction ---
         let selectedSoftBodyPoint = null;
         let mouse = { x: 0, y: 0, prevX: 0, prevY: 0, isDown: false, dx:0, dy:0 };
+        isRightDragging = false;
+        panStartMouseDisplayX = 0;
+        panStartMouseDisplayY = 0;
+        panInitialViewOffsetX = 0;
+        panInitialViewOffsetY = 0;
+
 
         function updateMouse(e) {
             const rect = canvas.getBoundingClientRect();
@@ -862,7 +875,17 @@
 
         canvas.addEventListener('mousedown', (e) => {
             mouse.isDown = true;
-            updateMouse(e); // Updates mouse.x, mouse.y relative to canvas element
+            updateMouse(e);
+
+            if (e.button === 2) { // Right mouse button
+                isRightDragging = true;
+                panStartMouseDisplayX = mouse.x;
+                panStartMouseDisplayY = mouse.y;
+                panInitialViewOffsetX = viewOffsetX;
+                panInitialViewOffsetY = viewOffsetY;
+                e.preventDefault();
+                return;
+            }
 
             const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
             const simMouseX = worldCoords.x;
@@ -909,13 +932,41 @@
         });
 
         canvas.addEventListener('mousemove', (e) => {
-            updateMouse(e); // mouse.x, mouse.y, mouse.dx, mouse.dy are in display pixels
+            updateMouse(e);
+
+            if (isRightDragging) {
+                const currentDisplayMouseX = mouse.x;
+                const currentDisplayMouseY = mouse.y;
+
+                const displayDx = currentDisplayMouseX - panStartMouseDisplayX;
+                const displayDy = currentDisplayMouseY - panStartMouseDisplayY;
+
+                // Convert display pixel delta to world unit delta for panning, considering zoom and canvas scaling
+                const rect = canvas.getBoundingClientRect();
+                const effectiveRenderScale = Math.min(rect.width / WORLD_WIDTH, rect.height / WORLD_HEIGHT);
+
+                const panDeltaX_world = displayDx / (effectiveRenderScale * viewZoom);
+                const panDeltaY_world = displayDy / (effectiveRenderScale * viewZoom);
+
+                viewOffsetX = panInitialViewOffsetX - panDeltaX_world;
+                viewOffsetY = panInitialViewOffsetY - panDeltaY_world;
+
+                // Clamp viewOffset
+                const effectiveViewportWidth = canvas.clientWidth / viewZoom;
+                const effectiveViewportHeight = canvas.clientHeight / viewZoom;
+                const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
+                const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
+                viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
+                viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
+                return; // Don't process other mousemove logic if right-dragging
+            }
+
 
             const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
             const simMouseX = worldCoords.x;
             const simMouseY = worldCoords.y;
 
-            const worldPrevCoords = getMouseWorldCoordinates(mouse.prevX, mouse.prevY);
+            const worldPrevCoords = getMouseWorldCoordinates(mouse.prevX, mouse.prevY); // Use prev mouse display coords
             const worldMouseDx = simMouseX - worldPrevCoords.x;
             const worldMouseDy = simMouseY - worldPrevCoords.y;
 
@@ -950,7 +1001,15 @@
             }
         });
 
-        canvas.addEventListener('mouseup', () => {
+        canvas.addEventListener('mouseup', (e) => {
+            if (isRightDragging && e.button === 2) {
+                isRightDragging = false;
+                e.preventDefault();
+                return;
+            }
+            isRightDragging = false; // General mouse up stops any drag
+
+
             if (IS_EMITTER_EDIT_MODE && emitterDragStartCell && fluidField) {
                 const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
                 const simMouseX = worldCoords.x;
@@ -1007,7 +1066,13 @@
                 selectedSoftBodyPoint = null;
             }
             mouse.isDown = false;
+            isRightDragging = false; // Stop right-drag panning if mouse leaves canvas
         });
+
+        canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault(); // Prevent context menu on canvas
+        });
+
 
         canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
@@ -1030,8 +1095,11 @@
             const scroll = e.deltaY < 0 ? 1 : -1;
             const newZoom = viewZoom * Math.pow(1 + ZOOM_SENSITIVITY * 10, scroll);
 
-            MIN_ZOOM = Math.max(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT);
-            MIN_ZOOM = Math.min(1.0, MIN_ZOOM);
+            // Calculate MIN_ZOOM dynamically based on fitting the world into the client view
+            let calculatedMinZoomX = canvas.clientWidth / WORLD_WIDTH;
+            let calculatedMinZoomY = canvas.clientHeight / WORLD_HEIGHT;
+            MIN_ZOOM = Math.min(calculatedMinZoomX, calculatedMinZoomY); // Ensure entire world can be seen if zoomed out enough
+            MIN_ZOOM = Math.max(0.01, MIN_ZOOM); // Absolute minimum bound to prevent division by zero or extreme zoom out
 
             viewZoom = Math.max(MIN_ZOOM, Math.min(newZoom, MAX_ZOOM));
 
@@ -1138,11 +1206,11 @@
                 ctx.fill();
 
                 // Glow effect using shadow
+                ctx.save(); // Save context state before applying shadow
                 ctx.shadowColor = mainColor;
                 ctx.shadowBlur = 7;
                 ctx.fill(); // Re-fill to apply shadow as a glow
-                ctx.shadowBlur = 0; // Reset shadow
-                ctx.shadowColor = 'transparent';
+                ctx.restore(); // Restore context state to remove shadow for subsequent drawings
 
 
                 if (this.nodeType === NodeType.NEURON) {
@@ -1151,7 +1219,7 @@
                     ctx.fillStyle = 'rgba(250, 200, 255, 0.9)';
                     ctx.fill();
                 }
-                ctx.closePath(); // Should be after all drawing for the point
+                // ctx.closePath(); // Already closed by fill()
             }
         }
 
@@ -1186,15 +1254,15 @@
                 this.p2.applyForce(totalForce.mul(-1));
             }
             draw(ctx) {
-                ctx.lineCap = "round"; // Added for smoother lines
-                ctx.lineJoin = "round"; // Added for smoother joins
+                ctx.lineCap = "round";
+                ctx.lineJoin = "round";
                 ctx.beginPath();
                 ctx.moveTo(this.p1.pos.x, this.p1.pos.y);
                 ctx.lineTo(this.p2.pos.x, this.p2.pos.y);
                 ctx.strokeStyle = 'rgba(150,150,150,0.6)';
                 ctx.lineWidth = 2;
                 ctx.stroke();
-                ctx.closePath();
+                // ctx.closePath(); // Not needed for lineTo
             }
         }
 
@@ -1378,7 +1446,6 @@
                             point.isPredator = Math.random() < predatorChance;
                             point.emitsDye = Math.random() < dyeEmitterChance;
                             point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
-                            // console.log(`Initial Grid Point (Body ${this.id}, Point ${this.massPoints.length}): isEater=${point.isEater}, eaterChance=${eaterChance}`);
                             this.massPoints.push(point); gridPoints[i][j] = point;
                         }}
                         for (let i=0; i<numPointsY; i++) for (let j=0; j<numPointsX-1; j++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], this.stiffness, this.springDamping));
@@ -1429,27 +1496,24 @@
                             };
                         }
                         if (p.nodeType === NodeType.FIXED_ROOT) p.isFixed = true;
-                        // console.log(`Finalized Initial Point ${idx} (Body ${this.id}): nodeType=${p.nodeType}, isEater=${p.isEater}`);
                     });
                 }
 
                 // Common post-creation neuron linking (for both initial and reproduced)
                 this.massPoints.forEach((p, idx) => {
                     if (p.nodeType === NodeType.NEURON && p.neuronData) {
-                        // Sensor linking
                         if (this.massPoints.length > 1) {
                             let newSensorIndex;
                             do { newSensorIndex = Math.floor(Math.random() * this.massPoints.length); } while (newSensorIndex === idx);
                             p.neuronData.sensorPointIndex = newSensorIndex;
                         } else {
-                            p.neuronData.sensorPointIndex = -1; // No other point to sense
+                            p.neuronData.sensorPointIndex = -1;
                         }
-                        // Effector linking
                         const effectorCandidates = this.massPoints.map((ep, epIdx) => ep.nodeType === NodeType.EMITTER_SWIMMER ? epIdx : -1).filter(epIdx => epIdx !== -1 && epIdx !== idx);
                         if (effectorCandidates.length > 0) {
                              p.neuronData.effectorPointIndex = effectorCandidates[Math.floor(Math.random() * effectorCandidates.length)];
                         } else {
-                            p.neuronData.effectorPointIndex = -1; // No valid effector
+                            p.neuronData.effectorPointIndex = -1;
                         }
                     }
                 });
@@ -1606,34 +1670,35 @@
 
                             if (checkGx >= 0 && checkGx < GRID_COLS && checkGy >= 0 && checkGy < GRID_ROWS) {
                                 const cellIndex = checkGx + checkGy * GRID_COLS;
-                                const cellBucket = spatialGrid[cellIndex];
+                                if (Array.isArray(spatialGrid[cellIndex])) { // Ensure bucket is iterable
+                                    const cellBucket = spatialGrid[cellIndex];
+                                    for (const otherPointData of cellBucket) {
+                                        if (otherPointData.bodyRef === this) continue;
 
-                                for (const otherPointData of cellBucket) {
-                                    if (otherPointData.bodyRef === this) continue; // Skip points from the same body
+                                        const p2 = otherPointData.pointRef;
+                                        if (p2.isFixed) continue;
 
-                                    const p2 = otherPointData.pointRef;
-                                    if (p2.isFixed) continue;
+                                        const diff = p1.pos.sub(p2.pos);
+                                        const distSq = diff.magSq();
+                                        const interactionRadius = (p1.radius + p2.radius) * BODY_REPULSION_RADIUS_FACTOR;
 
-                                    const diff = p1.pos.sub(p2.pos);
-                                    const distSq = diff.magSq();
-                                    const interactionRadius = (p1.radius + p2.radius) * BODY_REPULSION_RADIUS_FACTOR;
+                                        if (distSq < interactionRadius * interactionRadius && distSq > 0.0001) {
+                                            const dist = Math.sqrt(distSq);
+                                            const overlap = interactionRadius - dist;
+                                            const forceDir = diff.normalize();
+                                            const repulsionForceMag = BODY_REPULSION_STRENGTH * overlap * 0.5;
+                                            const repulsionForce = forceDir.mul(repulsionForceMag);
+                                            p1.applyForce(repulsionForce);
+                                        }
 
-                                    if (distSq < interactionRadius * interactionRadius && distSq > 0.0001) {
-                                        const dist = Math.sqrt(distSq);
-                                        const overlap = interactionRadius - dist;
-                                        const forceDir = diff.normalize();
-                                        const repulsionForceMag = BODY_REPULSION_STRENGTH * overlap * 0.5;
-                                        const repulsionForce = forceDir.mul(repulsionForceMag);
-                                        p1.applyForce(repulsionForce);
-                                    }
-
-                                    if (p1.isPredator) {
-                                        const predationRadius = p1.radius * PREDATION_RADIUS_MULTIPLIER;
-                                        if (distSq < predationRadius * predationRadius) {
-                                            const energyToSap = Math.min(otherPointData.bodyRef.creatureEnergy, ENERGY_SAPPED_PER_PREDATION);
-                                            if (energyToSap > 0) {
-                                                otherPointData.bodyRef.creatureEnergy -= energyToSap;
-                                                this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyToSap);
+                                        if (p1.isPredator) {
+                                            const predationRadius = p1.radius * PREDATION_RADIUS_MULTIPLIER;
+                                            if (distSq < predationRadius * predationRadius) {
+                                                const energyToSap = Math.min(otherPointData.bodyRef.creatureEnergy, ENERGY_SAPPED_PER_PREDATION);
+                                                if (energyToSap > 0) {
+                                                    otherPointData.bodyRef.creatureEnergy -= energyToSap;
+                                                    this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyToSap);
+                                                }
                                             }
                                         }
                                     }
@@ -2039,8 +2104,11 @@
 
             update(dt) {
                 if (this.isEaten) {
-                    this.life -= 0.1 * dt * 60;
-                     if (this.life <= 0) this.respawn();
+                     // Particle is fading out after being eaten
+                     this.life -= 0.2 * dt * 60; // Faster fade for eaten particles
+                     if (this.life <= 0) {
+                         // To be removed in updatePhysics
+                     }
                     return;
                 }
 
@@ -2073,20 +2141,14 @@
                 if (!IS_PARTICLE_LIFE_INFINITE) {
                     this.life -= (PARTICLE_BASE_LIFE_DECAY + Math.random() * PARTICLE_LIFE_DECAY_RANDOM_FACTOR) * dt * 60;
                     if (this.life <=0) {
-                       // Instead of respawn, particle will be removed in updatePhysics
+                       // To be removed in updatePhysics
                     }
                 } else {
                     this.life = 1.0;
                 }
             }
 
-            respawn() { // This method is no longer called directly by Particle, but can be used by external logic if needed (though not with rate-based emission)
-                this.pos.x = Math.random() * WORLD_WIDTH;
-                this.pos.y = Math.random() * WORLD_HEIGHT;
-                this.vel = new Vec2(Math.random() * 0.2 - 0.1, Math.random() * 0.2 - 0.1);
-                this.life = 1.0  + Math.random() * 0.5;
-                this.isEaten = false;
-            }
+            // respawn() removed as particles are now emitted and removed
 
             draw(ctx) {
                 const alpha = IS_PARTICLE_LIFE_INFINITE ? 0.7 : Math.max(0, this.life * 0.7);
@@ -2151,7 +2213,7 @@
                 return;
             }
 
-            populateSpatialGrid(); // Populate spatial grid at the start of each physics step
+            populateSpatialGrid();
 
             applyVelocityEmitters();
 
@@ -2208,9 +2270,9 @@
             // Update and remove dead particles
             for (let i = particles.length - 1; i >= 0; i--) {
                 particles[i].update(dt);
-                if (particles[i].life <= 0 && !IS_PARTICLE_LIFE_INFINITE && !particles[i].isEaten) { // isEaten check to avoid double removal
+                if (particles[i].life <= 0 && !particles[i].isEaten) {
                     particles.splice(i, 1);
-                } else if (particles[i].isEaten && particles[i].life <=0) { // Clean up eaten particles after fade
+                } else if (particles[i].isEaten && particles[i].life <=0) {
                     particles.splice(i,1);
                 }
             }
@@ -2485,6 +2547,7 @@
 
 
         // Start the simulation
+        initializeSpatialGrid(); // Initial call
         initializeAllSliderDisplays();
         initFluidSimulation();
         initParticles();

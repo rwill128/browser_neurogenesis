@@ -4,7 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Incredible Stuff">
+    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
+      <change afterPath="$PROJECT_DIR$/soft_body_27.html" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/soft_body_28.html" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/soft_body_26.html" beforeDir="false" afterPath="$PROJECT_DIR$/soft_body_26.html" afterDir="false" />
     </list>
@@ -139,7 +141,7 @@
       <workItem from="1748404633579" duration="1090000" />
       <workItem from="1748407142250" duration="3984000" />
       <workItem from="1748444840156" duration="115000" />
-      <workItem from="1748444958636" duration="2414000" />
+      <workItem from="1748444958636" duration="3854000" />
     </task>
     <task id="LOCAL-00001" summary="Checkpoint">
       <option name="closed" value="true" />
@@ -365,7 +367,15 @@
       <option name="project" value="LOCAL" />
       <updated>1748409388725</updated>
     </task>
-    <option name="localTasksCounter" value="29" />
+    <task id="LOCAL-00029" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
+      <option name="closed" value="true" />
+      <created>1748447401019</created>
+      <option name="number" value="00029" />
+      <option name="presentableId" value="LOCAL-00029" />
+      <option name="project" value="LOCAL" />
+      <updated>1748447401019</updated>
+    </task>
+    <option name="localTasksCounter" value="30" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -387,7 +397,8 @@
     <MESSAGE value="CHeckpoint" />
     <MESSAGE value="Amazing Checkpoint" />
     <MESSAGE value="Incredible Stuff" />
-    <option name="LAST_COMMIT_MESSAGE" value="Incredible Stuff" />
+    <MESSAGE value="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear" />
+    <option name="LAST_COMMIT_MESSAGE" value="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Slider Updates & Zoom Sensitivity Control</title>
+    <title>2D Soft Body Evolution - Advanced Controls & Defaults</title>
     <style>
         body {
             margin: 0;
@@ -133,9 +133,10 @@
             flex-direction: column;
         }
 
-        #controls label.slider-label, #controls label.checkbox-label { display: block; margin-bottom: 2px; font-size: 0.85em; font-weight: bold; color: #ddd; text-align: left; }
+        #controls label.slider-label, #controls label.checkbox-label, #controls label.input-label { display: block; margin-bottom: 2px; font-size: 0.85em; font-weight: bold; color: #ddd; text-align: left; }
         #controls label.checkbox-label { margin-top: 8px; display: flex; align-items: center; }
         #controls input[type="checkbox"] { margin-left: 5px; }
+        #controls input[type="number"] { width: 100%; padding: 5px; margin-top: 2px; margin-bottom: 5px; box-sizing: border-box; background-color: #333; color: #eee; border: 1px solid #555; border-radius: 3px;}
         #controls span.slider-value { display: block; font-size: 0.8em; text-align: right; color: #00aeff; margin-bottom: 3px; min-height: 1em; }
         #controls input[type="range"] { width: 100%; margin-top: 0; box-sizing: border-box; }
         #controls input[type="range"]:disabled + span.slider-value, #controls input[type="range"]:disabled ~ label.slider-label, #controls input[type="range"]:disabled { color: #777; opacity: 0.6; }
@@ -223,6 +224,12 @@
             <div class="control-group">
                 <h4>Viewport & Sim</h4>
                 <div class="viewport-instructions">WASD/Right-Drag to Pan, Scroll to Zoom</div>
+                <label for="worldWidthInput" class="input-label">World Width:</label>
+                <input type="number" id="worldWidthInput" value="3200" step="100">
+                <label for="worldHeightInput" class="input-label">World Height:</label>
+                <input type="number" id="worldHeightInput" value="2400" step="100">
+                <button id="resizeWorldButton">Resize World & Reset Sim</button>
+
                 <label for="worldWrapToggle" class="checkbox-label">Wrap Edges:
                     <input type="checkbox" id="worldWrapToggle">
                 </label>
@@ -230,7 +237,7 @@
                 <span id="maxTimestepValue" class="slider-value">10</span>
                 <input type="range" id="maxTimestep" min="1" max="50" value="10" step="1">
                 <label for="zoomSensitivitySlider" class="slider-label">Zoom Sensitivity:</label>
-                <span id="zoomSensitivityValueSpan" class="slider-value">0.020</span>
+                <span id="zoomSensitivityValueSpan" class="slider-value">0.0200</span>
                 <input type="range" id="zoomSensitivitySlider" min="0.005" max="0.03" value="0.02" step="0.0005">
                 <button id="pauseResumeButton">Pause</button>
             </div>
@@ -313,8 +320,8 @@
                 <input type="range" id="fluidViscosity" min="0" max="0.00015" value="0.000068" step="0.000001">
 
                 <label for="fluidFade" class="slider-label">Fade Rate:</label>
-                <span id="fluidFadeValue" class="slider-value">0.050</span>
-                <input type="range" id="fluidFade" min="0.0" max="1.0" value="0.05" step="0.001">
+                <span id="fluidFadeValue" class="slider-value">0.002</span>
+                <input type="range" id="fluidFade" min="0.0" max="1.0" value="0.002" step="0.001">
                 <button id="clearFluidButton">Clear Fluid</button>
             </div>
             <div class="control-group">
@@ -328,16 +335,16 @@
                 <input type="range" id="particlePopulationCeilingSlider" min="0" max="20000" value="5000" step="50">
 
                 <label for="particlesPerSecondSlider" class="slider-label">Particles / Sec (if between floor/ceil):</label>
-                <span id="particlesPerSecondValueSpan" class="slider-value">10</span>
-                <input type="range" id="particlesPerSecondSlider" min="0" max="100" value="10" step="1">
+                <span id="particlesPerSecondValueSpan" class="slider-value">100</span>
+                <input type="range" id="particlesPerSecondSlider" min="0" max="500" value="100" step="1">
 
                 <label for="particleFluidInfluence" class.slider-label="slider-label">Fluid Influence:</label>
-                <span id="particleFluidInfluenceValue" class="slider-value">1.0</span>
-                <input type="range" id="particleFluidInfluence" min="0.0" max="1.0" value="0.97" step="0.01">
+                <span id="particleFluidInfluenceValue" class="slider-value">1.00</span>
+                <input type="range" id="particleFluidInfluence" min="0.0" max="2.0" value="1.0" step="0.01">
 
                 <label for="particleLifeDecay" id="particleLifeDecayLabel" class="slider-label">Life Decay Rate:</label>
-                <span id="particleLifeDecayValue" class="slider-value">0.0050</span>
-                <input type="range" id="particleLifeDecay" min="0.0001" max="0.02" value="0.005" step="0.0001">
+                <span id="particleLifeDecayValue" class="slider-value">0.0010</span>
+                <input type="range" id="particleLifeDecay" min="0.0001" max="0.02" value="0.001" step="0.0001">
 
                 <label for="infiniteParticleLifeToggle" class="checkbox-label">Infinite Life:
                     <input type="checkbox" id="infiniteParticleLifeToggle">
@@ -351,8 +358,8 @@
                     <input type="checkbox" id="emitterEditModeToggle">
                 </label>
                 <label for="emitterStrength" class="slider-label">Emitter Strength:</label>
-                <span id="emitterStrengthValue" class="slider-value">1.0</span>
-                <input type="range" id="emitterStrength" min="0.0" max="5.0" value="1.0" step="0.1">
+                <span id="emitterStrengthValue" class="slider-value">3.0</span>
+                <input type="range" id="emitterStrength" min="0.0" max="10.0" value="3.0" step="0.1">
                 <button id="clearEmittersButton">Clear Emitters</button>
             </div>
             <div class="control-group">
@@ -370,8 +377,8 @@
         let offscreenFluidCanvas, offscreenFluidCtx; // For smoother fluid rendering
 
         // --- Viewport and World Dimensions ---
-        let WORLD_WIDTH = 10000;
-        let WORLD_HEIGHT = 7000;
+        let WORLD_WIDTH = 3200;
+        let WORLD_HEIGHT = 2400;
         const VIEW_PAN_SPEED = 80;
 
         canvas.width = WORLD_WIDTH;
@@ -380,7 +387,7 @@
         let viewOffsetX = 0;
         let viewOffsetY = 0;
         let viewZoom = 1.0;
-        let ZOOM_SENSITIVITY = 0.02; // Changed to let, default updated
+        let ZOOM_SENSITIVITY = 0.02;
         const MAX_ZOOM = 8.0;
         let MIN_ZOOM = 0.1;
 
@@ -437,11 +444,15 @@
 
 
         // --- Controls ---
+        const worldWidthInput = document.getElementById('worldWidthInput'); // New
+        const worldHeightInput = document.getElementById('worldHeightInput'); // New
+        const resizeWorldButton = document.getElementById('resizeWorldButton'); // New
+
         const worldWrapToggle = document.getElementById('worldWrapToggle');
         const maxTimestepSlider = document.getElementById('maxTimestep');
         const maxTimestepValueSpan = document.getElementById('maxTimestepValue');
-        const zoomSensitivitySlider = document.getElementById('zoomSensitivitySlider'); // New
-        const zoomSensitivityValueSpan = document.getElementById('zoomSensitivityValueSpan'); // New
+        const zoomSensitivitySlider = document.getElementById('zoomSensitivitySlider');
+        const zoomSensitivityValueSpan = document.getElementById('zoomSensitivityValueSpan');
         const pauseResumeButton = document.getElementById('pauseResumeButton');
         const toggleControlsButton = document.getElementById('toggleControlsButton');
         const controlsPanel = document.getElementById('controls');
@@ -533,7 +544,7 @@
         let BODY_REPULSION_RADIUS_FACTOR = parseFloat(bodyRepulsionRadiusFactorSlider.value);
         let GLOBAL_MUTATION_RATE_MODIFIER = parseFloat(globalMutationRateSlider.value);
         let MAX_DELTA_TIME_MS = parseInt(maxTimestepSlider.value);
-        ZOOM_SENSITIVITY = parseFloat(zoomSensitivitySlider.value); // Initialize from slider
+        ZOOM_SENSITIVITY = parseFloat(zoomSensitivitySlider.value);
         let IS_SIMULATION_PAUSED = false;
         let IS_EMITTER_EDIT_MODE = emitterEditModeToggle.checked;
         let EMITTER_STRENGTH = parseFloat(emitterStrengthSlider.value);
@@ -578,7 +589,7 @@
 
         let isAnySoftBodyUnstable = false;
         let MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5);
-        let INITIAL_POPULATION_SIZE = 500; // New Default
+        // INITIAL_POPULATION_SIZE is now effectively CREATURE_POPULATION_FLOOR for resets
 
         let velocityEmitters = [];
         let currentEmitterPreview = null;
@@ -627,7 +638,7 @@
                 span.textContent = value.toFixed(2);
             } else if (slider.id === 'particleLifeDecay' ||
                        slider.id === 'baseNodeCost' || slider.id === 'emitterNodeCost' || slider.id === 'neuronNodeCost' ||
-                       slider.id === 'eaterNodeCost' || slider.id === 'predatorNodeCost' || slider.id === 'zoomSensitivitySlider') { // Added zoomSensitivitySlider
+                       slider.id === 'eaterNodeCost' || slider.id === 'predatorNodeCost' || slider.id === 'zoomSensitivitySlider') {
                 span.textContent = value.toFixed(4);
             } else if (slider.id === 'fluidFade') {
                 span.textContent = value.toFixed(3);
@@ -723,6 +734,35 @@
             updateInstabilityIndicator();
         }
 
+        resizeWorldButton.onclick = function() { // New
+            const newWidth = parseInt(worldWidthInput.value);
+            const newHeight = parseInt(worldHeightInput.value);
+
+            if (isNaN(newWidth) || isNaN(newHeight) || newWidth < 500 || newHeight < 500 || newWidth > 20000 || newHeight > 20000) {
+                alert("Invalid world dimensions. Min 500x500, Max 20000x20000.");
+                worldWidthInput.value = WORLD_WIDTH;
+                worldHeightInput.value = WORLD_HEIGHT;
+                return;
+            }
+            WORLD_WIDTH = newWidth;
+            WORLD_HEIGHT = newHeight;
+            canvas.width = WORLD_WIDTH;
+            canvas.height = WORLD_HEIGHT;
+            MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5);
+
+            viewOffsetX = 0;
+            viewOffsetY = 0;
+            // viewZoom = 1.0; // Optionally reset zoom or adjust to fit new world
+
+            initializeSpatialGrid();
+            initFluidSimulation();
+            initParticles();
+            initializePopulation();
+            isAnySoftBodyUnstable = false;
+            updateInstabilityIndicator();
+            console.log(`World resized to ${WORLD_WIDTH}x${WORLD_HEIGHT} and simulation reset.`);
+        }
+
         fluidGridSizeSlider.oninput = function() {
             FLUID_GRID_SIZE_CONTROL = parseInt(this.value);
             updateSliderDisplay(this, fluidGridSizeValueSpan);
@@ -756,8 +796,10 @@
 
 
         function initializeAllSliderDisplays() {
+            worldWidthInput.value = WORLD_WIDTH; // New
+            worldHeightInput.value = WORLD_HEIGHT; // New
             updateSliderDisplay(maxTimestepSlider, maxTimestepValueSpan);
-            updateSliderDisplay(zoomSensitivitySlider, zoomSensitivityValueSpan); // New
+            updateSliderDisplay(zoomSensitivitySlider, zoomSensitivityValueSpan);
             updateSliderDisplay(creaturePopulationFloorSlider, creaturePopulationFloorValueSpan);
             updateSliderDisplay(creaturePopulationCeilingSlider, creaturePopulationCeilingValueSpan);
             updateSliderDisplay(particlePopulationFloorSlider, particlePopulationFloorValueSpan);
@@ -2521,7 +2563,7 @@
             const config = {
                 worldWidth: WORLD_WIDTH,
                 worldHeight: WORLD_HEIGHT,
-                zoomSensitivity: ZOOM_SENSITIVITY, // New
+                zoomSensitivity: ZOOM_SENSITIVITY,
                 creaturePopulationFloor: CREATURE_POPULATION_FLOOR,
                 creaturePopulationCeiling: CREATURE_POPULATION_CEILING,
                 particlePopulationFloor: PARTICLE_POPULATION_FLOOR,
@@ -2594,7 +2636,7 @@
             MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5); // Update threshold
             initializeSpatialGrid(); // Re-initialize grid with new world dimensions
 
-            if (config.zoomSensitivity !== undefined) ZOOM_SENSITIVITY = config.zoomSensitivity; // New
+            if (config.zoomSensitivity !== undefined) ZOOM_SENSITIVITY = config.zoomSensitivity;
             if (config.creaturePopulationFloor !== undefined) CREATURE_POPULATION_FLOOR = config.creaturePopulationFloor;
             if (config.creaturePopulationCeiling !== undefined) CREATURE_POPULATION_CEILING = config.creaturePopulationCeiling;
             if (config.particlePopulationFloor !== undefined) PARTICLE_POPULATION_FLOOR = config.particlePopulationFloor;
@@ -2648,7 +2690,7 @@
             emitterStrengthSlider.value = EMITTER_STRENGTH;
             globalMutationRateSlider.value = GLOBAL_MUTATION_RATE_MODIFIER;
             fluidGridSizeSlider.value = FLUID_GRID_SIZE_CONTROL;
-            zoomSensitivitySlider.value = ZOOM_SENSITIVITY; // New
+            zoomSensitivitySlider.value = ZOOM_SENSITIVITY;
             particlesPerSecondSlider.value = PARTICLES_PER_SECOND;
 
             reproductionCooldownSlider.value = REPRODUCTION_COOLDOWN_TICKS;

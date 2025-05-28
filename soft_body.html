@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Fluid Velocity Cap</title>
+    <title>2D Soft Body Evolution - Robust Instability Detection</title>
     <style>
         body {
             margin: 0;
@@ -645,8 +645,11 @@
         const NEW_POINT_OFFSET_RADIUS = 15;
 
         let isAnySoftBodyUnstable = false;
-        let MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5);
-        // INITIAL_POPULATION_SIZE is now effectively CREATURE_POPULATION_FLOOR for resets
+        const MAX_PIXELS_PER_FRAME_DISPLACEMENT = 100; // New, more robust velocity check
+        const MAX_SPRING_STRETCH_FACTOR = 4.0; // New
+        const MAX_SPAN_PER_POINT_FACTOR = GRID_CELL_SIZE * 0.75; // New, e.g. 75 for cell size 100
+
+        let INITIAL_POPULATION_SIZE = parseInt(creaturePopulationFloorSlider.value); // Updated to use floor
 
         let velocityEmitters = [];
         let currentEmitterPreview = null;
@@ -888,7 +891,7 @@
         fluidDiffusionSlider.oninput = function() { FLUID_DIFFUSION = parseFloat(this.value); updateSliderDisplay(this, fluidDiffusionValueSpan); if(fluidField) fluidField.diffusion = FLUID_DIFFUSION;}
         fluidViscositySlider.oninput = function() { FLUID_VISCOSITY = parseFloat(this.value); updateSliderDisplay(this, fluidViscosityValueSpan); if(fluidField) fluidField.viscosity = FLUID_VISCOSITY;}
         fluidFadeSlider.oninput = function() { FLUID_FADE_RATE = parseFloat(this.value); updateSliderDisplay(this, fluidFadeValueSpan);}
-        maxFluidVelocityComponentSlider.oninput = function() { MAX_FLUID_VELOCITY_COMPONENT = parseFloat(this.value); updateSliderDisplay(this, maxFluidVelocityComponentValueSpan); if(fluidField) fluidField.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT;} // New
+        maxFluidVelocityComponentSlider.oninput = function() { MAX_FLUID_VELOCITY_COMPONENT = parseFloat(this.value); updateSliderDisplay(this, maxFluidVelocityComponentValueSpan); if(fluidField) fluidField.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT;}
         clearFluidButton.onclick = function() { if(fluidField) fluidField.clear(); }
 
         particlesPerSecondSlider.oninput = function() {
@@ -937,7 +940,7 @@
             updateSliderDisplay(fluidDiffusionSlider, fluidDiffusionValueSpan);
             updateSliderDisplay(fluidViscositySlider, fluidViscosityValueSpan);
             updateSliderDisplay(fluidFadeSlider, fluidFadeValueSpan);
-            updateSliderDisplay(maxFluidVelocityComponentSlider, maxFluidVelocityComponentValueSpan); // New
+            updateSliderDisplay(maxFluidVelocityComponentSlider, maxFluidVelocityComponentValueSpan);
             updateSliderDisplay(particlesPerSecondSlider, particlesPerSecondValueSpan);
             updateSliderDisplay(particleFluidInfluenceSlider, particleFluidInfluenceValueSpan);
             updateSliderDisplay(particleLifeDecaySlider, particleLifeDecayValueSpan);
@@ -1950,18 +1953,45 @@
 
                 for (let point of this.massPoints) point.update(dt);
 
+                // Instability Checks
+                const MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ = (100)**2; // Max 100px displacement per frame
+                const localMaxSpringStretchFactor = MAX_SPRING_STRETCH_FACTOR; // Use the global constant
+                const localMaxSpanPerPointFactor = MAX_SPAN_PER_POINT_FACTOR;   // Use the global constant
+
                 for (let point of this.massPoints) {
-                    const displacementSq = point.pos.sub(point.prevPos).magSq();
-                    if (displacementSq > MAX_DISPLACEMENT_SQ_THRESHOLD ||
+                    const displacementSq = (point.pos.x - point.prevPos.x)**2 + (point.pos.y - point.prevPos.y)**2;
+                    if (displacementSq > MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ ||
                         isNaN(point.pos.x) || isNaN(point.pos.y) ||
                         !isFinite(point.pos.x) || !isFinite(point.pos.y)) {
                         this.isUnstable = true;
-                        // console.warn(`Soft body ID ${this.id} instability detected!`, point); // Keep console less noisy
+                        console.warn(`Soft body ID ${this.id} point instability (displacement/NaN/Infinite)!`, point);
                         break;
                     }
                 }
+                if (this.isUnstable) return;
 
-                if (!this.isUnstable) {
+                for (const spring of this.springs) {
+                    const currentLength = spring.p1.pos.sub(spring.p2.pos).mag();
+                    if (currentLength > spring.restLength * localMaxSpringStretchFactor) {
+                        this.isUnstable = true;
+                        console.warn(`Soft body ID ${this.id} spring instability (over-stretched)! Spring rest: ${spring.restLength.toFixed(1)}, current: ${currentLength.toFixed(1)}`);
+                        break;
+                    }
+                }
+                if (this.isUnstable) return;
+
+                if (this.massPoints.length > 2) { // Only check span for bodies with more than 2 points
+                    const bbox = this.getBoundingBox();
+                    if (bbox.width > this.massPoints.length * localMaxSpanPerPointFactor ||
+                        bbox.height > this.massPoints.length * localMaxSpanPerPointFactor) {
+                        this.isUnstable = true;
+                        console.warn(`Soft body ID ${this.id} span instability! Width: ${bbox.width.toFixed(1)}, Height: ${bbox.height.toFixed(1)}, Points: ${this.massPoints.length}`);
+                    }
+                }
+                if (this.isUnstable) return;
+
+
+                if (!this.isUnstable) { // Re-check after all instability checks
                     for (let point of this.massPoints) {
                         if (point.isFixed || point.nodeType === NodeType.FIXED_ROOT) continue;
 
@@ -1989,7 +2019,6 @@
                                                             particle.isEaten = true;
                                                             particle.life = 0; // Mark for removal from main particles array
                                                             this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + ENERGY_PER_PARTICLE);
-                                                            // No need to remove from cellBucket here, it's rebuilt each frame
                                                         }
                                                     }
                                                 }

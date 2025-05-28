@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Visual Refinements (Glows & Lines)</title>
+    <title>2D Soft Body Evolution - Spatial Partitioning for Interactions</title>
     <style>
         body {
             margin: 0;
@@ -364,6 +364,39 @@
         const ZOOM_SENSITIVITY = 0.0005;
         const MAX_ZOOM = 4.0;
         let MIN_ZOOM = 0.1;
+
+        // Spatial Grid for optimization
+        const GRID_CELL_SIZE = 100; // Adjust as needed, should be > typical interaction radius
+        let GRID_COLS = Math.ceil(WORLD_WIDTH / GRID_CELL_SIZE);
+        let GRID_ROWS = Math.ceil(WORLD_HEIGHT / GRID_CELL_SIZE);
+        let spatialGrid = [];
+
+        function initializeSpatialGrid() {
+            GRID_COLS = Math.ceil(WORLD_WIDTH / GRID_CELL_SIZE);
+            GRID_ROWS = Math.ceil(WORLD_HEIGHT / GRID_CELL_SIZE);
+            spatialGrid = new Array(GRID_COLS * GRID_ROWS);
+            for (let i = 0; i < spatialGrid.length; i++) {
+                spatialGrid[i] = [];
+            }
+        }
+        initializeSpatialGrid();
+
+        function populateSpatialGrid() {
+            for (let i = 0; i < spatialGrid.length; i++) {
+                spatialGrid[i] = [];
+            }
+            softBodyPopulation.forEach(body => {
+                if (body.isUnstable) return;
+                body.massPoints.forEach(point => {
+                    const gx = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(point.pos.x / GRID_CELL_SIZE)));
+                    const gy = Math.max(0, Math.min(GRID_ROWS - 1, Math.floor(point.pos.y / GRID_CELL_SIZE)));
+                    const gridIndex = gx + gy * GRID_COLS;
+                    if(spatialGrid[gridIndex]) { // Check if grid cell is valid
+                        spatialGrid[gridIndex].push({ pointRef: point, bodyRef: body });
+                    }
+                });
+            });
+        }
 
 
         // --- Controls ---
@@ -998,7 +1031,7 @@
             const newZoom = viewZoom * Math.pow(1 + ZOOM_SENSITIVITY * 10, scroll);
 
             MIN_ZOOM = Math.max(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT);
-            MIN_ZOOM = Math.min(1.0, MIN_ZOOM); // Ensure min zoom doesn't make world smaller than screen if world is small
+            MIN_ZOOM = Math.min(1.0, MIN_ZOOM);
 
             viewZoom = Math.max(MIN_ZOOM, Math.min(newZoom, MAX_ZOOM));
 
@@ -1183,8 +1216,8 @@
                 this.emitterDirection = new Vec2(Math.random()*2-1, Math.random()*2-1).normalize();
                 this.numOffspring = parentBody ? parentBody.numOffspring : (1 + Math.floor(Math.random() * 3));
                 this.offspringSpawnRadius = parentBody ? parentBody.offspringSpawnRadius : (50 + Math.random() * 50);
-                this.pointAddChance = parentBody ? parentBody.pointAddChance : (0.02 + Math.random() * 0.06); // e.g. 0.02 to 0.08
-                this.springConnectionRadius = parentBody ? parentBody.springConnectionRadius : (40 + Math.random() * 40); // e.g. 40 to 80
+                this.pointAddChance = parentBody ? parentBody.pointAddChance : (0.02 + Math.random() * 0.06);
+                this.springConnectionRadius = parentBody ? parentBody.springConnectionRadius : (40 + Math.random() * 40);
 
 
                 if (parentBody) {
@@ -1201,7 +1234,7 @@
                     this.numOffspring = Math.max(1, Math.min(5, Math.floor(parentBody.numOffspring + offspringNumChange)));
 
                     this.offspringSpawnRadius = Math.max(20, parentBody.offspringSpawnRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.5)));
-                    this.pointAddChance = Math.max(0, Math.min(0.5, parentBody.pointAddChance * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 2)))); // Higher mutation impact for chance
+                    this.pointAddChance = Math.max(0, Math.min(0.5, parentBody.pointAddChance * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 2))));
                     this.springConnectionRadius = Math.max(10, parentBody.springConnectionRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)));
 
 
@@ -1345,7 +1378,7 @@
                             point.isPredator = Math.random() < predatorChance;
                             point.emitsDye = Math.random() < dyeEmitterChance;
                             point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
-                            // console.log(`Initial Grid Point ${i*numPointsX+j}: isEater=${point.isEater} (Chance: ${eaterChance}, Rand: ${Math.random()})`); // DEBUG
+                            // console.log(`Initial Grid Point (Body ${this.id}, Point ${this.massPoints.length}): isEater=${point.isEater}, eaterChance=${eaterChance}`);
                             this.massPoints.push(point); gridPoints[i][j] = point;
                         }}
                         for (let i=0; i<numPointsY; i++) for (let j=0; j<numPointsX-1; j++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], this.stiffness, this.springDamping));
@@ -1396,7 +1429,7 @@
                             };
                         }
                         if (p.nodeType === NodeType.FIXED_ROOT) p.isFixed = true;
-                        // console.log(`Finalized Initial Point ${idx}: nodeType=${p.nodeType}, isEater=${p.isEater}`); // DEBUG
+                        // console.log(`Finalized Initial Point ${idx} (Body ${this.id}): nodeType=${p.nodeType}, isEater=${p.isEater}`);
                     });
                 }
 
@@ -1558,43 +1591,58 @@
 
                 for (let spring of this.springs) spring.applyForce();
 
-                for (let i = 0; i < this.massPoints.length; i++) {
-                    const p1 = this.massPoints[i];
+                // Inter-body repulsion & Predation (combined loop) - USING SPATIAL GRID
+                for (let i_p1 = 0; i_p1 < this.massPoints.length; i_p1++) {
+                    const p1 = this.massPoints[i_p1];
                     if (p1.isFixed) continue;
 
-                    for (let otherBody of softBodyPopulation) {
-                        if (otherBody === this || otherBody.isUnstable) continue;
-                        for (let j = 0; j < otherBody.massPoints.length; j++) {
-                            const p2 = otherBody.massPoints[j];
-                            if (p2.isFixed) continue;
+                    const p1Gx = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(p1.pos.x / GRID_CELL_SIZE)));
+                    const p1Gy = Math.max(0, Math.min(GRID_ROWS - 1, Math.floor(p1.pos.y / GRID_CELL_SIZE)));
 
-                            const diff = p1.pos.sub(p2.pos);
-                            const distSq = diff.magSq();
-                            const interactionRadius = (p1.radius + p2.radius) * BODY_REPULSION_RADIUS_FACTOR;
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const checkGx = p1Gx + dx;
+                            const checkGy = p1Gy + dy;
 
-                            if (distSq < interactionRadius * interactionRadius && distSq > 0.0001) {
-                                const dist = Math.sqrt(distSq);
-                                const overlap = interactionRadius - dist;
-                                const forceDir = diff.normalize();
-                                const repulsionForceMag = BODY_REPULSION_STRENGTH * overlap * 0.5;
-                                const repulsionForce = forceDir.mul(repulsionForceMag);
+                            if (checkGx >= 0 && checkGx < GRID_COLS && checkGy >= 0 && checkGy < GRID_ROWS) {
+                                const cellIndex = checkGx + checkGy * GRID_COLS;
+                                const cellBucket = spatialGrid[cellIndex];
 
-                                p1.applyForce(repulsionForce);
-                            }
+                                for (const otherPointData of cellBucket) {
+                                    if (otherPointData.bodyRef === this) continue; // Skip points from the same body
 
-                            if (p1.isPredator) {
-                                const predationRadius = p1.radius * PREDATION_RADIUS_MULTIPLIER;
-                                if (distSq < predationRadius * predationRadius) {
-                                    const energyToSap = Math.min(otherBody.creatureEnergy, ENERGY_SAPPED_PER_PREDATION);
-                                    if (energyToSap > 0) {
-                                        otherBody.creatureEnergy -= energyToSap;
-                                        this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyToSap);
+                                    const p2 = otherPointData.pointRef;
+                                    if (p2.isFixed) continue;
+
+                                    const diff = p1.pos.sub(p2.pos);
+                                    const distSq = diff.magSq();
+                                    const interactionRadius = (p1.radius + p2.radius) * BODY_REPULSION_RADIUS_FACTOR;
+
+                                    if (distSq < interactionRadius * interactionRadius && distSq > 0.0001) {
+                                        const dist = Math.sqrt(distSq);
+                                        const overlap = interactionRadius - dist;
+                                        const forceDir = diff.normalize();
+                                        const repulsionForceMag = BODY_REPULSION_STRENGTH * overlap * 0.5;
+                                        const repulsionForce = forceDir.mul(repulsionForceMag);
+                                        p1.applyForce(repulsionForce);
+                                    }
+
+                                    if (p1.isPredator) {
+                                        const predationRadius = p1.radius * PREDATION_RADIUS_MULTIPLIER;
+                                        if (distSq < predationRadius * predationRadius) {
+                                            const energyToSap = Math.min(otherPointData.bodyRef.creatureEnergy, ENERGY_SAPPED_PER_PREDATION);
+                                            if (energyToSap > 0) {
+                                                otherPointData.bodyRef.creatureEnergy -= energyToSap;
+                                                this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyToSap);
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
+
 
                 for (let point of this.massPoints) point.update(dt);
 
@@ -2103,6 +2151,8 @@
                 return;
             }
 
+            populateSpatialGrid(); // Populate spatial grid at the start of each physics step
+
             applyVelocityEmitters();
 
             // Particle Emission
@@ -2359,6 +2409,7 @@
             if (config.worldHeight !== undefined) WORLD_HEIGHT = config.worldHeight;
             canvas.width = WORLD_WIDTH;
             canvas.height = WORLD_HEIGHT;
+            initializeSpatialGrid(); // Re-initialize grid with new world dimensions
 
 
             if (config.bodyFluidEntrainment !== undefined) BODY_FLUID_ENTRAINMENT_FACTOR = config.bodyFluidEntrainment;

@@ -138,7 +138,7 @@
       <workItem from="1748404633579" duration="1090000" />
       <workItem from="1748407142250" duration="3984000" />
       <workItem from="1748444840156" duration="115000" />
-      <workItem from="1748444958636" duration="11025000" />
+      <workItem from="1748444958636" duration="11319000" />
     </task>
     <task id="LOCAL-00001" summary="Checkpoint">
       <option name="closed" value="true" />
@@ -436,7 +436,15 @@
       <option name="project" value="LOCAL" />
       <updated>1748467823715</updated>
     </task>
-    <option name="localTasksCounter" value="38" />
+    <task id="LOCAL-00038" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
+      <option name="closed" value="true" />
+      <created>1748468243383</created>
+      <option name="number" value="00038" />
+      <option name="presentableId" value="LOCAL-00038" />
+      <option name="project" value="LOCAL" />
+      <updated>1748468243383</updated>
+    </task>
+    <option name="localTasksCounter" value="39" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

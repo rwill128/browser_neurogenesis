@@ -4,7 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Incredible Stuff" />
+    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Incredible Stuff">
+      <change afterPath="$PROJECT_DIR$/soft_body_24.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -203,7 +206,7 @@
       <option name="presentableId" value="Default" />
       <updated>1748315119497</updated>
       <workItem from="1748315120538" duration="957000" />
-      <workItem from="1748367005646" duration="17602000" />
+      <workItem from="1748367005646" duration="19247000" />
     </task>
     <task id="LOCAL-00001" summary="Checkpoint">
       <option name="closed" value="true" />
@@ -389,7 +392,15 @@
       <option name="project" value="LOCAL" />
       <updated>1748392367006</updated>
     </task>
-    <option name="localTasksCounter" value="24" />
+    <task id="LOCAL-00024" summary="Incredible Stuff">
+      <option name="closed" value="true" />
+      <created>1748393577721</created>
+      <option name="number" value="00024" />
+      <option name="presentableId" value="LOCAL-00024" />
+      <option name="project" value="LOCAL" />
+      <updated>1748393577721</updated>
+    </task>
+    <option name="localTasksCounter" value="25" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

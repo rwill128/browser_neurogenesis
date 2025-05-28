@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Bounding Box Reproduction</title>
+    <title>2D Soft Body Evolution - Fluid Velocity Cap</title>
     <style>
         body {
             margin: 0;
@@ -272,9 +272,9 @@
                 <h4>Viewport & Sim</h4>
                 <div class="viewport-instructions">WASD/Right-Drag to Pan, Scroll to Zoom</div>
                 <label for="worldWidthInput" class="input-label">World Width:</label>
-                <input type="number" id="worldWidthInput" value="3200" step="100">
+                <input type="number" id="worldWidthInput" value="8000" step="100">
                 <label for="worldHeightInput" class="input-label">World Height:</label>
-                <input type="number" id="worldHeightInput" value="2400" step="100">
+                <input type="number" id="worldHeightInput" value="6000" step="100">
                 <button id="resizeWorldButton">Resize World & Reset Sim</button>
 
                 <label for="worldWrapToggle" class="checkbox-label">Wrap Edges:
@@ -369,6 +369,11 @@
                 <label for="fluidFade" class="slider-label">Fade Rate:</label>
                 <span id="fluidFadeValue" class="slider-value">0.002</span>
                 <input type="range" id="fluidFade" min="0.0" max="1.0" value="0.002" step="0.001">
+
+                <label for="maxFluidVelocityComponentSlider" class="slider-label">Max Fluid Vel. Component:</label>
+                <span id="maxFluidVelocityComponentValueSpan" class="slider-value">2.00</span>
+                <input type="range" id="maxFluidVelocityComponentSlider" min="0.1" max="10.0" value="2.0" step="0.1">
+
                 <button id="clearFluidButton">Clear Fluid</button>
             </div>
             <div class="control-group">
@@ -424,8 +429,8 @@
         let offscreenFluidCanvas, offscreenFluidCtx; // For smoother fluid rendering
 
         // --- Viewport and World Dimensions ---
-        let WORLD_WIDTH = 3200;
-        let WORLD_HEIGHT = 2400;
+        let WORLD_WIDTH = 8000;
+        let WORLD_HEIGHT = 6000;
         const VIEW_PAN_SPEED = 80;
 
         canvas.width = WORLD_WIDTH;
@@ -502,7 +507,7 @@
         const zoomSensitivityValueSpan = document.getElementById('zoomSensitivityValueSpan');
         const pauseResumeButton = document.getElementById('pauseResumeButton');
         const toggleControlsButton = document.getElementById('toggleControlsButton');
-        const screensaverButton = document.getElementById('screensaverButton'); // New
+        const screensaverButton = document.getElementById('screensaverButton');
         const controlsPanel = document.getElementById('controls');
 
         const creaturePopulationFloorSlider = document.getElementById('creaturePopulationFloorSlider');
@@ -548,6 +553,9 @@
         const fluidDiffusionValueSpan = document.getElementById('fluidDiffusionValue');
         const fluidViscosityValueSpan = document.getElementById('fluidViscosityValue');
         const fluidFadeValueSpan = document.getElementById('fluidFadeValue');
+        const maxFluidVelocityComponentSlider = document.getElementById('maxFluidVelocityComponentSlider'); // New
+        const maxFluidVelocityComponentValueSpan = document.getElementById('maxFluidVelocityComponentValueSpan'); // New
+
 
         const particlePopulationFloorSlider = document.getElementById('particlePopulationFloorSlider');
         const particlePopulationFloorValueSpan = document.getElementById('particlePopulationFloorValueSpan');
@@ -610,6 +618,7 @@
         let FLUID_DIFFUSION = parseFloat(fluidDiffusionSlider.value);
         let FLUID_VISCOSITY = parseFloat(fluidViscositySlider.value);
         let FLUID_FADE_RATE = parseFloat(fluidFadeSlider.value);
+        let MAX_FLUID_VELOCITY_COMPONENT = parseFloat(maxFluidVelocityComponentSlider.value); // New
         let IS_WORLD_WRAPPING = worldWrapToggle.checked;
         let PARTICLES_PER_SECOND = parseInt(particlesPerSecondSlider.value);
         let PARTICLE_FLUID_INFLUENCE = parseFloat(particleFluidInfluenceSlider.value);
@@ -680,7 +689,8 @@
             } else if (slider.id === 'particleFluidInfluence' || slider.id === 'fluidCurrentStrength' ||
                        slider.id === 'bodyPushStrength' ||
                        slider.id === 'bodyRepulsionStrength' || slider.id === 'bodyRepulsionRadiusFactor' ||
-                       slider.id === 'emitterStrength' || slider.id === 'globalMutationRate') {
+                       slider.id === 'emitterStrength' || slider.id === 'globalMutationRate' ||
+                       slider.id === 'maxFluidVelocityComponentSlider') {
                  span.textContent = value.toFixed(2);
             } else if (slider.id === 'bodyFluidEntrainment') {
                 span.textContent = value.toFixed(2);
@@ -878,6 +888,7 @@
         fluidDiffusionSlider.oninput = function() { FLUID_DIFFUSION = parseFloat(this.value); updateSliderDisplay(this, fluidDiffusionValueSpan); if(fluidField) fluidField.diffusion = FLUID_DIFFUSION;}
         fluidViscositySlider.oninput = function() { FLUID_VISCOSITY = parseFloat(this.value); updateSliderDisplay(this, fluidViscosityValueSpan); if(fluidField) fluidField.viscosity = FLUID_VISCOSITY;}
         fluidFadeSlider.oninput = function() { FLUID_FADE_RATE = parseFloat(this.value); updateSliderDisplay(this, fluidFadeValueSpan);}
+        maxFluidVelocityComponentSlider.oninput = function() { MAX_FLUID_VELOCITY_COMPONENT = parseFloat(this.value); updateSliderDisplay(this, maxFluidVelocityComponentValueSpan); if(fluidField) fluidField.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT;} // New
         clearFluidButton.onclick = function() { if(fluidField) fluidField.clear(); }
 
         particlesPerSecondSlider.oninput = function() {
@@ -926,6 +937,7 @@
             updateSliderDisplay(fluidDiffusionSlider, fluidDiffusionValueSpan);
             updateSliderDisplay(fluidViscositySlider, fluidViscosityValueSpan);
             updateSliderDisplay(fluidFadeSlider, fluidFadeValueSpan);
+            updateSliderDisplay(maxFluidVelocityComponentSlider, maxFluidVelocityComponentValueSpan); // New
             updateSliderDisplay(particlesPerSecondSlider, particlesPerSecondValueSpan);
             updateSliderDisplay(particleFluidInfluenceSlider, particleFluidInfluenceValueSpan);
             updateSliderDisplay(particleLifeDecaySlider, particleLifeDecayValueSpan);
@@ -2194,6 +2206,7 @@
                 this.scaleX = scaleX; // Store separate scales
                 this.scaleY = scaleY;
                 this.useWrapping = false;
+                this.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT; // New
 
                 this.densityR = new Float32Array(size * size).fill(0);
                 this.densityG = new Float32Array(size * size).fill(0);
@@ -2230,9 +2243,20 @@
 
             addVelocity(x, y, amountX, amountY) {
                 const idx = this.IX(x, y);
-                this.Vx[idx] += amountX;
-                this.Vy[idx] += amountY;
+                let newVx = this.Vx[idx] + amountX;
+                let newVy = this.Vy[idx] + amountY;
+
+                // Cap individual components
+                this.Vx[idx] = Math.max(-this.maxVelComponent, Math.min(newVx, this.maxVelComponent));
+                this.Vy[idx] = Math.max(-this.maxVelComponent, Math.min(newVy, this.maxVelComponent));
             }
+
+            clampVelocityComponents(arr) {
+                for(let i=0; i < arr.length; i++) {
+                    arr[i] = Math.max(-this.maxVelComponent, Math.min(arr[i], this.maxVelComponent));
+                }
+            }
+
 
             lin_solve(b, x, x0, a, c) {
                 const cRecip = 1.0 / c;
@@ -2263,7 +2287,7 @@
                         div_temp[idx] = -0.5 * (
                             velocX_in_out[this.IX(i+1,j)] - velocX_in_out[this.IX(i-1,j)] +
                             velocY_in_out[this.IX(i,j+1)] - velocY_in_out[this.IX(i,j-1)]
-                        ) / this.size; // Using this.size here assumes square cells for divergence calculation
+                        ) / this.size;
                         p_temp[idx] = 0;
                     }
                 }
@@ -2366,10 +2390,18 @@
             step() {
                 this.diffuse(1, this.Vx0, this.Vx, this.viscosity, this.dt);
                 this.diffuse(2, this.Vy0, this.Vy, this.viscosity, this.dt);
-                this.project(this.Vx0, this.Vy0, this.Vx, this.Vy);
+                this.clampVelocityComponents(this.Vx0); // Clamp after diffusion
+                this.clampVelocityComponents(this.Vy0);
+
+                this.project(this.Vx0, this.Vy0, this.Vx, this.Vy); // Vx, Vy are temp here
+
                 this.advect(1, this.Vx, this.Vx0, this.Vx0, this.Vy0, this.dt);
                 this.advect(2, this.Vy, this.Vy0, this.Vx0, this.Vy0, this.dt);
-                this.project(this.Vx, this.Vy, this.Vx0, this.Vy0);
+                this.clampVelocityComponents(this.Vx); // Clamp after advection
+                this.clampVelocityComponents(this.Vy);
+
+                this.project(this.Vx, this.Vy, this.Vx0, this.Vy0); // Vx0, Vy0 are temp here
+
                 this.diffuse(0, this.densityR0, this.densityR, this.diffusion, this.dt);
                 this.diffuse(0, this.densityG0, this.densityG, this.diffusion, this.dt);
                 this.diffuse(0, this.densityB0, this.densityB, this.diffusion, this.dt);
@@ -2508,6 +2540,7 @@
             const scaleY = WORLD_HEIGHT / FLUID_GRID_SIZE_CONTROL;
             fluidField = new FluidField(FLUID_GRID_SIZE_CONTROL, FLUID_DIFFUSION, FLUID_VISCOSITY, 1/60, scaleX, scaleY);
             fluidField.useWrapping = IS_WORLD_WRAPPING;
+            fluidField.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT; // Pass the cap
             velocityEmitters = [];
             if (offscreenFluidCanvas) {
                 offscreenFluidCanvas.width = FLUID_GRID_SIZE_CONTROL;
@@ -2750,6 +2783,7 @@
                 creaturePopulationCeiling: CREATURE_POPULATION_CEILING,
                 particlePopulationFloor: PARTICLE_POPULATION_FLOOR,
                 particlePopulationCeiling: PARTICLE_POPULATION_CEILING,
+                maxFluidVelocityComponent: MAX_FLUID_VELOCITY_COMPONENT, // New
                 bodyFluidEntrainment: BODY_FLUID_ENTRAINMENT_FACTOR,
                 fluidCurrentStrength: FLUID_CURRENT_STRENGTH_ON_BODY,
                 softBodyPushStrength: SOFT_BODY_PUSH_STRENGTH,
@@ -2823,6 +2857,7 @@
             if (config.creaturePopulationCeiling !== undefined) CREATURE_POPULATION_CEILING = config.creaturePopulationCeiling;
             if (config.particlePopulationFloor !== undefined) PARTICLE_POPULATION_FLOOR = config.particlePopulationFloor;
             if (config.particlePopulationCeiling !== undefined) PARTICLE_POPULATION_CEILING = config.particlePopulationCeiling;
+            if (config.maxFluidVelocityComponent !== undefined) MAX_FLUID_VELOCITY_COMPONENT = config.maxFluidVelocityComponent; // New
 
             if (config.bodyFluidEntrainment !== undefined) BODY_FLUID_ENTRAINMENT_FACTOR = config.bodyFluidEntrainment;
             if (config.fluidCurrentStrength !== undefined) FLUID_CURRENT_STRENGTH_ON_BODY = config.fluidCurrentStrength;
@@ -2874,6 +2909,7 @@
             fluidGridSizeSlider.value = FLUID_GRID_SIZE_CONTROL;
             zoomSensitivitySlider.value = ZOOM_SENSITIVITY;
             particlesPerSecondSlider.value = PARTICLES_PER_SECOND;
+            maxFluidVelocityComponentSlider.value = MAX_FLUID_VELOCITY_COMPONENT; // New
 
             reproductionCooldownSlider.value = REPRODUCTION_COOLDOWN_TICKS;
             bodyRepulsionStrengthSlider.value = BODY_REPULSION_STRENGTH;

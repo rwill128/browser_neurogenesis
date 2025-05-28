@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Enhanced Neuron Inspector</title>
+    <title>2D Soft Body Evolution - Morphological Evolution & Eater Debug</title>
     <style>
         body {
             margin: 0;
@@ -180,11 +180,12 @@
                     <p><strong>Emitter Direction:</strong> X: <span id="infoBodyEmitterDirX">-</span>, Y: <span id="infoBodyEmitterDirY">-</span></p>
                     <p><strong>Num Offspring:</strong> <span id="infoBodyNumOffspring">-</span></p>
                     <p><strong>Offspring Spawn Radius:</strong> <span id="infoBodyOffspringRadius">-</span></p>
+                    <p><strong>Point Add Chance:</strong> <span id="infoBodyPointAddChance">-</span></p>
+                    <p><strong>Spring Connection Radius:</strong> <span id="infoBodySpringConnectionRadius">-</span></p>
                     <p><strong>Energy:</strong> <span id="infoBodyEnergy">-</span></p>
                     <p><strong>Ticks Since Birth:</strong> <span id="infoBodyTicksBirth">-</span></p>
                     <p><strong>Can Reproduce:</strong> <span id="infoBodyCanReproduce">-</span></p>
-                    <p><strong>Shape Type:</strong> <span id="infoBodyShapeType">-</span></p>
-                </div>
+                    </div>
                 <div class="info-section" id="neuronInfoSection" style="display:none;">
                     <h5>Neuron Info</h5>
                     <p><strong>Sensor Index:</strong> <span id="infoNeuronSensorIdx">-</span></p>
@@ -350,8 +351,8 @@
         let offscreenFluidCanvas, offscreenFluidCtx; // For smoother fluid rendering
 
         // --- Viewport and World Dimensions ---
-        let WORLD_WIDTH = 8000;
-        let WORLD_HEIGHT = 4000;
+        let WORLD_WIDTH = 1600;
+        let WORLD_HEIGHT = 1200;
         const VIEW_PAN_SPEED = 20;
 
         canvas.width = WORLD_WIDTH;
@@ -484,7 +485,10 @@
         const MUTATION_RATE_PERCENT = 0.1;
         const MUTATION_CHANCE_BOOL = 0.05;
         const MUTATION_CHANCE_NODE_TYPE = 0.1;
+        const MUTATION_CHANCE_REASSIGN_NEURON_LINK = 0.02; // New
         const NEURON_CHANCE = 0.1; // Chance for a point to become a neuron initially
+        const ADD_POINT_MUTATION_CHANCE = 0.03; // Chance to add a point during reproduction
+        const NEW_POINT_OFFSET_RADIUS = 15; // How far new points spawn from their "parent" point
 
         let isAnySoftBodyUnstable = false;
         const MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5);
@@ -729,10 +733,12 @@
                 document.getElementById('infoBodyEmitterDirY').textContent = selectedInspectBody.emitterDirection.y.toFixed(2);
                 document.getElementById('infoBodyNumOffspring').textContent = selectedInspectBody.numOffspring;
                 document.getElementById('infoBodyOffspringRadius').textContent = selectedInspectBody.offspringSpawnRadius.toFixed(1);
+                document.getElementById('infoBodyPointAddChance').textContent = selectedInspectBody.pointAddChance.toFixed(3);
+                document.getElementById('infoBodySpringConnectionRadius').textContent = selectedInspectBody.springConnectionRadius.toFixed(1);
                 document.getElementById('infoBodyEnergy').textContent = selectedInspectBody.creatureEnergy.toFixed(2);
                 document.getElementById('infoBodyTicksBirth').textContent = selectedInspectBody.ticksSinceBirth;
                 document.getElementById('infoBodyCanReproduce').textContent = selectedInspectBody.canReproduce;
-                document.getElementById('infoBodyShapeType').textContent = selectedInspectBody.shapeType === 0 ? "Grid" : (selectedInspectBody.shapeType === 1 ? "Line" : "Circle");
+                // document.getElementById('infoBodyShapeType').textContent = selectedInspectBody.shapeType === 0 ? "Grid" : (selectedInspectBody.shapeType === 1 ? "Line" : "Circle"); // Less relevant now
 
                 document.getElementById('infoPointIndex').textContent = selectedInspectPointIndex;
                 document.getElementById('infoPointNodeType').textContent = getNodeTypeString(selectedInspectPoint.nodeType);
@@ -1039,7 +1045,7 @@
                 this.emitsDye = false;
                 this.dyeColor = [0,0,0];
                 this.neuronData = null;
-                this.neuralEffectiveStrength = null; // For EMITTER_SWIMMER nodes controlled by neurons
+                this.neuralEffectiveStrength = null;
             }
             applyForce(f) { this.force = this.force.add(f); }
 
@@ -1160,7 +1166,7 @@
                 this.creatureEnergy = MAX_CREATURE_ENERGY * OFFSPRING_INITIAL_ENERGY_SHARE;
                 this.ticksSinceBirth = 0;
                 this.canReproduce = false;
-                this.shapeType = parentBody ? parentBody.shapeType : Math.floor(Math.random() * 3);
+                this.shapeType = parentBody ? parentBody.shapeType : Math.floor(Math.random() * 3); // Used for initial generation
 
                 this.motorImpulseInterval = 30 + Math.floor(Math.random() * 90);
                 this.motorImpulseMagnitudeCap = 0.5 + Math.random() * 2.0;
@@ -1168,6 +1174,8 @@
                 this.emitterDirection = new Vec2(Math.random()*2-1, Math.random()*2-1).normalize();
                 this.numOffspring = parentBody ? parentBody.numOffspring : (1 + Math.floor(Math.random() * 3));
                 this.offspringSpawnRadius = parentBody ? parentBody.offspringSpawnRadius : (50 + Math.random() * 50);
+                this.pointAddChance = parentBody ? parentBody.pointAddChance : (0.02 + Math.random() * 0.06); // e.g. 0.02 to 0.08
+                this.springConnectionRadius = parentBody ? parentBody.springConnectionRadius : (40 + Math.random() * 40); // e.g. 40 to 80
 
 
                 if (parentBody) {
@@ -1184,6 +1192,8 @@
                     this.numOffspring = Math.max(1, Math.min(5, Math.floor(parentBody.numOffspring + offspringNumChange)));
 
                     this.offspringSpawnRadius = Math.max(20, parentBody.offspringSpawnRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.5)));
+                    this.pointAddChance = Math.max(0, Math.min(0.5, parentBody.pointAddChance * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 2)))); // Higher mutation impact for chance
+                    this.springConnectionRadius = Math.max(10, parentBody.springConnectionRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)));
 
 
                     const angleMutation = (Math.random() - 0.5) * Math.PI * 0.2 * GLOBAL_MUTATION_RATE_MODIFIER;
@@ -1205,6 +1215,8 @@
                 this.emitterStrength = Math.max(0, Math.min(this.emitterStrength, 3.0));
                 this.numOffspring = Math.max(1, Math.min(this.numOffspring, 5));
                 this.offspringSpawnRadius = Math.max(20, Math.min(this.offspringSpawnRadius, 150));
+                this.pointAddChance = Math.max(0, Math.min(0.5, this.pointAddChance));
+                this.springConnectionRadius = Math.max(10, Math.min(this.springConnectionRadius, 100));
 
 
                 this.fluidEntrainment = BODY_FLUID_ENTRAINMENT_FACTOR;
@@ -1218,163 +1230,182 @@
                 this.massPoints = [];
                 this.springs = [];
 
-                const basePointDist = 20 + Math.random() * 10;
                 const baseRadius = 3 + Math.random() * 3;
-
                 const eaterChance = 0.25;
                 const predatorChance = 0.15;
                 const dyeEmitterChance = 0.2;
                 const neuronChance = NEURON_CHANCE;
-
                 const nodeTypeChoices = [NodeType.NEUTRAL, NodeType.FLOATING, NodeType.FIXED_ROOT, NodeType.EMITTER_SWIMMER, NodeType.NEURON];
                 const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
 
+                if (parentBody) {
+                    // Morphological evolution from parent
+                    let lastPointPos = parentBody.massPoints.length > 0 ? parentBody.massPoints[parentBody.massPoints.length-1].pos.clone() : new Vec2(startX, startY);
 
-                if (this.shapeType === 0) {
-                    const numPointsX = 3;
-                    const numPointsY = 3;
-                    let gridPoints = [];
-                    for (let i = 0; i < numPointsY; i++) {
-                        gridPoints[i] = [];
-                        for (let j = 0; j < numPointsX; j++) {
-                            let mass = 0.3 + Math.random() * 0.4;
-                            let nodeType = Math.random() < neuronChance ? NodeType.NEURON : nodeTypeChoices[Math.floor(Math.random() * (nodeTypeChoices.length-1))];
-                            let isEater = Math.random() < eaterChance;
-                            let isPredator = Math.random() < predatorChance;
-                            let emitsDye = Math.random() < dyeEmitterChance;
-                            let dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
-                            let neuronData = null;
+                    parentBody.massPoints.forEach(parentPoint => {
+                        let mass = parentPoint.mass * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+                        mass = Math.max(0.1, Math.min(mass, 1.0));
 
+                        let nodeType = parentPoint.nodeType;
+                        if (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                            nodeType = nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)];
+                        }
 
-                            if (parentBody && parentBody.massPoints[i*numPointsX + j]) {
-                                const parentPoint = parentBody.massPoints[i*numPointsX + j];
-                                mass = parentPoint.mass * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-                                nodeType = Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER) ? nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)] : parentPoint.nodeType;
-                                isEater = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.isEater : parentPoint.isEater;
-                                isPredator = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.isPredator : parentPoint.isPredator;
-                                emitsDye = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.emitsDye : parentPoint.emitsDye;
-                                dyeColor = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)] : parentPoint.dyeColor;
-                                if(parentPoint.neuronData && nodeType === NodeType.NEURON) {
-                                    neuronData = {
-                                        sensorPointIndex: parentPoint.neuronData.sensorPointIndex,
-                                        effectorPointIndex: parentPoint.neuronData.effectorPointIndex,
-                                        weights: parentPoint.neuronData.weights.map(w => w * (1 + (Math.random() -0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER))),
-                                        bias: parentPoint.neuronData.bias * (1 + (Math.random() -0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)),
-                                        sensedChannel: Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER) ? Math.floor(Math.random() * 4) : parentPoint.neuronData.sensedChannel,
-                                        lastOutput: 0, lastSensedR: 0, lastSensedG: 0, lastSensedB: 0
-                                    };
-                                }
-                            }
-                            mass = Math.max(0.1, Math.min(mass, 1.0));
-                            const point = new MassPoint(startX + j * basePointDist, startY + i * basePointDist, mass, baseRadius);
-                            point.nodeType = nodeType;
-                            point.isEater = isEater;
-                            point.isPredator = isPredator;
-                            point.emitsDye = emitsDye;
-                            point.dyeColor = dyeColor;
-                            if (nodeType === NodeType.NEURON && !neuronData) {
-                                point.neuronData = {
+                        const offspringPoint = new MassPoint(
+                            parentPoint.pos.x + (Math.random() - 0.5) * 5,
+                            parentPoint.pos.y + (Math.random() - 0.5) * 5,
+                            mass,
+                            parentPoint.radius * (1 + (Math.random() - 0.5) * 0.2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER))
+                        );
+                        offspringPoint.nodeType = nodeType;
+                        offspringPoint.isEater = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.isEater : parentPoint.isEater;
+                        offspringPoint.isPredator = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.isPredator : parentPoint.isPredator;
+                        offspringPoint.emitsDye = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.emitsDye : parentPoint.emitsDye;
+                        offspringPoint.dyeColor = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)] : [...parentPoint.dyeColor];
+
+                        if (nodeType === NodeType.NEURON) {
+                            offspringPoint.neuronData = {
+                                sensorPointIndex: parentPoint.neuronData ? parentPoint.neuronData.sensorPointIndex : -1,
+                                effectorPointIndex: parentPoint.neuronData ? parentPoint.neuronData.effectorPointIndex : -1,
+                                weights: parentPoint.neuronData ? parentPoint.neuronData.weights.map(w => w * (1 + (Math.random() -0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER))) : [(Math.random()*2-1), (Math.random()*2-1), (Math.random()*2-1)],
+                                bias: parentPoint.neuronData ? parentPoint.neuronData.bias * (1 + (Math.random() -0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)) : (Math.random()*2-1) * 0.5,
+                                sensedChannel: parentPoint.neuronData ? (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER) ? Math.floor(Math.random() * 4) : parentPoint.neuronData.sensedChannel) : Math.floor(Math.random() * 4),
+                                lastOutput: 0, lastSensedR: 0, lastSensedG: 0, lastSensedB: 0
+                            };
+                        }
+                        if(offspringPoint.nodeType === NodeType.FIXED_ROOT) offspringPoint.isFixed = true;
+                        this.massPoints.push(offspringPoint);
+                        lastPointPos = offspringPoint.pos.clone();
+
+                        if (Math.random() < this.pointAddChance * GLOBAL_MUTATION_RATE_MODIFIER) {
+                            const newMass = 0.1 + Math.random() * 0.9;
+                            const newNodeType = nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)];
+                            const newPoint = new MassPoint(
+                                lastPointPos.x + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 2,
+                                lastPointPos.y + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 2,
+                                newMass,
+                                baseRadius * (0.8 + Math.random() * 0.4)
+                            );
+                            newPoint.nodeType = newNodeType;
+                            newPoint.isEater = Math.random() < eaterChance;
+                            newPoint.isPredator = Math.random() < predatorChance;
+                            newPoint.emitsDye = Math.random() < dyeEmitterChance;
+                            newPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                            if (newNodeType === NodeType.NEURON) {
+                                newPoint.neuronData = {
                                     sensorPointIndex: -1, effectorPointIndex: -1,
-                                    weights: [ (Math.random()*2-1), (Math.random()*2-1), (Math.random()*2-1) ],
-                                    bias: (Math.random()*2-1) * 0.5,
-                                    sensedChannel: Math.floor(Math.random() * 4),
+                                    weights: [(Math.random()*2-1), (Math.random()*2-1), (Math.random()*2-1)],
+                                    bias: (Math.random()*2-1) * 0.5, sensedChannel: Math.floor(Math.random() * 4),
                                     lastOutput: 0, lastSensedR: 0, lastSensedG: 0, lastSensedB: 0
                                 };
-                            } else if (neuronData) {
-                                point.neuronData = neuronData;
                             }
-                            if(point.nodeType === NodeType.FIXED_ROOT) point.isFixed = true;
-                            this.massPoints.push(point);
-                            gridPoints[i][j] = point;
-                        }
-                    }
-                    // Link neurons after all points are created
-                    this.massPoints.forEach((p, idx) => {
-                        if (p.nodeType === NodeType.NEURON && p.neuronData) {
-                            if (p.neuronData.sensorPointIndex === -1 || Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER)) {
-                                let newSensorIndex;
-                                do { newSensorIndex = Math.floor(Math.random() * this.massPoints.length); } while (newSensorIndex === idx && this.massPoints.length > 1);
-                                p.neuronData.sensorPointIndex = newSensorIndex;
-                            }
-                            const effectorCandidates = this.massPoints.map((ep, epIdx) => ep.nodeType === NodeType.EMITTER_SWIMMER ? epIdx : -1).filter(epIdx => epIdx !== -1 && epIdx !== idx);
-                            if (effectorCandidates.length > 0) {
-                                if (p.neuronData.effectorPointIndex === -1 || !this.massPoints[p.neuronData.effectorPointIndex] || this.massPoints[p.neuronData.effectorPointIndex].nodeType !== NodeType.EMITTER_SWIMMER || Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER)) {
-                                    p.neuronData.effectorPointIndex = effectorCandidates[Math.floor(Math.random() * effectorCandidates.length)];
-                                }
-                            } else {
-                                p.neuronData.effectorPointIndex = -1;
-                            }
+                            if(newPoint.nodeType === NodeType.FIXED_ROOT) newPoint.isFixed = true;
+                            this.massPoints.push(newPoint);
+                            lastPointPos = newPoint.pos.clone();
                         }
                     });
 
-                    for (let i = 0; i < numPointsY; i++) for (let j = 0; j < numPointsX - 1; j++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], this.stiffness, this.springDamping));
-                    for (let j = 0; j < numPointsX; j++) for (let i = 0; i < numPointsY - 1; i++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], this.stiffness, this.springDamping));
-                    for (let i = 0; i < numPointsY - 1; i++) for (let j = 0; j < numPointsX - 1; j++) {
-                        this.springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], this.stiffness * 0.7, this.springDamping));
-                        this.springs.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], this.stiffness * 0.7, this.springDamping));
+                    if (this.massPoints.length === 0) {
+                        this.massPoints.push(new MassPoint(startX, startY, 0.5, baseRadius));
                     }
-                } else if (this.shapeType === 1) {
-                    const numLinePoints = parentBody ? parentBody.massPoints.length : Math.floor(3 + Math.random() * 3);
-                    const isHorizontal = Math.random() < 0.5;
-                    let linePoints = [];
-                    for (let i = 0; i < numLinePoints; i++) {
-                        const x = startX + (isHorizontal ? i * basePointDist : 0);
-                        const y = startY + (isHorizontal ? 0 : i * basePointDist);
-                        const point = new MassPoint(x, y, 0.3 + Math.random() * 0.4, baseRadius);
-                        this.massPoints.push(point);
-                        linePoints.push(point);
+
+                    for (let i = 0; i < this.massPoints.length; i++) {
+                        for (let j = i + 1; j < this.massPoints.length; j++) {
+                            const p1 = this.massPoints[i];
+                            const p2 = this.massPoints[j];
+                            const dist = p1.pos.sub(p2.pos).mag();
+                            if (dist < this.springConnectionRadius && dist > 0.1) {
+                                this.springs.push(new Spring(p1, p2, this.stiffness, this.springDamping, dist));
+                            }
+                        }
                     }
-                     this.massPoints.forEach((p, idx) => {
+                    if (this.massPoints.length > 1 && this.springs.length === 0) {
+                        for(let i = 0; i < this.massPoints.length -1; i++){
+                             this.springs.push(new Spring(this.massPoints[i], this.massPoints[i+1], this.stiffness, this.springDamping));
+                        }
+                    }
+
+
+                } else { // Initial generation - use old shape types
+                    const basePointDist = 20 + Math.random() * 10;
+                    if (this.shapeType === 0) {
+                        const numPointsX = 3; const numPointsY = 3; let gridPoints = [];
+                        for (let i = 0; i < numPointsY; i++) { gridPoints[i] = []; for (let j = 0; j < numPointsX; j++) {
+                            const point = new MassPoint(startX + j * basePointDist, startY + i * basePointDist, 0.3 + Math.random() * 0.4, baseRadius);
+                            point.isEater = Math.random() < eaterChance; // Set boolean flags
+                            point.isPredator = Math.random() < predatorChance;
+                            point.emitsDye = Math.random() < dyeEmitterChance;
+                            point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                            this.massPoints.push(point); gridPoints[i][j] = point;
+                        }}
+                        for (let i=0; i<numPointsY; i++) for (let j=0; j<numPointsX-1; j++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], this.stiffness, this.springDamping));
+                        for (let j=0; j<numPointsX; j++) for (let i=0; i<numPointsY-1; i++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], this.stiffness, this.springDamping));
+                        for (let i=0; i<numPointsY-1; i++) for (let j=0; j<numPointsX-1; j++) {
+                            this.springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], this.stiffness*0.7, this.springDamping));
+                            this.springs.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], this.stiffness*0.7, this.springDamping));
+                        }
+                    } else if (this.shapeType === 1) {
+                        const numLinePoints = Math.floor(3 + Math.random() * 3); const isHorizontal = Math.random() < 0.5; let linePoints = [];
+                        for (let i=0; i<numLinePoints; i++) {
+                            const x = startX + (isHorizontal ? i * basePointDist : 0); const y = startY + (isHorizontal ? 0 : i * basePointDist);
+                            const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
+                            point.isEater = Math.random() < eaterChance; point.isPredator = Math.random() < predatorChance; point.emitsDye = Math.random() < dyeEmitterChance; point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                            this.massPoints.push(point); linePoints.push(point);
+                        }
+                        for (let i=0; i<numLinePoints-1; i++) this.springs.push(new Spring(linePoints[i], linePoints[i+1], this.stiffness, this.springDamping));
+                        if (numLinePoints > 2) this.springs.push(new Spring(linePoints[0], linePoints[numLinePoints-1], this.stiffness*0.5, this.springDamping));
+                    } else {
+                        const numOuterPoints = Math.floor(4 + Math.random()*3); const centralPoint = new MassPoint(startX, startY, (0.3+Math.random()*0.4)*1.5, baseRadius*1.2);
+                        centralPoint.isEater = Math.random() < eaterChance; centralPoint.isPredator = Math.random() < predatorChance; centralPoint.emitsDye = Math.random() < dyeEmitterChance; centralPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                        this.massPoints.push(centralPoint); const circleRadius = basePointDist * 1.5;
+                        for (let i=0; i<numOuterPoints; i++) {
+                            const angle = (i/numOuterPoints) * Math.PI * 2; const x = startX + Math.cos(angle)*circleRadius; const y = startY + Math.sin(angle)*circleRadius;
+                            const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
+                            point.isEater = Math.random() < eaterChance; point.isPredator = Math.random() < predatorChance; point.emitsDye = Math.random() < dyeEmitterChance; point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                            this.massPoints.push(point);
+                            this.springs.push(new Spring(centralPoint, point, this.stiffness, this.springDamping));
+                            if (i>0) this.springs.push(new Spring(this.massPoints[this.massPoints.length-2], point, this.stiffness*0.8, this.springDamping));
+                        }
+                        if (numOuterPoints > 1) this.springs.push(new Spring(this.massPoints[1], this.massPoints[this.massPoints.length-1], this.stiffness*0.8, this.springDamping));
+                    }
+                     // Assign random node types for initial generation, including neurons
+                    this.massPoints.forEach(p => {
                         if (Math.random() < neuronChance && this.massPoints.length > 1) {
                             p.nodeType = NodeType.NEURON;
                             p.neuronData = {
                                 sensorPointIndex: -1, effectorPointIndex: -1,
                                 weights: [ (Math.random()*2-1), (Math.random()*2-1), (Math.random()*2-1) ],
-                                bias: (Math.random()*2-1) * 0.5, sensedChannel: Math.floor(Math.random() * 4),
+                                bias: (Math.random()*2-1) * 0.5,
+                                sensedChannel: Math.floor(Math.random() * 4),
                                 lastOutput: 0, lastSensedR: 0, lastSensedG: 0, lastSensedB: 0
                             };
-                            let newSensorIndex;
-                            do { newSensorIndex = Math.floor(Math.random() * this.massPoints.length); } while (newSensorIndex === idx);
-                            p.neuronData.sensorPointIndex = newSensorIndex;
-                            const effectorCandidates = this.massPoints.map((ep, epIdx) => ep.nodeType === NodeType.EMITTER_SWIMMER ? epIdx : -1).filter(epIdx => epIdx !== -1 && epIdx !== idx);
-                            if (effectorCandidates.length > 0) p.neuronData.effectorPointIndex = effectorCandidates[Math.floor(Math.random() * effectorCandidates.length)];
+                        } else {
+                             p.nodeType = nodeTypeChoices[Math.floor(Math.random() * (nodeTypeChoices.length -1))]; // Exclude neuron if not chosen by chance
                         }
+                        if (p.nodeType === NodeType.FIXED_ROOT) p.isFixed = true;
                     });
-                    for (let i = 0; i < numLinePoints - 1; i++) this.springs.push(new Spring(linePoints[i], linePoints[i+1], this.stiffness, this.springDamping));
-                    if (numLinePoints > 2) this.springs.push(new Spring(linePoints[0], linePoints[numLinePoints-1], this.stiffness * 0.5, this.springDamping));
-
-                } else {
-                    const numOuterPoints = parentBody ? parentBody.massPoints.length -1 : Math.floor(4 + Math.random() * 3);
-                    const centralPoint = new MassPoint(startX, startY, (0.3 + Math.random() * 0.4) * 1.5, baseRadius * 1.2);
-                    this.massPoints.push(centralPoint);
-                    const circleRadius = basePointDist * 1.5;
-                    for (let i = 0; i < numOuterPoints; i++) {
-                        const angle = (i / numOuterPoints) * Math.PI * 2;
-                        const x = startX + Math.cos(angle) * circleRadius;
-                        const y = startY + Math.sin(angle) * circleRadius;
-                        const point = new MassPoint(x, y, 0.3 + Math.random() * 0.4, baseRadius);
-                        this.massPoints.push(point);
-                        this.springs.push(new Spring(centralPoint, point, this.stiffness, this.springDamping));
-                        if (i > 0) this.springs.push(new Spring(this.massPoints[this.massPoints.length-2], point, this.stiffness * 0.8, this.springDamping));
-                    }
-                    this.massPoints.forEach((p, idx) => {
-                        if (Math.random() < neuronChance && this.massPoints.length > 1) {
-                            p.nodeType = NodeType.NEURON;
-                             p.neuronData = {
-                                sensorPointIndex: -1, effectorPointIndex: -1,
-                                weights: [ (Math.random()*2-1), (Math.random()*2-1), (Math.random()*2-1) ],
-                                bias: (Math.random()*2-1) * 0.5, sensedChannel: Math.floor(Math.random() * 4),
-                                lastOutput: 0, lastSensedR: 0, lastSensedG: 0, lastSensedB: 0
-                            };
-                            let newSensorIndex;
-                            do { newSensorIndex = Math.floor(Math.random() * this.massPoints.length); } while (newSensorIndex === idx);
-                            p.neuronData.sensorPointIndex = newSensorIndex;
-                            const effectorCandidates = this.massPoints.map((ep, epIdx) => ep.nodeType === NodeType.EMITTER_SWIMMER ? epIdx : -1).filter(epIdx => epIdx !== -1 && epIdx !== idx);
-                            if (effectorCandidates.length > 0) p.neuronData.effectorPointIndex = effectorCandidates[Math.floor(Math.random() * effectorCandidates.length)];
-                        }
-                    });
-                    if (numOuterPoints > 1) this.springs.push(new Spring(this.massPoints[1], this.massPoints[this.massPoints.length-1], this.stiffness * 0.8, this.springDamping));
                 }
+
+                // Common post-creation neuron linking (for both initial and reproduced)
+                this.massPoints.forEach((p, idx) => {
+                    if (p.nodeType === NodeType.NEURON && p.neuronData) {
+                        // Sensor linking
+                        if (this.massPoints.length > 1) {
+                            let newSensorIndex;
+                            do { newSensorIndex = Math.floor(Math.random() * this.massPoints.length); } while (newSensorIndex === idx);
+                            p.neuronData.sensorPointIndex = newSensorIndex;
+                        } else {
+                            p.neuronData.sensorPointIndex = -1; // No other point to sense
+                        }
+                        // Effector linking
+                        const effectorCandidates = this.massPoints.map((ep, epIdx) => ep.nodeType === NodeType.EMITTER_SWIMMER ? epIdx : -1).filter(epIdx => epIdx !== -1 && epIdx !== idx);
+                        if (effectorCandidates.length > 0) {
+                             p.neuronData.effectorPointIndex = effectorCandidates[Math.floor(Math.random() * effectorCandidates.length)];
+                        } else {
+                            p.neuronData.effectorPointIndex = -1; // No valid effector
+                        }
+                    }
+                });
             }
 
 
@@ -1395,35 +1426,38 @@
                         if (neuronPoint.nodeType === NodeType.NEURON && neuronPoint.neuronData) {
                             const nd = neuronPoint.neuronData;
                             if (nd.sensorPointIndex >= 0 && nd.sensorPointIndex < this.massPoints.length &&
-                                nd.effectorPointIndex >= 0 && nd.effectorPointIndex < this.massPoints.length) {
+                                nd.effectorPointIndex >= 0 && nd.effectorPointIndex < this.massPoints.length &&
+                                this.massPoints[nd.sensorPointIndex] && this.massPoints[nd.effectorPointIndex] &&
+                                this.massPoints[nd.effectorPointIndex].nodeType === NodeType.EMITTER_SWIMMER ) {
 
                                 const sensor = this.massPoints[nd.sensorPointIndex];
                                 const effector = this.massPoints[nd.effectorPointIndex];
 
-                                if (effector.nodeType === NodeType.EMITTER_SWIMMER) {
-                                    const gx = Math.floor(sensor.pos.x / fluidFieldRef.scaleX);
-                                    const gy = Math.floor(sensor.pos.y / fluidFieldRef.scaleY);
-                                    const idx = fluidFieldRef.IX(gx, gy);
+                                const gx = Math.floor(sensor.pos.x / fluidFieldRef.scaleX);
+                                const gy = Math.floor(sensor.pos.y / fluidFieldRef.scaleY);
+                                const idx = fluidFieldRef.IX(gx, gy);
 
-                                    nd.lastSensedR = (fluidFieldRef.densityR[idx] || 0) / 255;
-                                    nd.lastSensedG = (fluidFieldRef.densityG[idx] || 0) / 255;
-                                    nd.lastSensedB = (fluidFieldRef.densityB[idx] || 0) / 255;
+                                nd.lastSensedR = (fluidFieldRef.densityR[idx] || 0) / 255;
+                                nd.lastSensedG = (fluidFieldRef.densityG[idx] || 0) / 255;
+                                nd.lastSensedB = (fluidFieldRef.densityB[idx] || 0) / 255;
 
-                                    let sensedInputValue = 0;
-                                    switch(nd.sensedChannel) {
-                                        case DyeChannel.RED: sensedInputValue = nd.lastSensedR * nd.weights[0]; break;
-                                        case DyeChannel.GREEN: sensedInputValue = nd.lastSensedG * nd.weights[1]; break;
-                                        case DyeChannel.BLUE: sensedInputValue = nd.lastSensedB * nd.weights[2]; break;
-                                        case DyeChannel.AVERAGE:
-                                            sensedInputValue = (nd.lastSensedR * nd.weights[0] + nd.lastSensedG * nd.weights[1] + nd.lastSensedB * nd.weights[2]) / 3;
-                                            break;
-                                    }
-
-                                    const neuronActivation = sensedInputValue + nd.bias;
-                                    nd.lastOutput = Math.tanh(neuronActivation);
-
-                                    effector.neuralEffectiveStrength = (nd.lastOutput + 1) / 2; // Map -1..1 to 0..1
+                                let sensedInputValue = 0;
+                                switch(nd.sensedChannel) {
+                                    case DyeChannel.RED: sensedInputValue = nd.lastSensedR * nd.weights[0]; break;
+                                    case DyeChannel.GREEN: sensedInputValue = nd.lastSensedG * nd.weights[1]; break;
+                                    case DyeChannel.BLUE: sensedInputValue = nd.lastSensedB * nd.weights[2]; break;
+                                    case DyeChannel.AVERAGE:
+                                        sensedInputValue = (nd.lastSensedR * nd.weights[0] + nd.lastSensedG * nd.weights[1] + nd.lastSensedB * nd.weights[2]) / 3;
+                                        break;
                                 }
+
+                                const neuronActivation = sensedInputValue + nd.bias;
+                                nd.lastOutput = Math.tanh(neuronActivation);
+
+                                effector.neuralEffectiveStrength = (nd.lastOutput + 1) / 2; // Map -1..1 to 0..1
+                            } else {
+                                nd.sensorPointIndex = -1;
+                                nd.effectorPointIndex = -1;
                             }
                         }
                     });
@@ -1632,7 +1666,7 @@
                 if (this.isUnstable || !this.canReproduce) return [];
 
                 const energyForOneOffspring = MAX_CREATURE_ENERGY * OFFSPRING_INITIAL_ENERGY_SHARE;
-                const totalEnergyForOffspring = this.numOffspring * energyForOneOffspring; // Use heritable numOffspring
+                const totalEnergyForOffspring = this.numOffspring * energyForOneOffspring;
 
                 if (this.creatureEnergy < totalEnergyForOffspring) return [];
 
@@ -1646,12 +1680,12 @@
                 let offspring = [];
                 const parentAvgPos = this.getAveragePosition();
 
-                for (let i = 0; i < this.numOffspring; i++) { // Use heritable numOffspring
+                for (let i = 0; i < this.numOffspring; i++) {
                     let spawnX, spawnY, isSpotClear, attempts = 0;
 
                     do {
                         const angle = Math.random() * Math.PI * 2;
-                        const radiusOffset = this.offspringSpawnRadius * (0.5 + Math.random() * 0.5); // Use heritable spawn radius
+                        const radiusOffset = this.offspringSpawnRadius * (0.5 + Math.random() * 0.5);
                         const offsetX = Math.cos(angle) * radiusOffset;
                         const offsetY = Math.sin(angle) * radiusOffset;
 

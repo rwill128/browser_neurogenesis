@@ -291,7 +291,7 @@
                 <h4>Fluid</h4>
                 <label for="fluidGridSize" class="slider-label">Fluid Grid Resolution:</label>
                 <span id="fluidGridSizeValue" class="slider-value">128</span>
-                <input type="range" id="fluidGridSize" min="32" max="256" value="128" step="16">
+                <input type="range" id="fluidGridSize" min="32" max="2048" value="128" step="16">
 
                 <label for="fluidDiffusion" class="slider-label">Diffusion:</label>
                 <span id="fluidDiffusionValue" class="slider-value">4.7e-4</span>
@@ -351,9 +351,9 @@
         let offscreenFluidCanvas, offscreenFluidCtx; // For smoother fluid rendering
 
         // --- Viewport and World Dimensions ---
-        let WORLD_WIDTH = 1600;
-        let WORLD_HEIGHT = 1200;
-        const VIEW_PAN_SPEED = 20;
+        let WORLD_WIDTH = 3200;
+        let WORLD_HEIGHT = 2400;
+        const VIEW_PAN_SPEED = 80;
 
         canvas.width = WORLD_WIDTH;
         canvas.height = WORLD_HEIGHT;
@@ -361,7 +361,7 @@
         let viewOffsetX = 0;
         let viewOffsetY = 0;
         let viewZoom = 1.0;
-        const ZOOM_SENSITIVITY = 0.0005;
+        const ZOOM_SENSITIVITY = 0.02;
         const MAX_ZOOM = 4.0;
         let MIN_ZOOM = 0.1;
 

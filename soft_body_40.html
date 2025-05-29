@@ -462,13 +462,9 @@
         const MUTATION_CHANCE_BOOL = 0.05;
         const MUTATION_CHANCE_NODE_TYPE = 0.1;
         const MUTATION_CHANCE_REASSIGN_NEURON_LINK = 0.02;
-        const NEURON_CHANCE = 0.1;
         const ADD_POINT_MUTATION_CHANCE = 0.03;
         const NEW_POINT_OFFSET_RADIUS = 15;
         let isAnySoftBodyUnstable = false;
-        const MAX_PIXELS_PER_FRAME_DISPLACEMENT = 100;
-        const MAX_SPRING_STRETCH_FACTOR = 4.0;
-        const MAX_SPAN_PER_POINT_FACTOR = GRID_CELL_SIZE * 2;
 
         function initializeSpatialGrid() {
             GRID_COLS = Math.max(1, Math.ceil(WORLD_WIDTH / GRID_CELL_SIZE));

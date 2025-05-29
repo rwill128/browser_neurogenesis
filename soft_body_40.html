@@ -449,6 +449,8 @@
         const MAX_SPRING_STRETCH_FACTOR = 4.0; 
         const MAX_SPAN_PER_POINT_FACTOR = GRID_CELL_SIZE * 2; 
         const DYE_PULL_RATE = 0.05; 
+        const MUTATION_RATE_PERCENT = 0.1;
+        const MUTATION_CHANCE_BOOL = 0.05;
 
         function initializeSpatialGrid() {
             GRID_COLS = Math.max(1, Math.ceil(WORLD_WIDTH / GRID_CELL_SIZE)); 

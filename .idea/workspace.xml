@@ -4,10 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/soft_body.html" beforeDir="false" afterPath="$PROJECT_DIR$/soft_body.html" afterDir="false" />
-    </list>
+    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -139,15 +136,7 @@
       <workItem from="1748404633579" duration="1090000" />
       <workItem from="1748407142250" duration="3984000" />
       <workItem from="1748444840156" duration="115000" />
-      <workItem from="1748444958636" duration="17346000" />
-    </task>
-    <task id="LOCAL-00001" summary="Checkpoint">
-      <option name="closed" value="true" />
-      <created>1748367963236</created>
-      <option name="number" value="00001" />
-      <option name="presentableId" value="LOCAL-00001" />
-      <option name="project" value="LOCAL" />
-      <updated>1748367963236</updated>
+      <workItem from="1748444958636" duration="18164000" />
     </task>
     <task id="LOCAL-00002" summary="CHeckpoint">
       <option name="closed" value="true" />
@@ -525,7 +514,23 @@
       <option name="project" value="LOCAL" />
       <updated>1748483422560</updated>
     </task>
-    <option name="localTasksCounter" value="49" />
+    <task id="LOCAL-00049" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
+      <option name="closed" value="true" />
+      <created>1748487791149</created>
+      <option name="number" value="00049" />
+      <option name="presentableId" value="LOCAL-00049" />
+      <option name="project" value="LOCAL" />
+      <updated>1748487791149</updated>
+    </task>
+    <task id="LOCAL-00050" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
+      <option name="closed" value="true" />
+      <created>1748487984013</created>
+      <option name="number" value="00050" />
+      <option name="presentableId" value="LOCAL-00050" />
+      <option name="project" value="LOCAL" />
+      <updated>1748487984013</updated>
+    </task>
+    <option name="localTasksCounter" value="51" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

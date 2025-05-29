@@ -293,8 +293,8 @@
                 <input type="range" id="creaturePopulationCeilingSlider" min="10" max="2000" value="1000" step="10">
 
                 <label for="globalMutationRate" class="slider-label">Global Mutation Rate:</label>
-                <span id="globalMutationRateValue" class="slider-value">1.0</span>
-                <input type="range" id="globalMutationRate" min="0.1" max="3.0" value="1.0" step="0.05">
+                <span id="globalMutationRateValue" class="slider-value">0.25</span>
+                <input type="range" id="globalMutationRate" min="0.1" max="3.0" value="0.25" step="0.05">
 
                 <label for="bodyFluidEntrainment" class="slider-label">Fluid Entrainment (Floaters):</label>
                 <span id="bodyFluidEntrainmentValue" class="slider-value">0.47</span>
@@ -327,24 +327,24 @@
             <div class="control-group">
                 <h4>Energy Costs / Frame</h4>
                 <label for="baseNodeCost" class="slider-label">Base Node Cost:</label>
-                <span id="baseNodeCostValue" class="slider-value">1.0000</span>
-                <input type="range" id="baseNodeCost" min="0.0" max="50.0" value="1.0" step="0.1">
+                <span id="baseNodeCostValue" class="slider-value">0.3</span>
+                <input type="range" id="baseNodeCost" min="0.0" max="50.0" value="0.3" step="0.1">
 
                 <label for="emitterNodeCost" class="slider-label">Emitter Node Cost:</label>
                 <span id="emitterNodeCostValue" class="slider-value">1.0000</span>
-                <input type="range" id="emitterNodeCost" min="0.0" max="50.0" value="1.0" step="0.1">
+                <input type="range" id="emitterNodeCost" min="0.0" max="50.0" value="0.3" step="0.1">
 
                 <label for="eaterNodeCost" class="slider-label">Eater Node Cost:</label>
                 <span id="eaterNodeCostValue" class="slider-value">1.0000</span>
-                <input type="range" id="eaterNodeCost" min="0.0" max="50.0" value="1.0" step="0.1">
+                <input type="range" id="eaterNodeCost" min="0.0" max="50.0" value="0.3" step="0.1">
 
                 <label for="predatorNodeCost" class="slider-label">Predator Node Cost:</label>
                 <span id="predatorNodeCostValue" class="slider-value">100.0000</span>
-                <input type="range" id="predatorNodeCost" min="0.0" max="100.0" value="100.0" step="0.1">
+                <input type="range" id="predatorNodeCost" min="0.0" max="100.0" value="0.8" step="0.1">
 
                 <label for="neuronNodeCost" class="slider-label">Neuron Node Cost:</label>
                 <span id="neuronNodeCostValue" class="slider-value">0.0500</span>
-                <input type="range" id="neuronNodeCost" min="0.0" max="0.5" value="0.05" step="0.001">
+                <input type="range" id="neuronNodeCost" min="0.0" max="0.5" value="0.01" step="0.001">
             </div>
             <div class="control-group">
                 <h4>Fluid</h4>
@@ -361,28 +361,28 @@
                 <input type="range" id="fluidViscosity" min="0" max="0.00015" value="0.000068" step="0.000001">
 
                 <label for="fluidFade" class="slider-label">Fade Rate:</label>
-                <span id="fluidFadeValue" class="slider-value">0.002</span>
-                <input type="range" id="fluidFade" min="0.0" max="1.0" value="0.002" step="0.001">
+                <span id="fluidFadeValue" class="slider-value">0.01</span>
+                <input type="range" id="fluidFade" min="0.0" max="1.0" value="0.01" step="0.001">
 
                 <label for="maxFluidVelocityComponentSlider" class="slider-label">Max Fluid Vel. Component:</label>
-                <span id="maxFluidVelocityComponentValueSpan" class="slider-value">2.00</span>
-                <input type="range" id="maxFluidVelocityComponentSlider" min="0.1" max="10.0" value="2.0" step="0.1">
+                <span id="maxFluidVelocityComponentValueSpan" class="slider-value">0.5</span>
+                <input type="range" id="maxFluidVelocityComponentSlider" min="0.1" max="10.0" value="0.5" step="0.1">
 
                 <button id="clearFluidButton">Clear Fluid</button>
             </div>
             <div class="control-group">
                 <h4>Particles</h4>
                 <label for="particlePopulationFloorSlider" class="slider-label">Particle Pop. Floor:</label>
-                <span id="particlePopulationFloorValueSpan" class="slider-value">2000</span>
-                <input type="range" id="particlePopulationFloorSlider" min="0" max="5000" value="2000" step="50">
+                <span id="particlePopulationFloorValueSpan" class="slider-value">5000</span>
+                <input type="range" id="particlePopulationFloorSlider" min="0" max="10000" value="5000" step="50">
 
                 <label for="particlePopulationCeilingSlider" class="slider-label">Particle Pop. Ceiling:</label>
-                <span id="particlePopulationCeilingValueSpan" class="slider-value">5000</span>
-                <input type="range" id="particlePopulationCeilingSlider" min="0" max="20000" value="5000" step="50">
+                <span id="particlePopulationCeilingValueSpan" class="slider-value">20000</span>
+                <input type="range" id="particlePopulationCeilingSlider" min="0" max="40000" value="20000" step="50">
 
                 <label for="particlesPerSecondSlider" class="slider-label">Particles / Sec (if between floor/ceil):</label>
-                <span id="particlesPerSecondValueSpan" class="slider-value">100</span>
-                <input type="range" id="particlesPerSecondSlider" min="0" max="500" value="100" step="1">
+                <span id="particlesPerSecondValueSpan" class="slider-value">500</span>
+                <input type="range" id="particlesPerSecondSlider" min="0" max="1000" value="500" step="1">
 
                 <label for="particleFluidInfluence" class.slider-label="slider-label">Fluid Influence:</label>
                 <span id="particleFluidInfluenceValue" class="slider-value">1.00</span>

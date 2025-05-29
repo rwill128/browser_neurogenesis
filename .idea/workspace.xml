@@ -5,7 +5,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
-      <change beforePath="$PROJECT_DIR$/soft_body.html" beforeDir="false" afterPath="$PROJECT_DIR$/soft_body.html" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/soft_body_35.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -138,7 +139,7 @@
       <workItem from="1748404633579" duration="1090000" />
       <workItem from="1748407142250" duration="3984000" />
       <workItem from="1748444840156" duration="115000" />
-      <workItem from="1748444958636" duration="11319000" />
+      <workItem from="1748444958636" duration="12387000" />
     </task>
     <task id="LOCAL-00001" summary="Checkpoint">
       <option name="closed" value="true" />
@@ -444,7 +445,39 @@
       <option name="project" value="LOCAL" />
       <updated>1748468243383</updated>
     </task>
-    <option name="localTasksCounter" value="39" />
+    <task id="LOCAL-00039" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
+      <option name="closed" value="true" />
+      <created>1748468462284</created>
+      <option name="number" value="00039" />
+      <option name="presentableId" value="LOCAL-00039" />
+      <option name="project" value="LOCAL" />
+      <updated>1748468462284</updated>
+    </task>
+    <task id="LOCAL-00040" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
+      <option name="closed" value="true" />
+      <created>1748468528797</created>
+      <option name="number" value="00040" />
+      <option name="presentableId" value="LOCAL-00040" />
+      <option name="project" value="LOCAL" />
+      <updated>1748468528797</updated>
+    </task>
+    <task id="LOCAL-00041" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
+      <option name="closed" value="true" />
+      <created>1748468617455</created>
+      <option name="number" value="00041" />
+      <option name="presentableId" value="LOCAL-00041" />
+      <option name="project" value="LOCAL" />
+      <updated>1748468617455</updated>
+    </task>
+    <task id="LOCAL-00042" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
+      <option name="closed" value="true" />
+      <created>1748468652731</created>
+      <option name="number" value="00042" />
+      <option name="presentableId" value="LOCAL-00042" />
+      <option name="project" value="LOCAL" />
+      <updated>1748468652731</updated>
+    </task>
+    <option name="localTasksCounter" value="43" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -476,6 +509,12 @@
           <url>file://$PROJECT_DIR$/soft_body_18.html</url>
           <line>334</line>
           <option name="timeStamp" value="1" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="javascript">
+          <url>file://$PROJECT_DIR$/soft_body_35.html</url>
+          <line>649</line>
+          <properties lambdaOrdinal="-1" />
+          <option name="timeStamp" value="2" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>

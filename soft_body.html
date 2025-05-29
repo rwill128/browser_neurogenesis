@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Capped Dye Emission</title>
+    <title>2D Soft Body Evolution - Dye Pull Logic</title>
     <style>
         body {
             margin: 0;
@@ -69,7 +69,7 @@
             align-items: center;
             overflow: hidden;
             position: relative;
-            background-color: #1a1a1a;
+            background-color: #000; /* Changed from #1a1a1a */
             border: 1px solid #444;
             border-radius: 8px;
         }
@@ -614,6 +614,7 @@
         let FLUID_VISCOSITY = parseFloat(fluidViscositySlider.value);
         let FLUID_FADE_RATE = parseFloat(fluidFadeSlider.value);
         let MAX_FLUID_VELOCITY_COMPONENT = parseFloat(maxFluidVelocityComponentSlider.value); // New
+        const DYE_PULL_RATE = 0.05; // New constant for dye pull logic
         let IS_WORLD_WRAPPING = worldWrapToggle.checked;
         let PARTICLES_PER_SECOND = parseInt(particlesPerSecondSlider.value);
         let PARTICLE_FLUID_INFLUENCE = parseFloat(particleFluidInfluenceSlider.value);
@@ -2263,27 +2264,21 @@
 
             addDensity(x, y, emitterR, emitterG, emitterB, emissionStrength) {
                 const idx = this.IX(x, y);
-                const normalizedStrength = emissionStrength / 255.0;
+                const normalizedEmissionEffect = (emissionStrength / 50.0) * DYE_PULL_RATE; // Use 50 as a reference emission strength
 
                 let currentR = this.densityR[idx];
-                let pigmentToAddR = emitterR * normalizedStrength;
-                if (currentR < emitterR) {
-                    this.densityR[idx] = Math.min(emitterR, currentR + pigmentToAddR);
-                }
+                let targetDiffR = emitterR - currentR;
+                this.densityR[idx] += targetDiffR * normalizedEmissionEffect;
                 this.densityR[idx] = Math.max(0, Math.min(255, this.densityR[idx]));
 
                 let currentG = this.densityG[idx];
-                let pigmentToAddG = emitterG * normalizedStrength;
-                if (currentG < emitterG) {
-                    this.densityG[idx] = Math.min(emitterG, currentG + pigmentToAddG);
-                }
+                let targetDiffG = emitterG - currentG;
+                this.densityG[idx] += targetDiffG * normalizedEmissionEffect;
                 this.densityG[idx] = Math.max(0, Math.min(255, this.densityG[idx]));
 
                 let currentB = this.densityB[idx];
-                let pigmentToAddB = emitterB * normalizedStrength;
-                if (currentB < emitterB) {
-                    this.densityB[idx] = Math.min(emitterB, currentB + pigmentToAddB);
-                }
+                let targetDiffB = emitterB - currentB;
+                this.densityB[idx] += targetDiffB * normalizedEmissionEffect;
                 this.densityB[idx] = Math.max(0, Math.min(255, this.densityB[idx]));
             }
 

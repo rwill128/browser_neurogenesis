@@ -41,7 +41,7 @@
   },
   {
     "id": "bodyFluidEntrainmentSlider",
-    "defaultValue": 0.465,
+    "defaultValue": 0.485,
     "min": 0.0,
     "max": 0.7,
     "step": 0.005,

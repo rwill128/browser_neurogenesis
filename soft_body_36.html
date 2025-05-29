@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - Capped Dye Emission</title>
+    <title>2D Soft Body Evolution - Robust Instability Detection</title>
     <style>
         body {
             margin: 0;
@@ -642,6 +642,8 @@
         const MAX_PIXELS_PER_FRAME_DISPLACEMENT = 100;
         const MAX_SPRING_STRETCH_FACTOR = 4.0;
         const MAX_SPAN_PER_POINT_FACTOR = GRID_CELL_SIZE * 2;
+
+        // INITIAL_POPULATION_SIZE is now effectively CREATURE_POPULATION_FLOOR for resets
 
         let velocityEmitters = [];
         let currentEmitterPreview = null;
@@ -1582,7 +1584,7 @@
                 const eaterChance = 0.25;
                 const predatorChance = 0.15;
                 const dyeEmitterChance = 0.2;
-                // const neuronChance = NEURON_CHANCE; // Use global NEURON_CHANCE directly
+                const neuronChance = NEURON_CHANCE; // Use global NEURON_CHANCE directly
                 const nodeTypeChoices = [NodeType.NEUTRAL, NodeType.FLOATING, NodeType.FIXED_ROOT, NodeType.EMITTER_SWIMMER, NodeType.NEURON];
                 const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
 
@@ -2261,32 +2263,12 @@
                 return Math.floor(x) + Math.floor(y) * this.size;
             }
 
-            addDensity(x, y, emitterR, emitterG, emitterB, emissionStrength) {
-                const idx = this.IX(x, y);
-                const normalizedStrength = emissionStrength / 255.0;
-
-                let currentR = this.densityR[idx];
-                let pigmentToAddR = emitterR * normalizedStrength;
-                if (currentR < emitterR) {
-                    this.densityR[idx] = Math.min(emitterR, currentR + pigmentToAddR);
-                }
-                this.densityR[idx] = Math.max(0, Math.min(255, this.densityR[idx]));
-
-                let currentG = this.densityG[idx];
-                let pigmentToAddG = emitterG * normalizedStrength;
-                if (currentG < emitterG) {
-                    this.densityG[idx] = Math.min(emitterG, currentG + pigmentToAddG);
-                }
-                this.densityG[idx] = Math.max(0, Math.min(255, this.densityG[idx]));
-
-                let currentB = this.densityB[idx];
-                let pigmentToAddB = emitterB * normalizedStrength;
-                if (currentB < emitterB) {
-                    this.densityB[idx] = Math.min(emitterB, currentB + pigmentToAddB);
-                }
-                this.densityB[idx] = Math.max(0, Math.min(255, this.densityB[idx]));
+            addDensity(x, y, r, g, b, amount) {
+                const idx = this.IX(x,y);
+                this.densityR[idx] = Math.min(255, this.densityR[idx] + r * (amount/255));
+                this.densityG[idx] = Math.min(255, this.densityG[idx] + g * (amount/255));
+                this.densityB[idx] = Math.min(255, this.densityB[idx] + b * (amount/255));
             }
-
 
             addVelocity(x, y, amountX, amountY) {
                 const idx = this.IX(x, y);

@@ -190,6 +190,22 @@
             border-radius: 3px;
         }
 
+        #copyInfoPanelButton {
+            position: absolute;
+            top: 10px;
+            right: 45px; /* Positioned to the left of the close button */
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 3px 7px;
+            cursor: pointer;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+        #copyInfoPanelButton:hover {
+            background-color: #0056b3;
+        }
+
         /* Screensaver Mode Styles */
         body.screensaver-active #controls,
         body.screensaver-active #infoPanel,
@@ -231,7 +247,9 @@
 <body>
     <div id="pageContainer">
         <div id="simulationAndInfoWrapper">
-            <div id="infoPanel"> <button id="closeInfoPanel">X</button>
+            <div id="infoPanel"> 
+                <button id="closeInfoPanel">X</button>
+                <button id="copyInfoPanelButton" title="Copy Info to Clipboard">Copy</button>
                 <div class="info-section">
                     <h5>Soft Body Info</h5>
                     <p><strong>ID:</strong> <span id="infoBodyId">-</span></p>
@@ -601,6 +619,7 @@
         const closeInfoPanelButton = document.getElementById('closeInfoPanel');
         const neuronInfoSection = document.getElementById('neuronInfoSection');
         const allPointsInfoContainer = document.getElementById('allPointsInfoContainer'); // New
+        const copyInfoPanelButton = document.getElementById('copyInfoPanelButton'); // New
 
 
         // --- Global Variables & Constants (with initial hardcoded defaults) ---
@@ -1007,6 +1026,47 @@
         importConfigButton.onclick = () => importConfigFile.click();
         importConfigFile.onchange = handleImportConfig;
         closeInfoPanelButton.onclick = () => { infoPanel.classList.remove('open'); selectedInspectBody = null; selectedInspectPoint = null; }
+
+        copyInfoPanelButton.onclick = function() {
+            if (!selectedInspectBody) {
+                showMessageModal("No creature selected to copy info from.");
+                return;
+            }
+            let infoText = "";
+            const panelElements = infoPanel.querySelectorAll('.info-section p, .info-section h5, .point-info-entry p, .point-info-entry h6');
+            
+            panelElements.forEach(el => {
+                let label = "";
+                let value = "";
+                if (el.tagName === 'H5' || el.tagName === 'H6') {
+                    infoText += el.textContent.trim() + "\n";
+                } else if (el.tagName === 'P') {
+                    const strongTag = el.querySelector('strong');
+                    if (strongTag) {
+                        label = strongTag.textContent.trim();
+                        // Get text content of the P element, then remove the strong tag's content and trim
+                        let allText = el.textContent.trim();
+                        value = allText.substring(label.length).trim(); // Assumes value follows label directly
+                         if (value.startsWith(":")) value = value.substring(1).trim(); // Remove leading colon if present
+                        infoText += label + ": " + value + "\n";
+                    } else {
+                        // Paragraphs without a <strong> tag, like in point details for multi-line data
+                        infoText += el.textContent.trim() + "\n";
+                    }
+                }
+            });
+
+            navigator.clipboard.writeText(infoText.trim()).then(() => {
+                const originalText = copyInfoPanelButton.textContent;
+                copyInfoPanelButton.textContent = "Copied!";
+                setTimeout(() => {
+                    copyInfoPanelButton.textContent = originalText;
+                }, 1500);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err);
+                showMessageModal("Failed to copy info. See console for details.");
+            });
+        }
 
 
         function initializeAllSliderDisplays() {

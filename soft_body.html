@@ -2130,119 +2130,157 @@
                     // console.log(`Body ${this.id} brain processed. Inputs: [${inputVector.map(v=>v.toFixed(2))}], Outputs: [${rawOutputs.map(v=>v.toFixed(2))}]`);
 
                     // --- Apply Neural Outputs (Modified for Policy Gradient - Step 1 of RL Phase) ---
-                    let emitterSwimmerOutputTracker = 0; // Tracks how many EMITTER_SWIMMERs we've processed outputs for
                     nd.currentFrameActionDetails = []; // Initialize/clear array for the current frame
+                    let currentRawOutputIndex = 0; // Tracks the current starting index in nd.rawOutputs
+
+                    // Helper to process one action component (mean + stdDev pair)
+                    // Moved this helper function outside the point iteration loop for broader access
+                    function sampleAndLogAction(rawMean, rawStdDev) {
+                        const mean = rawMean; // Assuming rawMean is suitable as direct mean
+                        const stdDev = Math.exp(rawStdDev) + 1e-6; // Ensure stdDev is positive and non-zero
+                        const sampledActionValue = sampleGaussian(mean, stdDev);
+                        const logProb = logPdfGaussian(sampledActionValue, mean, stdDev);
+                        
+                        return { 
+                            detail: { mean, stdDev, sampledAction: sampledActionValue, logProb }, 
+                            value: sampledActionValue 
+                        };
+                    }
 
                     this.massPoints.forEach(point => {
-                        point.currentExertionLevel = 0; // Reset exertion for this frame before NN sets it
+                        point.currentExertionLevel = 0; // Reset exertion for all points before NN potentially sets it
+                    });
 
+                    // Process Emitter/Swimmers first (matches order in initializeBrain for outputVectorSize)
+                    this.massPoints.forEach(point => {
                         if (point.nodeType === NodeType.EMITTER_SWIMMER) {
-                            const outputStartRawIdx = emitterSwimmerOutputTracker * NEURAL_OUTPUTS_PER_EMITTER_SWIMMER;
-                            // Note: NEURAL_OUTPUTS_PER_EMITTER_SWIMMER is now 14 (6 actions * 2 + exertion * 2)
-
+                            const outputStartRawIdx = currentRawOutputIndex;
                             if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_EMITTER_SWIMMER) {
-                                let currentOutputPairIdx = 0; // Index within the 12 outputs for this emitter
                                 const detailsForThisEmitter = [];
-
-                                // Helper to process one action component (mean + stdDev pair)
-                                function sampleAndLogAction(rawMean, rawStdDev) {
-                                    // The rawMean from NN output can be used directly or scaled/activated if needed.
-                                    // For now, assume it's suitable as a direct mean.
-                                    const mean = rawMean;
-                                    const stdDev = Math.exp(rawStdDev) + 1e-6; // Ensure stdDev is positive and non-zero
-                                    const sampledAction = sampleGaussian(mean, stdDev);
-                                    const logProb = logPdfGaussian(sampledAction, mean, stdDev);
-                                    
-                                    detailsForThisEmitter.push({ mean, stdDev, sampledAction, logProb });
-                                    return sampledAction; // Return the sampled_action for immediate use
-                                }
+                                let localRawOutputPairIdx = 0;
 
                                 // --- Action 1: Force X ---
-                                const sampledForceX = sampleAndLogAction(
-                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
-                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
+                                const forceXResult = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++],
+                                    nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++]
                                 );
-                                // appliedForceX now scaled by exertion level
-                                const appliedForceX = Math.tanh(sampledForceX) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength * point.currentExertionLevel;
-                                
+                                detailsForThisEmitter.push(forceXResult.detail);
+                                // Applied force will be scaled by exertion later, after exertion is determined for this point
+
                                 // --- Action 2: Force Y ---
-                                const sampledForceY = sampleAndLogAction(
-                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
-                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
+                                const forceYResult = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++],
+                                    nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++]
                                 );
-                                // appliedForceY now scaled by exertion level
-                                const appliedForceY = Math.tanh(sampledForceY) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength * point.currentExertionLevel;
-                                point.applyForce(new Vec2(appliedForceX / dt, appliedForceY / dt));
+                                detailsForThisEmitter.push(forceYResult.detail);
+                                // Applied force will be scaled by exertion later
 
                                 // --- Action 3: Target Dye Color R ---
-                                const sampledR = sampleAndLogAction(
-                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
-                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
+                                const dyeRResult = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++],
+                                    nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++]
                                 );
-                                point.dyeColor[0] = sigmoid(sampledR) * 255;
+                                detailsForThisEmitter.push(dyeRResult.detail);
+                                point.dyeColor[0] = sigmoid(dyeRResult.value) * 255;
 
                                 // --- Action 4: Target Dye Color G ---
-                                const sampledG = sampleAndLogAction(
-                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
-                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
+                                const dyeGResult = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++],
+                                    nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++]
                                 );
-                                point.dyeColor[1] = sigmoid(sampledG) * 255;
+                                detailsForThisEmitter.push(dyeGResult.detail);
+                                point.dyeColor[1] = sigmoid(dyeGResult.value) * 255;
 
                                 // --- Action 5: Target Dye Color B ---
-                                const sampledB = sampleAndLogAction(
-                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
-                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
+                                const dyeBResult = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++],
+                                    nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++]
                                 );
-                                point.dyeColor[2] = sigmoid(sampledB) * 255;
+                                detailsForThisEmitter.push(dyeBResult.detail);
+                                point.dyeColor[2] = sigmoid(dyeBResult.value) * 255;
 
                                 // --- Action 6: Emission Pull Strength ---
-                                const sampledPull = sampleAndLogAction(
-                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
-                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
+                                const pullResult = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++],
+                                    nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++]
                                 );
-                                // neuralPullStrength now scaled by exertion level
-                                const neuralPullStrength = sigmoid(sampledPull) * MAX_NEURAL_EMISSION_PULL_STRENGTH * point.currentExertionLevel;
+                                detailsForThisEmitter.push(pullResult.detail);
+                                // Emission pull strength will be scaled by exertion later
 
+                                // --- Action 7: Emitter/Swimmer Exertion ---
+                                const exertionResult = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++],
+                                    nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++]
+                                );
+                                detailsForThisEmitter.push(exertionResult.detail);
+                                point.currentExertionLevel = sigmoid(exertionResult.value); 
+
+                                // Now apply exertion-scaled effects
+                                const appliedForceX = Math.tanh(forceXResult.value) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength * point.currentExertionLevel;
+                                const appliedForceY = Math.tanh(forceYResult.value) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength * point.currentExertionLevel;
+                                point.applyForce(new Vec2(appliedForceX / dt, appliedForceY / dt));
+
+                                const neuralPullStrength = sigmoid(pullResult.value) * MAX_NEURAL_EMISSION_PULL_STRENGTH * point.currentExertionLevel;
                                 if (fluidFieldRef && point.emitsDye) {
                                     const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
                                     const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
                                     fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], neuralPullStrength * 50);
                                 }
-
-                                // --- Action 7: Emitter/Swimmer Exertion ---
-                                const sampledEmitterExertion = sampleAndLogAction(
-                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
-                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
-                                );
-                                point.currentExertionLevel = sigmoid(sampledEmitterExertion); 
-                                // Exertion is 0-1, used directly in energy cost calculation later
-
-                                nd.currentFrameActionDetails.push(...detailsForThisEmitter); 
-                            } 
-                            emitterSwimmerOutputTracker++;
-                        } else if (point.isEater) {
-                            // Similar logic for Eater exertion, assuming eater outputs follow emitter/swimmers
-                            // Need to carefully manage outputStartRawIdx if mixing types like this, 
-                            // or process them in sequence as defined in initializeBrain.
-                            // For now, let's assume a global output index that increments.
-                            // This part needs careful indexing based on how outputVectorSize was constructed.
-                            
-                            // To simplify, we need a running total of outputs consumed so far.
-                            // Let's adjust how outputStartRawIdx is determined later if this direct indexing is problematic.
-                            // Assuming eater outputs are packed after all emitter/swimmer outputs.
-                            // This needs a more robust indexing strategy if we have mixed types often.
-                            // A better way: Iterate points once to count, then iterate again to assign outputs.
-                            // Or, build the output array based on a defined order. 
-                            // For this pass, let's assume outputs are ordered: all E/S, then all Eaters, then all Predators.
-                            // We'll need a separate tracker for eater outputs.
-                            // This will be handled when we refactor the output application loop for multiple point types.
-                            // For now, this specific part for EATER and PREDATOR exertion will be a placeholder
-                            // until the output indexing strategy is solidified for mixed types.
-                            // TODO: Implement robust output indexing for Eaters and Predators for exertion.
-                        } else if (point.isPredator) {
-                            // TODO: Implement robust output indexing for Eaters and Predators for exertion.
+                                
+                                nd.currentFrameActionDetails.push(...detailsForThisEmitter);
+                                currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER_SWIMMER;
+                            } else {
+                                // Not enough rawOutputs for this ES point.
+                                // Still advance the raw output index to keep subsequent points aligned if possible,
+                                // or handle error more explicitly if this state is unexpected.
+                                currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER_SWIMMER;
+                            }
                         }
-                    }); 
+                    });
+
+                    // Process Eaters next
+                    this.massPoints.forEach(point => {
+                        // Process only if it's an Eater AND NOT ALSO an Emitter/Swimmer (to avoid double processing outputs)
+                        if (point.isEater && point.nodeType !== NodeType.EMITTER_SWIMMER) {
+                            const outputStartRawIdx = currentRawOutputIndex;
+                            if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_EATER) {
+                                const detailsForThisEater = [];
+                                const exertionResult = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx],
+                                    nd.rawOutputs[outputStartRawIdx + 1]
+                                );
+                                detailsForThisEater.push(exertionResult.detail);
+                                point.currentExertionLevel = sigmoid(exertionResult.value); 
+                                
+                                nd.currentFrameActionDetails.push(...detailsForThisEater);
+                                currentRawOutputIndex += NEURAL_OUTPUTS_PER_EATER;
+                            } else {
+                                currentRawOutputIndex += NEURAL_OUTPUTS_PER_EATER;
+                            }
+                        }
+                    });
+
+                    // Process Predators last
+                    this.massPoints.forEach(point => {
+                        // Process only if Predator AND NOT ES AND NOT Eater
+                        if (point.isPredator && point.nodeType !== NodeType.EMITTER_SWIMMER && !point.isEater) {
+                           const outputStartRawIdx = currentRawOutputIndex;
+                            if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_PREDATOR) {
+                                const detailsForThisPredator = [];
+                                const exertionResult = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx],
+                                    nd.rawOutputs[outputStartRawIdx + 1]
+                                );
+                                detailsForThisPredator.push(exertionResult.detail);
+                                point.currentExertionLevel = sigmoid(exertionResult.value);
+
+                                nd.currentFrameActionDetails.push(...detailsForThisPredator);
+                                currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR;
+                            } else {
+                                currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR;
+                            }
+                        }
+                    });
                     // --- End of Apply Neural Outputs ---
 
                     // --- Store Experience for RL (Step 2 of RL Phase) ---
@@ -2918,13 +2956,13 @@
                             if (actionDetailIndex >= actionDetails_t.length) {
                                 // This experience was recorded with a different number of actions
                                 // than the current network configuration. Skip this gradient component.
-                                // console.warn(`Skipping gradient for output ${j} in experience ${t}: actionDetailIndex ${actionDetailIndex} out of bounds for actionDetails_t length ${actionDetails_t.length}`);
+                                console.warn(`Skipping gradient for output ${j} in experience ${t}: actionDetailIndex ${actionDetailIndex} out of bounds for actionDetails_t length ${actionDetails_t.length}`);
                                 continue; 
                             }
 
                             const currentActionDetail = actionDetails_t[actionDetailIndex];
                             if (!currentActionDetail) { // Should ideally not happen if the length check passes
-                                // console.warn(`Skipping gradient for output ${j} in experience ${t}: currentActionDetail is undefined at index ${actionDetailIndex}`);
+                                console.warn(`Skipping gradient for output ${j} in experience ${t}: currentActionDetail is undefined at index ${actionDetailIndex}`);
                                 continue;
                             }
 

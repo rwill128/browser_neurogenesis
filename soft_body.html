@@ -107,6 +107,13 @@
             right: 100px;
         }
 
+        #viewEntireSimButton {
+            top: 60px; /* Positioned below the screensaver button */
+            right: 15px; /* Align with toggleControlsButton */
+            /* width: auto; Ensures button fits content */
+            /* padding: 8px 10px; Slightly less padding if text is long */
+        }
+
 
         #controls {
             position: fixed;
@@ -278,6 +285,7 @@
 
         <button id="toggleControlsButton" class="ui-button-top-right">Controls</button>
         <button id="screensaverButton" class="ui-button-top-right">Enter Screensaver</button>
+        <button id="viewEntireSimButton" class="ui-button-top-right">View Entire Sim</button>
 
         <div id="controls">
             <div class="control-group">
@@ -555,6 +563,7 @@
         const toggleControlsButton = document.getElementById('toggleControlsButton');
         const screensaverButton = document.getElementById('screensaverButton');
         const controlsPanel = document.getElementById('controls');
+        const viewEntireSimButton = document.getElementById('viewEntireSimButton'); // Get the new button
 
         const creaturePopulationFloorSlider = document.getElementById('creaturePopulationFloorSlider');
         const creaturePopulationFloorValueSpan = document.getElementById('creaturePopulationFloorValueSpan');
@@ -1081,6 +1090,20 @@
         importConfigButton.onclick = () => importConfigFile.click();
         importConfigFile.onchange = handleImportConfig;
         closeInfoPanelButton.onclick = () => { infoPanel.classList.remove('open'); selectedInspectBody = null; selectedInspectPoint = null; }
+
+        viewEntireSimButton.onclick = function() {
+            console.log('[View Entire Sim] Before:', { viewZoom, viewOffsetX, viewOffsetY, WORLD_WIDTH, WORLD_HEIGHT, clientW: canvas.clientWidth, clientH: canvas.clientHeight });
+            
+            viewZoom = 1.0;
+            viewOffsetX = 0;
+            viewOffsetY = 0;
+
+            // The browser's 'object-fit: contain' on the canvas element (which has canvas.width = WORLD_WIDTH)
+            // will handle scaling and centering the entire world content within the CSS dimensions of the canvas.
+            // No additional offset calculations for centering are needed here when viewZoom is 1 and offsets are 0.
+
+            console.log('[View Entire Sim] After:', { viewZoom, viewOffsetX, viewOffsetY });
+        };
 
         copyInfoPanelButton.onclick = function() {
             if (!selectedInspectBody) {
@@ -3820,6 +3843,18 @@
 
         // --- Main Initialization Sequence ---
         async function main() {
+            console.log('[Initial Sim State] Before any setup:', {
+                WORLD_WIDTH_initial_input: worldWidthInput.value,
+                WORLD_HEIGHT_initial_input: worldHeightInput.value,
+                canvas_initial_W: canvas.width,
+                canvas_initial_H: canvas.height,
+                canvas_client_W: canvas.clientWidth,
+                canvas_client_H: canvas.clientHeight,
+                viewZoom_initial: viewZoom,
+                viewOffsetX_initial: viewOffsetX,
+                viewOffsetY_initial: viewOffsetY
+            });
+
             // Initialize ALL global config variables with hardcoded defaults first
             // This ensures they have a value even if JSON load fails or is incomplete.
             WORLD_WIDTH = parseInt(worldWidthInput.value) || 8000;

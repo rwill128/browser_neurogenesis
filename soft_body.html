@@ -683,6 +683,10 @@
         const MAX_NEURAL_FORCE_COMPONENT = 1.0; // Max output for a single force component from NN
         const MAX_NEURAL_EMISSION_PULL_STRENGTH = 1.0; // Max output for emission pull strength
 
+        // --- RL Training Constants ---
+        const LEARNING_RATE = 0.001;
+        const DISCOUNT_FACTOR_GAMMA = 0.99;
+        const TRAINING_INTERVAL_FRAMES = 10; 
 
         // --- Neural Network Math Helpers ---
         function sigmoid(x) {
@@ -2201,6 +2205,13 @@
                     nd.previousEnergyForReward = this.creatureEnergy; // Update for next frame's reward calculation
                     // --- End of Store Experience ---
 
+                    // --- RL Training Trigger ---
+                    nd.framesSinceLastTrain++;
+                    if (nd.framesSinceLastTrain >= TRAINING_INTERVAL_FRAMES) {
+                        this.updateBrainPolicy(); 
+                    }
+                    // --- End of RL Training Trigger ---
+
                 } else {
                     // No operable brain, or brain not fully initialized
                     if (brainNode && brainNode.neuronData) brainNode.neuronData.rawOutputs = []; // Clear if partially set
@@ -2704,12 +2715,144 @@
                     nd.experienceBuffer = [];
                     nd.maxExperienceBufferSize = 10; // e.g., last 10 frames/experiences
                     nd.previousEnergyForReward = this.creatureEnergy; // Initialize for first reward calculation
+                    nd.framesSinceLastTrain = 0; 
 
                     // console.log(`Body ${this.id} brain initialized. Inputs: ${nd.inputVectorSize}, Hidden: ${nd.hiddenLayerSize}, Outputs: ${nd.outputVectorSize}`);
                 } else {
                     // No brain node found or brainNode.neuronData is missing somehow
                     // console.log(`Body ${this.id} has no operable brain node.`);
                 }
+            }
+
+            calculateDiscountedRewards(rewards, gamma) {
+                const discountedRewards = new Array(rewards.length);
+                let runningAdd = 0;
+                for (let i = rewards.length - 1; i >= 0; i--) {
+                    runningAdd = rewards[i] + gamma * runningAdd;
+                    discountedRewards[i] = runningAdd;
+                }
+                return discountedRewards;
+            }
+
+            updateBrainPolicy() {
+                let brainNode = null;
+                for (const point of this.massPoints) {
+                    if (point.neuronData && point.neuronData.isBrain) {
+                        brainNode = point;
+                        break;
+                    }
+                }
+
+                if (!brainNode || !brainNode.neuronData) return;
+                const nd = brainNode.neuronData;
+
+                if (!nd.experienceBuffer || nd.experienceBuffer.length < nd.maxExperienceBufferSize) {
+                    return; // Not enough experiences to train yet
+                }
+
+                const states = nd.experienceBuffer.map(exp => exp.state);
+                const actionDetailsBatch = nd.experienceBuffer.map(exp => exp.actionDetails); // Array of arrays of actionDetail objects
+                const rewards = nd.experienceBuffer.map(exp => exp.reward);
+
+                const discountedRewards = this.calculateDiscountedRewards(rewards, DISCOUNT_FACTOR_GAMMA);
+
+                // Normalize discounted rewards (optional but good practice)
+                let meanDiscountedReward = 0;
+                for (const r of discountedRewards) meanDiscountedReward += r;
+                meanDiscountedReward /= discountedRewards.length;
+
+                let stdDevDiscountedReward = 0;
+                for (const r of discountedRewards) stdDevDiscountedReward += (r - meanDiscountedReward) ** 2;
+                stdDevDiscountedReward = Math.sqrt(stdDevDiscountedReward / discountedRewards.length);
+                
+                const normalizedDiscountedRewards = discountedRewards.map(
+                    r => (r - meanDiscountedReward) / (stdDevDiscountedReward + 1e-6) // Add epsilon for stability
+                );
+
+                // Initialize gradients for weights and biases (accumulate over the batch)
+                const gradWeightsHO_acc = initializeMatrix(nd.outputVectorSize, nd.hiddenLayerSize, 0); // Initialize with zeros
+                const gradBiasesO_acc = initializeVector(nd.outputVectorSize, 0);
+                const gradWeightsIH_acc = initializeMatrix(nd.hiddenLayerSize, nd.inputVectorSize, 0);
+                const gradBiasesH_acc = initializeVector(nd.hiddenLayerSize, 0);
+                
+
+                // Iterate through each trajectory/experience in the batch
+                for (let t = 0; t < nd.experienceBuffer.length; t++) {
+                    const state_t = states[t];
+                    const actionDetails_t = actionDetailsBatch[t]; // This is an array of actionDetail objects for this timestep
+                    const G_t_normalized = normalizedDiscountedRewards[t];
+
+                    // Re-run forward pass to get hidden activations for this state_t
+                    // (assuming weights haven't changed *during* this batch processing)
+                    const hiddenLayerInputs_t = multiplyMatrixVector(nd.weightsIH, state_t);
+                    const hiddenLayerBiasedInputs_t = addVectors(hiddenLayerInputs_t, nd.biasesH);
+                    const hiddenActivations_t = hiddenLayerBiasedInputs_t.map(val => Math.tanh(val));
+                    
+                    // Gradients for Output Layer (weightsHO, biasesO)
+                    let currentActionDetailIdx = 0;
+                    for (let i = 0; i < nd.outputVectorSize / 2; i++) { // Iterate through 6 logical actions
+                        const meanOutputIdx = i * 2;
+                        const stdDevOutputIdx = i * 2 + 1;
+
+                        const ad = actionDetails_t[currentActionDetailIdx++];
+                        if (!ad) continue; // Should not happen if actionDetails_t is structured correctly
+
+                        const { sampledAction, mean, stdDev } = ad;
+                        const grad_logProb_d_mean = (sampledAction - mean) / (stdDev * stdDev + 1e-9); // add epsilon to stdDev^2
+                        const grad_logProb_d_stdDev_output = (((sampledAction - mean) ** 2) - (stdDev * stdDev)) / (stdDev * stdDev * stdDev + 1e-9);
+                        
+                        // Error for the mean output neuron
+                        const error_mean = G_t_normalized * grad_logProb_d_mean;
+                        // Error for the stdDev output neuron (raw output from NN, before exp())
+                        // actualStdDev = exp(rawStdDev) + eps --> d(actualStdDev)/d(rawStdDev) approx actualStdDev
+                        const error_stdDev = G_t_normalized * grad_logProb_d_stdDev_output * (stdDev - 1e-6); // (stdDev-eps) is approx exp(rawStdDev)
+
+                        for (let k = 0; k < nd.hiddenLayerSize; k++) {
+                            gradWeightsHO_acc[meanOutputIdx][k] += error_mean * hiddenActivations_t[k];
+                            gradWeightsHO_acc[stdDevOutputIdx][k] += error_stdDev * hiddenActivations_t[k];
+                        }
+                        gradBiasesO_acc[meanOutputIdx] += error_mean;
+                        gradBiasesO_acc[stdDevOutputIdx] += error_stdDev;
+                    }
+
+                    // Gradients for Hidden Layer (weightsIH, biasesH)
+                    const d_tanh = (x) => 1 - x * x; // Derivative of tanh(y) is 1 - tanh(y)^2 where x = tanh(y)
+                    for (let h = 0; h < nd.hiddenLayerSize; h++) {
+                        let sum_error_weighted_HO = 0;
+                        for (let j = 0; j < nd.outputVectorSize; j++) {
+                            // Determine if j is a mean or stdDev output to get the correct error term
+                            const error_from_output_j = (j % 2 === 0) ? 
+                                G_t_normalized * (actionDetails_t[Math.floor(j/2)].sampledAction - actionDetails_t[Math.floor(j/2)].mean) / (actionDetails_t[Math.floor(j/2)].stdDev**2 + 1e-9) :
+                                G_t_normalized * (((actionDetails_t[Math.floor(j/2)].sampledAction - actionDetails_t[Math.floor(j/2)].mean)**2 - actionDetails_t[Math.floor(j/2)].stdDev**2) / (actionDetails_t[Math.floor(j/2)].stdDev**3 + 1e-9)) * (actionDetails_t[Math.floor(j/2)].stdDev - 1e-6);
+                            sum_error_weighted_HO += error_from_output_j * nd.weightsHO[j][h];
+                        }
+                        const error_h = sum_error_weighted_HO * d_tanh(hiddenActivations_t[h]);
+
+                        for (let i_input = 0; i_input < nd.inputVectorSize; i_input++) {
+                            gradWeightsIH_acc[h][i_input] += error_h * state_t[i_input];
+                        }
+                        gradBiasesH_acc[h] += error_h;
+                    }
+                }
+
+                // Apply accumulated gradients (averaged over batch size implicitly by not dividing here, or explicitly divide)
+                const batchSize = nd.experienceBuffer.length;
+                for (let j = 0; j < nd.outputVectorSize; j++) {
+                    for (let k = 0; k < nd.hiddenLayerSize; k++) {
+                        nd.weightsHO[j][k] += LEARNING_RATE * gradWeightsHO_acc[j][k] / batchSize;
+                    }
+                    nd.biasesO[j] += LEARNING_RATE * gradBiasesO_acc[j] / batchSize;
+                }
+                for (let h = 0; h < nd.hiddenLayerSize; h++) {
+                    for (let i = 0; i < nd.inputVectorSize; i++) {
+                        nd.weightsIH[h][i] += LEARNING_RATE * gradWeightsIH_acc[h][i] / batchSize;
+                    }
+                    nd.biasesH[h] += LEARNING_RATE * gradBiasesH_acc[h] / batchSize;
+                }
+
+                nd.experienceBuffer = []; // Clear buffer after training
+                nd.framesSinceLastTrain = 0;
+                // console.log(`Body ${this.id} brain updated. Normalized G_t example: ${normalizedDiscountedRewards[0]}`);
             }
 
             drawSelf(ctx) {

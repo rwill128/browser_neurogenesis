@@ -1852,7 +1852,7 @@
             updateSelf(dt, fluidFieldRef) {
                 if (this.isUnstable) return;
 
-                // Reset neural overrides for effectors
+                // Reset neural overrides for effectors (Commented out in Step 2 fix)
                 /*
                 this.massPoints.forEach(p => {
                     if (p.nodeType === NodeType.EMITTER_SWIMMER) {
@@ -1862,7 +1862,7 @@
                 */
 
 
-                // Process Neurons
+                // Process Neurons (Old logic commented out in Step 2 fix)
                 /*
                 if (fluidFieldRef) {
                     this.massPoints.forEach(neuronPoint => {
@@ -1906,6 +1906,86 @@
                     });
                 }
                 */
+
+                // --- New Neural Network Processing (Step 4) ---
+                let brainNode = null;
+                for (const point of this.massPoints) {
+                    if (point.neuronData && point.neuronData.isBrain) {
+                        brainNode = point;
+                        break;
+                    }
+                }
+
+                if (brainNode && brainNode.neuronData && 
+                    brainNode.neuronData.weightsIH && brainNode.neuronData.biasesH && 
+                    brainNode.neuronData.weightsHO && brainNode.neuronData.biasesO &&
+                    typeof brainNode.neuronData.inputVectorSize === 'number' &&
+                    typeof brainNode.neuronData.hiddenLayerSize === 'number' &&
+                    typeof brainNode.neuronData.outputVectorSize === 'number') {
+
+                    const nd = brainNode.neuronData;
+                    const inputVector = [];
+
+                    // 1. Gather Inputs (8 inputs total)
+                    // a. Local Dye (RGB) at brain node's position
+                    if (fluidFieldRef) {
+                        const brainGx = Math.floor(brainNode.pos.x / fluidFieldRef.scaleX);
+                        const brainGy = Math.floor(brainNode.pos.y / fluidFieldRef.scaleY);
+                        const brainIdx = fluidFieldRef.IX(brainGx, brainGy);
+                        inputVector.push((fluidFieldRef.densityR[brainIdx] || 0) / 255); // Normalize to 0-1
+                        inputVector.push((fluidFieldRef.densityG[brainIdx] || 0) / 255);
+                        inputVector.push((fluidFieldRef.densityB[brainIdx] || 0) / 255);
+                    } else {
+                        inputVector.push(0, 0, 0); // No fluid field, no dye input
+                    }
+
+                    // b. Creature Energy (normalized)
+                    inputVector.push(this.creatureEnergy / MAX_CREATURE_ENERGY); // Normalize to 0-1
+
+                    // c. Relative Center of Mass Position (XY)
+                    const comPos = this.getAveragePosition();
+                    const relComPosX = (comPos.x - brainNode.pos.x) / WORLD_WIDTH; // Normalize by world dim
+                    const relComPosY = (comPos.y - brainNode.pos.y) / WORLD_HEIGHT;
+                    inputVector.push(Math.tanh(relComPosX)); // Use tanh to keep values bounded nicely
+                    inputVector.push(Math.tanh(relComPosY));
+
+                    // d. Relative Center of Mass Velocity (XY)
+                    const comVel = this.getAverageVelocity();
+                    const brainVelX = brainNode.pos.x - brainNode.prevPos.x;
+                    const brainVelY = brainNode.pos.y - brainNode.prevPos.y;
+                    const relComVelX = comVel.x - brainVelX;
+                    const relComVelY = comVel.y - brainVelY;
+                    inputVector.push(Math.tanh(relComVelX / MAX_PIXELS_PER_FRAME_DISPLACEMENT)); // Normalize and tanh
+                    inputVector.push(Math.tanh(relComVelY / MAX_PIXELS_PER_FRAME_DISPLACEMENT));
+                    
+                    // Ensure inputVector is the correct size, pad with 0 if necessary (e.g. if fluidFieldRef was null)
+                    while(inputVector.length < nd.inputVectorSize) {
+                        inputVector.push(0);
+                    }
+                    if(inputVector.length > nd.inputVectorSize) {
+                        inputVector.splice(nd.inputVectorSize); // Truncate if too long
+                    }
+
+
+                    // 2. Forward Propagation
+                    // Hidden Layer
+                    const hiddenLayerInputs = multiplyMatrixVector(nd.weightsIH, inputVector);
+                    const hiddenLayerBiasedInputs = addVectors(hiddenLayerInputs, nd.biasesH);
+                    const hiddenLayerActivations = hiddenLayerBiasedInputs.map(val => Math.tanh(val));
+
+                    // Output Layer
+                    const outputLayerInputs = multiplyMatrixVector(nd.weightsHO, hiddenLayerActivations);
+                    const rawOutputs = addVectors(outputLayerInputs, nd.biasesO);
+
+                    nd.rawOutputs = rawOutputs; // Store for Step 5
+                    // console.log(`Body ${this.id} brain processed. Inputs: [${inputVector.map(v=>v.toFixed(2))}], Outputs: [${rawOutputs.map(v=>v.toFixed(2))}]`);
+
+                } else {
+                    // No operable brain, or brain not fully initialized
+                    if (brainNode && brainNode.neuronData) brainNode.neuronData.rawOutputs = []; // Clear if partially set
+                }
+                // --- End of New Neural Network Processing ---
+
 
                 // Calculate and apply energy cost
                 let currentFrameEnergyCost = 0;

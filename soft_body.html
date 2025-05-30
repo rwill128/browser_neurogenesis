@@ -677,7 +677,10 @@
 
         // --- Neural Network Constants ---
         const NEURAL_INPUT_SIZE = 8; // 3 (dye RGB) + 1 (energy) + 2 (CoM rel pos) + 2 (CoM rel vel)
-        const NEURAL_OUTPUTS_PER_EMITTER_SWIMMER = 12; // For Policy Gradient: 6 means + 6 std devs
+        const NEURAL_OUTPUTS_PER_EMITTER_SWIMMER = 14; // For Policy Gradient: 6 actions (12) + 1 exertion (2) = 14
+        const NEURAL_OUTPUTS_PER_EATER = 2; // For Policy Gradient: 1 exertion (mean + stdDev)
+        const NEURAL_OUTPUTS_PER_PREDATOR = 2; // For Policy Gradient: 1 exertion (mean + stdDev)
+
         const DEFAULT_HIDDEN_LAYER_SIZE_MIN = 5;
         const DEFAULT_HIDDEN_LAYER_SIZE_MAX = 30; // Reduced from 50 for initial testing
         const MAX_NEURAL_FORCE_COMPONENT = 1.0; // Max output for a single force component from NN
@@ -1600,7 +1603,7 @@
                 this.emitsDye = false;
                 this.dyeColor = [0,0,0];
                 this.neuronData = null;
-                this.neuralEffectiveStrength = null;
+                this.currentExertionLevel = 0; // New: For dynamic energy costs
             }
             applyForce(f) { this.force = this.force.add(f); }
 
@@ -2111,9 +2114,12 @@
                     nd.currentFrameActionDetails = []; // Initialize/clear array for the current frame
 
                     this.massPoints.forEach(point => {
+                        point.currentExertionLevel = 0; // Reset exertion for this frame before NN sets it
+
                         if (point.nodeType === NodeType.EMITTER_SWIMMER) {
                             const outputStartRawIdx = emitterSwimmerOutputTracker * NEURAL_OUTPUTS_PER_EMITTER_SWIMMER;
-                            
+                            // Note: NEURAL_OUTPUTS_PER_EMITTER_SWIMMER is now 14 (6 actions * 2 + exertion * 2)
+
                             if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_EMITTER_SWIMMER) {
                                 let currentOutputPairIdx = 0; // Index within the 12 outputs for this emitter
                                 const detailsForThisEmitter = [];
@@ -2179,11 +2185,41 @@
                                     const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
                                     fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], neuralPullStrength * 50);
                                 }
-                                nd.currentFrameActionDetails.push(...detailsForThisEmitter); // Add all stored details for this emitter to the main list
-                            } // End check for sufficient rawOutputs length
+
+                                // --- Action 7: Emitter/Swimmer Exertion ---
+                                const sampledEmitterExertion = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
+                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
+                                );
+                                point.currentExertionLevel = sigmoid(sampledEmitterExertion); 
+                                // Exertion is 0-1, used directly in energy cost calculation later
+
+                                nd.currentFrameActionDetails.push(...detailsForThisEmitter); 
+                            } 
                             emitterSwimmerOutputTracker++;
-                        } // End check for EMITTER_SWIMMER type
-                    }); // End forEach massPoint
+                        } else if (point.isEater) {
+                            // Similar logic for Eater exertion, assuming eater outputs follow emitter/swimmers
+                            // Need to carefully manage outputStartRawIdx if mixing types like this, 
+                            // or process them in sequence as defined in initializeBrain.
+                            // For now, let's assume a global output index that increments.
+                            // This part needs careful indexing based on how outputVectorSize was constructed.
+                            
+                            // To simplify, we need a running total of outputs consumed so far.
+                            // Let's adjust how outputStartRawIdx is determined later if this direct indexing is problematic.
+                            // Assuming eater outputs are packed after all emitter/swimmer outputs.
+                            // This needs a more robust indexing strategy if we have mixed types often.
+                            // A better way: Iterate points once to count, then iterate again to assign outputs.
+                            // Or, build the output array based on a defined order. 
+                            // For this pass, let's assume outputs are ordered: all E/S, then all Eaters, then all Predators.
+                            // We'll need a separate tracker for eater outputs.
+                            // This will be handled when we refactor the output application loop for multiple point types.
+                            // For now, this specific part for EATER and PREDATOR exertion will be a placeholder
+                            // until the output indexing strategy is solidified for mixed types.
+                            // TODO: Implement robust output indexing for Eaters and Predators for exertion.
+                        } else if (point.isPredator) {
+                            // TODO: Implement robust output indexing for Eaters and Predators for exertion.
+                        }
+                    }); 
                     // --- End of Apply Neural Outputs ---
 
                     // --- Store Experience for RL (Step 2 of RL Phase) ---
@@ -2255,24 +2291,30 @@
                 let currentFrameEnergyCost = 0;
                 for (const point of this.massPoints) {
                     currentFrameEnergyCost += BASE_NODE_EXISTENCE_COST;
-                    if (point.nodeType === NodeType.EMITTER_SWIMMER && this.emitterStrength > 0.0001) {
-                        currentFrameEnergyCost += EMITTER_NODE_ENERGY_COST;
+                    const exertion = point.currentExertionLevel || 0; // Default to 0 if undefined
+
+                    if (point.nodeType === NodeType.EMITTER_SWIMMER) {
+                        // EMITTER_NODE_ENERGY_COST is now cost at max exertion (1.0)
+                        // Cost scales with square of exertion to make high exertion significantly more expensive
+                        currentFrameEnergyCost += EMITTER_NODE_ENERGY_COST * exertion * exertion;
+                        // Note: this.emitterStrength still modulates the *effect* of the emitter, 
+                        // but exertion directly impacts its energy cost.
                     }
                      if (point.nodeType === NodeType.NEURON) {
-                        // currentFrameEnergyCost += NEURON_NODE_ENERGY_COST; // Old flat cost
                         if (point.neuronData && point.neuronData.isBrain) {
-                            // Higher base cost for being a brain + cost per hidden neuron
-                            currentFrameEnergyCost += NEURON_NODE_ENERGY_COST * 5; // 5x base cost for brain
-                            currentFrameEnergyCost += (point.neuronData.hiddenLayerSize || 0) * NEURON_NODE_ENERGY_COST * 0.1; // 10% of base cost per hidden node
+                            currentFrameEnergyCost += NEURON_NODE_ENERGY_COST * 5; 
+                            currentFrameEnergyCost += (point.neuronData.hiddenLayerSize || 0) * NEURON_NODE_ENERGY_COST * 0.1; 
                         } else {
-                            currentFrameEnergyCost += NEURON_NODE_ENERGY_COST; // Standard cost for non-brain neurons
+                            currentFrameEnergyCost += NEURON_NODE_ENERGY_COST; 
                         }
                     }
                     if (point.isEater) {
-                        currentFrameEnergyCost += EATER_NODE_ENERGY_COST;
+                        // EATER_NODE_ENERGY_COST is now cost at max exertion (1.0)
+                        currentFrameEnergyCost += EATER_NODE_ENERGY_COST * exertion * exertion;
                     }
                     if (point.isPredator) {
-                        currentFrameEnergyCost += PREDATOR_NODE_ENERGY_COST;
+                        // PREDATOR_NODE_ENERGY_COST is now cost at max exertion (1.0)
+                        currentFrameEnergyCost += PREDATOR_NODE_ENERGY_COST * exertion * exertion;
                     }
                 }
                 this.creatureEnergy -= currentFrameEnergyCost * dt;
@@ -2693,12 +2735,21 @@
                     nd.inputVectorSize = NEURAL_INPUT_SIZE;
 
                     let numEmitterSwimmerPoints = 0;
+                    let numEaterPoints = 0;
+                    let numPredatorPoints = 0;
+
                     this.massPoints.forEach(p => {
                         if (p.nodeType === NodeType.EMITTER_SWIMMER) {
                             numEmitterSwimmerPoints++;
+                        } else if (p.isEater) { // Assuming Eater nodes are distinct or NodeType will be expanded
+                            numEaterPoints++;
+                        } else if (p.isPredator) { // Assuming Predator nodes are distinct
+                            numPredatorPoints++;
                         }
                     });
-                    nd.outputVectorSize = numEmitterSwimmerPoints * NEURAL_OUTPUTS_PER_EMITTER_SWIMMER; // This now uses the new value (12)
+                    nd.outputVectorSize = (numEmitterSwimmerPoints * NEURAL_OUTPUTS_PER_EMITTER_SWIMMER) +
+                                          (numEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
+                                          (numPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR);
 
                     // Initialize weights and biases
                     if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < DEFAULT_HIDDEN_LAYER_SIZE_MIN) {

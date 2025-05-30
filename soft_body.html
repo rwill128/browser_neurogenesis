@@ -467,10 +467,21 @@
         const MAX_SPRING_STRETCH_FACTOR = 4.0;
         const MAX_SPAN_PER_POINT_FACTOR = GRID_CELL_SIZE * 2;
         const DYE_PULL_RATE = 0.05;
-        const EATING_RADIUS_MULTIPLIER = 3.5;
-        const PREDATION_RADIUS_MULTIPLIER = 2.5;
+        
+        // Original Radius Multipliers (will become base values)
+        const EATING_RADIUS_MULTIPLIER_BASE = 2.0; // Original was 3.5, reducing base
+        const PREDATION_RADIUS_MULTIPLIER_BASE = 1.5; // Original was 2.5, reducing base
+
+        // Exertion Bonuses for Radius Multipliers
+        const EATING_RADIUS_MULTIPLIER_MAX_BONUS = 3.0; // Max bonus at full exertion
+        const PREDATION_RADIUS_MULTIPLIER_MAX_BONUS = 2.5; // Max bonus at full exertion
+
         const ENERGY_PER_PARTICLE = 25;
-        const ENERGY_SAPPED_PER_PREDATION = 5;
+        // Original Energy Sapped (will become base value)
+        const ENERGY_SAPPED_PER_PREDATION_BASE = 3; // Original was 5
+        // Exertion Bonus for Energy Sapped
+        const ENERGY_SAPPED_PER_PREDATION_MAX_BONUS = 7; // Max bonus at full exertion (total 10)
+
         const MAX_CREATURE_ENERGY = 100;
         const OFFSPRING_INITIAL_ENERGY_SHARE = 0.25;
         const REPRODUCTION_ADDITIONAL_COST_FACTOR = 0.1;
@@ -1631,13 +1642,13 @@
                 // Draw interaction radii first (underneath the point)
                 if (this.isEater) {
                     ctx.beginPath();
-                    ctx.arc(this.pos.x, this.pos.y, this.radius * EATING_RADIUS_MULTIPLIER, 0, Math.PI * 2);
+                    ctx.arc(this.pos.x, this.pos.y, this.radius * EATING_RADIUS_MULTIPLIER_BASE, 0, Math.PI * 2);
                     ctx.fillStyle = 'rgba(255, 165, 0, 0.05)';
                     ctx.fill();
                 }
                 if (this.isPredator) {
                     ctx.beginPath();
-                    ctx.arc(this.pos.x, this.pos.y, this.radius * PREDATION_RADIUS_MULTIPLIER, 0, Math.PI * 2);
+                    ctx.arc(this.pos.x, this.pos.y, this.radius * PREDATION_RADIUS_MULTIPLIER_BASE, 0, Math.PI * 2);
                     ctx.fillStyle = 'rgba(255, 50, 50, 0.05)';
                     ctx.fill();
                 }
@@ -1831,16 +1842,25 @@
                         offspringPoint.emitsDye = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.emitsDye : parentPoint.emitsDye;
                         offspringPoint.dyeColor = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)] : [...parentPoint.dyeColor];
 
+                        // Determine hiddenLayerSize for potential neuron
+                        let newHiddenLayerSizeForNeuron = DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1));
+                        if (parentPoint.neuronData && typeof parentPoint.neuronData.hiddenLayerSize === 'number') {
+                            newHiddenLayerSizeForNeuron = parentPoint.neuronData.hiddenLayerSize;
+                        }
+                        if (Math.random() < (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                            newHiddenLayerSizeForNeuron += Math.floor((Math.random() * 6) - 3);
+                            newHiddenLayerSizeForNeuron = Math.max(DEFAULT_HIDDEN_LAYER_SIZE_MIN, Math.min(newHiddenLayerSizeForNeuron, DEFAULT_HIDDEN_LAYER_SIZE_MAX));
+                        }
+
                         if (nodeType === NodeType.NEURON) {
                             offspringPoint.neuronData = {
-                                sensorPointIndex: parentPoint.neuronData ? parentPoint.neuronData.sensorPointIndex : -1,
-                                effectorPointIndex: parentPoint.neuronData ? parentPoint.neuronData.effectorPointIndex : -1,
-                                weights: parentPoint.neuronData ? parentPoint.neuronData.weights.map(w => w * (1 + (Math.random() -0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER))) : [(Math.random()*2-1), (Math.random()*2-1), (Math.random()*2-1)],
-                                bias: parentPoint.neuronData ? parentPoint.neuronData.bias * (1 + (Math.random() -0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)) : (Math.random()*2-1) * 0.5,
-                                sensedChannel: parentPoint.neuronData ? (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER) ? Math.floor(Math.random() * 4) : parentPoint.neuronData.sensedChannel) : Math.floor(Math.random() * 4),
-                                lastOutput: 0, lastSensedR: 0, lastSensedG: 0, lastSensedB: 0
+                                isBrain: false, 
+                                hiddenLayerSize: newHiddenLayerSizeForNeuron
                             };
+                        } else {
+                            offspringPoint.neuronData = null; // Crucial: ensure non-neurons have null neuronData
                         }
+
                         if(offspringPoint.nodeType === NodeType.FIXED_ROOT) offspringPoint.isFixed = true;
                         this.massPoints.push(offspringPoint);
                         lastPointPos = offspringPoint.pos.clone();
@@ -1861,11 +1881,11 @@
                             newPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
                             if (newNodeType === NodeType.NEURON) {
                                 newPoint.neuronData = {
-                                    sensorPointIndex: -1, effectorPointIndex: -1,
-                                    weights: [(Math.random()*2-1), (Math.random()*2-1), (Math.random()*2-1)],
-                                    bias: (Math.random()*2-1) * 0.5, sensedChannel: Math.floor(Math.random() * 4),
-                                    lastOutput: 0, lastSensedR: 0, lastSensedG: 0, lastSensedB: 0
+                                    isBrain: false,
+                                    hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
                                 };
+                            } else {
+                                newPoint.neuronData = null; // Crucial: ensure non-neurons have null neuronData
                             }
                             if(newPoint.nodeType === NodeType.FIXED_ROOT) newPoint.isFixed = true;
                             this.massPoints.push(newPoint);
@@ -1938,20 +1958,20 @@
                     }
 
                     this.massPoints.forEach((p, idx) => {
-                        let currentNodeType = nodeTypeChoices[Math.floor(Math.random() * (nodeTypeChoices.length -1))]; // Default non-neuron
-                        if (Math.random() < NEURON_CHANCE && this.massPoints.length > 1) { // Use global NEURON_CHANCE
+                        let currentNodeType = nodeTypeChoices[Math.floor(Math.random() * (nodeTypeChoices.length -1))]; 
+                        if (Math.random() < NEURON_CHANCE && this.massPoints.length > 1) { 
                             currentNodeType = NodeType.NEURON;
                         }
-                        p.nodeType = currentNodeType;
+                        p.nodeType = currentNodeType; // Assign type
 
+                        // Now set neuronData based on the final type
                         if (p.nodeType === NodeType.NEURON) {
                              p.neuronData = {
-                                sensorPointIndex: -1, effectorPointIndex: -1,
-                                weights: [ (Math.random()*2-1), (Math.random()*2-1), (Math.random()*2-1) ],
-                                bias: (Math.random()*2-1) * 0.5,
-                                sensedChannel: Math.floor(Math.random() * 4),
-                                lastOutput: 0, lastSensedR: 0, lastSensedG: 0, lastSensedB: 0
+                                isBrain: false,
+                                hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
                             };
+                        } else {
+                            p.neuronData = null; // Crucial: ensure non-neurons have null neuronData
                         }
                         if (p.nodeType === NodeType.FIXED_ROOT) p.isFixed = true;
                     });
@@ -2142,14 +2162,16 @@
                                     nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
                                     nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
                                 );
-                                const appliedForceX = Math.tanh(sampledForceX) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength;
+                                // appliedForceX now scaled by exertion level
+                                const appliedForceX = Math.tanh(sampledForceX) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength * point.currentExertionLevel;
                                 
                                 // --- Action 2: Force Y ---
                                 const sampledForceY = sampleAndLogAction(
                                     nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
                                     nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
                                 );
-                                const appliedForceY = Math.tanh(sampledForceY) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength;
+                                // appliedForceY now scaled by exertion level
+                                const appliedForceY = Math.tanh(sampledForceY) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength * point.currentExertionLevel;
                                 point.applyForce(new Vec2(appliedForceX / dt, appliedForceY / dt));
 
                                 // --- Action 3: Target Dye Color R ---
@@ -2178,7 +2200,8 @@
                                     nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
                                     nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
                                 );
-                                const neuralPullStrength = sigmoid(sampledPull) * MAX_NEURAL_EMISSION_PULL_STRENGTH;
+                                // neuralPullStrength now scaled by exertion level
+                                const neuralPullStrength = sigmoid(sampledPull) * MAX_NEURAL_EMISSION_PULL_STRENGTH * point.currentExertionLevel;
 
                                 if (fluidFieldRef && point.emitsDye) {
                                     const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
@@ -2417,9 +2440,13 @@
                                             }
 
                                             if (p1.isPredator) {
-                                                const predationRadius = p1.radius * PREDATION_RADIUS_MULTIPLIER;
+                                                const p1Exertion = p1.currentExertionLevel || 0;
+                                                const effectivePredationRadiusMultiplier = PREDATION_RADIUS_MULTIPLIER_BASE + (PREDATION_RADIUS_MULTIPLIER_MAX_BONUS * p1Exertion);
+                                                const predationRadius = p1.radius * effectivePredationRadiusMultiplier;
+                                                
                                                 if (distSq < predationRadius * predationRadius) {
-                                                    const energyToSap = Math.min(otherItem.bodyRef.creatureEnergy, ENERGY_SAPPED_PER_PREDATION);
+                                                    const effectiveEnergySapped = ENERGY_SAPPED_PER_PREDATION_BASE + (ENERGY_SAPPED_PER_PREDATION_MAX_BONUS * p1Exertion);
+                                                    const energyToSap = Math.min(otherItem.bodyRef.creatureEnergy, effectiveEnergySapped);
                                                     if (energyToSap > 0) {
                                                         otherItem.bodyRef.creatureEnergy -= energyToSap;
                                                         this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyToSap);
@@ -2480,10 +2507,14 @@
                         if (point.isFixed || point.nodeType === NodeType.FIXED_ROOT) continue;
 
                         if (point.isEater) {
+                            const pointExertion = point.currentExertionLevel || 0;
+                            const effectiveEatingRadiusMultiplier = EATING_RADIUS_MULTIPLIER_BASE + (EATING_RADIUS_MULTIPLIER_MAX_BONUS * pointExertion);
+                            const eatingRadius = point.radius * effectiveEatingRadiusMultiplier;
+                            const eatingRadiusSq = eatingRadius * eatingRadius;
+
+                            // Re-add eaterGx and eaterGy calculation here
                             const eaterGx = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(point.pos.x / GRID_CELL_SIZE)));
                             const eaterGy = Math.max(0, Math.min(GRID_ROWS - 1, Math.floor(point.pos.y / GRID_CELL_SIZE)));
-                            const eatingRadius = point.radius * EATING_RADIUS_MULTIPLIER;
-                            const eatingRadiusSq = eatingRadius * eatingRadius;
 
                             for (let dy = -1; dy <= 1; dy++) { // Check local grid cells for particles
                                 for (let dx = -1; dx <= 1; dx++) {
@@ -2845,11 +2876,22 @@
                         const meanOutputIdx = i * 2;
                         const stdDevOutputIdx = i * 2 + 1;
 
-                        const ad = actionDetails_t[currentActionDetailIdx++];
-                        if (!ad) continue; // Should not happen if actionDetails_t is structured correctly
+                        const ad = actionDetails_t[currentActionDetailIdx]; // Access detail for the current logical action
+                        
+                        if (!ad) { 
+                            // This implies that actionDetails_t (from experience buffer) is shorter 
+                            // than what outputVectorSize/2 expects. This could happen if not all 
+                            // controllable points could take actions in that specific past frame 
+                            // (e.g., rawOutputs array was too short for them).
+                            // We can't calculate a gradient for a missing action detail.
+                            // console.warn(`Body ${this.id} updateBrainPolicy: Missing action detail at index ${currentActionDetailIdx} for timestep ${t}. Skipping this action component's gradient.`);
+                            currentActionDetailIdx++; // Still need to advance to the next logical action slot
+                            continue; 
+                        }
+                        currentActionDetailIdx++; // Increment after successful access and use.
 
                         const { sampledAction, mean, stdDev } = ad;
-                        const grad_logProb_d_mean = (sampledAction - mean) / (stdDev * stdDev + 1e-9); // add epsilon to stdDev^2
+                        const grad_logProb_d_mean = (sampledAction - mean) / (stdDev * stdDev + 1e-9); 
                         const grad_logProb_d_stdDev_output = (((sampledAction - mean) ** 2) - (stdDev * stdDev)) / (stdDev * stdDev * stdDev + 1e-9);
                         
                         // Error for the mean output neuron
@@ -2872,9 +2914,23 @@
                         let sum_error_weighted_HO = 0;
                         for (let j = 0; j < nd.outputVectorSize; j++) {
                             // Determine if j is a mean or stdDev output to get the correct error term
+                            const actionDetailIndex = Math.floor(j/2);
+                            if (actionDetailIndex >= actionDetails_t.length) {
+                                // This experience was recorded with a different number of actions
+                                // than the current network configuration. Skip this gradient component.
+                                // console.warn(`Skipping gradient for output ${j} in experience ${t}: actionDetailIndex ${actionDetailIndex} out of bounds for actionDetails_t length ${actionDetails_t.length}`);
+                                continue; 
+                            }
+
+                            const currentActionDetail = actionDetails_t[actionDetailIndex];
+                            if (!currentActionDetail) { // Should ideally not happen if the length check passes
+                                // console.warn(`Skipping gradient for output ${j} in experience ${t}: currentActionDetail is undefined at index ${actionDetailIndex}`);
+                                continue;
+                            }
+
                             const error_from_output_j = (j % 2 === 0) ? 
-                                G_t_normalized * (actionDetails_t[Math.floor(j/2)].sampledAction - actionDetails_t[Math.floor(j/2)].mean) / (actionDetails_t[Math.floor(j/2)].stdDev**2 + 1e-9) :
-                                G_t_normalized * (((actionDetails_t[Math.floor(j/2)].sampledAction - actionDetails_t[Math.floor(j/2)].mean)**2 - actionDetails_t[Math.floor(j/2)].stdDev**2) / (actionDetails_t[Math.floor(j/2)].stdDev**3 + 1e-9)) * (actionDetails_t[Math.floor(j/2)].stdDev - 1e-6);
+                                G_t_normalized * (currentActionDetail.sampledAction - currentActionDetail.mean) / (currentActionDetail.stdDev**2 + 1e-9) :
+                                G_t_normalized * (((currentActionDetail.sampledAction - currentActionDetail.mean)**2 - currentActionDetail.stdDev**2) / (currentActionDetail.stdDev**3 + 1e-9)) * (currentActionDetail.stdDev - 1e-6);
                             sum_error_weighted_HO += error_from_output_j * nd.weightsHO[j][h];
                         }
                         const error_h = sum_error_weighted_HO * d_tanh(hiddenActivations_t[h]);

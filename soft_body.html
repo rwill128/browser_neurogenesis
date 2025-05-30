@@ -1916,15 +1916,40 @@
                         console.warn(`Body ${this.id} Brain: NaN detected in finalRawOutputs:`, JSON.stringify(finalRawOutputs));
                     }
 
-                    // 3. Apply Outputs
-                    let outputIndex = 0;
-                    for (let i = 0; i < this.massPoints.length; i++) {
-                        if (this.massPoints[i].nodeType === NodeType.EMITTER_SWIMMER) {
-                            this.massPoints[i].neuralEffectiveStrength = finalRawOutputs[outputIndex];
-                            outputIndex++;
-                        }
-                    }
+                    // let outputIndex = 0;
+                    // this.massPoints.forEach(point => {
+                    //     if (point.nodeType === NodeType.EMITTER_SWIMMER) {
+                    //         if (outputIndex + NEURAL_OUTPUTS_PER_EMITTER_SWIMMER <= brainNode.neuronData.rawOutputs.length) {
+                    //             const rawFx = brainNode.neuronData.rawOutputs[outputIndex++];
+                    //             const rawFy = brainNode.neuronData.rawOutputs[outputIndex++];
+                    //             const rawTargetR = brainNode.neuronData.rawOutputs[outputIndex++];
+                    //             const rawTargetG = brainNode.neuronData.rawOutputs[outputIndex++];
+                    //             const rawTargetB = brainNode.neuronData.rawOutputs[outputIndex++];
+                    //             const rawEmissionStrength = brainNode.neuronData.rawOutputs[outputIndex++];
 
+                    //             // Apply Force
+                    //             const forceX = Math.tanh(rawFx) * MAX_NEURAL_FORCE_COMPONENT;
+                    //             const forceY = Math.tanh(rawFy) * MAX_NEURAL_FORCE_COMPONENT;
+                    //             point.applyForce(new Vec2(forceX, forceY));
+
+                    //             // Apply Dye Emission
+                    //             point.dyeColor[0] = sigmoid(rawTargetR) * 255;
+                    //             point.dyeColor[1] = sigmoid(rawTargetG) * 255;
+                    //             point.dyeColor[2] = sigmoid(rawTargetB) * 255;
+                    //             const neuralEmissionPullStrength = sigmoid(rawEmissionStrength); // 0 to 1
+
+                    //             if (fluidFieldRef) {
+                    //                 const gx = Math.floor(point.pos.x / fluidFieldRef.scaleX);
+                    //                 const gy = Math.floor(point.pos.y / fluidFieldRef.scaleY);
+                    //                 fluidFieldRef.addDensity(gx, gy, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], neuralEmissionPullStrength, true);
+                    //             }
+                    //             point.emitsDye = true; // Mark as actively emitting under neural control
+                    //         } else {
+                    //             // Not enough outputs for this point, clear its emitsDye if it was set by brain
+                    //             point.emitsDye = false;
+                    //         }
+                    //     }
+                    // });
                 } else {
                      // Fallback: No brain or inoperable brain - clear any previous rawOutputs
                     if (brainNode && brainNode.neuronData) brainNode.neuronData.rawOutputs = [];

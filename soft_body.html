@@ -1228,6 +1228,9 @@
                             content += `<p><strong>Hidden Layer Size:</strong> ${point.neuronData.hiddenLayerSize || 'N/A'}</p>`;
                             content += `<p><strong>Input Vector Size:</strong> ${point.neuronData.inputVectorSize || 'N/A'}</p>`;
                             content += `<p><strong>Output Vector Size:</strong> ${point.neuronData.outputVectorSize || 'N/A'}</p>`;
+                            if (typeof point.neuronData.lastAvgNormalizedReward === 'number') {
+                                content += `<p><strong>Avg Batch Reward:</strong> ${point.neuronData.lastAvgNormalizedReward.toFixed(3)}</p>`;
+                            }
                             if (point.neuronData.rawOutputs && point.neuronData.rawOutputs.length > 0) {
                                 content += `<p><strong>Raw Outputs:</strong> [${point.neuronData.rawOutputs.map(o => o.toFixed(2)).join(', ')}]</p>`;
                             }
@@ -1640,16 +1643,20 @@
 
             draw(ctx) {
                 // Draw interaction radii first (underneath the point)
+                const exertion = this.currentExertionLevel || 0; // Default to 0 if undefined
+
                 if (this.isEater) {
+                    const effectiveEatingRadiusMultiplier = EATING_RADIUS_MULTIPLIER_BASE + (EATING_RADIUS_MULTIPLIER_MAX_BONUS * exertion);
                     ctx.beginPath();
-                    ctx.arc(this.pos.x, this.pos.y, this.radius * EATING_RADIUS_MULTIPLIER_BASE, 0, Math.PI * 2);
-                    ctx.fillStyle = 'rgba(255, 165, 0, 0.05)';
+                    ctx.arc(this.pos.x, this.pos.y, this.radius * effectiveEatingRadiusMultiplier, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(255, 165, 0, ${0.05 + exertion * 0.1})`; // Opacity increases with exertion
                     ctx.fill();
                 }
                 if (this.isPredator) {
+                    const effectivePredationRadiusMultiplier = PREDATION_RADIUS_MULTIPLIER_BASE + (PREDATION_RADIUS_MULTIPLIER_MAX_BONUS * exertion);
                     ctx.beginPath();
-                    ctx.arc(this.pos.x, this.pos.y, this.radius * PREDATION_RADIUS_MULTIPLIER_BASE, 0, Math.PI * 2);
-                    ctx.fillStyle = 'rgba(255, 50, 50, 0.05)';
+                    ctx.arc(this.pos.x, this.pos.y, this.radius * effectivePredationRadiusMultiplier, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(255, 50, 50, ${0.05 + exertion * 0.1})`; // Opacity increases with exertion
                     ctx.fill();
                 }
 
@@ -2836,6 +2843,7 @@
                     nd.maxExperienceBufferSize = 10; // e.g., last 10 frames/experiences
                     nd.previousEnergyForReward = this.creatureEnergy; // Initialize for first reward calculation
                     nd.framesSinceLastTrain = 0; 
+                    nd.lastAvgNormalizedReward = 0; // Initialize diagnostic value for average reward
 
                     // console.log(`Body ${this.id} brain initialized. Inputs: ${nd.inputVectorSize}, Hidden: ${nd.hiddenLayerSize}, Outputs: ${nd.outputVectorSize}`);
                 } else {
@@ -2888,6 +2896,10 @@
                 const normalizedDiscountedRewards = discountedRewards.map(
                     r => (r - meanDiscountedReward) / (stdDevDiscountedReward + 1e-6) // Add epsilon for stability
                 );
+
+                // Store the average normalized reward for diagnostics
+                nd.lastAvgNormalizedReward = meanDiscountedReward; // Using mean before normalization for a more direct sense of reward scale
+                // If you prefer the normalized mean: nd.lastAvgNormalizedReward = normalizedDiscountedRewards.reduce((a, b) => a + b, 0) / normalizedDiscountedRewards.length;
 
                 // Initialize gradients for weights and biases (accumulate over the batch)
                 const gradWeightsHO_acc = initializeMatrix(nd.outputVectorSize, nd.hiddenLayerSize, 0); // Initialize with zeros

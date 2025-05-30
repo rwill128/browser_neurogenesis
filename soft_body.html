@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2D Soft Body Evolution - NN Step 2: Neuron Init</title>
+    <title>2D Soft Body Evolution - Robust External Slider Config</title>
     <style>
         body {
             margin: 0;
@@ -239,6 +239,8 @@
                     <p><strong>Damping:</strong> <span id="infoBodyDamping">-</span></p>
                     <p><strong>Motor Impulse Interval:</strong> <span id="infoBodyMotorInterval">-</span></p>
                     <p><strong>Motor Impulse Cap:</strong> <span id="infoBodyMotorCap">-</span></p>
+                    <p><strong>Emitter Strength:</strong> <span id="infoBodyEmitterStrength">-</span></p>
+                    <p><strong>Emitter Direction:</strong> X: <span id="infoBodyEmitterDirX">-</span>, Y: <span id="infoBodyEmitterDirY">-</span></p>
                     <p><strong>Num Offspring:</strong> <span id="infoBodyNumOffspring">-</span></p>
                     <p><strong>Offspring Spawn Radius:</strong> <span id="infoBodyOffspringRadius">-</span></p>
                     <p><strong>Point Add Chance:</strong> <span id="infoBodyPointAddChance">-</span></p>
@@ -431,7 +433,7 @@
         let viewOffsetX = 0;
         let viewOffsetY = 0;
         let viewZoom = 1.0;
-        let ZOOM_SENSITIVITY = 0.2;
+        let ZOOM_SENSITIVITY = 0.02;
         const MAX_ZOOM = 8.0;
         let MIN_ZOOM = 0.1;
 
@@ -441,16 +443,12 @@
         let GRID_ROWS = Math.ceil(WORLD_HEIGHT / GRID_CELL_SIZE);
         let spatialGrid = [];
 
-        // Critical Simulation Constants
-        const MUTATION_CHANCE_REASSIGN_NEURON_LINK = 0.02;
+        // Moved these critical constants higher up
         const NEURON_CHANCE = 0.1;
-        const ADD_POINT_MUTATION_CHANCE = 0.03;
-        const NEW_POINT_OFFSET_RADIUS = 15;
         const MAX_PIXELS_PER_FRAME_DISPLACEMENT = 100;
         const MAX_SPRING_STRETCH_FACTOR = 4.0;
         const MAX_SPAN_PER_POINT_FACTOR = GRID_CELL_SIZE * 2;
         const DYE_PULL_RATE = 0.05;
-        const PARTICLE_LIFE_DECAY_RANDOM_FACTOR = 0.002;
         const EATING_RADIUS_MULTIPLIER = 3.5;
         const PREDATION_RADIUS_MULTIPLIER = 2.5;
         const ENERGY_PER_PARTICLE = 25;
@@ -459,19 +457,14 @@
         const OFFSPRING_INITIAL_ENERGY_SHARE = 0.25;
         const REPRODUCTION_ADDITIONAL_COST_FACTOR = 0.1;
         const OFFSPRING_PLACEMENT_ATTEMPTS = 10;
+        const OFFSPRING_PLACEMENT_CLEARANCE_RADIUS = 50;
         const MUTATION_RATE_PERCENT = 0.1;
         const MUTATION_CHANCE_BOOL = 0.05;
         const MUTATION_CHANCE_NODE_TYPE = 0.1;
-        const EMITTER_MOUSE_DRAG_SCALE = 0.1;
-        const FLUID_MOUSE_DRAG_VELOCITY_SCALE = 0.1;
-
-        // Neural Network Specific Constants (Added in Step 1)
-        const NEURAL_INPUT_SIZE = 8;
-        const NEURAL_OUTPUTS_PER_EMITTER_SWIMMER = 6;
-        const DEFAULT_HIDDEN_LAYER_SIZE_MIN = 10;
-        const DEFAULT_HIDDEN_LAYER_SIZE_MAX = 24;
-        const MAX_NEURAL_FORCE_COMPONENT = 1.0;
-        const MAX_NEURAL_EMISSION_PULL_STRENGTH = 1.0;
+        const MUTATION_CHANCE_REASSIGN_NEURON_LINK = 0.02;
+        const ADD_POINT_MUTATION_CHANCE = 0.03;
+        const NEW_POINT_OFFSET_RADIUS = 15;
+        let isAnySoftBodyUnstable = false;
 
         function initializeSpatialGrid() {
             GRID_COLS = Math.max(1, Math.ceil(WORLD_WIDTH / GRID_CELL_SIZE));
@@ -487,6 +480,7 @@
             for (let i = 0; i < spatialGrid.length; i++) {
                 spatialGrid[i] = [];
             }
+            // Add soft body mass points to the grid
             softBodyPopulation.forEach(body => {
                 if (body.isUnstable) return;
                 body.massPoints.forEach(point => {
@@ -502,8 +496,9 @@
                     }
                 });
             });
+            // Add particles to the grid
             particles.forEach(particle => {
-                if (particle.life <= 0) return;
+                if (particle.life <= 0) return; // Don't add dead/eaten particles
                  if (isNaN(particle.pos.x) || isNaN(particle.pos.y) || !isFinite(particle.pos.x) || !isFinite(particle.pos.y)) {
                     return;
                 }
@@ -575,8 +570,8 @@
         const fluidDiffusionValueSpan = document.getElementById('fluidDiffusionValue');
         const fluidViscosityValueSpan = document.getElementById('fluidViscosityValue');
         const fluidFadeValueSpan = document.getElementById('fluidFadeValue');
-        const maxFluidVelocityComponentSlider = document.getElementById('maxFluidVelocityComponentSlider');
-        const maxFluidVelocityComponentValueSpan = document.getElementById('maxFluidVelocityComponentValueSpan');
+        const maxFluidVelocityComponentSlider = document.getElementById('maxFluidVelocityComponentSlider'); // New
+        const maxFluidVelocityComponentValueSpan = document.getElementById('maxFluidVelocityComponentValueSpan'); // New
 
 
         const particlePopulationFloorSlider = document.getElementById('particlePopulationFloorSlider');
@@ -604,11 +599,11 @@
 
         const infoPanel = document.getElementById('infoPanel');
         const closeInfoPanelButton = document.getElementById('closeInfoPanel');
-        // const neuronInfoSection = document.getElementById('neuronInfoSection'); // Removed as info merged
-        const allPointsInfoContainer = document.getElementById('allPointsInfoContainer');
+        const neuronInfoSection = document.getElementById('neuronInfoSection');
+        const allPointsInfoContainer = document.getElementById('allPointsInfoContainer'); // New
 
 
-        // --- Global Variables (initialized with defaults, then overridden by JSON if loaded) ---
+        // --- Global Variables & Constants (with initial hardcoded defaults) ---
         let CREATURE_POPULATION_FLOOR = 10;
         let CREATURE_POPULATION_CEILING = 1000;
         let PARTICLE_POPULATION_FLOOR = 5000;
@@ -623,10 +618,11 @@
         let BODY_REPULSION_RADIUS_FACTOR = 5.0;
         let GLOBAL_MUTATION_RATE_MODIFIER = 0.25;
         let MAX_DELTA_TIME_MS = 10;
-        // ZOOM_SENSITIVITY defined above where it's first used, will be set by JSON
         let IS_SIMULATION_PAUSED = false;
-        let IS_EMITTER_EDIT_MODE = false;
+        let IS_EMITTER_EDIT_MODE = false; // Default to false, will be set by checkbox
         let EMITTER_STRENGTH = 3.0;
+        const EMITTER_MOUSE_DRAG_SCALE = 0.1;
+        const FLUID_MOUSE_DRAG_VELOCITY_SCALE = 0.1;
 
         let BASE_NODE_EXISTENCE_COST = 0.3;
         let EMITTER_NODE_ENERGY_COST = 1.0;
@@ -640,14 +636,15 @@
         let FLUID_VISCOSITY = 0.000068;
         let FLUID_FADE_RATE = 0.002;
         let MAX_FLUID_VELOCITY_COMPONENT = 0.5;
-        let IS_WORLD_WRAPPING = false;
+        let IS_WORLD_WRAPPING = false; // Default to false, will be set by checkbox
         let PARTICLES_PER_SECOND = 500;
         let PARTICLE_FLUID_INFLUENCE = 2.0;
         let PARTICLE_BASE_LIFE_DECAY = 0.001;
-        let IS_PARTICLE_LIFE_INFINITE = false;
+        let IS_PARTICLE_LIFE_INFINITE = false; // Default to false, will be set by checkbox
+        const PARTICLE_LIFE_DECAY_RANDOM_FACTOR = 0.002;
         let particleEmissionDebt = 0;
 
-        let INITIAL_POPULATION_SIZE;
+        let INITIAL_POPULATION_SIZE; // Will be set after CREATURE_POPULATION_FLOOR is loaded/defaulted
 
         let velocityEmitters = [];
         let currentEmitterPreview = null;
@@ -679,59 +676,7 @@
             BLUE: [50, 50, 200]
         };
 
-        // --- Math Helper Functions (Added in Step 1) ---
-        function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
-        // Using Math.tanh directly where needed.
-
-        function initializeMatrix(rows, cols, scale = 0.5) {
-            const matrix = [];
-            for (let i = 0; i < rows; i++) {
-                matrix[i] = [];
-                for (let j = 0; j < cols; j++) {
-                    matrix[i][j] = (Math.random() * 2 - 1) * scale; // Small random weights
-                }
-            }
-            return matrix;
-        }
-
-        function initializeVector(size, scale = 0.1) {
-            const vector = [];
-            for (let i = 0; i < size; i++) {
-                vector[i] = (Math.random() * 2 - 1) * scale; // Small random biases
-            }
-            return vector;
-        }
-
-        function multiplyMatrixVector(matrix, vector) {
-            const result = [];
-            const numRows = matrix.length;
-            if (numRows === 0) return result;
-            const numCols = matrix[0].length;
-
-            if (numCols !== vector.length) {
-                console.error("Matrix-vector dimension mismatch:", matrix, vector, `Matrix cols: ${numCols}, Vector length: ${vector.length}`);
-                const expectedOutputSize = numRows;
-                for(let i=0; i<expectedOutputSize; i++) result.push(0);
-                return result;
-            }
-
-            for (let i = 0; i < numRows; i++) {
-                let sum = 0;
-                for (let j = 0; j < numCols; j++) {
-                    sum += matrix[i][j] * vector[j];
-                }
-                result.push(sum);
-            }
-            return result;
-        }
-        function addVectors(vecA, vecB) {
-            if (vecA.length !== vecB.length) {
-                console.error("Vector addition dimension mismatch:", vecA, vecB);
-                return vecA;
-            }
-            return vecA.map((val, i) => val + vecB[i]);
-        }
-        // --- End Math Helper Functions ---
+        // --- Slider Config Loading ---
         async function loadAndApplySliderConfig() {
             try {
                 const response = await fetch('https://rwill128.github.io/browser_neurogenesis/slider_config.json');
@@ -739,7 +684,7 @@
                     throw new Error(`HTTP error! status: ${response.status}. Using hardcoded defaults.`);
                 }
                 const sliderConfigs = await response.json();
-                window.loadedSliderConfigs = sliderConfigs;
+                window.loadedSliderConfigs = sliderConfigs; // Store for updateSliderDisplay
 
                 sliderConfigs.forEach(config => {
                     const slider = document.getElementById(config.id);
@@ -749,37 +694,15 @@
                         slider.step = config.step;
                         slider.value = config.defaultValue;
 
+                        // Update global JS variable directly
                         if (config.jsVariable) {
-                            // Update global JS variable directly
-                            switch(config.jsVariable) {
-                                case "ZOOM_SENSITIVITY": ZOOM_SENSITIVITY = parseFloat(config.defaultValue); break;
-                                case "CREATURE_POPULATION_FLOOR": CREATURE_POPULATION_FLOOR = parseInt(config.defaultValue); break;
-                                case "CREATURE_POPULATION_CEILING": CREATURE_POPULATION_CEILING = parseInt(config.defaultValue); break;
-                                case "GLOBAL_MUTATION_RATE_MODIFIER": GLOBAL_MUTATION_RATE_MODIFIER = parseFloat(config.defaultValue); break;
-                                case "BODY_FLUID_ENTRAINMENT_FACTOR": BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(config.defaultValue); break;
-                                case "FLUID_CURRENT_STRENGTH_ON_BODY": FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(config.defaultValue); break;
-                                case "SOFT_BODY_PUSH_STRENGTH": SOFT_BODY_PUSH_STRENGTH = parseFloat(config.defaultValue); break;
-                                case "REPRODUCTION_COOLDOWN_TICKS": REPRODUCTION_COOLDOWN_TICKS = parseInt(config.defaultValue); break;
-                                case "BODY_REPULSION_STRENGTH": BODY_REPULSION_STRENGTH = parseFloat(config.defaultValue); break;
-                                case "BODY_REPULSION_RADIUS_FACTOR": BODY_REPULSION_RADIUS_FACTOR = parseFloat(config.defaultValue); break;
-                                case "BASE_NODE_EXISTENCE_COST": BASE_NODE_EXISTENCE_COST = parseFloat(config.defaultValue); break;
-                                case "EMITTER_NODE_ENERGY_COST": EMITTER_NODE_ENERGY_COST = parseFloat(config.defaultValue); break;
-                                case "EATER_NODE_ENERGY_COST": EATER_NODE_ENERGY_COST = parseFloat(config.defaultValue); break;
-                                case "PREDATOR_NODE_ENERGY_COST": PREDATOR_NODE_ENERGY_COST = parseFloat(config.defaultValue); break;
-                                case "NEURON_NODE_ENERGY_COST": NEURON_NODE_ENERGY_COST = parseFloat(config.defaultValue); break;
-                                case "FLUID_GRID_SIZE_CONTROL": FLUID_GRID_SIZE_CONTROL = parseInt(config.defaultValue); break;
-                                case "FLUID_DIFFUSION": FLUID_DIFFUSION = parseFloat(config.defaultValue); break;
-                                case "FLUID_VISCOSITY": FLUID_VISCOSITY = parseFloat(config.defaultValue); break;
-                                case "FLUID_FADE_RATE": FLUID_FADE_RATE = parseFloat(config.defaultValue); break;
-                                case "MAX_FLUID_VELOCITY_COMPONENT": MAX_FLUID_VELOCITY_COMPONENT = parseFloat(config.defaultValue); break;
-                                case "PARTICLE_POPULATION_FLOOR": PARTICLE_POPULATION_FLOOR = parseInt(config.defaultValue); break;
-                                case "PARTICLE_POPULATION_CEILING": PARTICLE_POPULATION_CEILING = parseInt(config.defaultValue); break;
-                                case "PARTICLES_PER_SECOND": PARTICLES_PER_SECOND = parseInt(config.defaultValue); break;
-                                case "PARTICLE_FLUID_INFLUENCE": PARTICLE_FLUID_INFLUENCE = parseFloat(config.defaultValue); break;
-                                case "PARTICLE_BASE_LIFE_DECAY": PARTICLE_BASE_LIFE_DECAY = parseFloat(config.defaultValue); break;
-                                case "EMITTER_STRENGTH": EMITTER_STRENGTH = parseFloat(config.defaultValue); break;
-                                case "MAX_DELTA_TIME_MS": MAX_DELTA_TIME_MS = parseInt(config.defaultValue); break;
-                                default: console.warn("Unknown jsVariable in slider_config.json:", config.jsVariable);
+                            // Check if the global variable is already defined (it should be due to prior initialization)
+                            if (typeof window[config.jsVariable] !== 'undefined') {
+                                window[config.jsVariable] = parseFloat(config.defaultValue);
+                            } else {
+                                // This case should ideally not be hit if all vars are pre-initialized
+                                console.warn(`Global variable ${config.jsVariable} was not pre-initialized. Setting it now.`);
+                                window[config.jsVariable] = parseFloat(config.defaultValue);
                             }
                         }
                     }
@@ -787,8 +710,671 @@
                 console.log("Slider configuration loaded and applied from URL.");
             } catch (error) {
                 console.error("Could not load or apply slider_config.json from URL. Using hardcoded defaults (already set).", error);
+                // Fallbacks are already set by initial 'let' declarations.
             }
         }
+
+
+        // Function to update slider value display
+        function updateSliderDisplay(slider, span) {
+            let value = parseFloat(slider.value);
+            if (!slider || !span) return;
+
+            const config = window.loadedSliderConfigs?.find(c => c.id === slider.id);
+
+            if (config && config.displayFormat === "toFixed(4)") {
+                 span.textContent = value.toFixed(4);
+            } else if (config && config.displayFormat === "toFixed(3)") {
+                 span.textContent = value.toFixed(3);
+            } else if (config && config.displayFormat === "toFixed(2)") {
+                 span.textContent = value.toFixed(2);
+            } else if (config && config.displayFormat === "toFixed(1)") {
+                 span.textContent = value.toFixed(1);
+            } else if (config && config.displayFormat === "toExponential(1)") {
+                 span.textContent = value.toExponential(1);
+            } else {
+                span.textContent = Number.isInteger(Number(slider.step)) && Number(slider.step) === 1 ? Math.floor(value) : value.toFixed(2);
+            }
+        }
+
+        // --- Event Listeners ---
+        document.addEventListener('keydown', (e) => {
+            if (IS_SIMULATION_PAUSED && e.key.toLowerCase() !== 'p') return;
+
+            const effectiveViewportWidth = canvas.clientWidth / viewZoom;
+            const effectiveViewportHeight = canvas.clientHeight / viewZoom;
+            const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
+            const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
+            const panSpeed = VIEW_PAN_SPEED / viewZoom;
+
+
+            switch(e.key.toLowerCase()) {
+                case 'w': viewOffsetY = Math.max(0, viewOffsetY - panSpeed); break;
+                case 's': viewOffsetY = Math.min(maxPanY, viewOffsetY + panSpeed); break;
+                case 'a': viewOffsetX = Math.max(0, viewOffsetX - panSpeed); break;
+                case 'd': viewOffsetX = Math.min(maxPanX, viewOffsetX + panSpeed); break;
+                case 'p':
+                    IS_SIMULATION_PAUSED = !IS_SIMULATION_PAUSED;
+                    pauseResumeButton.textContent = IS_SIMULATION_PAUSED ? "Resume" : "Pause";
+                    if (!IS_SIMULATION_PAUSED) {
+                        lastTime = performance.now();
+                        requestAnimationFrame(gameLoop);
+                    }
+                    break;
+            }
+        });
+
+
+        worldWrapToggle.onchange = function() {
+            IS_WORLD_WRAPPING = this.checked;
+            if (fluidField) fluidField.useWrapping = IS_WORLD_WRAPPING;
+        }
+        maxTimestepSlider.oninput = function() { MAX_DELTA_TIME_MS = parseInt(this.value); updateSliderDisplay(this, maxTimestepValueSpan); }
+        zoomSensitivitySlider.oninput = function() { ZOOM_SENSITIVITY = parseFloat(this.value); updateSliderDisplay(this, zoomSensitivityValueSpan); }
+
+        pauseResumeButton.onclick = function() {
+            IS_SIMULATION_PAUSED = !IS_SIMULATION_PAUSED;
+            this.textContent = IS_SIMULATION_PAUSED ? "Resume" : "Pause";
+            if (!IS_SIMULATION_PAUSED) {
+                lastTime = performance.now();
+                requestAnimationFrame(gameLoop);
+            }
+        }
+        toggleControlsButton.onclick = function() {
+            controlsPanel.classList.toggle('open');
+        }
+
+        function toggleScreensaverMode(forceOff = false) {
+            const isCurrentlyFullscreen = !!document.fullscreenElement;
+            const isBodyCssFullscreen = document.body.classList.contains('css-screensaver-active');
+
+            if (forceOff) { // Force exit
+                if (isCurrentlyFullscreen) {
+                    document.exitFullscreen().catch(err => console.error("Error exiting fullscreen:", err));
+                }
+                document.body.classList.remove('css-screensaver-active');
+                screensaverButton.textContent = "Enter Screensaver";
+                screensaverButton.classList.remove('in-screensaver');
+                return;
+            }
+
+            if (isCurrentlyFullscreen || isBodyCssFullscreen) {
+                // Exit fullscreen/screensaver
+                if (isCurrentlyFullscreen) {
+                    document.exitFullscreen().catch(err => console.error("Error exiting fullscreen:", err));
+                }
+                document.body.classList.remove('css-screensaver-active');
+                screensaverButton.textContent = "Enter Screensaver";
+                screensaverButton.classList.remove('in-screensaver');
+            } else {
+                // Enter fullscreen/screensaver
+                if (canvasContainer.requestFullscreen) {
+                    canvasContainer.requestFullscreen().then(() => {
+                        screensaverButton.textContent = "Exit Screensaver";
+                        screensaverButton.classList.add('in-screensaver');
+                        document.body.classList.add('css-screensaver-active');
+                    }).catch(err => {
+                        console.warn("Fullscreen API failed, falling back to CSS mode:", err);
+                        document.body.classList.add('css-screensaver-active');
+                        screensaverButton.textContent = "Exit Screensaver (CSS)";
+                        screensaverButton.classList.add('in-screensaver');
+                    });
+                } else {
+                    document.body.classList.add('css-screensaver-active');
+                    screensaverButton.textContent = "Exit Screensaver (CSS)";
+                    screensaverButton.classList.add('in-screensaver');
+                }
+            }
+        }
+
+        screensaverButton.onclick = () => toggleScreensaverMode();
+
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement) {
+                document.body.classList.remove('css-screensaver-active');
+                screensaverButton.textContent = "Enter Screensaver";
+                screensaverButton.classList.remove('in-screensaver');
+            } else {
+                 document.body.classList.add('css-screensaver-active');
+                 screensaverButton.textContent = "Exit Screensaver";
+                 screensaverButton.classList.add('in-screensaver');
+            }
+        });
+
+
+        creaturePopulationFloorSlider.oninput = function() { CREATURE_POPULATION_FLOOR = parseInt(this.value); updateSliderDisplay(this, creaturePopulationFloorValueSpan); }
+        creaturePopulationCeilingSlider.oninput = function() { CREATURE_POPULATION_CEILING = parseInt(this.value); updateSliderDisplay(this, creaturePopulationCeilingValueSpan); }
+        particlePopulationFloorSlider.oninput = function() { PARTICLE_POPULATION_FLOOR = parseInt(this.value); updateSliderDisplay(this, particlePopulationFloorValueSpan); }
+        particlePopulationCeilingSlider.oninput = function() { PARTICLE_POPULATION_CEILING = parseInt(this.value); updateSliderDisplay(this, particlePopulationCeilingValueSpan); }
+
+
+        emitterEditModeToggle.onchange = function() {
+            IS_EMITTER_EDIT_MODE = this.checked;
+            canvas.classList.toggle('emitter-edit-mode', IS_EMITTER_EDIT_MODE);
+            if (!IS_EMITTER_EDIT_MODE) {
+                currentEmitterPreview = null;
+                emitterDragStartCell = null;
+            }
+        }
+        emitterStrengthSlider.oninput = function() { EMITTER_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, emitterStrengthValueSpan); }
+        clearEmittersButton.onclick = function() { velocityEmitters = []; }
+
+
+        bodyFluidEntrainmentSlider.oninput = function() { BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(this.value); updateSliderDisplay(this, bodyFluidEntrainmentValueSpan); }
+        fluidCurrentStrengthSlider.oninput = function() { FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(this.value); updateSliderDisplay(this, fluidCurrentStrengthValueSpan); }
+        bodyPushStrengthSlider.oninput = function() { SOFT_BODY_PUSH_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, bodyPushStrengthValueSpan); }
+        reproductionCooldownSlider.oninput = function() { REPRODUCTION_COOLDOWN_TICKS = parseInt(this.value); updateSliderDisplay(this, reproductionCooldownValueSpan); }
+        bodyRepulsionStrengthSlider.oninput = function() { BODY_REPULSION_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, bodyRepulsionStrengthValueSpan); }
+        bodyRepulsionRadiusFactorSlider.oninput = function() { BODY_REPULSION_RADIUS_FACTOR = parseFloat(this.value); updateSliderDisplay(this, bodyRepulsionRadiusFactorValueSpan); }
+        globalMutationRateSlider.oninput = function() { GLOBAL_MUTATION_RATE_MODIFIER = parseFloat(this.value); updateSliderDisplay(this, globalMutationRateValueSpan); }
+
+        baseNodeCostSlider.oninput = function() { BASE_NODE_EXISTENCE_COST = parseFloat(this.value); updateSliderDisplay(this, baseNodeCostValueSpan); }
+        emitterNodeCostSlider.oninput = function() { EMITTER_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, emitterNodeCostValueSpan); }
+        eaterNodeCostSlider.oninput = function() { EATER_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, eaterNodeCostValueSpan); }
+        predatorNodeCostSlider.oninput = function() { PREDATOR_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, predatorNodeCostValueSpan); }
+        neuronNodeCostSlider.oninput = function() { NEURON_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, neuronNodeCostValueSpan); }
+
+
+        resetButton.onclick = function() {
+            initializePopulation();
+            isAnySoftBodyUnstable = false;
+            updateInstabilityIndicator();
+        }
+
+        resizeWorldButton.onclick = function() {
+            const newWidth = parseInt(worldWidthInput.value);
+            const newHeight = parseInt(worldHeightInput.value);
+
+            if (isNaN(newWidth) || isNaN(newHeight) || newWidth < 500 || newHeight < 500 || newWidth > 20000 || newHeight > 20000) {
+                showMessageModal("Invalid world dimensions. Min 500x500, Max 20000x20000.");
+                worldWidthInput.value = WORLD_WIDTH;
+                worldHeightInput.value = WORLD_HEIGHT;
+                return;
+            }
+            WORLD_WIDTH = newWidth;
+            WORLD_HEIGHT = newHeight;
+            canvas.width = WORLD_WIDTH;
+            canvas.height = WORLD_HEIGHT;
+            MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5);
+
+            viewOffsetX = 0;
+            viewOffsetY = 0;
+
+            initializeSpatialGrid();
+            initFluidSimulation();
+            initParticles();
+            initializePopulation();
+            isAnySoftBodyUnstable = false;
+            updateInstabilityIndicator();
+            console.log(`World resized to ${WORLD_WIDTH}x${WORLD_HEIGHT} and simulation reset.`);
+        }
+
+        fluidGridSizeSlider.oninput = function() {
+            FLUID_GRID_SIZE_CONTROL = parseInt(this.value);
+            updateSliderDisplay(this, fluidGridSizeValueSpan);
+            velocityEmitters = [];
+            initFluidSimulation();
+            initParticles();
+        }
+        fluidDiffusionSlider.oninput = function() { FLUID_DIFFUSION = parseFloat(this.value); updateSliderDisplay(this, fluidDiffusionValueSpan); if(fluidField) fluidField.diffusion = FLUID_DIFFUSION;}
+        fluidViscositySlider.oninput = function() { FLUID_VISCOSITY = parseFloat(this.value); updateSliderDisplay(this, fluidViscosityValueSpan); if(fluidField) fluidField.viscosity = FLUID_VISCOSITY;}
+        fluidFadeSlider.oninput = function() { FLUID_FADE_RATE = parseFloat(this.value); updateSliderDisplay(this, fluidFadeValueSpan);}
+        maxFluidVelocityComponentSlider.oninput = function() { MAX_FLUID_VELOCITY_COMPONENT = parseFloat(this.value); updateSliderDisplay(this, maxFluidVelocityComponentValueSpan); if(fluidField) fluidField.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT;}
+        clearFluidButton.onclick = function() { if(fluidField) fluidField.clear(); }
+
+        particlesPerSecondSlider.oninput = function() {
+            PARTICLES_PER_SECOND = parseInt(this.value);
+            updateSliderDisplay(this, particlesPerSecondValueSpan);
+        }
+        particleFluidInfluenceSlider.oninput = function() { PARTICLE_FLUID_INFLUENCE = parseFloat(this.value); updateSliderDisplay(this, particleFluidInfluenceValueSpan); }
+        particleLifeDecaySlider.oninput = function() { PARTICLE_BASE_LIFE_DECAY = parseFloat(this.value); updateSliderDisplay(this, particleLifeDecayValueSpan); }
+        infiniteParticleLifeToggle.onchange = function() {
+            IS_PARTICLE_LIFE_INFINITE = this.checked;
+            particleLifeDecaySlider.disabled = IS_PARTICLE_LIFE_INFINITE;
+            particleLifeDecayLabel.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#ddd';
+            particleLifeDecayValueSpan.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
+        }
+        resetParticlesButton.onclick = function() { initParticles(); }
+
+        exportConfigButton.onclick = handleExportConfig;
+        importConfigButton.onclick = () => importConfigFile.click();
+        importConfigFile.onchange = handleImportConfig;
+        closeInfoPanelButton.onclick = () => { infoPanel.classList.remove('open'); selectedInspectBody = null; selectedInspectPoint = null; }
+
+
+        function initializeAllSliderDisplays() {
+            worldWidthInput.value = WORLD_WIDTH;
+            worldHeightInput.value = WORLD_HEIGHT;
+
+            // Iterate through loadedSliderConfigs to set display values
+            if (window.loadedSliderConfigs) {
+                window.loadedSliderConfigs.forEach(config => {
+                    const slider = document.getElementById(config.id);
+                    const span = document.getElementById(config.valueSpanId);
+                    if (slider && span) {
+                         updateSliderDisplay(slider, span);
+                    }
+                });
+            }
+            // Update any displays for controls not in the JSON (like checkboxes)
+            particleLifeDecaySlider.disabled = IS_PARTICLE_LIFE_INFINITE;
+            particleLifeDecayLabel.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#ddd';
+            particleLifeDecayValueSpan.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
+            worldWrapToggle.checked = IS_WORLD_WRAPPING;
+            emitterEditModeToggle.checked = IS_EMITTER_EDIT_MODE;
+            infiniteParticleLifeToggle.checked = IS_PARTICLE_LIFE_INFINITE;
+
+            canvas.classList.toggle('emitter-edit-mode', IS_EMITTER_EDIT_MODE);
+        }
+
+        function updateInstabilityIndicator() {
+            if (isAnySoftBodyUnstable) {
+                instabilityLight.classList.add('unstable');
+            } else {
+                instabilityLight.classList.remove('unstable');
+            }
+        }
+        function updatePopulationCount() {
+            populationCountDisplay.textContent = `Population: ${softBodyPopulation.length}`;
+        }
+
+        function getNodeTypeString(nodeType) {
+            switch(nodeType) {
+                case NodeType.FLOATING: return "Floating";
+                case NodeType.FIXED_ROOT: return "Fixed Root";
+                case NodeType.EMITTER_SWIMMER: return "Emitter/Swimmer";
+                case NodeType.NEURON: return "Neuron";
+                case NodeType.NEUTRAL: return "Neutral";
+                default: return "Unknown";
+            }
+        }
+
+        function getSensedChannelString(channelId) {
+            switch(channelId) {
+                case DyeChannel.RED: return "Red";
+                case DyeChannel.GREEN: return "Green";
+                case DyeChannel.BLUE: return "Blue";
+                case DyeChannel.AVERAGE: return "Average Intensity";
+                default: return "Unknown";
+            }
+        }
+
+
+        function updateInfoPanel() {
+            if (selectedInspectBody) { // Check if a body is selected
+                document.getElementById('infoBodyId').textContent = selectedInspectBody.id;
+                document.getElementById('infoBodyStiffness').textContent = selectedInspectBody.stiffness.toFixed(2);
+                document.getElementById('infoBodyDamping').textContent = selectedInspectBody.springDamping.toFixed(2);
+                document.getElementById('infoBodyMotorInterval').textContent = selectedInspectBody.motorImpulseInterval;
+                document.getElementById('infoBodyMotorCap').textContent = selectedInspectBody.motorImpulseMagnitudeCap.toFixed(2);
+                document.getElementById('infoBodyEmitterStrength').textContent = selectedInspectBody.emitterStrength.toFixed(2);
+                document.getElementById('infoBodyEmitterDirX').textContent = selectedInspectBody.emitterDirection.x.toFixed(2);
+                document.getElementById('infoBodyEmitterDirY').textContent = selectedInspectBody.emitterDirection.y.toFixed(2);
+                document.getElementById('infoBodyNumOffspring').textContent = selectedInspectBody.numOffspring;
+                document.getElementById('infoBodyOffspringRadius').textContent = selectedInspectBody.offspringSpawnRadius.toFixed(1);
+                document.getElementById('infoBodyPointAddChance').textContent = selectedInspectBody.pointAddChance.toFixed(3);
+                document.getElementById('infoBodySpringConnectionRadius').textContent = selectedInspectBody.springConnectionRadius.toFixed(1);
+                document.getElementById('infoBodyEnergy').textContent = selectedInspectBody.creatureEnergy.toFixed(2);
+                document.getElementById('infoBodyTicksBirth').textContent = selectedInspectBody.ticksSinceBirth;
+                document.getElementById('infoBodyCanReproduce').textContent = selectedInspectBody.canReproduce;
+
+                allPointsInfoContainer.innerHTML = '<h5>All Mass Points</h5>'; // Clear previous and add title
+                selectedInspectBody.massPoints.forEach((point, index) => {
+                    const pointEntryDiv = document.createElement('div');
+                    pointEntryDiv.className = 'point-info-entry';
+
+                    let content = `<p><strong>Point Index:</strong> ${index}</p>`;
+                    content += `<p><strong>Node Type:</strong> ${getNodeTypeString(point.nodeType)}</p>`;
+                    content += `<p><strong>Mass:</strong> ${point.mass.toFixed(2)}</p>`;
+                    content += `<p><strong>Radius:</strong> ${point.radius.toFixed(2)}</p>`;
+                    content += `<p><strong>World Pos:</strong> X: ${point.pos.x.toFixed(2)}, Y: ${point.pos.y.toFixed(2)}</p>`;
+                    content += `<p><strong>Is Eater:</strong> ${point.isEater}</p>`;
+                    content += `<p><strong>Is Predator:</strong> ${point.isPredator}</p>`;
+                    content += `<p><strong>Emits Dye:</strong> ${point.emitsDye}</p>`;
+                    content += `<p><strong>Dye Color:</strong> ${point.emitsDye ? `R:${point.dyeColor[0]} G:${point.dyeColor[1]} B:${point.dyeColor[2]}` : "N/A"}</p>`;
+
+                    if (point.nodeType === NodeType.NEURON && point.neuronData) {
+                        const nd = point.neuronData;
+                        content += `<h6>Neuron Data:</h6>`;
+                        content += `<p><strong>Sensor Idx:</strong> ${nd.sensorPointIndex}</p>`;
+                        content += `<p><strong>Effector Idx:</strong> ${nd.effectorPointIndex}</p>`;
+                        content += `<p><strong>Sensed Ch:</strong> ${getSensedChannelString(nd.sensedChannel)}</p>`;
+                        content += `<p><strong>Last Sensed (RGB):</strong> ${nd.lastSensedR.toFixed(3)}, ${nd.lastSensedG.toFixed(3)}, ${nd.lastSensedB.toFixed(3)}</p>`;
+                        content += `<p><strong>Weights (RGB):</strong> ${nd.weights[0].toFixed(3)}, ${nd.weights[1].toFixed(3)}, ${nd.weights[2].toFixed(3)}</p>`;
+                        content += `<p><strong>Bias:</strong> ${nd.bias.toFixed(3)}</p>`;
+                        content += `<p><strong>Last Output:</strong> ${nd.lastOutput !== undefined ? nd.lastOutput.toFixed(3) : "N/A"}</p>`;
+                    }
+                    pointEntryDiv.innerHTML = content;
+                    allPointsInfoContainer.appendChild(pointEntryDiv);
+                });
+
+
+                if (!infoPanel.classList.contains('open')) {
+                    infoPanel.classList.add('open');
+                }
+            } else { // No body selected, clear all point info
+                allPointsInfoContainer.innerHTML = ''; // Clear the list
+                // Optionally hide or clear other body-specific fields if needed
+                document.getElementById('infoBodyId').textContent = '-';
+                // ... clear other body info spans ...
+                infoPanel.classList.remove('open');
+            }
+        }
+
+
+        // --- Simulation Parameters ---
+        const restitution = 0.4;
+
+        let softBodyPopulation = [];
+        let fluidField;
+        let particles = [];
+
+        let lastTime = 0;
+        let deltaTime = 0;
+        let nextSoftBodyId = 0;
+
+
+        // --- Mouse Interaction ---
+        let selectedSoftBodyPoint = null;
+        let mouse = { x: 0, y: 0, prevX: 0, prevY: 0, isDown: false, dx:0, dy:0 };
+        isRightDragging = false;
+        panStartMouseDisplayX = 0;
+        panStartMouseDisplayY = 0;
+        panInitialViewOffsetX = 0;
+        panInitialViewOffsetY = 0;
+
+
+        function updateMouse(e) {
+            const rect = canvas.getBoundingClientRect();
+            mouse.prevX = mouse.x;
+            mouse.prevY = mouse.y;
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+            mouse.dx = mouse.x - mouse.prevX;
+            mouse.dy = mouse.y - mouse.prevY;
+        }
+
+        function getMouseWorldCoordinates(displayMouseX, displayMouseY) {
+            const rect = canvas.getBoundingClientRect();
+
+            const canvasDisplayRatioX = canvas.clientWidth / WORLD_WIDTH;
+            const canvasDisplayRatioY = canvas.clientHeight / WORLD_HEIGHT;
+            const effectiveCanvasDisplayRatio = Math.min(canvasDisplayRatioX, canvasDisplayRatioY);
+
+            const renderedWorldWidthInCss = WORLD_WIDTH * effectiveCanvasDisplayRatio;
+            const renderedWorldHeightInCss = WORLD_HEIGHT * effectiveCanvasDisplayRatio;
+            const letterboxOffsetX = (canvas.clientWidth - renderedWorldWidthInCss) / 2;
+            const letterboxOffsetY = (canvas.clientHeight - renderedWorldHeightInCss) / 2;
+
+            const mouseOnRenderedX = displayMouseX - letterboxOffsetX;
+            const mouseOnRenderedY = displayMouseY - letterboxOffsetY;
+
+            const worldX = (mouseOnRenderedX / effectiveCanvasDisplayRatio / viewZoom) + viewOffsetX;
+            const worldY = (mouseOnRenderedY / effectiveCanvasDisplayRatio / viewZoom) + viewOffsetY;
+
+            return { x: worldX, y: worldY };
+        }
+
+
+        canvas.addEventListener('mousedown', (e) => {
+            updateMouse(e);
+
+            if (e.button === 2) { // Right mouse button
+                isRightDragging = true;
+                mouse.isDown = false; // Ensure left-click drag state is off
+                panStartMouseDisplayX = mouse.x;
+                panStartMouseDisplayY = mouse.y;
+                panInitialViewOffsetX = viewOffsetX;
+                panInitialViewOffsetY = viewOffsetY;
+                e.preventDefault();
+                return;
+            } else if (e.button === 0) { // Left mouse button
+                mouse.isDown = true;
+                isRightDragging = false;
+
+                const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
+                const simMouseX = worldCoords.x;
+                const simMouseY = worldCoords.y;
+
+                if (IS_EMITTER_EDIT_MODE && fluidField) {
+                    const gridX = Math.floor(simMouseX / fluidField.scaleX);
+                    const gridY = Math.floor(simMouseY / fluidField.scaleY);
+                    emitterDragStartCell = { gridX, gridY, mouseStartX: simMouseX, mouseStartY: simMouseY };
+                    currentEmitterPreview = {
+                        startX: (gridX + 0.5) * fluidField.scaleX,
+                        startY: (gridY + 0.5) * fluidField.scaleY,
+                        endX: simMouseX,
+                        endY: simMouseY
+                    };
+                    selectedInspectBody = null; selectedInspectPoint = null; updateInfoPanel();
+                    return;
+                }
+
+                let clickedOnPoint = false;
+                selectedInspectBody = null; // Reset selected body on new click
+                selectedInspectPoint = null;
+
+                for (let body of softBodyPopulation) {
+                    if (body.isUnstable) continue;
+                    for (let i = 0; i < body.massPoints.length; i++) {
+                        const point = body.massPoints[i];
+                        const dist = Math.sqrt((point.pos.x - simMouseX)**2 + (point.pos.y - simMouseY)**2);
+                        if (dist < point.radius * 2.5 ) {
+                            selectedSoftBodyPoint = { body: body, point: point };
+                            selectedInspectBody = body;
+                            selectedInspectPoint = point; // This specific point is the "primary" clicked one
+                            selectedInspectPointIndex = i;
+
+                            point.isFixed = true;
+                            point.prevPos.x = point.pos.x;
+                            point.prevPos.y = point.pos.y;
+                            clickedOnPoint = true;
+                            break; // Found a point, stop checking this body
+                        }
+                    }
+                    if(clickedOnPoint) break; // Found a point, stop checking other bodies
+                }
+                updateInfoPanel(); // Update panel based on selection (or lack thereof)
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            updateMouse(e);
+
+            if (isRightDragging) {
+                const currentDisplayMouseX = mouse.x;
+                const currentDisplayMouseY = mouse.y;
+
+                const displayDx = currentDisplayMouseX - panStartMouseDisplayX;
+                const displayDy = currentDisplayMouseY - panStartMouseDisplayY;
+
+                const rect = canvas.getBoundingClientRect();
+                const effectiveRenderScale = Math.min(rect.width / WORLD_WIDTH, rect.height / WORLD_HEIGHT);
+
+                const panDeltaX_world = displayDx / (effectiveRenderScale * viewZoom);
+                const panDeltaY_world = displayDy / (effectiveRenderScale * viewZoom);
+
+                viewOffsetX = panInitialViewOffsetX - panDeltaX_world;
+                viewOffsetY = panInitialViewOffsetY - panDeltaY_world;
+
+                const effectiveViewportWidth = canvas.clientWidth / viewZoom;
+                const effectiveViewportHeight = canvas.clientHeight / viewZoom;
+                const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
+                const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
+                viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
+                viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
+                return;
+            }
+
+
+            const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
+            const simMouseX = worldCoords.x;
+            const simMouseY = worldCoords.y;
+
+            const worldPrevCoords = getMouseWorldCoordinates(mouse.prevX, mouse.prevY);
+            const worldMouseDx = simMouseX - worldPrevCoords.x;
+            const worldMouseDy = simMouseY - worldPrevCoords.y;
+
+
+            if (mouse.isDown) { // This condition now correctly only applies to left-click drags
+                if (IS_EMITTER_EDIT_MODE && emitterDragStartCell) {
+                    currentEmitterPreview.endX = simMouseX;
+                    currentEmitterPreview.endY = simMouseY;
+                } else if (selectedSoftBodyPoint) {
+                    const point = selectedSoftBodyPoint.point;
+                    point.prevPos.x = point.pos.x;
+                    point.prevPos.y = point.pos.y;
+                    point.pos.x = simMouseX;
+                    point.pos.y = simMouseY;
+                } else if (fluidField) { // Fluid emission on left-drag
+                    const fluidGridX = Math.floor(simMouseX / fluidField.scaleX);
+                    const fluidGridY = Math.floor(simMouseY / fluidField.scaleY);
+                    const r1 = Math.random() * 100 + 155;
+                    const g1 = Math.random() * 50 + 25;
+                    const b1 = Math.random() * 100 + 100;
+                    fluidField.addDensity(fluidGridX, fluidGridY, r1, g1, b1, 150 + Math.random()*50);
+
+                    const r2 = Math.random() * 50 + 25;
+                    const g2 = Math.random() * 100 + 155;
+                    const b2 = Math.random() * 100 + 155;
+                    fluidField.addDensity(fluidGridX, fluidGridY, r2, g2, b2, 150 + Math.random()*50);
+
+                    const fluidVelX = worldMouseDx * FLUID_MOUSE_DRAG_VELOCITY_SCALE;
+                    const fluidVelY = worldMouseDy * FLUID_MOUSE_DRAG_VELOCITY_SCALE;
+                    fluidField.addVelocity(fluidGridX, fluidGridY, fluidVelX, fluidVelY);
+                }
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (e.button === 2) { // Right mouse button up
+                isRightDragging = false;
+                e.preventDefault();
+            } else if (e.button === 0) { // Left mouse button up
+                mouse.isDown = false;
+
+                if (IS_EMITTER_EDIT_MODE && emitterDragStartCell && fluidField) {
+                    const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
+                    const simMouseX = worldCoords.x;
+                    const simMouseY = worldCoords.y;
+
+                    const worldForceX = (simMouseX - emitterDragStartCell.mouseStartX) * EMITTER_MOUSE_DRAG_SCALE;
+                    const worldForceY = (simMouseY - emitterDragStartCell.mouseStartY) * EMITTER_MOUSE_DRAG_SCALE;
+
+                    const gridForceX = worldForceX / fluidField.scaleX;
+                    const gridForceY = worldForceY / fluidField.scaleY;
+
+
+                    const existingEmitter = velocityEmitters.find(em => em.gridX === emitterDragStartCell.gridX && em.gridY === emitterDragStartCell.gridY);
+                    if (existingEmitter) {
+                        existingEmitter.forceX = gridForceX;
+                        existingEmitter.forceY = gridForceY;
+                    } else {
+                        velocityEmitters.push({
+                            gridX: emitterDragStartCell.gridX,
+                            gridY: emitterDragStartCell.gridY,
+                            forceX: gridForceX,
+                            forceY: gridForceY
+                        });
+                    }
+                    emitterDragStartCell = null;
+                    currentEmitterPreview = null;
+                }
+                if (selectedSoftBodyPoint) {
+                    const point = selectedSoftBodyPoint.point;
+                    point.isFixed = false;
+                    const worldDx = (mouse.dx / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
+                    const worldDy = (mouse.dy / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
+
+                    point.prevPos.x = point.pos.x - worldDx * 1.0;
+                    point.prevPos.y = point.pos.y - worldDy * 1.0;
+                    selectedSoftBodyPoint = null;
+                }
+            }
+        });
+         canvas.addEventListener('mouseleave', () => {
+            mouse.isDown = false; // Clear left-drag state
+            isRightDragging = false; // Clear right-drag state
+            if (IS_EMITTER_EDIT_MODE && emitterDragStartCell) { // Finalize emitter if drag was in progress
+                const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
+                const simMouseX = worldCoords.x;
+                const simMouseY = worldCoords.y;
+                const worldForceX = (simMouseX - emitterDragStartCell.mouseStartX) * EMITTER_MOUSE_DRAG_SCALE;
+                const worldForceY = (simMouseY - emitterDragStartCell.mouseStartY) * EMITTER_MOUSE_DRAG_SCALE;
+                const gridForceX = worldForceX / fluidField.scaleX;
+                const gridForceY = worldForceY / fluidField.scaleY;
+                const existingEmitter = velocityEmitters.find(em => em.gridX === emitterDragStartCell.gridX && em.gridY === emitterDragStartCell.gridY);
+                if (existingEmitter) {
+                    existingEmitter.forceX = gridForceX;
+                    existingEmitter.forceY = gridForceY;
+                } else {
+                    velocityEmitters.push({
+                        gridX: emitterDragStartCell.gridX,
+                        gridY: emitterDragStartCell.gridY,
+                        forceX: gridForceX,
+                        forceY: gridForceY
+                    });
+                }
+            }
+            emitterDragStartCell = null;
+            currentEmitterPreview = null;
+
+            if (selectedSoftBodyPoint) {
+                const point = selectedSoftBodyPoint.point;
+                point.isFixed = false;
+                 const worldDx = (mouse.dx / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
+                const worldDy = (mouse.dy / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
+                point.prevPos.x = point.pos.x - worldDx * 1.0;
+                point.prevPos.y = point.pos.y - worldDy * 1.0;
+                selectedSoftBodyPoint = null;
+            }
+        });
+
+        canvas.addEventListener('contextmenu', (e) => {
+            e.preventDefault(); // Prevent context menu on canvas
+        });
+
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const displayMouseX = e.clientX - rect.left;
+            const displayMouseY = e.clientY - rect.top;
+
+            const canvasDisplayRatio = Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT);
+            const renderedWorldWidthInCss = WORLD_WIDTH * canvasDisplayRatio;
+            const renderedWorldHeightInCss = WORLD_HEIGHT * canvasDisplayRatio;
+            const letterboxOffsetX = (canvas.clientWidth - renderedWorldWidthInCss) / 2;
+            const letterboxOffsetY = (canvas.clientHeight - renderedWorldHeightInCss) / 2;
+
+            const mouseOnRenderedX = displayMouseX - letterboxOffsetX;
+            const mouseOnRenderedY = displayMouseY - letterboxOffsetY;
+
+            const worldMouseX_beforeZoom = (mouseOnRenderedX / canvasDisplayRatio / viewZoom) + viewOffsetX;
+            const worldMouseY_beforeZoom = (mouseOnRenderedY / canvasDisplayRatio / viewZoom) + viewOffsetY;
+
+            const scroll = e.deltaY < 0 ? 1 : -1;
+            const newZoom = viewZoom * Math.pow(1 + ZOOM_SENSITIVITY * 10, scroll);
+
+            // Calculate MIN_ZOOM dynamically based on fitting the world into the client view
+            let calculatedMinZoomX = canvas.clientWidth / WORLD_WIDTH;
+            let calculatedMinZoomY = canvas.clientHeight / WORLD_HEIGHT;
+            MIN_ZOOM = Math.min(calculatedMinZoomX, calculatedMinZoomY);
+            MIN_ZOOM = Math.max(0.01, MIN_ZOOM); // Absolute minimum bound to prevent division by zero or extreme zoom out
+
+            viewZoom = Math.max(MIN_ZOOM, Math.min(newZoom, MAX_ZOOM));
+
+            viewOffsetX = worldMouseX_beforeZoom - (mouseOnRenderedX / canvasDisplayRatio / viewZoom);
+            viewOffsetY = worldMouseY_beforeZoom - (mouseOnRenderedY / canvasDisplayRatio / viewZoom);
+
+            const effectiveViewportWidth = canvas.clientWidth / viewZoom;
+            const effectiveViewportHeight = canvas.clientHeight / viewZoom;
+            const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
+            const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
+            viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
+            viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
+        });
+
 
         // --- Vector2D Class ---
         class Vec2 {
@@ -820,7 +1406,8 @@
                 this.isPredator = false;
                 this.emitsDye = false;
                 this.dyeColor = [0,0,0];
-                this.neuronData = null; // Initialize to null
+                this.neuronData = null;
+                this.neuralEffectiveStrength = null;
             }
             applyForce(f) { this.force = this.force.add(f); }
 
@@ -864,7 +1451,7 @@
                 ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
                 let mainColor = this.isFixed ? 'rgba(255,0,0,0.9)' : this.color;
                 if (this.nodeType === NodeType.NEURON) {
-                    mainColor = (this.neuronData && this.neuronData.isBrain) ? 'rgba(255, 215, 0, 0.95)' : 'rgba(200, 100, 255, 0.9)'; // Gold for brain
+                    mainColor = 'rgba(200, 100, 255, 0.9)';
                 } else if (this.isPredator) {
                     mainColor = 'rgba(255, 50, 50, 0.9)';
                 } else if (this.nodeType === NodeType.EMITTER_SWIMMER && this.isEater) {
@@ -879,23 +1466,23 @@
                 ctx.fillStyle = mainColor;
                 ctx.fill();
 
-                ctx.save();
+                // Glow effect using shadow
+                ctx.save(); // Save context state before applying shadow
                 ctx.shadowColor = mainColor;
                 ctx.shadowBlur = 7;
-                ctx.fill();
-                ctx.restore();
+                ctx.fill(); // Re-fill to apply shadow as a glow
+                ctx.restore(); // Restore context state to remove shadow for subsequent drawings
 
 
                 if (this.nodeType === NodeType.NEURON) {
-                    ctx.beginPath();
-                    ctx.arc(this.pos.x, this.pos.y, this.radius * ( (this.neuronData && this.neuronData.isBrain) ? 0.65 : 0.5), 0, Math.PI * 2);
-                    ctx.fillStyle = (this.neuronData && this.neuronData.isBrain) ? 'rgba(255, 255, 255, 1)' : 'rgba(250, 200, 255, 0.9)';
+                    ctx.beginPath(); // Inner dot for neuron
+                    ctx.arc(this.pos.x, this.pos.y, this.radius * 0.5, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(250, 200, 255, 0.9)';
                     ctx.fill();
                 }
+                // ctx.closePath(); // Already closed by fill()
             }
         }
-        // --- End MassPoint Class ---
-
 
         // --- Spring Class (Soft Body) ---
         class Spring {
@@ -936,6 +1523,7 @@
                 ctx.strokeStyle = 'rgba(150,150,150,0.6)';
                 ctx.lineWidth = 2;
                 ctx.stroke();
+                // ctx.closePath(); // Not needed for lineTo
             }
         }
 
@@ -949,15 +1537,15 @@
                 this.creatureEnergy = MAX_CREATURE_ENERGY * OFFSPRING_INITIAL_ENERGY_SHARE;
                 this.ticksSinceBirth = 0;
                 this.canReproduce = false;
-                this.shapeType = parentBody ? parentBody.shapeType : Math.floor(Math.random() * 3);
+                this.shapeType = parentBody ? parentBody.shapeType : Math.floor(Math.random() * 3); // Used for initial generation
 
                 this.motorImpulseInterval = 30 + Math.floor(Math.random() * 90);
                 this.motorImpulseMagnitudeCap = 0.5 + Math.random() * 2.0;
-                // Emitter strength/direction are now neurally controlled if a brain exists
-
+                this.emitterStrength = 0.2 + Math.random() * 1.0;
+                this.emitterDirection = new Vec2(Math.random()*2-1, Math.random()*2-1).normalize();
                 this.numOffspring = parentBody ? parentBody.numOffspring : (1 + Math.floor(Math.random() * 3));
                 this.offspringSpawnRadius = parentBody ? parentBody.offspringSpawnRadius : (50 + Math.random() * 50);
-                this.pointAddChance = parentBody ? parentBody.pointAddChance : (ADD_POINT_MUTATION_CHANCE);
+                this.pointAddChance = parentBody ? parentBody.pointAddChance : (0.02 + Math.random() * 0.06);
                 this.springConnectionRadius = parentBody ? parentBody.springConnectionRadius : (40 + Math.random() * 40);
 
 
@@ -966,7 +1554,7 @@
                     this.springDamping = parentBody.springDamping * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
                     this.motorImpulseInterval = Math.max(10, Math.floor(parentBody.motorImpulseInterval * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER))));
                     this.motorImpulseMagnitudeCap = parentBody.motorImpulseMagnitudeCap * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-                    // Emitter strength/direction inherited via neuronData if parent had a brain, or re-initialized
+                    this.emitterStrength = parentBody.emitterStrength * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
 
                     let offspringNumChange = 0;
                     if (Math.random() < Math.max(0, Math.min(1, MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER))) {
@@ -978,80 +1566,36 @@
                     this.pointAddChance = Math.max(0, Math.min(0.5, parentBody.pointAddChance * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 2))));
                     this.springConnectionRadius = Math.max(10, parentBody.springConnectionRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)));
 
-                } else { // Initial generation
+
+                    const angleMutation = (Math.random() - 0.5) * Math.PI * 0.2 * GLOBAL_MUTATION_RATE_MODIFIER;
+                    const cosA = Math.cos(angleMutation);
+                    const sinA = Math.sin(angleMutation);
+                    this.emitterDirection = new Vec2(
+                        parentBody.emitterDirection.x * cosA - parentBody.emitterDirection.y * sinA,
+                        parentBody.emitterDirection.x * sinA + parentBody.emitterDirection.y * cosA
+                    ).normalize();
+
+                } else {
                     this.stiffness = 500 + Math.random() * 2500;
                     this.springDamping = 5 + Math.random() * 20;
                 }
-                // Clamp inherited/randomized values
                 this.stiffness = Math.max(100, Math.min(this.stiffness, 10000));
                 this.springDamping = Math.max(0.1, Math.min(this.springDamping, 50));
                 this.motorImpulseMagnitudeCap = Math.max(0, Math.min(this.motorImpulseMagnitudeCap, 5.0));
                 this.motorImpulseInterval = Math.max(10, Math.min(this.motorImpulseInterval, 300));
+                this.emitterStrength = Math.max(0, Math.min(this.emitterStrength, 3.0));
                 this.numOffspring = Math.max(1, Math.min(this.numOffspring, 5));
                 this.offspringSpawnRadius = Math.max(20, Math.min(this.offspringSpawnRadius, 150));
                 this.pointAddChance = Math.max(0, Math.min(0.5, this.pointAddChance));
                 this.springConnectionRadius = Math.max(10, Math.min(this.springConnectionRadius, 100));
 
+
                 this.fluidEntrainment = BODY_FLUID_ENTRAINMENT_FACTOR;
                 this.fluidCurrentStrength = FLUID_CURRENT_STRENGTH_ON_BODY;
                 this.bodyPushStrength = SOFT_BODY_PUSH_STRENGTH;
 
-                this.createShape(initialX, initialY, parentBody); // Creates massPoints
-                this.initializeBrain(); // Sets up the neural network for the active brain node
+                this.createShape(initialX, initialY, parentBody);
             }
-
-            initializeBrain() {
-                let brainNode = null;
-                let brainNodeIndex = -1;
-
-                for (let i = 0; i < this.massPoints.length; i++) {
-                    if (this.massPoints[i].nodeType === NodeType.NEURON) {
-                        if (!brainNode) {
-                            brainNode = this.massPoints[i];
-                            brainNodeIndex = i;
-                            if (!brainNode.neuronData) brainNode.neuronData = {};
-                            brainNode.neuronData.isBrain = true;
-                        } else {
-                            if (this.massPoints[i].neuronData) this.massPoints[i].neuronData.isBrain = false;
-                            else this.massPoints[i].neuronData = { isBrain: false };
-                        }
-                    }
-                }
-
-                if (brainNode) {
-                    const nd = brainNode.neuronData;
-                    nd.inputVectorSize = NEURAL_INPUT_SIZE;
-                    const numEmitterSwimmers = this.massPoints.filter(mp => mp.nodeType === NodeType.EMITTER_SWIMMER).length;
-                    nd.outputVectorSize = numEmitterSwimmers * NEURAL_OUTPUTS_PER_EMITTER_SWIMMER;
-
-                    if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize <= 0) {
-                         nd.hiddenLayerSize = Math.floor(DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1));
-                    }
-                    nd.hiddenLayerSize = Math.max(1, Math.min(Math.round(nd.hiddenLayerSize), DEFAULT_HIDDEN_LAYER_SIZE_MAX * 2));
-
-
-                    let needsWeightReinit = false;
-                    if (!nd.weightsIH || !nd.biasesH || !nd.weightsHO || !nd.biasesO) {
-                        needsWeightReinit = true;
-                    } else {
-                        if (nd.weightsIH.length !== nd.hiddenLayerSize || (nd.weightsIH[0] && nd.weightsIH[0].length !== nd.inputVectorSize)) needsWeightReinit = true;
-                        if (nd.biasesH.length !== nd.hiddenLayerSize) needsWeightReinit = true;
-                        if (nd.weightsHO.length !== nd.outputVectorSize || (nd.weightsHO[0] && nd.weightsHO[0].length !== nd.hiddenLayerSize)) needsWeightReinit = true;
-                        if (nd.biasesO.length !== nd.outputVectorSize) needsWeightReinit = true;
-                    }
-
-
-                    if (needsWeightReinit && nd.outputVectorSize > 0 && nd.hiddenLayerSize > 0 && nd.inputVectorSize > 0) {
-                        nd.weightsIH = initializeMatrix(nd.hiddenLayerSize, nd.inputVectorSize);
-                        nd.biasesH = initializeVector(nd.hiddenLayerSize);
-                        nd.weightsHO = initializeMatrix(nd.outputVectorSize, nd.hiddenLayerSize);
-                        nd.biasesO = initializeVector(nd.outputVectorSize);
-                    } else if (nd.outputVectorSize === 0 || nd.hiddenLayerSize === 0 || nd.inputVectorSize === 0) {
-                        nd.weightsIH = []; nd.biasesH = []; nd.weightsHO = []; nd.biasesO = [];
-                    }
-                }
-            }
-
 
             createShape(startX, startY, parentBody = null) {
                 this.massPoints = [];
@@ -1061,12 +1605,13 @@
                 const eaterChance = 0.25;
                 const predatorChance = 0.15;
                 const dyeEmitterChance = 0.2;
+                // const neuronChance = NEURON_CHANCE; // Use global NEURON_CHANCE directly
                 const nodeTypeChoices = [NodeType.NEUTRAL, NodeType.FLOATING, NodeType.FIXED_ROOT, NodeType.EMITTER_SWIMMER, NodeType.NEURON];
                 const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
 
                 if (parentBody) {
-                    const parentBrainNode = parentBody.massPoints.find(p => p.neuronData && p.neuronData.isBrain);
-                    let parentBrainHiddenSize = parentBrainNode ? parentBrainNode.neuronData.hiddenLayerSize : null;
+                    // Morphological evolution from parent
+                    let lastPointPos = parentBody.massPoints.length > 0 ? parentBody.massPoints[parentBody.massPoints.length-1].pos.clone() : new Vec2(startX, startY);
 
                     parentBody.massPoints.forEach(parentPoint => {
                         let mass = parentPoint.mass * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
@@ -1090,23 +1635,20 @@
                         offspringPoint.dyeColor = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)] : [...parentPoint.dyeColor];
 
                         if (nodeType === NodeType.NEURON) {
-                            let inheritedHiddenSize = DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN);
-                            if (parentPoint.neuronData && parentPoint.neuronData.hiddenLayerSize) { // If parent point was a neuron
-                                inheritedHiddenSize = parentPoint.neuronData.hiddenLayerSize;
-                                if (parentPoint === parentBrainNode) { // And it was the brain
-                                     inheritedHiddenSize = inheritedHiddenSize * (1 + (Math.random() - 0.5) * 0.2 * GLOBAL_MUTATION_RATE_MODIFIER); // Mutate
-                                }
-                            }
                             offspringPoint.neuronData = {
-                                isBrain: false, // Will be set by initializeBrain
-                                hiddenLayerSize: Math.max(DEFAULT_HIDDEN_LAYER_SIZE_MIN, Math.min(Math.round(inheritedHiddenSize), DEFAULT_HIDDEN_LAYER_SIZE_MAX * 2))
+                                sensorPointIndex: parentPoint.neuronData ? parentPoint.neuronData.sensorPointIndex : -1,
+                                effectorPointIndex: parentPoint.neuronData ? parentPoint.neuronData.effectorPointIndex : -1,
+                                weights: parentPoint.neuronData ? parentPoint.neuronData.weights.map(w => w * (1 + (Math.random() -0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER))) : [(Math.random()*2-1), (Math.random()*2-1), (Math.random()*2-1)],
+                                bias: parentPoint.neuronData ? parentPoint.neuronData.bias * (1 + (Math.random() -0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)) : (Math.random()*2-1) * 0.5,
+                                sensedChannel: parentPoint.neuronData ? (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER) ? Math.floor(Math.random() * 4) : parentPoint.neuronData.sensedChannel) : Math.floor(Math.random() * 4),
+                                lastOutput: 0, lastSensedR: 0, lastSensedG: 0, lastSensedB: 0
                             };
                         }
                         if(offspringPoint.nodeType === NodeType.FIXED_ROOT) offspringPoint.isFixed = true;
                         this.massPoints.push(offspringPoint);
+                        lastPointPos = offspringPoint.pos.clone();
 
-                        if (Math.random() < this.pointAddChance) {
-                            const lastPointPos = this.massPoints[this.massPoints.length-1].pos.clone();
+                        if (Math.random() < this.pointAddChance * GLOBAL_MUTATION_RATE_MODIFIER) {
                             const newMass = 0.1 + Math.random() * 0.9;
                             const newNodeType = nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)];
                             const newPoint = new MassPoint(
@@ -1121,37 +1663,23 @@
                             newPoint.emitsDye = Math.random() < dyeEmitterChance;
                             newPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
                             if (newNodeType === NodeType.NEURON) {
-                                newPoint.neuronData = { isBrain: false, hiddenLayerSize: Math.floor(DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) };
+                                newPoint.neuronData = {
+                                    sensorPointIndex: -1, effectorPointIndex: -1,
+                                    weights: [(Math.random()*2-1), (Math.random()*2-1), (Math.random()*2-1)],
+                                    bias: (Math.random()*2-1) * 0.5, sensedChannel: Math.floor(Math.random() * 4),
+                                    lastOutput: 0, lastSensedR: 0, lastSensedG: 0, lastSensedB: 0
+                                };
                             }
                             if(newPoint.nodeType === NodeType.FIXED_ROOT) newPoint.isFixed = true;
                             this.massPoints.push(newPoint);
+                            lastPointPos = newPoint.pos.clone();
                         }
                     });
-                     if (this.massPoints.length === 0) { // Fallback if parent had no points
+
+                    if (this.massPoints.length === 0) {
                         this.massPoints.push(new MassPoint(startX, startY, 0.5, baseRadius));
-                         if (Math.random() < NEURON_CHANCE) { this.massPoints[0].nodeType = NodeType.NEURON; this.massPoints[0].neuronData = {isBrain: false, hiddenLayerSize: Math.floor(DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) }; }
                     }
 
-                } else { // Initial generation logic
-                    const basePointDist = 20 + Math.random() * 10;
-                    // Simplified initial generation for brevity - actual logic from previous version should be here
-                    const numPoints = Math.floor(3 + Math.random() * 4);
-                    for(let i=0; i<numPoints; i++){
-                        const p = new MassPoint(startX + (Math.random()-0.5)*numPoints*5, startY + (Math.random()-0.5)*numPoints*5, 0.3+Math.random()*0.4, baseRadius);
-                        p.isEater = Math.random() < eaterChance; p.isPredator = Math.random() < predatorChance; p.emitsDye = Math.random() < dyeEmitterChance; p.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
-                        if (Math.random() < NEURON_CHANCE && numPoints > 1) {
-                            p.nodeType = NodeType.NEURON;
-                            p.neuronData = { isBrain: false, hiddenLayerSize: Math.floor(DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) };
-                        } else if(Math.random() < 0.3) {
-                            p.nodeType = NodeType.EMITTER_SWIMMER;
-                        }
-                        if (p.nodeType === NodeType.FIXED_ROOT) p.isFixed = true;
-                        this.massPoints.push(p);
-                    }
-                }
-
-                // Common spring creation logic
-                if (this.massPoints.length > 1) {
                     for (let i = 0; i < this.massPoints.length; i++) {
                         for (let j = i + 1; j < this.massPoints.length; j++) {
                             const p1 = this.massPoints[i];
@@ -1162,41 +1690,147 @@
                             }
                         }
                     }
-                    if (this.springs.length === 0 && this.massPoints.length > 1 && this.massPoints.length <= 3) {
-                        for(let i=0; i < this.massPoints.length-1; i++){
-                           this.springs.push(new Spring(this.massPoints[i], this.massPoints[i+1], this.stiffness, this.springDamping));
+                    if (this.massPoints.length > 1 && this.springs.length === 0) {
+                        for(let i = 0; i < this.massPoints.length -1; i++){
+                             this.springs.push(new Spring(this.massPoints[i], this.massPoints[i+1], this.stiffness, this.springDamping));
                         }
-                        if(this.massPoints.length === 3) this.springs.push(new Spring(this.massPoints[0], this.massPoints[2], this.stiffness, this.springDamping));
                     }
+
+
+                } else { // Initial generation - use old shape types
+                    const basePointDist = 20 + Math.random() * 10;
+                    if (this.shapeType === 0) {
+                        const numPointsX = 3; const numPointsY = 3; let gridPoints = [];
+                        for (let i = 0; i < numPointsY; i++) { gridPoints[i] = []; for (let j = 0; j < numPointsX; j++) {
+                            const point = new MassPoint(startX + j * basePointDist, startY + i * basePointDist, 0.3 + Math.random() * 0.4, baseRadius);
+                            point.isEater = Math.random() < eaterChance;
+                            point.isPredator = Math.random() < predatorChance;
+                            point.emitsDye = Math.random() < dyeEmitterChance;
+                            point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                            this.massPoints.push(point); gridPoints[i][j] = point;
+                        }}
+                        for (let i=0; i<numPointsY; i++) for (let j=0; j<numPointsX-1; j++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], this.stiffness, this.springDamping));
+                        for (let j=0; j<numPointsX; j++) for (let i=0; i<numPointsY-1; i++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], this.stiffness, this.springDamping));
+                        for (let i=0; i<numPointsY-1; i++) for (let j=0; j<numPointsX-1; j++) {
+                            this.springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], this.stiffness*0.7, this.springDamping));
+                            this.springs.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], this.stiffness*0.7, this.springDamping));
+                        }
+                    } else if (this.shapeType === 1) {
+                        const numLinePoints = Math.floor(3 + Math.random() * 3); const isHorizontal = Math.random() < 0.5; let linePoints = [];
+                        for (let i=0; i<numLinePoints; i++) {
+                            const x = startX + (isHorizontal ? i * basePointDist : 0); const y = startY + (isHorizontal ? 0 : i * basePointDist);
+                            const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
+                            point.isEater = Math.random() < eaterChance; point.isPredator = Math.random() < predatorChance; point.emitsDye = Math.random() < dyeEmitterChance; point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                            this.massPoints.push(point); linePoints.push(point);
+                        }
+                        for (let i=0; i<numLinePoints-1; i++) this.springs.push(new Spring(linePoints[i], linePoints[i+1], this.stiffness, this.springDamping));
+                        if (numLinePoints > 2) this.springs.push(new Spring(linePoints[0], linePoints[numLinePoints-1], this.stiffness*0.5, this.springDamping));
+                    } else {
+                        const numOuterPoints = Math.floor(4 + Math.random()*3); const centralPoint = new MassPoint(startX, startY, (0.3+Math.random()*0.4)*1.5, baseRadius*1.2);
+                        centralPoint.isEater = Math.random() < eaterChance; centralPoint.isPredator = Math.random() < predatorChance; centralPoint.emitsDye = Math.random() < dyeEmitterChance; centralPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                        this.massPoints.push(centralPoint); const circleRadius = basePointDist * 1.5;
+                        for (let i=0; i<numOuterPoints; i++) {
+                            const angle = (i / numOuterPoints) * Math.PI * 2; const x = startX + Math.cos(angle)*circleRadius; const y = startY + Math.sin(angle)*circleRadius;
+                            const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
+                            point.isEater = Math.random() < eaterChance; point.isPredator = Math.random() < predatorChance; point.emitsDye = Math.random() < dyeEmitterChance; point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                            this.massPoints.push(point);
+                            this.springs.push(new Spring(centralPoint, point, this.stiffness, this.springDamping));
+                            if (i>0) this.springs.push(new Spring(this.massPoints[this.massPoints.length-2], point, this.stiffness*0.8, this.springDamping));
+                        }
+                        if (numOuterPoints > 1) this.springs.push(new Spring(this.massPoints[1], this.massPoints[this.massPoints.length-1], this.stiffness*0.8, this.springDamping));
+                    }
+
+                    this.massPoints.forEach((p, idx) => {
+                        let currentNodeType = nodeTypeChoices[Math.floor(Math.random() * (nodeTypeChoices.length -1))]; // Default non-neuron
+                        if (Math.random() < NEURON_CHANCE && this.massPoints.length > 1) { // Use global NEURON_CHANCE
+                            currentNodeType = NodeType.NEURON;
+                        }
+                        p.nodeType = currentNodeType;
+
+                        if (p.nodeType === NodeType.NEURON) {
+                             p.neuronData = {
+                                sensorPointIndex: -1, effectorPointIndex: -1,
+                                weights: [ (Math.random()*2-1), (Math.random()*2-1), (Math.random()*2-1) ],
+                                bias: (Math.random()*2-1) * 0.5,
+                                sensedChannel: Math.floor(Math.random() * 4),
+                                lastOutput: 0, lastSensedR: 0, lastSensedG: 0, lastSensedB: 0
+                            };
+                        }
+                        if (p.nodeType === NodeType.FIXED_ROOT) p.isFixed = true;
+                    });
                 }
+
+                // Common post-creation neuron linking (for both initial and reproduced)
+                this.massPoints.forEach((p, idx) => {
+                    if (p.nodeType === NodeType.NEURON && p.neuronData) {
+                        if (this.massPoints.length > 1) {
+                            let newSensorIndex;
+                            do { newSensorIndex = Math.floor(Math.random() * this.massPoints.length); } while (newSensorIndex === idx);
+                            p.neuronData.sensorPointIndex = newSensorIndex;
+                        } else {
+                            p.neuronData.sensorPointIndex = -1;
+                        }
+                        const effectorCandidates = this.massPoints.map((ep, epIdx) => ep.nodeType === NodeType.EMITTER_SWIMMER ? epIdx : -1).filter(epIdx => epIdx !== -1 && epIdx !== idx);
+                        if (effectorCandidates.length > 0) {
+                             p.neuronData.effectorPointIndex = effectorCandidates[Math.floor(Math.random() * effectorCandidates.length)];
+                        } else {
+                            p.neuronData.effectorPointIndex = -1;
+                        }
+                    }
+                });
             }
+
 
             updateSelf(dt, fluidFieldRef) {
                 if (this.isUnstable) return;
 
-                // The new brain logic will replace this.
-
-                const brainNode = this.massPoints.find(p => p.neuronData && p.neuronData.isBrain);
-
-                if (brainNode && brainNode.neuronData && brainNode.neuronData.weightsIH && brainNode.neuronData.hiddenLayerSize > 0 && brainNode.neuronData.outputVectorSize > 0) {
-                    // Neural Network Control will be implemented in Step 4 & 5
-                } else { // Fallback for non-brained creatures or inoperable brains
-                    if (this.motorImpulseMagnitudeCap > 0.0001 && (this.ticksSinceBirth % this.motorImpulseInterval === 0)) {
-                        for (let point of this.massPoints) {
-                            if (!point.isFixed && point.nodeType !== NodeType.FIXED_ROOT) {
-                                const randomAngle = Math.random() * Math.PI * 2;
-                                const impulseDir = new Vec2(Math.cos(randomAngle), Math.sin(randomAngle));
-                                const impulseMag = Math.random() * this.motorImpulseMagnitudeCap;
-                                const impulseForce = impulseDir.mul(impulseMag / dt);
-                                point.applyForce(impulseForce);
-                            }
-                        }
+                // Reset neural overrides for effectors
+                this.massPoints.forEach(p => {
+                    if (p.nodeType === NodeType.EMITTER_SWIMMER) {
+                        p.neuralEffectiveStrength = null;
                     }
-                    this.massPoints.forEach(point => {
-                        if (point.nodeType === NodeType.EMITTER_SWIMMER && point.emitsDye && fluidFieldRef) {
-                            const emitterFluidGx = Math.floor(point.pos.x / fluidFieldRef.scaleX);
-                            const emitterFluidGy = Math.floor(point.pos.y / fluidFieldRef.scaleY);
-                            fluidFieldRef.addDensity(emitterFluidGx, emitterFluidGy, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], 50);
+                });
+
+
+                // Process Neurons
+                if (fluidFieldRef) {
+                    this.massPoints.forEach(neuronPoint => {
+                        if (neuronPoint.nodeType === NodeType.NEURON && neuronPoint.neuronData) {
+                            const nd = neuronPoint.neuronData;
+                            if (nd.sensorPointIndex >= 0 && nd.sensorPointIndex < this.massPoints.length &&
+                                nd.effectorPointIndex >= 0 && nd.effectorPointIndex < this.massPoints.length &&
+                                this.massPoints[nd.sensorPointIndex] && this.massPoints[nd.effectorPointIndex] &&
+                                this.massPoints[nd.effectorPointIndex].nodeType === NodeType.EMITTER_SWIMMER ) {
+
+                                const sensor = this.massPoints[nd.sensorPointIndex];
+                                const effector = this.massPoints[nd.effectorPointIndex];
+
+                                const gx = Math.floor(sensor.pos.x / fluidFieldRef.scaleX);
+                                const gy = Math.floor(sensor.pos.y / fluidFieldRef.scaleY);
+                                const idx = fluidFieldRef.IX(gx, gy);
+
+                                nd.lastSensedR = (fluidFieldRef.densityR[idx] || 0) / 255;
+                                nd.lastSensedG = (fluidFieldRef.densityG[idx] || 0) / 255;
+                                nd.lastSensedB = (fluidFieldRef.densityB[idx] || 0) / 255;
+
+                                let sensedInputValue = 0;
+                                switch(nd.sensedChannel) {
+                                    case DyeChannel.RED: sensedInputValue = nd.lastSensedR * nd.weights[0]; break;
+                                    case DyeChannel.GREEN: sensedInputValue = nd.lastSensedG * nd.weights[1]; break;
+                                    case DyeChannel.BLUE: sensedInputValue = nd.lastSensedB * nd.weights[2]; break;
+                                    case DyeChannel.AVERAGE:
+                                        sensedInputValue = (nd.lastSensedR * nd.weights[0] + nd.lastSensedG * nd.weights[1] + nd.lastSensedB * nd.weights[2]) / 3;
+                                        break;
+                                }
+
+                                const neuronActivation = sensedInputValue + nd.bias;
+                                nd.lastOutput = Math.tanh(neuronActivation);
+
+                                effector.neuralEffectiveStrength = (nd.lastOutput + 1) / 2; // Map -1..1 to 0..1
+                            } else {
+                                nd.sensorPointIndex = -1;
+                                nd.effectorPointIndex = -1;
+                            }
                         }
                     });
                 }
@@ -1228,7 +1862,9 @@
                 }
 
                 if (this.creatureEnergy <= 0) {
-                    this.isUnstable = true; return;
+                    this.isUnstable = true;
+                    // console.log(`Soft body ID ${this.id} died from energy depletion.`); // Keep console less noisy
+                    return;
                 }
 
                 if (this.motorImpulseMagnitudeCap > 0.0001 && (this.ticksSinceBirth % this.motorImpulseInterval === 0)) {
@@ -1365,7 +2001,7 @@
                 }
                 if (this.isUnstable) return;
 
-                if (this.massPoints.length > 2) {
+                if (this.massPoints.length > 2) { // Only check span for bodies with more than 2 points
                     const bbox = this.getBoundingBox();
                     if (bbox.width > this.massPoints.length * localMaxSpanPerPointFactor ||
                         bbox.height > this.massPoints.length * localMaxSpanPerPointFactor) {
@@ -1608,6 +2244,7 @@
                 for (let point of this.massPoints) point.draw(ctx);
             }
         }
+
 
         // --- FluidField Class (Simplified) ---
         class FluidField {
@@ -1936,6 +2573,8 @@
                     this.life = 1.0;
                 }
             }
+
+            // respawn() removed as particles are now emitted and removed
 
             draw(ctx) {
                 const alpha = IS_PARTICLE_LIFE_INFINITE ? 0.7 : Math.max(0, this.life * 0.7);
@@ -2280,7 +2919,7 @@
             if (config.worldHeight !== undefined) WORLD_HEIGHT = config.worldHeight;
             canvas.width = WORLD_WIDTH;
             canvas.height = WORLD_HEIGHT;
-            // MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5); // Not used anymore
+            MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5); // Update threshold
             initializeSpatialGrid(); // Re-initialize grid with new world dimensions
 
             if (config.zoomSensitivity !== undefined) ZOOM_SENSITIVITY = config.zoomSensitivity;
@@ -2408,14 +3047,15 @@
         // --- Main Initialization Sequence ---
         async function main() {
             // Initialize ALL global config variables with hardcoded defaults first
+            // This ensures they have a value even if JSON load fails or is incomplete.
             WORLD_WIDTH = parseInt(worldWidthInput.value) || 8000;
             WORLD_HEIGHT = parseInt(worldHeightInput.value) || 6000;
-            ZOOM_SENSITIVITY = 0.02; // Default
-            CREATURE_POPULATION_FLOOR = 10; // Default
-            CREATURE_POPULATION_CEILING = 1000; // Default
-            PARTICLE_POPULATION_FLOOR = 5000; // Default
-            PARTICLE_POPULATION_CEILING = 20000; // Default
-            MAX_FLUID_VELOCITY_COMPONENT = 0.5; // Default
+            ZOOM_SENSITIVITY = 0.02;
+            CREATURE_POPULATION_FLOOR = 10;
+            CREATURE_POPULATION_CEILING = 1000;
+            PARTICLE_POPULATION_FLOOR = 5000;
+            PARTICLE_POPULATION_CEILING = 20000;
+            MAX_FLUID_VELOCITY_COMPONENT = 0.5;
             BODY_FLUID_ENTRAINMENT_FACTOR = 0.465;
             FLUID_CURRENT_STRENGTH_ON_BODY = 19.7;
             SOFT_BODY_PUSH_STRENGTH = 0.10;
@@ -2429,7 +3069,7 @@
             EATER_NODE_ENERGY_COST = 0.3;
             PREDATOR_NODE_ENERGY_COST = 0.8;
             NEURON_NODE_ENERGY_COST = 0.01;
-            FLUID_GRID_SIZE_CONTROL = 128;
+            FLUID_GRID_SIZE_CONTROL = 128; // Crucial default
             FLUID_DIFFUSION = 0.00047;
             FLUID_VISCOSITY = 0.000068;
             FLUID_FADE_RATE = 0.002;
@@ -2444,10 +3084,10 @@
 
             await loadAndApplySliderConfig(); // Attempt to override with JSON values
 
-            INITIAL_POPULATION_SIZE = CREATURE_POPULATION_FLOOR;
+            INITIAL_POPULATION_SIZE = CREATURE_POPULATION_FLOOR; // Set this AFTER config is loaded
 
             initializeSpatialGrid();
-            initializeAllSliderDisplays();
+            initializeAllSliderDisplays(); // This will now use the (potentially JSON-overridden) global vars
             initFluidSimulation();
             initParticles();
             initializePopulation();

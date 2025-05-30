@@ -5,8 +5,6 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Deleting remnants to clean up">
-      <change afterPath="$PROJECT_DIR$/soft_body_temp.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/soft_body.html" beforeDir="false" afterPath="$PROJECT_DIR$/soft_body.html" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -142,15 +140,7 @@
       <workItem from="1748444840156" duration="115000" />
       <workItem from="1748444958636" duration="18164000" />
       <workItem from="1748521061145" duration="727000" />
-      <workItem from="1748557338428" duration="6854000" />
-    </task>
-    <task id="LOCAL-00008" summary="Amazing Checkpoint">
-      <option name="closed" value="true" />
-      <created>1748372465841</created>
-      <option name="number" value="00008" />
-      <option name="presentableId" value="LOCAL-00008" />
-      <option name="project" value="LOCAL" />
-      <updated>1748372465841</updated>
+      <workItem from="1748557338428" duration="7170000" />
     </task>
     <task id="LOCAL-00009" summary="Amazing Checkpoint">
       <option name="closed" value="true" />
@@ -536,7 +526,15 @@
       <option name="project" value="LOCAL" />
       <updated>1748564319107</updated>
     </task>
-    <option name="localTasksCounter" value="57" />
+    <task id="LOCAL-00057" summary="Deleting remnants to clean up">
+      <option name="closed" value="true" />
+      <created>1748565529536</created>
+      <option name="number" value="00057" />
+      <option name="presentableId" value="LOCAL-00057" />
+      <option name="project" value="LOCAL" />
+      <updated>1748565529536</updated>
+    </task>
+    <option name="localTasksCounter" value="58" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">

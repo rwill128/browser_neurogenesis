@@ -1098,9 +1098,33 @@
                     content += `<p><strong>Is Eater:</strong> ${point.isEater}</p>`;
                     content += `<p><strong>Is Predator:</strong> ${point.isPredator}</p>`;
                     content += `<p><strong>Emits Dye:</strong> ${point.emitsDye}</p>`;
-                    content += `<p><strong>Dye Color:</strong> ${point.emitsDye ? `R:${point.dyeColor[0]} G:${point.dyeColor[1]} B:${point.dyeColor[2]}` : "N/A"}</p>`;
+                    content += `<p><strong>Dye Color:</strong> ${point.emitsDye ? `R:${point.dyeColor[0].toFixed(0)} G:${point.dyeColor[1].toFixed(0)} B:${point.dyeColor[2].toFixed(0)}` : "N/A"}</p>`;
 
                     if (point.nodeType === NodeType.NEURON && point.neuronData) {
+                        if (typeof point.neuronData.hiddenLayerSize === 'undefined') {
+                            const bodyIdForLog = selectedInspectBody ? selectedInspectBody.id : 'UnknownBody';
+                            // index is available from the forEach loop: selectedInspectBody.massPoints.forEach((point, index) => {
+                            console.warn(`Neuron in Body ${bodyIdForLog}, Point Index ${index}, has neuronData, but hiddenLayerSize is UNDEFINED. neuronData:`, JSON.parse(JSON.stringify(point.neuronData)));
+                        }
+
+                        if (point.neuronData.isBrain) {
+                            content += `<h6>Brain Details:</h6>`;
+                            content += `<p><strong>Role:</strong> Active Brain</p>`;
+                            content += `<p><strong>Hidden Layer Size:</strong> ${point.neuronData.hiddenLayerSize || 'N/A'}</p>`;
+                            content += `<p><strong>Input Vector Size:</strong> ${point.neuronData.inputVectorSize || 'N/A'}</p>`;
+                            content += `<p><strong>Output Vector Size:</strong> ${point.neuronData.outputVectorSize || 'N/A'}</p>`;
+                            if (point.neuronData.rawOutputs && point.neuronData.rawOutputs.length > 0) {
+                                content += `<p><strong>Raw Outputs:</strong> [${point.neuronData.rawOutputs.map(o => o.toFixed(2)).join(', ')}]</p>`;
+                            }
+                        } else {
+                            // For non-brain neurons, if we add specific data later, display here.
+                            // For now, it might just show its basic neuron properties.
+                            content += `<h6>Neuron (Non-Brain)</h6>`;
+                            content += `<p><strong>Hidden Layer Size (if applicable):</strong> ${point.neuronData.hiddenLayerSize || 'N/A'}</p>`;
+                        }
+                        // Old detailed neuron data (sensor/effector/weights) is no longer displayed here
+                        // as it was removed from the primary neuronData structure for the new system.
+                        /*
                         const nd = point.neuronData;
                         content += `<h6>Neuron Data:</h6>`;
                         content += `<p><strong>Sensor Idx:</strong> ${nd.sensorPointIndex}</p>`;
@@ -1110,6 +1134,7 @@
                         content += `<p><strong>Weights (RGB):</strong> ${nd.weights[0].toFixed(3)}, ${nd.weights[1].toFixed(3)}, ${nd.weights[2].toFixed(3)}</p>`;
                         content += `<p><strong>Bias:</strong> ${nd.bias.toFixed(3)}</p>`;
                         content += `<p><strong>Last Output:</strong> ${nd.lastOutput !== undefined ? nd.lastOutput.toFixed(3) : "N/A"}</p>`;
+                        */
                     }
                     pointEntryDiv.innerHTML = content;
                     allPointsInfoContainer.appendChild(pointEntryDiv);
@@ -2068,7 +2093,14 @@
                         currentFrameEnergyCost += EMITTER_NODE_ENERGY_COST;
                     }
                      if (point.nodeType === NodeType.NEURON) {
-                        currentFrameEnergyCost += NEURON_NODE_ENERGY_COST;
+                        // currentFrameEnergyCost += NEURON_NODE_ENERGY_COST; // Old flat cost
+                        if (point.neuronData && point.neuronData.isBrain) {
+                            // Higher base cost for being a brain + cost per hidden neuron
+                            currentFrameEnergyCost += NEURON_NODE_ENERGY_COST * 5; // 5x base cost for brain
+                            currentFrameEnergyCost += (point.neuronData.hiddenLayerSize || 0) * NEURON_NODE_ENERGY_COST * 0.1; // 10% of base cost per hidden node
+                        } else {
+                            currentFrameEnergyCost += NEURON_NODE_ENERGY_COST; // Standard cost for non-brain neurons
+                        }
                     }
                     if (point.isEater) {
                         currentFrameEnergyCost += EATER_NODE_ENERGY_COST;
@@ -2503,8 +2535,11 @@
                     nd.outputVectorSize = numEmitterSwimmerPoints * NEURAL_OUTPUTS_PER_EMITTER_SWIMMER;
 
                     // Initialize weights and biases
-                    // These will be re-initialized if they don't exist or if dimensions are wrong
-                    // For simplicity, we assume hiddenLayerSize doesn't change after initial body creation here
+                    if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < DEFAULT_HIDDEN_LAYER_SIZE_MIN) {
+                        console.warn(`Body ${this.id} brain node had invalid hiddenLayerSize: ${nd.hiddenLayerSize}. Resetting to default: ${DEFAULT_HIDDEN_LAYER_SIZE_MIN}. NeuronData was:`, JSON.parse(JSON.stringify(nd)));
+                        nd.hiddenLayerSize = DEFAULT_HIDDEN_LAYER_SIZE_MIN;
+                    }
+
                     nd.weightsIH = initializeMatrix(nd.hiddenLayerSize, nd.inputVectorSize);
                     nd.biasesH = initializeVector(nd.hiddenLayerSize);
                     nd.weightsHO = initializeMatrix(nd.outputVectorSize, nd.hiddenLayerSize);

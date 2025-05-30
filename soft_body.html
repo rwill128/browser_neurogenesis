@@ -1980,11 +1980,84 @@
                     nd.rawOutputs = rawOutputs; // Store for Step 5
                     // console.log(`Body ${this.id} brain processed. Inputs: [${inputVector.map(v=>v.toFixed(2))}], Outputs: [${rawOutputs.map(v=>v.toFixed(2))}]`);
 
+                    // --- Apply Neural Outputs (Step 5) ---
+                    let emitterSwimmerOutputIdx = 0;
+                    this.massPoints.forEach(point => {
+                        if (point.nodeType === NodeType.EMITTER_SWIMMER) {
+                            const outputStartIdx = emitterSwimmerOutputIdx * NEURAL_OUTPUTS_PER_EMITTER_SWIMMER;
+                            if (nd.rawOutputs && nd.rawOutputs.length >= outputStartIdx + NEURAL_OUTPUTS_PER_EMITTER_SWIMMER) {
+                                // Outputs are: Force X, Force Y, Target R, Target G, Target B, Emission Strength
+
+                                // Force X & Y
+                                const rawForceX = nd.rawOutputs[outputStartIdx + 0];
+                                const rawForceY = nd.rawOutputs[outputStartIdx + 1];
+                                // Apply tanh, scale by max component, then by overall body emitter strength
+                                const forceX = Math.tanh(rawForceX) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength;
+                                const forceY = Math.tanh(rawForceY) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength;
+                                point.applyForce(new Vec2(forceX / dt, forceY / dt)); // Apply as an impulse for this frame
+
+                                // Target Dye Color (R, G, B)
+                                const rawR = nd.rawOutputs[outputStartIdx + 2];
+                                const rawG = nd.rawOutputs[outputStartIdx + 3];
+                                const rawB = nd.rawOutputs[outputStartIdx + 4];
+                                point.dyeColor[0] = sigmoid(rawR) * 255;
+                                point.dyeColor[1] = sigmoid(rawG) * 255;
+                                point.dyeColor[2] = sigmoid(rawB) * 255;
+
+                                // Emission Pull Strength
+                                const rawPull = nd.rawOutputs[outputStartIdx + 5];
+                                const neuralPullStrength = sigmoid(rawPull) * MAX_NEURAL_EMISSION_PULL_STRENGTH;
+
+                                if (fluidFieldRef && point.emitsDye) { // Point must be flagged to emit dye
+                                    const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
+                                    const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
+                                    // Use point.dyeColor (now set by NN) and neuralPullStrength.
+                                    // The '50' is a base emission magnitude that neuralPullStrength modulates.
+                                    fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], neuralPullStrength * 50);
+                                }
+                            } // else: not enough outputs for this emitter, do nothing for it
+                            emitterSwimmerOutputIdx++;
+                        }
+                    });
+                    // --- End of Apply Neural Outputs ---
+
                 } else {
                     // No operable brain, or brain not fully initialized
                     if (brainNode && brainNode.neuronData) brainNode.neuronData.rawOutputs = []; // Clear if partially set
-                }
-                // --- End of New Neural Network Processing ---
+
+                    // Fallback 1: Original random motor impulses for all points
+                    if (this.motorImpulseMagnitudeCap > 0.0001 && (this.ticksSinceBirth % this.motorImpulseInterval === 0)) {
+                        for (let point of this.massPoints) {
+                            if (!point.isFixed && point.nodeType !== NodeType.FIXED_ROOT) {
+                                const randomAngle = Math.random() * Math.PI * 2;
+                                const impulseDir = new Vec2(Math.cos(randomAngle), Math.sin(randomAngle));
+                                const impulseMag = Math.random() * this.motorImpulseMagnitudeCap;
+                                const impulseForce = impulseDir.mul(impulseMag / dt);
+                                point.applyForce(impulseForce);
+                            }
+                        }
+                    }
+
+                    // Fallback 2: Original EMITTER_SWIMMER behavior (fluid push and dye emission)
+                    if (fluidFieldRef) {
+                        this.massPoints.forEach(point => {
+                            if (point.nodeType === NodeType.EMITTER_SWIMMER && this.emitterStrength > 0.0001 && !point.isFixed) {
+                                const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
+                                const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
+                                
+                                // Fluid push based on fixed emitterDirection
+                                const emitterPushVx = this.emitterDirection.x * this.emitterStrength;
+                                const emitterPushVy = this.emitterDirection.y * this.emitterStrength;
+                                fluidFieldRef.addVelocity(fluidGridX, fluidGridY, emitterPushVx, emitterPushVy);
+                                
+                                // Dye emission based on point's own fixed dyeColor
+                                if (point.emitsDye) { 
+                                    fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], 50); // 50 is default emission strength
+                                }
+                            }
+                        });
+                    }
+                } // --- End of New Neural Network Processing (Brain & Fallback) ---
 
 
                 // Calculate and apply energy cost
@@ -2014,7 +2087,6 @@
 
                 if (this.creatureEnergy <= 0) {
                     this.isUnstable = true;
-                    // console.log(`Soft body ID ${this.id} died from energy depletion.`); // Keep console less noisy
                     return;
                 }
 

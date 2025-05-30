@@ -2181,6 +2181,26 @@
                         } // End check for EMITTER_SWIMMER type
                     }); // End forEach massPoint
                     // --- End of Apply Neural Outputs ---
+
+                    // --- Store Experience for RL (Step 2 of RL Phase) ---
+                    // This happens after actions are taken and energy costs for the frame are implicitly about to be (or have been) accounted for by the simulation loop.
+                    if (nd.currentFrameActionDetails && nd.currentFrameActionDetails.length > 0) {
+                        const reward = this.creatureEnergy - nd.previousEnergyForReward;
+                        const experience = {
+                            state: [...inputVector], // Store a copy of the inputVector used for this frame
+                            actionDetails: JSON.parse(JSON.stringify(nd.currentFrameActionDetails)), // Deep copy of action details
+                            reward: reward
+                        };
+                        nd.experienceBuffer.push(experience);
+
+                        // Manage buffer size
+                        if (nd.experienceBuffer.length > nd.maxExperienceBufferSize) {
+                            nd.experienceBuffer.shift(); // Remove oldest experience
+                        }
+                    }
+                    nd.previousEnergyForReward = this.creatureEnergy; // Update for next frame's reward calculation
+                    // --- End of Store Experience ---
+
                 } else {
                     // No operable brain, or brain not fully initialized
                     if (brainNode && brainNode.neuronData) brainNode.neuronData.rawOutputs = []; // Clear if partially set
@@ -2679,6 +2699,12 @@
                     nd.biasesH = initializeVector(nd.hiddenLayerSize);
                     nd.weightsHO = initializeMatrix(nd.outputVectorSize, nd.hiddenLayerSize);
                     nd.biasesO = initializeVector(nd.outputVectorSize);
+                    
+                    // For Reinforcement Learning - Experience Buffer & Reward Tracking
+                    nd.experienceBuffer = [];
+                    nd.maxExperienceBufferSize = 10; // e.g., last 10 frames/experiences
+                    nd.previousEnergyForReward = this.creatureEnergy; // Initialize for first reward calculation
+
                     // console.log(`Body ${this.id} brain initialized. Inputs: ${nd.inputVectorSize}, Hidden: ${nd.hiddenLayerSize}, Outputs: ${nd.outputVectorSize}`);
                 } else {
                     // No brain node found or brainNode.neuronData is missing somehow

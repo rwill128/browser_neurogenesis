@@ -677,7 +677,7 @@
 
         // --- Neural Network Constants ---
         const NEURAL_INPUT_SIZE = 8; // 3 (dye RGB) + 1 (energy) + 2 (CoM rel pos) + 2 (CoM rel vel)
-        const NEURAL_OUTPUTS_PER_EMITTER_SWIMMER = 6; // Force X, Force Y, Target R, Target G, Target B, Emission Strength
+        const NEURAL_OUTPUTS_PER_EMITTER_SWIMMER = 12; // For Policy Gradient: 6 means + 6 std devs
         const DEFAULT_HIDDEN_LAYER_SIZE_MIN = 5;
         const DEFAULT_HIDDEN_LAYER_SIZE_MAX = 30; // Reduced from 50 for initial testing
         const MAX_NEURAL_FORCE_COMPONENT = 1.0; // Max output for a single force component from NN
@@ -687,6 +687,43 @@
         // --- Neural Network Math Helpers ---
         function sigmoid(x) {
             return 1 / (1 + Math.exp(-x));
+        }
+
+        // Box-Muller transform to get a normally distributed random number (mean 0, stdDev 1)
+        // Returns one sample. Call twice if you need two independent samples (or cache the second one).
+        let _z1_gauss = null; // Cache for the second sample from Box-Muller
+        function sampleGaussianBoxMuller() {
+            if (_z1_gauss !== null) {
+                const z1 = _z1_gauss;
+                _z1_gauss = null;
+                return z1;
+            }
+            let u1 = 0, u2 = 0;
+            while (u1 === 0) u1 = Math.random(); //Working with [0,1)
+            while (u2 === 0) u2 = Math.random();
+            const R = Math.sqrt(-2.0 * Math.log(u1));
+            const Theta = 2.0 * Math.PI * u2;
+            const z0 = R * Math.cos(Theta);
+            _z1_gauss = R * Math.sin(Theta); // Cache the second sample
+            return z0;
+        }
+
+        function sampleGaussian(mean, stdDev) {
+            const z0 = sampleGaussianBoxMuller();
+            return z0 * stdDev + mean;
+        }
+
+        function logPdfGaussian(x, mean, stdDev) {
+            if (stdDev <= 1e-6) { // Avoid division by zero or log of zero if stdDev is tiny
+                // If stdDev is effectively zero, probability is extremely high if x is mean, else very low.
+                // This is a simplification; proper handling might involve a dirac delta or just clamping stdDev.
+                return (Math.abs(x - mean) < 1e-6) ? 0 : -Infinity; 
+            }
+            const M_PI = Math.PI;
+            const variance = stdDev * stdDev;
+            const logSqrt2PiVariance = 0.5 * Math.log(2 * M_PI * variance);
+            const exponent = -((x - mean) * (x - mean)) / (2 * variance);
+            return exponent - logSqrt2PiVariance;
         }
 
         function initializeMatrix(rows, cols, randomRange = 1) {
@@ -2065,47 +2102,85 @@
                     nd.rawOutputs = rawOutputs; // Store for Step 5
                     // console.log(`Body ${this.id} brain processed. Inputs: [${inputVector.map(v=>v.toFixed(2))}], Outputs: [${rawOutputs.map(v=>v.toFixed(2))}]`);
 
-                    // --- Apply Neural Outputs (Step 5) ---
-                    let emitterSwimmerOutputIdx = 0;
+                    // --- Apply Neural Outputs (Modified for Policy Gradient - Step 1 of RL Phase) ---
+                    let emitterSwimmerOutputTracker = 0; // Tracks how many EMITTER_SWIMMERs we've processed outputs for
+                    nd.currentFrameActionDetails = []; // Initialize/clear array for the current frame
+
                     this.massPoints.forEach(point => {
                         if (point.nodeType === NodeType.EMITTER_SWIMMER) {
-                            const outputStartIdx = emitterSwimmerOutputIdx * NEURAL_OUTPUTS_PER_EMITTER_SWIMMER;
-                            if (nd.rawOutputs && nd.rawOutputs.length >= outputStartIdx + NEURAL_OUTPUTS_PER_EMITTER_SWIMMER) {
-                                // Outputs are: Force X, Force Y, Target R, Target G, Target B, Emission Strength
+                            const outputStartRawIdx = emitterSwimmerOutputTracker * NEURAL_OUTPUTS_PER_EMITTER_SWIMMER;
+                            
+                            if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_EMITTER_SWIMMER) {
+                                let currentOutputPairIdx = 0; // Index within the 12 outputs for this emitter
+                                const detailsForThisEmitter = [];
 
-                                // Force X & Y
-                                const rawForceX = nd.rawOutputs[outputStartIdx + 0];
-                                const rawForceY = nd.rawOutputs[outputStartIdx + 1];
-                                // Apply tanh, scale by max component, then by overall body emitter strength
-                                const forceX = Math.tanh(rawForceX) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength;
-                                const forceY = Math.tanh(rawForceY) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength;
-                                point.applyForce(new Vec2(forceX / dt, forceY / dt)); // Apply as an impulse for this frame
+                                // Helper to process one action component (mean + stdDev pair)
+                                function sampleAndLogAction(rawMean, rawStdDev) {
+                                    // The rawMean from NN output can be used directly or scaled/activated if needed.
+                                    // For now, assume it's suitable as a direct mean.
+                                    const mean = rawMean;
+                                    const stdDev = Math.exp(rawStdDev) + 1e-6; // Ensure stdDev is positive and non-zero
+                                    const sampledAction = sampleGaussian(mean, stdDev);
+                                    const logProb = logPdfGaussian(sampledAction, mean, stdDev);
+                                    
+                                    detailsForThisEmitter.push({ mean, stdDev, sampledAction, logProb });
+                                    return sampledAction; // Return the sampled_action for immediate use
+                                }
 
-                                // Target Dye Color (R, G, B)
-                                const rawR = nd.rawOutputs[outputStartIdx + 2];
-                                const rawG = nd.rawOutputs[outputStartIdx + 3];
-                                const rawB = nd.rawOutputs[outputStartIdx + 4];
-                                point.dyeColor[0] = sigmoid(rawR) * 255;
-                                point.dyeColor[1] = sigmoid(rawG) * 255;
-                                point.dyeColor[2] = sigmoid(rawB) * 255;
+                                // --- Action 1: Force X ---
+                                const sampledForceX = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
+                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
+                                );
+                                const appliedForceX = Math.tanh(sampledForceX) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength;
+                                
+                                // --- Action 2: Force Y ---
+                                const sampledForceY = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
+                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
+                                );
+                                const appliedForceY = Math.tanh(sampledForceY) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength;
+                                point.applyForce(new Vec2(appliedForceX / dt, appliedForceY / dt));
 
-                                // Emission Pull Strength
-                                const rawPull = nd.rawOutputs[outputStartIdx + 5];
-                                const neuralPullStrength = sigmoid(rawPull) * MAX_NEURAL_EMISSION_PULL_STRENGTH;
+                                // --- Action 3: Target Dye Color R ---
+                                const sampledR = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
+                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
+                                );
+                                point.dyeColor[0] = sigmoid(sampledR) * 255;
 
-                                if (fluidFieldRef && point.emitsDye) { // Point must be flagged to emit dye
+                                // --- Action 4: Target Dye Color G ---
+                                const sampledG = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
+                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
+                                );
+                                point.dyeColor[1] = sigmoid(sampledG) * 255;
+
+                                // --- Action 5: Target Dye Color B ---
+                                const sampledB = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
+                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
+                                );
+                                point.dyeColor[2] = sigmoid(sampledB) * 255;
+
+                                // --- Action 6: Emission Pull Strength ---
+                                const sampledPull = sampleAndLogAction(
+                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++],
+                                    nd.rawOutputs[outputStartRawIdx + currentOutputPairIdx++]
+                                );
+                                const neuralPullStrength = sigmoid(sampledPull) * MAX_NEURAL_EMISSION_PULL_STRENGTH;
+
+                                if (fluidFieldRef && point.emitsDye) {
                                     const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
                                     const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
-                                    // Use point.dyeColor (now set by NN) and neuralPullStrength.
-                                    // The '50' is a base emission magnitude that neuralPullStrength modulates.
                                     fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], neuralPullStrength * 50);
                                 }
-                            } // else: not enough outputs for this emitter, do nothing for it
-                            emitterSwimmerOutputIdx++;
-                        }
-                    });
+                                nd.currentFrameActionDetails.push(...detailsForThisEmitter); // Add all stored details for this emitter to the main list
+                            } // End check for sufficient rawOutputs length
+                            emitterSwimmerOutputTracker++;
+                        } // End check for EMITTER_SWIMMER type
+                    }); // End forEach massPoint
                     // --- End of Apply Neural Outputs ---
-
                 } else {
                     // No operable brain, or brain not fully initialized
                     if (brainNode && brainNode.neuronData) brainNode.neuronData.rawOutputs = []; // Clear if partially set
@@ -2592,7 +2667,7 @@
                             numEmitterSwimmerPoints++;
                         }
                     });
-                    nd.outputVectorSize = numEmitterSwimmerPoints * NEURAL_OUTPUTS_PER_EMITTER_SWIMMER;
+                    nd.outputVectorSize = numEmitterSwimmerPoints * NEURAL_OUTPUTS_PER_EMITTER_SWIMMER; // This now uses the new value (12)
 
                     // Initialize weights and biases
                     if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < DEFAULT_HIDDEN_LAYER_SIZE_MIN) {

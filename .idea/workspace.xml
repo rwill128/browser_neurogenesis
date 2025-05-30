@@ -4,7 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="sdfa" />
+    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Changes to defaults">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/soft_body.html" beforeDir="false" afterPath="$PROJECT_DIR$/soft_body.html" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -139,143 +142,7 @@
       <workItem from="1748444958636" duration="18164000" />
       <workItem from="1748521061145" duration="727000" />
       <workItem from="1748557338428" duration="7402000" />
-      <workItem from="1748566260474" duration="1052000" />
-    </task>
-    <task id="LOCAL-00012" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748374793028</created>
-      <option name="number" value="00012" />
-      <option name="presentableId" value="LOCAL-00012" />
-      <option name="project" value="LOCAL" />
-      <updated>1748374793028</updated>
-    </task>
-    <task id="LOCAL-00013" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748375271357</created>
-      <option name="number" value="00013" />
-      <option name="presentableId" value="LOCAL-00013" />
-      <option name="project" value="LOCAL" />
-      <updated>1748375271357</updated>
-    </task>
-    <task id="LOCAL-00014" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748375831566</created>
-      <option name="number" value="00014" />
-      <option name="presentableId" value="LOCAL-00014" />
-      <option name="project" value="LOCAL" />
-      <updated>1748375831566</updated>
-    </task>
-    <task id="LOCAL-00015" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748376834219</created>
-      <option name="number" value="00015" />
-      <option name="presentableId" value="LOCAL-00015" />
-      <option name="project" value="LOCAL" />
-      <updated>1748376834219</updated>
-    </task>
-    <task id="LOCAL-00016" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748379007863</created>
-      <option name="number" value="00016" />
-      <option name="presentableId" value="LOCAL-00016" />
-      <option name="project" value="LOCAL" />
-      <updated>1748379007863</updated>
-    </task>
-    <task id="LOCAL-00017" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748379436168</created>
-      <option name="number" value="00017" />
-      <option name="presentableId" value="LOCAL-00017" />
-      <option name="project" value="LOCAL" />
-      <updated>1748379436168</updated>
-    </task>
-    <task id="LOCAL-00018" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748380166756</created>
-      <option name="number" value="00018" />
-      <option name="presentableId" value="LOCAL-00018" />
-      <option name="project" value="LOCAL" />
-      <updated>1748380166756</updated>
-    </task>
-    <task id="LOCAL-00019" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748383153795</created>
-      <option name="number" value="00019" />
-      <option name="presentableId" value="LOCAL-00019" />
-      <option name="project" value="LOCAL" />
-      <updated>1748383153795</updated>
-    </task>
-    <task id="LOCAL-00020" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748383999432</created>
-      <option name="number" value="00020" />
-      <option name="presentableId" value="LOCAL-00020" />
-      <option name="project" value="LOCAL" />
-      <updated>1748383999432</updated>
-    </task>
-    <task id="LOCAL-00021" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748384450178</created>
-      <option name="number" value="00021" />
-      <option name="presentableId" value="LOCAL-00021" />
-      <option name="project" value="LOCAL" />
-      <updated>1748384450178</updated>
-    </task>
-    <task id="LOCAL-00022" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748384530023</created>
-      <option name="number" value="00022" />
-      <option name="presentableId" value="LOCAL-00022" />
-      <option name="project" value="LOCAL" />
-      <updated>1748384530023</updated>
-    </task>
-    <task id="LOCAL-00023" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748392367006</created>
-      <option name="number" value="00023" />
-      <option name="presentableId" value="LOCAL-00023" />
-      <option name="project" value="LOCAL" />
-      <updated>1748392367006</updated>
-    </task>
-    <task id="LOCAL-00024" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748393577721</created>
-      <option name="number" value="00024" />
-      <option name="presentableId" value="LOCAL-00024" />
-      <option name="project" value="LOCAL" />
-      <updated>1748393577721</updated>
-    </task>
-    <task id="LOCAL-00025" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748403475920</created>
-      <option name="number" value="00025" />
-      <option name="presentableId" value="LOCAL-00025" />
-      <option name="project" value="LOCAL" />
-      <updated>1748403475920</updated>
-    </task>
-    <task id="LOCAL-00026" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748405122854</created>
-      <option name="number" value="00026" />
-      <option name="presentableId" value="LOCAL-00026" />
-      <option name="project" value="LOCAL" />
-      <updated>1748405122854</updated>
-    </task>
-    <task id="LOCAL-00027" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748407977462</created>
-      <option name="number" value="00027" />
-      <option name="presentableId" value="LOCAL-00027" />
-      <option name="project" value="LOCAL" />
-      <updated>1748407977462</updated>
-    </task>
-    <task id="LOCAL-00028" summary="Incredible Stuff">
-      <option name="closed" value="true" />
-      <created>1748409388725</created>
-      <option name="number" value="00028" />
-      <option name="presentableId" value="LOCAL-00028" />
-      <option name="project" value="LOCAL" />
-      <updated>1748409388725</updated>
+      <workItem from="1748566260474" duration="9327000" />
     </task>
     <task id="LOCAL-00029" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
       <option name="closed" value="true" />
@@ -533,7 +400,143 @@
       <option name="project" value="LOCAL" />
       <updated>1748567297066</updated>
     </task>
-    <option name="localTasksCounter" value="61" />
+    <task id="LOCAL-00061" summary="Fucxked">
+      <option name="closed" value="true" />
+      <created>1748567460165</created>
+      <option name="number" value="00061" />
+      <option name="presentableId" value="LOCAL-00061" />
+      <option name="project" value="LOCAL" />
+      <updated>1748567460165</updated>
+    </task>
+    <task id="LOCAL-00062" summary="Fucxked">
+      <option name="closed" value="true" />
+      <created>1748567757637</created>
+      <option name="number" value="00062" />
+      <option name="presentableId" value="LOCAL-00062" />
+      <option name="project" value="LOCAL" />
+      <updated>1748567757637</updated>
+    </task>
+    <task id="LOCAL-00063" summary="Working after step 2">
+      <option name="closed" value="true" />
+      <created>1748568140318</created>
+      <option name="number" value="00063" />
+      <option name="presentableId" value="LOCAL-00063" />
+      <option name="project" value="LOCAL" />
+      <updated>1748568140318</updated>
+    </task>
+    <task id="LOCAL-00064" summary="Working after step 3">
+      <option name="closed" value="true" />
+      <created>1748568253377</created>
+      <option name="number" value="00064" />
+      <option name="presentableId" value="LOCAL-00064" />
+      <option name="project" value="LOCAL" />
+      <updated>1748568253377</updated>
+    </task>
+    <task id="LOCAL-00065" summary="Working after step 3">
+      <option name="closed" value="true" />
+      <created>1748568433869</created>
+      <option name="number" value="00065" />
+      <option name="presentableId" value="LOCAL-00065" />
+      <option name="project" value="LOCAL" />
+      <updated>1748568433869</updated>
+    </task>
+    <task id="LOCAL-00066" summary="Working after step 5">
+      <option name="closed" value="true" />
+      <created>1748568726996</created>
+      <option name="number" value="00066" />
+      <option name="presentableId" value="LOCAL-00066" />
+      <option name="project" value="LOCAL" />
+      <updated>1748568726996</updated>
+    </task>
+    <task id="LOCAL-00067" summary="Working after step 6">
+      <option name="closed" value="true" />
+      <created>1748569358734</created>
+      <option name="number" value="00067" />
+      <option name="presentableId" value="LOCAL-00067" />
+      <option name="project" value="LOCAL" />
+      <updated>1748569358734</updated>
+    </task>
+    <task id="LOCAL-00068" summary="Working after step 6">
+      <option name="closed" value="true" />
+      <created>1748569656273</created>
+      <option name="number" value="00068" />
+      <option name="presentableId" value="LOCAL-00068" />
+      <option name="project" value="LOCAL" />
+      <updated>1748569656273</updated>
+    </task>
+    <task id="LOCAL-00069" summary="Laying groundwork for policy gradient RL">
+      <option name="closed" value="true" />
+      <created>1748570297153</created>
+      <option name="number" value="00069" />
+      <option name="presentableId" value="LOCAL-00069" />
+      <option name="project" value="LOCAL" />
+      <updated>1748570297153</updated>
+    </task>
+    <task id="LOCAL-00070" summary="Experience buffer implementation">
+      <option name="closed" value="true" />
+      <created>1748570582461</created>
+      <option name="number" value="00070" />
+      <option name="presentableId" value="LOCAL-00070" />
+      <option name="project" value="LOCAL" />
+      <updated>1748570582461</updated>
+    </task>
+    <task id="LOCAL-00071" summary="RL finally in place!">
+      <option name="closed" value="true" />
+      <created>1748570962150</created>
+      <option name="number" value="00071" />
+      <option name="presentableId" value="LOCAL-00071" />
+      <option name="project" value="LOCAL" />
+      <updated>1748570962150</updated>
+    </task>
+    <task id="LOCAL-00072" summary="Metabolism changes">
+      <option name="closed" value="true" />
+      <created>1748573330368</created>
+      <option name="number" value="00072" />
+      <option name="presentableId" value="LOCAL-00072" />
+      <option name="project" value="LOCAL" />
+      <updated>1748573330368</updated>
+    </task>
+    <task id="LOCAL-00073" summary="Metabolism changes">
+      <option name="closed" value="true" />
+      <created>1748574144291</created>
+      <option name="number" value="00073" />
+      <option name="presentableId" value="LOCAL-00073" />
+      <option name="project" value="LOCAL" />
+      <updated>1748574144291</updated>
+    </task>
+    <task id="LOCAL-00074" summary="Metabolism changes">
+      <option name="closed" value="true" />
+      <created>1748574460358</created>
+      <option name="number" value="00074" />
+      <option name="presentableId" value="LOCAL-00074" />
+      <option name="project" value="LOCAL" />
+      <updated>1748574460358</updated>
+    </task>
+    <task id="LOCAL-00075" summary="Changes to defaults">
+      <option name="closed" value="true" />
+      <created>1748574577067</created>
+      <option name="number" value="00075" />
+      <option name="presentableId" value="LOCAL-00075" />
+      <option name="project" value="LOCAL" />
+      <updated>1748574577067</updated>
+    </task>
+    <task id="LOCAL-00076" summary="Changes to defaults">
+      <option name="closed" value="true" />
+      <created>1748575030018</created>
+      <option name="number" value="00076" />
+      <option name="presentableId" value="LOCAL-00076" />
+      <option name="project" value="LOCAL" />
+      <updated>1748575030018</updated>
+    </task>
+    <task id="LOCAL-00077" summary="Changes to defaults">
+      <option name="closed" value="true" />
+      <created>1748575488073</created>
+      <option name="number" value="00077" />
+      <option name="presentableId" value="LOCAL-00077" />
+      <option name="project" value="LOCAL" />
+      <updated>1748575488073</updated>
+    </task>
+    <option name="localTasksCounter" value="78" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -559,6 +562,16 @@
     <MESSAGE value="Deleting remnants to clean up" />
     <MESSAGE value="Reverting a working version." />
     <MESSAGE value="sdfa" />
-    <option name="LAST_COMMIT_MESSAGE" value="sdfa" />
+    <MESSAGE value="Fucxked" />
+    <MESSAGE value="Working after step 2" />
+    <MESSAGE value="Working after step 3" />
+    <MESSAGE value="Working after step 5" />
+    <MESSAGE value="Working after step 6" />
+    <MESSAGE value="Laying groundwork for policy gradient RL" />
+    <MESSAGE value="Experience buffer implementation" />
+    <MESSAGE value="RL finally in place!" />
+    <MESSAGE value="Metabolism changes" />
+    <MESSAGE value="Changes to defaults" />
+    <option name="LAST_COMMIT_MESSAGE" value="Changes to defaults" />
   </component>
 </project>

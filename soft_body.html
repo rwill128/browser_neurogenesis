@@ -502,6 +502,7 @@
         const ADD_POINT_MUTATION_CHANCE = 0.03;
         const NEW_POINT_OFFSET_RADIUS = 15;
         let isAnySoftBodyUnstable = false;
+        const RED_DYE_POISON_STRENGTH = 0.5; // Energy lost per unit of normalized red dye (0-1) per point, per dt=1 frame
 
         function initializeSpatialGrid() {
             GRID_COLS = Math.max(1, Math.ceil(WORLD_WIDTH / GRID_CELL_SIZE));
@@ -1589,11 +1590,13 @@
             const scroll = e.deltaY < 0 ? 1 : -1;
             const newZoom = viewZoom * Math.pow(1 + ZOOM_SENSITIVITY * 10, scroll);
 
-            // Calculate MIN_ZOOM dynamically based on fitting the world into the client view
-            let calculatedMinZoomX = canvas.clientWidth / WORLD_WIDTH;
-            let calculatedMinZoomY = canvas.clientHeight / WORLD_HEIGHT;
-            MIN_ZOOM = Math.min(calculatedMinZoomX, calculatedMinZoomY);
-            MIN_ZOOM = Math.max(0.01, MIN_ZOOM); // Absolute minimum bound to prevent division by zero or extreme zoom out
+            // The minimum internal zoom factor should be 1.0.
+            // At viewZoom = 1.0, the simulation draws normally into its WORLD_WIDTH x WORLD_HEIGHT buffer.
+            // The CSS object-fit:contain on the canvas element then handles scaling that entire buffer
+            // to fit the client area, ensuring the whole sim is visible.
+            // Allowing internal viewZoom < 1.0 would mean drawing the sim smaller within its own large buffer,
+            // which then gets scaled down by object-fit, causing the "tiny sim in corner" effect.
+            MIN_ZOOM = 1.0; 
 
             viewZoom = Math.max(MIN_ZOOM, Math.min(newZoom, MAX_ZOOM));
 
@@ -2031,61 +2034,6 @@
             updateSelf(dt, fluidFieldRef) {
                 if (this.isUnstable) return;
 
-                // Reset neural overrides for effectors (Commented out in Step 2 fix)
-                /*
-                this.massPoints.forEach(p => {
-                    if (p.nodeType === NodeType.EMITTER_SWIMMER) {
-                        p.neuralEffectiveStrength = null;
-                    }
-                });
-                */
-
-
-                // Process Neurons (Old logic commented out in Step 2 fix)
-                /*
-                if (fluidFieldRef) {
-                    this.massPoints.forEach(neuronPoint => {
-                        if (neuronPoint.nodeType === NodeType.NEURON && neuronPoint.neuronData) {
-                            const nd = neuronPoint.neuronData;
-                            if (nd.sensorPointIndex >= 0 && nd.sensorPointIndex < this.massPoints.length &&
-                                nd.effectorPointIndex >= 0 && nd.effectorPointIndex < this.massPoints.length &&
-                                this.massPoints[nd.sensorPointIndex] && this.massPoints[nd.effectorPointIndex] &&
-                                this.massPoints[nd.effectorPointIndex].nodeType === NodeType.EMITTER_SWIMMER ) {
-
-                                const sensor = this.massPoints[nd.sensorPointIndex];
-                                const effector = this.massPoints[nd.effectorPointIndex];
-
-                                const gx = Math.floor(sensor.pos.x / fluidFieldRef.scaleX);
-                                const gy = Math.floor(sensor.pos.y / fluidFieldRef.scaleY);
-                                const idx = fluidFieldRef.IX(gx, gy);
-
-                                nd.lastSensedR = (fluidFieldRef.densityR[idx] || 0) / 255;
-                                nd.lastSensedG = (fluidFieldRef.densityG[idx] || 0) / 255;
-                                nd.lastSensedB = (fluidFieldRef.densityB[idx] || 0) / 255;
-
-                                let sensedInputValue = 0;
-                                switch(nd.sensedChannel) {
-                                    case DyeChannel.RED: sensedInputValue = nd.lastSensedR * nd.weights[0]; break;
-                                    case DyeChannel.GREEN: sensedInputValue = nd.lastSensedG * nd.weights[1]; break;
-                                    case DyeChannel.BLUE: sensedInputValue = nd.lastSensedB * nd.weights[2]; break;
-                                    case DyeChannel.AVERAGE:
-                                        sensedInputValue = (nd.lastSensedR * nd.weights[0] + nd.lastSensedG * nd.weights[1] + nd.lastSensedB * nd.weights[2]) / 3;
-                                        break;
-                                }
-
-                                const neuronActivation = sensedInputValue + nd.bias;
-                                nd.lastOutput = Math.tanh(neuronActivation);
-
-                                effector.neuralEffectiveStrength = (nd.lastOutput + 1) / 2; // Map -1..1 to 0..1
-                            } else {
-                                nd.sensorPointIndex = -1;
-                                nd.effectorPointIndex = -1;
-                            }
-                        }
-                    });
-                }
-                */
-
                 // --- New Neural Network Processing (Step 4) ---
                 let brainNode = null;
                 for (const point of this.massPoints) {
@@ -2376,6 +2324,25 @@
                         });
                     }
                 } // --- End of New Neural Network Processing (Brain & Fallback) ---
+
+                // --- Apply Red Dye Poison Effect ---
+                if (fluidFieldRef && RED_DYE_POISON_STRENGTH > 0) {
+                    let poisonDamageThisFrame = 0;
+                    for (const point of this.massPoints) {
+                        const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
+                        const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
+                        const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
+                        const redDensity = (fluidFieldRef.densityR[idx] || 0) / 255; // Normalize to 0-1
+
+                        if (redDensity > 0.01) { // Only apply if there's a meaningful amount of red dye
+                            poisonDamageThisFrame += redDensity * RED_DYE_POISON_STRENGTH * (point.radius / 5); // Scale by point radius (avg radius 5)
+                        }
+                    }
+                    if (poisonDamageThisFrame > 0) {
+                        this.creatureEnergy -= poisonDamageThisFrame * dt * 60; // dt is in seconds, scale strength to be per-second like other costs
+                    }
+                }
+                // --- End of Red Dye Poison Effect ---
 
 
                 // Calculate and apply energy cost

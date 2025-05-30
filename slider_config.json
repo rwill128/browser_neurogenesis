@@ -11,7 +11,7 @@
   },
   {
     "id": "creaturePopulationFloorSlider",
-    "defaultValue": 10,
+    "defaultValue": 100,
     "min": 1,
     "max": 1000,
     "step": 10,
@@ -21,7 +21,7 @@
   },
   {
     "id": "creaturePopulationCeilingSlider",
-    "defaultValue": 1000,
+    "defaultValue": 2000,
     "min": 10,
     "max": 5000,
     "step": 10,
@@ -171,7 +171,7 @@
   },
   {
     "id": "particlePopulationFloorSlider",
-    "defaultValue": 5000,
+    "defaultValue": 20000,
     "min": 0,
     "max": 40000,
     "step": 50,
@@ -181,9 +181,9 @@
   },
   {
     "id": "particlePopulationCeilingSlider",
-    "defaultValue": 20000,
+    "defaultValue": 60000,
     "min": 0,
-    "max": 80000,
+    "max": 100000,
     "step": 50,
     "valueSpanId": "particlePopulationCeilingValueSpan",
     "jsVariable": "PARTICLE_POPULATION_CEILING",

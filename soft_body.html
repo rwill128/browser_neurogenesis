@@ -1896,6 +1896,10 @@
                     while(inputVector.length < NEURAL_INPUT_SIZE) inputVector.push(0);
                     if(inputVector.length > NEURAL_INPUT_SIZE) inputVector.length = NEURAL_INPUT_SIZE; // Truncate if too long
 
+                    if (inputVector.some(isNaN)) {
+                        console.warn(`Body ${this.id} Brain: NaN detected in inputVector:`, JSON.stringify(inputVector));
+                    }
+
                     // 2. Forward Propagation
                     // Hidden Layer
                     const hiddenInputs = multiplyMatrixVector(brainNode.neuronData.weightsIH, inputVector);
@@ -1906,7 +1910,20 @@
                     const outputInputs = multiplyMatrixVector(brainNode.neuronData.weightsHO, hiddenOutputs);
                     const finalRawOutputs = addVectors(outputInputs, brainNode.neuronData.biasesO);
 
-                    brainNode.neuronData.rawOutputs = finalRawOutputs; // Store for Step 5
+                    brainNode.neuronData.rawOutputs = finalRawOutputs;
+
+                    if (finalRawOutputs.some(isNaN)) {
+                        console.warn(`Body ${this.id} Brain: NaN detected in finalRawOutputs:`, JSON.stringify(finalRawOutputs));
+                    }
+
+                    // 3. Apply Outputs
+                    let outputIndex = 0;
+                    for (let i = 0; i < this.massPoints.length; i++) {
+                        if (this.massPoints[i].nodeType === NodeType.EMITTER_SWIMMER) {
+                            this.massPoints[i].neuralEffectiveStrength = finalRawOutputs[outputIndex];
+                            outputIndex++;
+                        }
+                    }
 
                 } else {
                      // Fallback: No brain or inoperable brain - clear any previous rawOutputs

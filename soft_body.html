@@ -676,6 +676,70 @@
             BLUE: [50, 50, 200]
         };
 
+        // Neural Network Specific Constants
+        const NEURAL_INPUT_SIZE = 8; // dyeR, dyeG, dyeB (local to brain), energy, relComX, relComY, relComVelX, relComVelY
+        const NEURAL_OUTPUTS_PER_EMITTER_SWIMMER = 6; // Fx, Fy, targetR, targetG, targetB, emissionStrength
+        const DEFAULT_HIDDEN_LAYER_SIZE_MIN = 10;
+        const DEFAULT_HIDDEN_LAYER_SIZE_MAX = 24;
+        const MAX_NEURAL_FORCE_COMPONENT = 1.0; // Max impulse component (will be scaled by mass and 1/dt)
+        const MAX_NEURAL_EMISSION_PULL_STRENGTH = 1.0; // Max multiplier for effective DYE_PULL_RATE
+        const BRAIN_BASE_ADDITIONAL_COST = 0.1; // Additional energy cost for an active brain
+        const BRAIN_COST_PER_HIDDEN_NODE = 0.005; // Energy cost per node in the brain's hidden layer
+
+        // --- Math Helper Functions ---
+        function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
+        // Math.tanh is already available globally
+
+        function initializeMatrix(rows, cols, scale = 0.5) {
+            const matrix = [];
+            for (let i = 0; i < rows; i++) {
+                matrix[i] = [];
+                for (let j = 0; j < cols; j++) {
+                    matrix[i][j] = (Math.random() * 2 - 1) * scale;
+                }
+            }
+            return matrix;
+        }
+
+        function initializeVector(size, scale = 0.1) {
+            const vector = [];
+            for (let i = 0; i < size; i++) {
+                vector[i] = (Math.random() * 2 - 1) * scale;
+            }
+            return vector;
+        }
+
+        function multiplyMatrixVector(matrix, vector) {
+            const result = [];
+            const numRows = matrix.length;
+            if (numRows === 0) return result; // Handle empty matrix
+            const numCols = matrix[0].length;
+
+            if (numCols !== vector.length) {
+                console.error("Matrix-vector dimension mismatch:", matrix, vector, `Matrix cols: ${numCols}, Vector length: ${vector.length}`);
+                const expectedOutputSize = numRows;
+                for(let i=0; i<expectedOutputSize; i++) result.push(0); // Return zero vector of expected size
+                return result;
+            }
+
+            for (let i = 0; i < numRows; i++) {
+                let sum = 0;
+                for (let j = 0; j < numCols; j++) {
+                    sum += matrix[i][j] * vector[j];
+                }
+                result.push(sum);
+            }
+            return result;
+        }
+        function addVectors(vecA, vecB) { // Element-wise addition
+            if (vecA.length !== vecB.length) {
+                console.error("Vector addition dimension mismatch:", vecA, vecB);
+                return vecA; // Or handle error appropriately by returning one of the vectors or a zero vector
+            }
+            return vecA.map((val, i) => val + vecB[i]);
+        }
+        // --- End Math Helper Functions ---
+
         // --- Slider Config Loading ---
         async function loadAndApplySliderConfig() {
             try {
@@ -1031,18 +1095,19 @@
                     content += `<p><strong>Is Eater:</strong> ${point.isEater}</p>`;
                     content += `<p><strong>Is Predator:</strong> ${point.isPredator}</p>`;
                     content += `<p><strong>Emits Dye:</strong> ${point.emitsDye}</p>`;
-                    content += `<p><strong>Dye Color:</strong> ${point.emitsDye ? `R:${point.dyeColor[0]} G:${point.dyeColor[1]} B:${point.dyeColor[2]}` : "N/A"}</p>`;
+                    content += `<p><strong>Dye Color:</strong> ${point.emitsDye ? `R:${Math.round(point.dyeColor[0])} G:${Math.round(point.dyeColor[1])} B:${Math.round(point.dyeColor[2])}` : "N/A"}</p>`;
 
                     if (point.nodeType === NodeType.NEURON && point.neuronData) {
                         const nd = point.neuronData;
                         content += `<h6>Neuron Data:</h6>`;
-                        content += `<p><strong>Sensor Idx:</strong> ${nd.sensorPointIndex}</p>`;
-                        content += `<p><strong>Effector Idx:</strong> ${nd.effectorPointIndex}</p>`;
-                        content += `<p><strong>Sensed Ch:</strong> ${getSensedChannelString(nd.sensedChannel)}</p>`;
-                        content += `<p><strong>Last Sensed (RGB):</strong> ${nd.lastSensedR.toFixed(3)}, ${nd.lastSensedG.toFixed(3)}, ${nd.lastSensedB.toFixed(3)}</p>`;
-                        content += `<p><strong>Weights (RGB):</strong> ${nd.weights[0].toFixed(3)}, ${nd.weights[1].toFixed(3)}, ${nd.weights[2].toFixed(3)}</p>`;
-                        content += `<p><strong>Bias:</strong> ${nd.bias.toFixed(3)}</p>`;
-                        content += `<p><strong>Last Output:</strong> ${nd.lastOutput !== undefined ? nd.lastOutput.toFixed(3) : "N/A"}</p>`;
+                        if (nd.isBrain) {
+                            content += `<p><strong>Role:</strong> Active Brain</p>`;
+                            content += `<p><strong>Hidden Size:</strong> ${nd.hiddenLayerSize}</p>`;
+                            content += `<p><strong>Inputs:</strong> ${nd.inputVectorSize || 'N/A'}, <strong>Outputs:</strong> ${nd.outputVectorSize || 'N/A'}</p>`;
+                        } else {
+                            content += `<p><strong>Role:</strong> Passive Neural Node</p>`;
+                            content += `<p><strong>Configured Hidden Size:</strong> ${nd.hiddenLayerSize || 'N/A'}</p>`;
+                        }
                     }
                     pointEntryDiv.innerHTML = content;
                     allPointsInfoContainer.appendChild(pointEntryDiv);
@@ -1407,7 +1472,6 @@
                 this.emitsDye = false;
                 this.dyeColor = [0,0,0];
                 this.neuronData = null;
-                this.neuralEffectiveStrength = null;
             }
             applyForce(f) { this.force = this.force.add(f); }
 
@@ -1477,7 +1541,14 @@
                 if (this.nodeType === NodeType.NEURON) {
                     ctx.beginPath(); // Inner dot for neuron
                     ctx.arc(this.pos.x, this.pos.y, this.radius * 0.5, 0, Math.PI * 2);
-                    ctx.fillStyle = 'rgba(250, 200, 255, 0.9)';
+                    if (this.neuronData && this.neuronData.isBrain) {
+                        ctx.fillStyle = 'rgba(255, 215, 0, 1)'; // Gold for brain
+                        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+                        ctx.lineWidth = 0.5;
+                        ctx.stroke();
+                    } else {
+                        ctx.fillStyle = 'rgba(250, 200, 255, 0.9)';
+                    }
                     ctx.fill();
                 }
                 // ctx.closePath(); // Already closed by fill()
@@ -1595,6 +1666,7 @@
                 this.bodyPushStrength = SOFT_BODY_PUSH_STRENGTH;
 
                 this.createShape(initialX, initialY, parentBody);
+                this.initializeBrain(); // Initialize brain after shape creation
             }
 
             createShape(startX, startY, parentBody = null) {
@@ -1635,13 +1707,16 @@
                         offspringPoint.dyeColor = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)] : [...parentPoint.dyeColor];
 
                         if (nodeType === NodeType.NEURON) {
+                            let parentHiddenSize = DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1);
+                            if (parentPoint.neuronData && parentPoint.neuronData.hiddenLayerSize) {
+                                parentHiddenSize = parentPoint.neuronData.hiddenLayerSize;
+                            }
+                            const mutatedHiddenSize = Math.max(DEFAULT_HIDDEN_LAYER_SIZE_MIN, Math.min(DEFAULT_HIDDEN_LAYER_SIZE_MAX,
+                                Math.floor(parentHiddenSize * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)))
+                            ));
                             offspringPoint.neuronData = {
-                                sensorPointIndex: parentPoint.neuronData ? parentPoint.neuronData.sensorPointIndex : -1,
-                                effectorPointIndex: parentPoint.neuronData ? parentPoint.neuronData.effectorPointIndex : -1,
-                                weights: parentPoint.neuronData ? parentPoint.neuronData.weights.map(w => w * (1 + (Math.random() -0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER))) : [(Math.random()*2-1), (Math.random()*2-1), (Math.random()*2-1)],
-                                bias: parentPoint.neuronData ? parentPoint.neuronData.bias * (1 + (Math.random() -0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)) : (Math.random()*2-1) * 0.5,
-                                sensedChannel: parentPoint.neuronData ? (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER) ? Math.floor(Math.random() * 4) : parentPoint.neuronData.sensedChannel) : Math.floor(Math.random() * 4),
-                                lastOutput: 0, lastSensedR: 0, lastSensedG: 0, lastSensedB: 0
+                                isBrain: false, // Brain designation happens in initializeBrain()
+                                hiddenLayerSize: mutatedHiddenSize
                             };
                         }
                         if(offspringPoint.nodeType === NodeType.FIXED_ROOT) offspringPoint.isFixed = true;
@@ -1664,10 +1739,8 @@
                             newPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
                             if (newNodeType === NodeType.NEURON) {
                                 newPoint.neuronData = {
-                                    sensorPointIndex: -1, effectorPointIndex: -1,
-                                    weights: [(Math.random()*2-1), (Math.random()*2-1), (Math.random()*2-1)],
-                                    bias: (Math.random()*2-1) * 0.5, sensedChannel: Math.floor(Math.random() * 4),
-                                    lastOutput: 0, lastSensedR: 0, lastSensedG: 0, lastSensedB: 0
+                                    isBrain: false,
+                                    hiddenLayerSize: Math.floor(DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
                                 };
                             }
                             if(newPoint.nodeType === NodeType.FIXED_ROOT) newPoint.isFixed = true;
@@ -1749,11 +1822,8 @@
 
                         if (p.nodeType === NodeType.NEURON) {
                              p.neuronData = {
-                                sensorPointIndex: -1, effectorPointIndex: -1,
-                                weights: [ (Math.random()*2-1), (Math.random()*2-1), (Math.random()*2-1) ],
-                                bias: (Math.random()*2-1) * 0.5,
-                                sensedChannel: Math.floor(Math.random() * 4),
-                                lastOutput: 0, lastSensedR: 0, lastSensedG: 0, lastSensedB: 0
+                                isBrain: false,
+                                hiddenLayerSize: Math.floor(DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
                             };
                         }
                         if (p.nodeType === NodeType.FIXED_ROOT) p.isFixed = true;
@@ -1784,13 +1854,65 @@
             updateSelf(dt, fluidFieldRef) {
                 if (this.isUnstable) return;
 
-                // Reset neural overrides for effectors
-                this.massPoints.forEach(p => {
-                    if (p.nodeType === NodeType.EMITTER_SWIMMER) {
-                        p.neuralEffectiveStrength = null;
-                    }
-                });
+                // --- New Neural Network Update --- 
+                const brainNode = this.massPoints.find(p => p.neuronData && p.neuronData.isBrain);
 
+                if (brainNode && brainNode.neuronData.weightsIH && brainNode.neuronData.outputVectorSize > 0) {
+                    // 1. Gather Inputs (8 inputs total)
+                    const inputVector = [];
+
+                    // Inputs 1-3: Local Dye Concentration at Brain Node (normalized)
+                    if (fluidFieldRef) {
+                        const brainGx = Math.floor(brainNode.pos.x / fluidFieldRef.scaleX);
+                        const brainGy = Math.floor(brainNode.pos.y / fluidFieldRef.scaleY);
+                        const brainIdx = fluidFieldRef.IX(brainGx, brainGy);
+                        inputVector.push((fluidFieldRef.densityR[brainIdx] || 0) / 255); // R
+                        inputVector.push((fluidFieldRef.densityG[brainIdx] || 0) / 255); // G
+                        inputVector.push((fluidFieldRef.densityB[brainIdx] || 0) / 255); // B
+                    } else {
+                        inputVector.push(0, 0, 0); // No fluid field, no dye input
+                    }
+
+                    // Input 4: Creature Energy (normalized)
+                    inputVector.push(this.creatureEnergy / MAX_CREATURE_ENERGY);
+
+                    // Inputs 5-6: Relative Position of CoM to Brain Node (normalized by world dimensions)
+                    const avgPos = this.getAveragePosition();
+                    const relComX = (avgPos.x - brainNode.pos.x) / WORLD_WIDTH; // Normalize by world width
+                    const relComY = (avgPos.y - brainNode.pos.y) / WORLD_HEIGHT; // Normalize by world height
+                    inputVector.push(Math.tanh(relComX * 5)); // Scale and tanh to keep in reasonable range
+                    inputVector.push(Math.tanh(relComY * 5));
+
+                    // Inputs 7-8: Relative Velocity of CoM to Brain Node (normalized)
+                    const avgVel = this.getAverageVelocity(); // Already per dt
+                    const brainVelX = (brainNode.pos.x - brainNode.prevPos.x);
+                    const brainVelY = (brainNode.pos.y - brainNode.prevPos.y);
+                    let relComVelX = (avgVel.x - brainVelX) / MAX_PIXELS_PER_FRAME_DISPLACEMENT; // Normalize by a max possible velocity component
+                    let relComVelY = (avgVel.y - brainVelY) / MAX_PIXELS_PER_FRAME_DISPLACEMENT;
+                    inputVector.push(Math.tanh(relComVelX)); // Tanh to keep in -1 to 1 range
+                    inputVector.push(Math.tanh(relComVelY));
+
+                    // Ensure inputVector has correct size, pad with 0 if necessary (e.g. if fluid field was missing)
+                    while(inputVector.length < NEURAL_INPUT_SIZE) inputVector.push(0);
+                    if(inputVector.length > NEURAL_INPUT_SIZE) inputVector.length = NEURAL_INPUT_SIZE; // Truncate if too long
+
+                    // 2. Forward Propagation
+                    // Hidden Layer
+                    const hiddenInputs = multiplyMatrixVector(brainNode.neuronData.weightsIH, inputVector);
+                    const biasedHiddenInputs = addVectors(hiddenInputs, brainNode.neuronData.biasesH);
+                    const hiddenOutputs = biasedHiddenInputs.map(v => Math.tanh(v));
+
+                    // Output Layer
+                    const outputInputs = multiplyMatrixVector(brainNode.neuronData.weightsHO, hiddenOutputs);
+                    const finalRawOutputs = addVectors(outputInputs, brainNode.neuronData.biasesO);
+
+                    brainNode.neuronData.rawOutputs = finalRawOutputs; // Store for Step 5
+
+                } else {
+                     // Fallback: No brain or inoperable brain - clear any previous rawOutputs
+                    if (brainNode && brainNode.neuronData) brainNode.neuronData.rawOutputs = [];
+                }
+                // --- End New Neural Network Update ---
 
                 // Process Neurons
                 if (fluidFieldRef) {
@@ -1845,6 +1967,10 @@
                     }
                      if (point.nodeType === NodeType.NEURON) {
                         currentFrameEnergyCost += NEURON_NODE_ENERGY_COST;
+                        if (point.neuronData && point.neuronData.isBrain) {
+                            currentFrameEnergyCost += BRAIN_BASE_ADDITIONAL_COST;
+                            currentFrameEnergyCost += (point.neuronData.hiddenLayerSize || 0) * BRAIN_COST_PER_HIDDEN_NODE;
+                        }
                     }
                     if (point.isEater) {
                         currentFrameEnergyCost += EATER_NODE_ENERGY_COST;
@@ -2236,6 +2362,72 @@
                 let sumX = 0, sumY = 0;
                 this.massPoints.forEach(p => { sumX += p.pos.x; sumY += p.pos.y; });
                 return new Vec2(sumX / this.massPoints.length, sumY / this.massPoints.length);
+            }
+
+            getAverageVelocity() {
+                if (this.massPoints.length === 0) return new Vec2(0, 0);
+                let sumVx = 0, sumVy = 0;
+                let numDynamicPoints = 0;
+                this.massPoints.forEach(p => {
+                    if (p.invMass > 0) { // Only consider points with mass that can move
+                        sumVx += (p.pos.x - p.prevPos.x); // Implicit velocity component
+                        sumVy += (p.pos.y - p.prevPos.y);
+                        numDynamicPoints++;
+                    }
+                });
+                if (numDynamicPoints === 0) return new Vec2(0,0);
+                // The implicit velocity is already for 'dt', so no need to divide by dt if dt is consistent for prevPos update
+                return new Vec2(sumVx / numDynamicPoints, sumVy / numDynamicPoints);
+            }
+
+            initializeBrain() {
+                let brainNode = null;
+                this.massPoints.forEach(p => {
+                    if (p.nodeType === NodeType.NEURON && p.neuronData) {
+                        if (!brainNode) {
+                            brainNode = p;
+                            p.neuronData.isBrain = true;
+                        } else {
+                            p.neuronData.isBrain = false; // Ensure only one brain
+                        }
+                    }
+                });
+
+                if (brainNode) {
+                    brainNode.neuronData.inputVectorSize = NEURAL_INPUT_SIZE;
+
+                    const emitterSwimmerPoints = this.massPoints.filter(p => p.nodeType === NodeType.EMITTER_SWIMMER);
+                    brainNode.neuronData.outputVectorSize = emitterSwimmerPoints.length * NEURAL_OUTPUTS_PER_EMITTER_SWIMMER;
+
+                    if (brainNode.neuronData.outputVectorSize === 0) {
+                        brainNode.neuronData.isBrain = false; 
+                        return; 
+                    }
+
+                    console.log(`Body ${this.id} Brain Init IH: hiddenLayerSize=${brainNode.neuronData.hiddenLayerSize}, inputVectorSize=${brainNode.neuronData.inputVectorSize}`); // DEBUG LINE
+
+                    const weightScale = 0.5; 
+                    const biasScale = 0.1;   
+
+                    brainNode.neuronData.weightsIH = initializeMatrix(
+                        brainNode.neuronData.hiddenLayerSize, // Rows = Hidden layer size
+                        brainNode.neuronData.inputVectorSize,   // Cols = Input vector size
+                        weightScale
+                    );
+                    brainNode.neuronData.biasesH = initializeVector(brainNode.neuronData.hiddenLayerSize, biasScale);
+
+                    console.log(`Body ${this.id} Brain Init HO: outputVectorSize=${brainNode.neuronData.outputVectorSize}, hiddenLayerSize=${brainNode.neuronData.hiddenLayerSize}`); // DEBUG LINE
+
+                    brainNode.neuronData.weightsHO = initializeMatrix(
+                        brainNode.neuronData.outputVectorSize,    // Rows = Output vector size
+                        brainNode.neuronData.hiddenLayerSize,     // Cols = Hidden layer size
+                        weightScale
+                    );
+                    brainNode.neuronData.biasesO = initializeVector(brainNode.neuronData.outputVectorSize, biasScale);
+                    brainNode.neuronData.rawOutputs = []; // Initialize rawOutputs array
+                } else {
+                    // console.log(`Body ${this.id}: No neuron node found to designate as brain.`);
+                }
             }
 
             drawSelf(ctx) {

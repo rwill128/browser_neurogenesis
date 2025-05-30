@@ -4,8 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Deleting remnants to clean up">
+    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Reverting a working version.">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/soft_body.html" beforeDir="false" afterPath="$PROJECT_DIR$/soft_body.html" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/soft_body_temp.html" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -140,15 +142,8 @@
       <workItem from="1748444840156" duration="115000" />
       <workItem from="1748444958636" duration="18164000" />
       <workItem from="1748521061145" duration="727000" />
-      <workItem from="1748557338428" duration="7170000" />
-    </task>
-    <task id="LOCAL-00009" summary="Amazing Checkpoint">
-      <option name="closed" value="true" />
-      <created>1748373171376</created>
-      <option name="number" value="00009" />
-      <option name="presentableId" value="LOCAL-00009" />
-      <option name="project" value="LOCAL" />
-      <updated>1748373171376</updated>
+      <workItem from="1748557338428" duration="7402000" />
+      <workItem from="1748566260474" duration="750000" />
     </task>
     <task id="LOCAL-00010" summary="Amazing Checkpoint">
       <option name="closed" value="true" />
@@ -534,7 +529,15 @@
       <option name="project" value="LOCAL" />
       <updated>1748565529536</updated>
     </task>
-    <option name="localTasksCounter" value="58" />
+    <task id="LOCAL-00058" summary="Reverting a working version.">
+      <option name="closed" value="true" />
+      <created>1748565946507</created>
+      <option name="number" value="00058" />
+      <option name="presentableId" value="LOCAL-00058" />
+      <option name="project" value="LOCAL" />
+      <updated>1748565946507</updated>
+    </task>
+    <option name="localTasksCounter" value="59" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -558,6 +561,7 @@
     <MESSAGE value="Incredible Stuff" />
     <MESSAGE value="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear" />
     <MESSAGE value="Deleting remnants to clean up" />
-    <option name="LAST_COMMIT_MESSAGE" value="Deleting remnants to clean up" />
+    <MESSAGE value="Reverting a working version." />
+    <option name="LAST_COMMIT_MESSAGE" value="Reverting a working version." />
   </component>
 </project>

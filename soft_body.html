@@ -1662,6 +1662,7 @@
                 this.bodyPushStrength = SOFT_BODY_PUSH_STRENGTH;
 
                 this.createShape(initialX, initialY, parentBody);
+                this.initializeBrain(); // Call initializeBrain after shape creation
             }
 
             createShape(startX, startY, parentBody = null) {
@@ -2306,6 +2307,61 @@
                 let sumX = 0, sumY = 0;
                 this.massPoints.forEach(p => { sumX += p.pos.x; sumY += p.pos.y; });
                 return new Vec2(sumX / this.massPoints.length, sumY / this.massPoints.length);
+            }
+
+            getAverageVelocity() {
+                if (this.massPoints.length === 0) return new Vec2(0,0);
+                let sumVelX = 0, sumVelY = 0;
+                this.massPoints.forEach(p => {
+                    const velX = p.pos.x - p.prevPos.x;
+                    const velY = p.pos.y - p.prevPos.y;
+                    sumVelX += velX;
+                    sumVelY += velY;
+                });
+                return new Vec2(sumVelX / this.massPoints.length, sumVelY / this.massPoints.length);
+            }
+
+            initializeBrain() {
+                let brainNode = null;
+                for (const point of this.massPoints) {
+                    if (point.nodeType === NodeType.NEURON) {
+                        if (!brainNode) { // Designate first neuron as brain
+                            brainNode = point;
+                            if (!brainNode.neuronData) { // Should have been initialized in createShape
+                                brainNode.neuronData = { isBrain: false, hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN }; 
+                            }
+                            brainNode.neuronData.isBrain = true;
+                        } else {
+                            // If other neuron points exist, ensure they are not marked as brain
+                            if (point.neuronData) point.neuronData.isBrain = false;
+                        }
+                    }
+                }
+
+                if (brainNode && brainNode.neuronData && brainNode.neuronData.isBrain) {
+                    const nd = brainNode.neuronData;
+                    nd.inputVectorSize = NEURAL_INPUT_SIZE;
+
+                    let numEmitterSwimmerPoints = 0;
+                    this.massPoints.forEach(p => {
+                        if (p.nodeType === NodeType.EMITTER_SWIMMER) {
+                            numEmitterSwimmerPoints++;
+                        }
+                    });
+                    nd.outputVectorSize = numEmitterSwimmerPoints * NEURAL_OUTPUTS_PER_EMITTER_SWIMMER;
+
+                    // Initialize weights and biases
+                    // These will be re-initialized if they don't exist or if dimensions are wrong
+                    // For simplicity, we assume hiddenLayerSize doesn't change after initial body creation here
+                    nd.weightsIH = initializeMatrix(nd.hiddenLayerSize, nd.inputVectorSize);
+                    nd.biasesH = initializeVector(nd.hiddenLayerSize);
+                    nd.weightsHO = initializeMatrix(nd.outputVectorSize, nd.hiddenLayerSize);
+                    nd.biasesO = initializeVector(nd.outputVectorSize);
+                    // console.log(`Body ${this.id} brain initialized. Inputs: ${nd.inputVectorSize}, Hidden: ${nd.hiddenLayerSize}, Outputs: ${nd.outputVectorSize}`);
+                } else {
+                    // No brain node found or brainNode.neuronData is missing somehow
+                    // console.log(`Body ${this.id} has no operable brain node.`);
+                }
             }
 
             drawSelf(ctx) {

@@ -1852,14 +1852,17 @@
                 if (this.isUnstable) return;
 
                 // Reset neural overrides for effectors
+                /*
                 this.massPoints.forEach(p => {
                     if (p.nodeType === NodeType.EMITTER_SWIMMER) {
                         p.neuralEffectiveStrength = null;
                     }
                 });
+                */
 
 
                 // Process Neurons
+                /*
                 if (fluidFieldRef) {
                     this.massPoints.forEach(neuronPoint => {
                         if (neuronPoint.nodeType === NodeType.NEURON && neuronPoint.neuronData) {
@@ -1901,7 +1904,7 @@
                         }
                     });
                 }
-
+                */
 
                 // Calculate and apply energy cost
                 let currentFrameEnergyCost = 0;

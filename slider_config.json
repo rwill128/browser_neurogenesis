@@ -163,7 +163,7 @@
     "id": "fluidViscosity",
     "defaultValue": 0.000068,
     "min": 0,
-    "max": 0.00075,
+    "max": 0.0075,
     "step": 0.000001,
     "valueSpanId": "fluidViscosityValue",
     "jsVariable": "FLUID_VISCOSITY",

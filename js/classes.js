@@ -656,8 +656,10 @@ class SoftBody {
         // --- End of Red Dye Poison Effect ---
 
 
-        // Calculate and apply energy cost
+        // Calculate and apply energy cost & gains
         let currentFrameEnergyCost = 0;
+        let currentFrameEnergyGain = 0; // New variable for gains
+
         for (const point of this.massPoints) {
             let costMultiplier = 1.0;
             if (nutrientField && fluidFieldRef) {
@@ -670,11 +672,11 @@ class SoftBody {
             }
 
             currentFrameEnergyCost += BASE_NODE_EXISTENCE_COST * costMultiplier;
-            const exertion = point.currentExertionLevel || 0; // Default to 0 if undefined
+            const exertion = point.currentExertionLevel || 0; 
 
-            if (point.nodeType === NodeType.EMITTER) { // Changed from EMITTER_SWIMMER
+            if (point.nodeType === NodeType.EMITTER) { 
                 currentFrameEnergyCost += EMITTER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
-            } else if (point.nodeType === NodeType.SWIMMER) { // Added new case for Swimmer
+            } else if (point.nodeType === NodeType.SWIMMER) { 
                 currentFrameEnergyCost += SWIMMER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
             }
              if (point.nodeType === NodeType.NEURON) {
@@ -686,9 +688,11 @@ class SoftBody {
                 }
             }
             if (point.nodeType === NodeType.EATER) {
+                // Eating energy gain is handled during particle interaction, not here directly
                 currentFrameEnergyCost += EATER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
             }
             if (point.nodeType === NodeType.PREDATOR) {
+                // Predation energy gain is handled during inter-body interaction, not here directly
                 currentFrameEnergyCost += PREDATOR_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
             }
             if (point.nodeType === NodeType.PHOTOSYNTHETIC) {
@@ -698,14 +702,19 @@ class SoftBody {
                     const gy_photo = Math.floor(point.pos.y / fluidFieldRef.scaleY);
                     const lightIdx = fluidFieldRef.IX(gx_photo, gy_photo);
                     const baseLightValue = lightField[lightIdx] !== undefined ? lightField[lightIdx] : 0.0;
-                    const effectiveLightValue = baseLightValue * globalLightMultiplier; // Use globalLightMultiplier
+                    const effectiveLightValue = baseLightValue * globalLightMultiplier; 
 
-                    const energyGain = effectiveLightValue * PHOTOSYNTHESIS_EFFICIENCY * (point.radius / 5) * dt;
-                    this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyGain);
+                    const energyGainThisPoint = effectiveLightValue * PHOTOSYNTHESIS_EFFICIENCY * (point.radius / 5) * dt;
+                    currentFrameEnergyGain += energyGainThisPoint; // Accumulate gain
+                    // REMOVED: this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyGain);
                 }
             }
         }
-        this.creatureEnergy -= currentFrameEnergyCost * dt;
+        
+        // Apply net energy change and then cap
+        this.creatureEnergy += currentFrameEnergyGain; // Add all gains first
+        this.creatureEnergy -= currentFrameEnergyCost * dt; // Then subtract all costs (dt scaling for costs was already there)
+        this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, Math.max(0, this.creatureEnergy)); // Cap between 0 and MAX
 
 
         this.ticksSinceBirth++;

@@ -352,7 +352,7 @@
             </div>
             <div class="control-group">
                 <h4>Energy Costs / Frame</h4>
-                <label for="baseNodeCost" class="slider-label">Base Node Cost:</label>
+                <label for="baseNodeCost" class="slider-label">Base     Node Cost:</label>
                 <span id="baseNodeCostValue" class="slider-value">0.3</span>
                 <input type="range" id="baseNodeCost" min="0.0" max="50.0" value="0.3" step="0.1">
 
@@ -1197,9 +1197,16 @@
             initFluidSimulation();
             initParticles();
             initNutrientMap(); // Initialize nutrient map on fluid grid change
+            initLightMap(); // Initialize light map on fluid grid change
+            initViscosityMap(); // Initialize viscosity map on fluid grid change
         }
         fluidDiffusionSlider.oninput = function() { FLUID_DIFFUSION = parseFloat(this.value); updateSliderDisplay(this, fluidDiffusionValueSpan); if(fluidField) fluidField.diffusion = FLUID_DIFFUSION;}
-        fluidViscositySlider.oninput = function() { FLUID_VISCOSITY = parseFloat(this.value); updateSliderDisplay(this, fluidViscosityValueSpan); if(fluidField) fluidField.viscosity = FLUID_VISCOSITY;}
+        fluidViscositySlider.oninput = function() { 
+            FLUID_VISCOSITY = parseFloat(this.value); 
+            console.log("Fluid Viscosity slider raw value:", this.value, "Parsed FLUID_VISCOSITY:", FLUID_VISCOSITY); // DEBUG
+            updateSliderDisplay(this, fluidViscosityValueSpan); 
+            if(fluidField) fluidField.viscosity = FLUID_VISCOSITY;
+        }
         fluidFadeSlider.oninput = function() { FLUID_FADE_RATE = parseFloat(this.value); updateSliderDisplay(this, fluidFadeValueSpan);}
         maxFluidVelocityComponentSlider.oninput = function() { MAX_FLUID_VELOCITY_COMPONENT = parseFloat(this.value); updateSliderDisplay(this, maxFluidVelocityComponentValueSpan); if(fluidField) fluidField.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT;}
         clearFluidButton.onclick = function() { if(fluidField) fluidField.clear(); }

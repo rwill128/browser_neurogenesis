@@ -206,7 +206,7 @@ class SoftBody {
             this.reproductionEnergyThreshold = parentBody.reproductionEnergyThreshold * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.2)); 
             // Clamp the threshold: ensure it's not below a minimum (e.g., 5% of MAX_CREATURE_ENERGY) and not above MAX_CREATURE_ENERGY.
             this.reproductionEnergyThreshold = Math.max(MAX_CREATURE_ENERGY * 0.05, Math.min(this.reproductionEnergyThreshold, MAX_CREATURE_ENERGY));
-            this.reproductionEnergyThreshold = Math.round(this.reproductionEnergyThreshold); 
+            this.reproductionEnergyThreshold = Math.round(this.reproductionEnergyThreshold); // Keep it as an integer for clarity
 
             const angleMutation = (Math.random() - 0.5) * Math.PI * 0.2 * GLOBAL_MUTATION_RATE_MODIFIER;
             const cosA = Math.cos(angleMutation);
@@ -216,7 +216,27 @@ class SoftBody {
                 parentBody.emitterDirection.x * sinA + parentBody.emitterDirection.y * cosA
             ).normalize();
 
-        } else {
+            // Body Scale Mutation (Applied after other structural mutations)
+            if (Math.random() < BODY_SCALE_MUTATION_CHANCE) {
+                const scaleFactor = 1.0 + (Math.random() - 0.5) * 2 * BODY_SCALE_MUTATION_MAGNITUDE;
+                if (scaleFactor > 0.1) { // Ensure scale factor is not too small or negative
+                    // Scale spring rest lengths
+                    this.springs.forEach(spring => {
+                        spring.restLength *= scaleFactor;
+                        spring.restLength = Math.max(1, spring.restLength); // Min rest length
+                    });
+                    // Scale mass point radii
+                    this.massPoints.forEach(point => {
+                        point.radius *= scaleFactor;
+                        point.radius = Math.max(0.5, point.radius); // Min radius
+                    });
+                    // Scale offspring spawn radius as well
+                    this.offspringSpawnRadius *= scaleFactor;
+                    this.offspringSpawnRadius = Math.max(10, this.offspringSpawnRadius); // Min spawn radius
+                }
+            }
+
+        } else { // Initial generation (no parent)
             this.stiffness = 500 + Math.random() * 2500;
             this.springDamping = 5 + Math.random() * 20;
         }

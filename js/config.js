@@ -35,6 +35,10 @@ const MIN_SPRINGS_PER_NEW_NODE = 1;
 const MAX_SPRINGS_PER_NEW_NODE = 3;
 const NEW_SPRING_REST_LENGTH_VARIATION = 0.2; // e.g., +/- 20% of current distance for new springs
 
+// Body Scale Mutation Constants (New)
+const BODY_SCALE_MUTATION_CHANCE = 0.03;     // Chance for the whole body to scale
+const BODY_SCALE_MUTATION_MAGNITUDE = 0.1;   // Max +/- % change (e.g., 0.1 for 10%)
+
 // Original Radius Multipliers (will become base values)
 const EATING_RADIUS_MULTIPLIER_BASE = 2.0;
 const PREDATION_RADIUS_MULTIPLIER_BASE = 1.5;

@@ -3437,8 +3437,24 @@
                             let effective_cRecip = 1.0 / c_global_param; // Use the passed global 'c' by default
 
                             if ((field_type === 'velX' || field_type === 'velY')) {
-                                // LOCAL VISCOSITY LOGIC WILL GO HERE IN CHECKPOINT 3
-                                // For Checkpoint 2, this block intentionally does nothing to effective_a or effective_cRecip
+                                if (viscosityField && viscosityField[idx] !== undefined) { // Check viscosityField exists and has a value for this cell
+                                    const localViscosityMultiplier = Math.max(MIN_VISCOSITY_MULTIPLIER, Math.min(viscosityField[idx], MAX_VISCOSITY_MULTIPLIER));
+                                    const cell_specific_diff_rate = base_diff_rate * localViscosityMultiplier; // base_diff_rate is global fluid viscosity
+                                    
+                                    const temp_effective_a = dt_param * cell_specific_diff_rate * (this.size - 2) * (this.size - 2);
+                                    const temp_denominator_c = 1 + 4 * temp_effective_a;
+
+                                    if (temp_denominator_c !== 0 && !isNaN(temp_effective_a) && isFinite(temp_effective_a)) { // Check for sane values
+                                        effective_a = temp_effective_a;
+                                        effective_cRecip = 1.0 / temp_denominator_c;
+                                    } else {
+                                        // Fallback to global if local calculation is problematic
+                                        // effective_a and effective_cRecip remain as their _global_param defaults already set above
+                                        console.warn(`Viscosity solver: problematic local calculation at [${i},${j}]. Falling back to global viscosity for this cell. Multiplier: ${viscosityField[idx]}, Effective_a_attempt: ${temp_effective_a}`);
+                                    }
+                                }
+                                // If viscosityField doesn't exist or no value for idx, effective_a and effective_cRecip 
+                                // remain as their global_param defaults, which is correct.
                             }
                             
                             x[idx] =

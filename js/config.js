@@ -39,6 +39,9 @@ const NEW_SPRING_REST_LENGTH_VARIATION = 0.2; // e.g., +/- 20% of current distan
 const BODY_SCALE_MUTATION_CHANCE = 0.03;     // Chance for the whole body to scale
 const BODY_SCALE_MUTATION_MAGNITUDE = 0.1;   // Max +/- % change (e.g., 0.1 for 10%)
 
+// Spring Subdivision Mutation (New)
+const SPRING_SUBDIVISION_MUTATION_CHANCE = 0.02; // Chance an existing spring is subdivided
+
 // Original Radius Multipliers (will become base values)
 const EATING_RADIUS_MULTIPLIER_BASE = 2.0;
 const PREDATION_RADIUS_MULTIPLIER_BASE = 1.5;

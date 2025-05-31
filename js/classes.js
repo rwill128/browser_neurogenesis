@@ -475,6 +475,66 @@ class SoftBody {
                 }
             }
 
+            // Spring Subdivision Mutation
+            if (this.massPoints.length > 0 && this.springs.length > 0) { // Need points and springs to subdivide
+                const springsToConsider = [...this.springs]; // Iterate over a copy as we modify this.springs
+                for (let i = springsToConsider.length - 1; i >= 0; i--) { 
+                    const originalSpring = springsToConsider[i];
+                    if (Math.random() < SPRING_SUBDIVISION_MUTATION_CHANCE) {
+                        const p1 = originalSpring.p1;
+                        const p2 = originalSpring.p2;
+
+                        const midX = (p1.pos.x + p2.pos.x) / 2;
+                        const midY = (p1.pos.y + p2.pos.y) / 2;
+                        const newPointRadius = ((p1.radius || baseRadius) + (p2.radius || baseRadius)) / 2 * (0.8 + Math.random() * 0.4);
+                        const newPointMass = ((p1.mass || 0.5) + (p2.mass || 0.5)) / 2 * (0.8 + Math.random() * 0.4);
+                        
+                        const availableNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER];
+                        let newNodeType = availableNodeTypes[Math.floor(Math.random() * availableNodeTypes.length)];
+                        const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
+                        let newMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
+                        if (newNodeType === NodeType.SWIMMER && newMovementType === MovementType.FLOATING) {
+                            newMovementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
+                        }
+
+                        const newMidPoint = new MassPoint(midX, midY, Math.max(0.1, newPointMass), Math.max(0.5, newPointRadius));
+                        newMidPoint.nodeType = newNodeType;
+                        newMidPoint.movementType = newMovementType;
+                        const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE]; 
+                        newMidPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                        if (newNodeType === NodeType.NEURON) {
+                            newMidPoint.neuronData = {
+                                isBrain: false,
+                                hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
+                            };
+                        }
+                        this.massPoints.push(newMidPoint);
+
+                        const originalRestLength = originalSpring.restLength;
+                        const wasOriginalSpringRigid = originalSpring.isRigid;
+                        const stiffnessForNewSegments = wasOriginalSpringRigid ? RIGID_SPRING_STIFFNESS : this.stiffness;
+                        const dampingForNewSegments = wasOriginalSpringRigid ? RIGID_SPRING_DAMPING : this.springDamping;
+
+                        const originalSpringIndex = this.springs.indexOf(originalSpring);
+                        if (originalSpringIndex > -1) {
+                            this.springs.splice(originalSpringIndex, 1);
+                        }
+
+                        let restLength1 = p1.pos.sub(newMidPoint.pos).mag();
+                        if (originalRestLength > 1) { 
+                           restLength1 = originalRestLength / 2 * (1 + (Math.random() - 0.5) * 0.1);
+                        }
+                        this.springs.push(new Spring(p1, newMidPoint, stiffnessForNewSegments, dampingForNewSegments, Math.max(1, restLength1), wasOriginalSpringRigid));
+
+                        let restLength2 = newMidPoint.pos.sub(p2.pos).mag();
+                        if (originalRestLength > 1) {
+                           restLength2 = originalRestLength / 2 * (1 + (Math.random() - 0.5) * 0.1);
+                        }
+                        this.springs.push(new Spring(newMidPoint, p2, stiffnessForNewSegments, dampingForNewSegments, Math.max(1, restLength2), wasOriginalSpringRigid));
+                    }
+                }
+            }
+
             // Original spring connection logic based on radius is now replaced by above.
             // The fallback if no springs were created for a multi-point body:
             if (this.massPoints.length > 1 && this.springs.length === 0) {

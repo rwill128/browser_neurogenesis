@@ -150,10 +150,20 @@
     "displayFormat": "toFixed(4)"
   },
   {
+    "id": "fluidDiffusion",
+    "defaultValue": 0.00047,
+    "min": 0,
+    "max": 0.001,
+    "step": 0.00001,
+    "valueSpanId": "fluidDiffusionValue",
+    "jsVariable": "FLUID_DIFFUSION",
+    "displayFormat": "toExponential(1)"
+  },
+  {
     "id": "fluidViscosity",
     "defaultValue": 0.000068,
     "min": 0,
-    "max": 0.00015,
+    "max": 0.00075,
     "step": 0.000001,
     "valueSpanId": "fluidViscosityValue",
     "jsVariable": "FLUID_VISCOSITY",

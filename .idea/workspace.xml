@@ -4,7 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Viscosity field implemented but not affecting fluid physics yet." />
+    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Changing config">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -141,23 +143,7 @@
       <workItem from="1748557338428" duration="7402000" />
       <workItem from="1748566260474" duration="9327000" />
       <workItem from="1748628159695" duration="6229000" />
-      <workItem from="1748656846130" duration="302000" />
-    </task>
-    <task id="LOCAL-00037" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
-      <option name="closed" value="true" />
-      <created>1748467823715</created>
-      <option name="number" value="00037" />
-      <option name="presentableId" value="LOCAL-00037" />
-      <option name="project" value="LOCAL" />
-      <updated>1748467823715</updated>
-    </task>
-    <task id="LOCAL-00038" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
-      <option name="closed" value="true" />
-      <created>1748468243383</created>
-      <option name="number" value="00038" />
-      <option name="presentableId" value="LOCAL-00038" />
-      <option name="project" value="LOCAL" />
-      <updated>1748468243383</updated>
+      <workItem from="1748656846130" duration="1019000" />
     </task>
     <task id="LOCAL-00039" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
       <option name="closed" value="true" />
@@ -535,7 +521,23 @@
       <option name="project" value="LOCAL" />
       <updated>1748657147790</updated>
     </task>
-    <option name="localTasksCounter" value="86" />
+    <task id="LOCAL-00086" summary="Changing config">
+      <option name="closed" value="true" />
+      <created>1748657422874</created>
+      <option name="number" value="00086" />
+      <option name="presentableId" value="LOCAL-00086" />
+      <option name="project" value="LOCAL" />
+      <updated>1748657422874</updated>
+    </task>
+    <task id="LOCAL-00087" summary="Changing config">
+      <option name="closed" value="true" />
+      <created>1748657797151</created>
+      <option name="number" value="00087" />
+      <option name="presentableId" value="LOCAL-00087" />
+      <option name="project" value="LOCAL" />
+      <updated>1748657797151</updated>
+    </task>
+    <option name="localTasksCounter" value="88" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -575,6 +577,7 @@
     <MESSAGE value="Nutrient field implemented." />
     <MESSAGE value="Light field implemented" />
     <MESSAGE value="Viscosity field implemented but not affecting fluid physics yet." />
-    <option name="LAST_COMMIT_MESSAGE" value="Viscosity field implemented but not affecting fluid physics yet." />
+    <MESSAGE value="Changing config" />
+    <option name="LAST_COMMIT_MESSAGE" value="Changing config" />
   </component>
 </project>

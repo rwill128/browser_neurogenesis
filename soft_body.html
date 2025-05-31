@@ -985,7 +985,8 @@
             FLOATING: 1,
             FIXED_ROOT: 2,
             EMITTER_SWIMMER: 3,
-            NEURON: 4
+            NEURON: 4,
+            PHOTOSYNTHETIC: 5
         };
         const DyeChannel = {
             RED: 0,
@@ -1511,6 +1512,7 @@
                 case NodeType.FIXED_ROOT: return "Fixed Root";
                 case NodeType.EMITTER_SWIMMER: return "Emitter/Swimmer";
                 case NodeType.NEURON: return "Neuron";
+                case NodeType.PHOTOSYNTHETIC: return "Photosynthetic";
                 case NodeType.NEUTRAL: return "Neutral";
                 default: return "Unknown";
             }
@@ -2067,6 +2069,8 @@
                     mainColor = 'rgba(255, 50, 50, 0.9)';
                 } else if (this.nodeType === NodeType.EMITTER_SWIMMER && this.isEater) {
                      mainColor = 'rgba(200,255,0,0.9)';
+                } else if (this.nodeType === NodeType.PHOTOSYNTHETIC) { 
+                    mainColor = 'rgba(60, 179, 113, 0.9)'; // MediumSeaGreen for photosynthesis
                 } else if (this.nodeType === NodeType.EMITTER_SWIMMER) {
                     mainColor = 'rgba(0,255,100,0.9)';
                 } else if (this.isEater) {
@@ -2241,9 +2245,9 @@
                             parentPoint.radius * (1 + (Math.random() - 0.5) * 0.2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER))
                         );
                         offspringPoint.nodeType = nodeType;
-                        offspringPoint.isEater = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.isEater : parentPoint.isEater;
-                        offspringPoint.isPredator = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.isPredator : parentPoint.isPredator;
-                        offspringPoint.emitsDye = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.emitsDye : parentPoint.emitsDye;
+                            offspringPoint.isEater = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.isEater : parentPoint.isEater;
+                            offspringPoint.isPredator = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.isPredator : parentPoint.isPredator;
+                            offspringPoint.emitsDye = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.emitsDye : parentPoint.emitsDye;
                         offspringPoint.dyeColor = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)] : [...parentPoint.dyeColor];
 
                         // Determine hiddenLayerSize for potential neuron
@@ -2279,9 +2283,9 @@
                                 baseRadius * (0.8 + Math.random() * 0.4)
                             );
                             newPoint.nodeType = newNodeType;
-                            newPoint.isEater = Math.random() < eaterChance;
-                            newPoint.isPredator = Math.random() < predatorChance;
-                            newPoint.emitsDye = Math.random() < dyeEmitterChance;
+                                newPoint.isEater = Math.random() < eaterChance;
+                                newPoint.isPredator = Math.random() < predatorChance;
+                                newPoint.emitsDye = Math.random() < dyeEmitterChance;
                             newPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
                             if (newNodeType === NodeType.NEURON) {
                                 newPoint.neuronData = {
@@ -2364,7 +2368,7 @@
                     this.massPoints.forEach((p, idx) => {
                         let currentNodeType = nodeTypeChoices[Math.floor(Math.random() * (nodeTypeChoices.length -1))]; 
                         if (Math.random() < NEURON_CHANCE && this.massPoints.length > 1) { 
-                            currentNodeType = NodeType.NEURON;
+                                currentNodeType = NodeType.NEURON;
                         }
                         p.nodeType = currentNodeType; // Assign type
 
@@ -2374,7 +2378,7 @@
                                 isBrain: false,
                                 hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
                             };
-                        } else {
+                            } else {
                             p.neuronData = null; // Crucial: ensure non-neurons have null neuronData
                         }
                         if (p.nodeType === NodeType.FIXED_ROOT) p.isFixed = true;
@@ -2388,7 +2392,7 @@
                             let newSensorIndex;
                             do { newSensorIndex = Math.floor(Math.random() * this.massPoints.length); } while (newSensorIndex === idx);
                             p.neuronData.sensorPointIndex = newSensorIndex;
-                        } else {
+                            } else {
                             p.neuronData.sensorPointIndex = -1;
                         }
                         const effectorCandidates = this.massPoints.map((ep, epIdx) => ep.nodeType === NodeType.EMITTER_SWIMMER ? epIdx : -1).filter(epIdx => epIdx !== -1 && epIdx !== idx);

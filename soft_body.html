@@ -3443,9 +3443,10 @@
                 }
             }
 
-            diffuse(b, x_out, x_in, diff_rate, dt) { // Reverted signature
-                const a = dt * diff_rate * (this.size - 2) * (this.size - 2); 
-                this.lin_solve(b, x_out, x_in, a, 1 + 4 * a); 
+            diffuse(b, x_out, x_in, base_diff_rate, dt, field_type = 'density') { // Checkpoint 1 Signature
+                const a_global = dt * base_diff_rate * (this.size - 2) * (this.size - 2); 
+                // Pass new params; lin_solve will ignore field_type, base_diff_rate, dt for Checkpoint 1
+                this.lin_solve(b, x_out, x_in, a_global, 1 + 4 * a_global, field_type, base_diff_rate, dt); 
             }
 
             project(velocX_in_out, velocY_in_out, p_temp, div_temp) {
@@ -3556,8 +3557,8 @@
             }
 
             step() {
-                this.diffuse(1, this.Vx0, this.Vx, this.viscosity, this.dt); // Reverted: removed 'velX'
-                this.diffuse(2, this.Vy0, this.Vy, this.viscosity, this.dt); // Reverted: removed 'velY'
+                this.diffuse(1, this.Vx0, this.Vx, this.viscosity, this.dt, 'velX');
+                this.diffuse(2, this.Vy0, this.Vy, this.viscosity, this.dt, 'velY');
                 this.clampVelocityComponents(this.Vx0); 
                 this.clampVelocityComponents(this.Vy0);
 
@@ -3568,7 +3569,7 @@
                 this.clampVelocityComponents(this.Vx); // Clamp after advection
                 this.clampVelocityComponents(this.Vy);
 
-                this.project(this.Vx0, this.Vy0, this.Vx, this.Vy); // Vx0, Vy0 are temp here again, using them as p_temp and div_temp
+                this.project(this.Vx0, this.Vy0, this.Vx, this.Vy); // Vx, Vy are temp here again, using them as p_temp and div_temp
 
                 this.advect(1, this.Vx, this.Vx0, this.Vx0, this.Vy0, this.dt);
                 this.advect(2, this.Vy, this.Vy0, this.Vx0, this.Vy0, this.dt);
@@ -3577,9 +3578,9 @@
 
                 this.project(this.Vx, this.Vy, this.Vx0, this.Vy0); // Vx0, Vy0 are temp here again
 
-                this.diffuse(0, this.densityR0, this.densityR, this.diffusion, this.dt); // Reverted: removed 'density'
-                this.diffuse(0, this.densityG0, this.densityG, this.diffusion, this.dt); // Reverted: removed 'density'
-                this.diffuse(0, this.densityB0, this.densityB, this.diffusion, this.dt); // Reverted: removed 'density'
+                this.diffuse(0, this.densityR0, this.densityR, this.diffusion, this.dt, 'density');
+                this.diffuse(0, this.densityG0, this.densityG, this.diffusion, this.dt, 'density');
+                this.diffuse(0, this.densityB0, this.densityB, this.diffusion, this.dt, 'density');
                 this.advect(0, this.densityR, this.densityR0, this.Vx, this.Vy, this.dt);
                 this.advect(0, this.densityG, this.densityG0, this.Vx, this.Vy, this.dt);
                 this.advect(0, this.densityB, this.densityB0, this.Vx, this.Vy, this.dt);

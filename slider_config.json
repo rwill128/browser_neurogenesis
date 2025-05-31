@@ -150,6 +150,16 @@
     "displayFormat": "toFixed(4)"
   },
   {
+    "id": "fluidViscosity",
+    "defaultValue": 0.000068,
+    "min": 0,
+    "max": 0.00015,
+    "step": 0.000001,
+    "valueSpanId": "fluidViscosityValue",
+    "jsVariable": "FLUID_VISCOSITY",
+    "displayFormat": "toExponential(1)"
+  },
+  {
     "id": "fluidFadeSlider",
     "defaultValue": 0.002,
     "min": 0.0,
@@ -161,9 +171,9 @@
   },
   {
     "id": "maxFluidVelocityComponentSlider",
-    "defaultValue": 0.5,
+    "defaultValue": 10.0,
     "min": 0.1,
-    "max": 10.0,
+    "max": 20.0,
     "step": 0.1,
     "valueSpanId": "maxFluidVelocityComponentValueSpan",
     "jsVariable": "MAX_FLUID_VELOCITY_COMPONENT",

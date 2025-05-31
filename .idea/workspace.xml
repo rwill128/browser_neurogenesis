@@ -4,8 +4,10 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Changing config">
+    <list default="true" id="4818e3a3-5b98-4fef-bdea-9a2acf1edf87" name="Changes" comment="Checkpoint 3 of viscosity field.">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/slider_config.json" beforeDir="false" afterPath="$PROJECT_DIR$/slider_config.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/soft_body.html" beforeDir="false" afterPath="$PROJECT_DIR$/soft_body.html" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -143,87 +145,8 @@
       <workItem from="1748557338428" duration="7402000" />
       <workItem from="1748566260474" duration="9327000" />
       <workItem from="1748628159695" duration="6229000" />
-      <workItem from="1748656846130" duration="1019000" />
-    </task>
-    <task id="LOCAL-00039" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
-      <option name="closed" value="true" />
-      <created>1748468462284</created>
-      <option name="number" value="00039" />
-      <option name="presentableId" value="LOCAL-00039" />
-      <option name="project" value="LOCAL" />
-      <updated>1748468462284</updated>
-    </task>
-    <task id="LOCAL-00040" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
-      <option name="closed" value="true" />
-      <created>1748468528797</created>
-      <option name="number" value="00040" />
-      <option name="presentableId" value="LOCAL-00040" />
-      <option name="project" value="LOCAL" />
-      <updated>1748468528797</updated>
-    </task>
-    <task id="LOCAL-00041" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
-      <option name="closed" value="true" />
-      <created>1748468617455</created>
-      <option name="number" value="00041" />
-      <option name="presentableId" value="LOCAL-00041" />
-      <option name="project" value="LOCAL" />
-      <updated>1748468617455</updated>
-    </task>
-    <task id="LOCAL-00042" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
-      <option name="closed" value="true" />
-      <created>1748468652731</created>
-      <option name="number" value="00042" />
-      <option name="presentableId" value="LOCAL-00042" />
-      <option name="project" value="LOCAL" />
-      <updated>1748468652731</updated>
-    </task>
-    <task id="LOCAL-00043" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
-      <option name="closed" value="true" />
-      <created>1748477755066</created>
-      <option name="number" value="00043" />
-      <option name="presentableId" value="LOCAL-00043" />
-      <option name="project" value="LOCAL" />
-      <updated>1748477755066</updated>
-    </task>
-    <task id="LOCAL-00044" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
-      <option name="closed" value="true" />
-      <created>1748481628442</created>
-      <option name="number" value="00044" />
-      <option name="presentableId" value="LOCAL-00044" />
-      <option name="project" value="LOCAL" />
-      <updated>1748481628442</updated>
-    </task>
-    <task id="LOCAL-00045" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
-      <option name="closed" value="true" />
-      <created>1748481850919</created>
-      <option name="number" value="00045" />
-      <option name="presentableId" value="LOCAL-00045" />
-      <option name="project" value="LOCAL" />
-      <updated>1748481850919</updated>
-    </task>
-    <task id="LOCAL-00046" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
-      <option name="closed" value="true" />
-      <created>1748482253895</created>
-      <option name="number" value="00046" />
-      <option name="presentableId" value="LOCAL-00046" />
-      <option name="project" value="LOCAL" />
-      <updated>1748482253895</updated>
-    </task>
-    <task id="LOCAL-00047" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
-      <option name="closed" value="true" />
-      <created>1748482972948</created>
-      <option name="number" value="00047" />
-      <option name="presentableId" value="LOCAL-00047" />
-      <option name="project" value="LOCAL" />
-      <updated>1748482972948</updated>
-    </task>
-    <task id="LOCAL-00048" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
-      <option name="closed" value="true" />
-      <created>1748483422560</created>
-      <option name="number" value="00048" />
-      <option name="presentableId" value="LOCAL-00048" />
-      <option name="project" value="LOCAL" />
-      <updated>1748483422560</updated>
+      <workItem from="1748656846130" duration="6442000" />
+      <workItem from="1748663834180" duration="2146000" />
     </task>
     <task id="LOCAL-00049" summary="Has bug with single-point creatures? Ask for more debugging info and check if joints can disappear">
       <option name="closed" value="true" />
@@ -537,7 +460,87 @@
       <option name="project" value="LOCAL" />
       <updated>1748657797151</updated>
     </task>
-    <option name="localTasksCounter" value="88" />
+    <task id="LOCAL-00088" summary="Changing config">
+      <option name="closed" value="true" />
+      <created>1748658149759</created>
+      <option name="number" value="00088" />
+      <option name="presentableId" value="LOCAL-00088" />
+      <option name="project" value="LOCAL" />
+      <updated>1748658149759</updated>
+    </task>
+    <task id="LOCAL-00089" summary="Changing config">
+      <option name="closed" value="true" />
+      <created>1748658414142</created>
+      <option name="number" value="00089" />
+      <option name="presentableId" value="LOCAL-00089" />
+      <option name="project" value="LOCAL" />
+      <updated>1748658414142</updated>
+    </task>
+    <task id="LOCAL-00090" summary="Checkpoint 1 of viscosity field.">
+      <option name="closed" value="true" />
+      <created>1748658713792</created>
+      <option name="number" value="00090" />
+      <option name="presentableId" value="LOCAL-00090" />
+      <option name="project" value="LOCAL" />
+      <updated>1748658713792</updated>
+    </task>
+    <task id="LOCAL-00091" summary="Checkpoint 1 of viscosity field.">
+      <option name="closed" value="true" />
+      <created>1748658869881</created>
+      <option name="number" value="00091" />
+      <option name="presentableId" value="LOCAL-00091" />
+      <option name="project" value="LOCAL" />
+      <updated>1748658869881</updated>
+    </task>
+    <task id="LOCAL-00092" summary="Checkpoint 3 of viscosity field.">
+      <option name="closed" value="true" />
+      <created>1748659075592</created>
+      <option name="number" value="00092" />
+      <option name="presentableId" value="LOCAL-00092" />
+      <option name="project" value="LOCAL" />
+      <updated>1748659075592</updated>
+    </task>
+    <task id="LOCAL-00093" summary="Checkpoint 3 of viscosity field.">
+      <option name="closed" value="true" />
+      <created>1748659308168</created>
+      <option name="number" value="00093" />
+      <option name="presentableId" value="LOCAL-00093" />
+      <option name="project" value="LOCAL" />
+      <updated>1748659308168</updated>
+    </task>
+    <task id="LOCAL-00094" summary="Checkpoint 3 of viscosity field.">
+      <option name="closed" value="true" />
+      <created>1748659735315</created>
+      <option name="number" value="00094" />
+      <option name="presentableId" value="LOCAL-00094" />
+      <option name="project" value="LOCAL" />
+      <updated>1748659735315</updated>
+    </task>
+    <task id="LOCAL-00095" summary="Checkpoint 3 of viscosity field.">
+      <option name="closed" value="true" />
+      <created>1748660659786</created>
+      <option name="number" value="00095" />
+      <option name="presentableId" value="LOCAL-00095" />
+      <option name="project" value="LOCAL" />
+      <updated>1748660659786</updated>
+    </task>
+    <task id="LOCAL-00096" summary="Checkpoint 3 of viscosity field.">
+      <option name="closed" value="true" />
+      <created>1748661272743</created>
+      <option name="number" value="00096" />
+      <option name="presentableId" value="LOCAL-00096" />
+      <option name="project" value="LOCAL" />
+      <updated>1748661272743</updated>
+    </task>
+    <task id="LOCAL-00097" summary="Checkpoint 3 of viscosity field.">
+      <option name="closed" value="true" />
+      <created>1748662818360</created>
+      <option name="number" value="00097" />
+      <option name="presentableId" value="LOCAL-00097" />
+      <option name="project" value="LOCAL" />
+      <updated>1748662818360</updated>
+    </task>
+    <option name="localTasksCounter" value="98" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -578,6 +581,8 @@
     <MESSAGE value="Light field implemented" />
     <MESSAGE value="Viscosity field implemented but not affecting fluid physics yet." />
     <MESSAGE value="Changing config" />
-    <option name="LAST_COMMIT_MESSAGE" value="Changing config" />
+    <MESSAGE value="Checkpoint 1 of viscosity field." />
+    <MESSAGE value="Checkpoint 3 of viscosity field." />
+    <option name="LAST_COMMIT_MESSAGE" value="Checkpoint 3 of viscosity field." />
   </component>
 </project>

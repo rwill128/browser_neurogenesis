@@ -371,6 +371,14 @@
                 <label for="neuronNodeCost" class="slider-label">Neuron Node Cost:</label>
                 <span id="neuronNodeCostValue" class="slider-value">0.0100</span>
                 <input type="range" id="neuronNodeCost" min="0.0" max="0.5" value="0.01" step="0.001">
+
+                <label for="photosyntheticNodeCost" class="slider-label">Photosynthetic Node Cost:</label>
+                <span id="photosyntheticNodeCostValue" class="slider-value">0.5</span>
+                <input type="range" id="photosyntheticNodeCost" min="0.0" max="50.0" value="0.5" step="0.1">
+
+                <label for="photosynthesisEfficiency" class="slider-label">Photosynthesis Efficiency:</label>
+                <span id="photosynthesisEfficiencyValue" class="slider-value">0.01</span>
+                <input type="range" id="photosynthesisEfficiency" min="0.0" max="0.1" value="0.01" step="0.001">
             </div>
             <div class="control-group">
                 <h4>Fluid</h4>
@@ -2068,7 +2076,7 @@
                 } else if (this.isPredator) {
                     mainColor = 'rgba(255, 50, 50, 0.9)';
                 } else if (this.nodeType === NodeType.EMITTER_SWIMMER && this.isEater) {
-                     mainColor = 'rgba(200,255,0,0.9)';
+                     mainColor = 'rgba(255, 105, 180, 0.9)';
                 } else if (this.nodeType === NodeType.PHOTOSYNTHETIC) { 
                     mainColor = 'rgba(60, 179, 113, 0.9)'; // MediumSeaGreen for photosynthesis
                 } else if (this.nodeType === NodeType.EMITTER_SWIMMER) {
@@ -2222,7 +2230,7 @@
                 const predatorChance = 0.15;
                 const dyeEmitterChance = 0.2;
                 // const neuronChance = NEURON_CHANCE; // Use global NEURON_CHANCE directly
-                const nodeTypeChoices = [NodeType.NEUTRAL, NodeType.FLOATING, NodeType.FIXED_ROOT, NodeType.EMITTER_SWIMMER, NodeType.NEURON];
+                const nodeTypeChoices = [NodeType.NEUTRAL, NodeType.FLOATING, NodeType.FIXED_ROOT, NodeType.EMITTER_SWIMMER, NodeType.NEURON, NodeType.PHOTOSYNTHETIC];
                 const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
 
                 if (parentBody) {
@@ -2365,11 +2373,20 @@
                         if (numOuterPoints > 1) this.springs.push(new Spring(this.massPoints[1], this.massPoints[this.massPoints.length-1], this.stiffness*0.8, this.springDamping));
                     }
 
-                    this.massPoints.forEach((p, idx) => {
-                        let currentNodeType = nodeTypeChoices[Math.floor(Math.random() * (nodeTypeChoices.length -1))]; 
-                        if (Math.random() < NEURON_CHANCE && this.massPoints.length > 1) { 
-                                currentNodeType = NodeType.NEURON;
+                     this.massPoints.forEach((p, idx) => {
+                        // Initial random choice from the list (can be overridden by specific chances below)
+                        let currentNodeType = nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)]; // Corrected: use .length
+                        const ACTUAL_PHOTOSYNTHETIC_CHANCE = 0.15; // Define the chance here
+                        // NEURON_CHANCE is assumed to be globally defined (e.g., const NEURON_CHANCE = 0.1;)
+
+                        const rand = Math.random(); // Single random draw for mutually exclusive chances
+                        if (rand < NEURON_CHANCE && this.massPoints.length > 1) {
+                            currentNodeType = NodeType.NEURON;
+                        } else if (rand < NEURON_CHANCE + ACTUAL_PHOTOSYNTHETIC_CHANCE) { // Check for photosynthetic if not neuron
+                            currentNodeType = NodeType.PHOTOSYNTHETIC;
                         }
+                        // If neither of the above, currentNodeType remains as initially picked from nodeTypeChoices
+
                         p.nodeType = currentNodeType; // Assign type
 
                         // Now set neuronData based on the final type
@@ -2378,8 +2395,10 @@
                                 isBrain: false,
                                 hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
                             };
-                            } else {
-                            p.neuronData = null; // Crucial: ensure non-neurons have null neuronData
+                        } else {
+                            // This correctly ensures that if it's not a NEURON (e.g., it became PHOTOSYNTHETIC),
+                            // neuronData is null.
+                            p.neuronData = null;
                         }
                         if (p.nodeType === NodeType.FIXED_ROOT) p.isFixed = true;
                     });
@@ -2766,6 +2785,19 @@
                     }
                     if (point.isPredator) {
                         currentFrameEnergyCost += PREDATOR_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
+                    }
+                    if (point.nodeType === NodeType.PHOTOSYNTHETIC) {
+                        currentFrameEnergyCost += PHOTOSYNTHETIC_NODE_ENERGY_COST * costMultiplier;
+                        if (lightField && fluidFieldRef) {
+                            const gx_photo = Math.floor(point.pos.x / fluidFieldRef.scaleX);
+                            const gy_photo = Math.floor(point.pos.y / fluidFieldRef.scaleY);
+                            const lightIdx = fluidFieldRef.IX(gx_photo, gy_photo);
+                            const baseLightValue = lightField[lightIdx] !== undefined ? lightField[lightIdx] : 0.0;
+                            const effectiveLightValue = baseLightValue * globalLightMultiplier; // Use globalLightMultiplier
+
+                            const energyGain = effectiveLightValue * PHOTOSYNTHESIS_EFFICIENCY * (point.radius / 5) * dt;
+                            this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyGain);
+                        }
                     }
                 }
                 this.creatureEnergy -= currentFrameEnergyCost * dt;
@@ -4288,7 +4320,9 @@
                 lightFieldData: lightField ? Array.from(lightField) : null,
                 lightMapSize: lightField ? Math.round(FLUID_GRID_SIZE_CONTROL) : 0,
                 viscosityFieldData: viscosityField ? Array.from(viscosityField) : null,
-                viscosityMapSize: viscosityField ? Math.round(FLUID_GRID_SIZE_CONTROL) : 0
+                viscosityMapSize: viscosityField ? Math.round(FLUID_GRID_SIZE_CONTROL) : 0,
+                photosyntheticNodeCost: PHOTOSYNTHETIC_NODE_ENERGY_COST,
+                photosynthesisEfficiency: PHOTOSYNTHESIS_EFFICIENCY
             };
             const jsonString = JSON.stringify(config, null, 2);
             const blob = new Blob([jsonString], {type: "application/json"});
@@ -4401,6 +4435,9 @@
             particleFluidInfluenceSlider.value = PARTICLE_FLUID_INFLUENCE;
             particleLifeDecaySlider.value = PARTICLE_BASE_LIFE_DECAY;
             infiniteParticleLifeToggle.checked = IS_PARTICLE_LIFE_INFINITE;
+
+            if (config.photosyntheticNodeCost !== undefined) PHOTOSYNTHETIC_NODE_ENERGY_COST = config.photosyntheticNodeCost;
+            if (config.photosynthesisEfficiency !== undefined) PHOTOSYNTHESIS_EFFICIENCY = config.photosynthesisEfficiency;
 
             initializeAllSliderDisplays();
 
@@ -4539,6 +4576,8 @@
             IS_WORLD_WRAPPING = worldWrapToggle.checked;
             IS_PARTICLE_LIFE_INFINITE = infiniteParticleLifeToggle.checked;
             IS_EMITTER_EDIT_MODE = emitterEditModeToggle.checked;
+            PHOTOSYNTHETIC_NODE_ENERGY_COST = 0.5;
+            PHOTOSYNTHESIS_EFFICIENCY = 5;
 
 
             await loadAndApplySliderConfig(); // Attempt to override with JSON values

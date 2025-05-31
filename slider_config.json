@@ -157,7 +157,7 @@
     "step": 0.1,
     "valueSpanId": "photosyntheticNodeCostValueSpan",
     "jsVariable": "PHOTOSYNTHETIC_NODE_ENERGY_COST",
-    "displayFormat": "toFixed(2)" 
+    "displayFormat": "toFixed(2)"
   },
   {
     "id": "photosynthesisEfficiencySlider",

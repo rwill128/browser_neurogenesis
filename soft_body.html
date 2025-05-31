@@ -496,7 +496,7 @@
 
                 <label for="viscosityBrushValueSlider" class="slider-label">Viscosity Brush Multiplier:</label>
                 <span id="viscosityBrushValueSpan" class="slider-value">1.0</span>
-                <input type="range" id="viscosityBrushValueSlider" min="0.2" max="5.0" value="1.0" step="0.05">
+                <input type="range" id="viscosityBrushValueSlider" min="0.2" max="10.0" value="1.0" step="0.05">
 
                 <label for="viscosityBrushSizeSlider" class="slider-label">Viscosity Brush Size (cells):</label>
                 <span id="viscosityBrushSizeSpan" class="slider-value">5</span>
@@ -810,7 +810,7 @@
         let VISCOSITY_BRUSH_SIZE = 5;
         let VISCOSITY_BRUSH_STRENGTH = 0.1;
         const MIN_VISCOSITY_MULTIPLIER = 0.2;
-        const MAX_VISCOSITY_MULTIPLIER = 5.0;
+        const MAX_VISCOSITY_MULTIPLIER = 10.0; // Was 5.0
         let isPaintingViscosity = false;
 
         let INITIAL_POPULATION_SIZE; // Will be set after CREATURE_POPULATION_FLOOR is loaded/defaulted

@@ -1242,8 +1242,8 @@
             const newWidth = parseInt(worldWidthInput.value);
             const newHeight = parseInt(worldHeightInput.value);
 
-            if (isNaN(newWidth) || isNaN(newHeight) || newWidth < 500 || newHeight < 500 || newWidth > 20000 || newHeight > 20000) {
-                showMessageModal("Invalid world dimensions. Min 500x500, Max 20000x20000.");
+            if (isNaN(newWidth) || isNaN(newHeight) || newWidth < 500 || newHeight < 500 || newWidth > 40000 || newHeight > 40000) {
+                showMessageModal("Invalid world dimensions. Min 500x500, Max 40000x40000.");
                 worldWidthInput.value = WORLD_WIDTH;
                 worldHeightInput.value = WORLD_HEIGHT;
                 return;

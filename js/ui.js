@@ -35,8 +35,8 @@ const emitterNodeCostSlider = document.getElementById('emitterNodeCost');
 const eaterNodeCostSlider = document.getElementById('eaterNodeCost');
 const predatorNodeCostSlider = document.getElementById('predatorNodeCost');
 const neuronNodeCostSlider = document.getElementById('neuronNodeCost');
-const photosyntheticNodeCostSlider = document.getElementById('photosyntheticNodeCost'); // Added
-const photosynthesisEfficiencySlider = document.getElementById('photosynthesisEfficiency'); // Added
+const photosyntheticNodeCostSlider = document.getElementById('photosyntheticNodeCost'); 
+const photosynthesisEfficiencySlider = document.getElementById('photosynthesisEfficiency');
 
 const instabilityLight = document.getElementById('instabilityLight');
 const populationCountDisplay = document.getElementById('populationCount');
@@ -53,9 +53,8 @@ const emitterNodeCostValueSpan = document.getElementById('emitterNodeCostValue')
 const eaterNodeCostValueSpan = document.getElementById('eaterNodeCostValue');
 const predatorNodeCostValueSpan = document.getElementById('predatorNodeCostValue');
 const neuronNodeCostValueSpan = document.getElementById('neuronNodeCostValue');
-const photosyntheticNodeCostValueSpan = document.getElementById('photosyntheticNodeCostValue'); // Added
-const photosynthesisEfficiencyValueSpan = document.getElementById('photosynthesisEfficiencyValue'); // Added
-
+const photosyntheticNodeCostValueSpan = document.getElementById('photosyntheticNodeCostValue');
+const photosynthesisEfficiencyValueSpan = document.getElementById('photosynthesisEfficiencyValue');
 
 const fluidGridSizeSlider = document.getElementById('fluidGridSize');
 const fluidGridSizeValueSpan = document.getElementById('fluidGridSizeValue');
@@ -68,7 +67,6 @@ const fluidViscosityValueSpan = document.getElementById('fluidViscosityValue');
 const fluidFadeValueSpan = document.getElementById('fluidFadeValue');
 const maxFluidVelocityComponentSlider = document.getElementById('maxFluidVelocityComponentSlider'); 
 const maxFluidVelocityComponentValueSpan = document.getElementById('maxFluidVelocityComponentValueSpan');
-
 
 const particlePopulationFloorSlider = document.getElementById('particlePopulationFloorSlider');
 const particlePopulationFloorValueSpan = document.getElementById('particlePopulationFloorValueSpan');
@@ -83,6 +81,7 @@ const particleLifeDecayValueSpan = document.getElementById('particleLifeDecayVal
 const infiniteParticleLifeToggle = document.getElementById('infiniteParticleLifeToggle');
 const particleLifeDecayLabel = document.getElementById('particleLifeDecayLabel');
 const resetParticlesButton = document.getElementById('resetParticlesButton');
+const particleCountDisplay = document.getElementById('particleCount');
 
 const exportConfigButton = document.getElementById('exportConfigButton');
 const importConfigFile = document.getElementById('importConfigFile');
@@ -95,7 +94,6 @@ const clearEmittersButton = document.getElementById('clearEmittersButton');
 
 const infoPanel = document.getElementById('infoPanel');
 const closeInfoPanelButton = document.getElementById('closeInfoPanel');
-// const neuronInfoSection = document.getElementById('neuronInfoSection'); // This ID was not used
 const allPointsInfoContainer = document.getElementById('allPointsInfoContainer'); 
 const copyInfoPanelButton = document.getElementById('copyInfoPanelButton'); 
 
@@ -157,10 +155,6 @@ function updateSliderDisplay(slider, span) {
 
     const config = window.loadedSliderConfigs?.find(c => c.id === slider.id);
     
-    // if (slider.id === 'fluidViscosity') { // Specific debug for this slider
-    //     console.log("updateSliderDisplay for fluidViscosity. Config found:", config, "Value:", value, "slider.value:", slider.value);
-    // }
-
     if (config && config.displayFormat === "toFixed(4)") {
          span.textContent = value.toFixed(4);
     } else if (config && config.displayFormat === "toFixed(3)") {
@@ -180,7 +174,6 @@ function initializeAllSliderDisplays() {
     worldWidthInput.value = WORLD_WIDTH;
     worldHeightInput.value = WORLD_HEIGHT;
 
-    // Iterate through loadedSliderConfigs to set display values
     if (window.loadedSliderConfigs) {
         window.loadedSliderConfigs.forEach(config => {
             const slider = document.getElementById(config.id);
@@ -190,7 +183,6 @@ function initializeAllSliderDisplays() {
             }
         });
     }
-    // Update any displays for controls not in the JSON (like checkboxes)
     particleLifeDecaySlider.disabled = IS_PARTICLE_LIFE_INFINITE;
     particleLifeDecayLabel.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#ddd';
     particleLifeDecayValueSpan.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
@@ -200,7 +192,6 @@ function initializeAllSliderDisplays() {
 
     canvas.classList.toggle('emitter-edit-mode', IS_EMITTER_EDIT_MODE);
 
-    // Ensure map toggles reflect current state
     showNutrientMapToggle.checked = SHOW_NUTRIENT_MAP;
     nutrientEditModeToggle.checked = IS_NUTRIENT_EDIT_MODE;
     showLightMapToggle.checked = SHOW_LIGHT_MAP;
@@ -218,10 +209,11 @@ function updateInstabilityIndicator() {
 }
 function updatePopulationCount() {
     populationCountDisplay.textContent = `Population: ${softBodyPopulation.length}`;
+    particleCountDisplay.textContent = `Particles: ${particles.length}`;
 }
 
 function updateInfoPanel() {
-    if (selectedInspectBody) { // Check if a body is selected
+    if (selectedInspectBody) { 
         document.getElementById('infoBodyId').textContent = selectedInspectBody.id;
         document.getElementById('infoBodyStiffness').textContent = selectedInspectBody.stiffness.toFixed(2);
         document.getElementById('infoBodyDamping').textContent = selectedInspectBody.springDamping.toFixed(2);
@@ -238,7 +230,7 @@ function updateInfoPanel() {
         document.getElementById('infoBodyTicksBirth').textContent = selectedInspectBody.ticksSinceBirth;
         document.getElementById('infoBodyCanReproduce').textContent = selectedInspectBody.canReproduce;
 
-        allPointsInfoContainer.innerHTML = '<h5>All Mass Points</h5>'; // Clear previous and add title
+        allPointsInfoContainer.innerHTML = '<h5>All Mass Points</h5>';
         selectedInspectBody.massPoints.forEach((point, index) => {
             const pointEntryDiv = document.createElement('div');
             pointEntryDiv.className = 'point-info-entry';
@@ -280,19 +272,30 @@ function updateInfoPanel() {
             allPointsInfoContainer.appendChild(pointEntryDiv);
         });
 
-
         if (!infoPanel.classList.contains('open')) {
             infoPanel.classList.add('open');
         }
     } else { 
         allPointsInfoContainer.innerHTML = ''; 
         document.getElementById('infoBodyId').textContent = '-';
-        // ... clear other body info spans ...
+        document.getElementById('infoBodyStiffness').textContent = '-';
+        document.getElementById('infoBodyDamping').textContent = '-';
+        document.getElementById('infoBodyMotorInterval').textContent = '-';
+        document.getElementById('infoBodyMotorCap').textContent = '-';
+        document.getElementById('infoBodyEmitterStrength').textContent = '-';
+        document.getElementById('infoBodyEmitterDirX').textContent = '-';
+        document.getElementById('infoBodyEmitterDirY').textContent = '-';
+        document.getElementById('infoBodyNumOffspring').textContent = '-';
+        document.getElementById('infoBodyOffspringRadius').textContent = '-';
+        document.getElementById('infoBodyPointAddChance').textContent = '-';
+        document.getElementById('infoBodySpringConnectionRadius').textContent = '-';
+        document.getElementById('infoBodyEnergy').textContent = '-';
+        document.getElementById('infoBodyTicksBirth').textContent = '-';
+        document.getElementById('infoBodyCanReproduce').textContent = '-';
         infoPanel.classList.remove('open');
     }
 }
 
-// Simple modal for alerts
 function showMessageModal(message) {
     let modal = document.getElementById('messageModal');
     if (!modal) {
@@ -308,7 +311,7 @@ function showMessageModal(message) {
         modal.style.border = '1px solid #777';
         modal.style.borderRadius = '8px';
         modal.style.boxShadow = '0 0 15px rgba(0,0,0,0.5)';
-        modal.style.zIndex = '2000'; // Ensure on top
+        modal.style.zIndex = '2000';
 
         const messageP = document.createElement('p');
         messageP.id = 'modalMessageText';
@@ -994,6 +997,4 @@ canvas.addEventListener('wheel', (e) => {
     const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
     viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
-});
-
-</rewritten_file> 
+}); 

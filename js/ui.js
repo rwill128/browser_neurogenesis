@@ -37,6 +37,7 @@ const predatorNodeCostSlider = document.getElementById('predatorNodeCost');
 const neuronNodeCostSlider = document.getElementById('neuronNodeCost');
 const photosyntheticNodeCostSlider = document.getElementById('photosyntheticNodeCost'); 
 const photosynthesisEfficiencySlider = document.getElementById('photosynthesisEfficiency');
+const swimmerNodeCostSlider = document.getElementById('swimmerNodeCost');
 
 const instabilityLight = document.getElementById('instabilityLight');
 const populationCountDisplay = document.getElementById('populationCount');
@@ -55,6 +56,7 @@ const predatorNodeCostValueSpan = document.getElementById('predatorNodeCostValue
 const neuronNodeCostValueSpan = document.getElementById('neuronNodeCostValue');
 const photosyntheticNodeCostValueSpan = document.getElementById('photosyntheticNodeCostValue');
 const photosynthesisEfficiencyValueSpan = document.getElementById('photosynthesisEfficiencyValue');
+const swimmerNodeCostValueSpan = document.getElementById('swimmerNodeCostValue');
 
 const fluidGridSizeSlider = document.getElementById('fluidGridSize');
 const fluidGridSizeValueSpan = document.getElementById('fluidGridSizeValue');
@@ -194,6 +196,7 @@ function initializeAllSliderDisplays() {
         [eaterNodeCostSlider, "EATER_NODE_ENERGY_COST", true, eaterNodeCostValueSpan],
         [predatorNodeCostSlider, "PREDATOR_NODE_ENERGY_COST", true, predatorNodeCostValueSpan],
         [neuronNodeCostSlider, "NEURON_NODE_ENERGY_COST", true, neuronNodeCostValueSpan],
+        [swimmerNodeCostSlider, "SWIMMER_NODE_ENERGY_COST", true, swimmerNodeCostValueSpan],
         [photosyntheticNodeCostSlider, "PHOTOSYNTHETIC_NODE_ENERGY_COST", true, photosyntheticNodeCostValueSpan],
         [photosynthesisEfficiencySlider, "PHOTOSYNTHESIS_EFFICIENCY", true, photosynthesisEfficiencyValueSpan],
         [fluidGridSizeSlider, "FLUID_GRID_SIZE_CONTROL", false, fluidGridSizeValueSpan],
@@ -287,6 +290,7 @@ function updateInfoPanel() {
         document.getElementById('infoBodyPointAddChance').textContent = selectedInspectBody.pointAddChance.toFixed(3);
         document.getElementById('infoBodySpringConnectionRadius').textContent = selectedInspectBody.springConnectionRadius.toFixed(1);
         document.getElementById('infoBodyEnergy').textContent = selectedInspectBody.creatureEnergy.toFixed(2);
+        document.getElementById('infoBodyReproEnergyThreshold').textContent = selectedInspectBody.reproductionEnergyThreshold;
         document.getElementById('infoBodyTicksBirth').textContent = selectedInspectBody.ticksSinceBirth;
         document.getElementById('infoBodyCanReproduce').textContent = selectedInspectBody.canReproduce;
 
@@ -350,6 +354,7 @@ function updateInfoPanel() {
         document.getElementById('infoBodyPointAddChance').textContent = '-';
         document.getElementById('infoBodySpringConnectionRadius').textContent = '-';
         document.getElementById('infoBodyEnergy').textContent = '-';
+        document.getElementById('infoBodyReproEnergyThreshold').textContent = '-';
         document.getElementById('infoBodyTicksBirth').textContent = '-';
         document.getElementById('infoBodyCanReproduce').textContent = '-';
         infoPanel.classList.remove('open');
@@ -568,6 +573,7 @@ predatorNodeCostSlider.oninput = function() { PREDATOR_NODE_ENERGY_COST = parseF
 neuronNodeCostSlider.oninput = function() { NEURON_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, neuronNodeCostValueSpan); }
 photosyntheticNodeCostSlider.oninput = function() { PHOTOSYNTHETIC_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, photosyntheticNodeCostValueSpan); }
 photosynthesisEfficiencySlider.oninput = function() { PHOTOSYNTHESIS_EFFICIENCY = parseFloat(this.value); updateSliderDisplay(this, photosynthesisEfficiencyValueSpan); }
+swimmerNodeCostSlider.oninput = function() { SWIMMER_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, swimmerNodeCostValueSpan); }
 
 
 resetButton.onclick = function() {

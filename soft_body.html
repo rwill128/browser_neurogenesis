@@ -760,7 +760,7 @@
         let NUTRIENT_BRUSH_SIZE = 5; // In grid cells
         let NUTRIENT_BRUSH_STRENGTH = 0.1; // 0 to 1, how quickly it applies
         const MIN_NUTRIENT_VALUE = 0.1;
-        const MAX_NUTRIENT_VALUE = 3.0;
+        const MAX_NUTRIENT_VALUE = 2.0;
         let isPaintingNutrients = false;
 
         let lightField = null;
@@ -786,7 +786,7 @@
         lastPanMouseY = 0;
 
         // --- Neural Network Constants ---
-        const NEURAL_INPUT_SIZE = 8; // 3 (dye RGB) + 1 (energy) + 2 (CoM rel pos) + 2 (CoM rel vel)
+        const NEURAL_INPUT_SIZE = 9; // 3 (dye RGB) + 1 (energy) + 2 (CoM rel pos) + 2 (CoM rel vel) + 1 (nutrient level)
         const NEURAL_OUTPUTS_PER_EMITTER_SWIMMER = 14; // For Policy Gradient: 6 actions (12) + 1 exertion (2) = 14
         const NEURAL_OUTPUTS_PER_EATER = 2; // For Policy Gradient: 1 exertion (mean + stdDev)
         const NEURAL_OUTPUTS_PER_PREDATOR = 2; // For Policy Gradient: 1 exertion (mean + stdDev)
@@ -2278,6 +2278,20 @@
                     inputVector.push(Math.tanh(relComVelX / MAX_PIXELS_PER_FRAME_DISPLACEMENT)); // Normalize and tanh
                     inputVector.push(Math.tanh(relComVelY / MAX_PIXELS_PER_FRAME_DISPLACEMENT));
                     
+                    // e. Nutrient Level (1 input)
+                    if (nutrientField && fluidFieldRef) {
+                        const brainGx = Math.floor(brainNode.pos.x / fluidFieldRef.scaleX);
+                        const brainGy = Math.floor(brainNode.pos.y / fluidFieldRef.scaleY);
+                        const nutrientIdx = fluidFieldRef.IX(brainGx, brainGy);
+                        const currentNutrient = nutrientField[nutrientIdx] !== undefined ? nutrientField[nutrientIdx] : 1.0;
+                        const normalizedNutrient = (currentNutrient - MIN_NUTRIENT_VALUE) / (MAX_NUTRIENT_VALUE - MIN_NUTRIENT_VALUE);
+                        inputVector.push(Math.max(0, Math.min(1, normalizedNutrient))); // Clamp to 0-1
+                        // REMOVED: inputVector.push(Math.max(0, Math.min(1, normalizedNutrient))); // Duplicate for the second nutrient input for now
+                    } else {
+                        inputVector.push(0.5); // Default neutral nutrient if no field
+                        // REMOVED: inputVector.push(0.5);
+                    }
+
                     // Ensure inputVector is the correct size, pad with 0 if necessary (e.g. if fluidFieldRef was null)
                     while(inputVector.length < nd.inputVectorSize) {
                         inputVector.push(0);

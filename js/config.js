@@ -22,6 +22,11 @@ const MAX_SPRING_STRETCH_FACTOR = 4.0;
 const MAX_SPAN_PER_POINT_FACTOR = GRID_CELL_SIZE * 2;
 const DYE_PULL_RATE = 0.05;
 
+// Rigid Spring Properties (New)
+const RIGID_SPRING_STIFFNESS = 500000; 
+const RIGID_SPRING_DAMPING = 150;    
+const CHANCE_FOR_RIGID_SPRING = 0.1; // 10% chance a spring becomes rigid
+
 // Original Radius Multipliers (will become base values)
 const EATING_RADIUS_MULTIPLIER_BASE = 2.0;
 const PREDATION_RADIUS_MULTIPLIER_BASE = 1.5;

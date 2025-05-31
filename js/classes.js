@@ -115,10 +115,17 @@ class MassPoint {
 
 // --- Spring Class (Soft Body) ---
 class Spring {
-    constructor(p1, p2, stiffness, dampingFactor, restLength = null) {
-        this.p1 = p1; this.p2 = p2;
-        this.stiffness = stiffness;
-        this.dampingFactor = dampingFactor;
+    constructor(p1, p2, stiffness, dampingFactor, restLength = null, isRigid = false) {
+        this.p1 = p1;
+        this.p2 = p2;
+        this.isRigid = isRigid;
+        if (this.isRigid) {
+            this.stiffness = RIGID_SPRING_STIFFNESS;
+            this.dampingFactor = RIGID_SPRING_DAMPING;
+        } else {
+            this.stiffness = stiffness;
+            this.dampingFactor = dampingFactor;
+        }
         this.restLength = restLength === null ? p1.pos.sub(p2.pos).mag() : restLength;
     }
     applyForce() {
@@ -149,10 +156,9 @@ class Spring {
         ctx.beginPath();
         ctx.moveTo(this.p1.pos.x, this.p1.pos.y);
         ctx.lineTo(this.p2.pos.x, this.p2.pos.y);
-        ctx.strokeStyle = 'rgba(150,150,150,0.6)';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = this.isRigid ? 'rgba(255, 255, 0, 0.9)' : 'rgba(150,150,150,0.6)'; // Bright yellow for rigid springs
+        ctx.lineWidth = this.isRigid ? 3 : 2; // Thicker line for rigid springs
         ctx.stroke();
-        // ctx.closePath(); // Not needed for lineTo
     }
 }
 
@@ -352,60 +358,57 @@ class SoftBody {
                     const p2 = this.massPoints[j];
                     const dist = p1.pos.sub(p2.pos).mag();
                     if (dist < this.springConnectionRadius && dist > 0.1) {
-                        this.springs.push(new Spring(p1, p2, this.stiffness, this.springDamping, dist));
+                        const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
+                        this.springs.push(new Spring(p1, p2, this.stiffness, this.springDamping, dist, becomeRigid));
                     }
                 }
             }
             if (this.massPoints.length > 1 && this.springs.length === 0) {
                 for(let i = 0; i < this.massPoints.length -1; i++){
-                     this.springs.push(new Spring(this.massPoints[i], this.massPoints[i+1], this.stiffness, this.springDamping));
+                     const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
+                     this.springs.push(new Spring(this.massPoints[i], this.massPoints[i+1], this.stiffness, this.springDamping, null, becomeRigid));
                 }
             }
 
 
         } else { // Initial generation - use old shape types
-            const basePointDist = 5 + Math.random() * 3; // Reduced for smaller creatures
-            if (this.shapeType === 0) {
+            const basePointDist = 5 + Math.random() * 3; 
+            if (this.shapeType === 0) { // Grid
                 const numPointsX = 3; const numPointsY = 3; let gridPoints = [];
                 for (let i = 0; i < numPointsY; i++) { gridPoints[i] = []; for (let j = 0; j < numPointsX; j++) {
                     const point = new MassPoint(startX + j * basePointDist, startY + i * basePointDist, 0.3 + Math.random() * 0.4, baseRadius);
-                    // point.movementType = parentPoint.movementType; // This was the error for initial generation
-                    // Assign a default or random movement type for initial generation, handled below with all other points.
                     point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
                     this.massPoints.push(point); gridPoints[i][j] = point;
                 }}
-                for (let i=0; i<numPointsY; i++) for (let j=0; j<numPointsX-1; j++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], this.stiffness, this.springDamping));
-                for (let j=0; j<numPointsX; j++) for (let i=0; i<numPointsY-1; i++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], this.stiffness, this.springDamping));
+                for (let i=0; i<numPointsY; i++) for (let j=0; j<numPointsX-1; j++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                for (let j=0; j<numPointsX; j++) for (let i=0; i<numPointsY-1; i++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
                 for (let i=0; i<numPointsY-1; i++) for (let j=0; j<numPointsX-1; j++) {
-                    this.springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], this.stiffness*0.7, this.springDamping));
-                    this.springs.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], this.stiffness*0.7, this.springDamping));
+                    this.springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], this.stiffness*0.7, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                    this.springs.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], this.stiffness*0.7, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
                 }
-            } else if (this.shapeType === 1) {
+            } else if (this.shapeType === 1) { // Line
                 const numLinePoints = Math.floor(3 + Math.random() * 3); const isHorizontal = Math.random() < 0.5; let linePoints = [];
                 for (let i=0; i<numLinePoints; i++) {
                     const x = startX + (isHorizontal ? i * basePointDist : 0); const y = startY + (isHorizontal ? 0 : i * basePointDist);
                     const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
-                    // point.movementType = parentPoint.movementType; // This was the error for initial generation
                     point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
                     this.massPoints.push(point); linePoints.push(point);
                 }
-                for (let i=0; i<numLinePoints-1; i++) this.springs.push(new Spring(linePoints[i], linePoints[i+1], this.stiffness, this.springDamping));
-                if (numLinePoints > 2) this.springs.push(new Spring(linePoints[0], linePoints[numLinePoints-1], this.stiffness*0.5, this.springDamping));
-            } else {
+                for (let i=0; i<numLinePoints-1; i++) this.springs.push(new Spring(linePoints[i], linePoints[i+1], this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                if (numLinePoints > 2) this.springs.push(new Spring(linePoints[0], linePoints[numLinePoints-1], this.stiffness*0.5, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+            } else { // Star
                 const numOuterPoints = Math.floor(4 + Math.random()*3); const centralPoint = new MassPoint(startX, startY, (0.3+Math.random()*0.4)*1.5, baseRadius*1.2);
-                // centralPoint.movementType = parentPoint.movementType; // This was the error for initial generation
                 centralPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
                 this.massPoints.push(centralPoint); const circleRadius = basePointDist * 1.5;
                 for (let i=0; i<numOuterPoints; i++) {
                     const angle = (i / numOuterPoints) * Math.PI * 2; const x = startX + Math.cos(angle)*circleRadius; const y = startY + Math.sin(angle)*circleRadius;
                     const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
-                    // point.movementType = parentPoint.movementType; // This was the error for initial generation
                     point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
                     this.massPoints.push(point);
-                    this.springs.push(new Spring(centralPoint, point, this.stiffness, this.springDamping));
-                    if (i>0) this.springs.push(new Spring(this.massPoints[this.massPoints.length-2], point, this.stiffness*0.8, this.springDamping));
+                    this.springs.push(new Spring(centralPoint, point, this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                    if (i>0) this.springs.push(new Spring(this.massPoints[this.massPoints.length-2], point, this.stiffness*0.8, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
                 }
-                if (numOuterPoints > 1) this.springs.push(new Spring(this.massPoints[1], this.massPoints[this.massPoints.length-1], this.stiffness*0.8, this.springDamping));
+                if (numOuterPoints > 1) this.springs.push(new Spring(this.massPoints[1], this.massPoints[this.massPoints.length-1], this.stiffness*0.8, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
             }
 
             const availableNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER];
@@ -1067,17 +1070,19 @@ class SoftBody {
                     finalChild.springs = [];
                     for (let k = 0; k < finalChild.massPoints.length; k++) {
                         for (let l = k + 1; l < finalChild.massPoints.length; l++) {
-                            const p1 = finalChild.massPoints[k];
-                            const p2 = finalChild.massPoints[l];
-                            const dist = p1.pos.sub(p2.pos).mag();
-                            if (dist < finalChild.springConnectionRadius && dist > 0.1) {
-                                finalChild.springs.push(new Spring(p1, p2, finalChild.stiffness, finalChild.springDamping, dist));
+                            const p1_fc = finalChild.massPoints[k]; // Use distinct var names for final child points
+                            const p2_fc = finalChild.massPoints[l];
+                            const dist_fc = p1_fc.pos.sub(p2_fc.pos).mag();
+                            if (dist_fc < finalChild.springConnectionRadius && dist_fc > 0.1) {
+                                const becomeRigid_fc = Math.random() < CHANCE_FOR_RIGID_SPRING; // Apply chance here too
+                                finalChild.springs.push(new Spring(p1_fc, p2_fc, finalChild.stiffness, finalChild.springDamping, dist_fc, becomeRigid_fc));
                             }
                         }
                     }
                      if (finalChild.massPoints.length > 1 && finalChild.springs.length === 0) {
-                        for(let k = 0; k < finalChild.massPoints.length -1; k++){
-                            finalChild.springs.push(new Spring(finalChild.massPoints[k], finalChild.massPoints[k+1], finalChild.stiffness, finalChild.springDamping));
+                        for(let k_fc = 0; k_fc < finalChild.massPoints.length -1; k_fc++){ // Use distinct var names
+                            const becomeRigid_fc_fallback = Math.random() < CHANCE_FOR_RIGID_SPRING;
+                            finalChild.springs.push(new Spring(finalChild.massPoints[k_fc], finalChild.massPoints[k_fc+1], finalChild.stiffness, finalChild.springDamping, null, becomeRigid_fc_fallback));
                         }
                     }
                     // Re-link neurons for the final child

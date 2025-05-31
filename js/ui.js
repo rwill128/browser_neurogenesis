@@ -429,7 +429,10 @@ function getMouseWorldCoordinates(displayMouseX, displayMouseY) {
 
 // --- Event Listeners ---
 document.addEventListener('keydown', (e) => {
-    if (IS_SIMULATION_PAUSED && e.key.toLowerCase() !== 'p') return;
+    // Allow 'P' to toggle pause, and WASD for panning regardless of pause state.
+    if (e.key.toLowerCase() !== 'p' && e.key.toLowerCase() !== 'w' && e.key.toLowerCase() !== 'a' && e.key.toLowerCase() !== 's' && e.key.toLowerCase() !== 'd' && IS_SIMULATION_PAUSED) {
+        return; // Only block other keys if paused
+    }
 
     const effectiveViewportWidth = canvas.clientWidth / viewZoom;
     const effectiveViewportHeight = canvas.clientHeight / viewZoom;
@@ -775,6 +778,7 @@ canvas.addEventListener('mousedown', (e) => {
         const simMouseY = worldCoords.y;
 
         if (IS_EMITTER_EDIT_MODE && fluidField) {
+            if (IS_SIMULATION_PAUSED) return;
             const gridX = Math.floor(simMouseX / fluidField.scaleX);
             const gridY = Math.floor(simMouseY / fluidField.scaleY);
             emitterDragStartCell = { gridX, gridY, mouseStartX: simMouseX, mouseStartY: simMouseY };
@@ -789,6 +793,7 @@ canvas.addEventListener('mousedown', (e) => {
         }
 
         if (IS_NUTRIENT_EDIT_MODE) {
+            if (IS_SIMULATION_PAUSED) return;
             isPaintingNutrients = true;
             paintNutrientBrush(simMouseX, simMouseY); 
             selectedInspectBody = null; updateInfoPanel(); 
@@ -796,6 +801,7 @@ canvas.addEventListener('mousedown', (e) => {
             return; 
         }
         else if (IS_LIGHT_EDIT_MODE) { 
+            if (IS_SIMULATION_PAUSED) return;
             isPaintingLight = true;
             paintLightBrush(simMouseX, simMouseY);
             selectedInspectBody = null; updateInfoPanel(); 
@@ -803,6 +809,7 @@ canvas.addEventListener('mousedown', (e) => {
             return; 
         }
         else if (IS_VISCOSITY_EDIT_MODE) {
+            if (IS_SIMULATION_PAUSED) return;
             isPaintingViscosity = true;
             paintViscosityBrush(simMouseX, simMouseY);
             selectedInspectBody = null; updateInfoPanel(); 
@@ -825,9 +832,11 @@ canvas.addEventListener('mousedown', (e) => {
                     selectedInspectPoint = point; 
                     selectedInspectPointIndex = i;
 
-                    point.isFixed = true;
-                    point.prevPos.x = point.pos.x;
-                    point.prevPos.y = point.pos.y;
+                    if (!IS_SIMULATION_PAUSED) {
+                        point.isFixed = true;
+                        point.prevPos.x = point.pos.x;
+                        point.prevPos.y = point.pos.y;
+                    }
                     clickedOnPoint = true;
                     break; 
                 }
@@ -876,7 +885,7 @@ canvas.addEventListener('mousemove', (e) => {
     const worldMouseDy = simMouseY - worldPrevCoords.y;
 
 
-    if (mouse.isDown) { 
+    if (mouse.isDown && !IS_SIMULATION_PAUSED) { // Only do these if NOT paused
         if (IS_EMITTER_EDIT_MODE && emitterDragStartCell) {
             currentEmitterPreview.endX = simMouseX;
             currentEmitterPreview.endY = simMouseY;
@@ -903,17 +912,21 @@ canvas.addEventListener('mousemove', (e) => {
             const fluidVelY = worldMouseDy * FLUID_MOUSE_DRAG_VELOCITY_SCALE;
             fluidField.addVelocity(fluidGridX, fluidGridY, fluidVelX, fluidVelY);
         }
+    } else if (mouse.isDown && IS_EMITTER_EDIT_MODE && emitterDragStartCell) {
+        // Allow emitter preview to update even if paused, but don't affect sim state
+        currentEmitterPreview.endX = simMouseX;
+        currentEmitterPreview.endY = simMouseY;
     }
 
-    if (IS_NUTRIENT_EDIT_MODE && isPaintingNutrients && mouse.isDown) { 
+    if (IS_NUTRIENT_EDIT_MODE && isPaintingNutrients && mouse.isDown && !IS_SIMULATION_PAUSED) { 
         paintNutrientBrush(simMouseX, simMouseY);
         return; 
     }
-    else if (IS_LIGHT_EDIT_MODE && isPaintingLight && mouse.isDown) {
+    else if (IS_LIGHT_EDIT_MODE && isPaintingLight && mouse.isDown && !IS_SIMULATION_PAUSED) {
         paintLightBrush(simMouseX, simMouseY);
         return; 
     }
-    else if (IS_VISCOSITY_EDIT_MODE && isPaintingViscosity && mouse.isDown) {
+    else if (IS_VISCOSITY_EDIT_MODE && isPaintingViscosity && mouse.isDown && !IS_SIMULATION_PAUSED) {
         paintViscosityBrush(simMouseX, simMouseY);
         return; 
     }
@@ -933,7 +946,7 @@ canvas.addEventListener('mouseup', (e) => {
         }
         if (isPaintingViscosity) { isPaintingViscosity = false; }
 
-        if (IS_EMITTER_EDIT_MODE && emitterDragStartCell && fluidField) {
+        if (IS_EMITTER_EDIT_MODE && emitterDragStartCell && fluidField && !IS_SIMULATION_PAUSED) {
             const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
             const simMouseX = worldCoords.x;
             const simMouseY = worldCoords.y;
@@ -962,12 +975,13 @@ canvas.addEventListener('mouseup', (e) => {
         }
         if (selectedSoftBodyPoint) {
             const point = selectedSoftBodyPoint.point;
-            point.isFixed = false;
-            const worldDx = (mouse.dx / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
-            const worldDy = (mouse.dy / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
-
-            point.prevPos.x = point.pos.x - worldDx * 1.0;
-            point.prevPos.y = point.pos.y - worldDy * 1.0;
+            if (!IS_SIMULATION_PAUSED) {
+                point.isFixed = false;
+                const worldDx = (mouse.dx / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
+                const worldDy = (mouse.dy / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
+                point.prevPos.x = point.pos.x - worldDx * 1.0;
+                point.prevPos.y = point.pos.y - worldDy * 1.0;
+            }
             selectedSoftBodyPoint = null;
         }
     }

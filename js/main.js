@@ -43,38 +43,37 @@ async function main() {
 
 // --- Game Loop ---
 function gameLoop(timestamp) {
-    if (IS_SIMULATION_PAUSED) {
-        animationFrameId = requestAnimationFrame(gameLoop);
-        return;
-    }
-
     deltaTime = (timestamp - lastTime) / 1000;
-    if (isNaN(deltaTime) || deltaTime <= 0) deltaTime = 1/60;
+    if (isNaN(deltaTime) || deltaTime <= 0) deltaTime = 1/60; // Ensure valid deltaTime
     lastTime = timestamp;
 
     const currentMaxDeltaTime = MAX_DELTA_TIME_MS / 1000.0;
-    deltaTime = Math.min(deltaTime, currentMaxDeltaTime);
+    const effectiveDeltaTime = Math.min(deltaTime, currentMaxDeltaTime);
 
-    totalSimulationTime += deltaTime;
+    if (!IS_SIMULATION_PAUSED) {
+        totalSimulationTime += effectiveDeltaTime;
 
-    // Calculate global nutrient multiplier
-    if (nutrientCyclePeriodSeconds > 0) {
-        globalNutrientMultiplier = nutrientCycleBaseAmplitude + nutrientCycleWaveAmplitude * Math.sin((totalSimulationTime * 2 * Math.PI) / nutrientCyclePeriodSeconds);
-        globalNutrientMultiplier = Math.max(0.01, globalNutrientMultiplier); // Clamp to avoid zero or negative
-    } else {
-        globalNutrientMultiplier = nutrientCycleBaseAmplitude + nutrientCycleWaveAmplitude; // Effectively static if period is 0
+        // Calculate global nutrient multiplier
+        if (nutrientCyclePeriodSeconds > 0) {
+            globalNutrientMultiplier = nutrientCycleBaseAmplitude + nutrientCycleWaveAmplitude * Math.sin((totalSimulationTime * 2 * Math.PI) / nutrientCyclePeriodSeconds);
+            globalNutrientMultiplier = Math.max(0.01, globalNutrientMultiplier); 
+        } else {
+            globalNutrientMultiplier = nutrientCycleBaseAmplitude + nutrientCycleWaveAmplitude;
+        }
+        currentNutrientMultiplierDisplay.textContent = globalNutrientMultiplier.toFixed(2);
+
+        // Calculate global light multiplier
+        if (lightCyclePeriodSeconds > 0) {
+            globalLightMultiplier = (Math.sin((totalSimulationTime * 2 * Math.PI) / lightCyclePeriodSeconds) + 1) / 2; 
+        } else {
+            globalLightMultiplier = 0.5; 
+        }
+        currentLightMultiplierDisplay.textContent = globalLightMultiplier.toFixed(2);
+
+        updatePhysics(effectiveDeltaTime); // Only update physics if not paused
     }
-    currentNutrientMultiplierDisplay.textContent = globalNutrientMultiplier.toFixed(2);
 
-    // Calculate global light multiplier
-    if (lightCyclePeriodSeconds > 0) {
-        globalLightMultiplier = (Math.sin((totalSimulationTime * 2 * Math.PI) / lightCyclePeriodSeconds) + 1) / 2; // Ranges 0.0 to 1.0
-    } else {
-        globalLightMultiplier = 0.5; // Static at mid-value if period is 0
-    }
-    currentLightMultiplierDisplay.textContent = globalLightMultiplier.toFixed(2);
-
-    updatePhysics(deltaTime);
+    draw(); // Draw on every frame, regardless of pause state
     animationFrameId = requestAnimationFrame(gameLoop); // Keep the loop going
 }
 

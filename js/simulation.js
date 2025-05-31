@@ -210,12 +210,11 @@ function updatePhysics(dt) {
     }
     updatePopulationCount();
 
-
-    draw(); // Call draw after physics updates
+    // draw(); // REMOVE draw() call from here
     // requestAnimationFrame(gameLoop); // gameLoop call handled in main.js
 }
 
-// --- Drawing ---
+// --- Drawing --- (draw() function is now standalone)
 function draw() {
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);

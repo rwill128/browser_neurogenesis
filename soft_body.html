@@ -442,6 +442,7 @@
             </div>
             <div class="control-group">
                 <h4>Environment Maps</h4>
+                <hr style="border-color: #444; margin-top: 15px; margin-bottom: 10px;">
                 <label for="showNutrientMapToggle" class="checkbox-label">Show Nutrient Map:
                     <input type="checkbox" id="showNutrientMapToggle">
                 </label>
@@ -462,6 +463,30 @@
                 <input type="range" id="nutrientBrushStrengthSlider" min="0.01" max="1.0" value="0.1" step="0.01">
 
                 <button id="clearNutrientMapButton">Clear Nutrient Map</button>
+            </div>
+            <div class="control-group">
+                <h4>Environment Maps</h4>
+                <hr style="border-color: #444; margin-top: 15px; margin-bottom: 10px;">
+                <label for="showLightMapToggle" class="checkbox-label">Show Light Map:
+                    <input type="checkbox" id="showLightMapToggle">
+                </label>
+                <label for="lightEditModeToggle" class="checkbox-label">Edit Light Map:
+                    <input type="checkbox" id="lightEditModeToggle">
+                </label>
+
+                <label for="lightBrushValueSlider" class="slider-label">Light Brush Value:</label>
+                <span id="lightBrushValueSpan" class="slider-value">0.5</span>
+                <input type="range" id="lightBrushValueSlider" min="0.0" max="1.0" value="0.5" step="0.01">
+
+                <label for="lightBrushSizeSlider" class="slider-label">Light Brush Size (cells):</label>
+                <span id="lightBrushSizeSpan" class="slider-value">5</span>
+                <input type="range" id="lightBrushSizeSlider" min="1" max="20" value="5" step="1">
+
+                <label for="lightBrushStrengthSlider" class="slider-label">Light Brush Strength:</label>
+                <span id="lightBrushStrengthSpan" class="slider-value">0.10</span>
+                <input type="range" id="lightBrushStrengthSlider" min="0.01" max="1.0" value="0.1" step="0.01">
+                
+                <button id="clearLightMapButton">Reset Light Map (Surface)</button>
             </div>
         </div>
     </div>
@@ -676,6 +701,16 @@
         const nutrientBrushStrengthSpan = document.getElementById('nutrientBrushStrengthSpan');
         const clearNutrientMapButton = document.getElementById('clearNutrientMapButton');
 
+        const showLightMapToggle = document.getElementById('showLightMapToggle');
+        const lightEditModeToggle = document.getElementById('lightEditModeToggle');
+        const lightBrushValueSlider = document.getElementById('lightBrushValueSlider');
+        const lightBrushValueSpan = document.getElementById('lightBrushValueSpan');
+        const lightBrushSizeSlider = document.getElementById('lightBrushSizeSlider');
+        const lightBrushSizeSpan = document.getElementById('lightBrushSizeSpan');
+        const lightBrushStrengthSlider = document.getElementById('lightBrushStrengthSlider');
+        const lightBrushStrengthSpan = document.getElementById('lightBrushStrengthSpan');
+        const clearLightMapButton = document.getElementById('clearLightMapButton');
+
         // --- Global Variables & Constants (with initial hardcoded defaults) ---
         let CREATURE_POPULATION_FLOOR = 10;
         let CREATURE_POPULATION_CEILING = 1000;
@@ -727,6 +762,16 @@
         const MIN_NUTRIENT_VALUE = 0.1;
         const MAX_NUTRIENT_VALUE = 3.0;
         let isPaintingNutrients = false;
+
+        let lightField = null;
+        let IS_LIGHT_EDIT_MODE = false;
+        let SHOW_LIGHT_MAP = false; // Default to false
+        let LIGHT_BRUSH_VALUE = 0.5;
+        let LIGHT_BRUSH_SIZE = 5;
+        let LIGHT_BRUSH_STRENGTH = 0.1;
+        const MIN_LIGHT_VALUE = 0.0;
+        const MAX_LIGHT_VALUE = 1.0;
+        let isPaintingLight = false;
 
         let INITIAL_POPULATION_SIZE; // Will be set after CREATURE_POPULATION_FLOOR is loaded/defaulted
 
@@ -1161,6 +1206,27 @@
             console.log("Nutrient map cleared.");
         };
 
+        showLightMapToggle.onchange = function() { SHOW_LIGHT_MAP = this.checked; };
+        lightEditModeToggle.onchange = function() {
+            IS_LIGHT_EDIT_MODE = this.checked;
+            if (IS_LIGHT_EDIT_MODE) {
+                // Ensure other edit modes are off
+                emitterEditModeToggle.checked = false; IS_EMITTER_EDIT_MODE = false;
+                nutrientEditModeToggle.checked = false; IS_NUTRIENT_EDIT_MODE = false;
+                canvas.classList.remove('emitter-edit-mode');
+                // canvas.classList.add('light-edit-mode'); // Optional: for specific cursor
+            } else {
+                // canvas.classList.remove('light-edit-mode');
+            }
+        };
+        lightBrushValueSlider.oninput = function() { LIGHT_BRUSH_VALUE = parseFloat(this.value); updateSliderDisplay(this, lightBrushValueSpan); }
+        lightBrushSizeSlider.oninput = function() { LIGHT_BRUSH_SIZE = parseInt(this.value); updateSliderDisplay(this, lightBrushSizeSpan); }
+        lightBrushStrengthSlider.oninput = function() { LIGHT_BRUSH_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, lightBrushStrengthSpan); }
+        clearLightMapButton.onclick = function() {
+            initLightMap(); // Resets the map to default pattern
+            console.log("Light map reset to surface pattern.");
+        };
+
         viewEntireSimButton.onclick = function() {
             console.log('[View Entire Sim] Before:', { viewZoom, viewOffsetX, viewOffsetY, WORLD_WIDTH, WORLD_HEIGHT, clientW: canvas.clientWidth, clientH: canvas.clientHeight });
             
@@ -1183,6 +1249,15 @@
             updateSliderDisplay(nutrientBrushValueSlider, nutrientBrushValueSpan);
             updateSliderDisplay(nutrientBrushSizeSlider, nutrientBrushSizeSpan);
             updateSliderDisplay(nutrientBrushStrengthSlider, nutrientBrushStrengthSpan);
+
+            showLightMapToggle.checked = SHOW_LIGHT_MAP;
+            lightEditModeToggle.checked = IS_LIGHT_EDIT_MODE;
+            lightBrushValueSlider.value = LIGHT_BRUSH_VALUE;
+            lightBrushSizeSlider.value = LIGHT_BRUSH_SIZE;
+            lightBrushStrengthSlider.value = LIGHT_BRUSH_STRENGTH;
+            updateSliderDisplay(lightBrushValueSlider, lightBrushValueSpan);
+            updateSliderDisplay(lightBrushSizeSlider, lightBrushSizeSpan);
+            updateSliderDisplay(lightBrushStrengthSlider, lightBrushStrengthSpan);
 
             canvas.classList.toggle('emitter-edit-mode', IS_EMITTER_EDIT_MODE);
         }
@@ -1472,6 +1547,13 @@
                     selectedSoftBodyPoint = null;
                     return; // Consume the event
                 }
+                else if (IS_LIGHT_EDIT_MODE) { // else if to ensure exclusivity
+                    isPaintingLight = true;
+                    paintLightBrush(simMouseX, simMouseY);
+                    selectedInspectBody = null; updateInfoPanel(); 
+                    selectedSoftBodyPoint = null;
+                    return; 
+                }
 
                 let clickedOnPoint = false;
                 selectedInspectBody = null; // Reset selected body on new click
@@ -1572,6 +1654,10 @@
                 paintNutrientBrush(simMouseX, simMouseY);
                 return; // Consume if painting
             }
+            else if (IS_LIGHT_EDIT_MODE && isPaintingLight && mouse.isDown) {
+                paintLightBrush(simMouseX, simMouseY);
+                return; 
+            }
         });
 
         canvas.addEventListener('mouseup', (e) => {
@@ -1582,6 +1668,9 @@
                 mouse.isDown = false;
                 if (isPaintingNutrients) {
                     isPaintingNutrients = false;
+                }
+                if (isPaintingLight) { 
+                    isPaintingLight = false;
                 }
 
                 if (IS_EMITTER_EDIT_MODE && emitterDragStartCell && fluidField) {
@@ -1662,6 +1751,9 @@
 
             if (isPaintingNutrients) {
                 isPaintingNutrients = false;
+            }
+            if (isPaintingLight) { 
+                isPaintingLight = false;
             }
         });
 
@@ -3506,6 +3598,59 @@
             console.log(`Nutrient map initialized to ${size}x${size}.`);
         }
 
+        // Simple Perlin Noise placeholder
+        const PerlinNoise = function() {
+            this.p = new Uint8Array(512);
+            for (let i=0; i < 256 ; i++) this.p[i] = Math.floor(Math.random()*256);
+            for (let i=0; i < 256 ; i++) this.p[256+i] = this.p[i];
+
+            this.fade = function(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+            this.lerp = function(t, a, b) { return a + t * (b - a); }
+            this.grad = function(hash, x, y_param) { // Renamed y to y_param
+                const h = hash & 15;
+                const u = h < 8 ? x : y_param;
+                const v = h < 4 ? y_param : h === 12 || h === 14 ? x : 0;
+                return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+            }
+            this.noise = function(x, y_param) { // Renamed y to y_param
+                const X = Math.floor(x) & 255;
+                const Y = Math.floor(y_param) & 255;
+                x -= Math.floor(x);
+                y_param -= Math.floor(y_param);
+                const u = this.fade(x);
+                const v = this.fade(y_param);
+                const A = this.p[X  ] + Y;
+                const B = this.p[X+1] + Y;
+                return this.lerp(v, this.lerp(u, this.grad(this.p[A  ], x, y_param  ),
+                                                 this.grad(this.p[B  ], x-1,y_param  )),
+                                   this.lerp(u, this.grad(this.p[A+1], x, y_param-1),
+                                                 this.grad(this.p[B+1], x-1,y_param-1)));
+            }
+        };
+        const perlin = new PerlinNoise(); // Instantiate it
+
+        function initLightMap() {
+            const size = Math.round(FLUID_GRID_SIZE_CONTROL);
+            if (size <= 0 || !Number.isFinite(size)) {
+                console.error("Invalid size for light map:", size);
+                lightField = new Float32Array(0);
+                return;
+            }
+            lightField = new Float32Array(size * size);
+            const noiseScale = 0.05; // Adjust for patchiness; smaller = larger patches
+            const noiseOffsetX = Math.random() * 1000; 
+            const noiseOffsetY = Math.random() * 1000;
+
+            for (let y_coord = 0; y_coord < size; y_coord++) { 
+                for (let x = 0; x < size; x++) {
+                    let noiseValue = perlin.noise(x * noiseScale + noiseOffsetX, y_coord * noiseScale + noiseOffsetY);
+                    noiseValue = (noiseValue + 1) / 2; // Map to 0-1 range
+                    lightField[y_coord * size + x] = Math.max(MIN_LIGHT_VALUE, Math.min(MAX_LIGHT_VALUE, noiseValue));
+                }
+            }
+            console.log(`Light map initialized to ${size}x${size} with Perlin noise pattern.`);
+        }
+
         function initParticles() {
             particles = [];
             particleEmissionDebt = 0;
@@ -3656,6 +3801,9 @@
             if (SHOW_NUTRIENT_MAP && nutrientField && fluidField) {
                 drawNutrientMap(ctx);
             }
+            if (SHOW_LIGHT_MAP && lightField && fluidField) {
+                drawLightMap(ctx);
+            }
 
             for (let particle of particles) {
                 particle.draw(ctx);
@@ -3752,6 +3900,30 @@
             }
         }
 
+        function drawLightMap(ctxToDrawOn) {
+            if (!SHOW_LIGHT_MAP || !lightField || !fluidField) return;
+
+            const N = Math.round(FLUID_GRID_SIZE_CONTROL);
+            if (N <= 0) return;
+
+            const cellWidth = WORLD_WIDTH / N;
+            const cellHeight = WORLD_HEIGHT / N;
+
+            for (let j = 0; j < N; j++) {
+                for (let i = 0; i < N; i++) {
+                    const lightValue = lightField[fluidField.IX(i, j)]; // 0.0 to 1.0
+                    const intensity = Math.floor(lightValue * 200); // Base for yellow/white
+                    const bluePart = Math.floor((1 - lightValue) * 50); // Add some blue for darker areas
+                    const alpha = lightValue * 0.15 + (1-lightValue) * 0.05; // More opaque for brighter light, slightly visible for dark
+
+                    if (lightValue > 0.01 || (1-lightValue) > 0.01) { // Only draw if not perfectly neutral/invisible
+                        ctxToDrawOn.fillStyle = `rgba(${intensity}, ${intensity}, ${bluePart}, ${alpha.toFixed(2)})`;
+                        ctxToDrawOn.fillRect(i * cellWidth, j * cellHeight, cellWidth, cellHeight);
+                    }
+                }
+            }
+        }
+
         // --- Game Loop ---
         let animationFrameId = null;
         function gameLoop(timestamp) {
@@ -3809,7 +3981,9 @@
                 viewOffsetX: viewOffsetX,
                 viewOffsetY: viewOffsetY,
                 nutrientFieldData: nutrientField ? Array.from(nutrientField) : null,
-                nutrientMapSize: nutrientField ? Math.round(FLUID_GRID_SIZE_CONTROL) : 0
+                nutrientMapSize: nutrientField ? Math.round(FLUID_GRID_SIZE_CONTROL) : 0,
+                lightFieldData: lightField ? Array.from(lightField) : null,
+                lightMapSize: lightField ? Math.round(FLUID_GRID_SIZE_CONTROL) : 0
             };
             const jsonString = JSON.stringify(config, null, 2);
             const blob = new Blob([jsonString], {type: "application/json"});
@@ -3927,6 +4101,7 @@
 
             initFluidSimulation(); // This needs to be called so fluidField.scaleX/Y are set
             initNutrientMap(); // Initialize nutrient map after fluid sim is ready
+            initLightMap(); // Initialize light map
             initParticles();
             // Initialize nutrient map after fluid simulation setup to ensure FLUID_GRID_SIZE_CONTROL is correctly applied
             if (config.nutrientFieldData && config.nutrientMapSize) {
@@ -3939,6 +4114,18 @@
                 }
             } else {
                 initNutrientMap(); // Initialize if not in config
+            }
+            // Initialize light map after fluid simulation setup and nutrient map handling
+            if (config.lightFieldData && config.lightMapSize) {
+                if (config.lightMapSize === Math.round(FLUID_GRID_SIZE_CONTROL)) {
+                    lightField = new Float32Array(config.lightFieldData);
+                    console.log("Light map loaded from config.");
+                } else {
+                    console.warn("Light map size in config (" + config.lightMapSize + ") does not match current grid size (" + Math.round(FLUID_GRID_SIZE_CONTROL) + "). Re-initializing light map.");
+                    initLightMap();
+                }
+            } else {
+                initLightMap(); // Initialize if not in config
             }
             initializePopulation(); // Population depends on nutrient map for potential future cost calculations.
 
@@ -4044,6 +4231,7 @@
             initializeAllSliderDisplays(); // This will now use the (potentially JSON-overridden) global vars
             initFluidSimulation();
             initNutrientMap(); // Initialize nutrient map after fluid sim is ready
+            initLightMap(); // Initialize light map
             initParticles();
             initializePopulation();
             updateInstabilityIndicator();
@@ -4078,6 +4266,32 @@
                         let newValue = currentValue + (targetValue - currentValue) * NUTRIENT_BRUSH_STRENGTH;
                         newValue = Math.max(MIN_NUTRIENT_VALUE, Math.min(newValue, MAX_NUTRIENT_VALUE)); // Clamp
                         nutrientField[idx] = newValue;
+                    }
+                }
+            }
+        }
+
+        function paintLightBrush(worldX, worldY) {
+            if (!lightField || !fluidField || FLUID_GRID_SIZE_CONTROL <= 0) return;
+
+            const N = Math.round(FLUID_GRID_SIZE_CONTROL);
+            const gridX = Math.floor(worldX / fluidField.scaleX);
+            const gridY = Math.floor(worldY / fluidField.scaleY);
+            const brushRadius = Math.floor(LIGHT_BRUSH_SIZE / 2);
+
+            for (let offsetY = -brushRadius; offsetY <= brushRadius; offsetY++) {
+                for (let offsetX = -brushRadius; offsetX <= brushRadius; offsetX++) {
+                    const currentPaintX = gridX + offsetX;
+                    const currentPaintY = gridY + offsetY;
+
+                    if (currentPaintX >= 0 && currentPaintX < N && currentPaintY >= 0 && currentPaintY < N) {
+                        const idx = fluidField.IX(currentPaintX, currentPaintY);
+                        const currentValue = lightField[idx];
+                        const targetValue = LIGHT_BRUSH_VALUE;
+                        
+                        let newValue = currentValue + (targetValue - currentValue) * LIGHT_BRUSH_STRENGTH;
+                        newValue = Math.max(MIN_LIGHT_VALUE, Math.min(newValue, MAX_LIGHT_VALUE));
+                        lightField[idx] = newValue;
                     }
                 }
             }

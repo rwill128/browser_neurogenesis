@@ -1,0 +1,999 @@
+// --- DOM Element Selections ---
+const canvas = document.getElementById('simulationCanvas');
+const ctx = canvas.getContext('2d');
+let offscreenFluidCanvas, offscreenFluidCtx; // For smoother fluid rendering
+
+const worldWidthInput = document.getElementById('worldWidthInput');
+const worldHeightInput = document.getElementById('worldHeightInput');
+const resizeWorldButton = document.getElementById('resizeWorldButton');
+
+const worldWrapToggle = document.getElementById('worldWrapToggle');
+const maxTimestepSlider = document.getElementById('maxTimestep');
+const maxTimestepValueSpan = document.getElementById('maxTimestepValue');
+const zoomSensitivitySlider = document.getElementById('zoomSensitivitySlider');
+const zoomSensitivityValueSpan = document.getElementById('zoomSensitivityValueSpan');
+const pauseResumeButton = document.getElementById('pauseResumeButton');
+const toggleControlsButton = document.getElementById('toggleControlsButton');
+const screensaverButton = document.getElementById('screensaverButton');
+const controlsPanel = document.getElementById('controls');
+const viewEntireSimButton = document.getElementById('viewEntireSimButton');
+
+const creaturePopulationFloorSlider = document.getElementById('creaturePopulationFloorSlider');
+const creaturePopulationFloorValueSpan = document.getElementById('creaturePopulationFloorValueSpan');
+const creaturePopulationCeilingSlider = document.getElementById('creaturePopulationCeilingSlider');
+const creaturePopulationCeilingValueSpan = document.getElementById('creaturePopulationCeilingValueSpan');
+
+const bodyFluidEntrainmentSlider = document.getElementById('bodyFluidEntrainment');
+const fluidCurrentStrengthSlider = document.getElementById('fluidCurrentStrength');
+const bodyPushStrengthSlider = document.getElementById('bodyPushStrength');
+const reproductionCooldownSlider = document.getElementById('reproductionCooldown');
+const bodyRepulsionStrengthSlider = document.getElementById('bodyRepulsionStrength');
+const bodyRepulsionRadiusFactorSlider = document.getElementById('bodyRepulsionRadiusFactor');
+const globalMutationRateSlider = document.getElementById('globalMutationRate');
+const baseNodeCostSlider = document.getElementById('baseNodeCost');
+const emitterNodeCostSlider = document.getElementById('emitterNodeCost');
+const eaterNodeCostSlider = document.getElementById('eaterNodeCost');
+const predatorNodeCostSlider = document.getElementById('predatorNodeCost');
+const neuronNodeCostSlider = document.getElementById('neuronNodeCost');
+const photosyntheticNodeCostSlider = document.getElementById('photosyntheticNodeCost'); // Added
+const photosynthesisEfficiencySlider = document.getElementById('photosynthesisEfficiency'); // Added
+
+const instabilityLight = document.getElementById('instabilityLight');
+const populationCountDisplay = document.getElementById('populationCount');
+const resetButton = document.getElementById('resetButton');
+const bodyFluidEntrainmentValueSpan = document.getElementById('bodyFluidEntrainmentValue');
+const fluidCurrentStrengthValueSpan = document.getElementById('fluidCurrentStrengthValue');
+const bodyPushStrengthValueSpan = document.getElementById('bodyPushStrengthValue');
+const reproductionCooldownValueSpan = document.getElementById('reproductionCooldownValue');
+const bodyRepulsionStrengthValueSpan = document.getElementById('bodyRepulsionStrengthValue');
+const bodyRepulsionRadiusFactorValueSpan = document.getElementById('bodyRepulsionRadiusFactorValue');
+const globalMutationRateValueSpan = document.getElementById('globalMutationRateValue');
+const baseNodeCostValueSpan = document.getElementById('baseNodeCostValue');
+const emitterNodeCostValueSpan = document.getElementById('emitterNodeCostValue');
+const eaterNodeCostValueSpan = document.getElementById('eaterNodeCostValue');
+const predatorNodeCostValueSpan = document.getElementById('predatorNodeCostValue');
+const neuronNodeCostValueSpan = document.getElementById('neuronNodeCostValue');
+const photosyntheticNodeCostValueSpan = document.getElementById('photosyntheticNodeCostValue'); // Added
+const photosynthesisEfficiencyValueSpan = document.getElementById('photosynthesisEfficiencyValue'); // Added
+
+
+const fluidGridSizeSlider = document.getElementById('fluidGridSize');
+const fluidGridSizeValueSpan = document.getElementById('fluidGridSizeValue');
+const fluidDiffusionSlider = document.getElementById('fluidDiffusion');
+const fluidViscositySlider = document.getElementById('fluidViscosity');
+const fluidFadeSlider = document.getElementById('fluidFade');
+const clearFluidButton = document.getElementById('clearFluidButton');
+const fluidDiffusionValueSpan = document.getElementById('fluidDiffusionValue');
+const fluidViscosityValueSpan = document.getElementById('fluidViscosityValue');
+const fluidFadeValueSpan = document.getElementById('fluidFadeValue');
+const maxFluidVelocityComponentSlider = document.getElementById('maxFluidVelocityComponentSlider'); 
+const maxFluidVelocityComponentValueSpan = document.getElementById('maxFluidVelocityComponentValueSpan');
+
+
+const particlePopulationFloorSlider = document.getElementById('particlePopulationFloorSlider');
+const particlePopulationFloorValueSpan = document.getElementById('particlePopulationFloorValueSpan');
+const particlePopulationCeilingSlider = document.getElementById('particlePopulationCeilingSlider');
+const particlePopulationCeilingValueSpan = document.getElementById('particlePopulationCeilingValueSpan');
+const particlesPerSecondSlider = document.getElementById('particlesPerSecondSlider');
+const particlesPerSecondValueSpan = document.getElementById('particlesPerSecondValueSpan');
+const particleFluidInfluenceSlider = document.getElementById('particleFluidInfluence');
+const particleFluidInfluenceValueSpan = document.getElementById('particleFluidInfluenceValue');
+const particleLifeDecaySlider = document.getElementById('particleLifeDecay');
+const particleLifeDecayValueSpan = document.getElementById('particleLifeDecayValue');
+const infiniteParticleLifeToggle = document.getElementById('infiniteParticleLifeToggle');
+const particleLifeDecayLabel = document.getElementById('particleLifeDecayLabel');
+const resetParticlesButton = document.getElementById('resetParticlesButton');
+
+const exportConfigButton = document.getElementById('exportConfigButton');
+const importConfigFile = document.getElementById('importConfigFile');
+const importConfigButton = document.getElementById('importConfigButton');
+
+const emitterEditModeToggle = document.getElementById('emitterEditModeToggle');
+const emitterStrengthSlider = document.getElementById('emitterStrength');
+const emitterStrengthValueSpan = document.getElementById('emitterStrengthValue');
+const clearEmittersButton = document.getElementById('clearEmittersButton');
+
+const infoPanel = document.getElementById('infoPanel');
+const closeInfoPanelButton = document.getElementById('closeInfoPanel');
+// const neuronInfoSection = document.getElementById('neuronInfoSection'); // This ID was not used
+const allPointsInfoContainer = document.getElementById('allPointsInfoContainer'); 
+const copyInfoPanelButton = document.getElementById('copyInfoPanelButton'); 
+
+const showNutrientMapToggle = document.getElementById('showNutrientMapToggle');
+const nutrientEditModeToggle = document.getElementById('nutrientEditModeToggle');
+
+const nutrientBrushValueSlider = document.getElementById('nutrientBrushValueSlider');
+const nutrientBrushValueSpan = document.getElementById('nutrientBrushValueSpan');
+const nutrientBrushSizeSlider = document.getElementById('nutrientBrushSizeSlider');
+const nutrientBrushSizeSpan = document.getElementById('nutrientBrushSizeSpan');
+const nutrientBrushStrengthSlider = document.getElementById('nutrientBrushStrengthSlider');
+const nutrientBrushStrengthSpan = document.getElementById('nutrientBrushStrengthSpan');
+const clearNutrientMapButton = document.getElementById('clearNutrientMapButton');
+
+const showLightMapToggle = document.getElementById('showLightMapToggle');
+const lightEditModeToggle = document.getElementById('lightEditModeToggle');
+const lightBrushValueSlider = document.getElementById('lightBrushValueSlider');
+const lightBrushValueSpan = document.getElementById('lightBrushValueSpan');
+const lightBrushSizeSlider = document.getElementById('lightBrushSizeSlider');
+const lightBrushSizeSpan = document.getElementById('lightBrushSizeSpan');
+const lightBrushStrengthSlider = document.getElementById('lightBrushStrengthSlider');
+const lightBrushStrengthSpan = document.getElementById('lightBrushStrengthSpan');
+const clearLightMapButton = document.getElementById('clearLightMapButton');
+
+const showViscosityMapToggle = document.getElementById('showViscosityMapToggle');
+const viscosityEditModeToggle = document.getElementById('viscosityEditModeToggle');
+const viscosityBrushValueSlider = document.getElementById('viscosityBrushValueSlider');
+const viscosityBrushValueSpan = document.getElementById('viscosityBrushValueSpan');
+const viscosityBrushSizeSlider = document.getElementById('viscosityBrushSizeSlider');
+const viscosityBrushSizeSpan = document.getElementById('viscosityBrushSizeSpan');
+const viscosityBrushStrengthSlider = document.getElementById('viscosityBrushStrengthSlider');
+const viscosityBrushStrengthSpan = document.getElementById('viscosityBrushStrengthSpan');
+const clearViscosityMapButton = document.getElementById('clearViscosityMapButton');
+
+const nutrientCyclePeriodSlider = document.getElementById('nutrientCyclePeriodSlider');
+const nutrientCyclePeriodSpan = document.getElementById('nutrientCyclePeriodSpan');
+const nutrientCycleBaseAmplitudeSlider = document.getElementById('nutrientCycleBaseAmplitudeSlider');
+const nutrientCycleBaseAmplitudeSpan = document.getElementById('nutrientCycleBaseAmplitudeSpan');
+const nutrientCycleWaveAmplitudeSlider = document.getElementById('nutrientCycleWaveAmplitudeSlider');
+const nutrientCycleWaveAmplitudeSpan = document.getElementById('nutrientCycleWaveAmplitudeSpan');
+const lightCyclePeriodSlider = document.getElementById('lightCyclePeriodSlider');
+const lightCyclePeriodSpan = document.getElementById('lightCyclePeriodSpan');
+const currentNutrientMultiplierDisplay = document.getElementById('currentNutrientMultiplierDisplay');
+const currentLightMultiplierDisplay = document.getElementById('currentLightMultiplierDisplay');
+
+// --- Mouse Interaction State Variables ---
+let selectedSoftBodyPoint = null;
+let mouse = { x: 0, y: 0, prevX: 0, prevY: 0, isDown: false, dx:0, dy:0 };
+// isRightDragging already declared in config.js
+let panStartMouseDisplayX = 0;
+let panStartMouseDisplayY = 0;
+let panInitialViewOffsetX = 0;
+let panInitialViewOffsetY = 0;
+
+// --- UI Update Functions ---
+function updateSliderDisplay(slider, span) {
+    let value = parseFloat(slider.value);
+    if (!slider || !span) return;
+
+    const config = window.loadedSliderConfigs?.find(c => c.id === slider.id);
+    
+    // if (slider.id === 'fluidViscosity') { // Specific debug for this slider
+    //     console.log("updateSliderDisplay for fluidViscosity. Config found:", config, "Value:", value, "slider.value:", slider.value);
+    // }
+
+    if (config && config.displayFormat === "toFixed(4)") {
+         span.textContent = value.toFixed(4);
+    } else if (config && config.displayFormat === "toFixed(3)") {
+         span.textContent = value.toFixed(3);
+    } else if (config && config.displayFormat === "toFixed(2)") {
+         span.textContent = value.toFixed(2);
+    } else if (config && config.displayFormat === "toFixed(1)") {
+         span.textContent = value.toFixed(1);
+    } else if (config && config.displayFormat === "toExponential(1)") {
+         span.textContent = value.toExponential(1);
+    } else {
+        span.textContent = Number.isInteger(Number(slider.step)) && Number(slider.step) === 1 ? Math.floor(value) : value.toFixed(2);
+    }
+}
+
+function initializeAllSliderDisplays() {
+    worldWidthInput.value = WORLD_WIDTH;
+    worldHeightInput.value = WORLD_HEIGHT;
+
+    // Iterate through loadedSliderConfigs to set display values
+    if (window.loadedSliderConfigs) {
+        window.loadedSliderConfigs.forEach(config => {
+            const slider = document.getElementById(config.id);
+            const span = document.getElementById(config.valueSpanId);
+            if (slider && span) {
+                 updateSliderDisplay(slider, span);
+            }
+        });
+    }
+    // Update any displays for controls not in the JSON (like checkboxes)
+    particleLifeDecaySlider.disabled = IS_PARTICLE_LIFE_INFINITE;
+    particleLifeDecayLabel.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#ddd';
+    particleLifeDecayValueSpan.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
+    worldWrapToggle.checked = IS_WORLD_WRAPPING;
+    emitterEditModeToggle.checked = IS_EMITTER_EDIT_MODE;
+    infiniteParticleLifeToggle.checked = IS_PARTICLE_LIFE_INFINITE;
+
+    canvas.classList.toggle('emitter-edit-mode', IS_EMITTER_EDIT_MODE);
+
+    // Ensure map toggles reflect current state
+    showNutrientMapToggle.checked = SHOW_NUTRIENT_MAP;
+    nutrientEditModeToggle.checked = IS_NUTRIENT_EDIT_MODE;
+    showLightMapToggle.checked = SHOW_LIGHT_MAP;
+    lightEditModeToggle.checked = IS_LIGHT_EDIT_MODE;
+    showViscosityMapToggle.checked = SHOW_VISCOSITY_MAP;
+    viscosityEditModeToggle.checked = IS_VISCOSITY_EDIT_MODE;
+}
+
+function updateInstabilityIndicator() {
+    if (isAnySoftBodyUnstable) {
+        instabilityLight.classList.add('unstable');
+    } else {
+        instabilityLight.classList.remove('unstable');
+    }
+}
+function updatePopulationCount() {
+    populationCountDisplay.textContent = `Population: ${softBodyPopulation.length}`;
+}
+
+function updateInfoPanel() {
+    if (selectedInspectBody) { // Check if a body is selected
+        document.getElementById('infoBodyId').textContent = selectedInspectBody.id;
+        document.getElementById('infoBodyStiffness').textContent = selectedInspectBody.stiffness.toFixed(2);
+        document.getElementById('infoBodyDamping').textContent = selectedInspectBody.springDamping.toFixed(2);
+        document.getElementById('infoBodyMotorInterval').textContent = selectedInspectBody.motorImpulseInterval;
+        document.getElementById('infoBodyMotorCap').textContent = selectedInspectBody.motorImpulseMagnitudeCap.toFixed(2);
+        document.getElementById('infoBodyEmitterStrength').textContent = selectedInspectBody.emitterStrength.toFixed(2);
+        document.getElementById('infoBodyEmitterDirX').textContent = selectedInspectBody.emitterDirection.x.toFixed(2);
+        document.getElementById('infoBodyEmitterDirY').textContent = selectedInspectBody.emitterDirection.y.toFixed(2);
+        document.getElementById('infoBodyNumOffspring').textContent = selectedInspectBody.numOffspring;
+        document.getElementById('infoBodyOffspringRadius').textContent = selectedInspectBody.offspringSpawnRadius.toFixed(1);
+        document.getElementById('infoBodyPointAddChance').textContent = selectedInspectBody.pointAddChance.toFixed(3);
+        document.getElementById('infoBodySpringConnectionRadius').textContent = selectedInspectBody.springConnectionRadius.toFixed(1);
+        document.getElementById('infoBodyEnergy').textContent = selectedInspectBody.creatureEnergy.toFixed(2);
+        document.getElementById('infoBodyTicksBirth').textContent = selectedInspectBody.ticksSinceBirth;
+        document.getElementById('infoBodyCanReproduce').textContent = selectedInspectBody.canReproduce;
+
+        allPointsInfoContainer.innerHTML = '<h5>All Mass Points</h5>'; // Clear previous and add title
+        selectedInspectBody.massPoints.forEach((point, index) => {
+            const pointEntryDiv = document.createElement('div');
+            pointEntryDiv.className = 'point-info-entry';
+
+            let content = `<p><strong>Point Index:</strong> ${index}</p>`;
+            content += `<p><strong>Node Type:</strong> ${getNodeTypeString(point.nodeType)}</p>`;
+            content += `<p><strong>Mass:</strong> ${point.mass.toFixed(2)}</p>`;
+            content += `<p><strong>Radius:</strong> ${point.radius.toFixed(2)}</p>`;
+            content += `<p><strong>World Pos:</strong> X: ${point.pos.x.toFixed(2)}, Y: ${point.pos.y.toFixed(2)}</p>`;
+            content += `<p><strong>Is Eater:</strong> ${point.isEater}</p>`;
+            content += `<p><strong>Is Predator:</strong> ${point.isPredator}</p>`;
+            content += `<p><strong>Emits Dye:</strong> ${point.emitsDye}</p>`;
+            content += `<p><strong>Dye Color:</strong> ${point.emitsDye ? `R:${point.dyeColor[0].toFixed(0)} G:${point.dyeColor[1].toFixed(0)} B:${point.dyeColor[2].toFixed(0)}` : "N/A"}</p>`;
+
+            if (point.nodeType === NodeType.NEURON && point.neuronData) {
+                if (typeof point.neuronData.hiddenLayerSize === 'undefined') {
+                    const bodyIdForLog = selectedInspectBody ? selectedInspectBody.id : 'UnknownBody';
+                    console.warn(`Neuron in Body ${bodyIdForLog}, Point Index ${index}, has neuronData, but hiddenLayerSize is UNDEFINED. neuronData:`, JSON.parse(JSON.stringify(point.neuronData)));
+                }
+
+                if (point.neuronData.isBrain) {
+                    content += `<h6>Brain Details:</h6>`;
+                    content += `<p><strong>Role:</strong> Active Brain</p>`;
+                    content += `<p><strong>Hidden Layer Size:</strong> ${point.neuronData.hiddenLayerSize || 'N/A'}</p>`;
+                    content += `<p><strong>Input Vector Size:</strong> ${point.neuronData.inputVectorSize || 'N/A'}</p>`;
+                    content += `<p><strong>Output Vector Size:</strong> ${point.neuronData.outputVectorSize || 'N/A'}</p>`;
+                    if (typeof point.neuronData.lastAvgNormalizedReward === 'number') {
+                        content += `<p><strong>Avg Batch Reward:</strong> ${point.neuronData.lastAvgNormalizedReward.toFixed(3)}</p>`;
+                    }
+                    if (point.neuronData.rawOutputs && point.neuronData.rawOutputs.length > 0) {
+                        content += `<p><strong>Raw Outputs:</strong> [${point.neuronData.rawOutputs.map(o => o.toFixed(2)).join(', ')}]</p>`;
+                    }
+                } else {
+                    content += `<h6>Neuron (Non-Brain)</h6>`;
+                    content += `<p><strong>Hidden Layer Size (if applicable):</strong> ${point.neuronData.hiddenLayerSize || 'N/A'}</p>`;
+                }
+            }
+            pointEntryDiv.innerHTML = content;
+            allPointsInfoContainer.appendChild(pointEntryDiv);
+        });
+
+
+        if (!infoPanel.classList.contains('open')) {
+            infoPanel.classList.add('open');
+        }
+    } else { 
+        allPointsInfoContainer.innerHTML = ''; 
+        document.getElementById('infoBodyId').textContent = '-';
+        // ... clear other body info spans ...
+        infoPanel.classList.remove('open');
+    }
+}
+
+// Simple modal for alerts
+function showMessageModal(message) {
+    let modal = document.getElementById('messageModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'messageModal';
+        modal.style.position = 'fixed';
+        modal.style.left = '50%';
+        modal.style.top = '50%';
+        modal.style.transform = 'translate(-50%, -50%)';
+        modal.style.backgroundColor = 'rgba(50,50,50,0.9)';
+        modal.style.color = 'white';
+        modal.style.padding = '20px';
+        modal.style.border = '1px solid #777';
+        modal.style.borderRadius = '8px';
+        modal.style.boxShadow = '0 0 15px rgba(0,0,0,0.5)';
+        modal.style.zIndex = '2000'; // Ensure on top
+
+        const messageP = document.createElement('p');
+        messageP.id = 'modalMessageText';
+        messageP.style.margin = '0 0 15px 0';
+
+        const closeButton = document.createElement('button');
+        closeButton.textContent = 'OK';
+        closeButton.style.padding = '8px 15px';
+        closeButton.style.backgroundColor = '#007bff';
+        closeButton.style.color = 'white';
+        closeButton.style.border = 'none';
+        closeButton.style.borderRadius = '4px';
+        closeButton.style.cursor = 'pointer';
+        closeButton.onclick = () => modal.style.display = 'none';
+
+        modal.appendChild(messageP);
+        modal.appendChild(closeButton);
+        document.body.appendChild(modal);
+    }
+    document.getElementById('modalMessageText').textContent = message;
+    modal.style.display = 'block';
+}
+
+// --- Mouse Interaction Logic ---
+function updateMouse(e) {
+    const rect = canvas.getBoundingClientRect();
+    mouse.prevX = mouse.x;
+    mouse.prevY = mouse.y;
+    mouse.x = e.clientX - rect.left;
+    mouse.y = e.clientY - rect.top;
+    mouse.dx = mouse.x - mouse.prevX;
+    mouse.dy = mouse.y - mouse.prevY;
+}
+
+function getMouseWorldCoordinates(displayMouseX, displayMouseY) {
+    const rect = canvas.getBoundingClientRect();
+
+    const canvasDisplayRatioX = canvas.clientWidth / WORLD_WIDTH;
+    const canvasDisplayRatioY = canvas.clientHeight / WORLD_HEIGHT;
+    const effectiveCanvasDisplayRatio = Math.min(canvasDisplayRatioX, canvasDisplayRatioY);
+
+    const renderedWorldWidthInCss = WORLD_WIDTH * effectiveCanvasDisplayRatio;
+    const renderedWorldHeightInCss = WORLD_HEIGHT * effectiveCanvasDisplayRatio;
+    const letterboxOffsetX = (canvas.clientWidth - renderedWorldWidthInCss) / 2;
+    const letterboxOffsetY = (canvas.clientHeight - renderedWorldHeightInCss) / 2;
+
+    const mouseOnRenderedX = displayMouseX - letterboxOffsetX;
+    const mouseOnRenderedY = displayMouseY - letterboxOffsetY;
+
+    const worldX = (mouseOnRenderedX / effectiveCanvasDisplayRatio / viewZoom) + viewOffsetX;
+    const worldY = (mouseOnRenderedY / effectiveCanvasDisplayRatio / viewZoom) + viewOffsetY;
+
+    return { x: worldX, y: worldY };
+}
+
+// --- Event Listeners ---
+document.addEventListener('keydown', (e) => {
+    if (IS_SIMULATION_PAUSED && e.key.toLowerCase() !== 'p') return;
+
+    const effectiveViewportWidth = canvas.clientWidth / viewZoom;
+    const effectiveViewportHeight = canvas.clientHeight / viewZoom;
+    const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
+    const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
+    const panSpeed = VIEW_PAN_SPEED / viewZoom;
+
+
+    switch(e.key.toLowerCase()) {
+        case 'w': viewOffsetY = Math.max(0, viewOffsetY - panSpeed); break;
+        case 's': viewOffsetY = Math.min(maxPanY, viewOffsetY + panSpeed); break;
+        case 'a': viewOffsetX = Math.max(0, viewOffsetX - panSpeed); break;
+        case 'd': viewOffsetX = Math.min(maxPanX, viewOffsetX + panSpeed); break;
+        case 'p':
+            IS_SIMULATION_PAUSED = !IS_SIMULATION_PAUSED;
+            pauseResumeButton.textContent = IS_SIMULATION_PAUSED ? "Resume" : "Pause";
+            if (!IS_SIMULATION_PAUSED) {
+                lastTime = performance.now(); // lastTime is in main.js
+                requestAnimationFrame(gameLoop); // gameLoop is in main.js
+            }
+            break;
+    }
+});
+
+
+worldWrapToggle.onchange = function() {
+    IS_WORLD_WRAPPING = this.checked;
+    if (fluidField) fluidField.useWrapping = IS_WORLD_WRAPPING;
+}
+maxTimestepSlider.oninput = function() { MAX_DELTA_TIME_MS = parseInt(this.value); updateSliderDisplay(this, maxTimestepValueSpan); }
+zoomSensitivitySlider.oninput = function() { ZOOM_SENSITIVITY = parseFloat(this.value); updateSliderDisplay(this, zoomSensitivityValueSpan); }
+
+pauseResumeButton.onclick = function() {
+    IS_SIMULATION_PAUSED = !IS_SIMULATION_PAUSED;
+    this.textContent = IS_SIMULATION_PAUSED ? "Resume" : "Pause";
+    if (!IS_SIMULATION_PAUSED) {
+        lastTime = performance.now(); // lastTime is in main.js
+        requestAnimationFrame(gameLoop); // gameLoop is in main.js
+    }
+}
+toggleControlsButton.onclick = function() {
+    controlsPanel.classList.toggle('open');
+}
+
+function toggleScreensaverMode(forceOff = false) {
+    const isCurrentlyFullscreen = !!document.fullscreenElement;
+    const isBodyCssFullscreen = document.body.classList.contains('css-screensaver-active');
+
+    if (forceOff) { // Force exit
+        if (isCurrentlyFullscreen) {
+            document.exitFullscreen().catch(err => console.error("Error exiting fullscreen:", err));
+        }
+        document.body.classList.remove('css-screensaver-active');
+        screensaverButton.textContent = "Enter Screensaver";
+        screensaverButton.classList.remove('in-screensaver');
+        return;
+    }
+
+    if (isCurrentlyFullscreen || isBodyCssFullscreen) {
+        // Exit fullscreen/screensaver
+        if (isCurrentlyFullscreen) {
+            document.exitFullscreen().catch(err => console.error("Error exiting fullscreen:", err));
+        }
+        document.body.classList.remove('css-screensaver-active');
+        screensaverButton.textContent = "Enter Screensaver";
+        screensaverButton.classList.remove('in-screensaver');
+    } else {
+        // Enter fullscreen/screensaver
+        if (canvasContainer.requestFullscreen) {
+            canvasContainer.requestFullscreen().then(() => {
+                screensaverButton.textContent = "Exit Screensaver";
+                screensaverButton.classList.add('in-screensaver');
+                document.body.classList.add('css-screensaver-active');
+            }).catch(err => {
+                console.warn("Fullscreen API failed, falling back to CSS mode:", err);
+                document.body.classList.add('css-screensaver-active');
+                screensaverButton.textContent = "Exit Screensaver (CSS)";
+                screensaverButton.classList.add('in-screensaver');
+            });
+        } else {
+            document.body.classList.add('css-screensaver-active');
+            screensaverButton.textContent = "Exit Screensaver (CSS)";
+            screensaverButton.classList.add('in-screensaver');
+        }
+    }
+}
+
+screensaverButton.onclick = () => toggleScreensaverMode();
+
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement) {
+        document.body.classList.remove('css-screensaver-active');
+        screensaverButton.textContent = "Enter Screensaver";
+        screensaverButton.classList.remove('in-screensaver');
+    } else {
+         document.body.classList.add('css-screensaver-active');
+         screensaverButton.textContent = "Exit Screensaver";
+         screensaverButton.classList.add('in-screensaver');
+    }
+});
+
+
+creaturePopulationFloorSlider.oninput = function() { CREATURE_POPULATION_FLOOR = parseInt(this.value); updateSliderDisplay(this, creaturePopulationFloorValueSpan); }
+creaturePopulationCeilingSlider.oninput = function() { CREATURE_POPULATION_CEILING = parseInt(this.value); updateSliderDisplay(this, creaturePopulationCeilingValueSpan); }
+particlePopulationFloorSlider.oninput = function() { PARTICLE_POPULATION_FLOOR = parseInt(this.value); updateSliderDisplay(this, particlePopulationFloorValueSpan); }
+particlePopulationCeilingSlider.oninput = function() { PARTICLE_POPULATION_CEILING = parseInt(this.value); updateSliderDisplay(this, particlePopulationCeilingValueSpan); }
+
+
+emitterEditModeToggle.onchange = function() {
+    IS_EMITTER_EDIT_MODE = this.checked;
+    canvas.classList.toggle('emitter-edit-mode', IS_EMITTER_EDIT_MODE);
+    if (!IS_EMITTER_EDIT_MODE) {
+        currentEmitterPreview = null;
+        emitterDragStartCell = null;
+    }
+}
+emitterStrengthSlider.oninput = function() { EMITTER_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, emitterStrengthValueSpan); }
+clearEmittersButton.onclick = function() { velocityEmitters = []; }
+
+
+bodyFluidEntrainmentSlider.oninput = function() { BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(this.value); updateSliderDisplay(this, bodyFluidEntrainmentValueSpan); }
+fluidCurrentStrengthSlider.oninput = function() { FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(this.value); updateSliderDisplay(this, fluidCurrentStrengthValueSpan); }
+bodyPushStrengthSlider.oninput = function() { SOFT_BODY_PUSH_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, bodyPushStrengthValueSpan); }
+reproductionCooldownSlider.oninput = function() { REPRODUCTION_COOLDOWN_TICKS = parseInt(this.value); updateSliderDisplay(this, reproductionCooldownValueSpan); }
+bodyRepulsionStrengthSlider.oninput = function() { BODY_REPULSION_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, bodyRepulsionStrengthValueSpan); }
+bodyRepulsionRadiusFactorSlider.oninput = function() { BODY_REPULSION_RADIUS_FACTOR = parseFloat(this.value); updateSliderDisplay(this, bodyRepulsionRadiusFactorValueSpan); }
+globalMutationRateSlider.oninput = function() { GLOBAL_MUTATION_RATE_MODIFIER = parseFloat(this.value); updateSliderDisplay(this, globalMutationRateValueSpan); }
+
+baseNodeCostSlider.oninput = function() { BASE_NODE_EXISTENCE_COST = parseFloat(this.value); updateSliderDisplay(this, baseNodeCostValueSpan); }
+emitterNodeCostSlider.oninput = function() { EMITTER_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, emitterNodeCostValueSpan); }
+eaterNodeCostSlider.oninput = function() { EATER_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, eaterNodeCostValueSpan); }
+predatorNodeCostSlider.oninput = function() { PREDATOR_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, predatorNodeCostValueSpan); }
+neuronNodeCostSlider.oninput = function() { NEURON_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, neuronNodeCostValueSpan); }
+photosyntheticNodeCostSlider.oninput = function() { PHOTOSYNTHETIC_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, photosyntheticNodeCostValueSpan); }
+photosynthesisEfficiencySlider.oninput = function() { PHOTOSYNTHESIS_EFFICIENCY = parseFloat(this.value); updateSliderDisplay(this, photosynthesisEfficiencyValueSpan); }
+
+
+resetButton.onclick = function() {
+    initializePopulation();
+    isAnySoftBodyUnstable = false;
+    updateInstabilityIndicator();
+}
+
+resizeWorldButton.onclick = function() {
+    const newWidth = parseInt(worldWidthInput.value);
+    const newHeight = parseInt(worldHeightInput.value);
+
+    if (isNaN(newWidth) || isNaN(newHeight) || newWidth < 500 || newHeight < 500 || newWidth > 40000 || newHeight > 40000) {
+        showMessageModal("Invalid world dimensions. Min 500x500, Max 40000x40000.");
+        worldWidthInput.value = WORLD_WIDTH;
+        worldHeightInput.value = WORLD_HEIGHT;
+        return;
+    }
+    WORLD_WIDTH = newWidth;
+    WORLD_HEIGHT = newHeight;
+    canvas.width = WORLD_WIDTH;
+    canvas.height = WORLD_HEIGHT;
+    // MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5); // This constant is not used here
+
+    viewOffsetX = 0;
+    viewOffsetY = 0;
+
+    initializeSpatialGrid();
+    initFluidSimulation();
+    initParticles();
+    initializePopulation();
+    initNutrientMap(); 
+    initLightMap();
+    initViscosityMap();
+    isAnySoftBodyUnstable = false;
+    updateInstabilityIndicator();
+    console.log(`World resized to ${WORLD_WIDTH}x${WORLD_HEIGHT} and simulation reset.`);
+}
+
+fluidGridSizeSlider.oninput = function() {
+    FLUID_GRID_SIZE_CONTROL = parseInt(this.value);
+    updateSliderDisplay(this, fluidGridSizeValueSpan);
+    velocityEmitters = [];
+    initFluidSimulation();
+    initParticles();
+    initNutrientMap(); 
+    initLightMap(); 
+    initViscosityMap();
+}
+fluidDiffusionSlider.oninput = function() { FLUID_DIFFUSION = parseFloat(this.value); updateSliderDisplay(this, fluidDiffusionValueSpan); if(fluidField) fluidField.diffusion = FLUID_DIFFUSION;}
+fluidViscositySlider.oninput = function() { 
+    FLUID_VISCOSITY = parseFloat(this.value); 
+    // console.log("Fluid Viscosity slider raw value:", this.value, "Parsed FLUID_VISCOSITY:", FLUID_VISCOSITY); // DEBUG
+    updateSliderDisplay(this, fluidViscosityValueSpan); 
+    if(fluidField) fluidField.viscosity = FLUID_VISCOSITY;
+}
+fluidFadeSlider.oninput = function() { FLUID_FADE_RATE = parseFloat(this.value); updateSliderDisplay(this, fluidFadeValueSpan);}
+maxFluidVelocityComponentSlider.oninput = function() { MAX_FLUID_VELOCITY_COMPONENT = parseFloat(this.value); updateSliderDisplay(this, maxFluidVelocityComponentValueSpan); if(fluidField) fluidField.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT;}
+clearFluidButton.onclick = function() { if(fluidField) fluidField.clear(); }
+
+particlesPerSecondSlider.oninput = function() {
+    PARTICLES_PER_SECOND = parseInt(this.value);
+    updateSliderDisplay(this, particlesPerSecondValueSpan);
+}
+particleFluidInfluenceSlider.oninput = function() { PARTICLE_FLUID_INFLUENCE = parseFloat(this.value); updateSliderDisplay(this, particleFluidInfluenceValueSpan); }
+particleLifeDecaySlider.oninput = function() { PARTICLE_BASE_LIFE_DECAY = parseFloat(this.value); updateSliderDisplay(this, particleLifeDecayValueSpan); }
+infiniteParticleLifeToggle.onchange = function() {
+    IS_PARTICLE_LIFE_INFINITE = this.checked;
+    particleLifeDecaySlider.disabled = IS_PARTICLE_LIFE_INFINITE;
+    particleLifeDecayLabel.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#ddd';
+    particleLifeDecayValueSpan.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
+}
+resetParticlesButton.onclick = function() { initParticles(); }
+
+exportConfigButton.onclick = handleExportConfig;
+importConfigButton.onclick = () => importConfigFile.click();
+importConfigFile.onchange = handleImportConfig;
+closeInfoPanelButton.onclick = () => { infoPanel.classList.remove('open'); selectedInspectBody = null; selectedInspectPoint = null; }
+
+showNutrientMapToggle.onchange = function() { SHOW_NUTRIENT_MAP = this.checked; };
+nutrientEditModeToggle.onchange = function() {
+    IS_NUTRIENT_EDIT_MODE = this.checked;
+    if (IS_NUTRIENT_EDIT_MODE) {
+        emitterEditModeToggle.checked = false;
+        IS_EMITTER_EDIT_MODE = false;
+        canvas.classList.remove('emitter-edit-mode');
+        lightEditModeToggle.checked = false; IS_LIGHT_EDIT_MODE = false;
+        viscosityEditModeToggle.checked = false; IS_VISCOSITY_EDIT_MODE = false;
+    } 
+};
+
+nutrientBrushValueSlider.oninput = function() { NUTRIENT_BRUSH_VALUE = parseFloat(this.value); updateSliderDisplay(this, nutrientBrushValueSpan); }
+nutrientBrushSizeSlider.oninput = function() { NUTRIENT_BRUSH_SIZE = parseInt(this.value); updateSliderDisplay(this, nutrientBrushSizeSpan); }
+nutrientBrushStrengthSlider.oninput = function() { NUTRIENT_BRUSH_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, nutrientBrushStrengthSpan); }
+clearNutrientMapButton.onclick = function() {
+    initNutrientMap(); 
+    console.log("Nutrient map cleared.");
+};
+
+showLightMapToggle.onchange = function() { SHOW_LIGHT_MAP = this.checked; };
+lightEditModeToggle.onchange = function() {
+    IS_LIGHT_EDIT_MODE = this.checked;
+    if (IS_LIGHT_EDIT_MODE) {
+        emitterEditModeToggle.checked = false; IS_EMITTER_EDIT_MODE = false;
+        nutrientEditModeToggle.checked = false; IS_NUTRIENT_EDIT_MODE = false;
+        viscosityEditModeToggle.checked = false; IS_VISCOSITY_EDIT_MODE = false;
+        canvas.classList.remove('emitter-edit-mode');
+    } 
+};
+lightBrushValueSlider.oninput = function() { LIGHT_BRUSH_VALUE = parseFloat(this.value); updateSliderDisplay(this, lightBrushValueSpan); }
+lightBrushSizeSlider.oninput = function() { LIGHT_BRUSH_SIZE = parseInt(this.value); updateSliderDisplay(this, lightBrushSizeSpan); }
+lightBrushStrengthSlider.oninput = function() { LIGHT_BRUSH_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, lightBrushStrengthSpan); }
+clearLightMapButton.onclick = function() {
+    initLightMap();
+    console.log("Light map reset to surface pattern.");
+};
+
+showViscosityMapToggle.onchange = function() { SHOW_VISCOSITY_MAP = this.checked; };
+viscosityEditModeToggle.onchange = function() {
+    IS_VISCOSITY_EDIT_MODE = this.checked;
+    if (IS_VISCOSITY_EDIT_MODE) {
+        emitterEditModeToggle.checked = false; IS_EMITTER_EDIT_MODE = false;
+        nutrientEditModeToggle.checked = false; IS_NUTRIENT_EDIT_MODE = false;
+        lightEditModeToggle.checked = false; IS_LIGHT_EDIT_MODE = false;
+        canvas.classList.remove('emitter-edit-mode');
+    }
+};
+viscosityBrushValueSlider.oninput = function() { VISCOSITY_BRUSH_VALUE = parseFloat(this.value); updateSliderDisplay(this, viscosityBrushValueSpan); }
+viscosityBrushSizeSlider.oninput = function() { VISCOSITY_BRUSH_SIZE = parseInt(this.value); updateSliderDisplay(this, viscosityBrushSizeSpan); }
+viscosityBrushStrengthSlider.oninput = function() { VISCOSITY_BRUSH_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, viscosityBrushStrengthSpan); }
+clearViscosityMapButton.onclick = function() {
+    initViscosityMap(); 
+    console.log("Viscosity map reset to normal.");
+};
+
+nutrientCyclePeriodSlider.oninput = function() { nutrientCyclePeriodSeconds = parseInt(this.value); updateSliderDisplay(this, nutrientCyclePeriodSpan); };
+nutrientCycleBaseAmplitudeSlider.oninput = function() { nutrientCycleBaseAmplitude = parseFloat(this.value); updateSliderDisplay(this, nutrientCycleBaseAmplitudeSpan); };
+nutrientCycleWaveAmplitudeSlider.oninput = function() { nutrientCycleWaveAmplitude = parseFloat(this.value); updateSliderDisplay(this, nutrientCycleWaveAmplitudeSpan); };
+lightCyclePeriodSlider.oninput = function() { lightCyclePeriodSeconds = parseInt(this.value); updateSliderDisplay(this, lightCyclePeriodSpan); };
+
+viewEntireSimButton.onclick = function() {
+    // console.log('[View Entire Sim] Before:', { viewZoom, viewOffsetX, viewOffsetY, WORLD_WIDTH, WORLD_HEIGHT, clientW: canvas.clientWidth, clientH: canvas.clientHeight });
+    
+    viewZoom = 1.0;
+    viewOffsetX = 0;
+    viewOffsetY = 0;
+    // console.log('[View Entire Sim] After:', { viewZoom, viewOffsetX, viewOffsetY });
+}
+
+copyInfoPanelButton.onclick = function() {
+    if (!selectedInspectBody) {
+        showMessageModal("No creature selected to copy info from.");
+        return;
+    }
+    let infoText = "";
+    const panelElements = infoPanel.querySelectorAll('.info-section p, .info-section h5, .point-info-entry p, .point-info-entry h6');
+    
+    panelElements.forEach(el => {
+        let label = "";
+        let value = "";
+        if (el.tagName === 'H5' || el.tagName === 'H6') {
+            infoText += el.textContent.trim() + "\n";
+        } else if (el.tagName === 'P') {
+            const strongTag = el.querySelector('strong');
+            if (strongTag) {
+                label = strongTag.textContent.trim();
+                let allText = el.textContent.trim();
+                value = allText.substring(label.length).trim();
+                 if (value.startsWith(":")) value = value.substring(1).trim(); 
+                infoText += label + ": " + value + "\n";
+            } else {
+                infoText += el.textContent.trim() + "\n";
+            }
+        }
+    });
+
+    navigator.clipboard.writeText(infoText.trim()).then(() => {
+        const originalText = copyInfoPanelButton.textContent;
+        copyInfoPanelButton.textContent = "Copied!";
+        setTimeout(() => {
+            copyInfoPanelButton.textContent = originalText;
+        }, 1500);
+    }).catch(err => {
+        console.error('Failed to copy text: ', err);
+        showMessageModal("Failed to copy info. See console for details.");
+    });
+}
+
+
+canvas.addEventListener('mousedown', (e) => {
+    updateMouse(e);
+
+    if (e.button === 2) { // Right mouse button
+        isRightDragging = true;
+        mouse.isDown = false; 
+        panStartMouseDisplayX = mouse.x;
+        panStartMouseDisplayY = mouse.y;
+        panInitialViewOffsetX = viewOffsetX;
+        panInitialViewOffsetY = viewOffsetY;
+        e.preventDefault();
+        return;
+    } else if (e.button === 0) { // Left mouse button
+        mouse.isDown = true;
+        isRightDragging = false;
+
+        const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
+        const simMouseX = worldCoords.x;
+        const simMouseY = worldCoords.y;
+
+        if (IS_EMITTER_EDIT_MODE && fluidField) {
+            const gridX = Math.floor(simMouseX / fluidField.scaleX);
+            const gridY = Math.floor(simMouseY / fluidField.scaleY);
+            emitterDragStartCell = { gridX, gridY, mouseStartX: simMouseX, mouseStartY: simMouseY };
+            currentEmitterPreview = {
+                startX: (gridX + 0.5) * fluidField.scaleX,
+                startY: (gridY + 0.5) * fluidField.scaleY,
+                endX: simMouseX,
+                endY: simMouseY
+            };
+            selectedInspectBody = null; selectedInspectPoint = null; updateInfoPanel();
+            return;
+        }
+
+        if (IS_NUTRIENT_EDIT_MODE) {
+            isPaintingNutrients = true;
+            paintNutrientBrush(simMouseX, simMouseY); 
+            selectedInspectBody = null; updateInfoPanel(); 
+            selectedSoftBodyPoint = null;
+            return; 
+        }
+        else if (IS_LIGHT_EDIT_MODE) { 
+            isPaintingLight = true;
+            paintLightBrush(simMouseX, simMouseY);
+            selectedInspectBody = null; updateInfoPanel(); 
+            selectedSoftBodyPoint = null;
+            return; 
+        }
+        else if (IS_VISCOSITY_EDIT_MODE) {
+            isPaintingViscosity = true;
+            paintViscosityBrush(simMouseX, simMouseY);
+            selectedInspectBody = null; updateInfoPanel(); 
+            selectedSoftBodyPoint = null;
+            return; 
+        }
+
+        let clickedOnPoint = false;
+        selectedInspectBody = null; 
+        selectedInspectPoint = null;
+
+        for (let body of softBodyPopulation) {
+            if (body.isUnstable) continue;
+            for (let i = 0; i < body.massPoints.length; i++) {
+                const point = body.massPoints[i];
+                const dist = Math.sqrt((point.pos.x - simMouseX)**2 + (point.pos.y - simMouseY)**2);
+                if (dist < point.radius * 2.5 ) {
+                    selectedSoftBodyPoint = { body: body, point: point };
+                    selectedInspectBody = body;
+                    selectedInspectPoint = point; 
+                    selectedInspectPointIndex = i;
+
+                    point.isFixed = true;
+                    point.prevPos.x = point.pos.x;
+                    point.prevPos.y = point.pos.y;
+                    clickedOnPoint = true;
+                    break; 
+                }
+            }
+            if(clickedOnPoint) break; 
+        }
+        updateInfoPanel(); 
+    }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+    updateMouse(e);
+
+    if (isRightDragging) {
+        const currentDisplayMouseX = mouse.x;
+        const currentDisplayMouseY = mouse.y;
+
+        const displayDx = currentDisplayMouseX - panStartMouseDisplayX;
+        const displayDy = currentDisplayMouseY - panStartMouseDisplayY;
+
+        const rect = canvas.getBoundingClientRect();
+        const effectiveRenderScale = Math.min(rect.width / WORLD_WIDTH, rect.height / WORLD_HEIGHT);
+
+        const panDeltaX_world = displayDx / (effectiveRenderScale * viewZoom);
+        const panDeltaY_world = displayDy / (effectiveRenderScale * viewZoom);
+
+        viewOffsetX = panInitialViewOffsetX - panDeltaX_world;
+        viewOffsetY = panInitialViewOffsetY - panDeltaY_world;
+
+        const effectiveViewportWidth = canvas.clientWidth / viewZoom;
+        const effectiveViewportHeight = canvas.clientHeight / viewZoom;
+        const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
+        const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
+        viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
+        viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
+        return;
+    }
+
+
+    const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
+    const simMouseX = worldCoords.x;
+    const simMouseY = worldCoords.y;
+
+    const worldPrevCoords = getMouseWorldCoordinates(mouse.prevX, mouse.prevY);
+    const worldMouseDx = simMouseX - worldPrevCoords.x;
+    const worldMouseDy = simMouseY - worldPrevCoords.y;
+
+
+    if (mouse.isDown) { 
+        if (IS_EMITTER_EDIT_MODE && emitterDragStartCell) {
+            currentEmitterPreview.endX = simMouseX;
+            currentEmitterPreview.endY = simMouseY;
+        } else if (selectedSoftBodyPoint) {
+            const point = selectedSoftBodyPoint.point;
+            point.prevPos.x = point.pos.x;
+            point.prevPos.y = point.pos.y;
+            point.pos.x = simMouseX;
+            point.pos.y = simMouseY;
+        } else if (fluidField) { 
+            const fluidGridX = Math.floor(simMouseX / fluidField.scaleX);
+            const fluidGridY = Math.floor(simMouseY / fluidField.scaleY);
+            const r1 = Math.random() * 100 + 155;
+            const g1 = Math.random() * 50 + 25;
+            const b1 = Math.random() * 100 + 100;
+            fluidField.addDensity(fluidGridX, fluidGridY, r1, g1, b1, 150 + Math.random()*50);
+
+            const r2 = Math.random() * 50 + 25;
+            const g2 = Math.random() * 100 + 155;
+            const b2 = Math.random() * 100 + 155;
+            fluidField.addDensity(fluidGridX, fluidGridY, r2, g2, b2, 150 + Math.random()*50);
+
+            const fluidVelX = worldMouseDx * FLUID_MOUSE_DRAG_VELOCITY_SCALE;
+            const fluidVelY = worldMouseDy * FLUID_MOUSE_DRAG_VELOCITY_SCALE;
+            fluidField.addVelocity(fluidGridX, fluidGridY, fluidVelX, fluidVelY);
+        }
+    }
+
+    if (IS_NUTRIENT_EDIT_MODE && isPaintingNutrients && mouse.isDown) { 
+        paintNutrientBrush(simMouseX, simMouseY);
+        return; 
+    }
+    else if (IS_LIGHT_EDIT_MODE && isPaintingLight && mouse.isDown) {
+        paintLightBrush(simMouseX, simMouseY);
+        return; 
+    }
+    else if (IS_VISCOSITY_EDIT_MODE && isPaintingViscosity && mouse.isDown) {
+        paintViscosityBrush(simMouseX, simMouseY);
+        return; 
+    }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+    if (e.button === 2) { // Right mouse button up
+        isRightDragging = false;
+        e.preventDefault();
+    } else if (e.button === 0) { // Left mouse button up
+        mouse.isDown = false;
+        if (isPaintingNutrients) {
+            isPaintingNutrients = false;
+        }
+        if (isPaintingLight) { 
+            isPaintingLight = false;
+        }
+        if (isPaintingViscosity) { isPaintingViscosity = false; }
+
+        if (IS_EMITTER_EDIT_MODE && emitterDragStartCell && fluidField) {
+            const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
+            const simMouseX = worldCoords.x;
+            const simMouseY = worldCoords.y;
+
+            const worldForceX = (simMouseX - emitterDragStartCell.mouseStartX) * EMITTER_MOUSE_DRAG_SCALE;
+            const worldForceY = (simMouseY - emitterDragStartCell.mouseStartY) * EMITTER_MOUSE_DRAG_SCALE;
+
+            const gridForceX = worldForceX / fluidField.scaleX;
+            const gridForceY = worldForceY / fluidField.scaleY;
+
+
+            const existingEmitter = velocityEmitters.find(em => em.gridX === emitterDragStartCell.gridX && em.gridY === emitterDragStartCell.gridY);
+            if (existingEmitter) {
+                existingEmitter.forceX = gridForceX;
+                existingEmitter.forceY = gridForceY;
+            } else {
+                velocityEmitters.push({
+                    gridX: emitterDragStartCell.gridX,
+                    gridY: emitterDragStartCell.gridY,
+                    forceX: gridForceX,
+                    forceY: gridForceY
+                });
+            }
+            emitterDragStartCell = null;
+            currentEmitterPreview = null;
+        }
+        if (selectedSoftBodyPoint) {
+            const point = selectedSoftBodyPoint.point;
+            point.isFixed = false;
+            const worldDx = (mouse.dx / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
+            const worldDy = (mouse.dy / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
+
+            point.prevPos.x = point.pos.x - worldDx * 1.0;
+            point.prevPos.y = point.pos.y - worldDy * 1.0;
+            selectedSoftBodyPoint = null;
+        }
+    }
+});
+ canvas.addEventListener('mouseleave', () => {
+    mouse.isDown = false; 
+    isRightDragging = false; 
+    if (IS_EMITTER_EDIT_MODE && emitterDragStartCell) { 
+        const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
+        const simMouseX = worldCoords.x;
+        const simMouseY = worldCoords.y;
+        const worldForceX = (simMouseX - emitterDragStartCell.mouseStartX) * EMITTER_MOUSE_DRAG_SCALE;
+        const worldForceY = (simMouseY - emitterDragStartCell.mouseStartY) * EMITTER_MOUSE_DRAG_SCALE;
+        const gridForceX = worldForceX / fluidField.scaleX;
+        const gridForceY = worldForceY / fluidField.scaleY;
+        const existingEmitter = velocityEmitters.find(em => em.gridX === emitterDragStartCell.gridX && em.gridY === emitterDragStartCell.gridY);
+        if (existingEmitter) {
+            existingEmitter.forceX = gridForceX;
+            existingEmitter.forceY = gridForceY;
+        } else {
+            velocityEmitters.push({
+                gridX: emitterDragStartCell.gridX,
+                gridY: emitterDragStartCell.gridY,
+                forceX: gridForceX,
+                forceY: gridForceY
+            });
+        }
+    }
+    emitterDragStartCell = null;
+    currentEmitterPreview = null;
+
+    if (selectedSoftBodyPoint) {
+        const point = selectedSoftBodyPoint.point;
+        point.isFixed = false;
+         const worldDx = (mouse.dx / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
+        const worldDy = (mouse.dy / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
+        point.prevPos.x = point.pos.x - worldDx * 1.0;
+        point.prevPos.y = point.pos.y - worldDy * 1.0;
+        selectedSoftBodyPoint = null;
+    }
+
+    if (isPaintingNutrients) {
+        isPaintingNutrients = false;
+    }
+    if (isPaintingLight) { 
+        isPaintingLight = false;
+    }
+    if (isPaintingViscosity) { isPaintingViscosity = false; }
+});
+
+canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+});
+
+
+canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const displayMouseX = e.clientX - rect.left;
+    const displayMouseY = e.clientY - rect.top;
+
+    const canvasDisplayRatio = Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT);
+    const renderedWorldWidthInCss = WORLD_WIDTH * canvasDisplayRatio;
+    const renderedWorldHeightInCss = WORLD_HEIGHT * canvasDisplayRatio;
+    const letterboxOffsetX = (canvas.clientWidth - renderedWorldWidthInCss) / 2;
+    const letterboxOffsetY = (canvas.clientHeight - renderedWorldHeightInCss) / 2;
+
+    const mouseOnRenderedX = displayMouseX - letterboxOffsetX;
+    const mouseOnRenderedY = displayMouseY - letterboxOffsetY;
+
+    const worldMouseX_beforeZoom = (mouseOnRenderedX / canvasDisplayRatio / viewZoom) + viewOffsetX;
+    const worldMouseY_beforeZoom = (mouseOnRenderedY / canvasDisplayRatio / viewZoom) + viewOffsetY;
+
+    const scroll = e.deltaY < 0 ? 1 : -1;
+    const newZoom = viewZoom * Math.pow(1 + ZOOM_SENSITIVITY * 10, scroll);
+
+    MIN_ZOOM = 1.0; 
+
+    viewZoom = Math.max(MIN_ZOOM, Math.min(newZoom, MAX_ZOOM));
+
+    viewOffsetX = worldMouseX_beforeZoom - (mouseOnRenderedX / canvasDisplayRatio / viewZoom);
+    viewOffsetY = worldMouseY_beforeZoom - (mouseOnRenderedY / canvasDisplayRatio / viewZoom);
+
+    const effectiveViewportWidth = canvas.clientWidth / viewZoom;
+    const effectiveViewportHeight = canvas.clientHeight / viewZoom;
+    const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
+    const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
+    viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
+    viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
+});
+
+</rewritten_file> 

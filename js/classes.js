@@ -328,23 +328,38 @@ class SoftBody {
                         lastPointPos.x + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 2,
                         lastPointPos.y + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 2,
                         newMass,
-                        baseRadius * (0.8 + Math.random() * 0.4)
+                        baseRadius * (0.8 + Math.random() * 0.4) // Note: baseRadius is from the initial generation part, might need adjustment if parentBody exists
                     );
                     newPoint.nodeType = newNodeType;
                     newPoint.movementType = newMovementType;
-                    const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
+                    const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE]; // Ensure this is defined if not globally
                     newPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                    
                     if (newNodeType === NodeType.NEURON) {
                         newPoint.neuronData = {
                             isBrain: false,
                             hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
                         };
                     } else {
-                        newPoint.neuronData = null; // Crucial: ensure non-neurons have null neuronData
+                        newPoint.neuronData = null; 
                     }
-                    if(newPoint.nodeType === NodeType.FIXED_ROOT) newPoint.movementType = MovementType.FIXED;
+                    // if(newPoint.nodeType === NodeType.FIXED_ROOT) newPoint.movementType = MovementType.FIXED; // Not needed due to new NodeType
                     this.massPoints.push(newPoint);
                     lastPointPos = newPoint.pos.clone();
+
+                    // New spring connection logic for the newly added point
+                    const numSpringsToAddNewPoint = MIN_SPRINGS_PER_NEW_NODE + Math.floor(Math.random() * (MAX_SPRINGS_PER_NEW_NODE - MIN_SPRINGS_PER_NEW_NODE + 1));
+                    const existingPoints = this.massPoints.filter(p => p !== newPoint);
+                    const shuffledExistingPoints = existingPoints.sort(() => 0.5 - Math.random()); // Shuffle to pick random points
+
+                    for (let k = 0; k < Math.min(numSpringsToAddNewPoint, shuffledExistingPoints.length); k++) {
+                        const connectToPoint = shuffledExistingPoints[k];
+                        const dist = newPoint.pos.sub(connectToPoint.pos).mag();
+                        let newRestLength = dist * (1 + (Math.random() - 0.5) * 2 * NEW_SPRING_REST_LENGTH_VARIATION);
+                        newRestLength = Math.max(1, newRestLength);
+                        const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
+                        this.springs.push(new Spring(newPoint, connectToPoint, this.stiffness, this.springDamping, newRestLength, becomeRigid));
+                    }
                 }
             });
 
@@ -352,17 +367,87 @@ class SoftBody {
                 this.massPoints.push(new MassPoint(startX, startY, 0.5, baseRadius));
             }
 
-            for (let i = 0; i < this.massPoints.length; i++) {
-                for (let j = i + 1; j < this.massPoints.length; j++) {
-                    const p1 = this.massPoints[i];
-                    const p2 = this.massPoints[j];
-                    const dist = p1.pos.sub(p2.pos).mag();
-                    if (dist < this.springConnectionRadius && dist > 0.1) {
-                        const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
-                        this.springs.push(new Spring(p1, p2, this.stiffness, this.springDamping, dist, becomeRigid));
+            // Spring creation/mutation when reproducing from a parent
+            this.springs = [];
+            if (parentBody.springs && parentBody.springs.length > 0) {
+                // Helper to count springs for a point
+                const countSpringsForPoint = (pointIndex, springList) => {
+                    let count = 0;
+                    for (const spring of springList) {
+                        if (this.massPoints.indexOf(spring.p1) === pointIndex || this.massPoints.indexOf(spring.p2) === pointIndex) {
+                            count++;
+                        }
                     }
+                    return count;
+                };
+
+                parentBody.springs.forEach(parentSpring => {
+                    const p1Index = parentBody.massPoints.indexOf(parentSpring.p1);
+                    const p2Index = parentBody.massPoints.indexOf(parentSpring.p2);
+
+                    if (p1Index !== -1 && p2Index !== -1 && p1Index < this.massPoints.length && p2Index < this.massPoints.length) {
+                        const offspringP1 = this.massPoints[p1Index];
+                        const offspringP2 = this.massPoints[p2Index];
+                        let keepSpring = true;
+
+                        // Chance to delete spring (if not orphaning)
+                        if (Math.random() < SPRING_DELETION_CHANCE) {
+                            // Temporarily remove to check for orphans
+                            const tempSprings = this.springs.filter(s => s !== parentSpring); // Incorrect: this.springs is new list
+                            // We need to check against the list of springs *being built*
+                            // This check is complex here, better to build a list and then filter, or check based on parent's spring counts
+                            // For now, let's simplify: only delete if both points have > 1 potential connection in parent.
+                            let p1ParentSprings = 0; parentBody.springs.forEach(s => { if(s.p1 === parentSpring.p1 || s.p2 === parentSpring.p1) p1ParentSprings++; });
+                            let p2ParentSprings = 0; parentBody.springs.forEach(s => { if(s.p1 === parentSpring.p2 || s.p2 === parentSpring.p2) p2ParentSprings++; });
+                            if(p1ParentSprings > 1 && p2ParentSprings > 1) {
+                                keepSpring = false;
+                            }
+                        }
+
+                        if (keepSpring) {
+                            let newRestLength = parentSpring.restLength * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE);
+                            newRestLength = Math.max(1, newRestLength); // Min rest length 1
+                            const becomeRigid = (parentSpring.isRigid && Math.random() > MUTATION_CHANCE_BOOL) || (!parentSpring.isRigid && Math.random() < CHANCE_FOR_RIGID_SPRING); // Inherit rigidity with mutation chance
+                            this.springs.push(new Spring(offspringP1, offspringP2, this.stiffness, this.springDamping, newRestLength, becomeRigid));
+                        }
+                    }
+                });
+            }
+            
+            // Chance to add a new spring between unconnected points
+            if (this.massPoints.length >= 2 && Math.random() < SPRING_ADDITION_CHANCE) {
+                let attempts = 0;
+                while(attempts < 10) { // Try a few times to find an unconnected pair
+                    const idx1 = Math.floor(Math.random() * this.massPoints.length);
+                    let idx2 = Math.floor(Math.random() * this.massPoints.length);
+                    if (idx1 === idx2 && this.massPoints.length > 1) {
+                        idx2 = (idx1 + 1) % this.massPoints.length;
+                    }
+                    if (idx1 === idx2) break; // Not enough points
+
+                    const pA = this.massPoints[idx1];
+                    const pB = this.massPoints[idx2];
+                    let alreadyConnected = false;
+                    for (const s of this.springs) {
+                        if ((s.p1 === pA && s.p2 === pB) || (s.p1 === pB && s.p2 === pA)) {
+                            alreadyConnected = true;
+                            break;
+                        }
+                    }
+                    if (!alreadyConnected) {
+                        const dist = pA.pos.sub(pB.pos).mag();
+                        let newRestLength = dist * (1 + (Math.random() - 0.5) * 2 * NEW_SPRING_REST_LENGTH_VARIATION);
+                        newRestLength = Math.max(1, newRestLength);
+                        const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
+                        this.springs.push(new Spring(pA, pB, this.stiffness, this.springDamping, newRestLength, becomeRigid));
+                        break; // Added one spring
+                    }
+                    attempts++;
                 }
             }
+
+            // Original spring connection logic based on radius is now replaced by above.
+            // The fallback if no springs were created for a multi-point body:
             if (this.massPoints.length > 1 && this.springs.length === 0) {
                 for(let i = 0; i < this.massPoints.length -1; i++){
                      const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;

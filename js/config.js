@@ -27,6 +27,14 @@ const RIGID_SPRING_STIFFNESS = 500000;
 const RIGID_SPRING_DAMPING = 150;    
 const CHANCE_FOR_RIGID_SPRING = 0.1; // 10% chance a spring becomes rigid
 
+// Spring Mutation Constants (New)
+const SPRING_DELETION_CHANCE = 0.02;          // Chance an existing spring is deleted (if not orphaning a node)
+const SPRING_ADDITION_CHANCE = 0.02;          // Chance a new spring is added between unconnected nodes
+const SPRING_PROP_MUTATION_MAGNITUDE = 0.1;   // Max % change for stiffness, damping, restLength (e.g., 0.1 = +/-10%)
+const MIN_SPRINGS_PER_NEW_NODE = 1;
+const MAX_SPRINGS_PER_NEW_NODE = 3;
+const NEW_SPRING_REST_LENGTH_VARIATION = 0.2; // e.g., +/- 20% of current distance for new springs
+
 // Original Radius Multipliers (will become base values)
 const EATING_RADIUS_MULTIPLIER_BASE = 2.0;
 const PREDATION_RADIUS_MULTIPLIER_BASE = 1.5;

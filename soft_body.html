@@ -3426,17 +3426,26 @@
             }
 
 
-            lin_solve(b, x, x0, a, c, field_type_ignored, base_diff_rate_ignored, dt_param_ignored) { // Checkpoint 1 Signature
-                const cRecip = 1.0 / c; // Uses passed 'c'
+            lin_solve(b, x, x0, a_global_param, c_global_param, field_type, base_diff_rate, dt_param) { // Checkpoint 2 Signature & params used
+                // const cRecip = 1.0 / c; // Not needed directly like this anymore
                 for (let k_iter = 0; k_iter < this.iterations; k_iter++) { 
                     for (let j = 1; j < this.size - 1; j++) {
                         for (let i = 1; i < this.size - 1; i++) {
                             const idx = this.IX(i,j);
+                            
+                            let effective_a = a_global_param; // Use the passed global 'a' by default
+                            let effective_cRecip = 1.0 / c_global_param; // Use the passed global 'c' by default
+
+                            if ((field_type === 'velX' || field_type === 'velY')) {
+                                // LOCAL VISCOSITY LOGIC WILL GO HERE IN CHECKPOINT 3
+                                // For Checkpoint 2, this block intentionally does nothing to effective_a or effective_cRecip
+                            }
+                            
                             x[idx] =
                                 (x0[idx] +
-                                a * ( x[this.IX(i+1,j)] + x[this.IX(i-1,j)] +
+                                effective_a * ( x[this.IX(i+1,j)] + x[this.IX(i-1,j)] +
                                               x[this.IX(i,j+1)] + x[this.IX(i,j-1)]
-                                            )) * cRecip;
+                                            )) * effective_cRecip; 
                         }
                     }
                     this.set_bnd(b, x);

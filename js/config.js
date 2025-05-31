@@ -7,7 +7,7 @@ let viewOffsetX = 0;
 let viewOffsetY = 0;
 let viewZoom = 1.0;
 let ZOOM_SENSITIVITY = 0.02;
-const MAX_ZOOM = 8.0;
+const MAX_ZOOM = 40.0;
 let MIN_ZOOM = 0.1;
 
 // Spatial Grid for optimization
@@ -82,7 +82,7 @@ let PHOTOSYNTHESIS_EFFICIENCY = 100.0;
 let FLUID_GRID_SIZE_CONTROL = 128;
 let FLUID_DIFFUSION = 0.00047;
 let FLUID_VISCOSITY = 0.001;
-let FLUID_FADE_RATE = 0.002;
+let FLUID_FADE_RATE = 0.01;
 let MAX_FLUID_VELOCITY_COMPONENT = 10.0;
 let IS_WORLD_WRAPPING = false;
 let PARTICLES_PER_SECOND = 500;

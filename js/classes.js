@@ -225,7 +225,7 @@ class SoftBody {
         this.massPoints = [];
         this.springs = [];
 
-        const baseRadius = 3 + Math.random() * 3;
+        const baseRadius = 1 + Math.random() * 1; // Reduced for smaller creatures
         const eaterChance = 0.25;
         const predatorChance = 0.15;
         const dyeEmitterChance = 0.2;
@@ -331,7 +331,7 @@ class SoftBody {
 
 
         } else { // Initial generation - use old shape types
-            const basePointDist = 20 + Math.random() * 10;
+            const basePointDist = 5 + Math.random() * 3; // Reduced for smaller creatures
             if (this.shapeType === 0) {
                 const numPointsX = 3; const numPointsY = 3; let gridPoints = [];
                 for (let i = 0; i < numPointsY; i++) { gridPoints[i] = []; for (let j = 0; j < numPointsX; j++) {

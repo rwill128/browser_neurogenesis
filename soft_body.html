@@ -508,6 +508,29 @@
                 
                 <button id="clearViscosityMapButton">Reset Viscosity Map (Normal)</button>
             </div>
+
+            <div class="control-group">
+                <h4>Global Cycles</h4>
+                <label for="nutrientCyclePeriodSlider" class="slider-label">Nutrient Cycle Period (s):</label>
+                <span id="nutrientCyclePeriodSpan" class="slider-value">300</span>
+                <input type="range" id="nutrientCyclePeriodSlider" min="60" max="600" value="300" step="10">
+
+                <label for="nutrientCycleBaseAmplitudeSlider" class="slider-label">Nutrient Base Amplitude:</label>
+                <span id="nutrientCycleBaseAmplitudeSpan" class="slider-value">0.65</span>
+                <input type="range" id="nutrientCycleBaseAmplitudeSlider" min="0.0" max="1.0" value="0.65" step="0.01">
+
+                <label for="nutrientCycleWaveAmplitudeSlider" class="slider-label">Nutrient Wave Amplitude:</label>
+                <span id="nutrientCycleWaveAmplitudeSpan" class="slider-value">0.35</span>
+                <input type="range" id="nutrientCycleWaveAmplitudeSlider" min="0.0" max="1.0" value="0.35" step="0.01">
+
+                <label for="lightCyclePeriodSlider" class="slider-label">Light Cycle Period (s):</label>
+                <span id="lightCyclePeriodSpan" class="slider-value">480</span>
+                <input type="range" id="lightCyclePeriodSlider" min="60" max="900" value="480" step="10">
+
+                <p class="indicator-label" style="margin-top:10px;">Current Nutrient Multiplier: <span id="currentNutrientMultiplierDisplay" style="color:#00aeff;">1.00</span></p>
+                <p class="indicator-label">Current Light Multiplier: <span id="currentLightMultiplierDisplay" style="color:#00aeff;">1.00</span></p>
+            </div>
+
         </div>
     </div>
 
@@ -741,6 +764,18 @@
         const viscosityBrushStrengthSpan = document.getElementById('viscosityBrushStrengthSpan');
         const clearViscosityMapButton = document.getElementById('clearViscosityMapButton');
 
+        const nutrientCyclePeriodSlider = document.getElementById('nutrientCyclePeriodSlider');
+        const nutrientCyclePeriodSpan = document.getElementById('nutrientCyclePeriodSpan');
+        const nutrientCycleBaseAmplitudeSlider = document.getElementById('nutrientCycleBaseAmplitudeSlider');
+        const nutrientCycleBaseAmplitudeSpan = document.getElementById('nutrientCycleBaseAmplitudeSpan');
+        const nutrientCycleWaveAmplitudeSlider = document.getElementById('nutrientCycleWaveAmplitudeSlider');
+        const nutrientCycleWaveAmplitudeSpan = document.getElementById('nutrientCycleWaveAmplitudeSpan');
+        const lightCyclePeriodSlider = document.getElementById('lightCyclePeriodSlider');
+        const lightCyclePeriodSpan = document.getElementById('lightCyclePeriodSpan');
+        const currentNutrientMultiplierDisplay = document.getElementById('currentNutrientMultiplierDisplay');
+        const currentLightMultiplierDisplay = document.getElementById('currentLightMultiplierDisplay');
+
+
         // --- Global Variables & Constants (with initial hardcoded defaults) ---
         let CREATURE_POPULATION_FLOOR = 10;
         let CREATURE_POPULATION_CEILING = 1000;
@@ -812,6 +847,14 @@
         const MIN_VISCOSITY_MULTIPLIER = 0.2;
         const MAX_VISCOSITY_MULTIPLIER = 10.0; // Was 5.0
         let isPaintingViscosity = false;
+
+        let totalSimulationTime = 0.0;
+        let nutrientCyclePeriodSeconds = 300; 
+        let nutrientCycleBaseAmplitude = 0.65;
+        let nutrientCycleWaveAmplitude = 0.35;
+        let lightCyclePeriodSeconds = 480; 
+        let globalNutrientMultiplier = 1.0;
+        let globalLightMultiplier = 1.0;
 
         let INITIAL_POPULATION_SIZE; // Will be set after CREATURE_POPULATION_FLOOR is loaded/defaulted
 
@@ -1326,6 +1369,11 @@
             console.log("Viscosity map reset to normal.");
         };
 
+        nutrientCyclePeriodSlider.oninput = function() { nutrientCyclePeriodSeconds = parseInt(this.value); updateSliderDisplay(this, nutrientCyclePeriodSpan); };
+        nutrientCycleBaseAmplitudeSlider.oninput = function() { nutrientCycleBaseAmplitude = parseFloat(this.value); updateSliderDisplay(this, nutrientCycleBaseAmplitudeSpan); };
+        nutrientCycleWaveAmplitudeSlider.oninput = function() { nutrientCycleWaveAmplitude = parseFloat(this.value); updateSliderDisplay(this, nutrientCycleWaveAmplitudeSpan); };
+        lightCyclePeriodSlider.oninput = function() { lightCyclePeriodSeconds = parseInt(this.value); updateSliderDisplay(this, lightCyclePeriodSpan); };
+
         viewEntireSimButton.onclick = function() {
             console.log('[View Entire Sim] Before:', { viewZoom, viewOffsetX, viewOffsetY, WORLD_WIDTH, WORLD_HEIGHT, clientW: canvas.clientWidth, clientH: canvas.clientHeight });
             
@@ -1366,6 +1414,15 @@
             updateSliderDisplay(viscosityBrushValueSlider, viscosityBrushValueSpan);
             updateSliderDisplay(viscosityBrushSizeSlider, viscosityBrushSizeSpan);
             updateSliderDisplay(viscosityBrushStrengthSlider, viscosityBrushStrengthSpan);
+
+            nutrientCyclePeriodSlider.value = nutrientCyclePeriodSeconds;
+            nutrientCycleBaseAmplitudeSlider.value = nutrientCycleBaseAmplitude;
+            nutrientCycleWaveAmplitudeSlider.value = nutrientCycleWaveAmplitude;
+            lightCyclePeriodSlider.value = lightCyclePeriodSeconds;
+            updateSliderDisplay(nutrientCyclePeriodSlider, nutrientCyclePeriodSpan);
+            updateSliderDisplay(nutrientCycleBaseAmplitudeSlider, nutrientCycleBaseAmplitudeSpan);
+            updateSliderDisplay(nutrientCycleWaveAmplitudeSlider, nutrientCycleWaveAmplitudeSpan);
+            updateSliderDisplay(lightCyclePeriodSlider, lightCyclePeriodSpan);
 
             canvas.classList.toggle('emitter-edit-mode', IS_EMITTER_EDIT_MODE);
         }
@@ -2681,8 +2738,9 @@
                         const gx = Math.floor(point.pos.x / fluidFieldRef.scaleX);
                         const gy = Math.floor(point.pos.y / fluidFieldRef.scaleY);
                         const nutrientIdx = fluidFieldRef.IX(gx, gy);
-                        const nutrientValue = nutrientField[nutrientIdx] !== undefined ? nutrientField[nutrientIdx] : 1.0;
-                        costMultiplier = 1.0 / Math.max(MIN_NUTRIENT_VALUE, nutrientValue);
+                        const baseNutrientValue = nutrientField[nutrientIdx] !== undefined ? nutrientField[nutrientIdx] : 1.0;
+                        const effectiveNutrientValue = baseNutrientValue * globalNutrientMultiplier;
+                        costMultiplier = 1.0 / Math.max(MIN_NUTRIENT_VALUE, effectiveNutrientValue);
                     }
 
                     currentFrameEnergyCost += BASE_NODE_EXISTENCE_COST * costMultiplier;
@@ -2905,8 +2963,9 @@
                                                                 const particleGx = Math.floor(particle.pos.x / fluidField.scaleX);
                                                                 const particleGy = Math.floor(particle.pos.y / fluidField.scaleY);
                                                                 const nutrientIdxAtParticle = fluidField.IX(particleGx, particleGy);
-                                                                const nutrientValueAtParticle = nutrientField[nutrientIdxAtParticle] !== undefined ? nutrientField[nutrientIdxAtParticle] : 1.0;
-                                                                energyGain *= Math.max(MIN_NUTRIENT_VALUE, nutrientValueAtParticle);
+                                                                const baseNutrientValueAtParticle = nutrientField[nutrientIdxAtParticle] !== undefined ? nutrientField[nutrientIdxAtParticle] : 1.0;
+                                                                const effectiveNutrientAtParticle = baseNutrientValueAtParticle * globalNutrientMultiplier;
+                                                                energyGain *= Math.max(MIN_NUTRIENT_VALUE, effectiveNutrientAtParticle);
                                                             }
                                                             this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyGain);
                                                         }
@@ -4060,19 +4119,21 @@
 
             for (let j = 0; j < N; j++) {
                 for (let i = 0; i < N; i++) {
-                    const nutrientValue = nutrientField[fluidField.IX(i, j)]; // Use fluidField.IX for correct indexing
+                    const baseNutrientValue = nutrientField[fluidField.IX(i, j)]; 
+                    const effectiveNutrientValue = baseNutrientValue * globalNutrientMultiplier;
+                    // Use effectiveNutrientValue for color calculation
                     let r = 0, g = 0, b = 0, a = 0;
 
-                    if (nutrientValue < 1.0) { // Desert-like
+                    if (effectiveNutrientValue < 1.0) { // Desert-like
                         r = 150;
-                        g = 100 - (nutrientValue / 1.0) * 50;
-                        b = 50  - (nutrientValue / 1.0) * 25;
-                        a = 0.3 * (1.0 - nutrientValue / 1.0);
-                    } else if (nutrientValue > 1.0) { // Oasis-like
-                        r = 100 - ((nutrientValue - 1.0) / 1.0) * 50;
+                        g = 100 - (effectiveNutrientValue / 1.0) * 50;
+                        b = 50  - (effectiveNutrientValue / 1.0) * 25;
+                        a = 0.3 * (1.0 - effectiveNutrientValue / 1.0); 
+                    } else if (effectiveNutrientValue > 1.0) { // Oasis-like
+                        r = 100 - ((effectiveNutrientValue - 1.0) / 1.0) * 50;
                         g = 150;
-                        b = 100 - ((nutrientValue - 1.0) / 1.0) * 50;
-                        a = 0.3 * ((nutrientValue - 1.0) / 1.0);
+                        b = 100 - ((effectiveNutrientValue - 1.0) / 1.0) * 50;
+                        a = 0.3 * ((effectiveNutrientValue - 1.0) / 1.0); 
                     }
                     a = Math.min(0.3, Math.max(0, a));
 
@@ -4095,12 +4156,14 @@
 
             for (let j = 0; j < N; j++) {
                 for (let i = 0; i < N; i++) {
-                    const lightValue = lightField[fluidField.IX(i, j)]; // 0.0 to 1.0
-                    const intensity = Math.floor(lightValue * 200); // Base for yellow/white
-                    const bluePart = Math.floor((1 - lightValue) * 50); // Add some blue for darker areas
-                    const alpha = lightValue * 0.15 + (1-lightValue) * 0.05; // More opaque for brighter light, slightly visible for dark
+                    const baseLightValue = lightField[fluidField.IX(i, j)]; 
+                    const effectiveLightValue = baseLightValue * globalLightMultiplier;
+                    // Use effectiveLightValue for color calculation
+                    const intensity = Math.floor(effectiveLightValue * 200); 
+                    const bluePart = Math.floor((1 - effectiveLightValue) * 50); 
+                    const alpha = effectiveLightValue * 0.15 + (1 - effectiveLightValue) * 0.05; 
 
-                    if (lightValue > 0.01 || (1-lightValue) > 0.01) { // Only draw if not perfectly neutral/invisible
+                    if (effectiveLightValue > 0.01 || (1-effectiveLightValue) > 0.01) { 
                         ctxToDrawOn.fillStyle = `rgba(${intensity}, ${intensity}, ${bluePart}, ${alpha.toFixed(2)})`;
                         ctxToDrawOn.fillRect(i * cellWidth, j * cellHeight, cellWidth, cellHeight);
                     }
@@ -4155,6 +4218,25 @@
 
             const currentMaxDeltaTime = MAX_DELTA_TIME_MS / 1000.0;
             deltaTime = Math.min(deltaTime, currentMaxDeltaTime);
+
+            totalSimulationTime += deltaTime;
+
+            // Calculate global nutrient multiplier
+            if (nutrientCyclePeriodSeconds > 0) {
+                globalNutrientMultiplier = nutrientCycleBaseAmplitude + nutrientCycleWaveAmplitude * Math.sin((totalSimulationTime * 2 * Math.PI) / nutrientCyclePeriodSeconds);
+                globalNutrientMultiplier = Math.max(0.01, globalNutrientMultiplier); // Clamp to avoid zero or negative
+            } else {
+                globalNutrientMultiplier = nutrientCycleBaseAmplitude + nutrientCycleWaveAmplitude; // Effectively static if period is 0
+            }
+            currentNutrientMultiplierDisplay.textContent = globalNutrientMultiplier.toFixed(2);
+
+            // Calculate global light multiplier
+            if (lightCyclePeriodSeconds > 0) {
+                globalLightMultiplier = (Math.sin((totalSimulationTime * 2 * Math.PI) / lightCyclePeriodSeconds) + 1) / 2; // Ranges 0.0 to 1.0
+            } else {
+                globalLightMultiplier = 0.5; // Static at mid-value if period is 0
+            }
+            currentLightMultiplierDisplay.textContent = globalLightMultiplier.toFixed(2);
 
             updatePhysics(deltaTime);
         }

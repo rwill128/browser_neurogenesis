@@ -3426,13 +3426,12 @@
             }
 
 
-            lin_solve(b, x, x0, a, c) { // Reverted signature
-                const cRecip = 1.0 / c;
-                for (let k_iter = 0; k_iter < this.iterations; k_iter++) { // k_iter was k, kept k_iter for less churn
+            lin_solve(b, x, x0, a, c, field_type_ignored, base_diff_rate_ignored, dt_param_ignored) { // Checkpoint 1 Signature
+                const cRecip = 1.0 / c; // Uses passed 'c'
+                for (let k_iter = 0; k_iter < this.iterations; k_iter++) { 
                     for (let j = 1; j < this.size - 1; j++) {
                         for (let i = 1; i < this.size - 1; i++) {
                             const idx = this.IX(i,j);
-                            // Removed logic for field_type and viscosityField
                             x[idx] =
                                 (x0[idx] +
                                 a * ( x[this.IX(i+1,j)] + x[this.IX(i-1,j)] +

@@ -165,8 +165,8 @@ class SoftBody {
         this.isUnstable = false;
         this.creatureEnergy = MAX_CREATURE_ENERGY * OFFSPRING_INITIAL_ENERGY_SHARE;
         this.ticksSinceBirth = 0;
-        this.canReproduce = false;
-        this.shapeType = parentBody ? parentBody.shapeType : Math.floor(Math.random() * 3); // Used for initial generation
+        this.canReproduce = false; // This flag might become less important if threshold is dynamic
+        this.shapeType = parentBody ? parentBody.shapeType : Math.floor(Math.random() * 3); 
 
         this.motorImpulseInterval = 30 + Math.floor(Math.random() * 90);
         this.motorImpulseMagnitudeCap = 0.5 + Math.random() * 2.0;
@@ -176,6 +176,7 @@ class SoftBody {
         this.offspringSpawnRadius = parentBody ? parentBody.offspringSpawnRadius : (50 + Math.random() * 50);
         this.pointAddChance = parentBody ? parentBody.pointAddChance : (0.02 + Math.random() * 0.06);
         this.springConnectionRadius = parentBody ? parentBody.springConnectionRadius : (40 + Math.random() * 40);
+        this.reproductionEnergyThreshold = MAX_CREATURE_ENERGY; // Default for new creatures
 
 
         if (parentBody) {
@@ -195,6 +196,11 @@ class SoftBody {
             this.pointAddChance = Math.max(0, Math.min(0.5, parentBody.pointAddChance * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 2))));
             this.springConnectionRadius = Math.max(10, parentBody.springConnectionRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)));
 
+            // Mutate reproductionEnergyThreshold
+            this.reproductionEnergyThreshold = parentBody.reproductionEnergyThreshold * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.2)); 
+            // Clamp the threshold: ensure it's not below a minimum (e.g., 5% of MAX_CREATURE_ENERGY) and not above MAX_CREATURE_ENERGY.
+            this.reproductionEnergyThreshold = Math.max(MAX_CREATURE_ENERGY * 0.05, Math.min(this.reproductionEnergyThreshold, MAX_CREATURE_ENERGY));
+            this.reproductionEnergyThreshold = Math.round(this.reproductionEnergyThreshold); 
 
             const angleMutation = (Math.random() - 0.5) * Math.PI * 0.2 * GLOBAL_MUTATION_RATE_MODIFIER;
             const cosA = Math.cos(angleMutation);

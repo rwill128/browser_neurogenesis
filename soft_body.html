@@ -754,7 +754,7 @@
 
         let nutrientField = null;
         let IS_NUTRIENT_EDIT_MODE = false;
-        let SHOW_NUTRIENT_MAP = true;
+        let SHOW_NUTRIENT_MAP = false;
 
         let NUTRIENT_BRUSH_VALUE = 1.0;
         let NUTRIENT_BRUSH_SIZE = 5; // In grid cells
@@ -3594,8 +3594,21 @@
                 nutrientField = new Float32Array(0); // Empty array if size is invalid
                 return;
             }
-            nutrientField = new Float32Array(size * size).fill(1.0); // Default to 1.0 (neutral)
-            console.log(`Nutrient map initialized to ${size}x${size}.`);
+            // nutrientField = new Float32Array(size * size).fill(1.0); // Old: Default to 1.0 (neutral)
+            nutrientField = new Float32Array(size * size);
+            const noiseScale = 0.05; // Same scale as light map for consistency, can be different
+            const noiseOffsetX = Math.random() * 1000 + 1000; // Different random offset seed
+            const noiseOffsetY = Math.random() * 1000 + 1000; // Different random offset seed
+
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    let noiseValue = perlin.noise(x * noiseScale + noiseOffsetX, y * noiseScale + noiseOffsetY);
+                    // Map Perlin noise (-1 to 1) to our desired nutrient range (MIN_NUTRIENT_VALUE to MAX_NUTRIENT_VALUE)
+                    let mappedValue = ((noiseValue + 1) / 2) * (MAX_NUTRIENT_VALUE - MIN_NUTRIENT_VALUE) + MIN_NUTRIENT_VALUE;
+                    nutrientField[y * size + x] = Math.max(MIN_NUTRIENT_VALUE, Math.min(MAX_NUTRIENT_VALUE, mappedValue));
+                }
+            }
+            console.log(`Nutrient map initialized to ${size}x${size} with Perlin noise pattern.`);
         }
 
         // Simple Perlin Noise placeholder

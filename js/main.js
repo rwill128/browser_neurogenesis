@@ -24,12 +24,12 @@ async function main() {
     canvas.width = WORLD_WIDTH; // Set canvas internal size
     canvas.height = WORLD_HEIGHT;
 
-    await loadAndApplySliderConfig(); // Attempt to override with JSON values
+    // initializeDefaultSliderVariables(); // Removed - global vars in config.js are the defaults
 
-    INITIAL_POPULATION_SIZE = CREATURE_POPULATION_FLOOR; // Set this AFTER config is loaded
+    INITIAL_POPULATION_SIZE = CREATURE_POPULATION_FLOOR; 
 
     initializeSpatialGrid();
-    initializeAllSliderDisplays(); // This will now use the (potentially JSON-overridden) global vars
+    initializeAllSliderDisplays(); // Syncs HTML sliders with JS global defaults and updates display spans
     initFluidSimulation();
     initNutrientMap(); 
     initLightMap(); 

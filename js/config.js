@@ -1,6 +1,6 @@
 // --- Viewport and World Dimensions ---
-let WORLD_WIDTH = 8000;
-let WORLD_HEIGHT = 6000;
+let WORLD_WIDTH = 12000;
+let WORLD_HEIGHT = 9000;
 const VIEW_PAN_SPEED = 80;
 
 let viewOffsetX = 0;
@@ -23,18 +23,16 @@ const MAX_SPAN_PER_POINT_FACTOR = GRID_CELL_SIZE * 2;
 const DYE_PULL_RATE = 0.05;
 
 // Original Radius Multipliers (will become base values)
-const EATING_RADIUS_MULTIPLIER_BASE = 2.0; // Original was 3.5, reducing base
-const PREDATION_RADIUS_MULTIPLIER_BASE = 1.5; // Original was 2.5, reducing base
+const EATING_RADIUS_MULTIPLIER_BASE = 2.0;
+const PREDATION_RADIUS_MULTIPLIER_BASE = 1.5;
 
 // Exertion Bonuses for Radius Multipliers
-const EATING_RADIUS_MULTIPLIER_MAX_BONUS = 3.0; // Max bonus at full exertion
-const PREDATION_RADIUS_MULTIPLIER_MAX_BONUS = 2.5; // Max bonus at full exertion
+const EATING_RADIUS_MULTIPLIER_MAX_BONUS = 3.0;
+const PREDATION_RADIUS_MULTIPLIER_MAX_BONUS = 2.5;
 
 const ENERGY_PER_PARTICLE = 25;
-// Original Energy Sapped (will become base value)
-const ENERGY_SAPPED_PER_PREDATION_BASE = 3; // Original was 5
-// Exertion Bonus for Energy Sapped
-const ENERGY_SAPPED_PER_PREDATION_MAX_BONUS = 7; // Max bonus at full exertion (total 10)
+const ENERGY_SAPPED_PER_PREDATION_BASE = 3;
+const ENERGY_SAPPED_PER_PREDATION_MAX_BONUS = 7;
 
 const MAX_CREATURE_ENERGY = 100;
 const OFFSPRING_INITIAL_ENERGY_SHARE = 0.25;
@@ -48,17 +46,17 @@ const MUTATION_CHANCE_REASSIGN_NEURON_LINK = 0.02;
 const ADD_POINT_MUTATION_CHANCE = 0.03;
 const NEW_POINT_OFFSET_RADIUS = 15;
 let isAnySoftBodyUnstable = false;
-const RED_DYE_POISON_STRENGTH = 0.5; // Energy lost per unit of normalized red dye (0-1) per point, per dt=1 frame
+const RED_DYE_POISON_STRENGTH = 0.5;
 
 
 // --- Global Variables & Constants (with initial hardcoded defaults) ---
-let CREATURE_POPULATION_FLOOR = 10;
-let CREATURE_POPULATION_CEILING = 1000;
-let PARTICLE_POPULATION_FLOOR = 5000;
-let PARTICLE_POPULATION_CEILING = 20000;
+let CREATURE_POPULATION_FLOOR = 100;
+let CREATURE_POPULATION_CEILING = 2000;
+let PARTICLE_POPULATION_FLOOR = 20000;
+let PARTICLE_POPULATION_CEILING = 60000;
 let canCreaturesReproduceGlobally = true;
 
-let BODY_FLUID_ENTRAINMENT_FACTOR = 0.465;
+let BODY_FLUID_ENTRAINMENT_FACTOR = 0.485;
 let FLUID_CURRENT_STRENGTH_ON_BODY = 19.7;
 let SOFT_BODY_PUSH_STRENGTH = 0.10;
 let REPRODUCTION_COOLDOWN_TICKS = 1000;
@@ -67,30 +65,30 @@ let BODY_REPULSION_RADIUS_FACTOR = 5.0;
 let GLOBAL_MUTATION_RATE_MODIFIER = 0.25;
 let MAX_DELTA_TIME_MS = 10;
 let IS_SIMULATION_PAUSED = false;
-let IS_EMITTER_EDIT_MODE = false; // Default to false, will be set by checkbox
+let IS_EMITTER_EDIT_MODE = false;
 let EMITTER_STRENGTH = 3.0;
 const EMITTER_MOUSE_DRAG_SCALE = 0.1;
 const FLUID_MOUSE_DRAG_VELOCITY_SCALE = 0.1;
 
-let BASE_NODE_EXISTENCE_COST = 0.3;
-let EMITTER_NODE_ENERGY_COST = 1.0;
-let EATER_NODE_ENERGY_COST = 0.3;
-let PREDATOR_NODE_ENERGY_COST = 0.8;
-let NEURON_NODE_ENERGY_COST = 0.01;
-let PHOTOSYNTHETIC_NODE_ENERGY_COST = 0.01; // Added
-let PHOTOSYNTHESIS_EFFICIENCY = 5; // Added
+let BASE_NODE_EXISTENCE_COST = 0.05;
+let EMITTER_NODE_ENERGY_COST = 0.1;
+let EATER_NODE_ENERGY_COST = 0.1;
+let PREDATOR_NODE_ENERGY_COST = 0.1;
+let NEURON_NODE_ENERGY_COST = 0.001;
+let PHOTOSYNTHETIC_NODE_ENERGY_COST = 0.1;
+let PHOTOSYNTHESIS_EFFICIENCY = 100.0;
 
 
 let FLUID_GRID_SIZE_CONTROL = 128;
 let FLUID_DIFFUSION = 0.00047;
-let FLUID_VISCOSITY = 0.000068;
+let FLUID_VISCOSITY = 0.001;
 let FLUID_FADE_RATE = 0.002;
-let MAX_FLUID_VELOCITY_COMPONENT = 10.0; // Updated default
-let IS_WORLD_WRAPPING = false; // Default to false, will be set by checkbox
+let MAX_FLUID_VELOCITY_COMPONENT = 10.0;
+let IS_WORLD_WRAPPING = false;
 let PARTICLES_PER_SECOND = 500;
 let PARTICLE_FLUID_INFLUENCE = 2.0;
 let PARTICLE_BASE_LIFE_DECAY = 0.001;
-let IS_PARTICLE_LIFE_INFINITE = false; // Default to false, will be set by checkbox
+let IS_PARTICLE_LIFE_INFINITE = false;
 const PARTICLE_LIFE_DECAY_RANDOM_FACTOR = 0.002;
 let particleEmissionDebt = 0;
 
@@ -98,14 +96,14 @@ let IS_NUTRIENT_EDIT_MODE = false;
 let SHOW_NUTRIENT_MAP = false;
 
 let NUTRIENT_BRUSH_VALUE = 1.0;
-let NUTRIENT_BRUSH_SIZE = 5; // In grid cells
-let NUTRIENT_BRUSH_STRENGTH = 0.1; // 0 to 1, how quickly it applies
+let NUTRIENT_BRUSH_SIZE = 5;
+let NUTRIENT_BRUSH_STRENGTH = 0.1;
 const MIN_NUTRIENT_VALUE = 0.1;
 const MAX_NUTRIENT_VALUE = 2.0;
 let isPaintingNutrients = false;
 
 let IS_LIGHT_EDIT_MODE = false;
-let SHOW_LIGHT_MAP = false; // Default to false
+let SHOW_LIGHT_MAP = false;
 let LIGHT_BRUSH_VALUE = 0.5;
 let LIGHT_BRUSH_SIZE = 5;
 let LIGHT_BRUSH_STRENGTH = 0.1;
@@ -119,18 +117,18 @@ let VISCOSITY_BRUSH_VALUE = 1.0;
 let VISCOSITY_BRUSH_SIZE = 5;
 let VISCOSITY_BRUSH_STRENGTH = 0.1;
 const MIN_VISCOSITY_MULTIPLIER = 0.2;
-const MAX_VISCOSITY_MULTIPLIER = 10.0; // Was 5.0
+const MAX_VISCOSITY_MULTIPLIER = 10.0;
 let isPaintingViscosity = false;
 
 let totalSimulationTime = 0.0;
-let nutrientCyclePeriodSeconds = 300; 
+let nutrientCyclePeriodSeconds = 300;
 let nutrientCycleBaseAmplitude = 0.65;
 let nutrientCycleWaveAmplitude = 0.35;
-let lightCyclePeriodSeconds = 480; 
+let lightCyclePeriodSeconds = 480;
 let globalNutrientMultiplier = 1.0;
 let globalLightMultiplier = 1.0;
 
-let INITIAL_POPULATION_SIZE; // Will be set after CREATURE_POPULATION_FLOOR is loaded/defaulted
+let INITIAL_POPULATION_SIZE;
 
 let velocityEmitters = [];
 let currentEmitterPreview = null;
@@ -143,20 +141,20 @@ let lastPanMouseX = 0;
 let lastPanMouseY = 0;
 
 // --- Neural Network Constants ---
-const NEURAL_INPUT_SIZE = 9; // 3 (dye RGB) + 1 (energy) + 2 (CoM rel pos) + 2 (CoM rel vel) + 1 (nutrient level)
-const NEURAL_OUTPUTS_PER_EMITTER_SWIMMER = 14; // For Policy Gradient: 6 actions (12) + 1 exertion (2) = 14
-const NEURAL_OUTPUTS_PER_EATER = 2; // For Policy Gradient: 1 exertion (mean + stdDev)
-const NEURAL_OUTPUTS_PER_PREDATOR = 2; // For Policy Gradient: 1 exertion (mean + stdDev)
+const NEURAL_INPUT_SIZE = 9;
+const NEURAL_OUTPUTS_PER_EMITTER_SWIMMER = 14;
+const NEURAL_OUTPUTS_PER_EATER = 2;
+const NEURAL_OUTPUTS_PER_PREDATOR = 2;
 
 const DEFAULT_HIDDEN_LAYER_SIZE_MIN = 5;
-const DEFAULT_HIDDEN_LAYER_SIZE_MAX = 30; // Reduced from 50 for initial testing
-const MAX_NEURAL_FORCE_COMPONENT = 1.0; // Max output for a single force component from NN
-const MAX_NEURAL_EMISSION_PULL_STRENGTH = 1.0; // Max output for emission pull strength
+const DEFAULT_HIDDEN_LAYER_SIZE_MAX = 30;
+const MAX_NEURAL_FORCE_COMPONENT = 1.0;
+const MAX_NEURAL_EMISSION_PULL_STRENGTH = 1.0;
 
 // --- RL Training Constants ---
 const LEARNING_RATE = 0.001;
 const DISCOUNT_FACTOR_GAMMA = 0.99;
-const TRAINING_INTERVAL_FRAMES = 10; 
+const TRAINING_INTERVAL_FRAMES = 10;
 
 const DyeChannel = {
     RED: 0,
@@ -170,74 +168,6 @@ const DYE_COLORS = {
     BLUE: [50, 50, 200]
 };
 
-// --- Slider Config Loading ---
-async function loadAndApplySliderConfig() {
-    let configUrl;
-    if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.hostname === "" || window.location.protocol === "file:") {
-        // Added window.location.hostname === "" for cases when opened as a local file directly not through a server
-        configUrl = 'slider_config.json'; // Assumes slider_config.json is in the same directory or accessible via relative path
-    } else {
-        // Likely running on GitHub Pages or another deployed server
-        configUrl = 'https://rwill128.github.io/browser_neurogenesis/slider_config.json';
-    }
-
-    try {
-        console.log(`Fetching slider config from: ${configUrl}`); // Log which URL is being used
-        const response = await fetch(configUrl);
-        if (!response.ok) {
-            // If fetching from the primary URL fails, try to fall back to a local version if not already tried.
-            // This is a basic fallback, could be more sophisticated.
-            if (configUrl !== 'slider_config.json' && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.hostname === "" || window.location.protocol === "file:")) {
-                console.warn(`Failed to fetch from ${configUrl}, attempting fallback to local 'slider_config.json'.`);
-                configUrl = 'slider_config.json';
-                const fallbackResponse = await fetch(configUrl);
-                if (!fallbackResponse.ok) {
-                    throw new Error(`HTTP error! status: ${fallbackResponse.status} on fallback URL. Using hardcoded defaults.`);
-                }
-                const sliderConfigs = await fallbackResponse.json();
-                window.loadedSliderConfigs = sliderConfigs;
-                applySliderConfigData(sliderConfigs); // Use a helper to apply
-                console.log("Slider configuration loaded and applied from LOCAL FALLBACK URL.");
-                return; // Exit after successful fallback
-            }
-            throw new Error(`HTTP error! status: ${response.status}. Using hardcoded defaults.`);
-        }
-        const sliderConfigs = await response.json();
-        window.loadedSliderConfigs = sliderConfigs; // Store for updateSliderDisplay
-        applySliderConfigData(sliderConfigs); // Use a helper to apply
-
-        console.log("Slider configuration loaded and applied from URL.");
-    } catch (error) {
-        console.error("Could not load or apply slider_config.json. Using hardcoded defaults (already set).", error);
-        // Fallbacks are already set by initial 'let' declarations for JS variables.
-        // We might want to ensure sliders in HTML still get their min/max/step from a hardcoded JS object if fetch totally fails.
-        // For now, this relies on HTML defaults if JSON load fails and no JS defaults were set by slider_config.json for HTML attributes.
-    }
-}
-
-function applySliderConfigData(configs) { // Helper function to apply slider data
-    if (!configs) return;
-    configs.forEach(config => {
-        const slider = document.getElementById(config.id);
-        if (slider) {
-            slider.min = config.min;
-            slider.max = config.max;
-            slider.step = config.step;
-            slider.value = config.defaultValue;
-
-            // Update global JS variable directly
-            if (config.jsVariable) {
-                if (typeof window[config.jsVariable] !== 'undefined') {
-                    window[config.jsVariable] = parseFloat(config.defaultValue);
-                } else {
-                    console.warn(`Global variable ${config.jsVariable} was not pre-initialized. Setting it now.`);
-                    window[config.jsVariable] = parseFloat(config.defaultValue);
-                }
-            }
-        }
-    });
-}
-
 // --- Config Import/Export ---
 function handleExportConfig() {
     const config = {
@@ -248,7 +178,7 @@ function handleExportConfig() {
         creaturePopulationCeiling: CREATURE_POPULATION_CEILING,
         particlePopulationFloor: PARTICLE_POPULATION_FLOOR,
         particlePopulationCeiling: PARTICLE_POPULATION_CEILING,
-        maxFluidVelocityComponent: MAX_FLUID_VELOCITY_COMPONENT, // New
+        maxFluidVelocityComponent: MAX_FLUID_VELOCITY_COMPONENT,
         bodyFluidEntrainment: BODY_FLUID_ENTRAINMENT_FACTOR,
         fluidCurrentStrength: FLUID_CURRENT_STRENGTH_ON_BODY,
         softBodyPushStrength: SOFT_BODY_PUSH_STRENGTH,
@@ -314,23 +244,24 @@ function handleImportConfig(event) {
         }
     };
     reader.readAsText(file);
-    importConfigFile.value = '';
+    if (importConfigFile) importConfigFile.value = ''; // Clear file input
 }
 
 function applyImportedConfig(config) {
     if (config.worldWidth !== undefined) WORLD_WIDTH = config.worldWidth;
     if (config.worldHeight !== undefined) WORLD_HEIGHT = config.worldHeight;
-    canvas.width = WORLD_WIDTH;
-    canvas.height = WORLD_HEIGHT;
-    MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5); // Update threshold
-    initializeSpatialGrid(); // Re-initialize grid with new world dimensions
+    if (canvas) {
+        canvas.width = WORLD_WIDTH;
+        canvas.height = WORLD_HEIGHT;
+    }
+    initializeSpatialGrid();
 
     if (config.zoomSensitivity !== undefined) ZOOM_SENSITIVITY = config.zoomSensitivity;
     if (config.creaturePopulationFloor !== undefined) CREATURE_POPULATION_FLOOR = config.creaturePopulationFloor;
     if (config.creaturePopulationCeiling !== undefined) CREATURE_POPULATION_CEILING = config.creaturePopulationCeiling;
     if (config.particlePopulationFloor !== undefined) PARTICLE_POPULATION_FLOOR = config.particlePopulationFloor;
     if (config.particlePopulationCeiling !== undefined) PARTICLE_POPULATION_CEILING = config.particlePopulationCeiling;
-    if (config.maxFluidVelocityComponent !== undefined) MAX_FLUID_VELOCITY_COMPONENT = config.maxFluidVelocityComponent; // New
+    if (config.maxFluidVelocityComponent !== undefined) MAX_FLUID_VELOCITY_COMPONENT = config.maxFluidVelocityComponent;
 
     if (config.bodyFluidEntrainment !== undefined) BODY_FLUID_ENTRAINMENT_FACTOR = config.bodyFluidEntrainment;
     if (config.fluidCurrentStrength !== undefined) FLUID_CURRENT_STRENGTH_ON_BODY = config.fluidCurrentStrength;
@@ -367,9 +298,6 @@ function applyImportedConfig(config) {
     if (config.photosyntheticNodeCost !== undefined) PHOTOSYNTHETIC_NODE_ENERGY_COST = config.photosyntheticNodeCost;
     if (config.photosynthesisEfficiency !== undefined) PHOTOSYNTHESIS_EFFICIENCY = config.photosynthesisEfficiency;
     
-    // Update UI elements to reflect imported values
-    // This should be done *before* initializeAllSliderDisplays if that function reads from DOM for initial values
-    // Or, ensure initializeAllSliderDisplays *sets* DOM values from these JS vars.
     worldWidthInput.value = WORLD_WIDTH;
     worldHeightInput.value = WORLD_HEIGHT;
     zoomSensitivitySlider.value = ZOOM_SENSITIVITY;
@@ -403,29 +331,26 @@ function applyImportedConfig(config) {
     particleLifeDecaySlider.value = PARTICLE_BASE_LIFE_DECAY;
     infiniteParticleLifeToggle.checked = IS_PARTICLE_LIFE_INFINITE;
     emitterStrengthSlider.value = EMITTER_STRENGTH;
-    emitterEditModeToggle.checked = IS_EMITTER_EDIT_MODE; // Assuming IS_EMITTER_EDIT_MODE is part of config or handled
+    emitterEditModeToggle.checked = IS_EMITTER_EDIT_MODE;
 
-    // Initialize all slider displays to match loaded JS variables
     initializeAllSliderDisplays(); 
 
-    initFluidSimulation(); // This needs to be called so fluidField.scaleX/Y are set
-    initNutrientMap(); // Initialize nutrient map after fluid sim is ready
-    initLightMap(); // Initialize light map
-    initViscosityMap(); // Initialize viscosity map
+    initFluidSimulation();
+    initNutrientMap();
+    initLightMap();
+    initViscosityMap();
     initParticles();
-    // Initialize nutrient map after fluid simulation setup to ensure FLUID_GRID_SIZE_CONTROL is correctly applied
     if (config.nutrientFieldData && config.nutrientMapSize) {
         if (config.nutrientMapSize === Math.round(FLUID_GRID_SIZE_CONTROL)) {
             nutrientField = new Float32Array(config.nutrientFieldData);
             console.log("Nutrient map loaded from config.");
         } else {
             console.warn("Nutrient map size in config (" + config.nutrientMapSize + ") does not match current grid size (" + Math.round(FLUID_GRID_SIZE_CONTROL) + "). Re-initializing nutrient map.");
-            initNutrientMap(); // Re-initialize if sizes don't match
+            initNutrientMap();
         }
     } else {
-        initNutrientMap(); // Initialize if not in config
+        initNutrientMap();
     }
-    // Initialize light map after fluid simulation setup and nutrient map handling
     if (config.lightFieldData && config.lightMapSize) {
         if (config.lightMapSize === Math.round(FLUID_GRID_SIZE_CONTROL)) {
             lightField = new Float32Array(config.lightFieldData);
@@ -435,9 +360,8 @@ function applyImportedConfig(config) {
             initLightMap();
         }
     } else {
-        initLightMap(); // Initialize if not in config
+        initLightMap();
     }
-    // Initialize viscosity map after other maps
     if (config.viscosityFieldData && config.viscosityMapSize) {
         if (config.viscosityMapSize === Math.round(FLUID_GRID_SIZE_CONTROL)) {
             viscosityField = new Float32Array(config.viscosityFieldData);
@@ -447,9 +371,9 @@ function applyImportedConfig(config) {
             initViscosityMap();
         }
     } else {
-        initViscosityMap(); // Initialize if not in config
+        initViscosityMap();
     }
-    initializePopulation(); // Population depends on nutrient map for potential future cost calculations.
+    initializePopulation();
 
     console.log("Applied imported config. Reset population if needed for full effect on creatures.");
 } 

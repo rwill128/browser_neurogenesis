@@ -155,6 +155,7 @@ canvas.emitter-edit-mode {
 .indicator-light { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #4CAF50; margin-left: 5px; vertical-align: middle; border: 1px solid #222; transition: background-color 0.3s; }
 .indicator-light.unstable { background-color: #F44336; }
 #populationCount { margin-top: 10px; font-size: 0.9em; color: #ccc; text-align: center; width: 100%; }
+#particleCount { margin-top: 10px; font-size: 0.9em; color: #ccc; text-align: center; width: 100%; }
 .viewport-instructions { font-size: 0.8em; color: #bbb; text-align: center; margin-top: 5px; }
 #infoPanel h5 { margin-top: 0; margin-bottom: 8px; color: #00aeff; border-bottom: 1px solid #444; padding-bottom: 5px; }
 #infoPanel p { margin: 3px 0; line-height: 1.4; }

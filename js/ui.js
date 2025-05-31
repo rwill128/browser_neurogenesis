@@ -153,43 +153,103 @@ function updateSliderDisplay(slider, span) {
     let value = parseFloat(slider.value);
     if (!slider || !span) return;
 
-    const config = window.loadedSliderConfigs?.find(c => c.id === slider.id);
-    
-    if (config && config.displayFormat === "toFixed(4)") {
-         span.textContent = value.toFixed(4);
-    } else if (config && config.displayFormat === "toFixed(3)") {
-         span.textContent = value.toFixed(3);
-    } else if (config && config.displayFormat === "toFixed(2)") {
-         span.textContent = value.toFixed(2);
-    } else if (config && config.displayFormat === "toFixed(1)") {
-         span.textContent = value.toFixed(1);
-    } else if (config && config.displayFormat === "toExponential(1)") {
-         span.textContent = value.toExponential(1);
-    } else {
-        span.textContent = Number.isInteger(Number(slider.step)) && Number(slider.step) === 1 ? Math.floor(value) : value.toFixed(2);
+    // Determine display format based on slider properties (e.g., step or id)
+    const step = parseFloat(slider.step);
+    if (step === 0.0005 || slider.id === 'zoomSensitivitySlider' || slider.id === 'particleLifeDecay') {
+        span.textContent = value.toFixed(4);
+    } else if (slider.id === 'bodyFluidEntrainment' || slider.id === 'fluidFade') { // fluidFadeSlider was fluidFadeValueSpan
+        span.textContent = value.toFixed(3);
+    } else if (slider.id === 'globalMutationRate' || slider.id === 'bodyPushStrength' || 
+               slider.id === 'photosyntheticNodeCost' || slider.id === 'maxFluidVelocityComponentSlider' ||
+               slider.id === 'particleFluidInfluence') {
+        span.textContent = value.toFixed(2);
+    } else if (slider.id === 'fluidCurrentStrength' || slider.id === 'bodyRepulsionStrength' || 
+               slider.id === 'bodyRepulsionRadiusFactor' || slider.id === 'baseNodeCost' || 
+               slider.id === 'emitterNodeCost' || slider.id === 'eaterNodeCost' || 
+               slider.id === 'predatorNodeCost' || slider.id === 'photosynthesisEfficiency' || 
+               slider.id === 'emitterStrength') {
+        span.textContent = value.toFixed(1);
+    } else if (slider.id === 'fluidDiffusion' || slider.id === 'fluidViscosity') {
+        span.textContent = value.toExponential(1);
+    } else { // Integer display for others (like population counts, cooldowns)
+        span.textContent = Math.floor(value);
     }
 }
 
 function initializeAllSliderDisplays() {
+    // Array of [sliderElement, jsVariableString, needsFloatConversion]
+    const allSliders = [
+        [zoomSensitivitySlider, "ZOOM_SENSITIVITY", true, zoomSensitivityValueSpan],
+        [creaturePopulationFloorSlider, "CREATURE_POPULATION_FLOOR", false, creaturePopulationFloorValueSpan],
+        [creaturePopulationCeilingSlider, "CREATURE_POPULATION_CEILING", false, creaturePopulationCeilingValueSpan],
+        [globalMutationRateSlider, "GLOBAL_MUTATION_RATE_MODIFIER", true, globalMutationRateValueSpan],
+        [bodyFluidEntrainmentSlider, "BODY_FLUID_ENTRAINMENT_FACTOR", true, bodyFluidEntrainmentValueSpan],
+        [fluidCurrentStrengthSlider, "FLUID_CURRENT_STRENGTH_ON_BODY", true, fluidCurrentStrengthValueSpan],
+        [bodyPushStrengthSlider, "SOFT_BODY_PUSH_STRENGTH", true, bodyPushStrengthValueSpan],
+        [reproductionCooldownSlider, "REPRODUCTION_COOLDOWN_TICKS", false, reproductionCooldownValueSpan],
+        [bodyRepulsionStrengthSlider, "BODY_REPULSION_STRENGTH", true, bodyRepulsionStrengthValueSpan],
+        [bodyRepulsionRadiusFactorSlider, "BODY_REPULSION_RADIUS_FACTOR", true, bodyRepulsionRadiusFactorValueSpan],
+        [baseNodeCostSlider, "BASE_NODE_EXISTENCE_COST", true, baseNodeCostValueSpan],
+        [emitterNodeCostSlider, "EMITTER_NODE_ENERGY_COST", true, emitterNodeCostValueSpan],
+        [eaterNodeCostSlider, "EATER_NODE_ENERGY_COST", true, eaterNodeCostValueSpan],
+        [predatorNodeCostSlider, "PREDATOR_NODE_ENERGY_COST", true, predatorNodeCostValueSpan],
+        [neuronNodeCostSlider, "NEURON_NODE_ENERGY_COST", true, neuronNodeCostValueSpan],
+        [photosyntheticNodeCostSlider, "PHOTOSYNTHETIC_NODE_ENERGY_COST", true, photosyntheticNodeCostValueSpan],
+        [photosynthesisEfficiencySlider, "PHOTOSYNTHESIS_EFFICIENCY", true, photosynthesisEfficiencyValueSpan],
+        [fluidGridSizeSlider, "FLUID_GRID_SIZE_CONTROL", false, fluidGridSizeValueSpan],
+        [fluidDiffusionSlider, "FLUID_DIFFUSION", true, fluidDiffusionValueSpan],
+        [fluidViscositySlider, "FLUID_VISCOSITY", true, fluidViscosityValueSpan],
+        [fluidFadeSlider, "FLUID_FADE_RATE", true, fluidFadeValueSpan], // Corrected from fluidFadeValueSpan
+        [maxTimestepSlider, "MAX_DELTA_TIME_MS", false, maxTimestepValueSpan],
+        [maxFluidVelocityComponentSlider, "MAX_FLUID_VELOCITY_COMPONENT", true, maxFluidVelocityComponentValueSpan],
+        [particlePopulationFloorSlider, "PARTICLE_POPULATION_FLOOR", false, particlePopulationFloorValueSpan],
+        [particlePopulationCeilingSlider, "PARTICLE_POPULATION_CEILING", false, particlePopulationCeilingValueSpan],
+        [particlesPerSecondSlider, "PARTICLES_PER_SECOND", false, particlesPerSecondValueSpan],
+        [particleFluidInfluenceSlider, "PARTICLE_FLUID_INFLUENCE", true, particleFluidInfluenceValueSpan],
+        [particleLifeDecaySlider, "PARTICLE_BASE_LIFE_DECAY", true, particleLifeDecayValueSpan],
+        [emitterStrengthSlider, "EMITTER_STRENGTH", true, emitterStrengthValueSpan],
+        // Nutrient map sliders
+        [nutrientBrushValueSlider, "NUTRIENT_BRUSH_VALUE", true, nutrientBrushValueSpan],
+        [nutrientBrushSizeSlider, "NUTRIENT_BRUSH_SIZE", false, nutrientBrushSizeSpan],
+        [nutrientBrushStrengthSlider, "NUTRIENT_BRUSH_STRENGTH", true, nutrientBrushStrengthSpan],
+        [nutrientCyclePeriodSlider, "nutrientCyclePeriodSeconds", false, nutrientCyclePeriodSpan],
+        [nutrientCycleBaseAmplitudeSlider, "nutrientCycleBaseAmplitude", true, nutrientCycleBaseAmplitudeSpan],
+        [nutrientCycleWaveAmplitudeSlider, "nutrientCycleWaveAmplitude", true, nutrientCycleWaveAmplitudeSpan],
+        // Light map sliders
+        [lightBrushValueSlider, "LIGHT_BRUSH_VALUE", true, lightBrushValueSpan],
+        [lightBrushSizeSlider, "LIGHT_BRUSH_SIZE", false, lightBrushSizeSpan],
+        [lightBrushStrengthSlider, "LIGHT_BRUSH_STRENGTH", true, lightBrushStrengthSpan],
+        [lightCyclePeriodSlider, "lightCyclePeriodSeconds", false, lightCyclePeriodSpan],
+        // Viscosity map sliders
+        [viscosityBrushValueSlider, "VISCOSITY_BRUSH_VALUE", true, viscosityBrushValueSpan],
+        [viscosityBrushSizeSlider, "VISCOSITY_BRUSH_SIZE", false, viscosityBrushSizeSpan],
+        [viscosityBrushStrengthSlider, "VISCOSITY_BRUSH_STRENGTH", true, viscosityBrushStrengthSpan]
+    ];
+
     worldWidthInput.value = WORLD_WIDTH;
     worldHeightInput.value = WORLD_HEIGHT;
 
-    if (window.loadedSliderConfigs) {
-        window.loadedSliderConfigs.forEach(config => {
-            const slider = document.getElementById(config.id);
-            const span = document.getElementById(config.valueSpanId);
-            if (slider && span) {
-                 updateSliderDisplay(slider, span);
+    allSliders.forEach(([sliderElement, jsVarName, isFloat, spanElement]) => {
+        if (sliderElement && typeof window[jsVarName] !== 'undefined') {
+            // Set the JS global variable from the HTML slider's current value attribute
+            window[jsVarName] = isFloat ? parseFloat(sliderElement.value) : parseInt(sliderElement.value);
+            // Then update the display span to match this initial value
+            if (spanElement) {
+                updateSliderDisplay(sliderElement, spanElement);
             }
-        });
-    }
+        } else {
+            if (!sliderElement) console.warn(`Slider element for ${jsVarName} not found.`);
+            if (typeof window[jsVarName] === 'undefined') console.warn(`Global JS variable ${jsVarName} not found.`);
+        }
+    });
+
+    // Update checkbox states based on global JS variables (which have their defaults from config.js)
     particleLifeDecaySlider.disabled = IS_PARTICLE_LIFE_INFINITE;
     particleLifeDecayLabel.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#ddd';
     particleLifeDecayValueSpan.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
     worldWrapToggle.checked = IS_WORLD_WRAPPING;
     emitterEditModeToggle.checked = IS_EMITTER_EDIT_MODE;
     infiniteParticleLifeToggle.checked = IS_PARTICLE_LIFE_INFINITE;
-
     canvas.classList.toggle('emitter-edit-mode', IS_EMITTER_EDIT_MODE);
 
     showNutrientMapToggle.checked = SHOW_NUTRIENT_MAP;

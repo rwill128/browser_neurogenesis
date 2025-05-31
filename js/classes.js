@@ -169,94 +169,103 @@ class SoftBody {
         this.massPoints = [];
         this.springs = [];
         this.isUnstable = false;
-        this.creatureEnergy = MAX_CREATURE_ENERGY * OFFSPRING_INITIAL_ENERGY_SHARE;
         this.ticksSinceBirth = 0;
-        this.canReproduce = false; // This flag might become less important if threshold is dynamic
-        this.shapeType = parentBody ? parentBody.shapeType : Math.floor(Math.random() * 3); 
+        this.canReproduce = false;
+        this.shapeType = parentBody ? parentBody.shapeType : Math.floor(Math.random() * 3);
 
-        this.motorImpulseInterval = 30 + Math.floor(Math.random() * 90);
-        this.motorImpulseMagnitudeCap = 0.5 + Math.random() * 2.0;
-        this.emitterStrength = 0.2 + Math.random() * 1.0;
-        this.emitterDirection = new Vec2(Math.random()*2-1, Math.random()*2-1).normalize();
-        this.numOffspring = parentBody ? parentBody.numOffspring : (1 + Math.floor(Math.random() * 3));
-        this.offspringSpawnRadius = parentBody ? parentBody.offspringSpawnRadius : (50 + Math.random() * 50);
-        this.pointAddChance = parentBody ? parentBody.pointAddChance : (0.02 + Math.random() * 0.06);
-        this.springConnectionRadius = parentBody ? parentBody.springConnectionRadius : (40 + Math.random() * 40);
-        this.reproductionEnergyThreshold = MAX_CREATURE_ENERGY; // Default for new creatures
+        this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY; // Initial placeholder
 
-
+        // Initialize heritable/mutable properties
         if (parentBody) {
             this.stiffness = parentBody.stiffness * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
             this.springDamping = parentBody.springDamping * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-            this.motorImpulseInterval = Math.max(10, Math.floor(parentBody.motorImpulseInterval * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER))));
+            this.motorImpulseInterval = parentBody.motorImpulseInterval * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
             this.motorImpulseMagnitudeCap = parentBody.motorImpulseMagnitudeCap * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
             this.emitterStrength = parentBody.emitterStrength * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-
-            let offspringNumChange = 0;
-            if (Math.random() < Math.max(0, Math.min(1, MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER))) {
-                offspringNumChange = (Math.random() < 0.5 ? -1 : 1);
-            }
-            this.numOffspring = Math.max(1, Math.min(5, Math.floor(parentBody.numOffspring + offspringNumChange)));
-
-            this.offspringSpawnRadius = Math.max(20, parentBody.offspringSpawnRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.5)));
-            this.pointAddChance = Math.max(0, Math.min(0.5, parentBody.pointAddChance * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 2))));
-            this.springConnectionRadius = Math.max(10, parentBody.springConnectionRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)));
-
-            // Mutate reproductionEnergyThreshold
-            this.reproductionEnergyThreshold = parentBody.reproductionEnergyThreshold * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.2)); 
-            // Clamp the threshold: ensure it's not below a minimum (e.g., 5% of MAX_CREATURE_ENERGY) and not above MAX_CREATURE_ENERGY.
-            this.reproductionEnergyThreshold = Math.max(MAX_CREATURE_ENERGY * 0.05, Math.min(this.reproductionEnergyThreshold, MAX_CREATURE_ENERGY));
-            this.reproductionEnergyThreshold = Math.round(this.reproductionEnergyThreshold); // Keep it as an integer for clarity
-
+            let offspringNumChange = (Math.random() < Math.max(0, Math.min(1, MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER))) ? (Math.random() < 0.5 ? -1 : 1) : 0;
+            this.numOffspring = parentBody.numOffspring + offspringNumChange;
+            this.offspringSpawnRadius = parentBody.offspringSpawnRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.5));
+            this.pointAddChance = parentBody.pointAddChance * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 2));
+            this.springConnectionRadius = parentBody.springConnectionRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
             const angleMutation = (Math.random() - 0.5) * Math.PI * 0.2 * GLOBAL_MUTATION_RATE_MODIFIER;
             const cosA = Math.cos(angleMutation);
             const sinA = Math.sin(angleMutation);
-            this.emitterDirection = new Vec2(
-                parentBody.emitterDirection.x * cosA - parentBody.emitterDirection.y * sinA,
-                parentBody.emitterDirection.x * sinA + parentBody.emitterDirection.y * cosA
-            ).normalize();
-
-            // Body Scale Mutation (Applied after other structural mutations)
-            if (Math.random() < BODY_SCALE_MUTATION_CHANCE) {
-                const scaleFactor = 1.0 + (Math.random() - 0.5) * 2 * BODY_SCALE_MUTATION_MAGNITUDE;
-                if (scaleFactor > 0.1) { // Ensure scale factor is not too small or negative
-                    // Scale spring rest lengths
-                    this.springs.forEach(spring => {
-                        spring.restLength *= scaleFactor;
-                        spring.restLength = Math.max(1, spring.restLength); // Min rest length
-                    });
-                    // Scale mass point radii
-                    this.massPoints.forEach(point => {
-                        point.radius *= scaleFactor;
-                        point.radius = Math.max(0.5, point.radius); // Min radius
-                    });
-                    // Scale offspring spawn radius as well
-                    this.offspringSpawnRadius *= scaleFactor;
-                    this.offspringSpawnRadius = Math.max(10, this.offspringSpawnRadius); // Min spawn radius
-                }
-            }
-
-        } else { // Initial generation (no parent)
+            this.emitterDirection = new Vec2(parentBody.emitterDirection.x * cosA - parentBody.emitterDirection.y * sinA, parentBody.emitterDirection.x * sinA + parentBody.emitterDirection.y * cosA).normalize();
+            this.reproductionEnergyThreshold = parentBody.reproductionEnergyThreshold; // Inherit before own max energy is known
+        } else {
+            // Initial defaults for brand new creatures
             this.stiffness = 500 + Math.random() * 2500;
             this.springDamping = 5 + Math.random() * 20;
+            this.motorImpulseInterval = 30 + Math.floor(Math.random() * 90);
+            this.motorImpulseMagnitudeCap = 0.5 + Math.random() * 2.0;
+            this.emitterStrength = 0.2 + Math.random() * 1.0;
+            this.emitterDirection = new Vec2(Math.random()*2-1, Math.random()*2-1).normalize();
+            this.numOffspring = 1 + Math.floor(Math.random() * 3);
+            this.offspringSpawnRadius = 50 + Math.random() * 50;
+            this.pointAddChance = 0.02 + Math.random() * 0.06;
+            this.springConnectionRadius = 40 + Math.random() * 40;
+            this.reproductionEnergyThreshold = BASE_MAX_CREATURE_ENERGY; // Initial default, will be refined
         }
+
+        // Clamp properties to sensible ranges
         this.stiffness = Math.max(100, Math.min(this.stiffness, 10000));
         this.springDamping = Math.max(0.1, Math.min(this.springDamping, 50));
+        this.motorImpulseInterval = Math.max(10, Math.floor(this.motorImpulseInterval));
         this.motorImpulseMagnitudeCap = Math.max(0, Math.min(this.motorImpulseMagnitudeCap, 5.0));
-        this.motorImpulseInterval = Math.max(10, Math.min(this.motorImpulseInterval, 300));
         this.emitterStrength = Math.max(0, Math.min(this.emitterStrength, 3.0));
         this.numOffspring = Math.max(1, Math.min(this.numOffspring, 5));
         this.offspringSpawnRadius = Math.max(20, Math.min(this.offspringSpawnRadius, 150));
         this.pointAddChance = Math.max(0, Math.min(0.5, this.pointAddChance));
         this.springConnectionRadius = Math.max(10, Math.min(this.springConnectionRadius, 100));
 
-
         this.fluidEntrainment = BODY_FLUID_ENTRAINMENT_FACTOR;
         this.fluidCurrentStrength = FLUID_CURRENT_STRENGTH_ON_BODY;
         this.bodyPushStrength = SOFT_BODY_PUSH_STRENGTH;
 
+        // 1. Create shape (points and initial springs)
         this.createShape(initialX, initialY, parentBody);
-        this.initializeBrain(); // Call initializeBrain after shape creation
+
+        // 2. Body Scale Mutation (if offspring)
+        if (parentBody && Math.random() < BODY_SCALE_MUTATION_CHANCE) {
+            const scaleFactor = 1.0 + (Math.random() - 0.5) * 2 * BODY_SCALE_MUTATION_MAGNITUDE;
+            if (scaleFactor > 0.1) { 
+                this.springs.forEach(spring => {
+                    spring.restLength *= scaleFactor;
+                    spring.restLength = Math.max(1, spring.restLength); 
+                });
+                this.massPoints.forEach(point => {
+                    point.radius *= scaleFactor;
+                    point.radius = Math.max(0.5, point.radius); 
+                });
+                this.offspringSpawnRadius *= scaleFactor;
+                this.offspringSpawnRadius = Math.max(10, this.offspringSpawnRadius); 
+            }
+        }
+
+        // 3. Calculate dynamic max energy based on final point count
+        this.calculateCurrentMaxEnergy(); 
+
+        // 4. Set initial creature energy
+        this.creatureEnergy = this.currentMaxEnergy * OFFSPRING_INITIAL_ENERGY_SHARE; 
+
+        // 5. Finalize and mutate reproductionEnergyThreshold relative to currentMaxEnergy
+        if (parentBody) {
+            // It was inherited, now apply mutation relative to its *own* potential max
+            this.reproductionEnergyThreshold = this.reproductionEnergyThreshold * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.2));
+        } else {
+            // For new creatures, set it based on their calculated max energy
+            this.reproductionEnergyThreshold = this.currentMaxEnergy * (0.75 + Math.random() * 0.2); // e.g. 75-95% of their max
+        }
+        this.reproductionEnergyThreshold = Math.max(this.currentMaxEnergy * 0.05, Math.min(this.reproductionEnergyThreshold, this.currentMaxEnergy));
+        this.reproductionEnergyThreshold = Math.round(this.reproductionEnergyThreshold);
+        
+        // 6. Initialize Brain
+        this.initializeBrain(); 
+    }
+
+    calculateCurrentMaxEnergy() {
+        let pointBonus = Math.max(0, this.massPoints.length - BASE_POINTS_FOR_MAX_ENERGY_CALC) * ENERGY_PER_MASS_POINT_BONUS;
+        this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY + pointBonus;
     }
 
     createShape(startX, startY, parentBody = null) {
@@ -597,7 +606,7 @@ class SoftBody {
             } else {
                 inputVector.push(0, 0, 0);
             }
-            inputVector.push(this.creatureEnergy / MAX_CREATURE_ENERGY);
+            inputVector.push(this.creatureEnergy / this.currentMaxEnergy); // Use currentMaxEnergy
             const comPos = this.getAveragePosition();
             const relComPosX = (comPos.x - brainNode.pos.x) / WORLD_WIDTH;
             const relComPosY = (comPos.y - brainNode.pos.y) / WORLD_HEIGHT;
@@ -828,7 +837,7 @@ class SoftBody {
         // Apply net energy change and then cap
         this.creatureEnergy += currentFrameEnergyGain; // Add all gains first
         this.creatureEnergy -= currentFrameEnergyCost * dt; // Then subtract all costs (dt scaling for costs was already there)
-        this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, Math.max(0, this.creatureEnergy)); // Cap between 0 and MAX
+        this.creatureEnergy = Math.min(this.currentMaxEnergy, Math.max(0, this.creatureEnergy)); // Use currentMaxEnergy for capping
 
 
         this.ticksSinceBirth++;
@@ -949,7 +958,7 @@ class SoftBody {
                                             const energyToSap = Math.min(otherItem.bodyRef.creatureEnergy, effectiveEnergySapped);
                                             if (energyToSap > 0) {
                                                 otherItem.bodyRef.creatureEnergy -= energyToSap;
-                                                this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyToSap);
+                                                this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyToSap); // Use currentMaxEnergy
                                             }
                                         }
                                     }
@@ -1045,7 +1054,7 @@ class SoftBody {
                                                         const effectiveNutrientAtParticle = baseNutrientValueAtParticle * globalNutrientMultiplier;
                                                         energyGain *= Math.max(MIN_NUTRIENT_VALUE, effectiveNutrientAtParticle);
                                                     }
-                                                    this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyGain);
+                                                    this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyGain); // Use currentMaxEnergy
                                                 }
                                             }
                                         }
@@ -1107,7 +1116,7 @@ class SoftBody {
     reproduce() {
         if (this.isUnstable || !this.canReproduce || !canCreaturesReproduceGlobally) return []; // Check global flag
 
-        const energyForOneOffspring = MAX_CREATURE_ENERGY * OFFSPRING_INITIAL_ENERGY_SHARE;
+        const energyForOneOffspring = this.currentMaxEnergy * OFFSPRING_INITIAL_ENERGY_SHARE; // Use currentMaxEnergy for cost basis
         let successfullyPlacedOffspring = 0;
         let offspring = [];
 

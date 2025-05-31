@@ -51,7 +51,9 @@ const ENERGY_PER_PARTICLE = 25;
 const ENERGY_SAPPED_PER_PREDATION_BASE = 3;
 const ENERGY_SAPPED_PER_PREDATION_MAX_BONUS = 7;
 
-const MAX_CREATURE_ENERGY = 100;
+const BASE_MAX_CREATURE_ENERGY = 100;
+const ENERGY_PER_MASS_POINT_BONUS = 5;
+const BASE_POINTS_FOR_MAX_ENERGY_CALC = 5;
 const OFFSPRING_INITIAL_ENERGY_SHARE = 0.25;
 const REPRODUCTION_ADDITIONAL_COST_FACTOR = 0.1;
 const OFFSPRING_PLACEMENT_ATTEMPTS = 10;
@@ -208,6 +210,9 @@ function handleExportConfig() {
         eaterNodeCost: EATER_NODE_ENERGY_COST,
         predatorNodeCost: PREDATOR_NODE_ENERGY_COST,
         swimmerNodeCost: SWIMMER_NODE_ENERGY_COST,
+        baseMaxCreatureEnergy: BASE_MAX_CREATURE_ENERGY,
+        energyPerMassPointBonus: ENERGY_PER_MASS_POINT_BONUS,
+        basePointsForMaxEnergyCalc: BASE_POINTS_FOR_MAX_ENERGY_CALC,
         reproductionCooldown: REPRODUCTION_COOLDOWN_TICKS,
         bodyRepulsionStrength: BODY_REPULSION_STRENGTH,
         bodyRepulsionRadiusFactor: BODY_REPULSION_RADIUS_FACTOR,
@@ -299,6 +304,9 @@ function applyImportedConfig(config) {
     if (config.eaterNodeCost !== undefined) EATER_NODE_ENERGY_COST = config.eaterNodeCost;
     if (config.predatorNodeCost !== undefined) PREDATOR_NODE_ENERGY_COST = config.predatorNodeCost;
     if (config.swimmerNodeCost !== undefined) SWIMMER_NODE_ENERGY_COST = config.swimmerNodeCost;
+    if (config.baseMaxCreatureEnergy !== undefined) BASE_MAX_CREATURE_ENERGY = config.baseMaxCreatureEnergy;
+    if (config.energyPerMassPointBonus !== undefined) ENERGY_PER_MASS_POINT_BONUS = config.energyPerMassPointBonus;
+    if (config.basePointsForMaxEnergyCalc !== undefined) BASE_POINTS_FOR_MAX_ENERGY_CALC = config.basePointsForMaxEnergyCalc;
     if (config.emitterStrength !== undefined) EMITTER_STRENGTH = config.emitterStrength;
     if (config.velocityEmitters !== undefined) velocityEmitters = config.velocityEmitters;
     if (config.fluidGridSize !== undefined) FLUID_GRID_SIZE_CONTROL = config.fluidGridSize;

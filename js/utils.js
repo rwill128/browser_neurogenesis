@@ -141,13 +141,22 @@ const perlin = new PerlinNoise(); // Instantiate it
 
 function getNodeTypeString(nodeType) {
     switch(nodeType) {
-        case NodeType.FLOATING: return "Floating";
-        case NodeType.FIXED_ROOT: return "Fixed Root";
-        case NodeType.EMITTER_SWIMMER: return "Emitter/Swimmer";
-        case NodeType.NEURON: return "Neuron";
+        case NodeType.PREDATOR: return "Predator";
+        case NodeType.EATER: return "Eater";
         case NodeType.PHOTOSYNTHETIC: return "Photosynthetic";
-        case NodeType.NEUTRAL: return "Neutral";
-        default: return "Unknown";
+        case NodeType.NEURON: return "Neuron";
+        case NodeType.EMITTER: return "Emitter (Dye)";
+        case NodeType.SWIMMER: return "Swimmer (Propulsion)";
+        default: return "Unknown_NodeType";
+    }
+}
+
+function getMovementTypeString(movementType) {
+    switch(movementType) {
+        case MovementType.FIXED: return "Fixed";
+        case MovementType.FLOATING: return "Floating";
+        case MovementType.NEUTRAL: return "Neutral";
+        default: return "Unknown_MovementType";
     }
 }
 

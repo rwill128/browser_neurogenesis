@@ -1,10 +1,17 @@
 const NodeType = {
-    NEUTRAL: 0,
-    FLOATING: 1,
-    FIXED_ROOT: 2,
-    EMITTER_SWIMMER: 3,
-    NEURON: 4,
-    PHOTOSYNTHETIC: 5
+    PREDATOR: 0,
+    EATER: 1,
+    PHOTOSYNTHETIC: 2,
+    NEURON: 3,
+    EMITTER: 4, // For dye
+    SWIMMER: 5  // For propulsion
+    // Old types like NEUTRAL, FLOATING, FIXED_ROOT, EMITTER_SWIMMER are removed
+};
+
+const MovementType = {
+    FIXED: 0,    // Fixed in place, does not interact with fluid velocity but can affect it (if Swimmer)
+    FLOATING: 1, // Pushed by fluid, cannot be a Swimmer
+    NEUTRAL: 2   // Standard soft body physics, only interacts with fluid if Swimmer (by pushing it)
 };
 
 // --- MassPoint Class (Soft Body with Verlet Integration) ---
@@ -17,19 +24,20 @@ class MassPoint {
         this.invMass = this.mass !== 0 ? 1 / this.mass : 0;
         this.radius = radius;
         this.color = color;
-        this.isFixed = false;
-        this.nodeType = NodeType.NEUTRAL;
-        this.isEater = false;
-        this.isPredator = false;
-        this.emitsDye = false;
-        this.dyeColor = [0,0,0];
+        this.nodeType = NodeType.EATER; // Default to a base type, will be set in createShape
+        this.movementType = MovementType.NEUTRAL; // Default movement type
+        this.dyeColor = [0,0,0]; // Still needed for Emitter type
         this.neuronData = null;
         this.currentExertionLevel = 0; // New: For dynamic energy costs
     }
     applyForce(f) { this.force = this.force.add(f); }
 
+    get isFixed() { // Getter for convenience, based on movementType
+        return this.movementType === MovementType.FIXED;
+    }
+
     update(dt) {
-        if (this.isFixed || this.invMass === 0 || this.nodeType === NodeType.FIXED_ROOT) {
+        if (this.isFixed || this.invMass === 0) { // Use getter
             this.force = new Vec2();
             return;
         }
@@ -52,14 +60,14 @@ class MassPoint {
         // Draw interaction radii first (underneath the point)
         const exertion = this.currentExertionLevel || 0; // Default to 0 if undefined
 
-        if (this.isEater) {
+        if (this.nodeType === NodeType.EATER) {
             const effectiveEatingRadiusMultiplier = EATING_RADIUS_MULTIPLIER_BASE + (EATING_RADIUS_MULTIPLIER_MAX_BONUS * exertion);
             ctx.beginPath();
             ctx.arc(this.pos.x, this.pos.y, this.radius * effectiveEatingRadiusMultiplier, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(255, 165, 0, ${0.05 + exertion * 0.1})`; // Opacity increases with exertion
             ctx.fill();
         }
-        if (this.isPredator) {
+        if (this.nodeType === NodeType.PREDATOR) {
             const effectivePredationRadiusMultiplier = PREDATION_RADIUS_MULTIPLIER_BASE + (PREDATION_RADIUS_MULTIPLIER_MAX_BONUS * exertion);
             ctx.beginPath();
             ctx.arc(this.pos.x, this.pos.y, this.radius * effectivePredationRadiusMultiplier, 0, Math.PI * 2);
@@ -73,18 +81,16 @@ class MassPoint {
         let mainColor = this.isFixed ? 'rgba(255,0,0,0.9)' : this.color;
         if (this.nodeType === NodeType.NEURON) {
             mainColor = 'rgba(200, 100, 255, 0.9)';
-        } else if (this.isPredator) {
+        } else if (this.nodeType === NodeType.PREDATOR) {
             mainColor = 'rgba(255, 50, 50, 0.9)';
-        } else if (this.nodeType === NodeType.EMITTER_SWIMMER && this.isEater) {
-             mainColor = 'rgba(255, 105, 180, 0.9)';
+        } else if (this.nodeType === NodeType.SWIMMER) {
+             mainColor = 'rgba(0,200,255,0.9)'; // Bright blue for Swimmer
         } else if (this.nodeType === NodeType.PHOTOSYNTHETIC) { 
             mainColor = 'rgba(60, 179, 113, 0.9)'; // MediumSeaGreen for photosynthesis
-        } else if (this.nodeType === NodeType.EMITTER_SWIMMER) {
+        } else if (this.nodeType === NodeType.EMITTER) {
             mainColor = 'rgba(0,255,100,0.9)';
-        } else if (this.isEater) {
+        } else if (this.nodeType === NodeType.EATER) {
             mainColor = 'rgba(255,165,0,0.9)';
-        } else if (this.nodeType === NodeType.FIXED_ROOT) {
-            mainColor = 'rgba(100, 70, 30, 0.9)';
         }
         ctx.fillStyle = mainColor;
         ctx.fill();
@@ -243,7 +249,19 @@ class SoftBody {
 
                 let nodeType = parentPoint.nodeType;
                 if (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER)) {
-                    nodeType = nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)];
+                    const availableNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER];
+                    nodeType = availableNodeTypes[Math.floor(Math.random() * availableNodeTypes.length)];
+                }
+
+                let movementType = parentPoint.movementType;
+                if (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER)) { // Using same mutation chance for simplicity
+                    const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
+                    movementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
+                }
+
+                // Ensure Swimmer nodes are not Floating after potential mutation
+                if (nodeType === NodeType.SWIMMER && movementType === MovementType.FLOATING) {
+                    movementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
                 }
 
                 const offspringPoint = new MassPoint(
@@ -253,10 +271,12 @@ class SoftBody {
                     parentPoint.radius * (1 + (Math.random() - 0.5) * 0.2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER))
                 );
                 offspringPoint.nodeType = nodeType;
-                    offspringPoint.isEater = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.isEater : parentPoint.isEater;
-                    offspringPoint.isPredator = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.isPredator : parentPoint.isPredator;
-                    offspringPoint.emitsDye = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? !parentPoint.emitsDye : parentPoint.emitsDye;
-                offspringPoint.dyeColor = Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER) ? dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)] : [...parentPoint.dyeColor];
+                offspringPoint.movementType = movementType; // Assign new movement type
+                offspringPoint.dyeColor = [...parentPoint.dyeColor]; // Inherit dye color
+                if (Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER)) { // Mutate dye color
+                    const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
+                    offspringPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                }
 
                 // Determine hiddenLayerSize for potential neuron
                 let newHiddenLayerSizeForNeuron = DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1));
@@ -277,13 +297,21 @@ class SoftBody {
                     offspringPoint.neuronData = null; // Crucial: ensure non-neurons have null neuronData
                 }
 
-                if(offspringPoint.nodeType === NodeType.FIXED_ROOT) offspringPoint.isFixed = true;
+                if(offspringPoint.nodeType === NodeType.FIXED_ROOT) offspringPoint.movementType = MovementType.FIXED;
                 this.massPoints.push(offspringPoint);
                 lastPointPos = offspringPoint.pos.clone();
 
                 if (Math.random() < this.pointAddChance * GLOBAL_MUTATION_RATE_MODIFIER) {
                     const newMass = 0.1 + Math.random() * 0.9;
-                    const newNodeType = nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)];
+                    const availableNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER];
+                    let newNodeType = availableNodeTypes[Math.floor(Math.random() * availableNodeTypes.length)];
+                    const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
+                    let newMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
+
+                    if (newNodeType === NodeType.SWIMMER && newMovementType === MovementType.FLOATING) {
+                        newMovementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
+                    }
+
                     const newPoint = new MassPoint(
                         lastPointPos.x + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 2,
                         lastPointPos.y + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 2,
@@ -291,9 +319,8 @@ class SoftBody {
                         baseRadius * (0.8 + Math.random() * 0.4)
                     );
                     newPoint.nodeType = newNodeType;
-                        newPoint.isEater = Math.random() < eaterChance;
-                        newPoint.isPredator = Math.random() < predatorChance;
-                        newPoint.emitsDye = Math.random() < dyeEmitterChance;
+                    newPoint.movementType = newMovementType;
+                    const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
                     newPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
                     if (newNodeType === NodeType.NEURON) {
                         newPoint.neuronData = {
@@ -303,7 +330,7 @@ class SoftBody {
                     } else {
                         newPoint.neuronData = null; // Crucial: ensure non-neurons have null neuronData
                     }
-                    if(newPoint.nodeType === NodeType.FIXED_ROOT) newPoint.isFixed = true;
+                    if(newPoint.nodeType === NodeType.FIXED_ROOT) newPoint.movementType = MovementType.FIXED;
                     this.massPoints.push(newPoint);
                     lastPointPos = newPoint.pos.clone();
                 }
@@ -336,9 +363,8 @@ class SoftBody {
                 const numPointsX = 3; const numPointsY = 3; let gridPoints = [];
                 for (let i = 0; i < numPointsY; i++) { gridPoints[i] = []; for (let j = 0; j < numPointsX; j++) {
                     const point = new MassPoint(startX + j * basePointDist, startY + i * basePointDist, 0.3 + Math.random() * 0.4, baseRadius);
-                    point.isEater = Math.random() < eaterChance;
-                    point.isPredator = Math.random() < predatorChance;
-                    point.emitsDye = Math.random() < dyeEmitterChance;
+                    // point.movementType = parentPoint.movementType; // This was the error for initial generation
+                    // Assign a default or random movement type for initial generation, handled below with all other points.
                     point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
                     this.massPoints.push(point); gridPoints[i][j] = point;
                 }}
@@ -353,19 +379,22 @@ class SoftBody {
                 for (let i=0; i<numLinePoints; i++) {
                     const x = startX + (isHorizontal ? i * basePointDist : 0); const y = startY + (isHorizontal ? 0 : i * basePointDist);
                     const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
-                    point.isEater = Math.random() < eaterChance; point.isPredator = Math.random() < predatorChance; point.emitsDye = Math.random() < dyeEmitterChance; point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                    // point.movementType = parentPoint.movementType; // This was the error for initial generation
+                    point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
                     this.massPoints.push(point); linePoints.push(point);
                 }
                 for (let i=0; i<numLinePoints-1; i++) this.springs.push(new Spring(linePoints[i], linePoints[i+1], this.stiffness, this.springDamping));
                 if (numLinePoints > 2) this.springs.push(new Spring(linePoints[0], linePoints[numLinePoints-1], this.stiffness*0.5, this.springDamping));
             } else {
                 const numOuterPoints = Math.floor(4 + Math.random()*3); const centralPoint = new MassPoint(startX, startY, (0.3+Math.random()*0.4)*1.5, baseRadius*1.2);
-                centralPoint.isEater = Math.random() < eaterChance; centralPoint.isPredator = Math.random() < predatorChance; centralPoint.emitsDye = Math.random() < dyeEmitterChance; centralPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                // centralPoint.movementType = parentPoint.movementType; // This was the error for initial generation
+                centralPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
                 this.massPoints.push(centralPoint); const circleRadius = basePointDist * 1.5;
                 for (let i=0; i<numOuterPoints; i++) {
                     const angle = (i / numOuterPoints) * Math.PI * 2; const x = startX + Math.cos(angle)*circleRadius; const y = startY + Math.sin(angle)*circleRadius;
                     const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
-                    point.isEater = Math.random() < eaterChance; point.isPredator = Math.random() < predatorChance; point.emitsDye = Math.random() < dyeEmitterChance; point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                    // point.movementType = parentPoint.movementType; // This was the error for initial generation
+                    point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
                     this.massPoints.push(point);
                     this.springs.push(new Spring(centralPoint, point, this.stiffness, this.springDamping));
                     if (i>0) this.springs.push(new Spring(this.massPoints[this.massPoints.length-2], point, this.stiffness*0.8, this.springDamping));
@@ -373,34 +402,30 @@ class SoftBody {
                 if (numOuterPoints > 1) this.springs.push(new Spring(this.massPoints[1], this.massPoints[this.massPoints.length-1], this.stiffness*0.8, this.springDamping));
             }
 
-             this.massPoints.forEach((p, idx) => {
-                // Initial random choice from the list (can be overridden by specific chances below)
-                let currentNodeType = nodeTypeChoices[Math.floor(Math.random() * nodeTypeChoices.length)]; // Corrected: use .length
-                const ACTUAL_PHOTOSYNTHETIC_CHANCE = 0.15; // Define the chance here
-                // NEURON_CHANCE is assumed to be globally defined (e.g., const NEURON_CHANCE = 0.1;)
+            const availableNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER];
+            const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
 
-                const rand = Math.random(); // Single random draw for mutually exclusive chances
-                if (rand < NEURON_CHANCE && this.massPoints.length > 1) {
-                    currentNodeType = NodeType.NEURON;
-                } else if (rand < NEURON_CHANCE + ACTUAL_PHOTOSYNTHETIC_CHANCE) { // Check for photosynthetic if not neuron
-                    currentNodeType = NodeType.PHOTOSYNTHETIC;
+            this.massPoints.forEach((p, idx) => {
+                let chosenNodeType = availableNodeTypes[Math.floor(Math.random() * availableNodeTypes.length)];
+                let chosenMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
+
+                // Ensure Swimmer nodes are not Floating
+                if (chosenNodeType === NodeType.SWIMMER && chosenMovementType === MovementType.FLOATING) {
+                    // Change to Neutral or Fixed if it was Floating
+                    chosenMovementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
                 }
-                // If neither of the above, currentNodeType remains as initially picked from nodeTypeChoices
 
-                p.nodeType = currentNodeType; // Assign type
+                p.nodeType = chosenNodeType;
+                p.movementType = chosenMovementType;
 
-                // Now set neuronData based on the final type
                 if (p.nodeType === NodeType.NEURON) {
                      p.neuronData = {
                         isBrain: false,
                         hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
                     };
                 } else {
-                    // This correctly ensures that if it's not a NEURON (e.g., it became PHOTOSYNTHETIC),
-                    // neuronData is null.
                     p.neuronData = null;
                 }
-                if (p.nodeType === NodeType.FIXED_ROOT) p.isFixed = true;
             });
         }
 
@@ -414,7 +439,7 @@ class SoftBody {
                     } else {
                     p.neuronData.sensorPointIndex = -1;
                 }
-                const effectorCandidates = this.massPoints.map((ep, epIdx) => ep.nodeType === NodeType.EMITTER_SWIMMER ? epIdx : -1).filter(epIdx => epIdx !== -1 && epIdx !== idx);
+                const effectorCandidates = this.massPoints.map((ep, epIdx) => ep.nodeType === NodeType.EMITTER ? epIdx : -1).filter(epIdx => epIdx !== -1 && epIdx !== idx);
                 if (effectorCandidates.length > 0) {
                      p.neuronData.effectorPointIndex = effectorCandidates[Math.floor(Math.random() * effectorCandidates.length)];
                 } else {
@@ -447,291 +472,169 @@ class SoftBody {
             const nd = brainNode.neuronData;
             const inputVector = [];
 
-            // 1. Gather Inputs (8 inputs total)
-            // a. Local Dye (RGB) at brain node's position
+            // 1. Gather Inputs 
             if (fluidFieldRef) {
                 const brainGx = Math.floor(brainNode.pos.x / fluidFieldRef.scaleX);
                 const brainGy = Math.floor(brainNode.pos.y / fluidFieldRef.scaleY);
                 const brainIdx = fluidFieldRef.IX(brainGx, brainGy);
-                inputVector.push((fluidFieldRef.densityR[brainIdx] || 0) / 255); // Normalize to 0-1
+                inputVector.push((fluidFieldRef.densityR[brainIdx] || 0) / 255);
                 inputVector.push((fluidFieldRef.densityG[brainIdx] || 0) / 255);
                 inputVector.push((fluidFieldRef.densityB[brainIdx] || 0) / 255);
             } else {
-                inputVector.push(0, 0, 0); // No fluid field, no dye input
+                inputVector.push(0, 0, 0);
             }
-
-            // b. Creature Energy (normalized)
-            inputVector.push(this.creatureEnergy / MAX_CREATURE_ENERGY); // Normalize to 0-1
-
-            // c. Relative Center of Mass Position (XY)
+            inputVector.push(this.creatureEnergy / MAX_CREATURE_ENERGY);
             const comPos = this.getAveragePosition();
-            const relComPosX = (comPos.x - brainNode.pos.x) / WORLD_WIDTH; // Normalize by world dim
+            const relComPosX = (comPos.x - brainNode.pos.x) / WORLD_WIDTH;
             const relComPosY = (comPos.y - brainNode.pos.y) / WORLD_HEIGHT;
-            inputVector.push(Math.tanh(relComPosX)); // Use tanh to keep values bounded nicely
+            inputVector.push(Math.tanh(relComPosX));
             inputVector.push(Math.tanh(relComPosY));
-
-            // d. Relative Center of Mass Velocity (XY)
             const comVel = this.getAverageVelocity();
             const brainVelX = brainNode.pos.x - brainNode.prevPos.x;
             const brainVelY = brainNode.pos.y - brainNode.prevPos.y;
             const relComVelX = comVel.x - brainVelX;
             const relComVelY = comVel.y - brainVelY;
-            inputVector.push(Math.tanh(relComVelX / MAX_PIXELS_PER_FRAME_DISPLACEMENT)); // Normalize and tanh
+            inputVector.push(Math.tanh(relComVelX / MAX_PIXELS_PER_FRAME_DISPLACEMENT));
             inputVector.push(Math.tanh(relComVelY / MAX_PIXELS_PER_FRAME_DISPLACEMENT));
-            
-            // e. Nutrient Level (1 input)
             if (nutrientField && fluidFieldRef) {
                 const brainGx = Math.floor(brainNode.pos.x / fluidFieldRef.scaleX);
                 const brainGy = Math.floor(brainNode.pos.y / fluidFieldRef.scaleY);
                 const nutrientIdx = fluidFieldRef.IX(brainGx, brainGy);
                 const currentNutrient = nutrientField[nutrientIdx] !== undefined ? nutrientField[nutrientIdx] : 1.0;
                 const normalizedNutrient = (currentNutrient - MIN_NUTRIENT_VALUE) / (MAX_NUTRIENT_VALUE - MIN_NUTRIENT_VALUE);
-                inputVector.push(Math.max(0, Math.min(1, normalizedNutrient))); // Clamp to 0-1
-                // REMOVED: inputVector.push(Math.max(0, Math.min(1, normalizedNutrient))); // Duplicate for the second nutrient input for now
+                inputVector.push(Math.max(0, Math.min(1, normalizedNutrient)));
             } else {
-                inputVector.push(0.5); // Default neutral nutrient if no field
-                // REMOVED: inputVector.push(0.5);
+                inputVector.push(0.5);
             }
-
-            // Ensure inputVector is the correct size, pad with 0 if necessary (e.g. if fluidFieldRef was null)
-            while(inputVector.length < nd.inputVectorSize) {
-                inputVector.push(0);
-            }
-            if(inputVector.length > nd.inputVectorSize) {
-                inputVector.splice(nd.inputVectorSize); // Truncate if too long
-            }
-
+            while(inputVector.length < nd.inputVectorSize) { inputVector.push(0); }
+            if(inputVector.length > nd.inputVectorSize) { inputVector.splice(nd.inputVectorSize); }
 
             // 2. Forward Propagation
-            // Hidden Layer
             const hiddenLayerInputs = multiplyMatrixVector(nd.weightsIH, inputVector);
             const hiddenLayerBiasedInputs = addVectors(hiddenLayerInputs, nd.biasesH);
             const hiddenLayerActivations = hiddenLayerBiasedInputs.map(val => Math.tanh(val));
-
-            // Output Layer
             const outputLayerInputs = multiplyMatrixVector(nd.weightsHO, hiddenLayerActivations);
             const rawOutputs = addVectors(outputLayerInputs, nd.biasesO);
+            nd.rawOutputs = rawOutputs;
 
-            nd.rawOutputs = rawOutputs; // Store for Step 5
-            // console.log(`Body ${this.id} brain processed. Inputs: [${inputVector.map(v=>v.toFixed(2))}], Outputs: [${rawOutputs.map(v=>v.toFixed(2))}]`);
+            nd.currentFrameActionDetails = [];
+            let currentRawOutputIndex = 0;
 
-            // --- Apply Neural Outputs (Modified for Policy Gradient - Step 1 of RL Phase) ---
-            nd.currentFrameActionDetails = []; // Initialize/clear array for the current frame
-            let currentRawOutputIndex = 0; // Tracks the current starting index in nd.rawOutputs
-
-            // Helper to process one action component (mean + stdDev pair)
-            // Moved this helper function outside the point iteration loop for broader access
             function sampleAndLogAction(rawMean, rawStdDev) {
-                const mean = rawMean; // Assuming rawMean is suitable as direct mean
-                const stdDev = Math.exp(rawStdDev) + 1e-6; // Ensure stdDev is positive and non-zero
+                const mean = rawMean;
+                const stdDev = Math.exp(rawStdDev) + 1e-6;
                 const sampledActionValue = sampleGaussian(mean, stdDev);
                 const logProb = logPdfGaussian(sampledActionValue, mean, stdDev);
-                
-                return { 
-                    detail: { mean, stdDev, sampledAction: sampledActionValue, logProb }, 
-                    value: sampledActionValue 
-                };
+                return { detail: { mean, stdDev, sampledAction: sampledActionValue, logProb }, value: sampledActionValue };
             }
 
-            this.massPoints.forEach(point => {
-                point.currentExertionLevel = 0; // Reset exertion for all points before NN potentially sets it
-            });
+            this.massPoints.forEach(point => { point.currentExertionLevel = 0; });
 
-            // Process Emitter/Swimmers first (matches order in initializeBrain for outputVectorSize)
+            // Process Emitters
             this.massPoints.forEach(point => {
-                if (point.nodeType === NodeType.EMITTER_SWIMMER) {
+                if (point.nodeType === NodeType.EMITTER) {
                     const outputStartRawIdx = currentRawOutputIndex;
-                    if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_EMITTER_SWIMMER) {
+                    if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_EMITTER) {
                         const detailsForThisEmitter = [];
-                        let localRawOutputPairIdx = 0;
-
-                        // --- Action 1: Force X ---
-                        const forceXResult = sampleAndLogAction(
-                            nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++],
-                            nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++]
-                        );
-                        detailsForThisEmitter.push(forceXResult.detail);
-                        // Applied force will be scaled by exertion later, after exertion is determined for this point
-
-                        // --- Action 2: Force Y ---
-                        const forceYResult = sampleAndLogAction(
-                            nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++],
-                            nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++]
-                        );
-                        detailsForThisEmitter.push(forceYResult.detail);
-                        // Applied force will be scaled by exertion later
-
-                        // --- Action 3: Target Dye Color R ---
-                        const dyeRResult = sampleAndLogAction(
-                            nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++],
-                            nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++]
-                        );
-                        detailsForThisEmitter.push(dyeRResult.detail);
-                        point.dyeColor[0] = sigmoid(dyeRResult.value) * 255;
-
-                        // --- Action 4: Target Dye Color G ---
-                        const dyeGResult = sampleAndLogAction(
-                            nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++],
-                            nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++]
-                        );
-                        detailsForThisEmitter.push(dyeGResult.detail);
-                        point.dyeColor[1] = sigmoid(dyeGResult.value) * 255;
-
-                        // --- Action 5: Target Dye Color B ---
-                        const dyeBResult = sampleAndLogAction(
-                            nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++],
-                            nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++]
-                        );
-                        detailsForThisEmitter.push(dyeBResult.detail);
-                        point.dyeColor[2] = sigmoid(dyeBResult.value) * 255;
-
-                        // --- Action 6: Emission Pull Strength ---
-                        const pullResult = sampleAndLogAction(
-                            nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++],
-                            nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++]
-                        );
-                        detailsForThisEmitter.push(pullResult.detail);
-                        // Emission pull strength will be scaled by exertion later
-
-                        // --- Action 7: Emitter/Swimmer Exertion ---
-                        const exertionResult = sampleAndLogAction(
-                            nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++],
-                            nd.rawOutputs[outputStartRawIdx + localRawOutputPairIdx++]
-                        );
-                        detailsForThisEmitter.push(exertionResult.detail);
-                        point.currentExertionLevel = sigmoid(exertionResult.value); 
-
-                        // Now apply exertion-scaled effects
-                        const appliedForceX = Math.tanh(forceXResult.value) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength * point.currentExertionLevel;
-                        const appliedForceY = Math.tanh(forceYResult.value) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength * point.currentExertionLevel;
-                        point.applyForce(new Vec2(appliedForceX / dt, appliedForceY / dt));
-
-                        const neuralPullStrength = sigmoid(pullResult.value) * MAX_NEURAL_EMISSION_PULL_STRENGTH * point.currentExertionLevel;
-                        if (fluidFieldRef && point.emitsDye) {
-                            const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
-                            const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
-                            fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], neuralPullStrength * 50);
+                        let localPairIdx = 0;
+                        for (let i = 0; i < 3; i++) { // Dye R, G, B
+                            const res = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                            detailsForThisEmitter.push(res.detail);
+                            point.dyeColor[i] = sigmoid(res.value) * 255;
                         }
-                        
+                        const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                        detailsForThisEmitter.push(exertionRes.detail);
+                        point.currentExertionLevel = sigmoid(exertionRes.value);
                         nd.currentFrameActionDetails.push(...detailsForThisEmitter);
-                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER_SWIMMER;
-                    } else {
-                        // Not enough rawOutputs for this ES point.
-                        // Still advance the raw output index to keep subsequent points aligned if possible,
-                        // or handle error more explicitly if this state is unexpected.
-                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER_SWIMMER;
-                    }
+                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER;
+                    } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER; }
                 }
             });
 
-            // Process Eaters next
+            // Process Swimmers
             this.massPoints.forEach(point => {
-                // Process only if it's an Eater AND NOT ALSO an Emitter/Swimmer (to avoid double processing outputs)
-                if (point.isEater && point.nodeType !== NodeType.EMITTER_SWIMMER) {
+                if (point.nodeType === NodeType.SWIMMER) {
+                    const outputStartRawIdx = currentRawOutputIndex;
+                    if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_SWIMMER) {
+                        const detailsForThisSwimmer = [];
+                        let localPairIdx = 0;
+                        const forceXRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                        detailsForThisSwimmer.push(forceXRes.detail);
+                        const forceYRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                        detailsForThisSwimmer.push(forceYRes.detail);
+                        const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                        detailsForThisSwimmer.push(exertionRes.detail);
+                        point.currentExertionLevel = sigmoid(exertionRes.value);
+                        const appliedForceX = Math.tanh(forceXRes.value) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength * point.currentExertionLevel;
+                        const appliedForceY = Math.tanh(forceYRes.value) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength * point.currentExertionLevel;
+                        point.applyForce(new Vec2(appliedForceX / dt, appliedForceY / dt));
+                        nd.currentFrameActionDetails.push(...detailsForThisSwimmer);
+                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_SWIMMER;
+                    } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_SWIMMER; }
+                }
+            });
+
+            // Process Eaters
+            this.massPoints.forEach(point => {
+                if (point.nodeType === NodeType.EATER) {
                     const outputStartRawIdx = currentRawOutputIndex;
                     if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_EATER) {
-                        const detailsForThisEater = [];
-                        const exertionResult = sampleAndLogAction(
-                            nd.rawOutputs[outputStartRawIdx],
-                            nd.rawOutputs[outputStartRawIdx + 1]
-                        );
-                        detailsForThisEater.push(exertionResult.detail);
-                        point.currentExertionLevel = sigmoid(exertionResult.value); 
-                        
-                        nd.currentFrameActionDetails.push(...detailsForThisEater);
+                        const details = [];
+                        const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
+                        details.push(exertionRes.detail);
+                        point.currentExertionLevel = sigmoid(exertionRes.value);
+                        nd.currentFrameActionDetails.push(...details);
                         currentRawOutputIndex += NEURAL_OUTPUTS_PER_EATER;
-                    } else {
-                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_EATER;
-                    }
+                    } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_EATER; }
                 }
             });
 
-            // Process Predators last
+            // Process Predators
             this.massPoints.forEach(point => {
-                // Process only if Predator AND NOT ES AND NOT Eater
-                if (point.isPredator && point.nodeType !== NodeType.EMITTER_SWIMMER && !point.isEater) {
-                   const outputStartRawIdx = currentRawOutputIndex;
+                if (point.nodeType === NodeType.PREDATOR) {
+                    const outputStartRawIdx = currentRawOutputIndex;
                     if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_PREDATOR) {
-                        const detailsForThisPredator = [];
-                        const exertionResult = sampleAndLogAction(
-                            nd.rawOutputs[outputStartRawIdx],
-                            nd.rawOutputs[outputStartRawIdx + 1]
-                        );
-                        detailsForThisPredator.push(exertionResult.detail);
-                        point.currentExertionLevel = sigmoid(exertionResult.value);
-
-                        nd.currentFrameActionDetails.push(...detailsForThisPredator);
+                        const details = [];
+                        const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
+                        details.push(exertionRes.detail);
+                        point.currentExertionLevel = sigmoid(exertionRes.value);
+                        nd.currentFrameActionDetails.push(...details);
                         currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR;
-                    } else {
-                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR;
-                    }
+                    } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR; }
                 }
             });
             // --- End of Apply Neural Outputs ---
 
-            // --- Store Experience for RL (Step 2 of RL Phase) ---
-            // This happens after actions are taken and energy costs for the frame are implicitly about to be (or have been) accounted for by the simulation loop.
             if (nd.currentFrameActionDetails && nd.currentFrameActionDetails.length > 0) {
                 const reward = this.creatureEnergy - nd.previousEnergyForReward;
-                const experience = {
-                    state: [...inputVector], // Store a copy of the inputVector used for this frame
-                    actionDetails: JSON.parse(JSON.stringify(nd.currentFrameActionDetails)), // Deep copy of action details
+                nd.experienceBuffer.push({
+                    state: [...inputVector],
+                    actionDetails: JSON.parse(JSON.stringify(nd.currentFrameActionDetails)),
                     reward: reward
-                };
-                nd.experienceBuffer.push(experience);
-
-                // Manage buffer size
+                });
                 if (nd.experienceBuffer.length > nd.maxExperienceBufferSize) {
-                    nd.experienceBuffer.shift(); // Remove oldest experience
+                    nd.experienceBuffer.shift();
                 }
             }
-            nd.previousEnergyForReward = this.creatureEnergy; // Update for next frame's reward calculation
-            // --- End of Store Experience ---
-
-            // --- RL Training Trigger ---
+            nd.previousEnergyForReward = this.creatureEnergy;
             nd.framesSinceLastTrain++;
             if (nd.framesSinceLastTrain >= TRAINING_INTERVAL_FRAMES) {
-                this.updateBrainPolicy(); 
+                this.updateBrainPolicy();
             }
-            // --- End of RL Training Trigger ---
-
-        } else {
-            // No operable brain, or brain not fully initialized
-            if (brainNode && brainNode.neuronData) brainNode.neuronData.rawOutputs = []; // Clear if partially set
-
-            // Fallback 1: Original random motor impulses for all points
+        } else { // Fallback if no operable brain
+            if (brainNode && brainNode.neuronData) brainNode.neuronData.rawOutputs = [];
             if (this.motorImpulseMagnitudeCap > 0.0001 && (this.ticksSinceBirth % this.motorImpulseInterval === 0)) {
                 for (let point of this.massPoints) {
-                    if (!point.isFixed && point.nodeType !== NodeType.FIXED_ROOT) {
+                    if (!point.isFixed && point.movementType !== MovementType.FLOATING) { // Swimmers (not floating) can still have motor impulses
                         const randomAngle = Math.random() * Math.PI * 2;
                         const impulseDir = new Vec2(Math.cos(randomAngle), Math.sin(randomAngle));
                         const impulseMag = Math.random() * this.motorImpulseMagnitudeCap;
-                        const impulseForce = impulseDir.mul(impulseMag / dt);
-                        point.applyForce(impulseForce);
+                        point.applyForce(impulseDir.mul(impulseMag / dt));
                     }
                 }
             }
-
-            // Fallback 2: Original EMITTER_SWIMMER behavior (fluid push and dye emission)
-            if (fluidFieldRef) {
-                this.massPoints.forEach(point => {
-                    if (point.nodeType === NodeType.EMITTER_SWIMMER && this.emitterStrength > 0.0001 && !point.isFixed) {
-                        const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
-                        const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
-                        
-                        // Fluid push based on fixed emitterDirection
-                        const emitterPushVx = this.emitterDirection.x * this.emitterStrength;
-                        const emitterPushVy = this.emitterDirection.y * this.emitterStrength;
-                        fluidFieldRef.addVelocity(fluidGridX, fluidGridY, emitterPushVx, emitterPushVy);
-                        
-                        // Dye emission based on point's own fixed dyeColor
-                        if (point.emitsDye) { 
-                            fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], 50); // 50 is default emission strength
-                        }
-                    }
-                });
-            }
-        } // --- End of New Neural Network Processing (Brain & Fallback) ---
+            // Non-NN Swimmer and Emitter behavior handled in fluid interaction part
+        }
 
         // --- Apply Red Dye Poison Effect ---
         if (fluidFieldRef && RED_DYE_POISON_STRENGTH > 0) {
@@ -769,8 +672,10 @@ class SoftBody {
             currentFrameEnergyCost += BASE_NODE_EXISTENCE_COST * costMultiplier;
             const exertion = point.currentExertionLevel || 0; // Default to 0 if undefined
 
-            if (point.nodeType === NodeType.EMITTER_SWIMMER) {
+            if (point.nodeType === NodeType.EMITTER) { // Changed from EMITTER_SWIMMER
                 currentFrameEnergyCost += EMITTER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
+            } else if (point.nodeType === NodeType.SWIMMER) { // Added new case for Swimmer
+                currentFrameEnergyCost += SWIMMER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
             }
              if (point.nodeType === NodeType.NEURON) {
                 if (point.neuronData && point.neuronData.isBrain) {
@@ -780,10 +685,10 @@ class SoftBody {
                     currentFrameEnergyCost += NEURON_NODE_ENERGY_COST * costMultiplier; 
                 }
             }
-            if (point.isEater) {
+            if (point.nodeType === NodeType.EATER) {
                 currentFrameEnergyCost += EATER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
             }
-            if (point.isPredator) {
+            if (point.nodeType === NodeType.PREDATOR) {
                 currentFrameEnergyCost += PREDATOR_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
             }
             if (point.nodeType === NodeType.PHOTOSYNTHETIC) {
@@ -815,7 +720,7 @@ class SoftBody {
 
         if (this.motorImpulseMagnitudeCap > 0.0001 && (this.ticksSinceBirth % this.motorImpulseInterval === 0)) {
             for (let point of this.massPoints) {
-                if (!point.isFixed && point.nodeType !== NodeType.FIXED_ROOT) {
+                if (!point.isFixed && point.movementType !== MovementType.FLOATING) {
                     const randomAngle = Math.random() * Math.PI * 2;
                     const impulseDir = new Vec2(Math.cos(randomAngle), Math.sin(randomAngle));
                     const impulseMag = Math.random() * this.motorImpulseMagnitudeCap;
@@ -828,13 +733,15 @@ class SoftBody {
 
         if (fluidFieldRef) {
             for (let point of this.massPoints) {
-                if (point.isFixed || point.nodeType === NodeType.FIXED_ROOT) continue;
+                if (point.isFixed) continue; // Fixed points don't get pushed by fluid
 
                 const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
                 const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
                 const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
 
-                if (point.nodeType === NodeType.FLOATING) {
+                // Fluid Pushes Point (if Floating)
+                if (point.movementType === MovementType.FLOATING) {
+                    // Swimmers cannot be Floating, so no need to check point.nodeType === NodeType.SWIMMER here
                     const rawFluidVx = fluidFieldRef.Vx[idx];
                     const rawFluidVy = fluidFieldRef.Vy[idx];
                     let fluidDisplacementPx = new Vec2(rawFluidVx * fluidFieldRef.scaleX * dt, rawFluidVy * fluidFieldRef.scaleY * dt);
@@ -843,19 +750,28 @@ class SoftBody {
                     let blendedDisplacementPx = currentPointDisplacementPx.mul(1.0 - this.fluidEntrainment)
                                                      .add(effectiveFluidDisplacementPx.mul(this.fluidEntrainment));
                     point.prevPos = point.pos.clone().sub(blendedDisplacementPx);
-                } else if (point.nodeType === NodeType.EMITTER_SWIMMER && this.emitterStrength > 0.0001) {
-                    let currentEmitterStrength = this.emitterStrength;
-                    if (point.neuralEffectiveStrength !== null && point.neuralEffectiveStrength !== undefined) {
-                        currentEmitterStrength *= point.neuralEffectiveStrength;
-                    }
-
-                    const emitterPushVx = this.emitterDirection.x * currentEmitterStrength;
-                    const emitterPushVy = this.emitterDirection.y * currentEmitterStrength;
-                    fluidFieldRef.addVelocity(fluidGridX, fluidGridY, emitterPushVx, emitterPushVy);
+                }
+                
+                // Point Affects Fluid (if Swimmer or Emitter)
+                if (point.nodeType === NodeType.SWIMMER && this.emitterStrength > 0.0001) { // Using this.emitterStrength as a general "action strength"
+                    let currentActionStrength = this.emitterStrength; // TODO: Later, Swimmers might have their own strength attribute
+                    // if (point.neuralEffectiveStrength !== null && point.neuralEffectiveStrength !== undefined) { // For NN control
+                    //     currentActionStrength *= point.neuralEffectiveStrength;
+                    // }
+                    const swimForceX = this.emitterDirection.x * currentActionStrength; // TODO: Later, Swimmers will have their own direction or NN output for this
+                    const swimForceY = this.emitterDirection.y * currentActionStrength;
+                    fluidFieldRef.addVelocity(fluidGridX, fluidGridY, swimForceX, swimForceY);
                 }
 
-                if (point.emitsDye) {
-                    fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], 50);
+                if (point.nodeType === NodeType.EMITTER) { // Dye Emission
+                    // Emission strength for dye could be from point.currentExertionLevel if NN controlled, or a fixed value
+                    let dyeEmissionStrength = 50; // Default fixed strength
+                    if (point.neuronData && point.neuronData.isBrain && point.currentExertionLevel > 0) {
+                        // Example: Link dye emission strength to brain-controlled exertion for emitters
+                        // This part would be refined when NN outputs for Emitters are fully defined
+                        // dyeEmissionStrength *= point.currentExertionLevel;
+                    }
+                    fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], dyeEmissionStrength);
                 }
             }
         }
@@ -899,7 +815,8 @@ class SoftBody {
                                         p1.applyForce(repulsionForce);
                                     }
 
-                                    if (p1.isPredator) {
+                                    // CORRECTED PREDATION LOGIC
+                                    if (p1.nodeType === NodeType.PREDATOR) {
                                         const p1Exertion = p1.currentExertionLevel || 0;
                                         const effectivePredationRadiusMultiplier = PREDATION_RADIUS_MULTIPLIER_BASE + (PREDATION_RADIUS_MULTIPLIER_MAX_BONUS * p1Exertion);
                                         const predationRadius = p1.radius * effectivePredationRadiusMultiplier;
@@ -951,7 +868,7 @@ class SoftBody {
         }
         if (this.isUnstable) return;
 
-        if (this.massPoints.length > 2) { // Only check span for bodies with more than 2 points
+        if (this.massPoints.length > 2) { 
             const bbox = this.getBoundingBox();
             if (bbox.width > this.massPoints.length * localMaxSpanPerPointFactor ||
                 bbox.height > this.massPoints.length * localMaxSpanPerPointFactor) {
@@ -962,21 +879,21 @@ class SoftBody {
         if (this.isUnstable) return;
 
 
-        if (!this.isUnstable) { // Re-check after all instability checks
+        if (!this.isUnstable) { 
             for (let point of this.massPoints) {
-                if (point.isFixed || point.nodeType === NodeType.FIXED_ROOT) continue;
+                if (point.isFixed) continue; 
 
-                if (point.isEater) {
+                // CORRECTED EATING LOGIC
+                if (point.nodeType === NodeType.EATER) { 
                     const pointExertion = point.currentExertionLevel || 0;
                     const effectiveEatingRadiusMultiplier = EATING_RADIUS_MULTIPLIER_BASE + (EATING_RADIUS_MULTIPLIER_MAX_BONUS * pointExertion);
                     const eatingRadius = point.radius * effectiveEatingRadiusMultiplier;
                     const eatingRadiusSq = eatingRadius * eatingRadius;
 
-                    // Re-add eaterGx and eaterGy calculation here
                     const eaterGx = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(point.pos.x / GRID_CELL_SIZE)));
                     const eaterGy = Math.max(0, Math.min(GRID_ROWS - 1, Math.floor(point.pos.y / GRID_CELL_SIZE)));
 
-                    for (let dy = -1; dy <= 1; dy++) { // Check local grid cells for particles
+                    for (let dy = -1; dy <= 1; dy++) { 
                         for (let dx = -1; dx <= 1; dx++) {
                             const checkGx = eaterGx + dx;
                             const checkGy = eaterGy + dy;
@@ -984,7 +901,7 @@ class SoftBody {
                                 const cellIndex = checkGx + checkGy * GRID_COLS;
                                 if (Array.isArray(spatialGrid[cellIndex])) {
                                     const cellBucket = spatialGrid[cellIndex];
-                                    for (let k = cellBucket.length - 1; k >= 0; k--) { // Iterate backwards for safe removal
+                                    for (let k = cellBucket.length - 1; k >= 0; k--) { 
                                         const item = cellBucket[k];
                                         if (item.type === 'particle') {
                                             const particle = item.particleRef;
@@ -992,6 +909,8 @@ class SoftBody {
                                                 const distSq = point.pos.sub(particle.pos).magSq();
                                                 if (distSq < eatingRadiusSq) {
                                                     particle.isEaten = true;
+                                                    particle.life = 0; 
+                                                    
                                                     particle.life = 0; // Mark for removal from main particles array
                                                     
                                                     let energyGain = ENERGY_PER_PARTICLE;
@@ -1124,9 +1043,9 @@ class SoftBody {
                     finalChild.massPoints = []; // Clear default points
                     tempChild.massPoints.forEach(tp => { // Copy points and translate them
                         const newP = new MassPoint(tp.pos.x + spawnX - tempChild.getAveragePosition().x, tp.pos.y + spawnY - tempChild.getAveragePosition().y, tp.mass, tp.radius, tp.color);
-                        newP.nodeType = tp.nodeType; newP.isEater = tp.isEater; newP.isPredator = tp.isPredator; newP.emitsDye = tp.emitsDye; newP.dyeColor = [...tp.dyeColor];
+                        newP.nodeType = tp.nodeType; newP.movementType = tp.movementType; newP.dyeColor = [...tp.dyeColor];
                         if(tp.neuronData) newP.neuronData = JSON.parse(JSON.stringify(tp.neuronData)); // Deep copy neuron data
-                        if(newP.nodeType === NodeType.FIXED_ROOT) newP.isFixed = true;
+                        if(newP.nodeType === NodeType.FIXED_ROOT) newP.movementType = MovementType.FIXED;
                         finalChild.massPoints.push(newP);
                     });
                     // Recreate springs for the final child based on its actual points
@@ -1154,7 +1073,7 @@ class SoftBody {
                                 do { newSensorIndex = Math.floor(Math.random() * finalChild.massPoints.length); } while (newSensorIndex === pIdx);
                                 p.neuronData.sensorPointIndex = newSensorIndex;
                             } else { p.neuronData.sensorPointIndex = -1; }
-                            const effectorCandidates = finalChild.massPoints.map((ep, epIdx) => ep.nodeType === NodeType.EMITTER_SWIMMER ? epIdx : -1).filter(epIdx => epIdx !== -1 && epIdx !== pIdx);
+                            const effectorCandidates = finalChild.massPoints.map((ep, epIdx) => ep.nodeType === NodeType.EMITTER ? epIdx : -1).filter(epIdx => epIdx !== -1 && epIdx !== pIdx);
                             if (effectorCandidates.length > 0) { p.neuronData.effectorPointIndex = effectorCandidates[Math.floor(Math.random() * effectorCandidates.length)]; } else { p.neuronData.effectorPointIndex = -1;}
                         }
                     });
@@ -1235,20 +1154,24 @@ class SoftBody {
             const nd = brainNode.neuronData;
             nd.inputVectorSize = NEURAL_INPUT_SIZE;
 
-            let numEmitterSwimmerPoints = 0;
+            let numEmitterPoints = 0;
+            let numSwimmerPoints = 0;
             let numEaterPoints = 0;
             let numPredatorPoints = 0;
 
             this.massPoints.forEach(p => {
-                if (p.nodeType === NodeType.EMITTER_SWIMMER) {
-                    numEmitterSwimmerPoints++;
-                } else if (p.isEater) { // Assuming Eater nodes are distinct or NodeType will be expanded
+                if (p.nodeType === NodeType.EMITTER) {
+                    numEmitterPoints++;
+                } else if (p.nodeType === NodeType.SWIMMER) {
+                    numSwimmerPoints++;
+                } else if (p.nodeType === NodeType.EATER) { 
                     numEaterPoints++;
-                } else if (p.isPredator) { // Assuming Predator nodes are distinct
+                } else if (p.nodeType === NodeType.PREDATOR) { 
                     numPredatorPoints++;
                 }
             });
-            nd.outputVectorSize = (numEmitterSwimmerPoints * NEURAL_OUTPUTS_PER_EMITTER_SWIMMER) +
+            nd.outputVectorSize = (numEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
+                                  (numSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
                                   (numEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
                                   (numPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR);
 

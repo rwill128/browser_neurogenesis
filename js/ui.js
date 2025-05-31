@@ -297,13 +297,13 @@ function updateInfoPanel() {
 
             let content = `<p><strong>Point Index:</strong> ${index}</p>`;
             content += `<p><strong>Node Type:</strong> ${getNodeTypeString(point.nodeType)}</p>`;
+            content += `<p><strong>Movement Type:</strong> ${getMovementTypeString(point.movementType)}</p>`;
             content += `<p><strong>Mass:</strong> ${point.mass.toFixed(2)}</p>`;
             content += `<p><strong>Radius:</strong> ${point.radius.toFixed(2)}</p>`;
             content += `<p><strong>World Pos:</strong> X: ${point.pos.x.toFixed(2)}, Y: ${point.pos.y.toFixed(2)}</p>`;
-            content += `<p><strong>Is Eater:</strong> ${point.isEater}</p>`;
-            content += `<p><strong>Is Predator:</strong> ${point.isPredator}</p>`;
-            content += `<p><strong>Emits Dye:</strong> ${point.emitsDye}</p>`;
-            content += `<p><strong>Dye Color:</strong> ${point.emitsDye ? `R:${point.dyeColor[0].toFixed(0)} G:${point.dyeColor[1].toFixed(0)} B:${point.dyeColor[2].toFixed(0)}` : "N/A"}</p>`;
+            if (point.nodeType === NodeType.EMITTER) {
+                content += `<p><strong>Dye Color:</strong> R:${point.dyeColor[0].toFixed(0)} G:${point.dyeColor[1].toFixed(0)} B:${point.dyeColor[2].toFixed(0)}</p>`;
+            }
 
             if (point.nodeType === NodeType.NEURON && point.neuronData) {
                 if (typeof point.neuronData.hiddenLayerSize === 'undefined') {

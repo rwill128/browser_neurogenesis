@@ -75,6 +75,7 @@ let EMITTER_NODE_ENERGY_COST = 0.1;
 let EATER_NODE_ENERGY_COST = 0.1;
 let PREDATOR_NODE_ENERGY_COST = 0.1;
 let NEURON_NODE_ENERGY_COST = 0.001;
+let SWIMMER_NODE_ENERGY_COST = 0.1;
 let PHOTOSYNTHETIC_NODE_ENERGY_COST = 0.1;
 let PHOTOSYNTHESIS_EFFICIENCY = 100.0;
 
@@ -142,9 +143,11 @@ let lastPanMouseY = 0;
 
 // --- Neural Network Constants ---
 const NEURAL_INPUT_SIZE = 9;
-const NEURAL_OUTPUTS_PER_EMITTER_SWIMMER = 14;
-const NEURAL_OUTPUTS_PER_EATER = 2;
 const NEURAL_OUTPUTS_PER_PREDATOR = 2;
+const NEURAL_OUTPUTS_PER_EATER = 2;
+const NEURAL_OUTPUTS_PER_NEURON_EFFECTOR = 0;
+const NEURAL_OUTPUTS_PER_EMITTER = 8;
+const NEURAL_OUTPUTS_PER_SWIMMER = 6;
 
 const DEFAULT_HIDDEN_LAYER_SIZE_MIN = 5;
 const DEFAULT_HIDDEN_LAYER_SIZE_MAX = 30;
@@ -187,6 +190,7 @@ function handleExportConfig() {
         neuronNodeCost: NEURON_NODE_ENERGY_COST,
         eaterNodeCost: EATER_NODE_ENERGY_COST,
         predatorNodeCost: PREDATOR_NODE_ENERGY_COST,
+        swimmerNodeCost: SWIMMER_NODE_ENERGY_COST,
         reproductionCooldown: REPRODUCTION_COOLDOWN_TICKS,
         bodyRepulsionStrength: BODY_REPULSION_STRENGTH,
         bodyRepulsionRadiusFactor: BODY_REPULSION_RADIUS_FACTOR,
@@ -277,6 +281,7 @@ function applyImportedConfig(config) {
     if (config.neuronNodeCost !== undefined) NEURON_NODE_ENERGY_COST = config.neuronNodeCost;
     if (config.eaterNodeCost !== undefined) EATER_NODE_ENERGY_COST = config.eaterNodeCost;
     if (config.predatorNodeCost !== undefined) PREDATOR_NODE_ENERGY_COST = config.predatorNodeCost;
+    if (config.swimmerNodeCost !== undefined) SWIMMER_NODE_ENERGY_COST = config.swimmerNodeCost;
     if (config.emitterStrength !== undefined) EMITTER_STRENGTH = config.emitterStrength;
     if (config.velocityEmitters !== undefined) velocityEmitters = config.velocityEmitters;
     if (config.fluidGridSize !== undefined) FLUID_GRID_SIZE_CONTROL = config.fluidGridSize;

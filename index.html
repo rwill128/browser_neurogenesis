@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Soft Body Evolution - Robust External Slider Config</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="pageContainer">
+        <div id="simulationAndInfoWrapper">
+            <div id="infoPanel"> 
+                <button id="closeInfoPanel">X</button>
+                <button id="copyInfoPanelButton" title="Copy Info to Clipboard">Copy</button>
+                <div class="info-section">
+                    <h5>Soft Body Info</h5>
+                    <p><strong>ID:</strong> <span id="infoBodyId">-</span></p>
+                    <p><strong>Stiffness:</strong> <span id="infoBodyStiffness">-</span></p>
+                    <p><strong>Damping:</strong> <span id="infoBodyDamping">-</span></p>
+                    <p><strong>Motor Impulse Interval:</strong> <span id="infoBodyMotorInterval">-</span></p>
+                    <p><strong>Motor Impulse Cap:</strong> <span id="infoBodyMotorCap">-</span></p>
+                    <p><strong>Emitter Strength:</strong> <span id="infoBodyEmitterStrength">-</span></p>
+                    <p><strong>Emitter Direction:</strong> X: <span id="infoBodyEmitterDirX">-</span>, Y: <span id="infoBodyEmitterDirY">-</span></p>
+                    <p><strong>Num Offspring:</strong> <span id="infoBodyNumOffspring">-</span></p>
+                    <p><strong>Offspring Spawn Radius:</strong> <span id="infoBodyOffspringRadius">-</span></p>
+                    <p><strong>Point Add Chance:</strong> <span id="infoBodyPointAddChance">-</span></p>
+                    <p><strong>Spring Connection Radius:</strong> <span id="infoBodySpringConnectionRadius">-</span></p>
+                    <p><strong>Energy:</strong> <span id="infoBodyEnergy">-</span></p>
+                    <p><strong>Ticks Since Birth:</strong> <span id="infoBodyTicksBirth">-</span></p>
+                    <p><strong>Can Reproduce:</strong> <span id="infoBodyCanReproduce">-</span></p>
+                </div>
+
+                <div id="allPointsInfoContainer" class="info-section">
+                    </div>
+            </div>
+            <div id="canvasContainer">
+                <canvas id="simulationCanvas"></canvas>
+            </div>
+        </div>
+
+        <button id="toggleControlsButton" class="ui-button-top-right">Controls</button>
+        <button id="screensaverButton" class="ui-button-top-right">Enter Screensaver</button>
+        <button id="viewEntireSimButton" class="ui-button-top-right">View Entire Sim</button>
+
+        <div id="controls">
+            <div class="control-group">
+                <h4>Viewport & Sim</h4>
+                <div class="viewport-instructions">WASD/Right-Drag to Pan, Scroll to Zoom</div>
+                <label for="worldWidthInput" class="input-label">World Width:</label>
+                <input type="number" id="worldWidthInput" value="8000" step="100">
+                <label for="worldHeightInput" class="input-label">World Height:</label>
+                <input type="number" id="worldHeightInput" value="6000" step="100">
+                <button id="resizeWorldButton">Resize World & Reset Sim</button>
+
+                <label for="worldWrapToggle" class="checkbox-label">Wrap Edges:
+                    <input type="checkbox" id="worldWrapToggle">
+                </label>
+                <label for="maxTimestep" class="slider-label">Max Timestep (ms):</label>
+                <span id="maxTimestepValue" class="slider-value">10</span>
+                <input type="range" id="maxTimestep" min="1" max="50" value="10" step="1">
+                <label for="zoomSensitivitySlider" class="slider-label">Zoom Sensitivity:</label>
+                <span id="zoomSensitivityValueSpan" class="slider-value">0.0200</span>
+                <input type="range" id="zoomSensitivitySlider" min="0.005" max="0.03" value="0.02" step="0.0005">
+                <button id="pauseResumeButton">Pause</button>
+            </div>
+            <div class="control-group">
+                <h4>Soft Body (Global)</h4>
+                <label for="creaturePopulationFloorSlider" class="slider-label">Creature Pop. Floor:</label>
+                <span id="creaturePopulationFloorValueSpan" class="slider-value">10</span>
+                <input type="range" id="creaturePopulationFloorSlider" min="1" max="1000" value="10" step="10">
+
+                <label for="creaturePopulationCeilingSlider" class="slider-label">Creature Pop. Ceiling:</label>
+                <span id="creaturePopulationCeilingValueSpan" class="slider-value">1000</span>
+                <input type="range" id="creaturePopulationCeilingSlider" min="10" max="2000" value="1000" step="10">
+
+                <label for="globalMutationRate" class="slider-label">Global Mutation Rate:</label>
+                <span id="globalMutationRateValue" class="slider-value">0.25</span>
+                <input type="range" id="globalMutationRate" min="0.1" max="3.0" value="0.25" step="0.05">
+
+                <label for="bodyFluidEntrainment" class="slider-label">Fluid Entrainment (Floaters):</label>
+                <span id="bodyFluidEntrainmentValue" class="slider-value">0.47</span>
+                <input type="range" id="bodyFluidEntrainment" min="0.0" max="0.7" value="0.465" step="0.005">
+
+                <label for="fluidCurrentStrength" class="slider-label">Fluid Current Str (Floaters):</label>
+                <span id="fluidCurrentStrengthValue" class="slider-value">19.7</span>
+                <input type="range" id="fluidCurrentStrength" min="0.0" max="30.0" value="19.7" step="0.1">
+
+                <label for="bodyPushStrength" class="slider-label">Body Push Strength (Manual Drag):</label>
+                <span id="bodyPushStrengthValue" class="slider-value">0.10</span>
+                <input type="range" id="bodyPushStrength" min="0.0" max="2.0" value="0.10" step="0.05">
+
+                <label for="reproductionCooldown" class="slider-label">Repro. Cooldown (frames):</label>
+                <span id="reproductionCooldownValue" class="slider-value">1000</span>
+                <input type="range" id="reproductionCooldown" min="100" max="5000" value="1000" step="50">
+
+                <label for="bodyRepulsionStrength" class="slider-label">Body Repulsion Str:</label>
+                <span id="bodyRepulsionStrengthValue" class="slider-value">100.0</span>
+                <input type="range" id="bodyRepulsionStrength" min="0.0" max="200.0" value="100.0" step="0.5">
+
+                <label for="bodyRepulsionRadiusFactor" class="slider-label">Body Repulsion Radius Factor:</label>
+                <span id="bodyRepulsionRadiusFactorValue" class="slider-value">5.0</span>
+                <input type="range" id="bodyRepulsionRadiusFactor" min="0.0" max="10.0" value="5.0" step="0.1">
+
+                <div class="indicator-label">Any Unstable: <span id="instabilityLight" class="indicator-light"></span></div>
+                <div id="populationCount">Population: 0</div>
+                <button id="resetButton">Reset Population</button>
+            </div>
+            <div class="control-group">
+                <h4>Energy Costs / Frame</h4>
+                <label for="baseNodeCost" class="slider-label">Base     Node Cost:</label>
+                <span id="baseNodeCostValue" class="slider-value">0.3</span>
+                <input type="range" id="baseNodeCost" min="0.0" max="50.0" value="0.3" step="0.1">
+
+                <label for="emitterNodeCost" class="slider-label">Emitter Node Cost:</label>
+                <span id="emitterNodeCostValue" class="slider-value">1.0000</span>
+                <input type="range" id="emitterNodeCost" min="0.0" max="50.0" value="1.0" step="0.1">
+
+                <label for="eaterNodeCost" class="slider-label">Eater Node Cost:</label>
+                <span id="eaterNodeCostValue" class="slider-value">0.3</span>
+                <input type="range" id="eaterNodeCost" min="0.0" max="50.0" value="0.3" step="0.1">
+
+                <label for="predatorNodeCost" class="slider-label">Predator Node Cost:</label>
+                <span id="predatorNodeCostValue" class="slider-value">0.8</span>
+                <input type="range" id="predatorNodeCost" min="0.0" max="100.0" value="0.8" step="0.1">
+
+                <label for="neuronNodeCost" class="slider-label">Neuron Node Cost:</label>
+                <span id="neuronNodeCostValue" class="slider-value">0.0100</span>
+                <input type="range" id="neuronNodeCost" min="0.0" max="0.5" value="0.01" step="0.001">
+
+                <label for="photosyntheticNodeCost" class="slider-label">Photosynthetic Node Cost:</label>
+                <span id="photosyntheticNodeCostValue" class="slider-value">0.5</span>
+                <input type="range" id="photosyntheticNodeCost" min="0.0" max="50.0" value="0.5" step="0.1">
+
+                <label for="photosynthesisEfficiency" class="slider-label">Photosynthesis Efficiency:</label>
+                <span id="photosynthesisEfficiencyValue" class="slider-value">0.01</span>
+                <input type="range" id="photosynthesisEfficiency" min="0.0" max="0.1" value="0.01" step="0.001">
+            </div>
+            <div class="control-group">
+                <h4>Fluid</h4>
+                <label for="fluidGridSize" class="slider-label">Fluid Grid Resolution:</label>
+                <span id="fluidGridSizeValue" class="slider-value">128</span>
+                <input type="range" id="fluidGridSize" min="32" max="256" value="128" step="16">
+
+                <label for="fluidDiffusion" class="slider-label">Diffusion:</label>
+                <span id="fluidDiffusionValue" class="slider-value">4.7e-4</span>
+                <input type="range" id="fluidDiffusion" min="0" max="0.001" value="0.00047" step="0.00001">
+
+                <label for="fluidViscosity" class="slider-label">Viscosity:</label>
+                <span id="fluidViscosityValue" class="slider-value">6.8e-5</span>
+                <input type="range" id="fluidViscosity" min="0" max="0.0075" value="0.000068" step="0.000001">
+
+                <label for="fluidFade" class="slider-label">Fade Rate:</label>
+                <span id="fluidFadeValue" class="slider-value">0.002</span>
+                <input type="range" id="fluidFade" min="0.0" max="1.0" value="0.002" step="0.001">
+
+                <label for="maxFluidVelocityComponentSlider" class="slider-label">Max Fluid Vel. Component:</label>
+                <span id="maxFluidVelocityComponentValueSpan" class="slider-value">0.5</span>
+                <input type="range" id="maxFluidVelocityComponentSlider" min="0.1" max="20.0" value="10.0" step="0.1">
+
+                <button id="clearFluidButton">Clear Fluid</button>
+            </div>
+            <div class="control-group">
+                <h4>Particles</h4>
+                <label for="particlePopulationFloorSlider" class="slider-label">Particle Pop. Floor:</label>
+                <span id="particlePopulationFloorValueSpan" class="slider-value">5000</span>
+                <input type="range" id="particlePopulationFloorSlider" min="0" max="10000" value="5000" step="50">
+
+                <label for="particlePopulationCeilingSlider" class="slider-label">Particle Pop. Ceiling:</label>
+                <span id="particlePopulationCeilingValueSpan" class="slider-value">20000</span>
+                <input type="range" id="particlePopulationCeilingSlider" min="0" max="40000" value="20000" step="50">
+
+                <label for="particlesPerSecondSlider" class="slider-label">Particles / Sec (if between floor/ceil):</label>
+                <span id="particlesPerSecondValueSpan" class="slider-value">500</span>
+                <input type="range" id="particlesPerSecondSlider" min="0" max="1000" value="500" step="1">
+
+                <label for="particleFluidInfluence" class.slider-label="slider-label">Fluid Influence:</label>
+                <span id="particleFluidInfluenceValue" class="slider-value">2.00</span>
+                <input type="range" id="particleFluidInfluence" min="0.0" max="3.0" value="2.0" step="0.01">
+
+                <label for="particleLifeDecay" id="particleLifeDecayLabel" class="slider-label">Life Decay Rate:</label>
+                <span id="particleLifeDecayValue" class="slider-value">0.0010</span>
+                <input type="range" id="particleLifeDecay" min="0.0001" max="0.02" value="0.001" step="0.0001">
+
+                <label for="infiniteParticleLifeToggle" class="checkbox-label">Infinite Life:
+                    <input type="checkbox" id="infiniteParticleLifeToggle">
+                </label>
+
+                <button id="resetParticlesButton">Reset Particles</button>
+                <div id="particleCount">Particles: 0</div>
+            </div>
+            <div class="control-group">
+                <h4>Env. Emitters</h4>
+                <label for="emitterEditModeToggle" class="checkbox-label">Edit Emitters:
+                    <input type="checkbox" id="emitterEditModeToggle">
+                </label>
+                <label for="emitterStrength" class="slider-label">Emitter Strength:</label>
+                <span id="emitterStrengthValue" class="slider-value">3.0</span>
+                <input type="range" id="emitterStrength" min="0.0" max="10.0" value="3.0" step="0.1">
+                <button id="clearEmittersButton">Clear Emitters</button>
+            </div>
+            <div class="control-group">
+                <h4>Configuration</h4>
+                <button id="exportConfigButton">Export Config</button>
+                <input type="file" id="importConfigFile" accept=".json" style="display: none;">
+                <button id="importConfigButton">Import Config</button>
+            </div>
+            <div class="control-group">
+                <h4>Environment Maps</h4>
+                <hr style="border-color: #444; margin-top: 15px; margin-bottom: 10px;">
+                <label for="showNutrientMapToggle" class="checkbox-label">Show Nutrient Map:
+                    <input type="checkbox" id="showNutrientMapToggle">
+                </label>
+                <label for="nutrientEditModeToggle" class="checkbox-label">Edit Nutrient Map:
+                    <input type="checkbox" id="nutrientEditModeToggle">
+                </label>
+
+                <label for="nutrientBrushValueSlider" class="slider-label">Nutrient Brush Value:</label>
+                <span id="nutrientBrushValueSpan" class="slider-value">1.0</span>
+                <input type="range" id="nutrientBrushValueSlider" min="0.1" max="3.0" value="1.0" step="0.05">
+
+                <label for="nutrientBrushSizeSlider" class="slider-label">Nutrient Brush Size (cells):</label>
+                <span id="nutrientBrushSizeSpan" class="slider-value">5</span>
+                <input type="range" id="nutrientBrushSizeSlider" min="1" max="20" value="5" step="1">
+
+                <label for="nutrientBrushStrengthSlider" class="slider-label">Nutrient Brush Strength:</label>
+                <span id="nutrientBrushStrengthSpan" class="slider-value">0.10</span>
+                <input type="range" id="nutrientBrushStrengthSlider" min="0.01" max="1.0" value="0.1" step="0.01">
+
+                <button id="clearNutrientMapButton">Clear Nutrient Map</button>
+
+                <hr style="border-color: #444; margin-top: 15px; margin-bottom: 10px;">
+                <label for="showLightMapToggle" class="checkbox-label">Show Light Map:
+                    <input type="checkbox" id="showLightMapToggle">
+                </label>
+                <label for="lightEditModeToggle" class="checkbox-label">Edit Light Map:
+                    <input type="checkbox" id="lightEditModeToggle">
+                </label>
+
+                <label for="lightBrushValueSlider" class="slider-label">Light Brush Value:</label>
+                <span id="lightBrushValueSpan" class="slider-value">0.5</span>
+                <input type="range" id="lightBrushValueSlider" min="0.0" max="1.0" value="0.5" step="0.01">
+
+                <label for="lightBrushSizeSlider" class="slider-label">Light Brush Size (cells):</label>
+                <span id="lightBrushSizeSpan" class="slider-value">5</span>
+                <input type="range" id="lightBrushSizeSlider" min="1" max="20" value="5" step="1">
+
+                <label for="lightBrushStrengthSlider" class="slider-label">Light Brush Strength:</label>
+                <span id="lightBrushStrengthSpan" class="slider-value">0.10</span>
+                <input type="range" id="lightBrushStrengthSlider" min="0.01" max="1.0" value="0.1" step="0.01">
+                
+                <button id="clearLightMapButton">Reset Light Map (Surface)</button>
+
+                <hr style="border-color: #444; margin-top: 15px; margin-bottom: 10px;">
+                <label for="showViscosityMapToggle" class="checkbox-label">Show Viscosity Map:
+                    <input type="checkbox" id="showViscosityMapToggle">
+                </label>
+                <label for="viscosityEditModeToggle" class="checkbox-label">Edit Viscosity Map:
+                    <input type="checkbox" id="viscosityEditModeToggle">
+                </label>
+
+                <label for="viscosityBrushValueSlider" class="slider-label">Viscosity Brush Multiplier:</label>
+                <span id="viscosityBrushValueSpan" class="slider-value">1.0</span>
+                <input type="range" id="viscosityBrushValueSlider" min="0.2" max="10.0" value="1.0" step="0.05">
+
+                <label for="viscosityBrushSizeSlider" class="slider-label">Viscosity Brush Size (cells):</label>
+                <span id="viscosityBrushSizeSpan" class="slider-value">5</span>
+                <input type="range" id="viscosityBrushSizeSlider" min="1" max="20" value="5" step="1">
+
+                <label for="viscosityBrushStrengthSlider" class="slider-label">Viscosity Brush Strength:</label>
+                <span id="viscosityBrushStrengthSpan" class="slider-value">0.10</span>
+                <input type="range" id="viscosityBrushStrengthSlider" min="0.01" max="1.0" value="0.1" step="0.01">
+                
+                <button id="clearViscosityMapButton">Reset Viscosity Map (Normal)</button>
+            </div>
+
+            <div class="control-group">
+                <h4>Global Cycles</h4>
+                <label for="nutrientCyclePeriodSlider" class="slider-label">Nutrient Cycle Period (s):</label>
+                <span id="nutrientCyclePeriodSpan" class="slider-value">300</span>
+                <input type="range" id="nutrientCyclePeriodSlider" min="60" max="600" value="300" step="10">
+
+                <label for="nutrientCycleBaseAmplitudeSlider" class="slider-label">Nutrient Base Amplitude:</label>
+                <span id="nutrientCycleBaseAmplitudeSpan" class="slider-value">0.65</span>
+                <input type="range" id="nutrientCycleBaseAmplitudeSlider" min="0.0" max="1.0" value="0.65" step="0.01">
+
+                <label for="nutrientCycleWaveAmplitudeSlider" class="slider-label">Nutrient Wave Amplitude:</label>
+                <span id="nutrientCycleWaveAmplitudeSpan" class="slider-value">0.35</span>
+                <input type="range" id="nutrientCycleWaveAmplitudeSlider" min="0.0" max="1.0" value="0.35" step="0.01">
+
+                <label for="lightCyclePeriodSlider" class="slider-label">Light Cycle Period (s):</label>
+                <span id="lightCyclePeriodSpan" class="slider-value">480</span>
+                <input type="range" id="lightCyclePeriodSlider" min="60" max="900" value="480" step="10">
+
+                <p class="indicator-label" style="margin-top:10px;">Current Nutrient Multiplier: <span id="currentNutrientMultiplierDisplay" style="color:#00aeff;">1.00</span></p>
+                <p class="indicator-label">Current Light Multiplier: <span id="currentLightMultiplierDisplay" style="color:#00aeff;">1.00</span></p>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Configuration & Utilities -->
+    <script src="js/config.js"></script>
+    <script src="js/utils.js"></script>
+
+    <!-- Core Classes -->
+    <script src="js/classes.js"></script>
+
+    <!-- Environment and Simulation Logic -->
+    <script src="js/environment.js"></script>
+    <script src="js/simulation.js"></script>
+
+    <!-- UI Logic -->
+    <script src="js/ui.js"></script>
+
+    <!-- Main Entry Point & Game Loop -->
+    <script src="js/main.js"></script>
+</body>
+</html> 

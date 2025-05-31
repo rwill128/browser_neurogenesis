@@ -431,6 +431,7 @@
                 </label>
 
                 <button id="resetParticlesButton">Reset Particles</button>
+                <div id="particleCount">Particles: 0</div>
             </div>
             <div class="control-group">
                 <h4>Env. Emitters</h4>
@@ -4559,15 +4560,15 @@
             BODY_REPULSION_STRENGTH = 100.0;
             BODY_REPULSION_RADIUS_FACTOR = 5.0;
             GLOBAL_MUTATION_RATE_MODIFIER = 0.25;
-            MAX_DELTA_TIME_MS = 10;
-            BASE_NODE_EXISTENCE_COST = 0.3;
-            EMITTER_NODE_ENERGY_COST = 1.0;
-            EATER_NODE_ENERGY_COST = 0.3;
-            PREDATOR_NODE_ENERGY_COST = 0.8;
-            NEURON_NODE_ENERGY_COST = 0.01;
+            MAX_DELTA_TIME_MS = 5;
+            BASE_NODE_EXISTENCE_COST = 0.01;
+            EMITTER_NODE_ENERGY_COST = 0.1;
+            EATER_NODE_ENERGY_COST = 0.1;
+            PREDATOR_NODE_ENERGY_COST = 0.1;
+            NEURON_NODE_ENERGY_COST = 0.001;
             FLUID_GRID_SIZE_CONTROL = 128; // Crucial default
             FLUID_DIFFUSION = 0.00047;
-            FLUID_VISCOSITY = 0.000068;
+            FLUID_VISCOSITY = 0.0001;
             FLUID_FADE_RATE = 0.002;
             PARTICLES_PER_SECOND = 500;
             PARTICLE_FLUID_INFLUENCE = 2.0;
@@ -4576,7 +4577,7 @@
             IS_WORLD_WRAPPING = worldWrapToggle.checked;
             IS_PARTICLE_LIFE_INFINITE = infiniteParticleLifeToggle.checked;
             IS_EMITTER_EDIT_MODE = emitterEditModeToggle.checked;
-            PHOTOSYNTHETIC_NODE_ENERGY_COST = 0.5;
+            PHOTOSYNTHETIC_NODE_ENERGY_COST = 0.01;
             PHOTOSYNTHESIS_EFFICIENCY = 5;
 
 

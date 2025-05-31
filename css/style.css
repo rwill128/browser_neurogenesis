@@ -1,0 +1,244 @@
+body {
+    margin: 0;
+    overflow: hidden;
+    background-color: #111;
+    font-family: sans-serif;
+    color: #eee;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+#pageContainer {
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+#simulationAndInfoWrapper {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: 10px;
+    flex-grow: 1;
+    padding: 10px;
+    box-sizing: border-box;
+    height: 100%;
+    position: relative;
+}
+#infoPanel {
+    position: fixed;
+    top: 15px;
+    left: -330px;
+    width: 300px;
+    max-height: calc(100vh - 30px);
+    background-color: rgba(30,30,30,0.95);
+    border: 1px solid #555;
+    border-radius: 8px;
+    padding: 15px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.5);
+    z-index: 1000;
+    color: #eee;
+    font-size: 0.8em;
+    display: block;
+    opacity: 0;
+    visibility: hidden;
+    transition: left 0.3s ease-in-out, opacity 0.3s ease-in-out, visibility 0.3s ease-in-out;
+    overflow-y: auto;
+    box-sizing: border-box;
+}
+#infoPanel.open {
+    left: 15px;
+    opacity: 1;
+    visibility: visible;
+}
+#canvasContainer {
+    flex-grow: 1;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    position: relative;
+    background-color: #000;
+    border: 1px solid #444;
+    border-radius: 8px;
+}
+canvas {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    cursor: default;
+}
+canvas.emitter-edit-mode {
+    cursor: crosshair;
+}
+
+.ui-button-top-right {
+    position: fixed;
+    padding: 8px 12px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+    z-index: 1002;
+}
+.ui-button-top-right:hover {
+    background-color: #0056b3;
+}
+
+#toggleControlsButton {
+    top: 15px;
+    right: 15px;
+}
+#screensaverButton {
+    top: 15px;
+    right: 100px;
+}
+
+#viewEntireSimButton {
+    top: 60px; /* Positioned below the screensaver button */
+    right: 15px; /* Align with toggleControlsButton */
+    /* width: auto; Ensures button fits content */
+    /* padding: 8px 10px; Slightly less padding if text is long */
+}
+
+
+#controls {
+    position: fixed;
+    top: 0;
+    right: -360px;
+    width: 330px;
+    height: 100vh;
+    background-color: rgba(40,40,40,0.95);
+    padding: 15px;
+    border-left: 1px solid #555;
+    box-shadow: -5px 0 15px rgba(0,0,0,0.3);
+    overflow-y: auto;
+    z-index: 1001;
+    transition: right 0.3s ease-in-out;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    box-sizing: border-box;
+}
+#controls.open {
+    right: 0;
+}
+#controls div.control-group {
+    padding: 10px;
+    border: 1px solid #555;
+    border-radius: 6px;
+    background-color: rgba(50,50,50,0.8);
+    min-width: auto;
+    max-width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+}
+
+#controls label.slider-label, #controls label.checkbox-label, #controls label.input-label { display: block; margin-bottom: 2px; font-size: 0.85em; font-weight: bold; color: #ddd; text-align: left; }
+#controls label.checkbox-label { margin-top: 8px; display: flex; align-items: center; }
+#controls input[type="checkbox"] { margin-left: 5px; }
+#controls input[type="number"] { width: 100%; padding: 5px; margin-top: 2px; margin-bottom: 5px; box-sizing: border-box; background-color: #333; color: #eee; border: 1px solid #555; border-radius: 3px;}
+#controls span.slider-value { display: block; font-size: 0.8em; text-align: right; color: #00aeff; margin-bottom: 3px; min-height: 1em; }
+#controls input[type="range"] { width: 100%; margin-top: 0; box-sizing: border-box; }
+#controls input[type="range"]:disabled + span.slider-value, #controls input[type="range"]:disabled ~ label.slider-label, #controls input[type="range"]:disabled { color: #777; opacity: 0.6; }
+#controls button { padding: 8px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 8px; width: 100%; box-sizing: border-box; }
+#controls button:hover { background-color: #0056b3; }
+.control-group h4 { margin-top: 0; margin-bottom: 10px; text-align: center; color: #00aeff; width: 100%; font-size: 1em; }
+.indicator-label { font-size: 0.85em; color: #ddd; margin-top: 8px; }
+.indicator-light { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background-color: #4CAF50; margin-left: 5px; vertical-align: middle; border: 1px solid #222; transition: background-color 0.3s; }
+.indicator-light.unstable { background-color: #F44336; }
+#populationCount { margin-top: 10px; font-size: 0.9em; color: #ccc; text-align: center; width: 100%; }
+.viewport-instructions { font-size: 0.8em; color: #bbb; text-align: center; margin-top: 5px; }
+#infoPanel h5 { margin-top: 0; margin-bottom: 8px; color: #00aeff; border-bottom: 1px solid #444; padding-bottom: 5px; }
+#infoPanel p { margin: 3px 0; line-height: 1.4; }
+#infoPanel strong { color: #bbb; }
+#infoPanel .info-section { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dashed #333; }
+#infoPanel .info-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+
+#allPointsInfoContainer .point-info-entry {
+    border-bottom: 1px solid #444;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+}
+#allPointsInfoContainer .point-info-entry:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+ #allPointsInfoContainer .point-info-entry h6 {
+    margin: 5px 0 3px 0;
+    color: #7fdbff; /* A lighter blue for sub-headings */
+    font-size: 0.9em;
+}
+
+
+#closeInfoPanel {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #555;
+    color: white;
+    border: none;
+    padding: 3px 7px;
+    cursor: pointer;
+    border-radius: 3px;
+}
+
+#copyInfoPanelButton {
+    position: absolute;
+    top: 10px;
+    right: 45px; /* Positioned to the left of the close button */
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 3px 7px;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+#copyInfoPanelButton:hover {
+    background-color: #0056b3;
+}
+
+/* Screensaver Mode Styles */
+body.screensaver-active #controls,
+body.screensaver-active #infoPanel,
+body.screensaver-active #toggleControlsButton,
+body.screensaver-active #screensaverButton.in-screensaver { /* Hide button when in screensaver via CSS */
+    display: none !important;
+}
+
+body.css-screensaver-active #pageContainer {
+     position: fixed !important;
+     top: 0 !important;
+     left: 0 !important;
+     width: 100vw !important;
+     height: 100vh !important;
+     padding: 0 !important;
+     margin: 0 !important;
+     z-index: 2000 !important;
+     display: flex !important;
+     flex-direction: column !important;
+}
+ body.css-screensaver-active #simulationAndInfoWrapper {
+    flex-grow: 1 !important;
+    width: 100% !important;
+    height: 100% !important;
+    padding: 0 !important;
+    gap: 0 !important;
+    display: flex !important;
+}
+body.css-screensaver-active #canvasContainer {
+    flex-grow: 1 !important;
+    width: 100% !important;
+    height: 100% !important;
+    border-radius: 0 !important;
+    border: none !important;
+    background-color: #000 !important; /* Make background black */
+} 

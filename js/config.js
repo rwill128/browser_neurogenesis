@@ -51,9 +51,10 @@ const ENERGY_PER_PARTICLE = 25;
 const ENERGY_SAPPED_PER_PREDATION_BASE = 3;
 const ENERGY_SAPPED_PER_PREDATION_MAX_BONUS = 7;
 
-const BASE_MAX_CREATURE_ENERGY = 100;
-const ENERGY_PER_MASS_POINT_BONUS = 5;
-const BASE_POINTS_FOR_MAX_ENERGY_CALC = 5;
+// Dynamic Max Energy per Creature (New)
+const BASE_MAX_CREATURE_ENERGY = 100;      // Renamed from MAX_CREATURE_ENERGY, now a base value
+const ENERGY_PER_MASS_POINT_BONUS = 25;  // Extra energy capacity per point beyond base (Changed from 5)
+const BASE_POINTS_FOR_MAX_ENERGY_CALC = 25; // Creatures with this many points (or fewer) use BASE_MAX_CREATURE_ENERGY (Changed from 5)
 const OFFSPRING_INITIAL_ENERGY_SHARE = 0.25;
 const REPRODUCTION_ADDITIONAL_COST_FACTOR = 0.1;
 const OFFSPRING_PLACEMENT_ATTEMPTS = 10;

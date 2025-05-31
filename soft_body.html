@@ -440,6 +440,29 @@
                 <input type="file" id="importConfigFile" accept=".json" style="display: none;">
                 <button id="importConfigButton">Import Config</button>
             </div>
+            <div class="control-group">
+                <h4>Environment Maps</h4>
+                <label for="showNutrientMapToggle" class="checkbox-label">Show Nutrient Map:
+                    <input type="checkbox" id="showNutrientMapToggle">
+                </label>
+                <label for="nutrientEditModeToggle" class="checkbox-label">Edit Nutrient Map:
+                    <input type="checkbox" id="nutrientEditModeToggle">
+                </label>
+
+                <label for="nutrientBrushValueSlider" class="slider-label">Nutrient Brush Value:</label>
+                <span id="nutrientBrushValueSpan" class="slider-value">1.0</span>
+                <input type="range" id="nutrientBrushValueSlider" min="0.1" max="3.0" value="1.0" step="0.05">
+
+                <label for="nutrientBrushSizeSlider" class="slider-label">Nutrient Brush Size (cells):</label>
+                <span id="nutrientBrushSizeSpan" class="slider-value">5</span>
+                <input type="range" id="nutrientBrushSizeSlider" min="1" max="20" value="5" step="1">
+
+                <label for="nutrientBrushStrengthSlider" class="slider-label">Nutrient Brush Strength:</label>
+                <span id="nutrientBrushStrengthSpan" class="slider-value">0.10</span>
+                <input type="range" id="nutrientBrushStrengthSlider" min="0.01" max="1.0" value="0.1" step="0.01">
+
+                <button id="clearNutrientMapButton">Clear Nutrient Map</button>
+            </div>
         </div>
     </div>
 
@@ -642,6 +665,16 @@
         const allPointsInfoContainer = document.getElementById('allPointsInfoContainer'); // New
         const copyInfoPanelButton = document.getElementById('copyInfoPanelButton'); // New
 
+        const showNutrientMapToggle = document.getElementById('showNutrientMapToggle');
+        const nutrientEditModeToggle = document.getElementById('nutrientEditModeToggle');
+
+        const nutrientBrushValueSlider = document.getElementById('nutrientBrushValueSlider');
+        const nutrientBrushValueSpan = document.getElementById('nutrientBrushValueSpan');
+        const nutrientBrushSizeSlider = document.getElementById('nutrientBrushSizeSlider');
+        const nutrientBrushSizeSpan = document.getElementById('nutrientBrushSizeSpan');
+        const nutrientBrushStrengthSlider = document.getElementById('nutrientBrushStrengthSlider');
+        const nutrientBrushStrengthSpan = document.getElementById('nutrientBrushStrengthSpan');
+        const clearNutrientMapButton = document.getElementById('clearNutrientMapButton');
 
         // --- Global Variables & Constants (with initial hardcoded defaults) ---
         let CREATURE_POPULATION_FLOOR = 10;
@@ -683,6 +716,17 @@
         let IS_PARTICLE_LIFE_INFINITE = false; // Default to false, will be set by checkbox
         const PARTICLE_LIFE_DECAY_RANDOM_FACTOR = 0.002;
         let particleEmissionDebt = 0;
+
+        let nutrientField = null;
+        let IS_NUTRIENT_EDIT_MODE = false;
+        let SHOW_NUTRIENT_MAP = true;
+
+        let NUTRIENT_BRUSH_VALUE = 1.0;
+        let NUTRIENT_BRUSH_SIZE = 5; // In grid cells
+        let NUTRIENT_BRUSH_STRENGTH = 0.1; // 0 to 1, how quickly it applies
+        const MIN_NUTRIENT_VALUE = 0.1;
+        const MAX_NUTRIENT_VALUE = 3.0;
+        let isPaintingNutrients = false;
 
         let INITIAL_POPULATION_SIZE; // Will be set after CREATURE_POPULATION_FLOOR is loaded/defaulted
 
@@ -1055,6 +1099,7 @@
             initFluidSimulation();
             initParticles();
             initializePopulation();
+            initNutrientMap(); // Initialize nutrient map on resize
             isAnySoftBodyUnstable = false;
             updateInstabilityIndicator();
             console.log(`World resized to ${WORLD_WIDTH}x${WORLD_HEIGHT} and simulation reset.`);
@@ -1066,6 +1111,7 @@
             velocityEmitters = [];
             initFluidSimulation();
             initParticles();
+            initNutrientMap(); // Initialize nutrient map on fluid grid change
         }
         fluidDiffusionSlider.oninput = function() { FLUID_DIFFUSION = parseFloat(this.value); updateSliderDisplay(this, fluidDiffusionValueSpan); if(fluidField) fluidField.diffusion = FLUID_DIFFUSION;}
         fluidViscositySlider.oninput = function() { FLUID_VISCOSITY = parseFloat(this.value); updateSliderDisplay(this, fluidViscosityValueSpan); if(fluidField) fluidField.viscosity = FLUID_VISCOSITY;}
@@ -1092,6 +1138,29 @@
         importConfigFile.onchange = handleImportConfig;
         closeInfoPanelButton.onclick = () => { infoPanel.classList.remove('open'); selectedInspectBody = null; selectedInspectPoint = null; }
 
+        showNutrientMapToggle.onchange = function() { SHOW_NUTRIENT_MAP = this.checked; };
+        nutrientEditModeToggle.onchange = function() {
+            IS_NUTRIENT_EDIT_MODE = this.checked;
+            if (IS_NUTRIENT_EDIT_MODE) {
+                // If entering nutrient edit mode, ensure other edit modes are off
+                emitterEditModeToggle.checked = false;
+                IS_EMITTER_EDIT_MODE = false;
+                canvas.classList.remove('emitter-edit-mode');
+                // Potentially add a new class for nutrient editing cursor:
+                // canvas.classList.add('nutrient-edit-mode');
+            } else {
+                // canvas.classList.remove('nutrient-edit-mode');
+            }
+        };
+
+        nutrientBrushValueSlider.oninput = function() { NUTRIENT_BRUSH_VALUE = parseFloat(this.value); updateSliderDisplay(this, nutrientBrushValueSpan); }
+        nutrientBrushSizeSlider.oninput = function() { NUTRIENT_BRUSH_SIZE = parseInt(this.value); updateSliderDisplay(this, nutrientBrushSizeSpan); }
+        nutrientBrushStrengthSlider.oninput = function() { NUTRIENT_BRUSH_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, nutrientBrushStrengthSpan); }
+        clearNutrientMapButton.onclick = function() {
+            initNutrientMap(); // Resets the map to default
+            console.log("Nutrient map cleared.");
+        };
+
         viewEntireSimButton.onclick = function() {
             console.log('[View Entire Sim] Before:', { viewZoom, viewOffsetX, viewOffsetY, WORLD_WIDTH, WORLD_HEIGHT, clientW: canvas.clientWidth, clientH: canvas.clientHeight });
             
@@ -1104,7 +1173,19 @@
             // No additional offset calculations for centering are needed here when viewZoom is 1 and offsets are 0.
 
             console.log('[View Entire Sim] After:', { viewZoom, viewOffsetX, viewOffsetY });
-        };
+
+            showNutrientMapToggle.checked = SHOW_NUTRIENT_MAP;
+            nutrientEditModeToggle.checked = IS_NUTRIENT_EDIT_MODE;
+
+            nutrientBrushValueSlider.value = NUTRIENT_BRUSH_VALUE;
+            nutrientBrushSizeSlider.value = NUTRIENT_BRUSH_SIZE;
+            nutrientBrushStrengthSlider.value = NUTRIENT_BRUSH_STRENGTH;
+            updateSliderDisplay(nutrientBrushValueSlider, nutrientBrushValueSpan);
+            updateSliderDisplay(nutrientBrushSizeSlider, nutrientBrushSizeSpan);
+            updateSliderDisplay(nutrientBrushStrengthSlider, nutrientBrushStrengthSpan);
+
+            canvas.classList.toggle('emitter-edit-mode', IS_EMITTER_EDIT_MODE);
+        }
 
         copyInfoPanelButton.onclick = function() {
             if (!selectedInspectBody) {
@@ -1384,6 +1465,14 @@
                     return;
                 }
 
+                if (IS_NUTRIENT_EDIT_MODE) {
+                    isPaintingNutrients = true;
+                    paintNutrientBrush(simMouseX, simMouseY); // Paint on initial click
+                    selectedInspectBody = null; updateInfoPanel(); 
+                    selectedSoftBodyPoint = null;
+                    return; // Consume the event
+                }
+
                 let clickedOnPoint = false;
                 selectedInspectBody = null; // Reset selected body on new click
                 selectedInspectPoint = null;
@@ -1478,6 +1567,11 @@
                     fluidField.addVelocity(fluidGridX, fluidGridY, fluidVelX, fluidVelY);
                 }
             }
+
+            if (IS_NUTRIENT_EDIT_MODE && isPaintingNutrients && mouse.isDown) { // mouse.isDown ensures left button is held
+                paintNutrientBrush(simMouseX, simMouseY);
+                return; // Consume if painting
+            }
         });
 
         canvas.addEventListener('mouseup', (e) => {
@@ -1486,6 +1580,9 @@
                 e.preventDefault();
             } else if (e.button === 0) { // Left mouse button up
                 mouse.isDown = false;
+                if (isPaintingNutrients) {
+                    isPaintingNutrients = false;
+                }
 
                 if (IS_EMITTER_EDIT_MODE && emitterDragStartCell && fluidField) {
                     const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
@@ -1561,6 +1658,10 @@
                 point.prevPos.x = point.pos.x - worldDx * 1.0;
                 point.prevPos.y = point.pos.y - worldDy * 1.0;
                 selectedSoftBodyPoint = null;
+            }
+
+            if (isPaintingNutrients) {
+                isPaintingNutrients = false;
             }
         });
 
@@ -3382,6 +3483,17 @@
             }
         }
 
+        function initNutrientMap() {
+            const size = Math.round(FLUID_GRID_SIZE_CONTROL);
+            if (size <= 0 || !Number.isFinite(size)) {
+                console.error("Invalid size for nutrient map:", size);
+                nutrientField = new Float32Array(0); // Empty array if size is invalid
+                return;
+            }
+            nutrientField = new Float32Array(size * size).fill(1.0); // Default to 1.0 (neutral)
+            console.log(`Nutrient map initialized to ${size}x${size}.`);
+        }
+
         function initParticles() {
             particles = [];
             particleEmissionDebt = 0;
@@ -3529,6 +3641,9 @@
             if (fluidField) {
                 fluidField.draw(ctx, WORLD_WIDTH, WORLD_HEIGHT);
             }
+            if (SHOW_NUTRIENT_MAP && nutrientField && fluidField) {
+                drawNutrientMap(ctx);
+            }
 
             for (let particle of particles) {
                 particle.draw(ctx);
@@ -3589,6 +3704,42 @@
             ctx.restore();
         }
 
+        // --- Drawing ---
+        function drawNutrientMap(ctxToDrawOn) {
+            if (!SHOW_NUTRIENT_MAP || !nutrientField || !fluidField) return;
+
+            const N = Math.round(FLUID_GRID_SIZE_CONTROL);
+            if (N <= 0) return;
+
+            const cellWidth = WORLD_WIDTH / N;
+            const cellHeight = WORLD_HEIGHT / N;
+
+            for (let j = 0; j < N; j++) {
+                for (let i = 0; i < N; i++) {
+                    const nutrientValue = nutrientField[fluidField.IX(i, j)]; // Use fluidField.IX for correct indexing
+                    let r = 0, g = 0, b = 0, a = 0;
+
+                    if (nutrientValue < 1.0) { // Desert-like
+                        r = 150;
+                        g = 100 - (nutrientValue / 1.0) * 50;
+                        b = 50  - (nutrientValue / 1.0) * 25;
+                        a = 0.3 * (1.0 - nutrientValue / 1.0);
+                    } else if (nutrientValue > 1.0) { // Oasis-like
+                        r = 100 - ((nutrientValue - 1.0) / 1.0) * 50;
+                        g = 150;
+                        b = 100 - ((nutrientValue - 1.0) / 1.0) * 50;
+                        a = 0.3 * ((nutrientValue - 1.0) / 1.0);
+                    }
+                    a = Math.min(0.3, Math.max(0, a));
+
+                    if (a > 0.01) {
+                        ctxToDrawOn.fillStyle = `rgba(${Math.floor(r)},${Math.floor(g)},${Math.floor(b)},${a.toFixed(2)})`;
+                        ctxToDrawOn.fillRect(i * cellWidth, j * cellHeight, cellWidth, cellHeight);
+                    }
+                }
+            }
+        }
+
         // --- Game Loop ---
         let animationFrameId = null;
         function gameLoop(timestamp) {
@@ -3644,7 +3795,9 @@
                 velocityEmitters: velocityEmitters,
                 viewZoom: viewZoom,
                 viewOffsetX: viewOffsetX,
-                viewOffsetY: viewOffsetY
+                viewOffsetY: viewOffsetY,
+                nutrientFieldData: nutrientField ? Array.from(nutrientField) : null,
+                nutrientMapSize: nutrientField ? Math.round(FLUID_GRID_SIZE_CONTROL) : 0
             };
             const jsonString = JSON.stringify(config, null, 2);
             const blob = new Blob([jsonString], {type: "application/json"});
@@ -3760,9 +3913,22 @@
 
             initializeAllSliderDisplays();
 
-            initFluidSimulation();
+            initFluidSimulation(); // This needs to be called so fluidField.scaleX/Y are set
+            initNutrientMap(); // Initialize nutrient map after fluid sim is ready
             initParticles();
-            initializePopulation();
+            // Initialize nutrient map after fluid simulation setup to ensure FLUID_GRID_SIZE_CONTROL is correctly applied
+            if (config.nutrientFieldData && config.nutrientMapSize) {
+                if (config.nutrientMapSize === Math.round(FLUID_GRID_SIZE_CONTROL)) {
+                    nutrientField = new Float32Array(config.nutrientFieldData);
+                    console.log("Nutrient map loaded from config.");
+                } else {
+                    console.warn("Nutrient map size in config (" + config.nutrientMapSize + ") does not match current grid size (" + Math.round(FLUID_GRID_SIZE_CONTROL) + "). Re-initializing nutrient map.");
+                    initNutrientMap(); // Re-initialize if sizes don't match
+                }
+            } else {
+                initNutrientMap(); // Initialize if not in config
+            }
+            initializePopulation(); // Population depends on nutrient map for potential future cost calculations.
 
             console.log("Applied imported config. Reset population if needed for full effect on creatures.");
         }
@@ -3865,6 +4031,7 @@
             initializeSpatialGrid();
             initializeAllSliderDisplays(); // This will now use the (potentially JSON-overridden) global vars
             initFluidSimulation();
+            initNutrientMap(); // Initialize nutrient map after fluid sim is ready
             initParticles();
             initializePopulation();
             updateInstabilityIndicator();
@@ -3872,6 +4039,37 @@
         }
 
         main(); // Start the main sequence
+
+        function paintNutrientBrush(worldX, worldY) {
+            if (!nutrientField || !fluidField || FLUID_GRID_SIZE_CONTROL <= 0) return;
+
+            const N = Math.round(FLUID_GRID_SIZE_CONTROL);
+            const gridX = Math.floor(worldX / fluidField.scaleX);
+            const gridY = Math.floor(worldY / fluidField.scaleY);
+            const brushRadius = Math.floor(NUTRIENT_BRUSH_SIZE / 2);
+
+            for (let offsetY = -brushRadius; offsetY <= brushRadius; offsetY++) {
+                for (let offsetX = -brushRadius; offsetX <= brushRadius; offsetX++) {
+                    // Optional: Circular brush shape check
+                    // if (offsetX * offsetX + offsetY * offsetY > brushRadius * brushRadius) {
+                    //     continue;
+                    // }
+
+                    const currentPaintX = gridX + offsetX;
+                    const currentPaintY = gridY + offsetY;
+
+                    if (currentPaintX >= 0 && currentPaintX < N && currentPaintY >= 0 && currentPaintY < N) {
+                        const idx = fluidField.IX(currentPaintX, currentPaintY);
+                        const currentValue = nutrientField[idx];
+                        const targetValue = NUTRIENT_BRUSH_VALUE;
+                        
+                        let newValue = currentValue + (targetValue - currentValue) * NUTRIENT_BRUSH_STRENGTH;
+                        newValue = Math.max(MIN_NUTRIENT_VALUE, Math.min(newValue, MAX_NUTRIENT_VALUE)); // Clamp
+                        nutrientField[idx] = newValue;
+                    }
+                }
+            }
+        }
 
     </script>
 </body>

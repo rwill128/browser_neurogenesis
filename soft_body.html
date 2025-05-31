@@ -2449,31 +2449,34 @@
                 // Calculate and apply energy cost
                 let currentFrameEnergyCost = 0;
                 for (const point of this.massPoints) {
-                    currentFrameEnergyCost += BASE_NODE_EXISTENCE_COST;
+                    let costMultiplier = 1.0;
+                    if (nutrientField && fluidFieldRef) {
+                        const gx = Math.floor(point.pos.x / fluidFieldRef.scaleX);
+                        const gy = Math.floor(point.pos.y / fluidFieldRef.scaleY);
+                        const nutrientIdx = fluidFieldRef.IX(gx, gy);
+                        const nutrientValue = nutrientField[nutrientIdx] !== undefined ? nutrientField[nutrientIdx] : 1.0;
+                        costMultiplier = 1.0 / Math.max(MIN_NUTRIENT_VALUE, nutrientValue);
+                    }
+
+                    currentFrameEnergyCost += BASE_NODE_EXISTENCE_COST * costMultiplier;
                     const exertion = point.currentExertionLevel || 0; // Default to 0 if undefined
 
                     if (point.nodeType === NodeType.EMITTER_SWIMMER) {
-                        // EMITTER_NODE_ENERGY_COST is now cost at max exertion (1.0)
-                        // Cost scales with square of exertion to make high exertion significantly more expensive
-                        currentFrameEnergyCost += EMITTER_NODE_ENERGY_COST * exertion * exertion;
-                        // Note: this.emitterStrength still modulates the *effect* of the emitter, 
-                        // but exertion directly impacts its energy cost.
+                        currentFrameEnergyCost += EMITTER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
                     }
                      if (point.nodeType === NodeType.NEURON) {
                         if (point.neuronData && point.neuronData.isBrain) {
-                            currentFrameEnergyCost += NEURON_NODE_ENERGY_COST * 5; 
-                            currentFrameEnergyCost += (point.neuronData.hiddenLayerSize || 0) * NEURON_NODE_ENERGY_COST * 0.1; 
+                            currentFrameEnergyCost += NEURON_NODE_ENERGY_COST * 5 * costMultiplier; 
+                            currentFrameEnergyCost += (point.neuronData.hiddenLayerSize || 0) * NEURON_NODE_ENERGY_COST * 0.1 * costMultiplier; 
                         } else {
-                            currentFrameEnergyCost += NEURON_NODE_ENERGY_COST; 
+                            currentFrameEnergyCost += NEURON_NODE_ENERGY_COST * costMultiplier; 
                         }
                     }
                     if (point.isEater) {
-                        // EATER_NODE_ENERGY_COST is now cost at max exertion (1.0)
-                        currentFrameEnergyCost += EATER_NODE_ENERGY_COST * exertion * exertion;
+                        currentFrameEnergyCost += EATER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
                     }
                     if (point.isPredator) {
-                        // PREDATOR_NODE_ENERGY_COST is now cost at max exertion (1.0)
-                        currentFrameEnergyCost += PREDATOR_NODE_ENERGY_COST * exertion * exertion;
+                        currentFrameEnergyCost += PREDATOR_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
                     }
                 }
                 this.creatureEnergy -= currentFrameEnergyCost * dt;
@@ -2669,7 +2672,16 @@
                                                         if (distSq < eatingRadiusSq) {
                                                             particle.isEaten = true;
                                                             particle.life = 0; // Mark for removal from main particles array
-                                                            this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + ENERGY_PER_PARTICLE);
+                                                            
+                                                            let energyGain = ENERGY_PER_PARTICLE;
+                                                            if (nutrientField && fluidField) { // fluidFieldRef is fluidField in this context
+                                                                const particleGx = Math.floor(particle.pos.x / fluidField.scaleX);
+                                                                const particleGy = Math.floor(particle.pos.y / fluidField.scaleY);
+                                                                const nutrientIdxAtParticle = fluidField.IX(particleGx, particleGy);
+                                                                const nutrientValueAtParticle = nutrientField[nutrientIdxAtParticle] !== undefined ? nutrientField[nutrientIdxAtParticle] : 1.0;
+                                                                energyGain *= Math.max(MIN_NUTRIENT_VALUE, nutrientValueAtParticle);
+                                                            }
+                                                            this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyGain);
                                                         }
                                                     }
                                                 }

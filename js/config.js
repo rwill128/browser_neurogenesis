@@ -107,8 +107,11 @@ let NEURON_NODE_ENERGY_COST = 0.001;
 let SWIMMER_NODE_ENERGY_COST = 0.1;
 let PHOTOSYNTHETIC_NODE_ENERGY_COST = 0.1;
 let GRABBING_NODE_ENERGY_COST = 0.25;
+let EYE_NODE_ENERGY_COST = 0.05;
 let PHOTOSYNTHESIS_EFFICIENCY = 100.0;
 
+// Eye Detection Radius (New)
+const EYE_DETECTION_RADIUS = 300; // Max distance an eye can see a particle
 
 let FLUID_GRID_SIZE_CONTROL = 128;
 let FLUID_DIFFUSION = 0.00047;
@@ -179,6 +182,9 @@ const NEURAL_OUTPUTS_PER_NEURON_EFFECTOR = 0;
 const NEURAL_OUTPUTS_PER_EMITTER = 8;
 const NEURAL_OUTPUTS_PER_SWIMMER = 6;
 const NEURAL_OUTPUTS_PER_GRABBER_TOGGLE = 2;
+
+// Eye Node Specific NN Inputs (if an eye is present)
+const NEURAL_INPUTS_PER_EYE = 3; // seesParticle (0/1), nearestParticleMagnitude (normalized), nearestParticleDirection (angle)
 
 const DEFAULT_HIDDEN_LAYER_SIZE_MIN = 5;
 const DEFAULT_HIDDEN_LAYER_SIZE_MAX = 30;
@@ -252,7 +258,8 @@ function handleExportConfig() {
         viscosityFieldData: viscosityField ? Array.from(viscosityField) : null,
         viscosityMapSize: viscosityField ? Math.round(FLUID_GRID_SIZE_CONTROL) : 0,
         photosyntheticNodeCost: PHOTOSYNTHETIC_NODE_ENERGY_COST,
-        photosynthesisEfficiency: PHOTOSYNTHESIS_EFFICIENCY
+        photosynthesisEfficiency: PHOTOSYNTHESIS_EFFICIENCY,
+        eyeDetectionRadius: EYE_DETECTION_RADIUS
     };
     const jsonString = JSON.stringify(config, null, 2);
     const blob = new Blob([jsonString], {type: "application/json"});
@@ -318,6 +325,7 @@ function applyImportedConfig(config) {
     if (config.predatorNodeCost !== undefined) PREDATOR_NODE_ENERGY_COST = config.predatorNodeCost;
     if (config.swimmerNodeCost !== undefined) SWIMMER_NODE_ENERGY_COST = config.swimmerNodeCost;
     if (config.grabbingNodeCost !== undefined) GRABBING_NODE_ENERGY_COST = config.grabbingNodeCost;
+    if (config.eyeNodeCost !== undefined) EYE_NODE_ENERGY_COST = config.eyeNodeCost;
     if (config.baseMaxCreatureEnergy !== undefined) BASE_MAX_CREATURE_ENERGY = config.baseMaxCreatureEnergy;
     if (config.energyPerMassPointBonus !== undefined) ENERGY_PER_MASS_POINT_BONUS = config.energyPerMassPointBonus;
     if (config.basePointsForMaxEnergyCalc !== undefined) BASE_POINTS_FOR_MAX_ENERGY_CALC = config.basePointsForMaxEnergyCalc;
@@ -341,6 +349,8 @@ function applyImportedConfig(config) {
 
     if (config.photosyntheticNodeCost !== undefined) PHOTOSYNTHETIC_NODE_ENERGY_COST = config.photosyntheticNodeCost;
     if (config.photosynthesisEfficiency !== undefined) PHOTOSYNTHESIS_EFFICIENCY = config.photosynthesisEfficiency;
+    
+    if (config.eyeDetectionRadius !== undefined) EYE_DETECTION_RADIUS = config.eyeDetectionRadius;
     
     worldWidthInput.value = WORLD_WIDTH;
     worldHeightInput.value = WORLD_HEIGHT;
@@ -432,6 +442,9 @@ const MAX_SUBGRAPH_SIZE_FOR_TRANSLOCATION = 8;  // Max points in subgraph
 const SYMMETRIC_SUBGRAPH_DUPLICATION_CHANCE = 0.01; // Chance for this type of duplication
 const MIN_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP = 3;    // Min points in the *initial* subgraph (needs at least 1 edge + 1 other point)
 const MAX_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP = 7;    // Max points in the *initial* subgraph
+
+// Whole-Body Symmetrical Duplication along an Edge (New - Very Complex)
+const SYMMETRICAL_BODY_DUPLICATION_CHANCE = 0.002; // Very rare due to complexity and impact
 
 // Dynamic Max Energy per Creature (New)
 // ... existing code ... 

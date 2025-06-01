@@ -168,4 +168,32 @@ function getSensedChannelString(channelId) {
         case DyeChannel.AVERAGE: return "Average Intensity";
         default: return "Unknown";
     }
+}
+
+// Reflects point P across the line defined by L1 and L2
+function reflectPointAcrossLine(P, L1, L2) {
+    // Line L1L2 direction vector
+    const dX = L2.x - L1.x;
+    const dY = L2.y - L1.y;
+
+    if (dX === 0 && dY === 0) { // L1 and L2 are the same point, reflection is just P itself or undefined based on interpretation
+        return P.clone(); 
+    }
+
+    // t = [(P.x - L1.x) * dX + (P.y - L1.y) * dY] / (dX*dX + dY*dY)
+    // This t is the parameter for the projection of P onto the line L1L2, 
+    // where projected point M = L1 + t * (L2 - L1)
+    const t = ((P.x - L1.x) * dX + (P.y - L1.y) * dY) / (dX * dX + dY * dY);
+
+    // M: Projection of P onto the line L1L2
+    const Mx = L1.x + t * dX;
+    const My = L1.y + t * dY;
+
+    // Reflected point P_reflected = P + 2 * (M - P)
+    // P_reflected.x = P.x + 2 * (Mx - P.x) = 2*Mx - P.x
+    // P_reflected.y = P.y + 2 * (My - P.y) = 2*My - P.y
+    const reflectedX = 2 * Mx - P.x;
+    const reflectedY = 2 * My - P.y;
+
+    return new Vec2(reflectedX, reflectedY);
 } 

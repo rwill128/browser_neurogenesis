@@ -4,7 +4,8 @@ const NodeType = {
     PHOTOSYNTHETIC: 2,
     NEURON: 3,
     EMITTER: 4, // For dye
-    SWIMMER: 5  // For propulsion
+    SWIMMER: 5, // For propulsion
+    EYE: 6      // New: For particle detection
     // Old types like NEUTRAL, FLOATING, FIXED_ROOT, EMITTER_SWIMMER are removed
 };
 
@@ -30,6 +31,10 @@ class MassPoint {
         this.neuronData = null;
         this.currentExertionLevel = 0; // New: For dynamic energy costs
         this.isGrabbing = false; // New: For NN-controlled grabbing state
+        this.isDesignatedEye = false; // New: To identify the creature's primary eye point
+        this.seesParticle = false;       // New: Eye state
+        this.nearestParticleMagnitude = 0; // New: Eye state (distance)
+        this.nearestParticleDirection = 0; // New: Eye state (angle)
     }
     applyForce(f) { this.force = this.force.add(f); }
 
@@ -92,6 +97,8 @@ class MassPoint {
             mainColor = 'rgba(0,255,100,0.9)';
         } else if (this.nodeType === NodeType.EATER) {
             mainColor = 'rgba(255,165,0,0.9)';
+        } else if (this.nodeType === NodeType.EYE) { // New Eye color
+            mainColor = 'rgba(180, 180, 250, 0.9)'; // Light purple/blue for Eye
         }
         ctx.fillStyle = mainColor;
         ctx.fill();
@@ -260,7 +267,21 @@ class SoftBody {
         this.reproductionEnergyThreshold = Math.max(this.currentMaxEnergy * 0.05, Math.min(this.reproductionEnergyThreshold, this.currentMaxEnergy));
         this.reproductionEnergyThreshold = Math.round(this.reproductionEnergyThreshold);
         
-        // 6. Initialize Brain
+        this.primaryEyePoint = null; // New: For the creature's main eye
+        if (this.massPoints.length > 0) {
+            // Attempt to find an existing EYE node to designate as primary
+            for (const point of this.massPoints) {
+                if (point.nodeType === NodeType.EYE) {
+                    this.primaryEyePoint = point;
+                    point.isDesignatedEye = true;
+                    break; 
+                }
+            }
+            // If no EYE node found, and we want to ensure one, we could designate/change one here.
+            // For now, it's only set if an EYE node is already present (e.g. from mutation or initial gen).
+            // If still null, the NN input for eye will be default/neutral.
+        }
+
         this.initializeBrain(); 
     }
 
@@ -273,17 +294,16 @@ class SoftBody {
         this.massPoints = [];
         this.springs = [];
 
-        const baseRadius = 1 + Math.random() * 1; // Reduced for smaller creatures
-        const eaterChance = 0.25;
-        const predatorChance = 0.15;
-        const dyeEmitterChance = 0.2;
-        // const neuronChance = NEURON_CHANCE; // Use global NEURON_CHANCE directly
-        const nodeTypeChoices = [NodeType.NEUTRAL, NodeType.FLOATING, NodeType.FIXED_ROOT, NodeType.EMITTER_SWIMMER, NodeType.NEURON, NodeType.PHOTOSYNTHETIC];
-        const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
+        const baseRadius = 1 + Math.random() * 1; 
+        const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE];
+        const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE]; // Ensure this is defined here
 
         if (parentBody) {
             // Morphological evolution from parent
-            let lastPointPos = parentBody.massPoints.length > 0 ? parentBody.massPoints[parentBody.massPoints.length-1].pos.clone() : new Vec2(startX, startY);
+            // let lastPointPos = parentBody.massPoints.length > 0 ? parentBody.massPoints[parentBody.massPoints.length-1].pos.clone() : new Vec2(startX, startY); // Old problematic var
+            let referencePosForNewPoints = parentBody.massPoints.length > 0 
+                ? parentBody.massPoints[parentBody.massPoints.length - 1].pos.clone() 
+                : new Vec2(startX, startY);
 
             parentBody.massPoints.forEach(parentPoint => {
                 let mass = parentPoint.mass * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
@@ -291,8 +311,7 @@ class SoftBody {
 
                 let nodeType = parentPoint.nodeType;
                 if (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER)) {
-                    const availableNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER];
-                    nodeType = availableNodeTypes[Math.floor(Math.random() * availableNodeTypes.length)];
+                    nodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
                 }
 
                 let movementType = parentPoint.movementType;
@@ -341,12 +360,13 @@ class SoftBody {
 
                 if(offspringPoint.nodeType === NodeType.FIXED_ROOT) offspringPoint.movementType = MovementType.FIXED;
                 this.massPoints.push(offspringPoint);
-                lastPointPos = offspringPoint.pos.clone();
+                referencePosForNewPoints = offspringPoint.pos.clone(); // Update reference position
 
                 if (Math.random() < this.pointAddChance * GLOBAL_MUTATION_RATE_MODIFIER) {
+                    // console.log("Before newPoint creation, lastPointPos:", JSON.stringify(lastPointPos)); // DEBUG LINE - REMOVE
                     const newMass = 0.1 + Math.random() * 0.9;
-                    const availableNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER];
-                    let newNodeType = availableNodeTypes[Math.floor(Math.random() * availableNodeTypes.length)];
+                    const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE];
+                    let newNodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
                     const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
                     let newMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
 
@@ -355,14 +375,13 @@ class SoftBody {
                     }
 
                     const newPoint = new MassPoint(
-                        lastPointPos.x + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 2,
-                        lastPointPos.y + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 2,
+                        referencePosForNewPoints.x + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 2,
+                        referencePosForNewPoints.y + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 2,
                         newMass,
-                        baseRadius * (0.8 + Math.random() * 0.4) // Note: baseRadius is from the initial generation part, might need adjustment if parentBody exists
+                        baseRadius * (0.8 + Math.random() * 0.4) 
                     );
                     newPoint.nodeType = newNodeType;
                     newPoint.movementType = newMovementType;
-                    const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE]; // Ensure this is defined if not globally
                     newPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
                     
                     if (newNodeType === NodeType.NEURON) {
@@ -373,9 +392,8 @@ class SoftBody {
                     } else {
                         newPoint.neuronData = null; 
                     }
-                    // if(newPoint.nodeType === NodeType.FIXED_ROOT) newPoint.movementType = MovementType.FIXED; // Not needed due to new NodeType
                     this.massPoints.push(newPoint);
-                    lastPointPos = newPoint.pos.clone();
+                    referencePosForNewPoints = newPoint.pos.clone(); // Update reference for next potential new point
 
                     // New spring connection logic for the newly added point
                     const numSpringsToAddNewPoint = MIN_SPRINGS_PER_NEW_NODE + Math.floor(Math.random() * (MAX_SPRINGS_PER_NEW_NODE - MIN_SPRINGS_PER_NEW_NODE + 1));
@@ -491,8 +509,8 @@ class SoftBody {
                         const newPointRadius = ((p1.radius || defaultRadiusForNewSubdivisionPoint) + (p2.radius || defaultRadiusForNewSubdivisionPoint)) / 2 * (0.8 + Math.random() * 0.4);
                         const newPointMass = ((p1.mass || 0.5) + (p2.mass || 0.5)) / 2 * (0.8 + Math.random() * 0.4);
                         
-                        const availableNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER];
-                        let newNodeType = availableNodeTypes[Math.floor(Math.random() * availableNodeTypes.length)];
+                        const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE];
+                        let newNodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
                         const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
                         let newMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
                         if (newNodeType === NodeType.SWIMMER && newMovementType === MovementType.FLOATING) {
@@ -585,11 +603,11 @@ class SoftBody {
 
                         if (newP1 && newP2) {
                             let restL = newP1.pos.sub(newP2.pos).mag();
-                            let isRigid = Math.random() < CHANCE_FOR_RIGID_SPRING; // New springs get their own chance
-                            let_stiff = this.stiffness;
-                            let_damp = this.springDamping;
+                            let isRigid = Math.random() < CHANCE_FOR_RIGID_SPRING; 
+                            let _stiff = this.stiffness; // Corrected: Use underscore
+                            let _damp = this.springDamping; // Corrected: Use underscore
 
-                            if (originalInternalSpring) { // If we found the template spring
+                            if (originalInternalSpring) { 
                                 restL = originalInternalSpring.restLength * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE);
                                 isRigid = (originalInternalSpring.isRigid && Math.random() > MUTATION_CHANCE_BOOL) || (!originalInternalSpring.isRigid && Math.random() < CHANCE_FOR_RIGID_SPRING);
                                 if(isRigid){
@@ -840,6 +858,71 @@ class SoftBody {
                 }
             }
 
+            // Whole-Body Symmetrical Duplication (New - Highly Experimental)
+            if (Math.random() < SYMMETRICAL_BODY_DUPLICATION_CHANCE && this.springs.length > 0 && this.massPoints.length >= 2) {
+                const originalPoints = [...this.massPoints];
+                const originalSprings = [...this.springs];
+                const pointMap = new Map(); // Maps original point object to its new duplicated point object
+
+                // 1. Select a random existing spring as the hinge/axis
+                const hingeSpringIndex = Math.floor(Math.random() * originalSprings.length);
+                const hingeSpring = originalSprings[hingeSpringIndex];
+                const hingeP1 = hingeSpring.p1;
+                const hingeP2 = hingeSpring.p2;
+
+                const newDuplicatedPoints = [];
+
+                // 2. Duplicate all points EXCEPT hingeP1 and hingeP2, and reflect them
+                originalPoints.forEach(p_orig => {
+                    if (p_orig === hingeP1 || p_orig === hingeP2) {
+                        pointMap.set(p_orig, p_orig); // Hinge points map to themselves (they are shared)
+                        return;
+                    }
+                    const reflectedPos = reflectPointAcrossLine(p_orig.pos, hingeP1.pos, hingeP2.pos);
+                    const p_new = new MassPoint(reflectedPos.x, reflectedPos.y, p_orig.mass, p_orig.radius);
+                    
+                    p_new.nodeType = p_orig.nodeType; // Inherit and potentially mutate later if desired
+                    p_new.movementType = p_orig.movementType;
+                    p_new.dyeColor = [...p_orig.dyeColor];
+                    if (p_orig.neuronData) {
+                        p_new.neuronData = JSON.parse(JSON.stringify(p_orig.neuronData));
+                        if (p_new.neuronData) p_new.neuronData.isBrain = false; // Duplicated neurons are not the main brain
+                    }
+                    this.massPoints.push(p_new); // Add to the body's main point list
+                    newDuplicatedPoints.push(p_new);
+                    pointMap.set(p_orig, p_new);
+                });
+
+                // 3. Duplicate springs
+                const newSpringsToAdd = [];
+                originalSprings.forEach(s_orig => {
+                    if (s_orig === hingeSpring) return; // Don't duplicate the hinge spring itself
+
+                    const s_orig_p1 = s_orig.p1;
+                    const s_orig_p2 = s_orig.p2;
+
+                    const s_new_p1 = pointMap.get(s_orig_p1);
+                    const s_new_p2 = pointMap.get(s_orig_p2);
+
+                    if (s_new_p1 && s_new_p2 && s_new_p1 !== s_new_p2) { // Ensure both points were mapped and are distinct
+                        // Check if this new spring would be identical to the hinge spring if both ends are hinge points
+                        // (This check is implicitly handled by s_orig !== hingeSpring already if we are careful)
+                        
+                        // Create new spring with properties from original, possibly mutated
+                        let newRestLength = s_orig.restLength * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE * 0.5); // smaller mutation here
+                        newRestLength = Math.max(1, newRestLength);
+                        let isRigid = (s_orig.isRigid && Math.random() > MUTATION_CHANCE_BOOL*2) || (!s_orig.isRigid && Math.random() < CHANCE_FOR_RIGID_SPRING*0.5); // Less chance to flip rigidity for these
+                        
+                        let new_stiffness = isRigid ? RIGID_SPRING_STIFFNESS : this.stiffness;
+                        let new_damping = isRigid ? RIGID_SPRING_DAMPING : this.springDamping;
+
+                        newSpringsToAdd.push(new Spring(s_new_p1, s_new_p2, new_stiffness, new_damping, newRestLength, isRigid));
+                    }
+                });
+                this.springs.push(...newSpringsToAdd);
+                console.log("Whole-body symmetrical duplication occurred along an edge.");
+            }
+
         } else { // Initial generation - use old shape types
             const basePointDist = 5 + Math.random() * 3; 
             if (this.shapeType === 0) { // Grid
@@ -880,11 +963,11 @@ class SoftBody {
                 if (numOuterPoints > 1) this.springs.push(new Spring(this.massPoints[1], this.massPoints[this.massPoints.length-1], this.stiffness*0.8, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
             }
 
-            const availableNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER];
+            const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE];
             const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
 
             this.massPoints.forEach((p, idx) => {
-                let chosenNodeType = availableNodeTypes[Math.floor(Math.random() * availableNodeTypes.length)];
+                let chosenNodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
                 let chosenMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
 
                 // Ensure Swimmer nodes are not Floating
@@ -950,17 +1033,38 @@ class SoftBody {
             const nd = brainNode.neuronData;
             const inputVector = [];
 
-            // 1. Gather Inputs 
-            if (fluidFieldRef) {
-                const brainGx = Math.floor(brainNode.pos.x / fluidFieldRef.scaleX);
-                const brainGy = Math.floor(brainNode.pos.y / fluidFieldRef.scaleY);
-                const brainIdx = fluidFieldRef.IX(brainGx, brainGy);
-                inputVector.push((fluidFieldRef.densityR[brainIdx] || 0) / 255);
-                inputVector.push((fluidFieldRef.densityG[brainIdx] || 0) / 255);
-                inputVector.push((fluidFieldRef.densityB[brainIdx] || 0) / 255);
-            } else {
-                inputVector.push(0, 0, 0);
+            // --- Eye Logic (before NN input gathering) ---
+            if (this.primaryEyePoint) {
+                this.primaryEyePoint.seesParticle = false; // Reset first
+                this.primaryEyePoint.nearestParticleMagnitude = 0;
+                this.primaryEyePoint.nearestParticleDirection = 0;
+                let closestDistSq = EYE_DETECTION_RADIUS * EYE_DETECTION_RADIUS;
+                let nearestParticleFound = null;
+
+                // Consider using the spatial grid for optimizing particle search if performance becomes an issue
+                for (const particle of particles) { // `particles` is global from simulation.js
+                    if (particle.life <= 0) continue;
+                    const distSq = this.primaryEyePoint.pos.sub(particle.pos).magSq();
+                    if (distSq < closestDistSq) {
+                        closestDistSq = distSq;
+                        nearestParticleFound = particle;
+                    }
+                }
+
+                if (nearestParticleFound) {
+                    this.primaryEyePoint.seesParticle = true;
+                    const vecToParticle = nearestParticleFound.pos.sub(this.primaryEyePoint.pos);
+                    this.primaryEyePoint.nearestParticleMagnitude = vecToParticle.mag() / EYE_DETECTION_RADIUS; // Normalize by detection radius
+                    this.primaryEyePoint.nearestParticleDirection = Math.atan2(vecToParticle.y, vecToParticle.x);
+                }
             }
+            // --- End of Eye Logic ---
+
+            // 1. Gather Inputs for NN
+            // ... (existing inputs: dye, energy, CoM pos/vel, nutrient)
+            inputVector.push((fluidFieldRef.densityR[brainIdx] || 0) / 255);
+            inputVector.push((fluidFieldRef.densityG[brainIdx] || 0) / 255);
+            inputVector.push((fluidFieldRef.densityB[brainIdx] || 0) / 255);
             inputVector.push(this.creatureEnergy / this.currentMaxEnergy); // Use currentMaxEnergy
             const comPos = this.getAveragePosition();
             const relComPosX = (comPos.x - brainNode.pos.x) / WORLD_WIDTH;
@@ -984,6 +1088,17 @@ class SoftBody {
             } else {
                 inputVector.push(0.5);
             }
+
+            // Add Eye Inputs (if eye exists)
+            if (this.primaryEyePoint) {
+                inputVector.push(this.primaryEyePoint.seesParticle ? 1 : 0);
+                inputVector.push(this.primaryEyePoint.nearestParticleMagnitude); // Already normalized or 0
+                inputVector.push((this.primaryEyePoint.nearestParticleDirection / (Math.PI * 2)) + 0.5); // Normalize angle to ~0-1
+            } else if (NEURAL_INPUT_SIZE_PER_EYE > 0) { // Ensure consistent input vector size if no eye
+                for(let i=0; i < NEURAL_INPUTS_PER_EYE; i++) inputVector.push(0); // Default/neutral values
+            }
+            
+            // Ensure inputVector is the correct size (final check after all inputs added)
             while(inputVector.length < nd.inputVectorSize) { inputVector.push(0); }
             if(inputVector.length > nd.inputVectorSize) { inputVector.splice(nd.inputVectorSize); }
 
@@ -1222,6 +1337,10 @@ class SoftBody {
             if (point.isGrabbing) { // Check for each point, removed isDesignatedGrabber
                 currentFrameEnergyCost += GRABBING_NODE_ENERGY_COST * costMultiplier; 
             }
+            // Add energy cost for Eye node operation (applied to the designated eye point)
+            if (point.isDesignatedEye) { // Only the designated eye incurs cost
+                 currentFrameEnergyCost += EYE_NODE_ENERGY_COST * costMultiplier;
+            }
         }
         
         // Apply net energy change and then cap
@@ -1370,11 +1489,19 @@ class SoftBody {
 
         for (let point of this.massPoints) {
             const displacementSq = (point.pos.x - point.prevPos.x)**2 + (point.pos.y - point.prevPos.y)**2;
-            if (displacementSq > MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ ||
-                isNaN(point.pos.x) || isNaN(point.pos.y) ||
-                !isFinite(point.pos.x) || !isFinite(point.pos.y)) {
+            let instabilityReason = null;
+
+            if (displacementSq > MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ) {
+                instabilityReason = "excessive displacement";
+            } else if (isNaN(point.pos.x) || isNaN(point.pos.y)) {
+                instabilityReason = "NaN position";
+            } else if (!isFinite(point.pos.x) || !isFinite(point.pos.y)) {
+                instabilityReason = "Infinite position";
+            }
+
+            if (instabilityReason) {
                 this.isUnstable = true;
-                console.warn(`Soft body ID ${this.id} point instability (displacement/NaN/Infinite)!`, point);
+                console.warn(`Soft body ID ${this.id}, Point Index ${this.massPoints.indexOf(point)}: Instability due to ${instabilityReason}. Point:`, JSON.parse(JSON.stringify(point.pos)));
                 break;
             }
         }
@@ -1675,6 +1802,7 @@ class SoftBody {
             let numEaterPoints = 0;
             let numPredatorPoints = 0;
             let numPotentialGrabberPoints = this.massPoints.length; // Now, all points can potentially grab
+            let hasPrimaryEye = this.primaryEyePoint ? 1 : 0; // Check if a primary eye is designated
 
             this.massPoints.forEach(p => {
                 if (p.nodeType === NodeType.EMITTER) numEmitterPoints++;
@@ -1688,6 +1816,9 @@ class SoftBody {
                                   (numEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
                                   (numPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
                                   (numPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE);
+            
+            // Adjust input vector size for eye inputs
+            nd.inputVectorSize = NEURAL_INPUT_SIZE + (hasPrimaryEye * NEURAL_INPUTS_PER_EYE);
 
             // Initialize weights and biases
             if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < DEFAULT_HIDDEN_LAYER_SIZE_MIN) {

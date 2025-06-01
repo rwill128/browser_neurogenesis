@@ -38,6 +38,7 @@ const neuronNodeCostSlider = document.getElementById('neuronNodeCost');
 const photosyntheticNodeCostSlider = document.getElementById('photosyntheticNodeCost'); 
 const photosynthesisEfficiencySlider = document.getElementById('photosynthesisEfficiency');
 const swimmerNodeCostSlider = document.getElementById('swimmerNodeCost');
+const eyeDetectionRadiusSlider = document.getElementById('eyeDetectionRadiusSlider');
 
 const instabilityLight = document.getElementById('instabilityLight');
 const populationCountDisplay = document.getElementById('populationCount');
@@ -57,6 +58,7 @@ const neuronNodeCostValueSpan = document.getElementById('neuronNodeCostValue');
 const photosyntheticNodeCostValueSpan = document.getElementById('photosyntheticNodeCostValue');
 const photosynthesisEfficiencyValueSpan = document.getElementById('photosynthesisEfficiencyValue');
 const swimmerNodeCostValueSpan = document.getElementById('swimmerNodeCostValue');
+const eyeDetectionRadiusValueSpan = document.getElementById('eyeDetectionRadiusValueSpan');
 
 const fluidGridSizeSlider = document.getElementById('fluidGridSize');
 const fluidGridSizeValueSpan = document.getElementById('fluidGridSizeValue');
@@ -199,6 +201,7 @@ function initializeAllSliderDisplays() {
         [swimmerNodeCostSlider, "SWIMMER_NODE_ENERGY_COST", true, swimmerNodeCostValueSpan],
         [photosyntheticNodeCostSlider, "PHOTOSYNTHETIC_NODE_ENERGY_COST", true, photosyntheticNodeCostValueSpan],
         [photosynthesisEfficiencySlider, "PHOTOSYNTHESIS_EFFICIENCY", true, photosynthesisEfficiencyValueSpan],
+        [eyeDetectionRadiusSlider, "EYE_DETECTION_RADIUS", false, eyeDetectionRadiusValueSpan],
         [fluidGridSizeSlider, "FLUID_GRID_SIZE_CONTROL", false, fluidGridSizeValueSpan],
         [fluidDiffusionSlider, "FLUID_DIFFUSION", true, fluidDiffusionValueSpan],
         [fluidViscositySlider, "FLUID_VISCOSITY", true, fluidViscosityValueSpan],
@@ -276,7 +279,7 @@ function updatePopulationCount() {
 }
 
 function updateInfoPanel() {
-    if (selectedInspectBody) { 
+    if (selectedInspectBody && selectedInspectPoint) {
         document.getElementById('infoBodyId').textContent = selectedInspectBody.id;
         document.getElementById('infoBodyStiffness').textContent = selectedInspectBody.stiffness.toFixed(2);
         document.getElementById('infoBodyDamping').textContent = selectedInspectBody.springDamping.toFixed(2);
@@ -291,6 +294,7 @@ function updateInfoPanel() {
         document.getElementById('infoBodySpringConnectionRadius').textContent = selectedInspectBody.springConnectionRadius.toFixed(1);
         document.getElementById('infoBodyEnergy').textContent = selectedInspectBody.creatureEnergy.toFixed(2);
         document.getElementById('infoBodyReproEnergyThreshold').textContent = selectedInspectBody.reproductionEnergyThreshold;
+        document.getElementById('infoBodyCurrentMaxEnergy').textContent = selectedInspectBody.currentMaxEnergy.toFixed(2);
         document.getElementById('infoBodyTicksBirth').textContent = selectedInspectBody.ticksSinceBirth;
         document.getElementById('infoBodyCanReproduce').textContent = selectedInspectBody.canReproduce;
 
@@ -307,6 +311,18 @@ function updateInfoPanel() {
             content += `<p><strong>World Pos:</strong> X: ${point.pos.x.toFixed(2)}, Y: ${point.pos.y.toFixed(2)}</p>`;
             if (point.nodeType === NodeType.EMITTER) {
                 content += `<p><strong>Dye Color:</strong> R:${point.dyeColor[0].toFixed(0)} G:${point.dyeColor[1].toFixed(0)} B:${point.dyeColor[2].toFixed(0)}</p>`;
+            }
+            if (point.isGrabbing) {
+                content += `<p><strong>State:</strong> Grabbing</p>`;
+            }
+
+            if (point.isDesignatedEye) {
+                content += `<h6>Eye Sensor Data:</h6>`;
+                content += `<p><strong>Sees Particle:</strong> ${point.seesParticle}</p>`;
+                if (point.seesParticle) {
+                    content += `<p><strong>Particle Distance:</strong> ${(point.nearestParticleMagnitude * EYE_DETECTION_RADIUS).toFixed(1)} (norm: ${point.nearestParticleMagnitude.toFixed(3)})</p>`;
+                    content += `<p><strong>Particle Angle:</strong> ${(point.nearestParticleDirection * 180 / Math.PI).toFixed(1)}&deg;</p>`;
+                }
             }
 
             if (point.nodeType === NodeType.NEURON && point.neuronData) {
@@ -355,6 +371,7 @@ function updateInfoPanel() {
         document.getElementById('infoBodySpringConnectionRadius').textContent = '-';
         document.getElementById('infoBodyEnergy').textContent = '-';
         document.getElementById('infoBodyReproEnergyThreshold').textContent = '-';
+        document.getElementById('infoBodyCurrentMaxEnergy').textContent = '-';
         document.getElementById('infoBodyTicksBirth').textContent = '-';
         document.getElementById('infoBodyCanReproduce').textContent = '-';
         infoPanel.classList.remove('open');
@@ -1078,3 +1095,5 @@ canvas.addEventListener('wheel', (e) => {
     viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
 }); 
+
+eyeDetectionRadiusSlider.oninput = function() { EYE_DETECTION_RADIUS = parseInt(this.value); updateSliderDisplay(this, eyeDetectionRadiusValueSpan); } 

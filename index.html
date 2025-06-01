@@ -26,13 +26,15 @@
                     <p><strong>Point Add Chance:</strong> <span id="infoBodyPointAddChance">-</span></p>
                     <p><strong>Spring Connection Radius:</strong> <span id="infoBodySpringConnectionRadius">-</span></p>
                     <p><strong>Energy:</strong> <span id="infoBodyEnergy">-</span></p>
+                    <p><strong>Current Max Energy:</strong> <span id="infoBodyCurrentMaxEnergy">-</span></p>
                     <p><strong>Reproduction Energy Threshold:</strong> <span id="infoBodyReproEnergyThreshold">-</span></p>
                     <p><strong>Ticks Since Birth:</strong> <span id="infoBodyTicksBirth">-</span></p>
                     <p><strong>Can Reproduce:</strong> <span id="infoBodyCanReproduce">-</span></p>
                 </div>
 
                 <div id="allPointsInfoContainer" class="info-section">
-                    </div>
+                    <!-- Point data will be injected here by js/ui.js -->
+                </div>
             </div>
             <div id="canvasContainer">
                 <canvas id="simulationCanvas"></canvas>
@@ -73,6 +75,10 @@
                 <label for="creaturePopulationCeilingSlider" class="slider-label">Creature Pop. Ceiling:</label>
                 <span id="creaturePopulationCeilingValueSpan" class="slider-value">2000</span>
                 <input type="range" id="creaturePopulationCeilingSlider" min="10" max="5000" value="2000" step="10">
+
+                <label for="eyeDetectionRadiusSlider" class="slider-label">Eye Detection Radius:</label>
+                <span id="eyeDetectionRadiusValueSpan" class="slider-value">300</span>
+                <input type="range" id="eyeDetectionRadiusSlider" min="50" max="1000" value="300" step="10">
 
                 <label for="globalMutationRate" class="slider-label">Global Mutation Rate:</label>
                 <span id="globalMutationRateValue" class="slider-value">0.25</span>

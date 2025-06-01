@@ -147,6 +147,7 @@ function getNodeTypeString(nodeType) {
         case NodeType.NEURON: return "Neuron";
         case NodeType.EMITTER: return "Emitter (Dye)";
         case NodeType.SWIMMER: return "Swimmer (Propulsion)";
+        case NodeType.EYE: return "Eye (Particle Detector)";
         default: return "Unknown_NodeType";
     }
 }

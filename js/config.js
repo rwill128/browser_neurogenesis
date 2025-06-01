@@ -61,9 +61,8 @@ const ENERGY_SAPPED_PER_PREDATION_BASE = 3;
 const ENERGY_SAPPED_PER_PREDATION_MAX_BONUS = 7;
 
 // Dynamic Max Energy per Creature (New)
-const BASE_MAX_CREATURE_ENERGY = 100;      // Renamed from MAX_CREATURE_ENERGY, now a base value
-const ENERGY_PER_MASS_POINT_BONUS = 25;  // Extra energy capacity per point beyond base (Changed from 5)
-const BASE_POINTS_FOR_MAX_ENERGY_CALC = 25; // Creatures with this many points (or fewer) use BASE_MAX_CREATURE_ENERGY (Changed from 5)
+const BASE_MAX_CREATURE_ENERGY = 100;      // Now acts as an absolute minimum max energy for any creature
+const ENERGY_PER_MASS_POINT_BONUS = 25;  // Energy capacity per point
 const OFFSPRING_INITIAL_ENERGY_SHARE = 0.25;
 const REPRODUCTION_ADDITIONAL_COST_FACTOR = 0.1;
 const OFFSPRING_PLACEMENT_ATTEMPTS = 10;
@@ -232,7 +231,6 @@ function handleExportConfig() {
         eyeNodeCost: EYE_NODE_ENERGY_COST,
         baseMaxCreatureEnergy: BASE_MAX_CREATURE_ENERGY,
         energyPerMassPointBonus: ENERGY_PER_MASS_POINT_BONUS,
-        basePointsForMaxEnergyCalc: BASE_POINTS_FOR_MAX_ENERGY_CALC,
         reproductionCooldown: REPRODUCTION_COOLDOWN_TICKS,
         bodyRepulsionStrength: BODY_REPULSION_STRENGTH,
         bodyRepulsionRadiusFactor: BODY_REPULSION_RADIUS_FACTOR,
@@ -329,7 +327,6 @@ function applyImportedConfig(config) {
     if (config.eyeNodeCost !== undefined) EYE_NODE_ENERGY_COST = config.eyeNodeCost;
     if (config.baseMaxCreatureEnergy !== undefined) BASE_MAX_CREATURE_ENERGY = config.baseMaxCreatureEnergy;
     if (config.energyPerMassPointBonus !== undefined) ENERGY_PER_MASS_POINT_BONUS = config.energyPerMassPointBonus;
-    if (config.basePointsForMaxEnergyCalc !== undefined) BASE_POINTS_FOR_MAX_ENERGY_CALC = config.basePointsForMaxEnergyCalc;
     if (config.emitterStrength !== undefined) EMITTER_STRENGTH = config.emitterStrength;
     if (config.velocityEmitters !== undefined) velocityEmitters = config.velocityEmitters;
     if (config.fluidGridSize !== undefined) FLUID_GRID_SIZE_CONTROL = config.fluidGridSize;

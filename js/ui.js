@@ -321,6 +321,8 @@ function updateInfoPanel() {
             }
             if (point.isGrabbing) {
                 content += `<p><strong>State:</strong> Grabbing</p>`;
+            } else {
+                content += `<p><strong>State:</strong> Normal</p>`;
             }
 
             if (point.isDesignatedEye) {

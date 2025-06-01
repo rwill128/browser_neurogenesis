@@ -396,15 +396,6 @@ class SoftBody {
     }
 
     calculateCurrentMaxEnergy() {
-        // let pointBonus = Math.max(0, this.massPoints.length - BASE_POINTS_FOR_MAX_ENERGY_CALC) * ENERGY_PER_MASS_POINT_BONUS; // Old formula
-        // this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY + pointBonus; // Old formula
-        
-        // let calculatedMaxEnergy = this.massPoints.length * ENERGY_PER_MASS_POINT_BONUS;
-        // this.currentMaxEnergy = Math.max(BASE_MAX_CREATURE_ENERGY, calculatedMaxEnergy); // Ensure it's at least BASE_MAX_CREATURE_ENERGY
-        // if (this.massPoints.length === 0) { // Handle case of no points, though should not happen for live creatures
-        //     this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY; 
-        // }
-
         if (this.massPoints.length === 0) {
             this.currentMaxEnergy = 0; 
         } else {
@@ -1183,334 +1174,371 @@ class SoftBody {
         });
     }
 
-
+    // --- Main Update Method ---
     updateSelf(dt, fluidFieldRef) {
         if (this.isUnstable) return;
 
-        // --- New Neural Network Processing (Step 4) ---
-        let brainNode = null;
-        for (const point of this.massPoints) {
-            if (point.neuronData && point.neuronData.isBrain) {
-                brainNode = point;
-                break;
-            }
+        this._updateSensoryInputsAndDefaultActivations(fluidFieldRef, nutrientField, lightField, particles); // nutrientField and lightField are global
+        
+        let brainNode = this.massPoints.find(p => p.neuronData && p.neuronData.isBrain);
+
+        if (brainNode) {
+            this._processBrain(brainNode, dt, fluidFieldRef, nutrientField, lightField, particles);
+        } else {
+            this._applyFallbackBehaviors(dt, fluidFieldRef);
         }
 
-        if (brainNode && brainNode.neuronData && 
-            brainNode.neuronData.weightsIH && brainNode.neuronData.biasesH && 
-            brainNode.neuronData.weightsHO && brainNode.neuronData.biasesO &&
-            typeof brainNode.neuronData.inputVectorSize === 'number' &&
-            typeof brainNode.neuronData.hiddenLayerSize === 'number' &&
-            typeof brainNode.neuronData.outputVectorSize === 'number') {
+        this._updateEnergyBudget(dt, fluidFieldRef, nutrientField, lightField); // nutrientField and lightField are global
+        if (this.isUnstable) return; // Death from energy budget check
 
-            const nd = brainNode.neuronData;
-            const inputVector = [];
+        this._performPhysicalUpdates(dt, fluidFieldRef);
+        if (this.isUnstable) return; // Instability from physical updates
 
-            // --- Apply Default Activation Patterns to points before NN processing ---
-            this.massPoints.forEach(point => {
-                let baseActivation = 0;
-                const timeFactor = (this.ticksSinceBirth + this.defaultActivationPhaseOffset) / Math.max(1, this.defaultActivationPeriod);
+        this._finalizeUpdateAndCheckStability(dt); // dt might be needed for some interaction logic if it moves here
 
-                switch (this.defaultActivationPattern) {
-                    case ActivationPatternType.FLAT:
-                        baseActivation = this.defaultActivationLevel;
-                        break;
-                    case ActivationPatternType.SINE:
-                        baseActivation = this.defaultActivationLevel * (Math.sin(2 * Math.PI * timeFactor) * 0.5 + 0.5); // Ranges 0 to level
-                        break;
-                    case ActivationPatternType.PULSE:
-                        // Simple pulse: on for 10% of period, uses defaultActivationLevel as max
-                        baseActivation = (timeFactor % 1.0 < 0.1) ? this.defaultActivationLevel : 0;
-                        break;
-                }
-                point.currentExertionLevel = Math.max(0, Math.min(1, baseActivation)); // Clamp to 0-1
-                
-                // For Swimmers, this default activation could also modulate a base movement if NN isn't controlling force.
-                // For Emitters, it could modulate default dye emission strength.
-            });
+    }
 
-            // --- Eye Logic (Run for ALL Eye nodes to update their individual states) ---
-            this.massPoints.forEach(point => {
-                if (point.nodeType === NodeType.EYE) {
-                    point.seesParticle = false; // Reset first
-                    point.nearestParticleMagnitude = 0;
-                    point.nearestParticleDirection = 0;
-                    let closestDistSq = EYE_DETECTION_RADIUS * EYE_DETECTION_RADIUS;
-                    let nearestParticleFound = null;
+    // --- Refactored Helper Methods (Shells) ---
+    _updateSensoryInputsAndDefaultActivations(fluidFieldRef, nutrientField, lightField, particles) {
+        this._applyDefaultActivationPatterns();
+        this._updateEyeNodes(particles);
+    }
 
-                    for (const particle of particles) { 
-                        if (particle.life <= 0) continue;
-                        const distSq = point.pos.sub(particle.pos).magSq();
-                        if (distSq < closestDistSq) {
-                            closestDistSq = distSq;
-                            nearestParticleFound = particle;
-                        }
-                    }
+    _applyDefaultActivationPatterns() {
+        this.massPoints.forEach(point => {
+            let baseActivation = 0;
+            const timeFactor = (this.ticksSinceBirth + this.defaultActivationPhaseOffset) / Math.max(1, this.defaultActivationPeriod);
 
-                    if (nearestParticleFound) {
-                        point.seesParticle = true;
-                        const vecToParticle = nearestParticleFound.pos.sub(point.pos);
-                        point.nearestParticleMagnitude = vecToParticle.mag() / EYE_DETECTION_RADIUS; 
-                        point.nearestParticleDirection = Math.atan2(vecToParticle.y, vecToParticle.x);
+            switch (this.defaultActivationPattern) {
+                case ActivationPatternType.FLAT:
+                    baseActivation = this.defaultActivationLevel;
+                    break;
+                case ActivationPatternType.SINE:
+                    baseActivation = this.defaultActivationLevel * (Math.sin(2 * Math.PI * timeFactor) * 0.5 + 0.5); // Ranges 0 to level
+                    break;
+                case ActivationPatternType.PULSE:
+                    // Simple pulse: on for 10% of period, uses defaultActivationLevel as max
+                    baseActivation = (timeFactor % 1.0 < 0.1) ? this.defaultActivationLevel : 0;
+                    break;
+            }
+            point.currentExertionLevel = Math.max(0, Math.min(1, baseActivation)); // Clamp to 0-1
+        });
+    }
+
+    _updateEyeNodes(particles) {
+        this.massPoints.forEach(point => {
+            if (point.nodeType === NodeType.EYE) {
+                point.seesParticle = false; // Reset first
+                point.nearestParticleMagnitude = 0;
+                point.nearestParticleDirection = 0;
+                let closestDistSq = EYE_DETECTION_RADIUS * EYE_DETECTION_RADIUS;
+                let nearestParticleFound = null;
+
+                for (const particle of particles) { 
+                    if (particle.life <= 0) continue;
+                    const distSq = point.pos.sub(particle.pos).magSq();
+                    if (distSq < closestDistSq) {
+                        closestDistSq = distSq;
+                        nearestParticleFound = particle;
                     }
                 }
-            });
-            // --- End of Eye Logic ---
 
-            // 1. Gather Inputs for NN
-            // Start with base inputs (dye, energy, CoM pos/vel, nutrient)
-            if (fluidFieldRef) {
-                const brainGx = Math.floor(brainNode.pos.x / fluidFieldRef.scaleX);
-                const brainGy = Math.floor(brainNode.pos.y / fluidFieldRef.scaleY);
-                const brainIdx = fluidFieldRef.IX(brainGx, brainGy);
-                inputVector.push((fluidFieldRef.densityR[brainIdx] || 0) / 255);
-                inputVector.push((fluidFieldRef.densityG[brainIdx] || 0) / 255);
-                inputVector.push((fluidFieldRef.densityB[brainIdx] || 0) / 255);
-            } else {
-                inputVector.push(0, 0, 0);
-            }
-            inputVector.push(this.creatureEnergy / this.currentMaxEnergy); 
-            const comPos = this.getAveragePosition();
-            const relComPosX = (comPos.x - brainNode.pos.x) / WORLD_WIDTH;
-            const relComPosY = (comPos.y - brainNode.pos.y) / WORLD_HEIGHT;
-            inputVector.push(Math.tanh(relComPosX));
-            inputVector.push(Math.tanh(relComPosY));
-            const comVel = this.getAverageVelocity();
-            const brainVelX = brainNode.pos.x - brainNode.prevPos.x;
-            const brainVelY = brainNode.pos.y - brainNode.prevPos.y;
-            const relComVelX = comVel.x - brainVelX;
-            const relComVelY = comVel.y - brainVelY;
-            inputVector.push(Math.tanh(relComVelX / MAX_PIXELS_PER_FRAME_DISPLACEMENT));
-            inputVector.push(Math.tanh(relComVelY / MAX_PIXELS_PER_FRAME_DISPLACEMENT));
-            if (nutrientField && fluidFieldRef) {
-                const brainGx = Math.floor(brainNode.pos.x / fluidFieldRef.scaleX);
-                const brainGy = Math.floor(brainNode.pos.y / fluidFieldRef.scaleY);
-                const nutrientIdx = fluidFieldRef.IX(brainGx, brainGy);
-                const currentNutrient = nutrientField[nutrientIdx] !== undefined ? nutrientField[nutrientIdx] : 1.0;
-                const normalizedNutrient = (currentNutrient - MIN_NUTRIENT_VALUE) / (MAX_NUTRIENT_VALUE - MIN_NUTRIENT_VALUE);
-                inputVector.push(Math.max(0, Math.min(1, normalizedNutrient)));
-            } else {
-                inputVector.push(0.5);
-            }
-
-            // Add Eye Inputs (iterate through all points, add if it's an Eye)
-            let eyeNodesFoundForInput = 0;
-            this.massPoints.forEach(point => {
-                if (point.nodeType === NodeType.EYE) {
-                    inputVector.push(point.seesParticle ? 1 : 0);
-                    inputVector.push(point.nearestParticleMagnitude); // Already normalized 0-1 or 0
-                    inputVector.push((point.nearestParticleDirection / (Math.PI * 2)) + 0.5); // Normalize angle to ~0-1 (0 if no particle)
-                    eyeNodesFoundForInput++;
+                if (nearestParticleFound) {
+                    point.seesParticle = true;
+                    const vecToParticle = nearestParticleFound.pos.sub(point.pos);
+                    point.nearestParticleMagnitude = vecToParticle.mag() / EYE_DETECTION_RADIUS; 
+                    point.nearestParticleDirection = Math.atan2(vecToParticle.y, vecToParticle.x);
                 }
-            });
-            
-            // Pad if fewer eye nodes were found than the brain might expect (e.g. if an eye was just lost)
-            // The total nd.inputVectorSize calculated in initializeBrain already accounts for the *current* number of eyes.
-            // This padding is more of a safeguard if the structure changed mid-simulation without immediate brain re-init.
-            // However, the main padding loop at the end handles overall size consistency.
-            // let expectedEyeInputs = (nd.inputVectorSize - NEURAL_INPUT_SIZE) / NEURAL_INPUTS_PER_EYE;
-            // for (let i = eyeNodesFoundForInput; i < expectedEyeInputs; i++) { 
-            //     for(let j=0; j < NEURAL_INPUTS_PER_EYE; j++) inputVector.push(0); 
-            // }
-            
-            // Ensure inputVector is the correct size (final check after all inputs added)
-            while(inputVector.length < nd.inputVectorSize) { inputVector.push(0); }
-            if(inputVector.length > nd.inputVectorSize) { inputVector.splice(nd.inputVectorSize); }
-
-            // 2. Forward Propagation
-            const hiddenLayerInputs = multiplyMatrixVector(nd.weightsIH, inputVector);
-            const hiddenLayerBiasedInputs = addVectors(hiddenLayerInputs, nd.biasesH);
-            const hiddenLayerActivations = hiddenLayerBiasedInputs.map(val => Math.tanh(val));
-            const outputLayerInputs = multiplyMatrixVector(nd.weightsHO, hiddenLayerActivations);
-            const rawOutputs = addVectors(outputLayerInputs, nd.biasesO);
-            nd.rawOutputs = rawOutputs;
-
-            nd.currentFrameActionDetails = [];
-            let currentRawOutputIndex = 0;
-
-            function sampleAndLogAction(rawMean, rawStdDev) {
-                const mean = rawMean;
-                const stdDev = Math.exp(rawStdDev) + 1e-6;
-                const sampledActionValue = sampleGaussian(mean, stdDev);
-                const logProb = logPdfGaussian(sampledActionValue, mean, stdDev);
-                return { detail: { mean, stdDev, sampledAction: sampledActionValue, logProb }, value: sampledActionValue };
             }
+        });
+    }
 
-            this.massPoints.forEach(point => { point.currentExertionLevel = 0; });
+    _processBrain(brainNode, dt, fluidFieldRef, nutrientField, lightField, particles) {
+        const nd = brainNode.neuronData;
+        if (!nd || !nd.weightsIH || !nd.biasesH || !nd.weightsHO || !nd.biasesO ||
+            typeof nd.inputVectorSize !== 'number' ||
+            typeof nd.hiddenLayerSize !== 'number' ||
+            typeof nd.outputVectorSize !== 'number') {
+            // console.warn(`Body ${this.id} brain is missing essential data for processing.`);
+            this._applyFallbackBehaviors(dt, fluidFieldRef); // Fallback if brain data is incomplete
+            return;
+        }
 
-            // Process Emitters
-            this.massPoints.forEach(point => {
-                if (point.nodeType === NodeType.EMITTER) {
-                    const outputStartRawIdx = currentRawOutputIndex;
-                    if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_EMITTER) {
-                        const detailsForThisEmitter = [];
-                        let localPairIdx = 0;
-                        for (let i = 0; i < 3; i++) { // Dye R, G, B
-                            const res = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                            detailsForThisEmitter.push(res.detail);
-                            point.dyeColor[i] = sigmoid(res.value) * 255;
-                        }
-                        const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                        detailsForThisEmitter.push(exertionRes.detail);
-                        point.currentExertionLevel = sigmoid(exertionRes.value);
-                        nd.currentFrameActionDetails.push(...detailsForThisEmitter);
-                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER;
-                    } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER; }
+        const inputVector = this._gatherBrainInputs(brainNode, fluidFieldRef, nutrientField, lightField, particles);
+        this._propagateBrainOutputs(brainNode, inputVector);
+        this._applyBrainActionsToPoints(brainNode, dt);
+        this._updateBrainTrainingBuffer(brainNode, inputVector); // Reward logic now inside this method or called from it
+        this._triggerBrainPolicyUpdateIfNeeded(brainNode);
+    }
+
+    _gatherBrainInputs(brainNode, fluidFieldRef, nutrientField, lightField, particles) {
+        const nd = brainNode.neuronData;
+        const inputVector = [];
+
+        // Start with base inputs (dye, energy, CoM pos/vel, nutrient)
+        if (fluidFieldRef) {
+            const brainGx = Math.floor(brainNode.pos.x / fluidFieldRef.scaleX);
+            const brainGy = Math.floor(brainNode.pos.y / fluidFieldRef.scaleY);
+            const brainIdx = fluidFieldRef.IX(brainGx, brainGy);
+            inputVector.push((fluidFieldRef.densityR[brainIdx] || 0) / 255);
+            inputVector.push((fluidFieldRef.densityG[brainIdx] || 0) / 255);
+            inputVector.push((fluidFieldRef.densityB[brainIdx] || 0) / 255);
+        } else {
+            inputVector.push(0, 0, 0);
+        }
+        inputVector.push(this.creatureEnergy / this.currentMaxEnergy); 
+        const comPos = this.getAveragePosition();
+        const relComPosX = (comPos.x - brainNode.pos.x) / WORLD_WIDTH;
+        const relComPosY = (comPos.y - brainNode.pos.y) / WORLD_HEIGHT;
+        inputVector.push(Math.tanh(relComPosX));
+        inputVector.push(Math.tanh(relComPosY));
+        const comVel = this.getAverageVelocity();
+        const brainVelX = brainNode.pos.x - brainNode.prevPos.x;
+        const brainVelY = brainNode.pos.y - brainNode.prevPos.y;
+        const relComVelX = comVel.x - brainVelX;
+        const relComVelY = comVel.y - brainVelY;
+        inputVector.push(Math.tanh(relComVelX / MAX_PIXELS_PER_FRAME_DISPLACEMENT));
+        inputVector.push(Math.tanh(relComVelY / MAX_PIXELS_PER_FRAME_DISPLACEMENT));
+        if (nutrientField && fluidFieldRef) {
+            const brainGx = Math.floor(brainNode.pos.x / fluidFieldRef.scaleX);
+            const brainGy = Math.floor(brainNode.pos.y / fluidFieldRef.scaleY);
+            const nutrientIdx = fluidFieldRef.IX(brainGx, brainGy);
+            const currentNutrient = nutrientField[nutrientIdx] !== undefined ? nutrientField[nutrientIdx] : 1.0;
+            const normalizedNutrient = (currentNutrient - MIN_NUTRIENT_VALUE) / (MAX_NUTRIENT_VALUE - MIN_NUTRIENT_VALUE);
+            inputVector.push(Math.max(0, Math.min(1, normalizedNutrient)));
+        } else {
+            inputVector.push(0.5);
+        }
+
+        // Add Eye Inputs (iterate through all points, add if it's an Eye)
+        let eyeNodesFoundForInput = 0;
+        this.massPoints.forEach(point => {
+            if (point.nodeType === NodeType.EYE) {
+                inputVector.push(point.seesParticle ? 1 : 0);
+                inputVector.push(point.nearestParticleMagnitude); // Already normalized 0-1 or 0
+                inputVector.push((point.nearestParticleDirection / (Math.PI * 2)) + 0.5); // Normalize angle to ~0-1 (0 if no particle)
+                eyeNodesFoundForInput++;
+            }
+        });
+        
+        // Ensure inputVector is the correct size (final check after all inputs added)
+        while(inputVector.length < nd.inputVectorSize) { inputVector.push(0); }
+        if(inputVector.length > nd.inputVectorSize) { inputVector.splice(nd.inputVectorSize); }
+        
+        return inputVector;
+    }
+
+    _propagateBrainOutputs(brainNode, inputVector) {
+        const nd = brainNode.neuronData;
+        const hiddenLayerInputs = multiplyMatrixVector(nd.weightsIH, inputVector);
+        const hiddenLayerBiasedInputs = addVectors(hiddenLayerInputs, nd.biasesH);
+        const hiddenLayerActivations = hiddenLayerBiasedInputs.map(val => Math.tanh(val));
+        const outputLayerInputs = multiplyMatrixVector(nd.weightsHO, hiddenLayerActivations);
+        const rawOutputs = addVectors(outputLayerInputs, nd.biasesO);
+        nd.rawOutputs = rawOutputs;
+    }
+
+    _applyBrainActionsToPoints(brainNode, dt) {
+        const nd = brainNode.neuronData;
+        nd.currentFrameActionDetails = [];
+        let currentRawOutputIndex = 0;
+
+        function sampleAndLogAction(rawMean, rawStdDev) {
+            const mean = rawMean;
+            const stdDev = Math.exp(rawStdDev) + 1e-6;
+            const sampledActionValue = sampleGaussian(mean, stdDev);
+            const logProb = logPdfGaussian(sampledActionValue, mean, stdDev);
+            return { detail: { mean, stdDev, sampledAction: sampledActionValue, logProb }, value: sampledActionValue };
+        }
+
+        // Reset exertion levels that might have been set by default patterns before NN overrides them.
+        // Note: Default patterns already set point.currentExertionLevel. If NN controls exertion for a type,
+        // it will overwrite. If NN *doesn't* explicitly control exertion for a type, the default pattern's value persists.
+        // For now, let's assume NN *will* output exertion for types it controls, so this reset might not be strictly necessary
+        // if the default activation is meant to be a base for NN modulation. However, if NN exertion is absolute, then resetting is fine.
+        // this.massPoints.forEach(point => { point.currentExertionLevel = 0; }); // Optional: Reset all exertion before NN applies its own.
+
+        // Process Emitters
+        this.massPoints.forEach(point => {
+            if (point.nodeType === NodeType.EMITTER) {
+                const outputStartRawIdx = currentRawOutputIndex;
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_EMITTER) {
+                    const detailsForThisEmitter = [];
+                    let localPairIdx = 0;
+                    for (let i = 0; i < 3; i++) { // Dye R, G, B
+                        const res = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                        detailsForThisEmitter.push(res.detail);
+                        point.dyeColor[i] = sigmoid(res.value) * 255;
+                    }
+                    const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                    detailsForThisEmitter.push(exertionRes.detail);
+                    point.currentExertionLevel = sigmoid(exertionRes.value); // NN sets exertion for Emitter
+                    nd.currentFrameActionDetails.push(...detailsForThisEmitter);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER;
+                } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER; }
+            }
+        });
+
+        // Process Swimmers
+        this.massPoints.forEach(point => {
+            if (point.nodeType === NodeType.SWIMMER) {
+                const outputStartRawIdx = currentRawOutputIndex;
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_SWIMMER) {
+                    const detailsForThisSwimmer = [];
+                    let localPairIdx = 0;
+
+                    const magnitudeResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                    detailsForThisSwimmer.push(magnitudeResult.detail);
+                    const rawMagnitude = magnitudeResult.value;
+
+                    const directionResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                    detailsForThisSwimmer.push(directionResult.detail);
+                    const angle = directionResult.value; 
+
+                    const exertionResultSwimmer = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                    detailsForThisSwimmer.push(exertionResultSwimmer.detail);
+                    point.currentExertionLevel = sigmoid(exertionResultSwimmer.value); // NN sets exertion for Swimmer
+
+                    const finalMagnitude = sigmoid(rawMagnitude) * MAX_SWIMMER_OUTPUT_MAGNITUDE * this.emitterStrength * point.currentExertionLevel;
+                    const appliedForceX = finalMagnitude * Math.cos(angle);
+                    const appliedForceY = finalMagnitude * Math.sin(angle);
+                    
+                    point.applyForce(new Vec2(appliedForceX / dt, appliedForceY / dt)); 
+                    nd.currentFrameActionDetails.push(...detailsForThisSwimmer);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_SWIMMER;
+                } else {
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_SWIMMER; 
                 }
-            });
+            }
+        });
 
-            // Process Swimmers
-            this.massPoints.forEach(point => {
-                if (point.nodeType === NodeType.SWIMMER) {
-                    const outputStartRawIdx = currentRawOutputIndex;
-                    if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_SWIMMER) {
-                        const detailsForThisSwimmer = [];
-                        let localPairIdx = 0;
+        // Process Eaters
+        this.massPoints.forEach(point => {
+            if (point.nodeType === NodeType.EATER) {
+                const outputStartRawIdx = currentRawOutputIndex;
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_EATER) {
+                    const details = [];
+                    const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
+                    details.push(exertionRes.detail);
+                    point.currentExertionLevel = sigmoid(exertionRes.value); // NN sets exertion for Eater
+                    nd.currentFrameActionDetails.push(...details);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_EATER;
+                } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_EATER; }
+            }
+        });
 
-                        // Magnitude (1 pair = 2 outputs)
-                        const magnitudeResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                        detailsForThisSwimmer.push(magnitudeResult.detail);
-                        const rawMagnitude = magnitudeResult.value;
+        // Process Predators
+        this.massPoints.forEach(point => {
+            if (point.nodeType === NodeType.PREDATOR) {
+                const outputStartRawIdx = currentRawOutputIndex;
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_PREDATOR) {
+                    const details = [];
+                    const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
+                    details.push(exertionRes.detail);
+                    point.currentExertionLevel = sigmoid(exertionRes.value); // NN sets exertion for Predator
+                    nd.currentFrameActionDetails.push(...details);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR;
+                } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR; }
+            }
+        });
 
-                        // Direction/Angle (1 pair = 2 outputs)
-                        const directionResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                        detailsForThisSwimmer.push(directionResult.detail);
-                        const angle = directionResult.value; // NN learns to output radians directly, or could be scaled e.g. * 2 * Math.PI
+        // Process Grabber Toggles for each point
+        this.massPoints.forEach(point => {
+            if (point.canBeGrabber) { 
+                const outputStartRawIdx = currentRawOutputIndex;
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) {
+                    const detailsForThisGrab = [];
+                    const grabToggleResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
+                    detailsForThisGrab.push(grabToggleResult.detail);
+                    point.isGrabbing = sigmoid(grabToggleResult.value) > 0.5; 
+                    
+                    nd.currentFrameActionDetails.push(...detailsForThisGrab);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
+                } else {
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_GRABBER_TOGGLE; 
+                }
+            }
+        });
+    }
 
-                        // Swimmer Exertion (1 pair = 2 outputs)
-                        const exertionResultSwimmer = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                        detailsForThisSwimmer.push(exertionResultSwimmer.detail);
-                        point.currentExertionLevel = sigmoid(exertionResultSwimmer.value);
-
-                        // Apply exertion-scaled force based on magnitude and direction
-                        const finalMagnitude = sigmoid(rawMagnitude) * MAX_SWIMMER_OUTPUT_MAGNITUDE * this.emitterStrength * point.currentExertionLevel;
-                        const appliedForceX = finalMagnitude * Math.cos(angle);
-                        const appliedForceY = finalMagnitude * Math.sin(angle);
-                        
-                        point.applyForce(new Vec2(appliedForceX / dt, appliedForceY / dt)); 
-                        nd.currentFrameActionDetails.push(...detailsForThisSwimmer);
-                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_SWIMMER;
+    _updateBrainTrainingBuffer(brainNode, inputVector) { 
+        const nd = brainNode.neuronData;
+        if (nd.currentFrameActionDetails && nd.currentFrameActionDetails.length > 0) {
+            let reward = 0;
+            switch (this.rewardStrategy) {
+                case RLRewardStrategy.ENERGY_CHANGE:
+                    reward = this.creatureEnergy - nd.previousEnergyForReward;
+                    break;
+                case RLRewardStrategy.REPRODUCTION_EVENT:
+                    if (this.justReproduced) {
+                        reward = REPRODUCTION_REWARD_VALUE;
+                        this.justReproduced = false; // Reset flag after giving reward
                     } else {
-                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_SWIMMER; 
+                        reward = 0;
                     }
-                }
-            });
-
-            // Process Eaters
-            this.massPoints.forEach(point => {
-                if (point.nodeType === NodeType.EATER) {
-                    const outputStartRawIdx = currentRawOutputIndex;
-                    if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_EATER) {
-                        const details = [];
-                        const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
-                        details.push(exertionRes.detail);
-                        point.currentExertionLevel = sigmoid(exertionRes.value);
-                        nd.currentFrameActionDetails.push(...details);
-                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_EATER;
-                    } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_EATER; }
-                }
-            });
-
-            // Process Predators
-            this.massPoints.forEach(point => {
-                if (point.nodeType === NodeType.PREDATOR) {
-                    const outputStartRawIdx = currentRawOutputIndex;
-                    if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_PREDATOR) {
-                        const details = [];
-                        const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
-                        details.push(exertionRes.detail);
-                        point.currentExertionLevel = sigmoid(exertionRes.value);
-                        nd.currentFrameActionDetails.push(...details);
-                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR;
-                    } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR; }
-                }
-            });
-
-            // Process Grabber Toggles for each point
-            this.massPoints.forEach(point => {
-                if (point.canBeGrabber) { // Only process grabber outputs for points that can be grabbers
-                    const outputStartRawIdx = currentRawOutputIndex;
-                    if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) {
-                        const detailsForThisGrab = [];
-                        const grabToggleResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
-                        detailsForThisGrab.push(grabToggleResult.detail);
-                        point.isGrabbing = sigmoid(grabToggleResult.value) > 0.5; // Threshold to boolean
-                        
-                        nd.currentFrameActionDetails.push(...detailsForThisGrab);
-                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
-                    } else {
-                        // Ensure index advances even if there aren't enough rawOutputs for this point's grab action.
-                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_GRABBER_TOGGLE; 
-                    }
-                } // If point.canBeGrabber is false, its grab toggle output is not in the NN outputVector, so we don't advance currentRawOutputIndex here.
-            });
-            // --- End of Apply Neural Outputs ---
-
-            if (nd.currentFrameActionDetails && nd.currentFrameActionDetails.length > 0) {
-                let reward = 0;
-                switch (this.rewardStrategy) {
-                    case RLRewardStrategy.ENERGY_CHANGE:
-                        reward = this.creatureEnergy - nd.previousEnergyForReward;
-                        break;
-                    case RLRewardStrategy.REPRODUCTION_EVENT:
-                        if (this.justReproduced) {
-                            reward = REPRODUCTION_REWARD_VALUE;
-                            this.justReproduced = false; // Reset flag after giving reward
-                        } else {
-                            reward = 0;
-                        }
-                        break;
-                    case RLRewardStrategy.PARTICLE_PROXIMITY:
-                        let minParticleMagnitude = 1.0; // Default to max distance (1.0 after normalization)
-                        let particleSeenByAnyEye = false;
-                        this.massPoints.forEach(point => {
-                            if (point.nodeType === NodeType.EYE && point.seesParticle) {
-                                particleSeenByAnyEye = true;
-                                if (point.nearestParticleMagnitude < minParticleMagnitude) {
-                                    minParticleMagnitude = point.nearestParticleMagnitude;
-                                }
+                    break;
+                case RLRewardStrategy.PARTICLE_PROXIMITY:
+                    let minParticleMagnitude = 1.0; 
+                    let particleSeenByAnyEye = false;
+                    this.massPoints.forEach(point => {
+                        if (point.nodeType === NodeType.EYE && point.seesParticle) {
+                            particleSeenByAnyEye = true;
+                            if (point.nearestParticleMagnitude < minParticleMagnitude) {
+                                minParticleMagnitude = point.nearestParticleMagnitude;
                             }
-                        });
-                        if (particleSeenByAnyEye) {
-                            // Reward is higher for closer particles (smaller magnitude)
-                            reward = (1.0 - minParticleMagnitude) * PARTICLE_PROXIMITY_REWARD_SCALE;
-                        } else {
-                            reward = 0; // No particle seen, no proximity reward
                         }
-                        break;
-                    default:
-                        reward = this.creatureEnergy - nd.previousEnergyForReward; // Fallback
-                }
-
-                nd.experienceBuffer.push({
-                    state: [...inputVector],
-                    actionDetails: JSON.parse(JSON.stringify(nd.currentFrameActionDetails)),
-                    reward: reward
-                });
-                if (nd.experienceBuffer.length > nd.maxExperienceBufferSize) {
-                    nd.experienceBuffer.shift();
-                }
-            }
-            nd.previousEnergyForReward = this.creatureEnergy;
-            nd.framesSinceLastTrain++;
-            if (nd.framesSinceLastTrain >= TRAINING_INTERVAL_FRAMES) {
-                this.updateBrainPolicy();
-            }
-        } else { // Fallback if no operable brain
-            if (brainNode && brainNode.neuronData) brainNode.neuronData.rawOutputs = [];
-            if (this.motorImpulseMagnitudeCap > 0.0001 && (this.ticksSinceBirth % this.motorImpulseInterval === 0)) {
-                for (let point of this.massPoints) {
-                    if (!point.isFixed && point.movementType !== MovementType.FLOATING) { // Swimmers (not floating) can still have motor impulses
-                        const randomAngle = Math.random() * Math.PI * 2;
-                        const impulseDir = new Vec2(Math.cos(randomAngle), Math.sin(randomAngle));
-                        const impulseMag = Math.random() * this.motorImpulseMagnitudeCap;
-                        point.applyForce(impulseDir.mul(impulseMag / dt));
+                    });
+                    if (particleSeenByAnyEye) {
+                        reward = (1.0 - minParticleMagnitude) * PARTICLE_PROXIMITY_REWARD_SCALE;
+                    } else {
+                        reward = 0; 
                     }
+                    break;
+                default:
+                    reward = this.creatureEnergy - nd.previousEnergyForReward; // Fallback
+            }
+
+            nd.experienceBuffer.push({
+                state: [...inputVector],
+                actionDetails: JSON.parse(JSON.stringify(nd.currentFrameActionDetails)),
+                reward: reward
+            });
+            if (nd.experienceBuffer.length > nd.maxExperienceBufferSize) {
+                nd.experienceBuffer.shift();
+            }
+        }
+        nd.previousEnergyForReward = this.creatureEnergy; // Always update this after calculating reward for the frame
+    }
+
+    _triggerBrainPolicyUpdateIfNeeded(brainNode) {
+        const nd = brainNode.neuronData;
+        nd.framesSinceLastTrain++;
+        if (nd.framesSinceLastTrain >= TRAINING_INTERVAL_FRAMES) {
+            this.updateBrainPolicy(); // updateBrainPolicy itself will check buffer size
+            // nd.framesSinceLastTrain = 0; // updateBrainPolicy should reset this if it trains
+        }
+    }
+
+    _applyFallbackBehaviors(dt, fluidFieldRef) {
+        // This is called if brainNode is null or has incomplete data.
+        // Apply default activation patterns (already done in _updateSensoryInputsAndDefaultActivations)
+        // Apply random motor impulses for non-NN controlled movement
+        if (this.motorImpulseMagnitudeCap > 0.0001 && (this.ticksSinceBirth % this.motorImpulseInterval === 0)) {
+            for (let point of this.massPoints) {
+                if (!point.isFixed && point.movementType !== MovementType.FLOATING) { // Swimmers (not floating) can still have motor impulses
+                    const randomAngle = Math.random() * Math.PI * 2;
+                    const impulseDir = new Vec2(Math.cos(randomAngle), Math.sin(randomAngle));
+                    const impulseMag = Math.random() * this.motorImpulseMagnitudeCap;
+                    point.applyForce(impulseDir.mul(impulseMag / dt));
                 }
             }
-            // Non-NN Swimmer and Emitter behavior handled in fluid interaction part
         }
+        // Note: Emitter dye emission and Swimmer fluid push in fallback mode are currently handled
+        // by the fluid interaction logic in _performPhysicalUpdates, based on point.currentExertionLevel
+        // which would have been set by _applyDefaultActivationPatterns.
+    }
 
+    _updateEnergyBudget(dt, fluidFieldRef, nutrientField, lightField) {
         // --- Apply Red Dye Poison Effect ---
         if (fluidFieldRef && RED_DYE_POISON_STRENGTH > 0) {
             let poisonDamageThisFrame = 0;
@@ -1529,7 +1557,6 @@ class SoftBody {
             }
         }
         // --- End of Red Dye Poison Effect ---
-
 
         // Calculate and apply energy cost & gains
         let currentFrameEnergyCost = 0;
@@ -1581,13 +1608,13 @@ class SoftBody {
 
                     const energyGainThisPoint = effectiveLightValue * PHOTOSYNTHESIS_EFFICIENCY * (point.radius / 5) * dt;
                     currentFrameEnergyGain += energyGainThisPoint; // Accumulate gain
-                    // REMOVED: this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyGain);
                 }
             }
             // Add energy cost for grabbing state
-            if (point.isGrabbing) { // Check for each point, removed isDesignatedGrabber
+            if (point.isGrabbing) { 
                 currentFrameEnergyCost += GRABBING_NODE_ENERGY_COST * costMultiplier; 
             }
+            // Add energy cost for Eye node operation
             // Add energy cost for Eye node operation (applied to the designated eye point)
             if (point.isDesignatedEye) { // Only the designated eye incurs cost
                  currentFrameEnergyCost += EYE_NODE_ENERGY_COST * costMultiplier;
@@ -2352,6 +2379,215 @@ class SoftBody {
             }
         }
         return uniqueSegments;
+    }
+
+    _performPhysicalUpdates(dt, fluidFieldRef) {
+        // Fluid interactions
+        if (fluidFieldRef) {
+            for (let point of this.massPoints) {
+                if (point.isFixed) continue; 
+
+                const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
+                const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
+                const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
+
+                if (point.movementType === MovementType.FLOATING) {
+                    const rawFluidVx = fluidFieldRef.Vx[idx];
+                    const rawFluidVy = fluidFieldRef.Vy[idx];
+                    let fluidDisplacementPx = new Vec2(rawFluidVx * fluidFieldRef.scaleX * dt, rawFluidVy * fluidFieldRef.scaleY * dt);
+                    let effectiveFluidDisplacementPx = fluidDisplacementPx.mul(this.fluidCurrentStrength);
+                    let currentPointDisplacementPx = point.pos.sub(point.prevPos);
+                    let blendedDisplacementPx = currentPointDisplacementPx.mul(1.0 - this.fluidEntrainment)
+                                                     .add(effectiveFluidDisplacementPx.mul(this.fluidEntrainment));
+                    point.prevPos = point.pos.clone().sub(blendedDisplacementPx);
+                }
+                
+                if (point.nodeType === NodeType.EMITTER) { 
+                    let dyeEmissionStrength = 50 * point.currentExertionLevel; 
+                    fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], dyeEmissionStrength);
+                }
+            }
+        }
+
+        for (let spring of this.springs) spring.applyForce();
+        for (let point of this.massPoints) point.update(dt);
+
+        const MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ = (MAX_PIXELS_PER_FRAME_DISPLACEMENT)**2;
+        for (let point of this.massPoints) {
+            if (point.isFixed) continue; 
+
+            const displacementSq = (point.pos.x - point.prevPos.x)**2 + (point.pos.y - point.prevPos.y)**2;
+            if (displacementSq > MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ || isNaN(point.pos.x) || isNaN(point.pos.y) || !isFinite(point.pos.x) || !isFinite(point.pos.y)) {
+                this.isUnstable = true;
+                // console.warn(...)
+                return; 
+            }
+
+            const implicitVelX = point.pos.x - point.prevPos.x;
+            const implicitVelY = point.pos.y - point.prevPos.y;
+
+            if (IS_WORLD_WRAPPING) {
+                if (point.pos.x < 0) { point.pos.x += WORLD_WIDTH; point.prevPos.x += WORLD_WIDTH; }
+                else if (point.pos.x > WORLD_WIDTH) { point.pos.x -= WORLD_WIDTH; point.prevPos.x -= WORLD_WIDTH; }
+                if (point.pos.y < 0) { point.pos.y += WORLD_HEIGHT; point.prevPos.y += WORLD_HEIGHT; }
+                else if (point.pos.y > WORLD_HEIGHT) { point.pos.y -= WORLD_HEIGHT; point.prevPos.y -= WORLD_HEIGHT; }
+            } else {
+                if (point.pos.x - point.radius < 0) {
+                    point.pos.x = point.radius;
+                    point.prevPos.x = point.pos.x - implicitVelX * restitution;
+                } else if (point.pos.x + point.radius > WORLD_WIDTH) {
+                    point.pos.x = WORLD_WIDTH - point.radius;
+                    point.prevPos.x = point.pos.x - implicitVelX * restitution;
+                }
+                if (point.pos.y - point.radius < 0) {
+                    point.pos.y = point.radius;
+                    point.prevPos.y = point.pos.y - implicitVelY * restitution;
+                } else if (point.pos.y + point.radius > WORLD_HEIGHT) {
+                    point.pos.y = WORLD_HEIGHT - point.radius;
+                    point.prevPos.y = point.pos.y - implicitVelY * restitution;
+                }
+            }
+        }
+    }
+
+    _finalizeUpdateAndCheckStability(dt) { 
+        if (this.isUnstable) return; 
+
+        // Inter-body repulsion & Predation
+        for (let i_p1 = 0; i_p1 < this.massPoints.length; i_p1++) {
+            const p1 = this.massPoints[i_p1];
+            if (p1.isFixed) continue;
+
+            const p1Gx = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(p1.pos.x / GRID_CELL_SIZE)));
+            const p1Gy = Math.max(0, Math.min(GRID_ROWS - 1, Math.floor(p1.pos.y / GRID_CELL_SIZE)));
+
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    const checkGx = p1Gx + dx;
+                    const checkGy = p1Gy + dy;
+
+                    if (checkGx >= 0 && checkGx < GRID_COLS && checkGy >= 0 && checkGy < GRID_ROWS) {
+                        const cellIndex = checkGx + checkGy * GRID_COLS;
+                        if (Array.isArray(spatialGrid[cellIndex])) {
+                            const cellBucket = spatialGrid[cellIndex];
+                            for (const otherItem of cellBucket) {
+                                if (otherItem.type === 'softbody_point') {
+                                    if (otherItem.bodyRef === this) continue;
+                                    const p2 = otherItem.pointRef;
+                                    if (p2.isFixed) continue;
+
+                                    const diff = p1.pos.sub(p2.pos);
+                                    const distSq = diff.magSq();
+                                    const interactionRadius = (p1.radius + p2.radius) * BODY_REPULSION_RADIUS_FACTOR;
+
+                                    if (distSq < interactionRadius * interactionRadius && distSq > 0.0001) {
+                                        const dist = Math.sqrt(distSq);
+                                        const overlap = interactionRadius - dist;
+                                        const forceDir = diff.normalize();
+                                        const repulsionForceMag = BODY_REPULSION_STRENGTH * overlap * 0.5;
+                                        const repulsionForce = forceDir.mul(repulsionForceMag);
+                                        p1.applyForce(repulsionForce);
+                                    }
+
+                                    if (p1.nodeType === NodeType.PREDATOR) {
+                                        const p1Exertion = p1.currentExertionLevel || 0;
+                                        const effectivePredationRadiusMultiplier = PREDATION_RADIUS_MULTIPLIER_BASE + (PREDATION_RADIUS_MULTIPLIER_MAX_BONUS * p1Exertion);
+                                        const predationRadius = p1.radius * effectivePredationRadiusMultiplier;
+                                        
+                                        if (distSq < predationRadius * predationRadius) {
+                                            const effectiveEnergySapped = ENERGY_SAPPED_PER_PREDATION_BASE + (ENERGY_SAPPED_PER_PREDATION_MAX_BONUS * p1Exertion);
+                                            const energyToSap = Math.min(otherItem.bodyRef.creatureEnergy, effectiveEnergySapped);
+                                            if (energyToSap > 0) {
+                                                otherItem.bodyRef.creatureEnergy -= energyToSap;
+                                                this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyToSap); 
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Eating Logic
+        for (let point of this.massPoints) {
+            if (point.isFixed) continue; 
+            if (point.nodeType === NodeType.EATER) { 
+                const pointExertion = point.currentExertionLevel || 0;
+                const effectiveEatingRadiusMultiplier = EATING_RADIUS_MULTIPLIER_BASE + (EATING_RADIUS_MULTIPLIER_MAX_BONUS * pointExertion);
+                const eatingRadius = point.radius * effectiveEatingRadiusMultiplier;
+                const eatingRadiusSq = eatingRadius * eatingRadius;
+                const eaterGx = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(point.pos.x / GRID_CELL_SIZE)));
+                const eaterGy = Math.max(0, Math.min(GRID_ROWS - 1, Math.floor(point.pos.y / GRID_CELL_SIZE)));
+
+                for (let dy = -1; dy <= 1; dy++) { 
+                    for (let dx = -1; dx <= 1; dx++) {
+                        const checkGx = eaterGx + dx;
+                        const checkGy = eaterGy + dy;
+                        if (checkGx >= 0 && checkGx < GRID_COLS && checkGy >= 0 && checkGy < GRID_ROWS) {
+                            const cellIndex = checkGx + checkGy * GRID_COLS;
+                            if (Array.isArray(spatialGrid[cellIndex])) {
+                                const cellBucket = spatialGrid[cellIndex];
+                                for (let k = cellBucket.length - 1; k >= 0; k--) { 
+                                    const item = cellBucket[k];
+                                    if (item.type === 'particle') {
+                                        const particle = item.particleRef;
+                                        if (particle.life > 0 && !particle.isEaten) {
+                                            const distSq = point.pos.sub(particle.pos).magSq();
+                                            if (distSq < eatingRadiusSq) {
+                                                particle.isEaten = true;
+                                                particle.life = 0; 
+                                                let energyGain = ENERGY_PER_PARTICLE;
+                                                if (nutrientField && fluidField) { 
+                                                    const particleGx = Math.floor(particle.pos.x / fluidField.scaleX);
+                                                    const particleGy = Math.floor(particle.pos.y / fluidField.scaleY);
+                                                    const nutrientIdxAtParticle = fluidField.IX(particleGx, particleGy);
+                                                    const baseNutrientValueAtParticle = nutrientField[nutrientIdxAtParticle] !== undefined ? nutrientField[nutrientIdxAtParticle] : 1.0;
+                                                    const effectiveNutrientAtParticle = baseNutrientValueAtParticle * globalNutrientMultiplier;
+                                                    energyGain *= Math.max(MIN_NUTRIENT_VALUE, effectiveNutrientAtParticle);
+                                                }
+                                                this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyGain); 
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (this.isUnstable) return; 
+
+        // Final Instability Checks: Springs and Span
+        const localMaxSpringStretchFactor = MAX_SPRING_STRETCH_FACTOR;
+        const localMaxSpanPerPointFactor = MAX_SPAN_PER_POINT_FACTOR;
+
+        for (const spring of this.springs) {
+            const currentLength = spring.p1.pos.sub(spring.p2.pos).mag();
+            if (currentLength > spring.restLength * localMaxSpringStretchFactor) {
+                this.isUnstable = true;
+                // console.warn(...)
+                return;
+            }
+        }
+
+        if (this.massPoints.length > 2) { 
+            const bbox = this.getBoundingBox();
+            if (bbox.width > this.massPoints.length * localMaxSpanPerPointFactor ||
+                bbox.height > this.massPoints.length * localMaxSpanPerPointFactor) {
+                this.isUnstable = true;
+                // console.warn(...)
+                return;
+            }
+        }
+
+        this.ticksSinceBirth++;
+        if (this.ticksSinceBirth > REPRODUCTION_COOLDOWN_TICKS) {
+            this.canReproduce = true;
+        }
     }
 }
 

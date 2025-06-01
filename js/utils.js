@@ -61,16 +61,34 @@ function initializeVector(size, randomRange = 1) {
 
 function multiplyMatrixVector(matrix, vector) {
     const result = [];
-    if (!matrix || matrix.length === 0 || !vector || vector.length === 0 || matrix[0].length !== vector.length) {
-        console.error("Matrix-vector multiplication dimension mismatch:", matrix, vector);
-        // Return a zero vector of expected output size if possible, or an empty array
-        const expectedOutputSize = matrix && matrix.length > 0 ? matrix.length : 0;
-        for(let i = 0; i < expectedOutputSize; i++) result.push(0);
+    if (!matrix || !vector) { 
+        console.error("Matrix or vector is null/undefined in multiplyMatrixVector", matrix, vector);
+        return result; 
+    }
+
+    const numRows = matrix.length;
+    const numCols = numRows > 0 ? matrix[0].length : 0;
+
+    if (numRows === 0) { 
+        return result; 
+    }
+
+    // True dimension mismatch for multiplication
+    if (numCols !== vector.length) { 
+        console.error("Matrix-vector multiplication dimension mismatch: Matrix_cols:", numCols, "Vector_len:", vector.length, matrix, vector);
+        for(let i = 0; i < numRows; i++) result.push(0); // Return zero vector of numRows length
         return result;
     }
-    for (let i = 0; i < matrix.length; i++) {
+
+    // If vector is empty and numCols is also 0 (valid for dot products that become 0)
+    if (vector.length === 0 && numCols === 0) { 
+        for (let i = 0; i < numRows; i++) result.push(0);
+        return result;
+    }
+    
+    for (let i = 0; i < numRows; i++) {
         let sum = 0;
-        for (let j = 0; j < vector.length; j++) {
+        for (let j = 0; j < numCols; j++) { 
             sum += matrix[i][j] * vector[j];
         }
         result.push(sum);

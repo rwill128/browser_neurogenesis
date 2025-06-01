@@ -444,6 +444,14 @@ const MAX_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP = 7;    // Max points in the *initial*
 // Whole-Body Symmetrical Duplication along an Edge (New - Very Complex)
 const SYMMETRICAL_BODY_DUPLICATION_CHANCE = 0.002; // Very rare due to complexity and impact
 
+// Heritable Reward Weights & Related (New)
+const REWARD_WEIGHT_MUTATION_CHANCE = 0.1;
+const REWARD_WEIGHT_MUTATION_MAGNITUDE = 0.2; // Max +/- 20% change
+const REWARD_WEIGHT_MIN = 0.0;
+const REWARD_WEIGHT_MAX = 2.0; // Allow weights to go slightly above 1 or be negative
+const REPRODUCTION_REWARD_VALUE = 50.0; // Bonus reward for successful reproduction
+const DEFAULT_SURVIVAL_REWARD_WEIGHT = 0.01; // Small constant reward for living
+
 // Default Activation Pattern for Brainless/Non-NN Controlled Nodes (New)
 const ActivationPatternType = {
     FLAT: 0,    // Constant exertion level

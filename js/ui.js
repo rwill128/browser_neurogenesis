@@ -17,6 +17,10 @@ const toggleControlsButton = document.getElementById('toggleControlsButton');
 const screensaverButton = document.getElementById('screensaverButton');
 const controlsPanel = document.getElementById('controls');
 const viewEntireSimButton = document.getElementById('viewEntireSimButton');
+const toggleStatsPanelButton = document.getElementById('toggleStatsPanelButton');
+const statsPanel = document.getElementById('statsPanel');
+const closeStatsPanelButton = document.getElementById('closeStatsPanelButton');
+const nodeTypeStatsDiv = document.getElementById('nodeTypeStats');
 
 const creaturePopulationFloorSlider = document.getElementById('creaturePopulationFloorSlider');
 const creaturePopulationFloorValueSpan = document.getElementById('creaturePopulationFloorValueSpan');
@@ -35,9 +39,10 @@ const emitterNodeCostSlider = document.getElementById('emitterNodeCost');
 const eaterNodeCostSlider = document.getElementById('eaterNodeCost');
 const predatorNodeCostSlider = document.getElementById('predatorNodeCost');
 const neuronNodeCostSlider = document.getElementById('neuronNodeCost');
-const photosyntheticNodeCostSlider = document.getElementById('photosyntheticNodeCost'); 
+const photosyntheticNodeCostSlider = document.getElementById('photosyntheticNodeCost');
 const photosynthesisEfficiencySlider = document.getElementById('photosynthesisEfficiency');
 const swimmerNodeCostSlider = document.getElementById('swimmerNodeCost');
+const eyeNodeCostSlider = document.getElementById('eyeNodeCostSlider');
 const eyeDetectionRadiusSlider = document.getElementById('eyeDetectionRadiusSlider');
 
 const instabilityLight = document.getElementById('instabilityLight');
@@ -58,6 +63,7 @@ const neuronNodeCostValueSpan = document.getElementById('neuronNodeCostValue');
 const photosyntheticNodeCostValueSpan = document.getElementById('photosyntheticNodeCostValue');
 const photosynthesisEfficiencyValueSpan = document.getElementById('photosynthesisEfficiencyValue');
 const swimmerNodeCostValueSpan = document.getElementById('swimmerNodeCostValue');
+const eyeNodeCostValueSpan = document.getElementById('eyeNodeCostValueSpan');
 const eyeDetectionRadiusValueSpan = document.getElementById('eyeDetectionRadiusValueSpan');
 
 const fluidGridSizeSlider = document.getElementById('fluidGridSize');
@@ -69,7 +75,7 @@ const clearFluidButton = document.getElementById('clearFluidButton');
 const fluidDiffusionValueSpan = document.getElementById('fluidDiffusionValue');
 const fluidViscosityValueSpan = document.getElementById('fluidViscosityValue');
 const fluidFadeValueSpan = document.getElementById('fluidFadeValue');
-const maxFluidVelocityComponentSlider = document.getElementById('maxFluidVelocityComponentSlider'); 
+const maxFluidVelocityComponentSlider = document.getElementById('maxFluidVelocityComponentSlider');
 const maxFluidVelocityComponentValueSpan = document.getElementById('maxFluidVelocityComponentValueSpan');
 
 const particlePopulationFloorSlider = document.getElementById('particlePopulationFloorSlider');
@@ -98,8 +104,8 @@ const clearEmittersButton = document.getElementById('clearEmittersButton');
 
 const infoPanel = document.getElementById('infoPanel');
 const closeInfoPanelButton = document.getElementById('closeInfoPanel');
-const allPointsInfoContainer = document.getElementById('allPointsInfoContainer'); 
-const copyInfoPanelButton = document.getElementById('copyInfoPanelButton'); 
+const allPointsInfoContainer = document.getElementById('allPointsInfoContainer');
+const copyInfoPanelButton = document.getElementById('copyInfoPanelButton');
 
 const showNutrientMapToggle = document.getElementById('showNutrientMapToggle');
 const nutrientEditModeToggle = document.getElementById('nutrientEditModeToggle');
@@ -201,6 +207,7 @@ function initializeAllSliderDisplays() {
         [swimmerNodeCostSlider, "SWIMMER_NODE_ENERGY_COST", true, swimmerNodeCostValueSpan],
         [photosyntheticNodeCostSlider, "PHOTOSYNTHETIC_NODE_ENERGY_COST", true, photosyntheticNodeCostValueSpan],
         [photosynthesisEfficiencySlider, "PHOTOSYNTHESIS_EFFICIENCY", true, photosynthesisEfficiencyValueSpan],
+        [eyeNodeCostSlider, "EYE_NODE_ENERGY_COST", true, eyeNodeCostValueSpan],
         [eyeDetectionRadiusSlider, "EYE_DETECTION_RADIUS", false, eyeDetectionRadiusValueSpan],
         [fluidGridSizeSlider, "FLUID_GRID_SIZE_CONTROL", false, fluidGridSizeValueSpan],
         [fluidDiffusionSlider, "FLUID_DIFFUSION", true, fluidDiffusionValueSpan],
@@ -499,6 +506,17 @@ toggleControlsButton.onclick = function() {
     controlsPanel.classList.toggle('open');
 }
 
+toggleStatsPanelButton.onclick = function() {
+    statsPanel.classList.toggle('open');
+    if (statsPanel.classList.contains('open')) {
+        updateStatsPanel();
+    }
+}
+
+closeStatsPanelButton.onclick = function() {
+    statsPanel.classList.remove('open');
+}
+
 function toggleScreensaverMode(forceOff = false) {
     const isCurrentlyFullscreen = !!document.fullscreenElement;
     const isBodyCssFullscreen = document.body.classList.contains('css-screensaver-active');
@@ -591,6 +609,7 @@ neuronNodeCostSlider.oninput = function() { NEURON_NODE_ENERGY_COST = parseFloat
 photosyntheticNodeCostSlider.oninput = function() { PHOTOSYNTHETIC_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, photosyntheticNodeCostValueSpan); }
 photosynthesisEfficiencySlider.oninput = function() { PHOTOSYNTHESIS_EFFICIENCY = parseFloat(this.value); updateSliderDisplay(this, photosynthesisEfficiencyValueSpan); }
 swimmerNodeCostSlider.oninput = function() { SWIMMER_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, swimmerNodeCostValueSpan); }
+eyeNodeCostSlider.oninput = function() { EYE_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, eyeNodeCostValueSpan); }
 
 
 resetButton.onclick = function() {
@@ -1097,3 +1116,37 @@ canvas.addEventListener('wheel', (e) => {
 }); 
 
 eyeDetectionRadiusSlider.oninput = function() { EYE_DETECTION_RADIUS = parseInt(this.value); updateSliderDisplay(this, eyeDetectionRadiusValueSpan); } 
+
+function updateStatsPanel() {
+    if (!nodeTypeStatsDiv) return;
+
+    const nodeCounts = {};
+    let totalNodes = 0;
+
+    for (const typeName in NodeType) {
+        nodeCounts[NodeType[typeName]] = 0;
+    }
+
+    softBodyPopulation.forEach(body => {
+        body.massPoints.forEach(point => {
+            if (nodeCounts[point.nodeType] !== undefined) {
+                nodeCounts[point.nodeType]++;
+            }
+            totalNodes++;
+        });
+    });
+
+    let statsHTML = "<p><strong>Node Type Proportions:</strong></p>";
+    if (totalNodes === 0) {
+        statsHTML += "<p>No creatures to analyze.</p>";
+    } else {
+        for (const typeName in NodeType) {
+            const typeEnum = NodeType[typeName];
+            const count = nodeCounts[typeEnum];
+            const percentage = ((count / totalNodes) * 100).toFixed(2);
+            statsHTML += `<p>${getNodeTypeString(typeEnum)}: ${count} (${percentage}%)</p>`;
+        }
+        statsHTML += `<p><strong>Total Nodes:</strong> ${totalNodes}</p>`;
+    }
+    nodeTypeStatsDiv.innerHTML = statsHTML;
+} 

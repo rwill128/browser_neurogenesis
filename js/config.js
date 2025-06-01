@@ -229,6 +229,7 @@ function handleExportConfig() {
         predatorNodeCost: PREDATOR_NODE_ENERGY_COST,
         swimmerNodeCost: SWIMMER_NODE_ENERGY_COST,
         grabbingNodeCost: GRABBING_NODE_ENERGY_COST,
+        eyeNodeCost: EYE_NODE_ENERGY_COST,
         baseMaxCreatureEnergy: BASE_MAX_CREATURE_ENERGY,
         energyPerMassPointBonus: ENERGY_PER_MASS_POINT_BONUS,
         basePointsForMaxEnergyCalc: BASE_POINTS_FOR_MAX_ENERGY_CALC,

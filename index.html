@@ -41,6 +41,7 @@
             </div>
         </div>
 
+        <button id="toggleStatsPanelButton" class="ui-button-top-right">Stats</button>
         <button id="toggleControlsButton" class="ui-button-top-right">Controls</button>
         <button id="screensaverButton" class="ui-button-top-left">Enter Screensaver</button>
         <button id="viewEntireSimButton" class="ui-button-top-left">View Entire Sim</button>
@@ -137,6 +138,10 @@
                 <label for="swimmerNodeCost" class="slider-label">Swimmer Node Cost:</label>
                 <span id="swimmerNodeCostValue" class="slider-value">0.1</span>
                 <input type="range" id="swimmerNodeCost" min="0.0" max="50.0" value="0.1" step="0.01">
+
+                <label for="eyeNodeCostSlider" class="slider-label">Eye Node Cost:</label>
+                <span id="eyeNodeCostValueSpan" class="slider-value">0.05</span>
+                <input type="range" id="eyeNodeCostSlider" min="0.0" max="1.0" value="0.05" step="0.01">
 
                 <label for="photosyntheticNodeCost" class="slider-label">Photosynthetic Node Cost:</label>
                 <span id="photosyntheticNodeCostValue" class="slider-value">0.1</span>
@@ -307,6 +312,15 @@
             </div>
 
         </div>
+    </div>
+
+    <div id="statsPanel">
+        <button id="closeStatsPanelButton">X</button>
+        <h4>Simulation Statistics</h4>
+        <div id="nodeTypeStats">
+            <!-- Node type proportions will be listed here -->
+        </div>
+        <!-- More stats can be added later -->
     </div>
 
     <!-- Configuration & Utilities -->

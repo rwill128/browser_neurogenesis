@@ -106,6 +106,7 @@ let PREDATOR_NODE_ENERGY_COST = 0.1;
 let NEURON_NODE_ENERGY_COST = 0.001;
 let SWIMMER_NODE_ENERGY_COST = 0.1;
 let PHOTOSYNTHETIC_NODE_ENERGY_COST = 0.1;
+let GRABBING_NODE_ENERGY_COST = 0.25;
 let PHOTOSYNTHESIS_EFFICIENCY = 100.0;
 
 
@@ -177,10 +178,11 @@ const NEURAL_OUTPUTS_PER_EATER = 2;
 const NEURAL_OUTPUTS_PER_NEURON_EFFECTOR = 0;
 const NEURAL_OUTPUTS_PER_EMITTER = 8;
 const NEURAL_OUTPUTS_PER_SWIMMER = 6;
+const NEURAL_OUTPUTS_PER_GRABBER_TOGGLE = 2;
 
 const DEFAULT_HIDDEN_LAYER_SIZE_MIN = 5;
 const DEFAULT_HIDDEN_LAYER_SIZE_MAX = 30;
-const MAX_NEURAL_FORCE_COMPONENT = 1.0;
+const MAX_SWIMMER_OUTPUT_MAGNITUDE = 1.0;
 const MAX_NEURAL_EMISSION_PULL_STRENGTH = 1.0;
 
 // --- RL Training Constants ---
@@ -220,6 +222,7 @@ function handleExportConfig() {
         eaterNodeCost: EATER_NODE_ENERGY_COST,
         predatorNodeCost: PREDATOR_NODE_ENERGY_COST,
         swimmerNodeCost: SWIMMER_NODE_ENERGY_COST,
+        grabbingNodeCost: GRABBING_NODE_ENERGY_COST,
         baseMaxCreatureEnergy: BASE_MAX_CREATURE_ENERGY,
         energyPerMassPointBonus: ENERGY_PER_MASS_POINT_BONUS,
         basePointsForMaxEnergyCalc: BASE_POINTS_FOR_MAX_ENERGY_CALC,
@@ -314,6 +317,7 @@ function applyImportedConfig(config) {
     if (config.eaterNodeCost !== undefined) EATER_NODE_ENERGY_COST = config.eaterNodeCost;
     if (config.predatorNodeCost !== undefined) PREDATOR_NODE_ENERGY_COST = config.predatorNodeCost;
     if (config.swimmerNodeCost !== undefined) SWIMMER_NODE_ENERGY_COST = config.swimmerNodeCost;
+    if (config.grabbingNodeCost !== undefined) GRABBING_NODE_ENERGY_COST = config.grabbingNodeCost;
     if (config.baseMaxCreatureEnergy !== undefined) BASE_MAX_CREATURE_ENERGY = config.baseMaxCreatureEnergy;
     if (config.energyPerMassPointBonus !== undefined) ENERGY_PER_MASS_POINT_BONUS = config.energyPerMassPointBonus;
     if (config.basePointsForMaxEnergyCalc !== undefined) BASE_POINTS_FOR_MAX_ENERGY_CALC = config.basePointsForMaxEnergyCalc;
@@ -354,6 +358,7 @@ function applyImportedConfig(config) {
     neuronNodeCostSlider.value = NEURON_NODE_ENERGY_COST;
     eaterNodeCostSlider.value = EATER_NODE_ENERGY_COST;
     predatorNodeCostSlider.value = PREDATOR_NODE_ENERGY_COST;
+    swimmerNodeCostSlider.value = SWIMMER_NODE_ENERGY_COST;
     photosyntheticNodeCostSlider.value = PHOTOSYNTHETIC_NODE_ENERGY_COST;
     photosynthesisEfficiencySlider.value = PHOTOSYNTHESIS_EFFICIENCY;
     reproductionCooldownSlider.value = REPRODUCTION_COOLDOWN_TICKS;
@@ -417,3 +422,16 @@ function applyImportedConfig(config) {
 
     console.log("Applied imported config. Reset population if needed for full effect on creatures.");
 } 
+
+// Subgraph Translocation Mutation (New - Complex)
+const SUBGRAPH_TRANSLOCATION_CHANCE = 0.005;    // Chance a subgraph is moved
+const MIN_SUBGRAPH_SIZE_FOR_TRANSLOCATION = 3;  // Min points in subgraph
+const MAX_SUBGRAPH_SIZE_FOR_TRANSLOCATION = 8;  // Max points in subgraph
+
+// Symmetrical Subgraph Duplication along an Edge (New - Complex)
+const SYMMETRIC_SUBGRAPH_DUPLICATION_CHANCE = 0.01; // Chance for this type of duplication
+const MIN_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP = 3;    // Min points in the *initial* subgraph (needs at least 1 edge + 1 other point)
+const MAX_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP = 7;    // Max points in the *initial* subgraph
+
+// Dynamic Max Energy per Creature (New)
+// ... existing code ... 

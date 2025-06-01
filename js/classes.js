@@ -29,15 +29,16 @@ class MassPoint {
         this.dyeColor = [0,0,0]; // Still needed for Emitter type
         this.neuronData = null;
         this.currentExertionLevel = 0; // New: For dynamic energy costs
+        this.isGrabbing = false; // New: For NN-controlled grabbing state
     }
     applyForce(f) { this.force = this.force.add(f); }
 
-    get isFixed() { // Getter for convenience, based on movementType
-        return this.movementType === MovementType.FIXED;
+    get isFixed() { // Getter for convenience, based on movementType OR if grabbing
+        return this.movementType === MovementType.FIXED || this.isGrabbing;
     }
 
     update(dt) {
-        if (this.isFixed || this.invMass === 0) { // Use getter
+        if (this.isFixed || this.invMass === 0) { // isFixed getter now includes isGrabbing
             this.force = new Vec2();
             return;
         }
@@ -625,6 +626,220 @@ class SoftBody {
                 }
             }
 
+            // Subgraph Translocation Mutation (EXPERIMENTAL AND SIMPLIFIED)
+            if (Math.random() < SUBGRAPH_TRANSLOCATION_CHANCE && this.massPoints.length > MIN_SUBGRAPH_SIZE_FOR_TRANSLOCATION + 1) { // Ensure enough points for a subgraph and a remaining body
+                let attempts = 0;
+                let success = false;
+                while (attempts < 5 && !success) { // Try a few times to find a suitable subgraph
+                    attempts++;
+
+                    const subgraphPoints = [];
+                    const subgraphInternalSprings = []; // Springs entirely within the subgraph
+                    const boundarySprings = [];       // Springs connecting subgraph to rest of body
+                    const mainBodyPoints = new Set(this.massPoints); // Assume all points are main body initially
+
+                    // 1. Select a random starting point for the subgraph
+                    const startPointIndex = Math.floor(Math.random() * this.massPoints.length);
+                    const startPoint = this.massPoints[startPointIndex];
+
+                    // 2. Grow the subgraph using BFS-like approach
+                    const queue = [startPoint];
+                    const visitedForSubgraph = new Set([startPoint]);
+                    subgraphPoints.push(startPoint);
+                    mainBodyPoints.delete(startPoint);
+
+                    let head = 0;
+                    while(head < queue.length && subgraphPoints.length < MAX_SUBGRAPH_SIZE_FOR_TRANSLOCATION) {
+                        const currentPoint = queue[head++];
+                        this.springs.forEach(spring => {
+                            let neighbor = null;
+                            if (spring.p1 === currentPoint && !visitedForSubgraph.has(spring.p2)) neighbor = spring.p2;
+                            else if (spring.p2 === currentPoint && !visitedForSubgraph.has(spring.p1)) neighbor = spring.p1;
+
+                            if (neighbor && subgraphPoints.length < MAX_SUBGRAPH_SIZE_FOR_TRANSLOCATION) {
+                                visitedForSubgraph.add(neighbor);
+                                subgraphPoints.push(neighbor);
+                                mainBodyPoints.delete(neighbor);
+                                queue.push(neighbor);
+                                subgraphInternalSprings.push(spring); // This spring is internal to the growing subgraph
+                            }
+                        });
+                    }
+                    
+                    if (subgraphPoints.length < MIN_SUBGRAPH_SIZE_FOR_TRANSLOCATION || mainBodyPoints.size === 0) {
+                        continue; // Subgraph too small or no main body left, try again
+                    }
+
+                    // Identify boundary springs (connecting subgraph to what's left)
+                    const tempSprings = [...this.springs]; // Work on a copy for modification
+                    this.springs = []; // Clear current springs, will rebuild
+
+                    tempSprings.forEach(spring => {
+                        const p1InSubgraph = subgraphPoints.includes(spring.p1);
+                        const p2InSubgraph = subgraphPoints.includes(spring.p2);
+                        if (p1InSubgraph && p2InSubgraph) {
+                            // This is an internal spring to the subgraph, keep it with subgraph points if we re-add them later.
+                            // For now, let's assume subgraphInternalSprings already captured these correctly during BFS growth.
+                            // This part needs careful thought: ensure internal springs are preserved and re-added correctly.
+                        } else if (p1InSubgraph || p2InSubgraph) {
+                            boundarySprings.push(spring); // These are the connections to cut
+                        } else {
+                            this.springs.push(spring); // Spring belongs to the main body
+                        }
+                    });
+                    
+                    // Simplified check: if there are no boundary springs, it means the subgraph was the whole body, or disconnected.
+                    if (boundarySprings.length === 0 && this.massPoints.length !== subgraphPoints.length) {
+                         this.springs = tempSprings; // Restore springs and try again
+                         continue;
+                    }
+
+                    // At this point, `this.springs` contains springs of the main body (potentially empty if subgraph was everything)
+                    // `subgraphPoints` has the points to move. We need to re-create their internal springs.
+                    // `boundarySprings` are severed.
+
+                    // --- Re-create internal springs for the subgraph --- (This is crucial and was missing) 
+                    const newSubgraphInternalSprings = [];
+                    for(let i = 0; i < subgraphPoints.length; i++){
+                        for(let j = i + 1; j < subgraphPoints.length; j++){
+                            const pA = subgraphPoints[i];
+                            const pB = subgraphPoints[j];
+                            // Check if these two points were connected in the original body
+                            const originalConnectingSpring = parentBody.springs.find(s => 
+                                (s.p1 === pA && s.p2 === pB) || (s.p1 === pB && s.p2 === pA)
+                            ) || tempSprings.find(s => /* Check in tempSprings if not found in parentBody.springs, for robustness */
+                                (s.p1 === pA && s.p2 === pB) || (s.p1 === pB && s.p2 === pA)
+                            );
+
+                            if(originalConnectingSpring){
+                                newSubgraphInternalSprings.push(new Spring(pA, pB, originalConnectingSpring.stiffness, originalConnectingSpring.dampingFactor, originalConnectingSpring.restLength, originalConnectingSpring.isRigid));
+                            }
+                        }
+                    }
+
+                    // 3. Select new attachment point on the (remaining) main body
+                    if (mainBodyPoints.size === 0) { // Should have been caught earlier, but double check
+                        this.springs = tempSprings; // Restore
+                        this.massPoints = [...mainBodyPoints, ...subgraphPoints]; // Restore points if they were conceptually removed
+                        continue;
+                    }
+                    const mainBodyPointsArray = Array.from(mainBodyPoints);
+                    const newAnchorNode = mainBodyPointsArray[Math.floor(Math.random() * mainBodyPointsArray.length)];
+                    
+                    // 4. Offset and re-attach subgraph points (conceptual, positions are already global)
+                    // For simplicity, connect the original startPoint of the subgraph to the newAnchorNode.
+                    const subgraphStartPointForConnection = subgraphPoints[0]; // The first point added to subgraph
+                    
+                    const dist = subgraphStartPointForConnection.pos.sub(newAnchorNode.pos).mag();
+                    let connectRestLength = dist * (1 + (Math.random() - 0.5) * 0.2);
+                    connectRestLength = Math.max(5, connectRestLength); // Min length for this new connection
+                    const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
+                    this.springs.push(new Spring(subgraphStartPointForConnection, newAnchorNode, this.stiffness, this.springDamping, connectRestLength, becomeRigid));
+
+                    // Add the subgraph's internal springs to the main list
+                    this.springs.push(...newSubgraphInternalSprings);
+                    
+                    console.log(`Subgraph translocation: ${subgraphPoints.length} points moved and reattached.`);
+                    success = true; // Mutation succeeded
+                    break; // Exit while loop
+                }
+            }
+
+            // Symmetrical Subgraph Duplication along an Edge (EXPERIMENTAL)
+            if (Math.random() < SYMMETRIC_SUBGRAPH_DUPLICATION_CHANCE && this.springs.length > 0 && this.massPoints.length >= MIN_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP) {
+                let attempts = 0;
+                let duplicationDone = false;
+                while (attempts < 5 && !duplicationDone) {
+                    attempts++;
+
+                    // 1. Select a random existing spring to be the axis
+                    const axisSpringIndex = Math.floor(Math.random() * this.springs.length);
+                    const axisSpring = this.springs[axisSpringIndex];
+                    const axisP1 = axisSpring.p1;
+                    const axisP2 = axisSpring.p2;
+
+                    // 2. Identify a "branch" connected to axisP2 (excluding axisP1)
+                    const branchPoints = [];
+                    const pointToNewPointMap = new Map();
+                    const springsForNewCollection = []; // To temporarily hold springs related to the branch & new duplicate
+
+                    const q = [];
+                    const visitedInBranch = new Set([axisP1, axisP2]); // Don't traverse back along axis or re-add axis points to branch
+
+                    // Find direct neighbors of axisP2 (excluding axisP1)
+                    this.springs.forEach(s => {
+                        if (s === axisSpring) return;
+                        if (s.p1 === axisP2 && !visitedInBranch.has(s.p2)) { q.push({point: s.p2, parentInBranch: axisP2, originalSpring: s}); visitedInBranch.add(s.p2); }
+                        else if (s.p2 === axisP2 && !visitedInBranch.has(s.p1)) { q.push({point: s.p1, parentInBranch: axisP2, originalSpring: s}); visitedInBranch.add(s.p1); }
+                    });
+
+                    let head = 0;
+                    while(head < q.length && branchPoints.length < (MAX_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP - 2)) {
+                        const currentItem = q[head++];
+                        const currentPoint = currentItem.point;
+                        branchPoints.push(currentPoint);
+                        // For this simpler version, we only duplicate a small branch directly off axisP2
+                        // More complex traversal to get a larger subgraph connected to axisP2 could be added here
+                    }
+
+                    if (branchPoints.length > 0) {
+                        // 3. Duplicate the branch points and their internal connections, attaching to axisP1
+                        const duplicatedBranchRootOriginal = branchPoints[0]; // The point in branch that was connected to axisP2
+                        
+                        branchPoints.forEach(originalBranchPoint => {
+                            const vecP2ToOriginal = originalBranchPoint.pos.sub(axisP2.pos);
+                            // New position: reflect across axisP1 relative to axisP2, or simply translate for now
+                            const newPos = axisP1.pos.add(vecP2ToOriginal); // Simple translation relative to axisP1
+                            
+                            const newDupPoint = new MassPoint(newPos.x, newPos.y, originalBranchPoint.mass, originalBranchPoint.radius);
+                            newDupPoint.nodeType = originalBranchPoint.nodeType; // Consider mutating these
+                            newDupPoint.movementType = originalBranchPoint.movementType;
+                            newDupPoint.dyeColor = [...originalBranchPoint.dyeColor];
+                            if (originalBranchPoint.neuronData) {
+                                newDupPoint.neuronData = JSON.parse(JSON.stringify(originalBranchPoint.neuronData));
+                                newDupPoint.neuronData.isBrain = false;
+                            }
+                            this.massPoints.push(newDupPoint);
+                            pointToNewPointMap.set(originalBranchPoint, newDupPoint);
+                        });
+
+                        // Duplicate internal springs within the branch
+                        branchPoints.forEach(bp1 => {
+                            branchPoints.forEach(bp2 => {
+                                if (this.massPoints.indexOf(bp1) < this.massPoints.indexOf(bp2)) { // Avoid double checking and self-loops
+                                    const originalBranchSpring = this.springs.find(s => 
+                                        (s.p1 === bp1 && s.p2 === bp2) || (s.p1 === bp2 && s.p2 === bp1)
+                                    );
+                                    if (originalBranchSpring) {
+                                        const newDupP1 = pointToNewPointMap.get(bp1);
+                                        const newDupP2 = pointToNewPointMap.get(bp2);
+                                        if (newDupP1 && newDupP2) {
+                                            this.springs.push(new Spring(newDupP1, newDupP2, 
+                                                originalBranchSpring.isRigid ? RIGID_SPRING_STIFFNESS : this.stiffness, 
+                                                originalBranchSpring.isRigid ? RIGID_SPRING_DAMPING : this.springDamping, 
+                                                originalBranchSpring.restLength, originalBranchSpring.isRigid));
+                                        }
+                                    }
+                                }
+                            });
+                        });
+                        
+                        // Connect the root of the duplicated branch to axisP1
+                        const duplicatedBranchRootNew = pointToNewPointMap.get(duplicatedBranchRootOriginal);
+                        if (duplicatedBranchRootNew) {
+                             const dist = duplicatedBranchRootNew.pos.sub(axisP1.pos).mag();
+                             let connectRestLength = dist * (1 + (Math.random() - 0.5) * 0.2);
+                             connectRestLength = Math.max(1, connectRestLength);
+                             const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING; // Or inherit from axisSpring?
+                             this.springs.push(new Spring(axisP1, duplicatedBranchRootNew, this.stiffness, this.springDamping, connectRestLength, becomeRigid));
+                        }
+
+                        console.log("Symmetric subgraph duplication occurred.");
+                        duplicationDone = true;
+                    }
+                }
+            }
+
         } else { // Initial generation - use old shape types
             const basePointDist = 5 + Math.random() * 3; 
             if (this.shapeType === 0) { // Grid
@@ -821,19 +1036,33 @@ class SoftBody {
                     if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_SWIMMER) {
                         const detailsForThisSwimmer = [];
                         let localPairIdx = 0;
-                        const forceXRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                        detailsForThisSwimmer.push(forceXRes.detail);
-                        const forceYRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                        detailsForThisSwimmer.push(forceYRes.detail);
-                        const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                        detailsForThisSwimmer.push(exertionRes.detail);
-                        point.currentExertionLevel = sigmoid(exertionRes.value);
-                        const appliedForceX = Math.tanh(forceXRes.value) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength * point.currentExertionLevel;
-                        const appliedForceY = Math.tanh(forceYRes.value) * MAX_NEURAL_FORCE_COMPONENT * this.emitterStrength * point.currentExertionLevel;
-                        point.applyForce(new Vec2(appliedForceX / dt, appliedForceY / dt));
+
+                        // Magnitude (1 pair = 2 outputs)
+                        const magnitudeResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                        detailsForThisSwimmer.push(magnitudeResult.detail);
+                        const rawMagnitude = magnitudeResult.value;
+
+                        // Direction/Angle (1 pair = 2 outputs)
+                        const directionResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                        detailsForThisSwimmer.push(directionResult.detail);
+                        const angle = directionResult.value; // NN learns to output radians directly, or could be scaled e.g. * 2 * Math.PI
+
+                        // Swimmer Exertion (1 pair = 2 outputs)
+                        const exertionResultSwimmer = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                        detailsForThisSwimmer.push(exertionResultSwimmer.detail);
+                        point.currentExertionLevel = sigmoid(exertionResultSwimmer.value);
+
+                        // Apply exertion-scaled force based on magnitude and direction
+                        const finalMagnitude = sigmoid(rawMagnitude) * MAX_SWIMMER_OUTPUT_MAGNITUDE * this.emitterStrength * point.currentExertionLevel;
+                        const appliedForceX = finalMagnitude * Math.cos(angle);
+                        const appliedForceY = finalMagnitude * Math.sin(angle);
+                        
+                        point.applyForce(new Vec2(appliedForceX / dt, appliedForceY / dt)); 
                         nd.currentFrameActionDetails.push(...detailsForThisSwimmer);
                         currentRawOutputIndex += NEURAL_OUTPUTS_PER_SWIMMER;
-                    } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_SWIMMER; }
+                    } else {
+                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_SWIMMER; 
+                    }
                 }
             });
 
@@ -864,6 +1093,23 @@ class SoftBody {
                         nd.currentFrameActionDetails.push(...details);
                         currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR;
                     } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR; }
+                }
+            });
+
+            // Process Grabber Toggles for each point
+            this.massPoints.forEach(point => {
+                const outputStartRawIdx = currentRawOutputIndex;
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) {
+                    const detailsForThisGrab = [];
+                    const grabToggleResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
+                    detailsForThisGrab.push(grabToggleResult.detail);
+                    point.isGrabbing = sigmoid(grabToggleResult.value) > 0.5; // Threshold to boolean
+                    
+                    nd.currentFrameActionDetails.push(...detailsForThisGrab);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
+                } else {
+                    // Ensure index advances even if there aren't enough rawOutputs for this point's grab action.
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_GRABBER_TOGGLE; 
                 }
             });
             // --- End of Apply Neural Outputs ---
@@ -971,6 +1217,10 @@ class SoftBody {
                     currentFrameEnergyGain += energyGainThisPoint; // Accumulate gain
                     // REMOVED: this.creatureEnergy = Math.min(MAX_CREATURE_ENERGY, this.creatureEnergy + energyGain);
                 }
+            }
+            // Add energy cost for grabbing state
+            if (point.isGrabbing) { // Check for each point, removed isDesignatedGrabber
+                currentFrameEnergyCost += GRABBING_NODE_ENERGY_COST * costMultiplier; 
             }
         }
         
@@ -1410,17 +1660,9 @@ class SoftBody {
     initializeBrain() {
         let brainNode = null;
         for (const point of this.massPoints) {
-            if (point.nodeType === NodeType.NEURON) {
-                if (!brainNode) { // Designate first neuron as brain
-                    brainNode = point;
-                    if (!brainNode.neuronData) { // Should have been initialized in createShape
-                        brainNode.neuronData = { isBrain: false, hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN }; 
-                    }
-                    brainNode.neuronData.isBrain = true;
-                } else {
-                    // If other neuron points exist, ensure they are not marked as brain
-                    if (point.neuronData) point.neuronData.isBrain = false;
-                }
+            if (point.neuronData && point.neuronData.isBrain) {
+                brainNode = point;
+                break;
             }
         }
 
@@ -1432,22 +1674,20 @@ class SoftBody {
             let numSwimmerPoints = 0;
             let numEaterPoints = 0;
             let numPredatorPoints = 0;
+            let numPotentialGrabberPoints = this.massPoints.length; // Now, all points can potentially grab
 
             this.massPoints.forEach(p => {
-                if (p.nodeType === NodeType.EMITTER) {
-                    numEmitterPoints++;
-                } else if (p.nodeType === NodeType.SWIMMER) {
-                    numSwimmerPoints++;
-                } else if (p.nodeType === NodeType.EATER) { 
-                    numEaterPoints++;
-                } else if (p.nodeType === NodeType.PREDATOR) { 
-                    numPredatorPoints++;
-                }
+                if (p.nodeType === NodeType.EMITTER) numEmitterPoints++;
+                else if (p.nodeType === NodeType.SWIMMER) numSwimmerPoints++;
+                else if (p.nodeType === NodeType.EATER) numEaterPoints++;
+                else if (p.nodeType === NodeType.PREDATOR) numPredatorPoints++;
             });
+
             nd.outputVectorSize = (numEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
                                   (numSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
                                   (numEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
-                                  (numPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR);
+                                  (numPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
+                                  (numPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE);
 
             // Initialize weights and biases
             if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < DEFAULT_HIDDEN_LAYER_SIZE_MIN) {

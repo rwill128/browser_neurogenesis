@@ -325,7 +325,7 @@ function updateInfoPanel() {
                 content += `<p><strong>State:</strong> Normal</p>`;
             }
 
-            if (point.isDesignatedEye) {
+            if (point.nodeType === NodeType.EYE) {
                 content += `<h6>Eye Sensor Data:</h6>`;
                 content += `<p><strong>Sees Particle:</strong> ${point.seesParticle}</p>`;
                 if (point.seesParticle) {

@@ -1,6 +1,8 @@
 let lastTime = 0;
 let deltaTime = 0;
 let animationFrameId = null;
+let statsUpdateCounter = 0; // New counter for throttling stats update
+const STATS_UPDATE_INTERVAL = 60; // Update stats approx every 60 frames (e.g., once per second at 60fps)
 
 // --- Main Initialization Sequence ---
 async function main() {
@@ -74,6 +76,14 @@ function gameLoop(timestamp) {
     }
 
     draw(); // Draw on every frame, regardless of pause state
+
+    // Update stats panel if open, but throttled
+    statsUpdateCounter++;
+    if (statsPanel && statsPanel.classList.contains('open') && statsUpdateCounter >= STATS_UPDATE_INTERVAL) {
+        updateStatsPanel();
+        statsUpdateCounter = 0;
+    }
+
     animationFrameId = requestAnimationFrame(gameLoop); // Keep the loop going
 }
 

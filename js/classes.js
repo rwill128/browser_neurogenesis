@@ -1085,31 +1085,32 @@ class SoftBody {
             const nd = brainNode.neuronData;
             const inputVector = [];
 
-            // --- Eye Logic (before NN input gathering) ---
-            if (this.primaryEyePoint) {
-                this.primaryEyePoint.seesParticle = false; // Reset first
-                this.primaryEyePoint.nearestParticleMagnitude = 0;
-                this.primaryEyePoint.nearestParticleDirection = 0;
-                let closestDistSq = EYE_DETECTION_RADIUS * EYE_DETECTION_RADIUS;
-                let nearestParticleFound = null;
+            // --- Eye Logic (Run for ALL Eye nodes to update their individual states) ---
+            this.massPoints.forEach(point => {
+                if (point.nodeType === NodeType.EYE) {
+                    point.seesParticle = false; // Reset first
+                    point.nearestParticleMagnitude = 0;
+                    point.nearestParticleDirection = 0;
+                    let closestDistSq = EYE_DETECTION_RADIUS * EYE_DETECTION_RADIUS;
+                    let nearestParticleFound = null;
 
-                // Consider using the spatial grid for optimizing particle search if performance becomes an issue
-                for (const particle of particles) { // `particles` is global from simulation.js
-                    if (particle.life <= 0) continue;
-                    const distSq = this.primaryEyePoint.pos.sub(particle.pos).magSq();
-                    if (distSq < closestDistSq) {
-                        closestDistSq = distSq;
-                        nearestParticleFound = particle;
+                    for (const particle of particles) { 
+                        if (particle.life <= 0) continue;
+                        const distSq = point.pos.sub(particle.pos).magSq();
+                        if (distSq < closestDistSq) {
+                            closestDistSq = distSq;
+                            nearestParticleFound = particle;
+                        }
+                    }
+
+                    if (nearestParticleFound) {
+                        point.seesParticle = true;
+                        const vecToParticle = nearestParticleFound.pos.sub(point.pos);
+                        point.nearestParticleMagnitude = vecToParticle.mag() / EYE_DETECTION_RADIUS; 
+                        point.nearestParticleDirection = Math.atan2(vecToParticle.y, vecToParticle.x);
                     }
                 }
-
-                if (nearestParticleFound) {
-                    this.primaryEyePoint.seesParticle = true;
-                    const vecToParticle = nearestParticleFound.pos.sub(this.primaryEyePoint.pos);
-                    this.primaryEyePoint.nearestParticleMagnitude = vecToParticle.mag() / EYE_DETECTION_RADIUS; // Normalize by detection radius
-                    this.primaryEyePoint.nearestParticleDirection = Math.atan2(vecToParticle.y, vecToParticle.x);
-                }
-            }
+            });
             // --- End of Eye Logic ---
 
             // 1. Gather Inputs for NN
@@ -1141,12 +1142,12 @@ class SoftBody {
                 inputVector.push(0.5);
             }
 
-            // Add Eye Inputs (if eye exists)
-            if (this.primaryEyePoint) {
+            // Add Eye Inputs (if a primary eye exists and is designated)
+            if (this.primaryEyePoint) { // Still using primaryEyePoint for NN input
                 inputVector.push(this.primaryEyePoint.seesParticle ? 1 : 0);
-                inputVector.push(this.primaryEyePoint.nearestParticleMagnitude); // Already normalized or 0
-                inputVector.push((this.primaryEyePoint.nearestParticleDirection / (Math.PI * 2)) + 0.5); // Normalize angle to ~0-1
-            } else if (NEURAL_INPUT_SIZE_PER_EYE > 0) { // Ensure consistent input vector size if no eye
+                inputVector.push(this.primaryEyePoint.nearestParticleMagnitude); 
+                inputVector.push((this.primaryEyePoint.nearestParticleDirection / (Math.PI * 2)) + 0.5); 
+            } else if (NEURAL_INPUTS_PER_EYE > 0) { // Ensure consistent input vector size if no eye
                 for(let i=0; i < NEURAL_INPUTS_PER_EYE; i++) inputVector.push(0); // Default/neutral values
             }
             

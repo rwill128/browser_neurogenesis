@@ -21,6 +21,7 @@ const toggleStatsPanelButton = document.getElementById('toggleStatsPanelButton')
 const statsPanel = document.getElementById('statsPanel');
 const closeStatsPanelButton = document.getElementById('closeStatsPanelButton');
 const nodeTypeStatsDiv = document.getElementById('nodeTypeStats');
+const copyStatsPanelButton = document.getElementById('copyStatsPanelButton');
 
 const creaturePopulationFloorSlider = document.getElementById('creaturePopulationFloorSlider');
 const creaturePopulationFloorValueSpan = document.getElementById('creaturePopulationFloorValueSpan');
@@ -517,6 +518,38 @@ toggleStatsPanelButton.onclick = function() {
 
 closeStatsPanelButton.onclick = function() {
     statsPanel.classList.remove('open');
+}
+
+copyStatsPanelButton.onclick = function() {
+    const nodeStatsDiv = document.getElementById('nodeTypeStats');
+    const mutationStatsDiv = document.getElementById('mutationTypeStats');
+    let textToCopy = "Simulation Statistics\n----------------------\n\n";
+
+    if (nodeStatsDiv) {
+        const children = nodeStatsDiv.querySelectorAll('p');
+        children.forEach(child => {
+            textToCopy += child.textContent.trim() + "\n";
+        });
+    }
+    textToCopy += "\n"; // Add a separator
+
+    if (mutationStatsDiv) {
+        const children = mutationStatsDiv.querySelectorAll('p');
+        children.forEach(child => {
+            textToCopy += child.textContent.trim() + "\n";
+        });
+    }
+
+    navigator.clipboard.writeText(textToCopy.trim()).then(() => {
+        const originalText = copyStatsPanelButton.textContent;
+        copyStatsPanelButton.textContent = "Copied!";
+        setTimeout(() => {
+            copyStatsPanelButton.textContent = originalText;
+        }, 1500);
+    }).catch(err => {
+        console.error('Failed to copy stats text: ', err);
+        showMessageModal("Failed to copy stats. See console for details.");
+    });
 }
 
 function toggleScreensaverMode(forceOff = false) {

@@ -314,4 +314,20 @@ body.css-screensaver-active #canvasContainer {
 #nodeTypeStats p {
     margin: 5px 0;
     font-size: 0.85em;
+}
+
+#statsPanel #copyStatsPanelButton {
+    position: absolute;
+    top: 10px;
+    right: 45px; /* Positioned to the left of its close button */
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 3px 7px;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+#statsPanel #copyStatsPanelButton:hover {
+    background-color: #0056b3;
 } 

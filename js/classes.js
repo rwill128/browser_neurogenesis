@@ -486,7 +486,8 @@ class SoftBody {
 
                         const midX = (p1.pos.x + p2.pos.x) / 2;
                         const midY = (p1.pos.y + p2.pos.y) / 2;
-                        const newPointRadius = ((p1.radius || baseRadius) + (p2.radius || baseRadius)) / 2 * (0.8 + Math.random() * 0.4);
+                        const defaultRadiusForNewSubdivisionPoint = 1.5; // Define a default
+                        const newPointRadius = ((p1.radius || defaultRadiusForNewSubdivisionPoint) + (p2.radius || defaultRadiusForNewSubdivisionPoint)) / 2 * (0.8 + Math.random() * 0.4);
                         const newPointMass = ((p1.mass || 0.5) + (p2.mass || 0.5)) / 2 * (0.8 + Math.random() * 0.4);
                         
                         const availableNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER];
@@ -544,6 +545,85 @@ class SoftBody {
                 }
             }
 
+            // Segment Duplication Mutation (New)
+            if (Math.random() < SEGMENT_DUPLICATION_CHANCE && this.massPoints.length > 0) {
+                const potentialSegments = this.findLinearSegments(MIN_SEGMENT_LENGTH_FOR_DUPLICATION, MAX_SEGMENT_LENGTH_FOR_DUPLICATION);
+                if (potentialSegments.length > 0) {
+                    const segmentToDuplicate = potentialSegments[Math.floor(Math.random() * potentialSegments.length)];
+                    const newPoints = [];
+                    const pointMap = new Map(); // Maps original point to new point
+
+                    // Duplicate points
+                    segmentToDuplicate.forEach(originalPoint => {
+                        const newX = originalPoint.pos.x + (Math.random() - 0.5) * 10; // Slight offset for new segment
+                        const newY = originalPoint.pos.y + (Math.random() - 0.5) * 10;
+                        const newPoint = new MassPoint(newX, newY, originalPoint.mass, originalPoint.radius);
+                        newPoint.nodeType = originalPoint.nodeType; // Inherit type
+                        newPoint.movementType = originalPoint.movementType; // Inherit movement
+                        newPoint.dyeColor = [...originalPoint.dyeColor]; // Inherit color
+                        if (originalPoint.neuronData) { // Deep copy neuron data if exists
+                            newPoint.neuronData = JSON.parse(JSON.stringify(originalPoint.neuronData));
+                            newPoint.neuronData.isBrain = false; // Duplicated neurons are not the brain
+                        }
+                        this.massPoints.push(newPoint);
+                        newPoints.push(newPoint);
+                        pointMap.set(originalPoint, newPoint);
+                    });
+
+                    // Duplicate internal springs of the segment
+                    for (let k = 0; k < segmentToDuplicate.length - 1; k++) {
+                        const originalP1 = segmentToDuplicate[k];
+                        const originalP2 = segmentToDuplicate[k+1];
+                        // Find the original spring that connected these two points
+                        const originalInternalSpring = parentBody.springs.find(s => 
+                            (s.p1 === originalP1 && s.p2 === originalP2) || (s.p1 === originalP2 && s.p2 === originalP1)
+                        );
+                        
+                        const newP1 = pointMap.get(originalP1);
+                        const newP2 = pointMap.get(originalP2);
+
+                        if (newP1 && newP2) {
+                            let restL = newP1.pos.sub(newP2.pos).mag();
+                            let isRigid = Math.random() < CHANCE_FOR_RIGID_SPRING; // New springs get their own chance
+                            let_stiff = this.stiffness;
+                            let_damp = this.springDamping;
+
+                            if (originalInternalSpring) { // If we found the template spring
+                                restL = originalInternalSpring.restLength * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE);
+                                isRigid = (originalInternalSpring.isRigid && Math.random() > MUTATION_CHANCE_BOOL) || (!originalInternalSpring.isRigid && Math.random() < CHANCE_FOR_RIGID_SPRING);
+                                if(isRigid){
+                                    _stiff = RIGID_SPRING_STIFFNESS;
+                                    _damp = RIGID_SPRING_DAMPING;
+                                }
+                            }
+                            restL = Math.max(1, restL);
+                            this.springs.push(new Spring(newP1, newP2, _stiff, _damp, restL, isRigid));
+                        }
+                    }
+
+                    // Connect the new segment (simple append for now)
+                    // Attach the first point of the new segment to the last point of the original segment
+                    if (newPoints.length > 0 && segmentToDuplicate.length > 0) {
+                        const attachToOriginalPoint = segmentToDuplicate[segmentToDuplicate.length - 1]; // Last point of original segment
+                        const attachNewPoint = newPoints[0]; // First point of new segment
+                        
+                        // Check if already connected (should not be, but good practice)
+                        let alreadyConnected = false;
+                        for (const s of this.springs) {
+                            if ((s.p1 === attachToOriginalPoint && s.p2 === attachNewPoint) || (s.p1 === attachNewPoint && s.p2 === attachToOriginalPoint)) {
+                                alreadyConnected = true; break;
+                            }
+                        }
+                        if (!alreadyConnected) {
+                            const dist = attachToOriginalPoint.pos.sub(attachNewPoint.pos).mag();
+                            let connectRestLength = dist * (1 + (Math.random() - 0.5) * 2 * NEW_SPRING_REST_LENGTH_VARIATION);
+                            connectRestLength = Math.max(1, connectRestLength);
+                            const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
+                            this.springs.push(new Spring(attachToOriginalPoint, attachNewPoint, this.stiffness, this.springDamping, connectRestLength, becomeRigid));
+                        }
+                    }
+                }
+            }
 
         } else { // Initial generation - use old shape types
             const basePointDist = 5 + Math.random() * 3; 
@@ -1558,6 +1638,64 @@ class SoftBody {
         if (this.isUnstable) return;
         for (let spring of this.springs) spring.draw(ctx);
         for (let point of this.massPoints) point.draw(ctx);
+    }
+
+    // Helper function to find linear segments of points
+    findLinearSegments(minLength, maxLength) {
+        const segments = [];
+        if (this.massPoints.length < minLength) return segments;
+
+        const adjacency = new Map(); // point_index -> [neighbor_indices]
+        this.massPoints.forEach((_, i) => adjacency.set(i, []));
+
+        this.springs.forEach(spring => {
+            const p1Index = this.massPoints.indexOf(spring.p1);
+            const p2Index = this.massPoints.indexOf(spring.p2);
+            if (p1Index !== -1 && p2Index !== -1) {
+                adjacency.get(p1Index).push(p2Index);
+                adjacency.get(p2Index).push(p1Index);
+            }
+        });
+
+        for (let i = 0; i < this.massPoints.length; i++) {
+            // Try to start a segment from each point
+            // Explore paths using DFS/BFS to find linear chains
+            const stack = [[i, [i]]]; // [current_point_index, path_so_far_indices]
+            const visitedInPath = new Set(); // To avoid cycles in the current path being built
+
+            while (stack.length > 0) {
+                const [currentIndex, currentPathIndices] = stack.pop();
+                visitedInPath.add(currentIndex);
+
+                if (currentPathIndices.length >= minLength) {
+                    segments.push(currentPathIndices.map(idx => this.massPoints[idx]));
+                }
+
+                if (currentPathIndices.length < maxLength) {
+                    const neighbors = adjacency.get(currentIndex) || [];
+                    for (const neighborIndex of neighbors) {
+                        if (!currentPathIndices.includes(neighborIndex)) { // Avoid immediate backtracking and simple cycles
+                             // Check if adding this neighbor would still constitute a "linear-enough" extension.
+                             // For this version, we are more permissive: any sequence of connected points.
+                            stack.push([neighborIndex, [...currentPathIndices, neighborIndex]]);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Post-process to remove duplicate or fully contained sub-segments if desired, but for now, allow overlaps.
+        // Ensure segments are unique point sequences if multiple paths lead to same point sequence.
+        const uniqueSegments = [];
+        const segmentSignatures = new Set();
+        for (const seg of segments) {
+            const signature = seg.map(p => this.massPoints.indexOf(p)).sort((a,b)=>a-b).join('-'); // Create a unique signature
+            if(!segmentSignatures.has(signature)){
+                segmentSignatures.add(signature);
+                uniqueSegments.push(seg);
+            }
+        }
+        return uniqueSegments;
     }
 }
 

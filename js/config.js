@@ -42,6 +42,12 @@ const BODY_SCALE_MUTATION_MAGNITUDE = 0.1;   // Max +/- % change (e.g., 0.1 for 
 // Spring Subdivision Mutation (New)
 const SPRING_SUBDIVISION_MUTATION_CHANCE = 0.02; // Chance an existing spring is subdivided
 
+// Segment Duplication Mutation (New)
+const SEGMENT_DUPLICATION_CHANCE = 0.01;       // Chance a linear segment is duplicated
+const MIN_SEGMENT_LENGTH_FOR_DUPLICATION = 3;  // Minimum number of points in a segment to be considered for duplication
+const MAX_SEGMENT_LENGTH_FOR_DUPLICATION = 7;  // Maximum number of points in a segment
+const SEGMENT_DUPLICATION_OFFSET_SCALE = 1.0;  // How far to offset the duplicated segment (e.g., 1.0 = its own length)
+
 // Original Radius Multipliers (will become base values)
 const EATING_RADIUS_MULTIPLIER_BASE = 2.0;
 const PREDATION_RADIUS_MULTIPLIER_BASE = 1.5;

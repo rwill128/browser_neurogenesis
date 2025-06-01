@@ -399,10 +399,20 @@ class SoftBody {
         // let pointBonus = Math.max(0, this.massPoints.length - BASE_POINTS_FOR_MAX_ENERGY_CALC) * ENERGY_PER_MASS_POINT_BONUS; // Old formula
         // this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY + pointBonus; // Old formula
         
-        let calculatedMaxEnergy = this.massPoints.length * ENERGY_PER_MASS_POINT_BONUS;
-        this.currentMaxEnergy = Math.max(BASE_MAX_CREATURE_ENERGY, calculatedMaxEnergy); // Ensure it's at least BASE_MAX_CREATURE_ENERGY
-        if (this.massPoints.length === 0) { // Handle case of no points, though should not happen for live creatures
-            this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY; 
+        // let calculatedMaxEnergy = this.massPoints.length * ENERGY_PER_MASS_POINT_BONUS;
+        // this.currentMaxEnergy = Math.max(BASE_MAX_CREATURE_ENERGY, calculatedMaxEnergy); // Ensure it's at least BASE_MAX_CREATURE_ENERGY
+        // if (this.massPoints.length === 0) { // Handle case of no points, though should not happen for live creatures
+        //     this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY; 
+        // }
+
+        if (this.massPoints.length === 0) {
+            this.currentMaxEnergy = 0; 
+        } else {
+            this.currentMaxEnergy = this.massPoints.length * ENERGY_PER_MASS_POINT_BONUS;
+            // Ensure currentMaxEnergy is at least 1 if points exist and ENERGY_PER_MASS_POINT_BONUS might be zero or very small.
+            if (this.currentMaxEnergy < 1) { 
+                this.currentMaxEnergy = 1;
+            }
         }
     }
 

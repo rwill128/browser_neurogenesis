@@ -306,6 +306,27 @@ function updateInfoPanel() {
         document.getElementById('infoBodyTicksBirth').textContent = selectedInspectBody.ticksSinceBirth;
         document.getElementById('infoBodyCanReproduce').textContent = selectedInspectBody.canReproduce;
 
+        // New: Display Default Activation Pattern Info
+        let patternName = "Unknown";
+        if (selectedInspectBody.defaultActivationPattern === ActivationPatternType.FLAT) patternName = "Flat";
+        else if (selectedInspectBody.defaultActivationPattern === ActivationPatternType.SINE) patternName = "Sine Wave";
+        else if (selectedInspectBody.defaultActivationPattern === ActivationPatternType.PULSE) patternName = "Pulse";
+        let activationInfoHTML = `<div class="info-section"><h5>Default Activation Pattern</h5>`;
+        activationInfoHTML += `<p><strong>Pattern:</strong> ${patternName}</p>`;
+        activationInfoHTML += `<p><strong>Level/Amplitude:</strong> ${selectedInspectBody.defaultActivationLevel.toFixed(3)}</p>`;
+        activationInfoHTML += `<p><strong>Period (ticks):</strong> ${selectedInspectBody.defaultActivationPeriod.toFixed(0)}</p>`;
+        activationInfoHTML += `<p><strong>Phase Offset:</strong> ${selectedInspectBody.defaultActivationPhaseOffset.toFixed(1)}</p></div>`;
+        
+        // Temporarily find a place to inject this. Let's put it before allPointsInfoContainer
+        // This is a bit hacky; ideally, the infoPanel HTML would have a dedicated div for this.
+        const existingInfoSection = infoPanel.querySelector('.info-section'); // Get the first one
+        if (existingInfoSection) {
+            existingInfoSection.insertAdjacentHTML('afterend', activationInfoHTML);
+        } else {
+            infoPanel.insertAdjacentHTML('beforeend', activationInfoHTML); // Fallback
+        }
+        // End of new display logic
+
         allPointsInfoContainer.innerHTML = '<h5>All Mass Points</h5>';
         selectedInspectBody.massPoints.forEach((point, index) => {
             const pointEntryDiv = document.createElement('div');
@@ -384,6 +405,9 @@ function updateInfoPanel() {
         document.getElementById('infoBodyCurrentMaxEnergy').textContent = '-';
         document.getElementById('infoBodyTicksBirth').textContent = '-';
         document.getElementById('infoBodyCanReproduce').textContent = '-';
+        // Clear the temp activation info if we added it like this
+        const tempActivationDiv = infoPanel.querySelector("div > h5:contains('Default Activation Pattern')")?.parentElement;
+        if(tempActivationDiv && tempActivationDiv.parentNode === infoPanel) tempActivationDiv.remove();
         infoPanel.classList.remove('open');
     }
 }

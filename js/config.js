@@ -444,5 +444,18 @@ const MAX_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP = 7;    // Max points in the *initial*
 // Whole-Body Symmetrical Duplication along an Edge (New - Very Complex)
 const SYMMETRICAL_BODY_DUPLICATION_CHANCE = 0.002; // Very rare due to complexity and impact
 
+// Default Activation Pattern for Brainless/Non-NN Controlled Nodes (New)
+const ActivationPatternType = {
+    FLAT: 0,    // Constant exertion level
+    SINE: 1,    // Sinusoidal exertion (0 to Max)
+    PULSE: 2   // Periodic sharp pulse (0 or Max)
+};
+const ACTIVATION_PATTERN_MUTATION_CHANCE = 0.05;  // Chance to change pattern type or params
+const ACTIVATION_PARAM_MUTATION_MAGNITUDE = 0.2;  // Max +/- % change for level, period
+const DEFAULT_ACTIVATION_LEVEL_MIN = 0.1;
+const DEFAULT_ACTIVATION_LEVEL_MAX = 0.7;
+const DEFAULT_ACTIVATION_PERIOD_MIN_TICKS = 50;
+const DEFAULT_ACTIVATION_PERIOD_MAX_TICKS = 300;
+
 // Dynamic Max Energy per Creature (New)
 // ... existing code ... 

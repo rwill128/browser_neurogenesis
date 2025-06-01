@@ -456,6 +456,9 @@ const DEFAULT_SURVIVAL_REWARD_WEIGHT = 0.01; // Small constant reward for living
 const RLRewardStrategy_MUTATION_CHANCE = 0.05; // Chance to mutate reward strategy
 const PARTICLE_PROXIMITY_REWARD_SCALE = 10.0;  // Scales the (0-1) proximity magnitude
 
+// New constant for Grabber Gene Mutation
+const GRABBER_GENE_MUTATION_CHANCE = 0.03; // Chance for a point to gain/lose grabber ability
+
 // Default Activation Pattern for Brainless/Non-NN Controlled Nodes (New)
 const ActivationPatternType = {
     FLAT: 0,    // Constant exertion level

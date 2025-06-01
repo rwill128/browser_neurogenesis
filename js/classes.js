@@ -43,6 +43,7 @@ class MassPoint {
         this.currentExertionLevel = 0; // New: For dynamic energy costs
         this.isGrabbing = false; // New: For NN-controlled grabbing state
         this.isDesignatedEye = false; // New: To identify the creature's primary eye point
+        this.canBeGrabber = false; // New: Gene, false by default
         this.seesParticle = false;       // New: Eye state
         this.nearestParticleMagnitude = 0; // New: Eye state (distance)
         this.nearestParticleDirection = 0; // New: Eye state (angle)
@@ -453,6 +454,13 @@ class SoftBody {
                 offspringPoint.nodeType = nodeType;
                 offspringPoint.movementType = movementType; // Assign new movement type
                 offspringPoint.dyeColor = [...parentPoint.dyeColor]; // Inherit dye color
+                offspringPoint.canBeGrabber = parentPoint.canBeGrabber; // Inherit grabber gene
+
+                if (Math.random() < GRABBER_GENE_MUTATION_CHANCE) {
+                    offspringPoint.canBeGrabber = !offspringPoint.canBeGrabber;
+                    mutationStats.grabberGeneChange++;
+                }
+
                 if (Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER)) { // Mutate dye color
                     const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
                     offspringPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
@@ -502,6 +510,12 @@ class SoftBody {
                     newPoint.nodeType = newNodeType;
                     newPoint.movementType = newMovementType;
                     newPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                    if (Math.random() < GRABBER_GENE_MUTATION_CHANCE) { // Chance for new point to be a grabber
+                        newPoint.canBeGrabber = true;
+                        // Not counted in grabberGeneChange as it's an initial state, not a flip from parent
+                    } else {
+                        newPoint.canBeGrabber = false;
+                    }
                     
                     if (newNodeType === NodeType.NEURON) {
                         newPoint.neuronData = {
@@ -651,6 +665,11 @@ class SoftBody {
                         newMidPoint.movementType = newMovementType;
                         const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE]; 
                         newMidPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                        if (Math.random() < GRABBER_GENE_MUTATION_CHANCE) { // Chance for new subdivided point to be a grabber
+                            newMidPoint.canBeGrabber = true;
+                        } else {
+                            newMidPoint.canBeGrabber = false;
+                        }
                         if (newNodeType === NodeType.NEURON) {
                             newMidPoint.neuronData = {
                                 isBrain: false,
@@ -711,6 +730,7 @@ class SoftBody {
                         newPoint.nodeType = originalPoint.nodeType; // Inherit type
                         newPoint.movementType = originalPoint.movementType; // Inherit movement
                         newPoint.dyeColor = [...originalPoint.dyeColor]; // Inherit color
+                        newPoint.canBeGrabber = originalPoint.canBeGrabber; // Inherit grabber gene for duplicated point
                         if (originalPoint.neuronData) { // Deep copy neuron data if exists
                             newPoint.neuronData = JSON.parse(JSON.stringify(originalPoint.neuronData));
                             newPoint.neuronData.isBrain = false; // Duplicated neurons are not the brain
@@ -944,6 +964,7 @@ class SoftBody {
                             newDupPoint.nodeType = originalBranchPoint.nodeType; // Consider mutating these
                             newDupPoint.movementType = originalBranchPoint.movementType;
                             newDupPoint.dyeColor = [...originalBranchPoint.dyeColor];
+                            newDupPoint.canBeGrabber = originalBranchPoint.canBeGrabber; // Inherit grabber gene for duplicated point
                             if (originalBranchPoint.neuronData) {
                                 newDupPoint.neuronData = JSON.parse(JSON.stringify(originalBranchPoint.neuronData));
                                 newDupPoint.neuronData.isBrain = false;
@@ -1015,6 +1036,11 @@ class SoftBody {
                     p_new.nodeType = p_orig.nodeType; // Inherit and potentially mutate later if desired
                     p_new.movementType = p_orig.movementType;
                     p_new.dyeColor = [...p_orig.dyeColor];
+                    p_new.canBeGrabber = p_orig.canBeGrabber; // Inherit grabber gene
+                    if (Math.random() < GRABBER_GENE_MUTATION_CHANCE * 0.25) { // Even lower chance during whole body duplication
+                        p_new.canBeGrabber = !p_new.canBeGrabber;
+                        // mutationStats.grabberGeneChange++; // Consider if this specific mutation should be counted
+                    }
                     if (p_orig.neuronData) {
                         p_new.neuronData = JSON.parse(JSON.stringify(p_orig.neuronData));
                         if (p_new.neuronData) p_new.neuronData.isBrain = false; // Duplicated neurons are not the main brain
@@ -1109,6 +1135,12 @@ class SoftBody {
 
                 p.nodeType = chosenNodeType;
                 p.movementType = chosenMovementType;
+
+                if (Math.random() < GRABBER_GENE_MUTATION_CHANCE) { // Initial chance for first-gen points
+                    p.canBeGrabber = true;
+                } else {
+                    p.canBeGrabber = false;
+                }
 
                 if (p.nodeType === NodeType.NEURON) {
                      p.neuronData = {
@@ -1386,19 +1418,21 @@ class SoftBody {
 
             // Process Grabber Toggles for each point
             this.massPoints.forEach(point => {
-                const outputStartRawIdx = currentRawOutputIndex;
-                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) {
-                    const detailsForThisGrab = [];
-                    const grabToggleResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
-                    detailsForThisGrab.push(grabToggleResult.detail);
-                    point.isGrabbing = sigmoid(grabToggleResult.value) > 0.5; // Threshold to boolean
-                    
-                    nd.currentFrameActionDetails.push(...detailsForThisGrab);
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
-                } else {
-                    // Ensure index advances even if there aren't enough rawOutputs for this point's grab action.
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_GRABBER_TOGGLE; 
-                }
+                if (point.canBeGrabber) { // Only process grabber outputs for points that can be grabbers
+                    const outputStartRawIdx = currentRawOutputIndex;
+                    if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) {
+                        const detailsForThisGrab = [];
+                        const grabToggleResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
+                        detailsForThisGrab.push(grabToggleResult.detail);
+                        point.isGrabbing = sigmoid(grabToggleResult.value) > 0.5; // Threshold to boolean
+                        
+                        nd.currentFrameActionDetails.push(...detailsForThisGrab);
+                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
+                    } else {
+                        // Ensure index advances even if there aren't enough rawOutputs for this point's grab action.
+                        currentRawOutputIndex += NEURAL_OUTPUTS_PER_GRABBER_TOGGLE; 
+                    }
+                } // If point.canBeGrabber is false, its grab toggle output is not in the NN outputVector, so we don't advance currentRawOutputIndex here.
             });
             // --- End of Apply Neural Outputs ---
 
@@ -2032,6 +2066,7 @@ class SoftBody {
             let numEaterPoints = 0;
             let numPredatorPoints = 0;
             let numEyeNodes = 0;
+            let numPotentialGrabberPoints = 0;
 
             this.massPoints.forEach(p => {
                 if (p.nodeType === NodeType.EMITTER) numEmitterPoints++;
@@ -2039,10 +2074,13 @@ class SoftBody {
                 else if (p.nodeType === NodeType.EATER) numEaterPoints++;
                 else if (p.nodeType === NodeType.PREDATOR) numPredatorPoints++;
                 else if (p.nodeType === NodeType.EYE) numEyeNodes++;
+
+                if (p.canBeGrabber) numPotentialGrabberPoints++; // Count only points that can be grabbers
             });
 
             nd.inputVectorSize = NEURAL_INPUT_SIZE + (numEyeNodes * NEURAL_INPUTS_PER_EYE);
-            const newNumPotentialGrabberOutputs = this.massPoints.length * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
+            // const newNumPotentialGrabberOutputs = this.massPoints.length * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE; // Old calculation
+            const newNumPotentialGrabberOutputs = numPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
             nd.outputVectorSize = (numEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
                                   (numSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
                                   (numEaterPoints * NEURAL_OUTPUTS_PER_EATER) +

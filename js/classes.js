@@ -1114,11 +1114,18 @@ class SoftBody {
             // --- End of Eye Logic ---
 
             // 1. Gather Inputs for NN
-            // ... (existing inputs: dye, energy, CoM pos/vel, nutrient)
-            inputVector.push((fluidFieldRef.densityR[brainIdx] || 0) / 255);
-            inputVector.push((fluidFieldRef.densityG[brainIdx] || 0) / 255);
-            inputVector.push((fluidFieldRef.densityB[brainIdx] || 0) / 255);
-            inputVector.push(this.creatureEnergy / this.currentMaxEnergy); // Use currentMaxEnergy
+            // Start with base inputs (dye, energy, CoM pos/vel, nutrient)
+            if (fluidFieldRef) {
+                const brainGx = Math.floor(brainNode.pos.x / fluidFieldRef.scaleX);
+                const brainGy = Math.floor(brainNode.pos.y / fluidFieldRef.scaleY);
+                const brainIdx = fluidFieldRef.IX(brainGx, brainGy);
+                inputVector.push((fluidFieldRef.densityR[brainIdx] || 0) / 255);
+                inputVector.push((fluidFieldRef.densityG[brainIdx] || 0) / 255);
+                inputVector.push((fluidFieldRef.densityB[brainIdx] || 0) / 255);
+            } else {
+                inputVector.push(0, 0, 0);
+            }
+            inputVector.push(this.creatureEnergy / this.currentMaxEnergy); 
             const comPos = this.getAveragePosition();
             const relComPosX = (comPos.x - brainNode.pos.x) / WORLD_WIDTH;
             const relComPosY = (comPos.y - brainNode.pos.y) / WORLD_HEIGHT;
@@ -1142,14 +1149,25 @@ class SoftBody {
                 inputVector.push(0.5);
             }
 
-            // Add Eye Inputs (if a primary eye exists and is designated)
-            if (this.primaryEyePoint) { // Still using primaryEyePoint for NN input
-                inputVector.push(this.primaryEyePoint.seesParticle ? 1 : 0);
-                inputVector.push(this.primaryEyePoint.nearestParticleMagnitude); 
-                inputVector.push((this.primaryEyePoint.nearestParticleDirection / (Math.PI * 2)) + 0.5); 
-            } else if (NEURAL_INPUTS_PER_EYE > 0) { // Ensure consistent input vector size if no eye
-                for(let i=0; i < NEURAL_INPUTS_PER_EYE; i++) inputVector.push(0); // Default/neutral values
-            }
+            // Add Eye Inputs (iterate through all points, add if it's an Eye)
+            let eyeNodesFoundForInput = 0;
+            this.massPoints.forEach(point => {
+                if (point.nodeType === NodeType.EYE) {
+                    inputVector.push(point.seesParticle ? 1 : 0);
+                    inputVector.push(point.nearestParticleMagnitude); // Already normalized 0-1 or 0
+                    inputVector.push((point.nearestParticleDirection / (Math.PI * 2)) + 0.5); // Normalize angle to ~0-1 (0 if no particle)
+                    eyeNodesFoundForInput++;
+                }
+            });
+            
+            // Pad if fewer eye nodes were found than the brain might expect (e.g. if an eye was just lost)
+            // The total nd.inputVectorSize calculated in initializeBrain already accounts for the *current* number of eyes.
+            // This padding is more of a safeguard if the structure changed mid-simulation without immediate brain re-init.
+            // However, the main padding loop at the end handles overall size consistency.
+            // let expectedEyeInputs = (nd.inputVectorSize - NEURAL_INPUT_SIZE) / NEURAL_INPUTS_PER_EYE;
+            // for (let i = eyeNodesFoundForInput; i < expectedEyeInputs; i++) { 
+            //     for(let j=0; j < NEURAL_INPUTS_PER_EYE; j++) inputVector.push(0); 
+            // }
             
             // Ensure inputVector is the correct size (final check after all inputs added)
             while(inputVector.length < nd.inputVectorSize) { inputVector.push(0); }
@@ -1839,6 +1857,7 @@ class SoftBody {
 
     initializeBrain() {
         let brainNode = null;
+        // First, try to find an already designated brain (e.g., from a parent or loaded config)
         for (const point of this.massPoints) {
             if (point.neuronData && point.neuronData.isBrain) {
                 brainNode = point;
@@ -1846,55 +1865,83 @@ class SoftBody {
             }
         }
 
+        // If no brain was pre-designated, find the first NEURON type node and make it the brain.
+        if (!brainNode) {
+            for (const point of this.massPoints) {
+                if (point.nodeType === NodeType.NEURON) {
+                    if (!point.neuronData) { // Ensure neuronData exists
+                        point.neuronData = { 
+                            hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
+                        };
+                    }
+                    point.neuronData.isBrain = true;
+                    brainNode = point; // Assign it as the brain for subsequent logic
+                    // Ensure other neurons are not brains (important if multiple neurons exist)
+                    this.massPoints.forEach(otherP => {
+                        if (otherP !== point && otherP.nodeType === NodeType.NEURON && otherP.neuronData) {
+                            otherP.neuronData.isBrain = false;
+                        }
+                    });
+                    break; // Found and assigned a brain
+                }
+            }
+        }
+
         if (brainNode && brainNode.neuronData && brainNode.neuronData.isBrain) {
             const nd = brainNode.neuronData;
-            nd.inputVectorSize = NEURAL_INPUT_SIZE;
 
             let numEmitterPoints = 0;
             let numSwimmerPoints = 0;
             let numEaterPoints = 0;
             let numPredatorPoints = 0;
-            let numPotentialGrabberPoints = this.massPoints.length; // Now, all points can potentially grab
-            let hasPrimaryEye = this.primaryEyePoint ? 1 : 0; // Check if a primary eye is designated
+            let numEyeNodes = 0;
 
             this.massPoints.forEach(p => {
                 if (p.nodeType === NodeType.EMITTER) numEmitterPoints++;
                 else if (p.nodeType === NodeType.SWIMMER) numSwimmerPoints++;
                 else if (p.nodeType === NodeType.EATER) numEaterPoints++;
                 else if (p.nodeType === NodeType.PREDATOR) numPredatorPoints++;
+                else if (p.nodeType === NodeType.EYE) numEyeNodes++;
             });
 
+            nd.inputVectorSize = NEURAL_INPUT_SIZE + (numEyeNodes * NEURAL_INPUTS_PER_EYE);
+            const newNumPotentialGrabberOutputs = this.massPoints.length * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
             nd.outputVectorSize = (numEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
                                   (numSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
                                   (numEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
                                   (numPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
-                                  (numPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE);
-            
-            // Adjust input vector size for eye inputs
-            nd.inputVectorSize = NEURAL_INPUT_SIZE + (hasPrimaryEye * NEURAL_INPUTS_PER_EYE);
+                                  newNumPotentialGrabberOutputs;
 
-            // Initialize weights and biases
-            if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < DEFAULT_HIDDEN_LAYER_SIZE_MIN) {
-                console.warn(`Body ${this.id} brain node had invalid hiddenLayerSize: ${nd.hiddenLayerSize}. Resetting to default: ${DEFAULT_HIDDEN_LAYER_SIZE_MIN}. NeuronData was:`, JSON.parse(JSON.stringify(nd)));
-                nd.hiddenLayerSize = DEFAULT_HIDDEN_LAYER_SIZE_MIN;
+            // Ensure hiddenLayerSize is valid or initialize it if it's from an older creature version
+            if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < DEFAULT_HIDDEN_LAYER_SIZE_MIN || nd.hiddenLayerSize > DEFAULT_HIDDEN_LAYER_SIZE_MAX) {
+                nd.hiddenLayerSize = DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1));
             }
 
-            nd.weightsIH = initializeMatrix(nd.hiddenLayerSize, nd.inputVectorSize);
-            nd.biasesH = initializeVector(nd.hiddenLayerSize);
-            nd.weightsHO = initializeMatrix(nd.outputVectorSize, nd.hiddenLayerSize);
-            nd.biasesO = initializeVector(nd.outputVectorSize);
+            // Initialize weights and biases only once for this creature instance
+            // (or if hiddenLayerSize was just reset)
+            if (!nd.weightsIH || nd.weightsIH.length !== nd.hiddenLayerSize || (nd.weightsIH.length > 0 && nd.weightsIH[0].length !== nd.inputVectorSize) ) {
+                nd.weightsIH = initializeMatrix(nd.hiddenLayerSize, nd.inputVectorSize);
+                nd.biasesH = initializeVector(nd.hiddenLayerSize);
+                console.log(`Body ${this.id} brain: Initialized weightsIH/biasesH. Inputs: ${nd.inputVectorSize}, Hidden: ${nd.hiddenLayerSize}`);
+            }
             
-            // For Reinforcement Learning - Experience Buffer & Reward Tracking
-            nd.experienceBuffer = [];
-            nd.maxExperienceBufferSize = 10; // e.g., last 10 frames/experiences
-            nd.previousEnergyForReward = this.creatureEnergy; // Initialize for first reward calculation
-            nd.framesSinceLastTrain = 0; 
-            nd.lastAvgNormalizedReward = 0; // Initialize diagnostic value for average reward
+            if (!nd.weightsHO || nd.weightsHO.length !== nd.outputVectorSize || (nd.weightsHO.length > 0 && nd.weightsHO[0].length !== nd.hiddenLayerSize) ) {
+                nd.weightsHO = initializeMatrix(nd.outputVectorSize, nd.hiddenLayerSize);
+                nd.biasesO = initializeVector(nd.outputVectorSize);
+                console.log(`Body ${this.id} brain: Initialized weightsHO/biasesO. Outputs: ${nd.outputVectorSize}, Hidden: ${nd.hiddenLayerSize}`);
+            }
+            
+            // nd.lastInitializedNumEyeNodes = numEyeNodes; // No longer needed to track changes within initializeBrain
 
-            // console.log(`Body ${this.id} brain initialized. Inputs: ${nd.inputVectorSize}, Hidden: ${nd.hiddenLayerSize}, Outputs: ${nd.outputVectorSize}`);
+            // Initialize RL components if they don't exist
+            if (!nd.experienceBuffer) nd.experienceBuffer = [];
+            if (typeof nd.framesSinceLastTrain !== 'number') nd.framesSinceLastTrain = 0; 
+            if (typeof nd.previousEnergyForReward !== 'number') nd.previousEnergyForReward = this.creatureEnergy;
+            if (typeof nd.lastAvgNormalizedReward !== 'number') nd.lastAvgNormalizedReward = 0;
+            if (typeof nd.maxExperienceBufferSize !== 'number') nd.maxExperienceBufferSize = 10;
+
         } else {
             // No brain node found or brainNode.neuronData is missing somehow
-            // console.log(`Body ${this.id} has no operable brain node.`);
         }
     }
 

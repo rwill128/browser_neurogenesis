@@ -171,6 +171,15 @@ function getSensedChannelString(channelId) {
     }
 }
 
+function getRewardStrategyString(strategy) {
+    switch(strategy) {
+        case RLRewardStrategy.ENERGY_CHANGE: return "Energy Change";
+        case RLRewardStrategy.REPRODUCTION_EVENT: return "Reproduction Event";
+        case RLRewardStrategy.PARTICLE_PROXIMITY: return "Particle Proximity";
+        default: return "Unknown_Strategy";
+    }
+}
+
 // Reflects point P across the line defined by L1 and L2
 function reflectPointAcrossLine(P, L1, L2) {
     // Line L1L2 direction vector

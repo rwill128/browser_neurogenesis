@@ -27,7 +27,8 @@ let mutationStats = { // New: For tracking mutation occurrences
     springSubdivision: 0,
     segmentDuplication: 0, 
     symmetricBodyDuplication: 0,
-    bodyScale: 0
+    bodyScale: 0,
+    rewardStrategyChange: 0 // New stat for reward strategy mutations
 };
 
 function initializeSpatialGrid() {

@@ -9,6 +9,17 @@ const NodeType = {
     // Old types like NEUTRAL, FLOATING, FIXED_ROOT, EMITTER_SWIMMER are removed
 };
 
+const RLRewardStrategy = {
+    ENERGY_CHANGE: 0,
+    REPRODUCTION_EVENT: 1,
+    PARTICLE_PROXIMITY: 2
+};
+
+const RLAlgorithmType = {
+    REINFORCE: 0, // Your current policy gradient
+    SAC: 1        // Soft Actor-Critic
+};
+
 const MovementType = {
     FIXED: 0,    // Fixed in place, does not interact with fluid velocity but can affect it (if Swimmer)
     FLOATING: 1, // Pushed by fluid, cannot be a Swimmer
@@ -180,6 +191,7 @@ class SoftBody {
         this.ticksSinceBirth = 0;
         this.canReproduce = false;
         this.shapeType = parentBody ? parentBody.shapeType : Math.floor(Math.random() * 3);
+        this.justReproduced = false; // New: Flag for reproduction reward
 
         this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY; // Initial placeholder
 
@@ -218,96 +230,61 @@ class SoftBody {
             this.springConnectionRadius = parentBody.springConnectionRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
             if (this.springConnectionRadius !== oldSpringConnectionRadius) mutationStats.springConnectionRadiusGene++;
             
-            const oldEmitterDirX = parentBody.emitterDirection.x;
-            const angleMutation = (Math.random() - 0.5) * Math.PI * 0.2 * GLOBAL_MUTATION_RATE_MODIFIER;
-            const cosA = Math.cos(angleMutation);
-            const sinA = Math.sin(angleMutation);
-            this.emitterDirection = new Vec2(parentBody.emitterDirection.x * cosA - parentBody.emitterDirection.y * sinA, parentBody.emitterDirection.x * sinA + parentBody.emitterDirection.y * cosA).normalize();
-            if (this.emitterDirection.x !== oldEmitterDirX) mutationStats.emitterDirection++; // Simplified check
+            if (parentBody.emitterDirection) {
+                const oldEmitterDirX = parentBody.emitterDirection.x;
+                const angleMutation = (Math.random() - 0.5) * Math.PI * 0.2 * GLOBAL_MUTATION_RATE_MODIFIER;
+                const cosA = Math.cos(angleMutation);
+                const sinA = Math.sin(angleMutation);
+                this.emitterDirection = new Vec2(parentBody.emitterDirection.x * cosA - parentBody.emitterDirection.y * sinA, parentBody.emitterDirection.x * sinA + parentBody.emitterDirection.y * cosA).normalize();
+                if (this.emitterDirection.x !== oldEmitterDirX) mutationStats.emitterDirection++; // Simplified check
+            } else {
+                this.emitterDirection = new Vec2(Math.random()*2-1, Math.random()*2-1).normalize();
+                console.warn(`Parent body ${parentBody.id} was missing emitterDirection. Offspring ${this.id} gets random emitterDirection.`);
+                mutationStats.emitterDirection++; // Count as a change if parent was missing it
+            }
             
             let oldReproThreshold = parentBody.reproductionEnergyThreshold;
             this.reproductionEnergyThreshold = parentBody.reproductionEnergyThreshold; 
             // Mutation of reproductionEnergyThreshold happens later, after currentMaxEnergy is set for the offspring
 
-            // Default Activation Pattern Properties
-            this.defaultActivationPattern = ActivationPatternType.SINE; // Default pattern
-            this.defaultActivationLevel = DEFAULT_ACTIVATION_LEVEL_MIN + Math.random() * (DEFAULT_ACTIVATION_LEVEL_MAX - DEFAULT_ACTIVATION_LEVEL_MIN);
-            this.defaultActivationPeriod = DEFAULT_ACTIVATION_PERIOD_MIN_TICKS + Math.random() * (DEFAULT_ACTIVATION_PERIOD_MAX_TICKS - DEFAULT_ACTIVATION_PERIOD_MIN_TICKS);
-            this.defaultActivationPhaseOffset = Math.random() * this.defaultActivationPeriod; // Random initial phase
-
-            if (parentBody) {
-                this.stiffness = parentBody.stiffness * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.stiffness !== parentBody.stiffness) mutationStats.stiffness++;
-                this.springDamping = parentBody.springDamping * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.springDamping !== parentBody.springDamping) mutationStats.damping++;
-                
-                let oldMotorInterval = parentBody.motorImpulseInterval;
-                this.motorImpulseInterval = parentBody.motorImpulseInterval * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-                if (Math.floor(this.motorImpulseInterval) !== Math.floor(oldMotorInterval)) mutationStats.motorInterval++;
-
-                let oldMotorCap = parentBody.motorImpulseMagnitudeCap;
-                this.motorImpulseMagnitudeCap = parentBody.motorImpulseMagnitudeCap * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.motorImpulseMagnitudeCap !== oldMotorCap) mutationStats.motorCap++;
-
-                let oldEmitterStrength = parentBody.emitterStrength;
-                this.emitterStrength = parentBody.emitterStrength * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.emitterStrength !== oldEmitterStrength) mutationStats.emitterStrength++;
-
-                let offspringNumChange = (Math.random() < Math.max(0, Math.min(1, MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER))) ? (Math.random() < 0.5 ? -1 : 1) : 0;
-                this.numOffspring = parentBody.numOffspring + offspringNumChange;
-                if (offspringNumChange !== 0) mutationStats.numOffspring++;
-
-                let oldOffspringSpawnRadius = parentBody.offspringSpawnRadius;
-                this.offspringSpawnRadius = parentBody.offspringSpawnRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.5));
-                if (this.offspringSpawnRadius !== oldOffspringSpawnRadius) mutationStats.offspringSpawnRadius++;
-                
-                let oldPointAddChance = parentBody.pointAddChance;
-                this.pointAddChance = parentBody.pointAddChance * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 2));
-                if (this.pointAddChance !== oldPointAddChance) mutationStats.pointAddChanceGene++;
-
-                let oldSpringConnectionRadius = parentBody.springConnectionRadius;
-                this.springConnectionRadius = parentBody.springConnectionRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.springConnectionRadius !== oldSpringConnectionRadius) mutationStats.springConnectionRadiusGene++;
-                
-                // Inherit and mutate activation pattern properties
-                if (Math.random() < ACTIVATION_PATTERN_MUTATION_CHANCE) {
-                    const patterns = Object.values(ActivationPatternType);
-                    this.defaultActivationPattern = patterns[Math.floor(Math.random() * patterns.length)];
-                } else {
-                    this.defaultActivationPattern = parentBody.defaultActivationPattern;
-                }
-                this.defaultActivationLevel = parentBody.defaultActivationLevel * (1 + (Math.random() - 0.5) * 2 * ACTIVATION_PARAM_MUTATION_MAGNITUDE);
-                this.defaultActivationLevel = Math.max(DEFAULT_ACTIVATION_LEVEL_MIN * 0.5, Math.min(this.defaultActivationLevel, DEFAULT_ACTIVATION_LEVEL_MAX * 1.5)); // Clamped
-                this.defaultActivationPeriod = parentBody.defaultActivationPeriod * (1 + (Math.random() - 0.5) * 2 * ACTIVATION_PARAM_MUTATION_MAGNITUDE);
-                this.defaultActivationPeriod = Math.max(DEFAULT_ACTIVATION_PERIOD_MIN_TICKS * 0.5, Math.min(this.defaultActivationPeriod, DEFAULT_ACTIVATION_PERIOD_MAX_TICKS * 1.5)); // Clamped
-                this.defaultActivationPhaseOffset = parentBody.defaultActivationPhaseOffset + (Math.random() - 0.5) * (parentBody.defaultActivationPeriod * 0.2); // Mutate phase slightly
-                if (this.defaultActivationPhaseOffset < 0) this.defaultActivationPhaseOffset += this.defaultActivationPeriod; // Wrap phase
-                this.defaultActivationPhaseOffset %= this.defaultActivationPeriod;
-
-                let oldReproThreshold = parentBody.reproductionEnergyThreshold;
-                this.reproductionEnergyThreshold = parentBody.reproductionEnergyThreshold; 
-                // Mutation of reproductionEnergyThreshold happens later, after currentMaxEnergy is set for the offspring
-            } else {
-                // Initial defaults for brand new creatures
-                this.stiffness = 500 + Math.random() * 2500;
-                this.springDamping = 5 + Math.random() * 20;
-                this.motorImpulseInterval = 30 + Math.floor(Math.random() * 90);
-                this.motorImpulseMagnitudeCap = 0.5 + Math.random() * 2.0;
-                this.emitterStrength = 0.2 + Math.random() * 1.0;
-                this.emitterDirection = new Vec2(Math.random()*2-1, Math.random()*2-1).normalize();
-                this.numOffspring = 1 + Math.floor(Math.random() * 3);
-                this.offspringSpawnRadius = 50 + Math.random() * 50;
-                this.pointAddChance = 0.02 + Math.random() * 0.06;
-                this.springConnectionRadius = parentBody ? parentBody.springConnectionRadius : (40 + Math.random() * 40);
-                this.reproductionEnergyThreshold = BASE_MAX_CREATURE_ENERGY; // Will be refined based on actual max energy
-
-                // Default Activation Pattern Properties for new creature
+            // Inherit and mutate activation pattern properties
+            if (Math.random() < ACTIVATION_PATTERN_MUTATION_CHANCE) {
                 const patterns = Object.values(ActivationPatternType);
                 this.defaultActivationPattern = patterns[Math.floor(Math.random() * patterns.length)];
-                this.defaultActivationLevel = DEFAULT_ACTIVATION_LEVEL_MIN + Math.random() * (DEFAULT_ACTIVATION_LEVEL_MAX - DEFAULT_ACTIVATION_LEVEL_MIN);
-                this.defaultActivationPeriod = DEFAULT_ACTIVATION_PERIOD_MIN_TICKS + Math.floor(Math.random() * (DEFAULT_ACTIVATION_PERIOD_MAX_TICKS - DEFAULT_ACTIVATION_PERIOD_MIN_TICKS + 1));
-                this.defaultActivationPhaseOffset = Math.random() * this.defaultActivationPeriod; 
+            } else {
+                this.defaultActivationPattern = parentBody.defaultActivationPattern;
             }
+            this.defaultActivationLevel = parentBody.defaultActivationLevel * (1 + (Math.random() - 0.5) * 2 * ACTIVATION_PARAM_MUTATION_MAGNITUDE);
+            this.defaultActivationPeriod = parentBody.defaultActivationPeriod * (1 + (Math.random() - 0.5) * 2 * ACTIVATION_PARAM_MUTATION_MAGNITUDE);
+            this.defaultActivationPhaseOffset = parentBody.defaultActivationPhaseOffset + (Math.random() - 0.5) * (parentBody.defaultActivationPeriod * 0.2); 
+            
+            // Inherit/Mutate Reward Strategy
+            if (Math.random() < RLRewardStrategy_MUTATION_CHANCE) {
+                const strategies = Object.values(RLRewardStrategy);
+                let newStrategy = strategies[Math.floor(Math.random() * strategies.length)];
+                if (newStrategy !== parentBody.rewardStrategy) {
+                    this.rewardStrategy = newStrategy;
+                    mutationStats.rewardStrategyChange++;
+                } else {
+                    if (strategies.length > 1) {
+                        let tempStrategies = strategies.filter(s => s !== parentBody.rewardStrategy);
+                        if (tempStrategies.length > 0) {
+                            this.rewardStrategy = tempStrategies[Math.floor(Math.random() * tempStrategies.length)];
+                            mutationStats.rewardStrategyChange++; 
+                        } else {
+                            this.rewardStrategy = parentBody.rewardStrategy;
+                        }
+                    } else {
+                        this.rewardStrategy = parentBody.rewardStrategy;
+                    }
+                }
+            } else {
+                this.rewardStrategy = parentBody.rewardStrategy;
+            }
+            // RL Algorithm type inheritance (can add mutation if needed)
+            this.rlAlgorithmType = parentBody.rlAlgorithmType || RLAlgorithmType.REINFORCE;
+
+
         } else {
             // Initial defaults for brand new creatures
             this.stiffness = 500 + Math.random() * 2500;
@@ -327,7 +304,14 @@ class SoftBody {
             this.defaultActivationPattern = patterns[Math.floor(Math.random() * patterns.length)];
             this.defaultActivationLevel = DEFAULT_ACTIVATION_LEVEL_MIN + Math.random() * (DEFAULT_ACTIVATION_LEVEL_MAX - DEFAULT_ACTIVATION_LEVEL_MIN);
             this.defaultActivationPeriod = DEFAULT_ACTIVATION_PERIOD_MIN_TICKS + Math.floor(Math.random() * (DEFAULT_ACTIVATION_PERIOD_MAX_TICKS - DEFAULT_ACTIVATION_PERIOD_MIN_TICKS + 1));
-            this.defaultActivationPhaseOffset = Math.random() * this.defaultActivationPeriod; 
+            this.defaultActivationPhaseOffset = Math.random() * this.defaultActivationPeriod;
+            
+            // Default RL Algorithm for brand new creatures
+            this.rlAlgorithmType = RLAlgorithmType.REINFORCE; 
+            
+            // New: Default Reward Strategy for brand new creatures
+            const strategies = Object.values(RLRewardStrategy);
+            this.rewardStrategy = strategies[Math.floor(Math.random() * strategies.length)];
         }
 
         // Clamp activation properties after they've been set/inherited/mutated
@@ -1419,7 +1403,41 @@ class SoftBody {
             // --- End of Apply Neural Outputs ---
 
             if (nd.currentFrameActionDetails && nd.currentFrameActionDetails.length > 0) {
-                const reward = this.creatureEnergy - nd.previousEnergyForReward;
+                let reward = 0;
+                switch (this.rewardStrategy) {
+                    case RLRewardStrategy.ENERGY_CHANGE:
+                        reward = this.creatureEnergy - nd.previousEnergyForReward;
+                        break;
+                    case RLRewardStrategy.REPRODUCTION_EVENT:
+                        if (this.justReproduced) {
+                            reward = REPRODUCTION_REWARD_VALUE;
+                            this.justReproduced = false; // Reset flag after giving reward
+                        } else {
+                            reward = 0;
+                        }
+                        break;
+                    case RLRewardStrategy.PARTICLE_PROXIMITY:
+                        let minParticleMagnitude = 1.0; // Default to max distance (1.0 after normalization)
+                        let particleSeenByAnyEye = false;
+                        this.massPoints.forEach(point => {
+                            if (point.nodeType === NodeType.EYE && point.seesParticle) {
+                                particleSeenByAnyEye = true;
+                                if (point.nearestParticleMagnitude < minParticleMagnitude) {
+                                    minParticleMagnitude = point.nearestParticleMagnitude;
+                                }
+                            }
+                        });
+                        if (particleSeenByAnyEye) {
+                            // Reward is higher for closer particles (smaller magnitude)
+                            reward = (1.0 - minParticleMagnitude) * PARTICLE_PROXIMITY_REWARD_SCALE;
+                        } else {
+                            reward = 0; // No particle seen, no proximity reward
+                        }
+                        break;
+                    default:
+                        reward = this.creatureEnergy - nd.previousEnergyForReward; // Fallback
+                }
+
                 nd.experienceBuffer.push({
                     state: [...inputVector],
                     actionDetails: JSON.parse(JSON.stringify(nd.currentFrameActionDetails)),
@@ -1936,6 +1954,7 @@ class SoftBody {
             if(this.creatureEnergy < 0) this.creatureEnergy = 0;
             this.ticksSinceBirth = 0;
             this.canReproduce = false;
+            this.justReproduced = true; // Set the flag here
         }
         return offspring;
     }

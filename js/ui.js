@@ -305,6 +305,7 @@ function updateInfoPanel() {
         document.getElementById('infoBodyCurrentMaxEnergy').textContent = selectedInspectBody.currentMaxEnergy.toFixed(2);
         document.getElementById('infoBodyTicksBirth').textContent = selectedInspectBody.ticksSinceBirth;
         document.getElementById('infoBodyCanReproduce').textContent = selectedInspectBody.canReproduce;
+        document.getElementById('infoBodyRewardStrategy').textContent = getRewardStrategyString(selectedInspectBody.rewardStrategy);
 
         allPointsInfoContainer.innerHTML = '<h5>All Mass Points</h5>';
         selectedInspectBody.massPoints.forEach((point, index) => {
@@ -384,6 +385,7 @@ function updateInfoPanel() {
         document.getElementById('infoBodyCurrentMaxEnergy').textContent = '-';
         document.getElementById('infoBodyTicksBirth').textContent = '-';
         document.getElementById('infoBodyCanReproduce').textContent = '-';
+        document.getElementById('infoBodyRewardStrategy').textContent = '-';
         infoPanel.classList.remove('open');
     }
 }

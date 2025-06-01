@@ -618,6 +618,13 @@ resetButton.onclick = function() {
     initializePopulation();
     isAnySoftBodyUnstable = false;
     updateInstabilityIndicator();
+    // Reset mutation stats
+    for (const key in mutationStats) {
+        mutationStats[key] = 0;
+    }
+    if (statsPanel.classList.contains('open')) {
+        updateStatsPanel(); // Update if open
+    }
 }
 
 resizeWorldButton.onclick = function() {
@@ -1121,14 +1128,14 @@ eyeDetectionRadiusSlider.oninput = function() { EYE_DETECTION_RADIUS = parseInt(
 
 function updateStatsPanel() {
     if (!nodeTypeStatsDiv) return;
+    const mutationTypeStatsDiv = document.getElementById('mutationTypeStats'); // Get the new div
 
+    // Node Type Proportions
     const nodeCounts = {};
     let totalNodes = 0;
-
     for (const typeName in NodeType) {
         nodeCounts[NodeType[typeName]] = 0;
     }
-
     softBodyPopulation.forEach(body => {
         body.massPoints.forEach(point => {
             if (nodeCounts[point.nodeType] !== undefined) {
@@ -1137,7 +1144,6 @@ function updateStatsPanel() {
             totalNodes++;
         });
     });
-
     let statsHTML = "<p><strong>Node Type Proportions:</strong></p>";
     if (totalNodes === 0) {
         statsHTML += "<p>No creatures to analyze.</p>";
@@ -1151,4 +1157,16 @@ function updateStatsPanel() {
         statsHTML += `<p><strong>Total Nodes:</strong> ${totalNodes}</p>`;
     }
     nodeTypeStatsDiv.innerHTML = statsHTML;
+
+    // Mutation Type Counts
+    if (mutationTypeStatsDiv) {
+        let mutationStatsHTML = "<p><strong>Mutation Occurrences:</strong></p>";
+        let totalMutations = 0;
+        for (const key in mutationStats) {
+            mutationStatsHTML += `<p>${key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}: ${mutationStats[key]}</p>`;
+            totalMutations += mutationStats[key];
+        }
+        mutationStatsHTML += `<p><strong>Total Mutations Tracked:</strong> ${totalMutations}</p>`;
+        mutationTypeStatsDiv.innerHTML = mutationStatsHTML;
+    }
 } 

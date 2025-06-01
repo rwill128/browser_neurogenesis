@@ -5,6 +5,31 @@ let particles = [];
 let nextSoftBodyId = 0;
 const restitution = 0.4; // Moved from global constants as it's physics-specific
 
+let mutationStats = { // New: For tracking mutation occurrences
+    stiffness: 0,
+    damping: 0,
+    motorInterval: 0,
+    motorCap: 0,
+    emitterStrength: 0,
+    emitterDirection: 0,
+    numOffspring: 0,
+    offspringSpawnRadius: 0,
+    pointAddChanceGene: 0, // Mutation of the gene itself
+    springConnectionRadiusGene: 0, // Mutation of the gene itself
+    reproductionEnergyThreshold: 0,
+    nodeTypeChange: 0,
+    movementTypeChange: 0,
+    springDeletion: 0,
+    springAddition: 0,
+    springRestLength: 0,
+    springRigidityFlip: 0,
+    pointAddActual: 0,      
+    springSubdivision: 0,
+    segmentDuplication: 0, 
+    symmetricBodyDuplication: 0,
+    bodyScale: 0
+};
+
 function initializeSpatialGrid() {
     GRID_COLS = Math.max(1, Math.ceil(WORLD_WIDTH / GRID_CELL_SIZE));
     GRID_ROWS = Math.max(1, Math.ceil(WORLD_HEIGHT / GRID_CELL_SIZE));

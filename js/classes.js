@@ -186,20 +186,48 @@ class SoftBody {
         // Initialize heritable/mutable properties
         if (parentBody) {
             this.stiffness = parentBody.stiffness * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+            if (this.stiffness !== parentBody.stiffness) mutationStats.stiffness++;
             this.springDamping = parentBody.springDamping * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+            if (this.springDamping !== parentBody.springDamping) mutationStats.damping++;
+            
+            let oldMotorInterval = parentBody.motorImpulseInterval;
             this.motorImpulseInterval = parentBody.motorImpulseInterval * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+            if (Math.floor(this.motorImpulseInterval) !== Math.floor(oldMotorInterval)) mutationStats.motorInterval++;
+
+            let oldMotorCap = parentBody.motorImpulseMagnitudeCap;
             this.motorImpulseMagnitudeCap = parentBody.motorImpulseMagnitudeCap * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+            if (this.motorImpulseMagnitudeCap !== oldMotorCap) mutationStats.motorCap++;
+
+            let oldEmitterStrength = parentBody.emitterStrength;
             this.emitterStrength = parentBody.emitterStrength * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+            if (this.emitterStrength !== oldEmitterStrength) mutationStats.emitterStrength++;
+
             let offspringNumChange = (Math.random() < Math.max(0, Math.min(1, MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER))) ? (Math.random() < 0.5 ? -1 : 1) : 0;
             this.numOffspring = parentBody.numOffspring + offspringNumChange;
+            if (offspringNumChange !== 0) mutationStats.numOffspring++;
+
+            let oldOffspringSpawnRadius = parentBody.offspringSpawnRadius;
             this.offspringSpawnRadius = parentBody.offspringSpawnRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.5));
+            if (this.offspringSpawnRadius !== oldOffspringSpawnRadius) mutationStats.offspringSpawnRadius++;
+            
+            let oldPointAddChance = parentBody.pointAddChance;
             this.pointAddChance = parentBody.pointAddChance * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 2));
+            if (this.pointAddChance !== oldPointAddChance) mutationStats.pointAddChanceGene++;
+
+            let oldSpringConnectionRadius = parentBody.springConnectionRadius;
             this.springConnectionRadius = parentBody.springConnectionRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+            if (this.springConnectionRadius !== oldSpringConnectionRadius) mutationStats.springConnectionRadiusGene++;
+            
+            const oldEmitterDirX = parentBody.emitterDirection.x;
             const angleMutation = (Math.random() - 0.5) * Math.PI * 0.2 * GLOBAL_MUTATION_RATE_MODIFIER;
             const cosA = Math.cos(angleMutation);
             const sinA = Math.sin(angleMutation);
             this.emitterDirection = new Vec2(parentBody.emitterDirection.x * cosA - parentBody.emitterDirection.y * sinA, parentBody.emitterDirection.x * sinA + parentBody.emitterDirection.y * cosA).normalize();
-            this.reproductionEnergyThreshold = parentBody.reproductionEnergyThreshold; // Inherit before own max energy is known
+            if (this.emitterDirection.x !== oldEmitterDirX) mutationStats.emitterDirection++; // Simplified check
+            
+            let oldReproThreshold = parentBody.reproductionEnergyThreshold;
+            this.reproductionEnergyThreshold = parentBody.reproductionEnergyThreshold; 
+            // Mutation of reproductionEnergyThreshold happens later, after currentMaxEnergy is set for the offspring
         } else {
             // Initial defaults for brand new creatures
             this.stiffness = 500 + Math.random() * 2500;
@@ -236,7 +264,7 @@ class SoftBody {
         // 2. Body Scale Mutation (if offspring)
         if (parentBody && Math.random() < BODY_SCALE_MUTATION_CHANCE) {
             const scaleFactor = 1.0 + (Math.random() - 0.5) * 2 * BODY_SCALE_MUTATION_MAGNITUDE;
-            if (scaleFactor > 0.1) { 
+            if (scaleFactor > 0.1 && Math.abs(scaleFactor - 1.0) > 0.001) { // Check if it actually scaled
                 this.springs.forEach(spring => {
                     spring.restLength *= scaleFactor;
                     spring.restLength = Math.max(1, spring.restLength); 
@@ -247,6 +275,7 @@ class SoftBody {
                 });
                 this.offspringSpawnRadius *= scaleFactor;
                 this.offspringSpawnRadius = Math.max(10, this.offspringSpawnRadius); 
+                mutationStats.bodyScale++;
             }
         }
 
@@ -256,16 +285,17 @@ class SoftBody {
         // 4. Set initial creature energy
         this.creatureEnergy = this.currentMaxEnergy * OFFSPRING_INITIAL_ENERGY_SHARE; 
 
-        // 5. Finalize and mutate reproductionEnergyThreshold relative to currentMaxEnergy
+        let oldReproThresholdForStat = this.reproductionEnergyThreshold; // Capture before mutation
         if (parentBody) {
-            // It was inherited, now apply mutation relative to its *own* potential max
             this.reproductionEnergyThreshold = this.reproductionEnergyThreshold * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.2));
         } else {
-            // For new creatures, set it based on their calculated max energy
-            this.reproductionEnergyThreshold = this.currentMaxEnergy * (0.75 + Math.random() * 0.2); // e.g. 75-95% of their max
+            this.reproductionEnergyThreshold = this.currentMaxEnergy * (0.75 + Math.random() * 0.2);
         }
         this.reproductionEnergyThreshold = Math.max(this.currentMaxEnergy * 0.05, Math.min(this.reproductionEnergyThreshold, this.currentMaxEnergy));
         this.reproductionEnergyThreshold = Math.round(this.reproductionEnergyThreshold);
+        if (this.reproductionEnergyThreshold !== oldReproThresholdForStat && parentBody) { // Only count if from parent and changed
+            mutationStats.reproductionEnergyThreshold++;
+        }
         
         this.primaryEyePoint = null; // New: For the creature's main eye
         if (this.massPoints.length > 0) {
@@ -315,15 +345,19 @@ class SoftBody {
                 let mass = parentPoint.mass * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
                 mass = Math.max(0.1, Math.min(mass, 1.0));
 
+                let oldNodeType = parentPoint.nodeType;
                 let nodeType = parentPoint.nodeType;
                 if (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER)) {
                     nodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
+                    if (nodeType !== oldNodeType) mutationStats.nodeTypeChange++;
                 }
 
+                let oldMovementType = parentPoint.movementType;
                 let movementType = parentPoint.movementType;
-                if (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER)) { // Using same mutation chance for simplicity
+                if (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER)) { 
                     const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
                     movementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
+                    if (movementType !== oldMovementType) mutationStats.movementTypeChange++;
                 }
 
                 // Ensure Swimmer nodes are not Floating after potential mutation
@@ -369,7 +403,7 @@ class SoftBody {
                 referencePosForNewPoints = offspringPoint.pos.clone(); // Update reference position
 
                 if (Math.random() < this.pointAddChance * GLOBAL_MUTATION_RATE_MODIFIER) {
-                    // console.log("Before newPoint creation, lastPointPos:", JSON.stringify(lastPointPos)); // DEBUG LINE - REMOVE
+                    // ... (new point creation logic) ...
                     const newMass = 0.1 + Math.random() * 0.9;
                     const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE];
                     let newNodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
@@ -399,7 +433,8 @@ class SoftBody {
                         newPoint.neuronData = null; 
                     }
                     this.massPoints.push(newPoint);
-                    referencePosForNewPoints = newPoint.pos.clone(); // Update reference for next potential new point
+                    mutationStats.pointAddActual++; // Count actual point addition
+                    referencePosForNewPoints = newPoint.pos.clone(); 
 
                     // New spring connection logic for the newly added point
                     const numSpringsToAddNewPoint = MIN_SPRINGS_PER_NEW_NODE + Math.floor(Math.random() * (MAX_SPRINGS_PER_NEW_NODE - MIN_SPRINGS_PER_NEW_NODE + 1));
@@ -459,10 +494,18 @@ class SoftBody {
                         }
 
                         if (keepSpring) {
+                            let oldRestLength = parentSpring.restLength;
                             let newRestLength = parentSpring.restLength * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE);
-                            newRestLength = Math.max(1, newRestLength); // Min rest length 1
-                            const becomeRigid = (parentSpring.isRigid && Math.random() > MUTATION_CHANCE_BOOL) || (!parentSpring.isRigid && Math.random() < CHANCE_FOR_RIGID_SPRING); // Inherit rigidity with mutation chance
+                            newRestLength = Math.max(1, newRestLength); 
+                            if (Math.abs(newRestLength - oldRestLength) > 0.01) mutationStats.springRestLength++;
+
+                            let oldRigid = parentSpring.isRigid;
+                            const becomeRigid = (parentSpring.isRigid && Math.random() > MUTATION_CHANCE_BOOL) || (!parentSpring.isRigid && Math.random() < CHANCE_FOR_RIGID_SPRING); 
+                            if (becomeRigid !== oldRigid) mutationStats.springRigidityFlip++;
+                            
                             this.springs.push(new Spring(offspringP1, offspringP2, this.stiffness, this.springDamping, newRestLength, becomeRigid));
+                        } else {
+                            mutationStats.springDeletion++; 
                         }
                     }
                 });
@@ -494,6 +537,7 @@ class SoftBody {
                         newRestLength = Math.max(1, newRestLength);
                         const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
                         this.springs.push(new Spring(pA, pB, this.stiffness, this.springDamping, newRestLength, becomeRigid));
+                        mutationStats.springAddition++; 
                         break; // Added one spring
                     }
                     attempts++;
@@ -557,6 +601,8 @@ class SoftBody {
                            restLength2 = originalRestLength / 2 * (1 + (Math.random() - 0.5) * 0.1);
                         }
                         this.springs.push(new Spring(newMidPoint, p2, stiffnessForNewSegments, dampingForNewSegments, Math.max(1, restLength2), wasOriginalSpringRigid));
+                        mutationStats.springSubdivision++; 
+                        mutationStats.pointAddActual++; // A point is added during subdivision
                     }
                 }
             }

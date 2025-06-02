@@ -390,4 +390,29 @@ body.css-screensaver-active #canvasContainer {
 #nodeTypeStats p span.stat-value,
 #mutationTypeStats p span.stat-value {
     color: #eee; /* Value color */
+}
+
+#globalEnergyGainsStats p {
+    margin: 5px 0;
+    font-size: 0.85em;
+    font-weight: normal;
+    text-align: left;
+}
+
+#globalEnergyGainsStats > p:first-child {
+    color: #00aeff;
+    font-weight: bold;
+    margin-bottom: 8px;
+    font-size: 0.9em;
+    text-align: left;
+}
+
+#globalEnergyGainsStats p strong {
+    font-weight: bold;
+    color: #bbb;
+    margin-right: 5px;
+}
+
+#globalEnergyGainsStats p span.stat-value {
+    color: #eee;
 } 

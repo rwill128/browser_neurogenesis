@@ -5,6 +5,12 @@ let particles = [];
 let nextSoftBodyId = 0;
 const restitution = 0.4; // Moved from global constants as it's physics-specific
 
+let globalEnergyGains = {
+    photosynthesis: 0,
+    eating: 0,
+    predation: 0
+};
+
 let mutationStats = { // New: For tracking mutation occurrences
     stiffness: 0,
     damping: 0,
@@ -216,6 +222,10 @@ function updatePhysics(dt) {
     let removedCount = 0;
     for (let i = softBodyPopulation.length - 1; i >= 0; i--) {
         if (softBodyPopulation[i].isUnstable) {
+            const body = softBodyPopulation[i];
+            globalEnergyGains.photosynthesis += body.energyGainedFromPhotosynthesis;
+            globalEnergyGains.eating += body.energyGainedFromEating;
+            globalEnergyGains.predation += body.energyGainedFromPredation;
             softBodyPopulation.splice(i, 1);
             removedCount++;
         }
@@ -235,6 +245,7 @@ function updatePhysics(dt) {
              }
          }
     }
+
     updatePopulationCount();
 
     // draw(); // REMOVE draw() call from here

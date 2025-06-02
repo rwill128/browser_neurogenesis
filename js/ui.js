@@ -308,6 +308,9 @@ function updateInfoPanel() {
         document.getElementById('infoBodyTicksBirth').textContent = selectedInspectBody.ticksSinceBirth;
         document.getElementById('infoBodyCanReproduce').textContent = selectedInspectBody.canReproduce;
         document.getElementById('infoBodyRewardStrategy').textContent = getRewardStrategyString(selectedInspectBody.rewardStrategy);
+        document.getElementById('infoBodyEnergyPhoto').textContent = selectedInspectBody.energyGainedFromPhotosynthesis.toFixed(2);
+        document.getElementById('infoBodyEnergyEat').textContent = selectedInspectBody.energyGainedFromEating.toFixed(2);
+        document.getElementById('infoBodyEnergyPred').textContent = selectedInspectBody.energyGainedFromPredation.toFixed(2);
 
         allPointsInfoContainer.innerHTML = '<h5>All Mass Points</h5>';
         selectedInspectBody.massPoints.forEach((point, index) => {
@@ -389,6 +392,9 @@ function updateInfoPanel() {
         document.getElementById('infoBodyTicksBirth').textContent = '-';
         document.getElementById('infoBodyCanReproduce').textContent = '-';
         document.getElementById('infoBodyRewardStrategy').textContent = '-';
+        document.getElementById('infoBodyEnergyPhoto').textContent = '-';
+        document.getElementById('infoBodyEnergyEat').textContent = '-';
+        document.getElementById('infoBodyEnergyPred').textContent = '-';
         infoPanel.classList.remove('open');
     }
 }
@@ -660,6 +666,10 @@ resetButton.onclick = function() {
     for (const key in mutationStats) {
         mutationStats[key] = 0;
     }
+    // Reset global energy gains
+    globalEnergyGains.photosynthesis = 0;
+    globalEnergyGains.eating = 0;
+    globalEnergyGains.predation = 0;
     if (statsPanel.classList.contains('open')) {
         updateStatsPanel(); // Update if open
     }
@@ -1177,6 +1187,7 @@ eyeDetectionRadiusSlider.oninput = function() { EYE_DETECTION_RADIUS = parseInt(
 function updateStatsPanel() {
     if (!nodeTypeStatsDiv) return;
     const mutationTypeStatsDiv = document.getElementById('mutationTypeStats'); // Get the new div
+    const globalEnergyGainsStatsDiv = document.getElementById('globalEnergyGainsStats');
 
     // Node Type Proportions
     const nodeCounts = {};
@@ -1216,5 +1227,14 @@ function updateStatsPanel() {
         }
         mutationStatsHTML += `<p><strong>Total Mutations Tracked:</strong> <span class=\"stat-value\">${totalMutations}</span></p>`;
         mutationTypeStatsDiv.innerHTML = mutationStatsHTML;
+    }
+
+    // Global Energy Gains
+    if (globalEnergyGainsStatsDiv) {
+        let energyGainsHTML = "<p><strong>Global Energy Gains (All Time):</strong></p>";
+        energyGainsHTML += `<p><strong>Photosynthesis:</strong> <span class=\"stat-value\">${globalEnergyGains.photosynthesis.toFixed(2)}</span></p>`;
+        energyGainsHTML += `<p><strong>Eating:</strong> <span class=\"stat-value\">${globalEnergyGains.eating.toFixed(2)}</span></p>`;
+        energyGainsHTML += `<p><strong>Predation:</strong> <span class=\"stat-value\">${globalEnergyGains.predation.toFixed(2)}</span></p>`;
+        globalEnergyGainsStatsDiv.innerHTML = energyGainsHTML;
     }
 } 

@@ -194,6 +194,10 @@ class SoftBody {
         this.shapeType = parentBody ? parentBody.shapeType : Math.floor(Math.random() * 3);
         this.justReproduced = false; // New: Flag for reproduction reward
 
+        this.energyGainedFromPhotosynthesis = 0;
+        this.energyGainedFromEating = 0;
+        this.energyGainedFromPredation = 0;
+
         this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY; // Initial placeholder
 
         // Initialize heritable/mutable properties
@@ -1630,6 +1634,7 @@ class SoftBody {
 
                     const energyGainThisPoint = effectiveLightValue * PHOTOSYNTHESIS_EFFICIENCY * (point.radius / 5) * dt;
                     currentFrameEnergyGain += energyGainThisPoint; // Accumulate gain
+                    this.energyGainedFromPhotosynthesis += energyGainThisPoint;
                 }
             }
             // Add energy cost for grabbing state
@@ -1768,6 +1773,7 @@ class SoftBody {
                                             if (energyToSap > 0) {
                                                 otherItem.bodyRef.creatureEnergy -= energyToSap;
                                                 this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyToSap); // Use currentMaxEnergy
+                                                this.energyGainedFromPredation += energyToSap;
                                             }
                                         }
                                     }
@@ -1872,6 +1878,7 @@ class SoftBody {
                                                         energyGain *= Math.max(MIN_NUTRIENT_VALUE, effectiveNutrientAtParticle);
                                                     }
                                                     this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyGain); // Use currentMaxEnergy
+                                                    this.energyGainedFromEating += energyGain;
                                                 }
                                             }
                                         }
@@ -2522,6 +2529,7 @@ class SoftBody {
                                             if (energyToSap > 0) {
                                                 otherItem.bodyRef.creatureEnergy -= energyToSap;
                                                 this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyToSap); 
+                                                this.energyGainedFromPredation += energyToSap;
                                             }
                                         }
                                     }
@@ -2571,6 +2579,7 @@ class SoftBody {
                                                     energyGain *= Math.max(MIN_NUTRIENT_VALUE, effectiveNutrientAtParticle);
                                                 }
                                                 this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyGain); 
+                                                this.energyGainedFromEating += energyGain;
                                             }
                                         }
                                     }

@@ -1188,9 +1188,9 @@ function updateStatsPanel() {
             const typeEnum = NodeType[typeName];
             const count = nodeCounts[typeEnum];
             const percentage = ((count / totalNodes) * 100).toFixed(2);
-            statsHTML += `<p>${getNodeTypeString(typeEnum)}: ${count} (${percentage}%)</p>`;
+            statsHTML += `<p><strong>${getNodeTypeString(typeEnum)}:</strong> <span class=\"stat-value\">${count} (${percentage}%)</span></p>`;
         }
-        statsHTML += `<p><strong>Total Nodes:</strong> ${totalNodes}</p>`;
+        statsHTML += `<p><strong>Total Nodes:</strong> <span class=\"stat-value\">${totalNodes}</span></p>`;
     }
     nodeTypeStatsDiv.innerHTML = statsHTML;
 
@@ -1199,10 +1199,10 @@ function updateStatsPanel() {
         let mutationStatsHTML = "<p><strong>Mutation Occurrences:</strong></p>";
         let totalMutations = 0;
         for (const key in mutationStats) {
-            mutationStatsHTML += `<p>${key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}: ${mutationStats[key]}</p>`;
+            mutationStatsHTML += `<p><strong>${key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}:</strong> <span class=\"stat-value\">${mutationStats[key]}</span></p>`;
             totalMutations += mutationStats[key];
         }
-        mutationStatsHTML += `<p><strong>Total Mutations Tracked:</strong> ${totalMutations}</p>`;
+        mutationStatsHTML += `<p><strong>Total Mutations Tracked:</strong> <span class=\"stat-value\">${totalMutations}</span></p>`;
         mutationTypeStatsDiv.innerHTML = mutationStatsHTML;
     }
 } 

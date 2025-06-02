@@ -330,4 +330,64 @@ body.css-screensaver-active #canvasContainer {
 }
 #statsPanel #copyStatsPanelButton:hover {
     background-color: #0056b3;
+}
+
+#statsContentWrapper {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-around; /* Distribute space between the two columns */
+    width: 100%;
+    gap: 20px; /* Optional: adds some space between the columns */
+}
+
+#nodeTypeStats,
+#mutationTypeStats {
+    flex-basis: 48%; /* Each takes up roughly half the space, accounting for gap */
+    /* Styles similar to #nodeTypeStats p can be applied here or directly to p tags if preferred */
+}
+
+#mutationTypeStats p {
+    margin: 5px 0;
+    font-size: 0.85em;
+    /* Removed font-weight: bold; as it's not in nodeTypeStats p */
+}
+
+#mutationTypeStats p strong {
+    font-weight: bold; /* Keep strong tags bold if needed */
+}
+
+#nodeTypeStats p strong, /* Ensure strong tags in nodeTypeStats are also bolded if needed */
+#mutationTypeStats p strong {
+    font-weight: bold;
+    color: #00aeff; /* Match the heading color for emphasis on the label part */
+}
+
+#nodeTypeStats > p:first-child,
+#mutationTypeStats > p:first-child {
+    color: #00aeff; /* Make the first <p> (which is the title) blue */
+    font-weight: bold;
+    margin-bottom: 8px; /* Add some space below the title */
+    font-size: 0.9em; /* Slightly larger font for the title */
+    text-align: left;
+}
+
+/* Ensure subsequent paragraphs are not bold unless specified by <strong> */
+#nodeTypeStats p,
+#mutationTypeStats p {
+    font-weight: normal;
+    text-align: left;
+}
+
+/* Re-apply bold to strong tags within paragraphs, and style the label part */
+#nodeTypeStats p strong,
+#mutationTypeStats p strong {
+    font-weight: bold;
+    color: #bbb; /* Color for the label part like 'Stiffness:' */
+    margin-right: 5px; /* Space between label and value */
+}
+
+/* Style for the value part after the strong tag */
+#nodeTypeStats p span.stat-value,
+#mutationTypeStats p span.stat-value {
+    color: #eee; /* Value color */
 } 

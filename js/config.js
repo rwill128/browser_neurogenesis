@@ -124,6 +124,7 @@ let PARTICLE_BASE_LIFE_DECAY = 0.001;
 let IS_PARTICLE_LIFE_INFINITE = false;
 const PARTICLE_LIFE_DECAY_RANDOM_FACTOR = 0.002;
 let particleEmissionDebt = 0;
+let SHOW_FLUID_VELOCITY = false;
 
 let IS_NUTRIENT_EDIT_MODE = false;
 let SHOW_NUTRIENT_MAP = false;
@@ -258,7 +259,8 @@ function handleExportConfig() {
         viscosityMapSize: viscosityField ? Math.round(FLUID_GRID_SIZE_CONTROL) : 0,
         photosyntheticNodeCost: PHOTOSYNTHETIC_NODE_ENERGY_COST,
         photosynthesisEfficiency: PHOTOSYNTHESIS_EFFICIENCY,
-        eyeDetectionRadius: EYE_DETECTION_RADIUS
+        eyeDetectionRadius: EYE_DETECTION_RADIUS,
+        showFluidVelocity: SHOW_FLUID_VELOCITY
     };
     const jsonString = JSON.stringify(config, null, 2);
     const blob = new Blob([jsonString], {type: "application/json"});
@@ -349,6 +351,7 @@ function applyImportedConfig(config) {
     if (config.photosynthesisEfficiency !== undefined) PHOTOSYNTHESIS_EFFICIENCY = config.photosynthesisEfficiency;
     
     if (config.eyeDetectionRadius !== undefined) EYE_DETECTION_RADIUS = config.eyeDetectionRadius;
+    if (config.showFluidVelocity !== undefined) SHOW_FLUID_VELOCITY = config.showFluidVelocity;
     
     worldWidthInput.value = WORLD_WIDTH;
     worldHeightInput.value = WORLD_HEIGHT;
@@ -385,6 +388,7 @@ function applyImportedConfig(config) {
     infiniteParticleLifeToggle.checked = IS_PARTICLE_LIFE_INFINITE;
     emitterStrengthSlider.value = EMITTER_STRENGTH;
     emitterEditModeToggle.checked = IS_EMITTER_EDIT_MODE;
+    showFluidVelocityToggle.checked = SHOW_FLUID_VELOCITY;
 
     initializeAllSliderDisplays(); 
 

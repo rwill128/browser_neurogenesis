@@ -149,6 +149,7 @@ const lightCyclePeriodSlider = document.getElementById('lightCyclePeriodSlider')
 const lightCyclePeriodSpan = document.getElementById('lightCyclePeriodSpan');
 const currentNutrientMultiplierDisplay = document.getElementById('currentNutrientMultiplierDisplay');
 const currentLightMultiplierDisplay = document.getElementById('currentLightMultiplierDisplay');
+const showFluidVelocityToggle = document.getElementById('showFluidVelocityToggle');
 
 // --- Mouse Interaction State Variables ---
 let selectedSoftBodyPoint = null;
@@ -272,6 +273,7 @@ function initializeAllSliderDisplays() {
     lightEditModeToggle.checked = IS_LIGHT_EDIT_MODE;
     showViscosityMapToggle.checked = SHOW_VISCOSITY_MAP;
     viscosityEditModeToggle.checked = IS_VISCOSITY_EDIT_MODE;
+    showFluidVelocityToggle.checked = SHOW_FLUID_VELOCITY;
 }
 
 function updateInstabilityIndicator() {
@@ -734,7 +736,10 @@ importConfigButton.onclick = () => importConfigFile.click();
 importConfigFile.onchange = handleImportConfig;
 closeInfoPanelButton.onclick = () => { infoPanel.classList.remove('open'); selectedInspectBody = null; selectedInspectPoint = null; }
 
-showNutrientMapToggle.onchange = function() { SHOW_NUTRIENT_MAP = this.checked; };
+showNutrientMapToggle.onchange = function() { 
+    SHOW_NUTRIENT_MAP = this.checked; 
+    console.log("[Debug] showNutrientMapToggle changed. SHOW_NUTRIENT_MAP is now:", SHOW_NUTRIENT_MAP);
+};
 nutrientEditModeToggle.onchange = function() {
     IS_NUTRIENT_EDIT_MODE = this.checked;
     if (IS_NUTRIENT_EDIT_MODE) {
@@ -754,7 +759,10 @@ clearNutrientMapButton.onclick = function() {
     console.log("Nutrient map cleared.");
 };
 
-showLightMapToggle.onchange = function() { SHOW_LIGHT_MAP = this.checked; };
+showLightMapToggle.onchange = function() { 
+    SHOW_LIGHT_MAP = this.checked; 
+    console.log("[Debug] showLightMapToggle changed. SHOW_LIGHT_MAP is now:", SHOW_LIGHT_MAP);
+};
 lightEditModeToggle.onchange = function() {
     IS_LIGHT_EDIT_MODE = this.checked;
     if (IS_LIGHT_EDIT_MODE) {
@@ -772,7 +780,10 @@ clearLightMapButton.onclick = function() {
     console.log("Light map reset to surface pattern.");
 };
 
-showViscosityMapToggle.onchange = function() { SHOW_VISCOSITY_MAP = this.checked; };
+showViscosityMapToggle.onchange = function() { 
+    SHOW_VISCOSITY_MAP = this.checked; 
+    console.log("[Debug] showViscosityMapToggle changed. SHOW_VISCOSITY_MAP is now:", SHOW_VISCOSITY_MAP);
+};
 viscosityEditModeToggle.onchange = function() {
     IS_VISCOSITY_EDIT_MODE = this.checked;
     if (IS_VISCOSITY_EDIT_MODE) {
@@ -843,6 +854,7 @@ copyInfoPanelButton.onclick = function() {
     });
 }
 
+showFluidVelocityToggle.onchange = function() { SHOW_FLUID_VELOCITY = this.checked; };
 
 canvas.addEventListener('mousedown', (e) => {
     updateMouse(e);

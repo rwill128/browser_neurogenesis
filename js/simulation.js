@@ -264,6 +264,11 @@ function draw() {
         drawViscosityMap(ctx);
     }
 
+    console.log("[Debug] In draw() function, about to check SHOW_FLUID_VELOCITY. Value:", SHOW_FLUID_VELOCITY);
+    if (SHOW_FLUID_VELOCITY && fluidField) {
+        drawFluidVelocities(ctx, fluidField);
+    }
+
     for (let particle of particles) {
         particle.draw(ctx);
     }
@@ -321,4 +326,82 @@ function draw() {
 
 
     ctx.restore();
+}
+
+function drawFluidVelocities(ctx, fluidData) {
+    if (!fluidData || !fluidData.Vx || !fluidData.Vy) return;
+    console.log("[Debug] drawFluidVelocities called. SHOW_FLUID_VELOCITY:", SHOW_FLUID_VELOCITY);
+
+    const N = Math.round(fluidData.size);
+    if (N <= 0) {
+        console.log("[Debug] Fluid grid size (N) is zero or negative.");
+        return;
+    }
+
+    // Log a sample of fluid velocities
+    if (N > 0 && fluidData.Vx.length > 0) {
+        let sampleIndices = [];
+        for(let k=0; k < Math.min(5, N*N); k++) { // Log up to 5 sample points
+            sampleIndices.push(Math.floor(Math.random() * N*N));
+        }
+        let sampleVelocities = sampleIndices.map(idx => `Vx[${idx}]: ${fluidData.Vx[idx]?.toFixed(3)}, Vy[${idx}]: ${fluidData.Vy[idx]?.toFixed(3)}`);
+        console.log("[Debug] Sample fluid velocities:", sampleVelocities.join('; '));
+        if (fluidData.Vx.every(v => Math.abs(v) < 0.001) && fluidData.Vy.every(v => Math.abs(v) < 0.001)) {
+            console.log("[Debug] All fluid velocities are very close to zero.");
+        }
+    }
+
+    const cellWidth = WORLD_WIDTH / N;
+    const cellHeight = WORLD_HEIGHT / N;
+    const arrowLengthScale = 1.0 * Math.min(cellWidth, cellHeight); // Increased from 0.5
+    const maxVelocityDisplay = 5; // Clamp velocity magnitude for display to avoid overly long arrows
+
+    ctx.strokeStyle = 'rgba(200, 200, 255, 0.6)'; // Increased alpha for better visibility
+    // Ensure a minimum line width on screen, regardless of zoom.
+    // If viewZoom is high (zoomed in), 1.0 / viewZoom can be very small.
+    // We want the line to be at least, say, 0.5 pixels wide on the screen.
+    ctx.lineWidth = Math.max(0.5, 1.0 / viewZoom); 
+
+    for (let j = 0; j < N; j++) {
+        for (let i = 0; i < N; i++) {
+            const idx = fluidData.IX(i, j);
+            let vx = fluidData.Vx[idx];
+            let vy = fluidData.Vy[idx];
+
+            // Clamp velocity for display
+            const mag = Math.sqrt(vx * vx + vy * vy);
+            if (mag > maxVelocityDisplay) {
+                vx = (vx / mag) * maxVelocityDisplay;
+                vy = (vy / mag) * maxVelocityDisplay;
+            }
+
+            const startX = (i + 0.5) * cellWidth;
+            const startY = (j + 0.5) * cellHeight;
+            const endX = startX + vx * arrowLengthScale;
+            const endY = startY + vy * arrowLengthScale;
+
+            if (Math.abs(startX - endX) < 0.1 && Math.abs(startY - endY) < 0.1) continue; // Skip tiny arrows
+
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+
+            // Draw arrowhead
+            const angle = Math.atan2(endY - startY, endX - startX);
+            // Adjust arrowhead size: make it scale less aggressively with zoom out, but ensure a minimum size.
+            const baseArrowHeadSize = 4; // Base size in world units before zoom scaling
+            const arrowHeadScreenMinSize = 1.5; // Minimum size on screen
+            const arrowHeadScreenMaxSize = 8;   // Maximum size on screen
+            let arrowHeadSize = baseArrowHeadSize / viewZoom;
+            arrowHeadSize = Math.max(arrowHeadScreenMinSize, Math.min(arrowHeadSize, arrowHeadScreenMaxSize)); 
+
+            ctx.beginPath();
+            ctx.moveTo(endX, endY);
+            ctx.lineTo(endX - arrowHeadSize * Math.cos(angle - Math.PI / 6), endY - arrowHeadSize * Math.sin(angle - Math.PI / 6));
+            ctx.moveTo(endX, endY);
+            ctx.lineTo(endX - arrowHeadSize * Math.cos(angle + Math.PI / 6), endY - arrowHeadSize * Math.sin(angle + Math.PI / 6));
+            ctx.stroke();
+        }
+    }
 } 

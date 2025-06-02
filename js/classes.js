@@ -717,8 +717,10 @@ class SoftBody {
 
             // Segment Duplication Mutation (New)
             if (Math.random() < SEGMENT_DUPLICATION_CHANCE && this.massPoints.length > 0) {
+                console.log(`Body ${this.id}: Attempting Segment Duplication.`);
                 const potentialSegments = this.findLinearSegments(MIN_SEGMENT_LENGTH_FOR_DUPLICATION, MAX_SEGMENT_LENGTH_FOR_DUPLICATION);
                 if (potentialSegments.length > 0) {
+                    console.log(`Body ${this.id}: Found ${potentialSegments.length} potential segments for duplication.`);
                     const segmentToDuplicate = potentialSegments[Math.floor(Math.random() * potentialSegments.length)];
                     const newPoints = [];
                     const pointMap = new Map(); // Maps original point to new point
@@ -793,6 +795,10 @@ class SoftBody {
                             this.springs.push(new Spring(attachToOriginalPoint, attachNewPoint, this.stiffness, this.springDamping, connectRestLength, becomeRigid));
                         }
                     }
+                    mutationStats.segmentDuplication++; 
+                    console.log(`Body ${this.id}: Segment Duplication SUCCESSFUL. New points: ${newPoints.length}`);
+                } else {
+                    console.log(`Body ${this.id}: Segment Duplication FAILED - No suitable linear segments found.`);
                 }
             }
 
@@ -919,6 +925,7 @@ class SoftBody {
             if (Math.random() < SYMMETRIC_SUBGRAPH_DUPLICATION_CHANCE && this.springs.length > 0 && this.massPoints.length >= MIN_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP) {
                 let attempts = 0;
                 let duplicationDone = false;
+                console.log(`Body ${this.id}: Attempting Symmetrical Subgraph Duplication.`);
                 while (attempts < 5 && !duplicationDone) {
                     attempts++;
 
@@ -1006,13 +1013,20 @@ class SoftBody {
                         }
 
                         console.log("Symmetric subgraph duplication occurred.");
+                        mutationStats.symmetricSubgraphDuplication = (mutationStats.symmetricSubgraphDuplication || 0) + 1;
                         duplicationDone = true;
+                    } else {
+                        console.log(`Body ${this.id}: Symmetrical Subgraph Duplication attempt ${attempts} FAILED - No suitable branch found.`);
                     }
+                }
+                if (!duplicationDone) {
+                    console.log(`Body ${this.id}: Symmetrical Subgraph Duplication FAILED after all attempts.`);
                 }
             }
 
             // Whole-Body Symmetrical Duplication (New - Highly Experimental)
             if (Math.random() < SYMMETRICAL_BODY_DUPLICATION_CHANCE && this.springs.length > 0 && this.massPoints.length >= 2) {
+                console.log(`Body ${this.id}: Attempting Whole-Body Symmetrical Duplication.`);
                 const originalPoints = [...this.massPoints];
                 const originalSprings = [...this.springs];
                 const pointMap = new Map(); // Maps original point object to its new duplicated point object
@@ -1079,6 +1093,14 @@ class SoftBody {
                 });
                 this.springs.push(...newSpringsToAdd);
                 console.log("Whole-body symmetrical duplication occurred along an edge.");
+                mutationStats.symmetricalBodyDuplication = (mutationStats.symmetricalBodyDuplication || 0) + 1;
+            } else if (this.springs.length === 0 || this.massPoints.length < 2) {
+                // This else if condition is tricky because the Math.random() is the primary condition.
+                // We can log if the random chance passed but the other conditions failed.
+                // However, a separate log if the random chance itself fails is too verbose.
+                if (SYMMETRICAL_BODY_DUPLICATION_CHANCE > 0 && (this.springs.length === 0 || this.massPoints.length < 2)) {
+                     // console.log(`Body ${this.id}: Skipped Whole-Body Symmetrical Duplication due to insufficient points/springs (chance was ${SYMMETRICAL_BODY_DUPLICATION_CHANCE.toFixed(3)}).`);
+                }
             }
 
         } else { // Initial generation - use old shape types

@@ -49,12 +49,12 @@ const MAX_SEGMENT_LENGTH_FOR_DUPLICATION = 7;  // Maximum number of points in a 
 const SEGMENT_DUPLICATION_OFFSET_SCALE = 1.0;  // How far to offset the duplicated segment (e.g., 1.0 = its own length)
 
 // Original Radius Multipliers (will become base values)
-const EATING_RADIUS_MULTIPLIER_BASE = 2.0;
-const PREDATION_RADIUS_MULTIPLIER_BASE = 1.5;
+const EATING_RADIUS_MULTIPLIER_BASE = 10.0;
+const PREDATION_RADIUS_MULTIPLIER_BASE = 7.5;
 
 // Exertion Bonuses for Radius Multipliers
-const EATING_RADIUS_MULTIPLIER_MAX_BONUS = 3.0;
-const PREDATION_RADIUS_MULTIPLIER_MAX_BONUS = 2.5;
+const EATING_RADIUS_MULTIPLIER_MAX_BONUS = 15.0;
+const PREDATION_RADIUS_MULTIPLIER_MAX_BONUS = 12.5;
 
 const ENERGY_PER_PARTICLE = 25;
 const ENERGY_SAPPED_PER_PREDATION_BASE = 3;
@@ -432,17 +432,17 @@ function applyImportedConfig(config) {
 } 
 
 // Subgraph Translocation Mutation (New - Complex)
-const SUBGRAPH_TRANSLOCATION_CHANCE = 0.005;    // Chance a subgraph is moved
+const SUBGRAPH_TRANSLOCATION_CHANCE = 0.15;    // Chance a subgraph is moved, increased from 0.005
 const MIN_SUBGRAPH_SIZE_FOR_TRANSLOCATION = 3;  // Min points in subgraph
 const MAX_SUBGRAPH_SIZE_FOR_TRANSLOCATION = 8;  // Max points in subgraph
 
 // Symmetrical Subgraph Duplication along an Edge (New - Complex)
-const SYMMETRIC_SUBGRAPH_DUPLICATION_CHANCE = 0.01; // Chance for this type of duplication
+const SYMMETRIC_SUBGRAPH_DUPLICATION_CHANCE = 0.2; // Chance for this type of duplication, increased from 0.01
 const MIN_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP = 3;    // Min points in the *initial* subgraph (needs at least 1 edge + 1 other point)
 const MAX_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP = 7;    // Max points in the *initial* subgraph
 
 // Whole-Body Symmetrical Duplication along an Edge (New - Very Complex)
-const SYMMETRICAL_BODY_DUPLICATION_CHANCE = 0.002; // Very rare due to complexity and impact
+const SYMMETRICAL_BODY_DUPLICATION_CHANCE = 0.25; // Very rare due to complexity and impact, increased from 0.002
 
 // Heritable Reward Weights & Related (New)
 const REWARD_WEIGHT_MUTATION_CHANCE = 0.1;

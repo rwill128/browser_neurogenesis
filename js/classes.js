@@ -820,6 +820,87 @@ class SoftBody {
                 }
             }
 
+            // Add Box Mutation (New)
+            // Assumes ADD_BOX_MUTATION_CHANCE, NEW_BOX_SIDE_LENGTH_MIN, NEW_BOX_SIDE_LENGTH_MAX are globally defined
+            // if (Math.random() < (ADD_BOX_MUTATION_CHANCE || 0.05) && this.springs.length > 0 && this.massPoints.length >= 2) {
+            //     const axisSpringIndex = Math.floor(Math.random() * this.springs.length);
+            //     const axisSpring = this.springs[axisSpringIndex];
+            //     const P1 = axisSpring.p1;
+            //     const P2 = axisSpring.p2;
+            //
+            //     const vecP1P2 = P2.pos.sub(P1.pos);
+            //     if (vecP1P2.magSq() > 0.001) { // Ensure P1 and P2 are not coincident
+            //         let perpVec = new Vec2(-vecP1P2.y, vecP1P2.x).normalize();
+            //         if (Math.random() < 0.5) { // Randomly flip direction
+            //             perpVec = perpVec.mul(-1);
+            //         }
+            //
+            //         const chosenBoxSideLength = (NEW_BOX_SIDE_LENGTH_MIN || 10) + Math.random() * ((NEW_BOX_SIDE_LENGTH_MAX || 30) - (NEW_BOX_SIDE_LENGTH_MIN || 10));
+            //         const scaledPerpVec = perpVec.mul(chosenBoxSideLength);
+            //
+            //         const P3_pos = P2.pos.add(scaledPerpVec);
+            //         const P4_pos = P1.pos.add(scaledPerpVec);
+            //
+            //         const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE];
+            //         const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE]; // Assumes DYE_COLORS is global
+            //         const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
+            //
+            //         // Create P3
+            //         const avgParentRadiusP3 = (P1.radius + P2.radius) / 2; // Base on P1/P2 for consistency
+            //         const newRadiusP3 = Math.max(0.5, avgParentRadiusP3 * (0.8 + Math.random() * 0.4));
+            //         const newMassP3 = Math.max(0.1, ((P1.mass + P2.mass) / 2) * (0.8 + Math.random() * 0.4));
+            //         let nodeTypeP3 = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
+            //         let movementTypeP3 = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
+            //         if (nodeTypeP3 === NodeType.SWIMMER && movementTypeP3 === MovementType.FLOATING) {
+            //             movementTypeP3 = MovementType.NEUTRAL;
+            //         }
+            //         const P3_mp = new MassPoint(P3_pos.x, P3_pos.y, newMassP3, newRadiusP3);
+            //         P3_mp.nodeType = nodeTypeP3;
+            //         P3_mp.movementType = movementTypeP3;
+            //         P3_mp.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+            //         P3_mp.canBeGrabber = Math.random() < (GRABBER_GENE_MUTATION_CHANCE || 0.1);
+            //         if (P3_mp.nodeType === NodeType.NEURON) {
+            //             P3_mp.neuronData = { isBrain: false, hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) };
+            //         }
+            //         this.massPoints.push(P3_mp);
+            //
+            //         // Create P4
+            //         const avgParentRadiusP4 = (P1.radius + P2.radius) / 2;
+            //         const newRadiusP4 = Math.max(0.5, avgParentRadiusP4 * (0.8 + Math.random() * 0.4));
+            //         const newMassP4 = Math.max(0.1, ((P1.mass + P2.mass) / 2) * (0.8 + Math.random() * 0.4));
+            //         let nodeTypeP4 = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
+            //         let movementTypeP4 = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
+            //          if (nodeTypeP4 === NodeType.SWIMMER && movementTypeP4 === MovementType.FLOATING) {
+            //             movementTypeP4 = MovementType.NEUTRAL;
+            //         }
+            //         const P4_mp = new MassPoint(P4_pos.x, P4_pos.y, newMassP4, newRadiusP4);
+            //         P4_mp.nodeType = nodeTypeP4;
+            //         P4_mp.movementType = movementTypeP4;
+            //         P4_mp.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+            //         P4_mp.canBeGrabber = Math.random() < (GRABBER_GENE_MUTATION_CHANCE || 0.1);
+            //          if (P4_mp.nodeType === NodeType.NEURON) {
+            //             P4_mp.neuronData = { isBrain: false, hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) };
+            //         }
+            //         this.massPoints.push(P4_mp);
+            //
+            //         // Add new springs
+            //         const rigidChance = CHANCE_FOR_RIGID_SPRING || 0.1;
+            //         // Edge P2-P3
+            //         this.springs.push(new Spring(P2, P3_mp, this.stiffness, this.springDamping, chosenBoxSideLength, Math.random() < rigidChance));
+            //         // Edge P3-P4
+            //         this.springs.push(new Spring(P3_mp, P4_mp, this.stiffness, this.springDamping, vecP1P2.mag(), Math.random() < rigidChance));
+            //         // Edge P4-P1
+            //         this.springs.push(new Spring(P4_mp, P1, this.stiffness, this.springDamping, chosenBoxSideLength, Math.random() < rigidChance));
+            //         // Diagonal P1-P3
+            //         this.springs.push(new Spring(P1, P3_mp, this.stiffness, this.springDamping, P3_mp.pos.sub(P1.pos).mag(), Math.random() < rigidChance));
+            //         // Diagonal P2-P4
+            //         this.springs.push(new Spring(P2, P4_mp, this.stiffness, this.springDamping, P4_mp.pos.sub(P2.pos).mag(), Math.random() < rigidChance));
+            //
+            //         mutationStats.addBoxMutation = (mutationStats.addBoxMutation || 0) + 1;
+            //         console.log(`Body ${this.id}: Add Box Mutation SUCCESSFUL. Added 2 points, 5 springs.`);
+            //     }
+            // }
+
             // Subgraph Translocation Mutation (EXPERIMENTAL AND SIMPLIFIED)
             if (Math.random() < SUBGRAPH_TRANSLOCATION_CHANCE && this.massPoints.length > MIN_SUBGRAPH_SIZE_FOR_TRANSLOCATION + 1) { // Ensure enough points for a subgraph and a remaining body
                 let attempts = 0;
@@ -2073,6 +2154,13 @@ class SoftBody {
         let successfullyPlacedOffspring = 0;
         let offspring = [];
 
+        // Cache bounding boxes of existing population
+        const existingBodyBBoxes = softBodyPopulation.map(body => {
+            if (body.isUnstable) return null; // or some indicator for unstable bodies
+            return body.getBoundingBox();
+        }).filter(bbox => bbox !== null);
+
+
         for (let i = 0; i < this.numOffspring; i++) {
             if (this.creatureEnergy < energyForOneOffspring) break; // Not enough energy for this one
 
@@ -2104,9 +2192,8 @@ class SoftBody {
 
                 let isSpotClear = true;
                 // Check against existing population
-                for (const otherBody of softBodyPopulation) {
-                    if (otherBody.isUnstable) continue;
-                    const otherBBox = otherBody.getBoundingBox();
+                for (const otherBBox of existingBodyBBoxes) {
+                    // No need to check otherBody.isUnstable here as it's filtered during caching
                     if (!(childWorldMaxX < otherBBox.minX || childWorldMinX > otherBBox.maxX || childWorldMaxY < otherBBox.minY || childWorldMinY > otherBBox.maxY)) {
                         isSpotClear = false; break;
                     }

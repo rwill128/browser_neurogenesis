@@ -2763,15 +2763,15 @@ class SoftBody {
 
 // --- FluidField Class (Simplified) ---
 class FluidField {
-    constructor(size, diffusion, viscosity, dt, scaleX, scaleY) { // Added scaleX, scaleY
-        this.size = Math.round(size); // Ensure integer
+    constructor(size, diffusion, viscosity, dt, scaleX, scaleY) {
+        this.size = Math.round(size);
         this.dt = dt;
         this.diffusion = diffusion;
         this.viscosity = viscosity;
-        this.scaleX = scaleX; // Store separate scales
-        this.scaleY = scaleY;
+        this.scaleX = scaleX; 
+        this.scaleY = scaleY; 
         this.useWrapping = false;
-        this.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT; // New
+        this.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT;
 
         this.densityR = new Float32Array(this.size * this.size).fill(0);
         this.densityG = new Float32Array(this.size * this.size).fill(0);
@@ -2785,7 +2785,7 @@ class FluidField {
         this.Vx0 = new Float32Array(this.size * this.size).fill(0);
         this.Vy0 = new Float32Array(this.size * this.size).fill(0);
 
-        this.iterations = 4;
+        this.iterations = 4; 
     }
 
     IX(x, y) {
@@ -2801,33 +2801,16 @@ class FluidField {
 
     addDensity(x, y, emitterR, emitterG, emitterB, emissionStrength) {
         const idx = this.IX(x, y);
-        const normalizedEmissionEffect = (emissionStrength / 50.0) * DYE_PULL_RATE; // Use 50 as a reference emission strength
-
-        let currentR = this.densityR[idx];
-        let targetDiffR = emitterR - currentR;
-        this.densityR[idx] += targetDiffR * normalizedEmissionEffect;
-        this.densityR[idx] = Math.max(0, Math.min(255, this.densityR[idx]));
-
-        let currentG = this.densityG[idx];
-        let targetDiffG = emitterG - currentG;
-        this.densityG[idx] += targetDiffG * normalizedEmissionEffect;
-        this.densityG[idx] = Math.max(0, Math.min(255, this.densityG[idx]));
-
-        let currentB = this.densityB[idx];
-        let targetDiffB = emitterB - currentB;
-        this.densityB[idx] += targetDiffB * normalizedEmissionEffect;
-        this.densityB[idx] = Math.max(0, Math.min(255, this.densityB[idx]));
+        const normalizedEmissionEffect = (emissionStrength / 50.0) * DYE_PULL_RATE;
+        this.densityR[idx] = Math.max(0, Math.min(255, this.densityR[idx] + (emitterR - this.densityR[idx]) * normalizedEmissionEffect));
+        this.densityG[idx] = Math.max(0, Math.min(255, this.densityG[idx] + (emitterG - this.densityG[idx]) * normalizedEmissionEffect));
+        this.densityB[idx] = Math.max(0, Math.min(255, this.densityB[idx] + (emitterB - this.densityB[idx]) * normalizedEmissionEffect));
     }
-
 
     addVelocity(x, y, amountX, amountY) {
         const idx = this.IX(x, y);
-        let newVx = this.Vx[idx] + amountX;
-        let newVy = this.Vy[idx] + amountY;
-
-        // Cap individual components
-        this.Vx[idx] = Math.max(-this.maxVelComponent, Math.min(newVx, this.maxVelComponent));
-        this.Vy[idx] = Math.max(-this.maxVelComponent, Math.min(newVy, this.maxVelComponent));
+        this.Vx[idx] = Math.max(-this.maxVelComponent, Math.min(this.Vx[idx] + amountX, this.maxVelComponent));
+        this.Vy[idx] = Math.max(-this.maxVelComponent, Math.min(this.Vy[idx] + amountY, this.maxVelComponent));
     }
 
     clampVelocityComponents(arr) {
@@ -2836,69 +2819,50 @@ class FluidField {
         }
     }
 
-
-    lin_solve(b, x, x0, a_global_param, c_global_param, field_type, base_diff_rate, dt_param) { // Checkpoint 2 Signature & params used
-        // const cRecip = 1.0 / c; // Not needed directly like this anymore
-        for (let k_iter = 0; k_iter < this.iterations; k_iter++) { 
+    lin_solve(b, x, x0, a_global_param, c_global_param, field_type, base_diff_rate, dt_param) {
+        const cRecipGlobal = 1.0 / c_global_param;
+        for (let k_iter = 0; k_iter < this.iterations; k_iter++) {
             for (let j = 1; j < this.size - 1; j++) {
                 for (let i = 1; i < this.size - 1; i++) {
                     const idx = this.IX(i,j);
-                    
-                    let effective_a = a_global_param; // Use the passed global 'a' by default
-                    let effective_cRecip = 1.0 / c_global_param; // Use the passed global 'c' by default
+                    let effective_a = a_global_param;
+                    let effective_cRecip = cRecipGlobal;
 
                     if ((field_type === 'velX' || field_type === 'velY')) {
-                        if (viscosityField && viscosityField[idx] !== undefined) { // Check viscosityField exists and has a value for this cell
+                        if (viscosityField && viscosityField[idx] !== undefined) { 
                             const localViscosityMultiplier = Math.max(MIN_VISCOSITY_MULTIPLIER, Math.min(viscosityField[idx], MAX_VISCOSITY_MULTIPLIER));
-                            const cell_specific_diff_rate = base_diff_rate * localViscosityMultiplier; // base_diff_rate is global fluid viscosity
-                            
+                            const cell_specific_diff_rate = base_diff_rate * localViscosityMultiplier; 
                             const temp_effective_a = dt_param * cell_specific_diff_rate * (this.size - 2) * (this.size - 2);
                             const temp_denominator_c = 1 + 4 * temp_effective_a;
-
-                            if (temp_denominator_c !== 0 && !isNaN(temp_effective_a) && isFinite(temp_effective_a)) { // Check for sane values
+                            if (temp_denominator_c !== 0 && !isNaN(temp_effective_a) && isFinite(temp_effective_a)) {
                                 effective_a = temp_effective_a;
                                 effective_cRecip = 1.0 / temp_denominator_c;
-                            } else {
-                                // Fallback to global if local calculation is problematic
-                                // effective_a and effective_cRecip remain as their _global_param defaults already set above
-                                console.warn(`Viscosity solver: problematic local calculation at [${i},${j}]. Falling back to global viscosity for this cell. Multiplier: ${viscosityField[idx]}, Effective_a_attempt: ${temp_effective_a}`);
-                            }
+                            } 
                         }
-                        // If viscosityField doesn't exist or no value for idx, effective_a and effective_cRecip 
-                        // remain as their global_param defaults, which is correct.
                     }
-                    
-                    x[idx] =
-                        (x0[idx] +
-                        effective_a * ( x[this.IX(i+1,j)] + x[this.IX(i-1,j)] +
-                                      x[this.IX(i,j+1)] + x[this.IX(i,j-1)]
-                                    )) * effective_cRecip; 
+                    x[idx] = (x0[idx] + effective_a * (x[this.IX(i+1,j)] + x[this.IX(i-1,j)] + x[this.IX(i,j+1)] + x[this.IX(i,j-1)])) * effective_cRecip;
                 }
             }
             this.set_bnd(b, x);
         }
     }
 
-    diffuse(b, x_out, x_in, base_diff_rate, dt, field_type = 'density') { // Checkpoint 1 Signature
-        const a_global = dt * base_diff_rate * (this.size - 2) * (this.size - 2); 
-        // Pass new params; lin_solve will ignore field_type, base_diff_rate, dt for Checkpoint 1
-        this.lin_solve(b, x_out, x_in, a_global, 1 + 4 * a_global, field_type, base_diff_rate, dt); 
+    diffuse(b, x_out, x_in, base_diff_rate, dt, field_type = 'density') {
+        const a_global = dt * base_diff_rate * (this.size - 2) * (this.size - 2);
+        this.lin_solve(b, x_out, x_in, a_global, 1 + 4 * a_global, field_type, base_diff_rate, dt);
     }
 
     project(velocX_in_out, velocY_in_out, p_temp, div_temp) {
         for (let j = 1; j < this.size - 1; j++) {
             for (let i = 1; i < this.size - 1; i++) {
                 const idx = this.IX(i,j);
-                div_temp[idx] = -0.5 * (
-                    velocX_in_out[this.IX(i+1,j)] - velocX_in_out[this.IX(i-1,j)] +
-                    velocY_in_out[this.IX(i,j+1)] - velocY_in_out[this.IX(i,j-1)]
-                ) / this.size; // Using this.size here assumes square cells for divergence calculation
+                div_temp[idx] = -0.5 * (velocX_in_out[this.IX(i+1,j)] - velocX_in_out[this.IX(i-1,j)] + velocY_in_out[this.IX(i,j+1)] - velocY_in_out[this.IX(i,j-1)]) / this.size;
                 p_temp[idx] = 0;
             }
         }
         this.set_bnd(0, div_temp);
         this.set_bnd(0, p_temp);
-        this.lin_solve(0, p_temp, div_temp, 1, 4);
+        this.lin_solve(0, p_temp, div_temp, 1, 4, 'pressure', 0, 0);
 
         for (let j = 1; j < this.size - 1; j++) {
             for (let i = 1; i < this.size - 1; i++) {
@@ -2913,21 +2877,18 @@ class FluidField {
 
     advect(b, d_out, d_in, velocX_source, velocY_source, dt) {
         let i0, i1, j0, j1;
-        const dtx = dt * (this.size - 2);
-        const dty = dt * (this.size - 2);
-        let s0, s1, t0, t1;
-        let tmp1, tmp2, x, y;
-
         const N = this.size;
+        const dtx_scaled = dt * N; 
+        const dty_scaled = dt * N;
+
+        let s0, s1, t0, t1;
+        let x, y;
 
         for (let j_cell = 1; j_cell < N - 1; j_cell++) {
             for (let i_cell = 1; i_cell < N - 1; i_cell++) {
                 const current_idx = this.IX(i_cell, j_cell);
-
-                tmp1 = dtx * velocX_source[current_idx];
-                tmp2 = dty * velocY_source[current_idx];
-                x = i_cell - tmp1;
-                y = j_cell - tmp2;
+                x = i_cell - (dtx_scaled * velocX_source[current_idx]); 
+                y = j_cell - (dty_scaled * velocY_source[current_idx]);
 
                 if (this.useWrapping) {
                     x = (x % N + N) % N;
@@ -2938,22 +2899,20 @@ class FluidField {
                     j1 = (j0 + 1) % N;
                 } else {
                     if (x < 0.5) x = 0.5;
-                    if (x > N - 1.5) x = N - 1.5;
+                    if (x > N - 1.5) x = N - 1.5; 
                     i0 = Math.floor(x);
-                    i1 = i0 + 1.0;
-
+                    i1 = i0 + 1;
                     if (y < 0.5) y = 0.5;
                     if (y > N - 1.5) y = N - 1.5;
                     j0 = Math.floor(y);
-                    j1 = j0 + 1.0;
+                    j1 = j0 + 1;
                 }
 
                 s1 = x - i0;
-                if (this.useWrapping && i1 === 0 && i0 === N - 1) s0 = 1.0 - s1 + 1; else s0 = 1.0 - s1;
-
+                s0 = 1.0 - s1;
                 t1 = y - j0;
-                if (this.useWrapping && j1 === 0 && j0 === N - 1) t0 = 1.0 - t1 + 1; else t0 = 1.0 - t1;
-
+                t0 = 1.0 - t1;
+                
                 d_out[current_idx] = s0 * (t0 * d_in[this.IX(i0,j0)] + t1 * d_in[this.IX(i0,j1)]) +
                                      s1 * (t0 * d_in[this.IX(i1,j0)] + t1 * d_in[this.IX(i1,j1)]);
             }
@@ -2975,7 +2934,6 @@ class FluidField {
             x_arr[this.IX(0, this.size - 1)] = 0.5 * (x_arr[this.IX(1, this.size - 1)] + x_arr[this.IX(0, this.size - 2)]);
             x_arr[this.IX(this.size - 1, 0)] = 0.5 * (x_arr[this.IX(this.size - 2, 0)] + x_arr[this.IX(this.size - 1, 1)]);
             x_arr[this.IX(this.size - 1, this.size - 1)] = 0.5 * (x_arr[this.IX(this.size - 2, this.size - 1)] + x_arr[this.IX(this.size - 1, this.size - 2)]);
-
         } else {
             for (let i = 1; i < this.size - 1; i++) {
                 x_arr[this.IX(i, 0)] = b === 2 ? -x_arr[this.IX(i, 1)] : x_arr[this.IX(i, 1)];
@@ -2995,32 +2953,20 @@ class FluidField {
     step() {
         this.diffuse(1, this.Vx0, this.Vx, this.viscosity, this.dt, 'velX');
         this.diffuse(2, this.Vy0, this.Vy, this.viscosity, this.dt, 'velY');
-        this.clampVelocityComponents(this.Vx0); 
+        this.clampVelocityComponents(this.Vx0);
         this.clampVelocityComponents(this.Vy0);
-
-        this.project(this.Vx0, this.Vy0, this.Vx, this.Vy); // Vx, Vy are temp here
-
+        this.project(this.Vx0, this.Vy0, this.Vx, this.Vy);
         this.advect(1, this.Vx, this.Vx0, this.Vx0, this.Vy0, this.dt);
         this.advect(2, this.Vy, this.Vy0, this.Vx0, this.Vy0, this.dt);
-        this.clampVelocityComponents(this.Vx); // Clamp after advection
+        this.clampVelocityComponents(this.Vx);
         this.clampVelocityComponents(this.Vy);
-
-        this.project(this.Vx0, this.Vy0, this.Vx, this.Vy); // Vx0, Vy0 are temp here again, using them as p_temp and div_temp
-
-        this.advect(1, this.Vx, this.Vx0, this.Vx0, this.Vy0, this.dt);
-        this.advect(2, this.Vy, this.Vy0, this.Vx0, this.Vy0, this.dt);
-        this.clampVelocityComponents(this.Vx); // Clamp after advection
-        this.clampVelocityComponents(this.Vy);
-
-        this.project(this.Vx, this.Vy, this.Vx0, this.Vy0); // Vx0, Vy0 are temp here again
-
+        this.project(this.Vx, this.Vy, this.Vx0, this.Vy0);
         this.diffuse(0, this.densityR0, this.densityR, this.diffusion, this.dt, 'density');
         this.diffuse(0, this.densityG0, this.densityG, this.diffusion, this.dt, 'density');
         this.diffuse(0, this.densityB0, this.densityB, this.diffusion, this.dt, 'density');
         this.advect(0, this.densityR, this.densityR0, this.Vx, this.Vy, this.dt);
         this.advect(0, this.densityG, this.densityG0, this.Vx, this.Vy, this.dt);
         this.advect(0, this.densityB, this.densityB0, this.Vx, this.Vy, this.dt);
-
         for (let i = 0; i < this.densityR.length; i++) {
             this.densityR[i] = Math.max(0, this.densityR[i] - FLUID_FADE_RATE * 255 * this.dt);
             this.densityG[i] = Math.max(0, this.densityG[i] - FLUID_FADE_RATE * 255 * this.dt);
@@ -3028,33 +2974,49 @@ class FluidField {
         }
     }
 
-    draw(ctxToDrawOn, targetWidth, targetHeight) {
-        const roundedSize = Math.round(this.size);
-         if (roundedSize <= 0 || !Number.isFinite(roundedSize)) {
-            console.error("Invalid fluid field size for drawing (this.size):", this.size);
+    draw(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight, viewOffsetXWorld, viewOffsetYWorld, currentZoom) {
+        const N = Math.round(this.size);
+        if (N <= 0 || !Number.isFinite(N)) {
+            console.error("FluidField.draw: Invalid N size:", N);
             return;
         }
 
-        if (!offscreenFluidCanvas || offscreenFluidCanvas.width !== roundedSize) {
-            offscreenFluidCanvas = document.createElement('canvas');
-            offscreenFluidCanvas.width = roundedSize;
-            offscreenFluidCanvas.height = roundedSize;
-            offscreenFluidCtx = offscreenFluidCanvas.getContext('2d');
-        }
+        const worldCellWidth = WORLD_WIDTH / N;
+        const worldCellHeight = WORLD_HEIGHT / N;
 
-        const imgData = offscreenFluidCtx.createImageData(roundedSize, roundedSize);
-        const data = imgData.data;
-        for (let i = 0; i < roundedSize * roundedSize; i++) {
-            data[i * 4 + 0] = Math.min(255, Math.max(0, Math.floor(this.densityR[i])));
-            data[i * 4 + 1] = Math.min(255, Math.max(0, Math.floor(this.densityG[i])));
-            data[i * 4 + 2] = Math.min(255, Math.max(0, Math.floor(this.densityB[i])));
-            data[i * 4 + 3] = (this.densityR[i] > 1 || this.densityG[i] > 1 || this.densityB[i] > 1) ? 255 : 0;
-        }
-        offscreenFluidCtx.putImageData(imgData, 0, 0);
+        const viewportWorldWidth = viewportCanvasWidth / currentZoom;
+        const viewportWorldHeight = viewportCanvasHeight / currentZoom;
 
-        ctxToDrawOn.imageSmoothingEnabled = true;
-        ctxToDrawOn.drawImage(offscreenFluidCanvas, 0, 0, roundedSize, roundedSize, 0, 0, targetWidth, targetHeight);
+        const viewLeftWorld = viewOffsetXWorld;
+        const viewTopWorld = viewOffsetYWorld;
+        const viewRightWorld = viewOffsetXWorld + viewportWorldWidth;
+        const viewBottomWorld = viewOffsetYWorld + viewportWorldHeight;
+
+        const startCol = Math.max(0, Math.floor(viewLeftWorld / worldCellWidth));
+        const endCol = Math.min(N - 1, Math.floor(viewRightWorld / worldCellWidth));
+        const startRow = Math.max(0, Math.floor(viewTopWorld / worldCellHeight));
+        const endRow = Math.min(N - 1, Math.floor(viewBottomWorld / worldCellHeight));
+
+        if (startCol > endCol || startRow > endRow) return; // No visible cells
+
+        for (let j = startRow; j <= endRow; j++) {
+            for (let i = startCol; i <= endCol; i++) {
+                const idx = this.IX(i, j);
+                const rVal = Math.min(255, Math.max(0, Math.floor(this.densityR[idx])));
+                const gVal = Math.min(255, Math.max(0, Math.floor(this.densityG[idx])));
+                const bVal = Math.min(255, Math.max(0, Math.floor(this.densityB[idx])));
+                const alphaVal = (rVal > 1 || gVal > 1 || bVal > 1) ? 0.4 : 0; // Original alpha for blocky rendering
+
+                if (alphaVal > 0) {
+                    const cellWorldX = i * worldCellWidth;
+                    const cellWorldY = j * worldCellHeight;
+                    ctxToDrawOn.fillStyle = `rgba(${rVal},${gVal},${bVal},${alphaVal.toFixed(2)})`;
+                    ctxToDrawOn.fillRect(cellWorldX, cellWorldY, worldCellWidth, worldCellHeight);
+                }
+            }
+        }
     }
+
     clear() {
         this.densityR.fill(0); this.densityG.fill(0); this.densityB.fill(0);
         this.densityR0.fill(0); this.densityG0.fill(0); this.densityB0.fill(0);
@@ -3062,7 +3024,6 @@ class FluidField {
         this.Vx0.fill(0); this.Vy0.fill(0);
     }
 }
-
 
 // --- Particle Class (for fluid visualization) ---
 class Particle {

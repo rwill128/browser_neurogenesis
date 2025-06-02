@@ -279,7 +279,7 @@ function updatePhysics(dt) {
 // --- Drawing --- (draw() function is now standalone)
 function draw() {
     ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.save();
 
@@ -287,27 +287,48 @@ function draw() {
     ctx.translate(-viewOffsetX, -viewOffsetY);
 
     if (fluidField) {
-        fluidField.draw(ctx, WORLD_WIDTH, WORLD_HEIGHT);
+        // Reverted: Direct blocky drawing
+        const viewportWorldWidth = canvas.width / viewZoom;
+        const viewportWorldHeight = canvas.height / viewZoom;
+        fluidField.draw(ctx, canvas.width, canvas.height, viewOffsetX, viewOffsetY, viewZoom);
     }
     if (SHOW_NUTRIENT_MAP && nutrientField && fluidField) {
-        drawNutrientMap(ctx);
+        drawNutrientMap(ctx, canvas.width, canvas.height, viewOffsetX, viewOffsetY, viewZoom);
     }
     if (SHOW_LIGHT_MAP && lightField && fluidField) {
-        drawLightMap(ctx);
+        drawLightMap(ctx, canvas.width, canvas.height, viewOffsetX, viewOffsetY, viewZoom);
     }
     if (SHOW_VISCOSITY_MAP && viscosityField && fluidField) {
-        drawViscosityMap(ctx);
+        drawViscosityMap(ctx, canvas.width, canvas.height, viewOffsetX, viewOffsetY, viewZoom);
     }
 
     console.log("[Debug] In draw() function, about to check SHOW_FLUID_VELOCITY. Value:", SHOW_FLUID_VELOCITY);
     if (SHOW_FLUID_VELOCITY && fluidField) {
-        drawFluidVelocities(ctx, fluidField);
+        drawFluidVelocities(ctx, fluidField, canvas.width, canvas.height, viewOffsetX, viewOffsetY, viewZoom);
     }
 
     for (let particle of particles) {
+        // Culling check (particles are small, so checking their center point + radius is good)
+        const viewRightWorld = viewOffsetX + canvas.width / viewZoom;
+        const viewBottomWorld = viewOffsetY + canvas.height / viewZoom;
+        const particleRadius = particle.size; // Assuming particle.size is its radius
+
+        if (particle.pos.x + particleRadius < viewOffsetX || particle.pos.x - particleRadius > viewRightWorld ||
+            particle.pos.y + particleRadius < viewOffsetY || particle.pos.y - particleRadius > viewBottomWorld) {
+            continue; // Skip drawing if particle is outside viewport
+        }
         particle.draw(ctx);
     }
     for (let body of softBodyPopulation) {
+        // Culling check for soft bodies
+        const bbox = body.getBoundingBox(); // { minX, minY, maxX, maxY } in world coords
+        const viewRightWorld = viewOffsetX + canvas.width / viewZoom;
+        const viewBottomWorld = viewOffsetY + canvas.height / viewZoom;
+
+        if (bbox.maxX < viewOffsetX || bbox.minX > viewRightWorld ||
+            bbox.maxY < viewOffsetY || bbox.minY > viewBottomWorld) {
+            continue; // Skip drawing if body is outside viewport
+        }
         body.drawSelf(ctx);
     }
 
@@ -363,7 +384,7 @@ function draw() {
     ctx.restore();
 }
 
-function drawFluidVelocities(ctx, fluidData) {
+function drawFluidVelocities(ctx, fluidData, viewportCanvasWidth, viewportCanvasHeight, viewOffsetXWorld, viewOffsetYWorld, currentZoom) {
     if (!fluidData || !fluidData.Vx || !fluidData.Vy) return;
     console.log("[Debug] drawFluidVelocities called. SHOW_FLUID_VELOCITY:", SHOW_FLUID_VELOCITY);
 
@@ -373,69 +394,81 @@ function drawFluidVelocities(ctx, fluidData) {
         return;
     }
 
+    const worldCellWidth = WORLD_WIDTH / N; // Cell dimensions in world units
+    const worldCellHeight = WORLD_HEIGHT / N;
+
+    // Determine visible grid range
+    const viewLeftWorld = viewOffsetXWorld;
+    const viewTopWorld = viewOffsetYWorld;
+    const viewRightWorld = viewOffsetXWorld + viewportCanvasWidth / currentZoom;
+    const viewBottomWorld = viewOffsetYWorld + viewportCanvasHeight / currentZoom;
+
+    const startCol = Math.max(0, Math.floor(viewLeftWorld / worldCellWidth));
+    const endCol = Math.min(N - 1, Math.floor(viewRightWorld / worldCellWidth));
+    const startRow = Math.max(0, Math.floor(viewTopWorld / worldCellHeight));
+    const endRow = Math.min(N - 1, Math.floor(viewBottomWorld / worldCellHeight));
+
     // Log a sample of fluid velocities
-    if (N > 0 && fluidData.Vx.length > 0) {
+    if (N > 0 && fluidData.Vx.length > 0 && (startCol <= endCol && startRow <= endRow)) {
         let sampleIndices = [];
-        for(let k=0; k < Math.min(5, N*N); k++) { // Log up to 5 sample points
-            sampleIndices.push(Math.floor(Math.random() * N*N));
+        // Ensure we only sample valid indices within the visible range if possible
+        for(let k=0; k < Math.min(5, (endCol-startCol+1)*(endRow-startRow+1)); k++) { 
+            const randCol = startCol + Math.floor(Math.random() * (endCol - startCol + 1));
+            const randRow = startRow + Math.floor(Math.random() * (endRow - startRow + 1));
+            sampleIndices.push(fluidData.IX(randCol, randRow));
         }
         let sampleVelocities = sampleIndices.map(idx => `Vx[${idx}]: ${fluidData.Vx[idx]?.toFixed(3)}, Vy[${idx}]: ${fluidData.Vy[idx]?.toFixed(3)}`);
-        console.log("[Debug] Sample fluid velocities:", sampleVelocities.join('; '));
-        if (fluidData.Vx.every(v => Math.abs(v) < 0.001) && fluidData.Vy.every(v => Math.abs(v) < 0.001)) {
-            console.log("[Debug] All fluid velocities are very close to zero.");
-        }
+        console.log("[Debug] Sample fluid velocities (visible range):", sampleVelocities.join('; '));
+        // This check for all zero might be too expensive if done every time on the full arrays.
+        // Consider removing or restricting it if performance is an issue.
+        // if (fluidData.Vx.every(v => Math.abs(v) < 0.001) && fluidData.Vy.every(v => Math.abs(v) < 0.001)) {
+        //     console.log("[Debug] All fluid velocities are very close to zero.");
+        // }
     }
 
-    const cellWidth = WORLD_WIDTH / N;
-    const cellHeight = WORLD_HEIGHT / N;
-    const arrowLengthScale = 1.0 * Math.min(cellWidth, cellHeight); // Increased from 0.5
-    const maxVelocityDisplay = 5; // Clamp velocity magnitude for display to avoid overly long arrows
+    const arrowLengthScale = 0.8 * Math.min(worldCellWidth, worldCellHeight); // Adjusted for better visuals
+    const maxVelocityDisplay = 5; 
 
-    ctx.strokeStyle = 'rgba(200, 200, 255, 0.6)'; // Increased alpha for better visibility
-    // Ensure a minimum line width on screen, regardless of zoom.
-    // If viewZoom is high (zoomed in), 1.0 / viewZoom can be very small.
-    // We want the line to be at least, say, 0.5 pixels wide on the screen.
-    ctx.lineWidth = Math.max(0.5, 1.0 / viewZoom); 
+    ctx.strokeStyle = 'rgba(200, 200, 255, 0.6)';
+    ctx.lineWidth = Math.max(0.5, 1.0 / currentZoom); 
 
-    for (let j = 0; j < N; j++) {
-        for (let i = 0; i < N; i++) {
+    for (let j = startRow; j <= endRow; j++) {
+        for (let i = startCol; i <= endCol; i++) {
             const idx = fluidData.IX(i, j);
             let vx = fluidData.Vx[idx];
             let vy = fluidData.Vy[idx];
 
-            // Clamp velocity for display
             const mag = Math.sqrt(vx * vx + vy * vy);
             if (mag > maxVelocityDisplay) {
                 vx = (vx / mag) * maxVelocityDisplay;
                 vy = (vy / mag) * maxVelocityDisplay;
             }
 
-            const startX = (i + 0.5) * cellWidth;
-            const startY = (j + 0.5) * cellHeight;
-            const endX = startX + vx * arrowLengthScale;
-            const endY = startY + vy * arrowLengthScale;
+            // Cell center in world coordinates
+            const startXWorld = (i + 0.5) * worldCellWidth;
+            const startYWorld = (j + 0.5) * worldCellHeight;
+            const endXWorld = startXWorld + vx * arrowLengthScale;
+            const endYWorld = startYWorld + vy * arrowLengthScale;
 
-            if (Math.abs(startX - endX) < 0.1 && Math.abs(startY - endY) < 0.1) continue; // Skip tiny arrows
+            if (Math.abs(startXWorld - endXWorld) < 0.1 && Math.abs(startYWorld - endYWorld) < 0.1) continue; 
 
             ctx.beginPath();
-            ctx.moveTo(startX, startY);
-            ctx.lineTo(endX, endY);
+            ctx.moveTo(startXWorld, startYWorld); // Draw using world coordinates
+            ctx.lineTo(endXWorld, endYWorld);   // The main canvas transform handles screen placement
             ctx.stroke();
 
-            // Draw arrowhead
-            const angle = Math.atan2(endY - startY, endX - startX);
-            // Adjust arrowhead size: make it scale less aggressively with zoom out, but ensure a minimum size.
-            const baseArrowHeadSize = 4; // Base size in world units before zoom scaling
-            const arrowHeadScreenMinSize = 1.5; // Minimum size on screen
-            const arrowHeadScreenMaxSize = 8;   // Maximum size on screen
-            let arrowHeadSize = baseArrowHeadSize / viewZoom;
+            const angle = Math.atan2(endYWorld - startYWorld, endXWorld - startXWorld);
+            const baseArrowHeadSize = 4; 
+            const arrowHeadScreenMinSize = 1.5; 
+            const arrowHeadScreenMaxSize = 8;   
+            let arrowHeadSize = baseArrowHeadSize / currentZoom;
             arrowHeadSize = Math.max(arrowHeadScreenMinSize, Math.min(arrowHeadSize, arrowHeadScreenMaxSize)); 
 
             ctx.beginPath();
-            ctx.moveTo(endX, endY);
-            ctx.lineTo(endX - arrowHeadSize * Math.cos(angle - Math.PI / 6), endY - arrowHeadSize * Math.sin(angle - Math.PI / 6));
-            ctx.moveTo(endX, endY);
-            ctx.lineTo(endX - arrowHeadSize * Math.cos(angle + Math.PI / 6), endY - arrowHeadSize * Math.sin(angle + Math.PI / 6));
+            ctx.moveTo(endXWorld, endYWorld);
+            ctx.lineTo(endXWorld - arrowHeadSize * Math.cos(angle - Math.PI / 6), endYWorld - arrowHeadSize * Math.sin(angle - Math.PI / 6));
+            ctx.moveTo(endXWorld, endYWorld);
+            ctx.lineTo(endXWorld - arrowHeadSize * Math.cos(angle + Math.PI / 6), endYWorld - arrowHeadSize * Math.sin(angle + Math.PI / 6));
             ctx.stroke();
         }
     }

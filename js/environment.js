@@ -154,20 +154,29 @@ function paintViscosityBrush(worldX, worldY) {
 }
 
 // --- Drawing ---
-function drawNutrientMap(ctxToDrawOn) {
+function drawNutrientMap(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight, viewOffsetXWorld, viewOffsetYWorld, currentZoom) {
     if (!SHOW_NUTRIENT_MAP || !nutrientField || !fluidField) return;
 
     const N = Math.round(FLUID_GRID_SIZE_CONTROL);
     if (N <= 0) return;
 
-    const cellWidth = WORLD_WIDTH / N;
-    const cellHeight = WORLD_HEIGHT / N;
+    const worldCellWidth = WORLD_WIDTH / N;
+    const worldCellHeight = WORLD_HEIGHT / N;
 
-    for (let j = 0; j < N; j++) {
-        for (let i = 0; i < N; i++) {
+    const viewLeftWorld = viewOffsetXWorld;
+    const viewTopWorld = viewOffsetYWorld;
+    const viewRightWorld = viewOffsetXWorld + viewportCanvasWidth / currentZoom;
+    const viewBottomWorld = viewOffsetYWorld + viewportCanvasHeight / currentZoom;
+
+    const startCol = Math.max(0, Math.floor(viewLeftWorld / worldCellWidth));
+    const endCol = Math.min(N - 1, Math.floor(viewRightWorld / worldCellWidth));
+    const startRow = Math.max(0, Math.floor(viewTopWorld / worldCellHeight));
+    const endRow = Math.min(N - 1, Math.floor(viewBottomWorld / worldCellHeight));
+
+    for (let j = startRow; j <= endRow; j++) {
+        for (let i = startCol; i <= endCol; i++) {
             const baseNutrientValue = nutrientField[fluidField.IX(i, j)]; 
             const effectiveNutrientValue = baseNutrientValue * globalNutrientMultiplier;
-            // Use effectiveNutrientValue for color calculation
             let r = 0, g = 0, b = 0, a = 0;
 
             if (effectiveNutrientValue < 1.0) { // Desert-like
@@ -184,58 +193,81 @@ function drawNutrientMap(ctxToDrawOn) {
             a = Math.min(0.3, Math.max(0, a));
 
             if (a > 0.01) {
+                const cellWorldX = i * worldCellWidth;
+                const cellWorldY = j * worldCellHeight;
                 ctxToDrawOn.fillStyle = `rgba(${Math.floor(r)},${Math.floor(g)},${Math.floor(b)},${a.toFixed(2)})`;
-                ctxToDrawOn.fillRect(i * cellWidth, j * cellHeight, cellWidth, cellHeight);
+                ctxToDrawOn.fillRect(cellWorldX, cellWorldY, worldCellWidth, worldCellHeight);
             }
         }
     }
 }
 
-function drawLightMap(ctxToDrawOn) {
+function drawLightMap(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight, viewOffsetXWorld, viewOffsetYWorld, currentZoom) {
     if (!SHOW_LIGHT_MAP || !lightField || !fluidField) return;
 
     const N = Math.round(FLUID_GRID_SIZE_CONTROL);
     if (N <= 0) return;
 
-    const cellWidth = WORLD_WIDTH / N;
-    const cellHeight = WORLD_HEIGHT / N;
+    const worldCellWidth = WORLD_WIDTH / N;
+    const worldCellHeight = WORLD_HEIGHT / N;
 
-    for (let j = 0; j < N; j++) {
-        for (let i = 0; i < N; i++) {
+    const viewLeftWorld = viewOffsetXWorld;
+    const viewTopWorld = viewOffsetYWorld;
+    const viewRightWorld = viewOffsetXWorld + viewportCanvasWidth / currentZoom;
+    const viewBottomWorld = viewOffsetYWorld + viewportCanvasHeight / currentZoom;
+
+    const startCol = Math.max(0, Math.floor(viewLeftWorld / worldCellWidth));
+    const endCol = Math.min(N - 1, Math.floor(viewRightWorld / worldCellWidth));
+    const startRow = Math.max(0, Math.floor(viewTopWorld / worldCellHeight));
+    const endRow = Math.min(N - 1, Math.floor(viewBottomWorld / worldCellHeight));
+
+    for (let j = startRow; j <= endRow; j++) {
+        for (let i = startCol; i <= endCol; i++) {
             const baseLightValue = lightField[fluidField.IX(i, j)]; 
             const effectiveLightValue = baseLightValue * globalLightMultiplier;
-            // Use effectiveLightValue for color calculation
             const intensity = Math.floor(effectiveLightValue * 200); 
             const bluePart = Math.floor((1 - effectiveLightValue) * 50); 
             const alpha = effectiveLightValue * 0.15 + (1 - effectiveLightValue) * 0.05; 
 
             if (effectiveLightValue > 0.01 || (1-effectiveLightValue) > 0.01) { 
+                const cellWorldX = i * worldCellWidth;
+                const cellWorldY = j * worldCellHeight;
                 ctxToDrawOn.fillStyle = `rgba(${intensity}, ${intensity}, ${bluePart}, ${alpha.toFixed(2)})`;
-                ctxToDrawOn.fillRect(i * cellWidth, j * cellHeight, cellWidth, cellHeight);
+                ctxToDrawOn.fillRect(cellWorldX, cellWorldY, worldCellWidth, worldCellHeight);
             }
         }
     }
 }
 
-function drawViscosityMap(ctxToDrawOn) {
+function drawViscosityMap(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight, viewOffsetXWorld, viewOffsetYWorld, currentZoom) {
     if (!SHOW_VISCOSITY_MAP || !viscosityField || !fluidField) return;
     const N = Math.round(FLUID_GRID_SIZE_CONTROL);
     if (N <= 0) return;
-    const cellWidth = WORLD_WIDTH / N;
-    const cellHeight = WORLD_HEIGHT / N;
+    const worldCellWidth = WORLD_WIDTH / N;
+    const worldCellHeight = WORLD_HEIGHT / N;
 
-    for (let j = 0; j < N; j++) {
-        for (let i = 0; i < N; i++) {
-            const viscosityValue = viscosityField[fluidField.IX(i, j)]; // e.g., 0.2 to 5.0
+    const viewLeftWorld = viewOffsetXWorld;
+    const viewTopWorld = viewOffsetYWorld;
+    const viewRightWorld = viewOffsetXWorld + viewportCanvasWidth / currentZoom;
+    const viewBottomWorld = viewOffsetYWorld + viewportCanvasHeight / currentZoom;
+
+    const startCol = Math.max(0, Math.floor(viewLeftWorld / worldCellWidth));
+    const endCol = Math.min(N - 1, Math.floor(viewRightWorld / worldCellWidth));
+    const startRow = Math.max(0, Math.floor(viewTopWorld / worldCellHeight));
+    const endRow = Math.min(N - 1, Math.floor(viewBottomWorld / worldCellHeight));
+
+    for (let j = startRow; j <= endRow; j++) {
+        for (let i = startCol; i <= endCol; i++) {
+            const viscosityValue = viscosityField[fluidField.IX(i, j)];
             let r = 0, g = 0, b = 0, a = 0;
 
             if (viscosityValue > 1.0) { // Higher viscosity - cooler colors
-                b = 150 + Math.min(105, (viscosityValue - 1.0) * 25); // More blue
+                b = 150 + Math.min(105, (viscosityValue - 1.0) * 25);
                 r = 50 - Math.min(50, (viscosityValue - 1.0) * 10);
                 g = 50 - Math.min(50, (viscosityValue - 1.0) * 10);
                 a = 0.05 + Math.min(0.25, (viscosityValue - 1.0) * 0.05);
             } else if (viscosityValue < 1.0) { // Lower viscosity - warmer colors
-                r = 150 + Math.min(105, (1.0 - viscosityValue) * 25); // More red
+                r = 150 + Math.min(105, (1.0 - viscosityValue) * 25);
                 g = 100 - Math.min(50, (1.0 - viscosityValue) * 20);
                 b = 50 - Math.min(50, (1.0 - viscosityValue) * 10);
                 a = 0.05 + Math.min(0.25, (1.0 - viscosityValue) * 0.05);
@@ -243,8 +275,10 @@ function drawViscosityMap(ctxToDrawOn) {
             a = Math.min(0.3, Math.max(0, a));
 
             if (a > 0.01) {
+                const cellWorldX = i * worldCellWidth;
+                const cellWorldY = j * worldCellHeight;
                 ctxToDrawOn.fillStyle = `rgba(${Math.floor(r)},${Math.floor(g)},${Math.floor(b)},${a.toFixed(2)})`;
-                ctxToDrawOn.fillRect(i * cellWidth, j * cellHeight, cellWidth, cellHeight);
+                ctxToDrawOn.fillRect(cellWorldX, cellWorldY, worldCellWidth, worldCellHeight);
             }
         }
     }

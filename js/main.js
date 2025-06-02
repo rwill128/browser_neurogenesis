@@ -23,8 +23,8 @@ async function main() {
     // These are already defined in config.js, so ensure they are loaded before this script.
     WORLD_WIDTH = parseInt(worldWidthInput.value) || 8000;
     WORLD_HEIGHT = parseInt(worldHeightInput.value) || 6000;
-    canvas.width = WORLD_WIDTH; // Set canvas internal size
-    canvas.height = WORLD_HEIGHT;
+    canvas.width = 1920; // Set canvas internal size to fixed HD
+    canvas.height = 1080; // Set canvas internal size to fixed HD
 
     // initializeDefaultSliderVariables(); // Removed - global vars in config.js are the defaults
 

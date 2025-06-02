@@ -472,22 +472,41 @@ function updateMouse(e) {
 }
 
 function getMouseWorldCoordinates(displayMouseX, displayMouseY) {
-    const rect = canvas.getBoundingClientRect();
+    // displayMouseX, displayMouseY are mouse coordinates relative to the canvas CSS dimensions (e.g., from event.clientX - rect.left)
 
-    const canvasDisplayRatioX = canvas.clientWidth / WORLD_WIDTH;
-    const canvasDisplayRatioY = canvas.clientHeight / WORLD_HEIGHT;
-    const effectiveCanvasDisplayRatio = Math.min(canvasDisplayRatioX, canvasDisplayRatioY);
+    // Canvas internal bitmap dimensions (now fixed, e.g., 1920x1080)
+    const bitmapInternalWidth = canvas.width;
+    const bitmapInternalHeight = canvas.height;
 
-    const renderedWorldWidthInCss = WORLD_WIDTH * effectiveCanvasDisplayRatio;
-    const renderedWorldHeightInCss = WORLD_HEIGHT * effectiveCanvasDisplayRatio;
-    const letterboxOffsetX = (canvas.clientWidth - renderedWorldWidthInCss) / 2;
-    const letterboxOffsetY = (canvas.clientHeight - renderedWorldHeightInCss) / 2;
+    // Canvas CSS dimensions (how it's displayed on the page)
+    const cssClientWidth = canvas.clientWidth;
+    const cssClientHeight = canvas.clientHeight;
 
-    const mouseOnRenderedX = displayMouseX - letterboxOffsetX;
-    const mouseOnRenderedY = displayMouseY - letterboxOffsetY;
+    // How the internal bitmap is scaled to fit the CSS dimensions, maintaining aspect ratio
+    const bitmapDisplayScale = Math.min(cssClientWidth / bitmapInternalWidth, cssClientHeight / bitmapInternalHeight);
 
-    const worldX = (mouseOnRenderedX / effectiveCanvasDisplayRatio / viewZoom) + viewOffsetX;
-    const worldY = (mouseOnRenderedY / effectiveCanvasDisplayRatio / viewZoom) + viewOffsetY;
+    // The size of the (scaled) internal bitmap as it appears within the CSS box
+    const displayedBitmapWidthInCss = bitmapInternalWidth * bitmapDisplayScale;
+    const displayedBitmapHeightInCss = bitmapInternalHeight * bitmapDisplayScale;
+
+    // Offset if the scaled bitmap is letterboxed/pillarboxed within the CSS box
+    const letterboxOffsetXcss = (cssClientWidth - displayedBitmapWidthInCss) / 2;
+    const letterboxOffsetYcss = (cssClientHeight - displayedBitmapHeightInCss) / 2;
+
+    // Coordinates of the mouse click *on the scaled bitmap image*
+    const mouseOnScaledBitmapX = displayMouseX - letterboxOffsetXcss;
+    const mouseOnScaledBitmapY = displayMouseY - letterboxOffsetYcss;
+
+    // Convert these coordinates to what they would be on the *unscaled internal bitmap*
+    const mouseOnUnscaledBitmapX = mouseOnScaledBitmapX / bitmapDisplayScale;
+    const mouseOnUnscaledBitmapY = mouseOnScaledBitmapY / bitmapDisplayScale;
+
+    // Now, transform from unscaled internal bitmap coordinates to world coordinates
+    // This transformation is the inverse of what's applied in the main draw call:
+    // canvas_bitmap_x = (world_x - viewOffsetX) * viewZoom
+    // canvas_bitmap_y = (world_y - viewOffsetY) * viewZoom
+    const worldX = (mouseOnUnscaledBitmapX / viewZoom) + viewOffsetX;
+    const worldY = (mouseOnUnscaledBitmapY / viewZoom) + viewOffsetY;
 
     return { x: worldX, y: worldY };
 }
@@ -709,8 +728,8 @@ resizeWorldButton.onclick = function() {
     }
     WORLD_WIDTH = newWidth;
     WORLD_HEIGHT = newHeight;
-    canvas.width = WORLD_WIDTH;
-    canvas.height = WORLD_HEIGHT;
+    // canvas.width = WORLD_WIDTH; // Remove - canvas size is fixed
+    // canvas.height = WORLD_HEIGHT; // Remove - canvas size is fixed
     // MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5); // This constant is not used here
 
     viewOffsetX = 0;
@@ -839,12 +858,40 @@ nutrientCycleWaveAmplitudeSlider.oninput = function() { nutrientCycleWaveAmplitu
 lightCyclePeriodSlider.oninput = function() { lightCyclePeriodSeconds = parseInt(this.value); updateSliderDisplay(this, lightCyclePeriodSpan); };
 
 viewEntireSimButton.onclick = function() {
-    // console.log('[View Entire Sim] Before:', { viewZoom, viewOffsetX, viewOffsetY, WORLD_WIDTH, WORLD_HEIGHT, clientW: canvas.clientWidth, clientH: canvas.clientHeight });
-    
-    viewZoom = 1.0;
-    viewOffsetX = 0;
-    viewOffsetY = 0;
-    // console.log('[View Entire Sim] After:', { viewZoom, viewOffsetX, viewOffsetY });
+    const targetZoomX = canvas.clientWidth / WORLD_WIDTH;
+    const targetZoomY = canvas.clientHeight / WORLD_HEIGHT;
+    viewZoom = Math.min(targetZoomX, targetZoomY); // Zoom to fit entire world
+    viewZoom = Math.min(viewZoom, MAX_ZOOM); // Respect MAX_ZOOM
+    // Ensure MIN_ZOOM calculation from wheel event is considered if it was more restrictive
+    const minZoomToSeeAllX = canvas.clientWidth / WORLD_WIDTH;
+    const minZoomToSeeAllY = canvas.clientHeight / WORLD_HEIGHT;
+    let currentMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
+    currentMinZoom = Math.min(1.0, currentMinZoom);
+    if (WORLD_WIDTH <= canvas.clientWidth && WORLD_HEIGHT <= canvas.clientHeight) {
+        currentMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
+    } else {
+        currentMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
+    }
+    currentMinZoom = Math.max(0.01, currentMinZoom);
+    viewZoom = Math.max(viewZoom, currentMinZoom); // Ensure we don't zoom out beyond what MIN_ZOOM allows
+
+    // Center the view
+    // Calculate the dimensions of the world as they would appear on screen at the new zoom level
+    const worldDisplayWidth = WORLD_WIDTH * viewZoom;
+    const worldDisplayHeight = WORLD_HEIGHT * viewZoom;
+
+    // Calculate required offset to center this displayed world within the canvas
+    // This calculation needs to be in world coordinates for viewOffsetX/Y
+    viewOffsetX = (WORLD_WIDTH / 2) - (canvas.clientWidth / viewZoom / 2);
+    viewOffsetY = (WORLD_HEIGHT / 2) - (canvas.clientHeight / viewZoom / 2);
+
+    // Clamp offsets to prevent viewing outside world boundaries
+    const effectiveViewportWidth = canvas.clientWidth / viewZoom;
+    const effectiveViewportHeight = canvas.clientHeight / viewZoom;
+    const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
+    const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
+    viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
+    viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
 }
 
 copyInfoPanelButton.onclick = function() {
@@ -988,19 +1035,22 @@ canvas.addEventListener('mousemove', (e) => {
         const displayDx = currentDisplayMouseX - panStartMouseDisplayX;
         const displayDy = currentDisplayMouseY - panStartMouseDisplayY;
 
-        const rect = canvas.getBoundingClientRect();
-        const effectiveRenderScale = Math.min(rect.width / WORLD_WIDTH, rect.height / WORLD_HEIGHT);
+        // Scale factor of the internal bitmap to its displayed size on the CSS canvas
+        const bitmapDisplayScale = Math.min(canvas.clientWidth / canvas.width, canvas.clientHeight / canvas.height);
 
-        const panDeltaX_world = displayDx / (effectiveRenderScale * viewZoom);
-        const panDeltaY_world = displayDy / (effectiveRenderScale * viewZoom);
+        // How much the world should shift, based on mouse movement on the displayed bitmap, scaled by current zoom
+        const panDeltaX_world = displayDx / (bitmapDisplayScale * viewZoom);
+        const panDeltaY_world = displayDy / (bitmapDisplayScale * viewZoom);
 
         viewOffsetX = panInitialViewOffsetX - panDeltaX_world;
         viewOffsetY = panInitialViewOffsetY - panDeltaY_world;
 
-        const effectiveViewportWidth = canvas.clientWidth / viewZoom;
-        const effectiveViewportHeight = canvas.clientHeight / viewZoom;
-        const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
-        const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
+        const effectiveViewportWidth = canvas.clientWidth / viewZoom; // This is viewport width in world units
+        const effectiveViewportHeight = canvas.clientHeight / viewZoom; // This is viewport height in world units
+        // Correct maxPan calculations for clamping viewOffset
+        const maxPanX = Math.max(0, WORLD_WIDTH - (canvas.clientWidth / bitmapDisplayScale / viewZoom) );
+        const maxPanY = Math.max(0, WORLD_HEIGHT - (canvas.clientHeight / bitmapDisplayScale / viewZoom) );
+
         viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
         viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
         return;
@@ -1174,32 +1224,51 @@ canvas.addEventListener('wheel', (e) => {
     const displayMouseX = e.clientX - rect.left;
     const displayMouseY = e.clientY - rect.top;
 
-    const canvasDisplayRatio = Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT);
-    const renderedWorldWidthInCss = WORLD_WIDTH * canvasDisplayRatio;
-    const renderedWorldHeightInCss = WORLD_HEIGHT * canvasDisplayRatio;
-    const letterboxOffsetX = (canvas.clientWidth - renderedWorldWidthInCss) / 2;
-    const letterboxOffsetY = (canvas.clientHeight - renderedWorldHeightInCss) / 2;
-
-    const mouseOnRenderedX = displayMouseX - letterboxOffsetX;
-    const mouseOnRenderedY = displayMouseY - letterboxOffsetY;
-
-    const worldMouseX_beforeZoom = (mouseOnRenderedX / canvasDisplayRatio / viewZoom) + viewOffsetX;
-    const worldMouseY_beforeZoom = (mouseOnRenderedY / canvasDisplayRatio / viewZoom) + viewOffsetY;
+    // Get world coordinates of the mouse pointer BEFORE the zoom operation
+    const worldMouseBeforeZoom = getMouseWorldCoordinates(displayMouseX, displayMouseY);
 
     const scroll = e.deltaY < 0 ? 1 : -1;
-    const newZoom = viewZoom * Math.pow(1 + ZOOM_SENSITIVITY * 10, scroll);
+    const oldZoom = viewZoom;
+    let newZoom = viewZoom * Math.pow(1 + ZOOM_SENSITIVITY * 10, scroll);
 
-    MIN_ZOOM = 1.0; 
+    const minZoomToSeeAllX = canvas.clientWidth / WORLD_WIDTH;
+    const minZoomToSeeAllY = canvas.clientHeight / WORLD_HEIGHT;
+    let dynamicMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
+    if (WORLD_WIDTH <= canvas.clientWidth && WORLD_HEIGHT <= canvas.clientHeight) {
+        dynamicMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY); 
+    } else {
+        dynamicMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
+    }
+    dynamicMinZoom = Math.max(0.01, dynamicMinZoom); 
 
-    viewZoom = Math.max(MIN_ZOOM, Math.min(newZoom, MAX_ZOOM));
+    viewZoom = Math.max(dynamicMinZoom, Math.min(newZoom, MAX_ZOOM));
 
-    viewOffsetX = worldMouseX_beforeZoom - (mouseOnRenderedX / canvasDisplayRatio / viewZoom);
-    viewOffsetY = worldMouseY_beforeZoom - (mouseOnRenderedY / canvasDisplayRatio / viewZoom);
+    // After zoom, the same mouse display position will point to a different world coordinate.
+    // We want the world point that was under the mouse before zoom to still be under the mouse.
+    // world_mouse = (display_mouse_on_unscaled_bitmap / new_view_zoom) + new_view_offset_x
+    // new_view_offset_x = world_mouse - (display_mouse_on_unscaled_bitmap / new_view_zoom)
 
-    const effectiveViewportWidth = canvas.clientWidth / viewZoom;
-    const effectiveViewportHeight = canvas.clientHeight / viewZoom;
-    const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
-    const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
+    // To get display_mouse_on_unscaled_bitmap:
+    const bitmapInternalWidth = canvas.width;
+    const bitmapInternalHeight = canvas.height;
+    const cssClientWidth = canvas.clientWidth;
+    const cssClientHeight = canvas.clientHeight;
+    const bitmapDisplayScale = Math.min(cssClientWidth / bitmapInternalWidth, cssClientHeight / bitmapInternalHeight);
+    const displayedBitmapWidthInCss = bitmapInternalWidth * bitmapDisplayScale;
+    const displayedBitmapHeightInCss = bitmapInternalHeight * bitmapDisplayScale;
+    const letterboxOffsetXcss = (cssClientWidth - displayedBitmapWidthInCss) / 2;
+    const letterboxOffsetYcss = (cssClientHeight - displayedBitmapHeightInCss) / 2;
+    const mouseOnScaledBitmapX = displayMouseX - letterboxOffsetXcss;
+    const mouseOnScaledBitmapY = displayMouseY - letterboxOffsetYcss;
+    const mouseOnUnscaledBitmapX = mouseOnScaledBitmapX / bitmapDisplayScale;
+    const mouseOnUnscaledBitmapY = mouseOnScaledBitmapY / bitmapDisplayScale;
+    
+    viewOffsetX = worldMouseBeforeZoom.x - (mouseOnUnscaledBitmapX / viewZoom);
+    viewOffsetY = worldMouseBeforeZoom.y - (mouseOnUnscaledBitmapY / viewZoom);
+
+    // Clamp offsets
+    const maxPanX = Math.max(0, WORLD_WIDTH - (cssClientWidth / bitmapDisplayScale / viewZoom));
+    const maxPanY = Math.max(0, WORLD_HEIGHT - (cssClientHeight / bitmapDisplayScale / viewZoom));
     viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
 }); 

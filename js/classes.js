@@ -1222,12 +1222,12 @@ class SoftBody {
     updateSelf(dt, fluidFieldRef) {
         if (this.isUnstable) return;
 
-        this._updateSensoryInputsAndDefaultActivations(fluidFieldRef, nutrientField, lightField, particles); // nutrientField and lightField are global
+        this._updateSensoryInputsAndDefaultActivations(fluidFieldRef, nutrientField, lightField); // Removed particles argument
         
         let brainNode = this.massPoints.find(p => p.neuronData && p.neuronData.isBrain);
 
         if (brainNode) {
-            this._processBrain(brainNode, dt, fluidFieldRef, nutrientField, lightField, particles);
+            this._processBrain(brainNode, dt, fluidFieldRef, nutrientField, lightField); // Removed particles argument
         } else {
             this._applyFallbackBehaviors(dt, fluidFieldRef);
         }
@@ -1243,9 +1243,9 @@ class SoftBody {
     }
 
     // --- Refactored Helper Methods (Shells) ---
-    _updateSensoryInputsAndDefaultActivations(fluidFieldRef, nutrientField, lightField, particles) {
+    _updateSensoryInputsAndDefaultActivations(fluidFieldRef, nutrientField, lightField) { // Removed particles argument
         this._applyDefaultActivationPatterns();
-        this._updateEyeNodes(particles);
+        this._updateEyeNodes(); // Removed particles argument
     }
 
     _applyDefaultActivationPatterns() {
@@ -1269,7 +1269,7 @@ class SoftBody {
         });
     }
 
-    _updateEyeNodes(particles) {
+    _updateEyeNodes() { // Removed particles argument
         this.massPoints.forEach(point => {
             if (point.nodeType === NodeType.EYE) {
                 point.seesParticle = false; // Reset first
@@ -1278,12 +1278,30 @@ class SoftBody {
                 let closestDistSq = EYE_DETECTION_RADIUS * EYE_DETECTION_RADIUS;
                 let nearestParticleFound = null;
 
-                for (const particle of particles) { 
-                    if (particle.life <= 0) continue;
-                    const distSq = point.pos.sub(particle.pos).magSq();
-                    if (distSq < closestDistSq) {
-                        closestDistSq = distSq;
-                        nearestParticleFound = particle;
+                // Determine the grid cell range to check based on EYE_DETECTION_RADIUS
+                const eyeGxMin = Math.max(0, Math.floor((point.pos.x - EYE_DETECTION_RADIUS) / GRID_CELL_SIZE));
+                const eyeGxMax = Math.min(GRID_COLS - 1, Math.floor((point.pos.x + EYE_DETECTION_RADIUS) / GRID_CELL_SIZE));
+                const eyeGyMin = Math.max(0, Math.floor((point.pos.y - EYE_DETECTION_RADIUS) / GRID_CELL_SIZE));
+                const eyeGyMax = Math.min(GRID_ROWS - 1, Math.floor((point.pos.y + EYE_DETECTION_RADIUS) / GRID_CELL_SIZE));
+
+                for (let gy = eyeGyMin; gy <= eyeGyMax; gy++) {
+                    for (let gx = eyeGxMin; gx <= eyeGxMax; gx++) {
+                        const cellIndex = gx + gy * GRID_COLS;
+                        if (spatialGrid[cellIndex] && spatialGrid[cellIndex].length > 0) {
+                            const cellBucket = spatialGrid[cellIndex];
+                            for (const item of cellBucket) {
+                                if (item.type === 'particle') {
+                                    const particle = item.particleRef;
+                                    if (particle.life <= 0) continue;
+
+                                    const distSq = point.pos.sub(particle.pos).magSq();
+                                    if (distSq < closestDistSq) {
+                                        closestDistSq = distSq;
+                                        nearestParticleFound = particle;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -1297,7 +1315,7 @@ class SoftBody {
         });
     }
 
-    _processBrain(brainNode, dt, fluidFieldRef, nutrientField, lightField, particles) {
+    _processBrain(brainNode, dt, fluidFieldRef, nutrientField, lightField) {
         const nd = brainNode.neuronData;
         if (!nd || !nd.weightsIH || !nd.biasesH || !nd.weightsHO || !nd.biasesO ||
             typeof nd.inputVectorSize !== 'number' ||
@@ -1639,110 +1657,131 @@ class SoftBody {
         // --- Apply Red Dye Poison Effect ---
         if (fluidFieldRef && RED_DYE_POISON_STRENGTH > 0) {
             let poisonDamageThisFrame = 0;
-            for (const point of this.massPoints) {
-                const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
-                const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
-                const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
-                const redDensity = (fluidFieldRef.densityR[idx] || 0) / 255; // Normalize to 0-1
+            // Cache scale factors for this specific loop if fluidFieldRef is valid
+            const localScaleX = fluidFieldRef.scaleX;
+            const localScaleY = fluidFieldRef.scaleY;
 
-                if (redDensity > 0.01) { // Only apply if there's a meaningful amount of red dye
-                    poisonDamageThisFrame += redDensity * RED_DYE_POISON_STRENGTH * (point.radius / 5); // Scale by point radius (avg radius 5)
+            for (const point of this.massPoints) {
+                const fluidGridX = Math.floor(point.pos.x / localScaleX);
+                const fluidGridY = Math.floor(point.pos.y / localScaleY);
+                const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
+                const redDensity = (fluidFieldRef.densityR[idx] || 0) / 255;
+
+                if (redDensity > 0.01) {
+                    poisonDamageThisFrame += redDensity * RED_DYE_POISON_STRENGTH * (point.radius / 5);
                 }
             }
             if (poisonDamageThisFrame > 0) {
-                this.creatureEnergy -= poisonDamageThisFrame * dt * 60; // dt is in seconds, scale strength to be per-second like other costs
+                this.creatureEnergy -= poisonDamageThisFrame * dt * 60; // dt is in seconds, scale strength to be per-second
             }
         }
         // --- End of Red Dye Poison Effect ---
 
-        // Calculate and apply energy cost & gains
         let currentFrameEnergyCost = 0;
-        let currentFrameEnergyGain = 0; // New variable for gains
+        let currentFrameEnergyGain = 0;
+
+        const hasFluidField = fluidFieldRef !== null && typeof fluidFieldRef !== 'undefined';
+        const hasNutrientField = nutrientField !== null && typeof nutrientField !== 'undefined';
+        const hasLightField = lightField !== null && typeof lightField !== 'undefined';
+
+        // Cache scale factors if fluidFieldRef exists, to avoid repeated access in loop
+        const scaleX = hasFluidField ? fluidFieldRef.scaleX : 0;
+        const scaleY = hasFluidField ? fluidFieldRef.scaleY : 0;
 
         for (const point of this.massPoints) {
             let costMultiplier = 1.0;
-            if (nutrientField && fluidFieldRef) {
-                const gx = Math.floor(point.pos.x / fluidFieldRef.scaleX);
-                const gy = Math.floor(point.pos.y / fluidFieldRef.scaleY);
-                const nutrientIdx = fluidFieldRef.IX(gx, gy);
-                const baseNutrientValue = nutrientField[nutrientIdx] !== undefined ? nutrientField[nutrientIdx] : 1.0;
+            let mapIdx = -1; // Initialize map index
+
+            if (hasFluidField) { // Calculate grid coordinates and index once if fluid field is present
+                const gx = Math.floor(point.pos.x / scaleX);
+                const gy = Math.floor(point.pos.y / scaleY);
+                mapIdx = fluidFieldRef.IX(gx, gy);
+
+                if (hasNutrientField) {
+                    const baseNutrientValue = nutrientField[mapIdx] !== undefined ? nutrientField[mapIdx] : 1.0;
                 const effectiveNutrientValue = baseNutrientValue * globalNutrientMultiplier;
                 costMultiplier = 1.0 / Math.max(MIN_NUTRIENT_VALUE, effectiveNutrientValue);
+                }
             }
+
 
             const baseNodeCostThisFrame = BASE_NODE_EXISTENCE_COST * costMultiplier;
             currentFrameEnergyCost += baseNodeCostThisFrame;
-            this.energyCostFromBaseNodes += baseNodeCostThisFrame * dt; // Accumulate with dt scaling
+            this.energyCostFromBaseNodes += baseNodeCostThisFrame * dt;
 
             const exertion = point.currentExertionLevel || 0; 
+            const exertionSq = exertion * exertion; // Calculate once if used multiple times
 
-            if (point.nodeType === NodeType.EMITTER) { 
-                const emitterCostThisFrame = EMITTER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
+            // NodeType specific costs
+            switch (point.nodeType) {
+                case NodeType.EMITTER:
+                    const emitterCostThisFrame = EMITTER_NODE_ENERGY_COST * exertionSq * costMultiplier;
                 currentFrameEnergyCost += emitterCostThisFrame;
                 this.energyCostFromEmitterNodes += emitterCostThisFrame * dt;
-            } else if (point.nodeType === NodeType.SWIMMER) { 
-                const swimmerCostThisFrame = SWIMMER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
+                    break;
+                case NodeType.SWIMMER:
+                    const swimmerCostThisFrame = SWIMMER_NODE_ENERGY_COST * exertionSq * costMultiplier;
                 currentFrameEnergyCost += swimmerCostThisFrame;
                 this.energyCostFromSwimmerNodes += swimmerCostThisFrame * dt;
-            }
-             if (point.nodeType === NodeType.NEURON) {
-                let neuronCostThisFrame = 0;
-                if (point.neuronData && point.neuronData.isBrain) {
-                    neuronCostThisFrame = NEURON_NODE_ENERGY_COST * 5 * costMultiplier; 
-                    neuronCostThisFrame += (point.neuronData.hiddenLayerSize || 0) * NEURON_NODE_ENERGY_COST * 0.1 * costMultiplier; 
-                } else {
-                    neuronCostThisFrame = NEURON_NODE_ENERGY_COST * costMultiplier; 
-                }
-                currentFrameEnergyCost += neuronCostThisFrame;
-                this.energyCostFromNeuronNodes += neuronCostThisFrame * dt;
-            }
-            if (point.nodeType === NodeType.EATER) {
-                const eaterCostThisFrame = EATER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
+                    break;
+                case NodeType.EATER:
+                    const eaterCostThisFrame = EATER_NODE_ENERGY_COST * exertionSq * costMultiplier;
                 currentFrameEnergyCost += eaterCostThisFrame;
                 this.energyCostFromEaterNodes += eaterCostThisFrame * dt;
-            }
-            if (point.nodeType === NodeType.PREDATOR) {
-                const predatorCostThisFrame = PREDATOR_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
+                    break;
+                case NodeType.PREDATOR:
+                    const predatorCostThisFrame = PREDATOR_NODE_ENERGY_COST * exertionSq * costMultiplier;
                 currentFrameEnergyCost += predatorCostThisFrame;
                 this.energyCostFromPredatorNodes += predatorCostThisFrame * dt;
-            }
-            if (point.nodeType === NodeType.PHOTOSYNTHETIC) {
+                    break;
+                case NodeType.PHOTOSYNTHETIC:
                 const photosyntheticCostThisFrame = PHOTOSYNTHETIC_NODE_ENERGY_COST * costMultiplier;
                 currentFrameEnergyCost += photosyntheticCostThisFrame;
                 this.energyCostFromPhotosyntheticNodes += photosyntheticCostThisFrame * dt;
 
-                if (lightField && fluidFieldRef) {
-                    const gx_photo = Math.floor(point.pos.x / fluidFieldRef.scaleX);
-                    const gy_photo = Math.floor(point.pos.y / fluidFieldRef.scaleY);
-                    const lightIdx = fluidFieldRef.IX(gx_photo, gy_photo);
-                    const baseLightValue = lightField[lightIdx] !== undefined ? lightField[lightIdx] : 0.0;
+                    if (hasLightField && hasFluidField && mapIdx !== -1) { // mapIdx would have been calculated if hasFluidField
+                        const baseLightValue = lightField[mapIdx] !== undefined ? lightField[mapIdx] : 0.0;
                     const effectiveLightValue = baseLightValue * globalLightMultiplier; 
-
                     const energyGainThisPoint = effectiveLightValue * PHOTOSYNTHESIS_EFFICIENCY * (point.radius / 5) * dt;
-                    currentFrameEnergyGain += energyGainThisPoint; // Accumulate gain
+                        currentFrameEnergyGain += energyGainThisPoint;
                     this.energyGainedFromPhotosynthesis += energyGainThisPoint;
                 }
+                    break;
+                // Note: Neuron, Grabbing, Eye costs are handled by separate 'if' statements below
+                // as they can co-exist or have different conditions than the primary functional type.
             }
-            // Add energy cost for grabbing state
+
+            // Neuron cost (can be any type of point, but has neuronData)
+            if (point.nodeType === NodeType.NEURON) { // This check is okay, as NodeType is exclusive.
+                let neuronCostThisFrame = 0;
+                if (point.neuronData && point.neuronData.isBrain) {
+                    neuronCostThisFrame = NEURON_NODE_ENERGY_COST * 5 * costMultiplier;
+                    neuronCostThisFrame += (point.neuronData.hiddenLayerSize || 0) * NEURON_NODE_ENERGY_COST * 0.1 * costMultiplier;
+                } else {
+                    neuronCostThisFrame = NEURON_NODE_ENERGY_COST * costMultiplier;
+                }
+                currentFrameEnergyCost += neuronCostThisFrame;
+                this.energyCostFromNeuronNodes += neuronCostThisFrame * dt;
+            }
+
+            // Grabbing cost (independent of NodeType, depends on isGrabbing state)
             if (point.isGrabbing) { 
                 const grabbingCostThisFrame = GRABBING_NODE_ENERGY_COST * costMultiplier;
                 currentFrameEnergyCost += grabbingCostThisFrame; 
                 this.energyCostFromGrabbingNodes += grabbingCostThisFrame * dt;
             }
-            // Add energy cost for Eye node operation
-            // Add energy cost for Eye node operation (applied to the designated eye point)
-            if (point.isDesignatedEye) { // Only the designated eye incurs cost
+
+            // Eye cost (independent of NodeType, depends on isDesignatedEye state)
+            if (point.isDesignatedEye) {
                  const eyeCostThisFrame = EYE_NODE_ENERGY_COST * costMultiplier;
                  currentFrameEnergyCost += eyeCostThisFrame;
                  this.energyCostFromEyeNodes += eyeCostThisFrame * dt;
             }
         }
         
-        // Apply net energy change and then cap
-        this.creatureEnergy += currentFrameEnergyGain; // Add all gains first
-        this.creatureEnergy -= currentFrameEnergyCost * dt; // Then subtract all costs (dt scaling for costs was already there)
-        this.creatureEnergy = Math.min(this.currentMaxEnergy, Math.max(0, this.creatureEnergy)); // Use currentMaxEnergy for capping
-
+        this.creatureEnergy += currentFrameEnergyGain; // Gains are already dt-scaled
+        this.creatureEnergy -= currentFrameEnergyCost * dt; // Costs are per-frame, so scale by dt here
+        this.creatureEnergy = Math.min(this.currentMaxEnergy, Math.max(0, this.creatureEnergy));
 
         this.ticksSinceBirth++;
         if (this.ticksSinceBirth > REPRODUCTION_COOLDOWN_TICKS) {
@@ -1751,7 +1790,7 @@ class SoftBody {
 
         if (this.creatureEnergy <= 0) {
             this.isUnstable = true;
-            return;
+            // return; // The original function had other logic after this, ensure this return is appropriate if truly unstable
         }
 
         if (this.motorImpulseMagnitudeCap > 0.0001 && (this.ticksSinceBirth % this.motorImpulseInterval === 0)) {

@@ -198,6 +198,17 @@ class SoftBody {
         this.energyGainedFromEating = 0;
         this.energyGainedFromPredation = 0;
 
+        // New: Energy cost accumulators
+        this.energyCostFromBaseNodes = 0;
+        this.energyCostFromEmitterNodes = 0;
+        this.energyCostFromEaterNodes = 0;
+        this.energyCostFromPredatorNodes = 0;
+        this.energyCostFromNeuronNodes = 0;
+        this.energyCostFromSwimmerNodes = 0;
+        this.energyCostFromPhotosyntheticNodes = 0;
+        this.energyCostFromGrabbingNodes = 0;
+        this.energyCostFromEyeNodes = 0;
+
         this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY; // Initial placeholder
 
         // Initialize heritable/mutable properties
@@ -460,8 +471,11 @@ class SoftBody {
                 offspringPoint.movementType = movementType; // Assign new movement type
                 offspringPoint.dyeColor = [...parentPoint.dyeColor]; // Inherit dye color
                 offspringPoint.canBeGrabber = parentPoint.canBeGrabber; // Inherit grabber gene
-
                 if (Math.random() < GRABBER_GENE_MUTATION_CHANCE) {
+                    // DEBUG LOG ADDED HERE
+                    if (this.id === 290 || this.id === 291 || this.id === 292) { // 'this' is the offspring being created
+                        console.warn(`MUTATION_DEBUG (L464): Offspring ${this.id} is having a point's canBeGrabber (orig from parent ${parentBody.id}) potentially flipped. Current offspringPoint canBeGrabber before flip: ${offspringPoint.canBeGrabber}`);
+                    }
                     offspringPoint.canBeGrabber = !offspringPoint.canBeGrabber;
                     mutationStats.grabberGeneChange++;
                 }
@@ -1029,6 +1043,8 @@ class SoftBody {
             }
 
             // Whole-Body Symmetrical Duplication (New - Highly Experimental)
+            // ---- Start of TEMPORARILY DISABLED BLOCK -----
+            /*
             if (Math.random() < SYMMETRICAL_BODY_DUPLICATION_CHANCE && this.springs.length > 0 && this.massPoints.length >= 2) {
                 console.log(`Body ${this.id}: Attempting Whole-Body Symmetrical Duplication.`);
                 const originalPoints = [...this.massPoints];
@@ -1106,6 +1122,8 @@ class SoftBody {
                      // console.log(`Body ${this.id}: Skipped Whole-Body Symmetrical Duplication due to insufficient points/springs (chance was ${SYMMETRICAL_BODY_DUPLICATION_CHANCE.toFixed(3)}).`);
                 }
             }
+            */
+            // ---- End of TEMPORARILY DISABLED BLOCK -----
 
         } else { // Initial generation - use old shape types
             const basePointDist = 5 + Math.random() * 3; 
@@ -1362,12 +1380,53 @@ class SoftBody {
         const outputLayerInputs = multiplyMatrixVector(nd.weightsHO, hiddenLayerActivations);
         const rawOutputs = addVectors(outputLayerInputs, nd.biasesO);
         nd.rawOutputs = rawOutputs;
+
+        // DEBUG LOG ADDED HERE
+        if (nd.rawOutputs.length !== nd.outputVectorSize) {
+            console.warn(`Body ${this.id} _propagateBrainOutputs: nd.rawOutputs.length (${nd.rawOutputs.length}) !== nd.outputVectorSize (${nd.outputVectorSize})`);
+        }
     }
 
     _applyBrainActionsToPoints(brainNode, dt) {
         const nd = brainNode.neuronData;
-        nd.currentFrameActionDetails = [];
+
+        // Recalculate expected output vector size based on current points
+        let currentNumEmitterPoints = 0;
+        let currentNumSwimmerPoints = 0;
+        let currentNumEaterPoints = 0;
+        let currentNumPredatorPoints = 0;
+        let currentNumPotentialGrabberPoints = 0;
+        this.massPoints.forEach(p => {
+            if (p.nodeType === NodeType.EMITTER) currentNumEmitterPoints++;
+            else if (p.nodeType === NodeType.SWIMMER) currentNumSwimmerPoints++;
+            else if (p.nodeType === NodeType.EATER) currentNumEaterPoints++;
+            else if (p.nodeType === NodeType.PREDATOR) currentNumPredatorPoints++;
+            if (p.canBeGrabber) currentNumPotentialGrabberPoints++;
+        });
+
+        const recalculatedOutputVectorSize = (currentNumEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
+                                           (currentNumSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
+                                           (currentNumEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
+                                           (currentNumPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
+                                           (currentNumPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE);
+
+        if (nd.outputVectorSize !== recalculatedOutputVectorSize) {
+            console.warn(`Body ${this.id} _applyBrainActionsToPoints: MISMATCH between stored nd.outputVectorSize (${nd.outputVectorSize}) and recalculatedOutputVectorSize (${recalculatedOutputVectorSize}) based on current points.`);
+            const pointTypes = this.massPoints.map((p, idx) => `Idx ${idx}: Type ${p.nodeType} Grabber: ${p.canBeGrabber}`).join(', ');
+            console.warn(`Body ${this.id} Current Points (${this.massPoints.length}): [${pointTypes}]`);
+            // Log counts that led to recalculatedOutputVectorSize
+            console.warn(`Body ${this.id} Recalculated Counts: Emitters: ${currentNumEmitterPoints}, Swimmers: ${currentNumSwimmerPoints}, Eaters: ${currentNumEaterPoints}, Predators: ${currentNumPredatorPoints}, Grabbers: ${currentNumPotentialGrabberPoints}`);
+            // To see what it was at birth, you'd need to check the initializeBrain logs for this body ID.
+        }
+
+        // The old log for all-zero controllable points is less useful now, so we can comment it out or remove.
+        // if (nd.outputVectorSize > 0 && currentNumEmitterPoints === 0 && currentNumSwimmerPoints === 0 && currentNumEaterPoints === 0 && currentNumPredatorPoints === 0 && currentNumPotentialGrabberPoints === 0) {
+        //     const pointTypes = this.massPoints.map((p, idx) => `Idx ${idx}: Type ${p.nodeType} (IsEmitter: ${p.nodeType === NodeType.EMITTER})`).join(', ');
+        //     console.warn(`Body ${this.id} _applyBrainActionsToPoints: outputVectorSize is ${nd.outputVectorSize}, but NO controllable points found. Current Points (${this.massPoints.length}): [${pointTypes}]`);
+        // }
+
         let currentRawOutputIndex = 0;
+        nd.currentFrameActionDetails = [];
 
         function sampleAndLogAction(rawMean, rawStdDev) {
             const mean = rawMean;
@@ -1376,13 +1435,6 @@ class SoftBody {
             const logProb = logPdfGaussian(sampledActionValue, mean, stdDev);
             return { detail: { mean, stdDev, sampledAction: sampledActionValue, logProb }, value: sampledActionValue };
         }
-
-        // Reset exertion levels that might have been set by default patterns before NN overrides them.
-        // Note: Default patterns already set point.currentExertionLevel. If NN controls exertion for a type,
-        // it will overwrite. If NN *doesn't* explicitly control exertion for a type, the default pattern's value persists.
-        // For now, let's assume NN *will* output exertion for types it controls, so this reset might not be strictly necessary
-        // if the default activation is meant to be a base for NN modulation. However, if NN exertion is absolute, then resetting is fine.
-        // this.massPoints.forEach(point => { point.currentExertionLevel = 0; }); // Optional: Reset all exertion before NN applies its own.
 
         // Process Emitters
         this.massPoints.forEach(point => {
@@ -1401,7 +1453,11 @@ class SoftBody {
                     point.currentExertionLevel = sigmoid(exertionRes.value); // NN sets exertion for Emitter
                     nd.currentFrameActionDetails.push(...detailsForThisEmitter);
                     currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER;
-                } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER; }
+                } else {
+                    // DEBUG LOG ADDED HERE
+                    console.warn(`Body ${this.id} _applyBrainActionsToPoints (Emitter): Skipped logging. rawOutputs.length: ${nd.rawOutputs ? nd.rawOutputs.length : 'undefined'}, outputStartRawIdx: ${outputStartRawIdx}, NEURAL_OUTPUTS_PER_EMITTER: ${NEURAL_OUTPUTS_PER_EMITTER}, current nd.outputVectorSize: ${nd.outputVectorSize}`);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER;
+                }
             }
         });
 
@@ -1433,6 +1489,8 @@ class SoftBody {
                     nd.currentFrameActionDetails.push(...detailsForThisSwimmer);
                     currentRawOutputIndex += NEURAL_OUTPUTS_PER_SWIMMER;
                 } else {
+                    // DEBUG LOG ADDED HERE
+                    console.warn(`Body ${this.id} _applyBrainActionsToPoints (Swimmer): Skipped logging. rawOutputs.length: ${nd.rawOutputs ? nd.rawOutputs.length : 'undefined'}, outputStartRawIdx: ${outputStartRawIdx}, NEURAL_OUTPUTS_PER_SWIMMER: ${NEURAL_OUTPUTS_PER_SWIMMER}, current nd.outputVectorSize: ${nd.outputVectorSize}`);
                     currentRawOutputIndex += NEURAL_OUTPUTS_PER_SWIMMER; 
                 }
             }
@@ -1449,7 +1507,10 @@ class SoftBody {
                     point.currentExertionLevel = sigmoid(exertionRes.value); // NN sets exertion for Eater
                     nd.currentFrameActionDetails.push(...details);
                     currentRawOutputIndex += NEURAL_OUTPUTS_PER_EATER;
-                } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_EATER; }
+                } else {
+                    // DEBUG LOG ADDED HERE
+                    console.warn(`Body ${this.id} _applyBrainActionsToPoints (Eater): Skipped logging. rawOutputs.length: ${nd.rawOutputs ? nd.rawOutputs.length : 'undefined'}, outputStartRawIdx: ${outputStartRawIdx}, NEURAL_OUTPUTS_PER_EATER: ${NEURAL_OUTPUTS_PER_EATER}, current nd.outputVectorSize: ${nd.outputVectorSize}`);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_EATER; }
             }
         });
 
@@ -1464,7 +1525,10 @@ class SoftBody {
                     point.currentExertionLevel = sigmoid(exertionRes.value); // NN sets exertion for Predator
                     nd.currentFrameActionDetails.push(...details);
                     currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR;
-                } else { currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR; }
+                } else {
+                    // DEBUG LOG ADDED HERE
+                    console.warn(`Body ${this.id} _applyBrainActionsToPoints (Predator): Skipped logging. rawOutputs.length: ${nd.rawOutputs ? nd.rawOutputs.length : 'undefined'}, outputStartRawIdx: ${outputStartRawIdx}, NEURAL_OUTPUTS_PER_PREDATOR: ${NEURAL_OUTPUTS_PER_PREDATOR}, current nd.outputVectorSize: ${nd.outputVectorSize}`);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR; }
             }
         });
 
@@ -1481,10 +1545,17 @@ class SoftBody {
                     nd.currentFrameActionDetails.push(...detailsForThisGrab);
                     currentRawOutputIndex += NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
                 } else {
+                    // DEBUG LOG ADDED HERE
+                    console.warn(`Body ${this.id} _applyBrainActionsToPoints (Grabber): Skipped logging. rawOutputs.length: ${nd.rawOutputs ? nd.rawOutputs.length : 'undefined'}, outputStartRawIdx: ${outputStartRawIdx}, NEURAL_OUTPUTS_PER_GRABBER_TOGGLE: ${NEURAL_OUTPUTS_PER_GRABBER_TOGGLE}, current nd.outputVectorSize: ${nd.outputVectorSize}`);
                     currentRawOutputIndex += NEURAL_OUTPUTS_PER_GRABBER_TOGGLE; 
                 }
             }
         });
+
+        // DEBUG LOG: Log final state for this function call before buffer push
+        if (nd.currentFrameActionDetails.length !== nd.outputVectorSize / 2 && nd.outputVectorSize > 0) { // only log if mismatch and outputsize > 0
+            console.warn(`Body ${this.id} _applyBrainActionsToPoints END MISMATCH: currentFrameActionDetails.length (${nd.currentFrameActionDetails.length}) !== nd.outputVectorSize/2 (${nd.outputVectorSize / 2}). Final currentRawOutputIndex: ${currentRawOutputIndex}, Expected final CRI (outputVecSize): ${nd.outputVectorSize}`);
+        }
     }
 
     _updateBrainTrainingBuffer(brainNode, inputVector) { 
@@ -1599,32 +1670,47 @@ class SoftBody {
                 costMultiplier = 1.0 / Math.max(MIN_NUTRIENT_VALUE, effectiveNutrientValue);
             }
 
-            currentFrameEnergyCost += BASE_NODE_EXISTENCE_COST * costMultiplier;
+            const baseNodeCostThisFrame = BASE_NODE_EXISTENCE_COST * costMultiplier;
+            currentFrameEnergyCost += baseNodeCostThisFrame;
+            this.energyCostFromBaseNodes += baseNodeCostThisFrame * dt; // Accumulate with dt scaling
+
             const exertion = point.currentExertionLevel || 0; 
 
             if (point.nodeType === NodeType.EMITTER) { 
-                currentFrameEnergyCost += EMITTER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
+                const emitterCostThisFrame = EMITTER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
+                currentFrameEnergyCost += emitterCostThisFrame;
+                this.energyCostFromEmitterNodes += emitterCostThisFrame * dt;
             } else if (point.nodeType === NodeType.SWIMMER) { 
-                currentFrameEnergyCost += SWIMMER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
+                const swimmerCostThisFrame = SWIMMER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
+                currentFrameEnergyCost += swimmerCostThisFrame;
+                this.energyCostFromSwimmerNodes += swimmerCostThisFrame * dt;
             }
              if (point.nodeType === NodeType.NEURON) {
+                let neuronCostThisFrame = 0;
                 if (point.neuronData && point.neuronData.isBrain) {
-                    currentFrameEnergyCost += NEURON_NODE_ENERGY_COST * 5 * costMultiplier; 
-                    currentFrameEnergyCost += (point.neuronData.hiddenLayerSize || 0) * NEURON_NODE_ENERGY_COST * 0.1 * costMultiplier; 
+                    neuronCostThisFrame = NEURON_NODE_ENERGY_COST * 5 * costMultiplier; 
+                    neuronCostThisFrame += (point.neuronData.hiddenLayerSize || 0) * NEURON_NODE_ENERGY_COST * 0.1 * costMultiplier; 
                 } else {
-                    currentFrameEnergyCost += NEURON_NODE_ENERGY_COST * costMultiplier; 
+                    neuronCostThisFrame = NEURON_NODE_ENERGY_COST * costMultiplier; 
                 }
+                currentFrameEnergyCost += neuronCostThisFrame;
+                this.energyCostFromNeuronNodes += neuronCostThisFrame * dt;
             }
             if (point.nodeType === NodeType.EATER) {
-                // Eating energy gain is handled during particle interaction, not here directly
-                currentFrameEnergyCost += EATER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
+                const eaterCostThisFrame = EATER_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
+                currentFrameEnergyCost += eaterCostThisFrame;
+                this.energyCostFromEaterNodes += eaterCostThisFrame * dt;
             }
             if (point.nodeType === NodeType.PREDATOR) {
-                // Predation energy gain is handled during inter-body interaction, not here directly
-                currentFrameEnergyCost += PREDATOR_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
+                const predatorCostThisFrame = PREDATOR_NODE_ENERGY_COST * exertion * exertion * costMultiplier;
+                currentFrameEnergyCost += predatorCostThisFrame;
+                this.energyCostFromPredatorNodes += predatorCostThisFrame * dt;
             }
             if (point.nodeType === NodeType.PHOTOSYNTHETIC) {
-                currentFrameEnergyCost += PHOTOSYNTHETIC_NODE_ENERGY_COST * costMultiplier;
+                const photosyntheticCostThisFrame = PHOTOSYNTHETIC_NODE_ENERGY_COST * costMultiplier;
+                currentFrameEnergyCost += photosyntheticCostThisFrame;
+                this.energyCostFromPhotosyntheticNodes += photosyntheticCostThisFrame * dt;
+
                 if (lightField && fluidFieldRef) {
                     const gx_photo = Math.floor(point.pos.x / fluidFieldRef.scaleX);
                     const gy_photo = Math.floor(point.pos.y / fluidFieldRef.scaleY);
@@ -1639,12 +1725,16 @@ class SoftBody {
             }
             // Add energy cost for grabbing state
             if (point.isGrabbing) { 
-                currentFrameEnergyCost += GRABBING_NODE_ENERGY_COST * costMultiplier; 
+                const grabbingCostThisFrame = GRABBING_NODE_ENERGY_COST * costMultiplier;
+                currentFrameEnergyCost += grabbingCostThisFrame; 
+                this.energyCostFromGrabbingNodes += grabbingCostThisFrame * dt;
             }
             // Add energy cost for Eye node operation
             // Add energy cost for Eye node operation (applied to the designated eye point)
             if (point.isDesignatedEye) { // Only the designated eye incurs cost
-                 currentFrameEnergyCost += EYE_NODE_ENERGY_COST * costMultiplier;
+                 const eyeCostThisFrame = EYE_NODE_ENERGY_COST * costMultiplier;
+                 currentFrameEnergyCost += eyeCostThisFrame;
+                 this.energyCostFromEyeNodes += eyeCostThisFrame * dt;
             }
         }
         
@@ -2144,14 +2234,23 @@ class SoftBody {
                 if (p.canBeGrabber) numPotentialGrabberPoints++; // Count only points that can be grabbers
             });
 
+            // DEBUG LOG ADDED HERE (in initializeBrain)
+            // console.log(`Body ${this.id} initializeBrain Counts: Emitters: ${numEmitterPoints}, Swimmers: ${numSwimmerPoints}, Eaters: ${numEaterPoints}, Predators: ${numPredatorPoints}, Grabbers: ${numPotentialGrabberPoints}, Eyes: ${numEyeNodes}`);
+            // Corrected log name for clarity
+            console.log(`Body ${this.id} initializeBrain Counts from .massPoints loop: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}, Ey:${numEyeNodes}`);
+
             nd.inputVectorSize = NEURAL_INPUT_SIZE + (numEyeNodes * NEURAL_INPUTS_PER_EYE);
-            // const newNumPotentialGrabberOutputs = this.massPoints.length * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE; // Old calculation
-            const newNumPotentialGrabberOutputs = numPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
+            
+            // Log individual counts IMMEDIATELY BEFORE SUM
+            console.log(`Body ${this.id} initializeBrain Counts directly before sum: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}`);
+
             nd.outputVectorSize = (numEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
                                   (numSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
                                   (numEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
                                   (numPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
-                                  newNumPotentialGrabberOutputs;
+                                  (numPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE);
+
+            console.log(`Body ${this.id} initializeBrain: Calculated nd.outputVectorSize = ${nd.outputVectorSize} (using E:${numEmitterPoints},S:${numSwimmerPoints},Ea:${numEaterPoints},P:${numPredatorPoints},G:${numPotentialGrabberPoints})`);
 
             // Ensure hiddenLayerSize is valid or initialize it if it's from an older creature version
             if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < DEFAULT_HIDDEN_LAYER_SIZE_MIN || nd.hiddenLayerSize > DEFAULT_HIDDEN_LAYER_SIZE_MAX) {

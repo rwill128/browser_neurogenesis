@@ -11,6 +11,18 @@ let globalEnergyGains = {
     predation: 0
 };
 
+let globalEnergyCosts = {
+    baseNodes: 0,
+    emitterNodes: 0,
+    eaterNodes: 0,
+    predatorNodes: 0,
+    neuronNodes: 0,
+    swimmerNodes: 0,
+    photosyntheticNodes: 0,
+    grabbingNodes: 0,
+    eyeNodes: 0
+};
+
 let mutationStats = { // New: For tracking mutation occurrences
     stiffness: 0,
     damping: 0,
@@ -226,6 +238,18 @@ function updatePhysics(dt) {
             globalEnergyGains.photosynthesis += body.energyGainedFromPhotosynthesis;
             globalEnergyGains.eating += body.energyGainedFromEating;
             globalEnergyGains.predation += body.energyGainedFromPredation;
+
+            // Accumulate global costs from the dying body
+            globalEnergyCosts.baseNodes += body.energyCostFromBaseNodes;
+            globalEnergyCosts.emitterNodes += body.energyCostFromEmitterNodes;
+            globalEnergyCosts.eaterNodes += body.energyCostFromEaterNodes;
+            globalEnergyCosts.predatorNodes += body.energyCostFromPredatorNodes;
+            globalEnergyCosts.neuronNodes += body.energyCostFromNeuronNodes;
+            globalEnergyCosts.swimmerNodes += body.energyCostFromSwimmerNodes;
+            globalEnergyCosts.photosyntheticNodes += body.energyCostFromPhotosyntheticNodes;
+            globalEnergyCosts.grabbingNodes += body.energyCostFromGrabbingNodes;
+            globalEnergyCosts.eyeNodes += body.energyCostFromEyeNodes;
+
             softBodyPopulation.splice(i, 1);
             removedCount++;
         }
@@ -415,4 +439,23 @@ function drawFluidVelocities(ctx, fluidData) {
             ctx.stroke();
         }
     }
-} 
+}
+
+// Reset global energy gains
+globalEnergyGains.photosynthesis = 0;
+globalEnergyGains.eating = 0;
+globalEnergyGains.predation = 0;
+// Reset global energy costs
+globalEnergyCosts.baseNodes = 0;
+globalEnergyCosts.emitterNodes = 0;
+globalEnergyCosts.eaterNodes = 0;
+globalEnergyCosts.predatorNodes = 0;
+globalEnergyCosts.neuronNodes = 0;
+globalEnergyCosts.swimmerNodes = 0;
+globalEnergyCosts.photosyntheticNodes = 0;
+globalEnergyCosts.grabbingNodes = 0;
+globalEnergyCosts.eyeNodes = 0;
+
+if (statsPanel.classList.contains('open')) {
+    // ... existing code ...
+}

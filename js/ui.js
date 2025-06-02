@@ -312,6 +312,17 @@ function updateInfoPanel() {
         document.getElementById('infoBodyEnergyEat').textContent = selectedInspectBody.energyGainedFromEating.toFixed(2);
         document.getElementById('infoBodyEnergyPred').textContent = selectedInspectBody.energyGainedFromPredation.toFixed(2);
 
+        // Populate new energy cost fields
+        document.getElementById('infoBodyCostBase').textContent = selectedInspectBody.energyCostFromBaseNodes.toFixed(2);
+        document.getElementById('infoBodyCostEmitter').textContent = selectedInspectBody.energyCostFromEmitterNodes.toFixed(2);
+        document.getElementById('infoBodyCostEater').textContent = selectedInspectBody.energyCostFromEaterNodes.toFixed(2);
+        document.getElementById('infoBodyCostPredator').textContent = selectedInspectBody.energyCostFromPredatorNodes.toFixed(2);
+        document.getElementById('infoBodyCostNeuron').textContent = selectedInspectBody.energyCostFromNeuronNodes.toFixed(2);
+        document.getElementById('infoBodyCostSwimmer').textContent = selectedInspectBody.energyCostFromSwimmerNodes.toFixed(2);
+        document.getElementById('infoBodyCostPhoto').textContent = selectedInspectBody.energyCostFromPhotosyntheticNodes.toFixed(2);
+        document.getElementById('infoBodyCostGrabbing').textContent = selectedInspectBody.energyCostFromGrabbingNodes.toFixed(2);
+        document.getElementById('infoBodyCostEye').textContent = selectedInspectBody.energyCostFromEyeNodes.toFixed(2);
+
         allPointsInfoContainer.innerHTML = '<h5>All Mass Points</h5>';
         selectedInspectBody.massPoints.forEach((point, index) => {
             const pointEntryDiv = document.createElement('div');
@@ -395,6 +406,17 @@ function updateInfoPanel() {
         document.getElementById('infoBodyEnergyPhoto').textContent = '-';
         document.getElementById('infoBodyEnergyEat').textContent = '-';
         document.getElementById('infoBodyEnergyPred').textContent = '-';
+
+        document.getElementById('infoBodyCostBase').textContent = '-';
+        document.getElementById('infoBodyCostEmitter').textContent = '-';
+        document.getElementById('infoBodyCostEater').textContent = '-';
+        document.getElementById('infoBodyCostPredator').textContent = '-';
+        document.getElementById('infoBodyCostNeuron').textContent = '-';
+        document.getElementById('infoBodyCostSwimmer').textContent = '-';
+        document.getElementById('infoBodyCostPhoto').textContent = '-';
+        document.getElementById('infoBodyCostGrabbing').textContent = '-';
+        document.getElementById('infoBodyCostEye').textContent = '-';
+
         infoPanel.classList.remove('open');
     }
 }
@@ -1188,6 +1210,7 @@ function updateStatsPanel() {
     if (!nodeTypeStatsDiv) return;
     const mutationTypeStatsDiv = document.getElementById('mutationTypeStats'); // Get the new div
     const globalEnergyGainsStatsDiv = document.getElementById('globalEnergyGainsStats');
+    const globalEnergyCostsStatsDiv = document.getElementById('globalEnergyCostsStats'); // New: Get the costs div
 
     // Node Type Proportions
     const nodeCounts = {};
@@ -1232,9 +1255,24 @@ function updateStatsPanel() {
     // Global Energy Gains
     if (globalEnergyGainsStatsDiv) {
         let energyGainsHTML = "<p><strong>Global Energy Gains (All Time):</strong></p>";
-        energyGainsHTML += `<p><strong>Photosynthesis:</strong> <span class=\"stat-value\">${globalEnergyGains.photosynthesis.toFixed(2)}</span></p>`;
-        energyGainsHTML += `<p><strong>Eating:</strong> <span class=\"stat-value\">${globalEnergyGains.eating.toFixed(2)}</span></p>`;
-        energyGainsHTML += `<p><strong>Predation:</strong> <span class=\"stat-value\">${globalEnergyGains.predation.toFixed(2)}</span></p>`;
+        energyGainsHTML += `<p><strong>Photosynthesis:</strong> <span class="stat-value">${globalEnergyGains.photosynthesis.toFixed(2)}</span></p>`;
+        energyGainsHTML += `<p><strong>Eating:</strong> <span class="stat-value">${globalEnergyGains.eating.toFixed(2)}</span></p>`;
+        energyGainsHTML += `<p><strong>Predation:</strong> <span class="stat-value">${globalEnergyGains.predation.toFixed(2)}</span></p>`;
         globalEnergyGainsStatsDiv.innerHTML = energyGainsHTML;
+    }
+
+    // Global Energy Costs
+    if (globalEnergyCostsStatsDiv) {
+        let energyCostsHTML = "<p><strong>Global Energy Costs (All Time):</strong></p>";
+        energyCostsHTML += `<p><strong>Base Nodes:</strong> <span class="stat-value">${globalEnergyCosts.baseNodes.toFixed(2)}</span></p>`;
+        energyCostsHTML += `<p><strong>Emitter Nodes:</strong> <span class="stat-value">${globalEnergyCosts.emitterNodes.toFixed(2)}</span></p>`;
+        energyCostsHTML += `<p><strong>Eater Nodes:</strong> <span class="stat-value">${globalEnergyCosts.eaterNodes.toFixed(2)}</span></p>`;
+        energyCostsHTML += `<p><strong>Predator Nodes:</strong> <span class="stat-value">${globalEnergyCosts.predatorNodes.toFixed(2)}</span></p>`;
+        energyCostsHTML += `<p><strong>Neuron Nodes:</strong> <span class="stat-value">${globalEnergyCosts.neuronNodes.toFixed(2)}</span></p>`;
+        energyCostsHTML += `<p><strong>Swimmer Nodes:</strong> <span class="stat-value">${globalEnergyCosts.swimmerNodes.toFixed(2)}</span></p>`;
+        energyCostsHTML += `<p><strong>Photosynthetic Nodes:</strong> <span class="stat-value">${globalEnergyCosts.photosyntheticNodes.toFixed(2)}</span></p>`;
+        energyCostsHTML += `<p><strong>Grabbing Nodes:</strong> <span class="stat-value">${globalEnergyCosts.grabbingNodes.toFixed(2)}</span></p>`;
+        energyCostsHTML += `<p><strong>Eye Nodes:</strong> <span class="stat-value">${globalEnergyCosts.eyeNodes.toFixed(2)}</span></p>`;
+        globalEnergyCostsStatsDiv.innerHTML = energyCostsHTML;
     }
 } 

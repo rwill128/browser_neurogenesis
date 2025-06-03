@@ -31,7 +31,7 @@ class MassPoint {
     constructor(x, y, mass = 0.5, radius = 5, color = 'rgba(0,150,255,0.8)') {
         this.pos = new Vec2(x, y);
         this.prevPos = new Vec2(x, y);
-        this.force = new Vec2();
+        this.force = new Vec2(); // Initialized as a Vec2 object
         this.mass = mass;
         this.invMass = this.mass !== 0 ? 1 / this.mass : 0;
         this.radius = radius;
@@ -48,7 +48,7 @@ class MassPoint {
         this.nearestParticleMagnitude = 0; // New: Eye state (distance)
         this.nearestParticleDirection = 0; // New: Eye state (angle)
     }
-    applyForce(f) { this.force = this.force.add(f); }
+    applyForce(f) { this.force.addInPlace(f); } // Use addInPlace
 
     get isFixed() { // Getter for convenience, based on movementType OR if grabbing
         return this.movementType === MovementType.FIXED || this.isGrabbing;
@@ -147,28 +147,46 @@ class Spring {
             this.dampingFactor = dampingFactor;
         }
         this.restLength = restLength === null ? p1.pos.sub(p2.pos).mag() : restLength;
+
+        // Temporary vectors for calculations
+        this._tempDiffPos = new Vec2();
+        this._tempDirection = new Vec2();
+        this._tempRelVel = new Vec2();
+        this._tempP1Vel = new Vec2();
+        this._tempP2Vel = new Vec2();
+        this._tempSpringForceVec = new Vec2();
+        this._tempDampingForceVec = new Vec2();
+        this._tempTotalForceVec = new Vec2();
     }
     applyForce() {
-        const diffPos = this.p1.pos.sub(this.p2.pos);
-        const currentLength = diffPos.mag();
+        const diffPos = this._tempDiffPos.copyFrom(this.p1.pos).subInPlace(this.p2.pos);
+        const currentLength = diffPos.mag(); // mag() still creates a new Vec2 for its internal calculation if not careful, but it returns a scalar. Let's assume Vec2.mag() is efficient or accept this one.
         if (currentLength === 0) return;
         const displacement = currentLength - this.restLength;
-        const direction = diffPos.normalize();
+        const direction = this._tempDirection.copyFrom(diffPos).normalizeInPlace();
 
         const springForceMagnitude = -this.stiffness * displacement;
-        const springForce = direction.mul(springForceMagnitude);
+        const springForce = this._tempSpringForceVec.copyFrom(direction).mulInPlace(springForceMagnitude);
 
-        const p1_vel_implicit = this.p1.pos.sub(this.p1.prevPos);
-        const p2_vel_implicit = this.p2.pos.sub(this.p2.prevPos);
-        const relVel_implicit = p1_vel_implicit.sub(p2_vel_implicit);
+        const p1_vel_implicit = this._tempP1Vel.copyFrom(this.p1.pos).subInPlace(this.p1.prevPos);
+        const p2_vel_implicit = this._tempP2Vel.copyFrom(this.p2.pos).subInPlace(this.p2.prevPos);
+        const relVel_implicit = this._tempRelVel.copyFrom(p1_vel_implicit).subInPlace(p2_vel_implicit);
 
-        const velAlongSpring = Vec2.dot(relVel_implicit, direction);
+        const velAlongSpring = Vec2.dot(relVel_implicit, direction); // Vec2.dot is a static method, returns scalar
         const dampingForceMagnitude = -this.dampingFactor * velAlongSpring;
-        const dampingForce = direction.mul(dampingForceMagnitude);
+        const dampingForce = this._tempDampingForceVec.copyFrom(direction).mulInPlace(dampingForceMagnitude);
 
-        const totalForce = springForce.add(dampingForce);
+        const totalForce = this._tempTotalForceVec.copyFrom(springForce).addInPlace(dampingForce);
         this.p1.applyForce(totalForce);
-        this.p2.applyForce(totalForce.mul(-1));
+        // For p2, we need to apply the negative of totalForce. 
+        // We can reuse totalForce by scaling, applying, then scaling back if necessary, or use another temp if complex.
+        // Or, simpler, just make sure applyForce(totalForce.mul(-1)) is efficient or this is acceptable.
+        // Given applyForce now uses addInPlace, we should be fine with creating one new vector here for the negated force if MassPoint.applyForce takes a const ref or copies.
+        // MassPoint.applyForce(f) { this.force.addInPlace(f); } means 'f' is not modified. So totalForce.mul(-1) which creates a new Vec2 is fine.
+        // However, to be fully in-place for Spring's applyForce, we can do:
+        // this.p2.applyForce(this._tempTotalForceVec.copyFrom(totalForce).mulInPlace(-1)); // This would modify _tempTotalForceVec for p2
+        // But totalForce IS _tempTotalForceVec. So apply, then negate, then apply to p2.
+        this.p2.applyForce(this._tempTotalForceVec.mulInPlace(-1)); // totalForce is already _tempTotalForceVec, negate it and apply.
     }
     draw(ctx) {
         ctx.lineCap = "round";
@@ -428,6 +446,10 @@ class SoftBody {
         }
 
         this.initializeBrain(); 
+
+        // Temporary vectors for calculations to reduce allocations
+        this._tempVec1 = new Vec2();
+        this._tempVec2 = new Vec2();
     }
 
     calculateCurrentMaxEnergy() {
@@ -1292,53 +1314,49 @@ class SoftBody {
     }
 
     _updateEnergyBudget(dt, fluidFieldRef, nutrientField, lightField) {
-        // --- Apply Red Dye Poison Effect ---
-        if (fluidFieldRef && RED_DYE_POISON_STRENGTH > 0) {
-            let poisonDamageThisFrame = 0;
-            // Cache scale factors for this specific loop if fluidFieldRef is valid
-            const localScaleX = fluidFieldRef.scaleX;
-            const localScaleY = fluidFieldRef.scaleY;
-
-            for (const point of this.massPoints) {
-                const fluidGridX = Math.floor(point.pos.x / localScaleX);
-                const fluidGridY = Math.floor(point.pos.y / localScaleY);
-                const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
-                const redDensity = (fluidFieldRef.densityR[idx] || 0) / 255;
-
-                if (redDensity > 0.01) {
-                    poisonDamageThisFrame += redDensity * RED_DYE_POISON_STRENGTH * (point.radius / 5);
-                }
-            }
-            if (poisonDamageThisFrame > 0) {
-                this.creatureEnergy -= poisonDamageThisFrame * dt * 60; // dt is in seconds, scale strength to be per-second
-            }
-        }
-        // --- End of Red Dye Poison Effect ---
-
         let currentFrameEnergyCost = 0;
         let currentFrameEnergyGain = 0;
+        let poisonDamageThisFrame = 0; // Initialize here
 
         const hasFluidField = fluidFieldRef !== null && typeof fluidFieldRef !== 'undefined';
         const hasNutrientField = nutrientField !== null && typeof nutrientField !== 'undefined';
         const hasLightField = lightField !== null && typeof lightField !== 'undefined';
 
-        // Cache scale factors if fluidFieldRef exists, to avoid repeated access in loop
         const scaleX = hasFluidField ? fluidFieldRef.scaleX : 0;
         const scaleY = hasFluidField ? fluidFieldRef.scaleY : 0;
 
         for (const point of this.massPoints) {
-            let costMultiplier = 1.0;
-            let mapIdx = -1; // Initialize map index
+            // --- Red Dye Poison Effect (Moved inside main loop) ---
+            if (hasFluidField && RED_DYE_POISON_STRENGTH > 0) {
+                // const fluidGridX = Math.floor(point.pos.x / scaleX); // gx already calculated below
+                // const fluidGridY = Math.floor(point.pos.y / scaleY); // gy already calculated below
+                // let tempMapIdxForPoison = fluidFieldRef.IX(fluidGridX, fluidGridY); // mapIdx used below is the same
+                // const redDensity = (fluidFieldRef.densityR[tempMapIdxForPoison] || 0) / 255;
+                // Calculation will use mapIdx determined below if hasFluidField
+            }
+            // --- End of Moved Red Dye Poison Effect ---
 
-            if (hasFluidField) { // Calculate grid coordinates and index once if fluid field is present
+            let costMultiplier = 1.0;
+            let mapIdx = -1;
+
+            if (hasFluidField) {
                 const gx = Math.floor(point.pos.x / scaleX);
                 const gy = Math.floor(point.pos.y / scaleY);
                 mapIdx = fluidFieldRef.IX(gx, gy);
 
+                // --- Red Dye Poison Calculation (using mapIdx) ---
+                if (RED_DYE_POISON_STRENGTH > 0) {
+                    const redDensity = (fluidFieldRef.densityR[mapIdx] || 0) / 255;
+                    if (redDensity > 0.01) {
+                        poisonDamageThisFrame += redDensity * RED_DYE_POISON_STRENGTH * (point.radius / 5);
+                    }
+                }
+                // --- End of Red Dye Poison Calculation ---
+
                 if (hasNutrientField) {
                     const baseNutrientValue = nutrientField[mapIdx] !== undefined ? nutrientField[mapIdx] : 1.0;
-                const effectiveNutrientValue = baseNutrientValue * globalNutrientMultiplier;
-                costMultiplier = 1.0 / Math.max(MIN_NUTRIENT_VALUE, effectiveNutrientValue);
+                    const effectiveNutrientValue = baseNutrientValue * globalNutrientMultiplier;
+                    costMultiplier = 1.0 / Math.max(MIN_NUTRIENT_VALUE, effectiveNutrientValue);
                 }
             }
 
@@ -1417,6 +1435,11 @@ class SoftBody {
             }
         }
         
+        // Apply poison damage after the loop, before other adjustments
+        if (poisonDamageThisFrame > 0) {
+            this.creatureEnergy -= poisonDamageThisFrame * dt * 60; // dt is in seconds, scale strength to be per-second
+        }
+
         this.creatureEnergy += currentFrameEnergyGain; // Gains are already dt-scaled
         this.creatureEnergy -= currentFrameEnergyCost * dt; // Costs are per-frame, so scale by dt here
         this.creatureEnergy = Math.min(this.currentMaxEnergy, Math.max(0, this.creatureEnergy));
@@ -1628,12 +1651,12 @@ class SoftBody {
                                         if (item.type === 'particle') {
                                             const particle = item.particleRef;
                                             if (particle.life > 0 && !particle.isEaten) {
-                                                const distSq = point.pos.sub(particle.pos).magSq();
+                                                // const distSq = point.pos.sub(particle.pos).magSq();
+                                                this._tempVec1.copyFrom(point.pos).subInPlace(particle.pos);
+                                                const distSq = this._tempVec1.magSq();
                                                 if (distSq < eatingRadiusSq) {
                                                     particle.isEaten = true;
                                                     particle.life = 0; 
-                                                    
-                                                    particle.life = 0; // Mark for removal from main particles array
                                                     
                                                     let energyGain = ENERGY_PER_PARTICLE;
                                                     if (nutrientField && fluidField) { // fluidFieldRef is fluidField in this context
@@ -2165,12 +2188,23 @@ class SoftBody {
                 if (point.movementType === MovementType.FLOATING) {
                     const rawFluidVx = fluidFieldRef.Vx[idx];
                     const rawFluidVy = fluidFieldRef.Vy[idx];
-                    let fluidDisplacementPx = new Vec2(rawFluidVx * fluidFieldRef.scaleX * dt, rawFluidVy * fluidFieldRef.scaleY * dt);
-                    let effectiveFluidDisplacementPx = fluidDisplacementPx.mul(this.fluidCurrentStrength);
-                    let currentPointDisplacementPx = point.pos.sub(point.prevPos);
-                    let blendedDisplacementPx = currentPointDisplacementPx.mul(1.0 - this.fluidEntrainment)
-                                                     .add(effectiveFluidDisplacementPx.mul(this.fluidEntrainment));
-                    point.prevPos = point.pos.clone().sub(blendedDisplacementPx);
+                    
+                    // Use temporary vectors from SoftBody instance (this._tempVec1, this._tempVec2)
+                    // Calculate currentPointDisplacementPx * (1.0 - this.fluidEntrainment) and store in this._tempVec1
+                    this._tempVec1.copyFrom(point.pos).subInPlace(point.prevPos).mulInPlace(1.0 - this.fluidEntrainment);
+                    
+                    // Calculate effectiveFluidDisplacementPx * this.fluidEntrainment and store in this._tempVec2
+                    // effectiveFluidDisplacementPx was: fluidDisplacementPx.mul(this.fluidCurrentStrength)
+                    // fluidDisplacementPx was: new Vec2(rawFluidVx * fluidFieldRef.scaleX * dt, rawFluidVy * fluidFieldRef.scaleY * dt)
+                    this._tempVec2.x = rawFluidVx * fluidFieldRef.scaleX * dt;
+                    this._tempVec2.y = rawFluidVy * fluidFieldRef.scaleY * dt;
+                    this._tempVec2.mulInPlace(this.fluidCurrentStrength).mulInPlace(this.fluidEntrainment);
+                    
+                    // blendedDisplacementPx = _tempVec1 + _tempVec2 (result in _tempVec1)
+                    this._tempVec1.addInPlace(this._tempVec2);
+                    
+                    // point.prevPos = point.pos.clone().sub(blendedDisplacementPx);
+                    point.prevPos.copyFrom(point.pos).subInPlace(this._tempVec1);
                 }
                 
                 if (point.nodeType === NodeType.EMITTER) { 
@@ -2225,6 +2259,10 @@ class SoftBody {
         if (this.isUnstable) return; 
 
         // Inter-body repulsion & Predation
+        // Use this._tempVec1 for diff, and this._tempVec2 for forceDir/repulsionForce
+        const tempDiffVec = this._tempVec1; 
+        const tempForceVec = this._tempVec2;
+
         for (let i_p1 = 0; i_p1 < this.massPoints.length; i_p1++) {
             const p1 = this.massPoints[i_p1];
             if (p1.isFixed) continue;
@@ -2247,17 +2285,22 @@ class SoftBody {
                                     const p2 = otherItem.pointRef;
                                     if (p2.isFixed) continue;
 
-                                    const diff = p1.pos.sub(p2.pos);
-                                    const distSq = diff.magSq();
+                                    // const diff = p1.pos.sub(p2.pos);
+                                    tempDiffVec.copyFrom(p1.pos).subInPlace(p2.pos);
+                                    const distSq = tempDiffVec.magSq();
                                     const interactionRadius = (p1.radius + p2.radius) * BODY_REPULSION_RADIUS_FACTOR;
 
                                     if (distSq < interactionRadius * interactionRadius && distSq > 0.0001) {
                                         const dist = Math.sqrt(distSq);
                                         const overlap = interactionRadius - dist;
-                                        const forceDir = diff.normalize();
+                                        // const forceDir = diff.normalize();
+                                        // const repulsionForce = forceDir.mul(repulsionForceMag);
+                                        // p1.applyForce(repulsionForce);
+                                        
+                                        tempForceVec.copyFrom(tempDiffVec).normalizeInPlace();
                                         const repulsionForceMag = BODY_REPULSION_STRENGTH * overlap * 0.5;
-                                        const repulsionForce = forceDir.mul(repulsionForceMag);
-                                        p1.applyForce(repulsionForce);
+                                        tempForceVec.mulInPlace(repulsionForceMag);
+                                        p1.applyForce(tempForceVec);
                                     }
 
                                     if (p1.nodeType === NodeType.PREDATOR) {
@@ -2307,12 +2350,15 @@ class SoftBody {
                                     if (item.type === 'particle') {
                                         const particle = item.particleRef;
                                         if (particle.life > 0 && !particle.isEaten) {
-                                            const distSq = point.pos.sub(particle.pos).magSq();
+                                            // const distSq = point.pos.sub(particle.pos).magSq();
+                                            this._tempVec1.copyFrom(point.pos).subInPlace(particle.pos);
+                                            const distSq = this._tempVec1.magSq();
                                             if (distSq < eatingRadiusSq) {
                                                 particle.isEaten = true;
                                                 particle.life = 0; 
+                                                
                                                 let energyGain = ENERGY_PER_PARTICLE;
-                                                if (nutrientField && fluidField) { 
+                                                if (nutrientField && fluidField) { // fluidFieldRef is fluidField in this context
                                                     const particleGx = Math.floor(particle.pos.x / fluidField.scaleX);
                                                     const particleGy = Math.floor(particle.pos.y / fluidField.scaleY);
                                                     const nutrientIdxAtParticle = fluidField.IX(particleGx, particleGy);
@@ -2339,7 +2385,9 @@ class SoftBody {
         const localMaxSpanPerPointFactor = MAX_SPAN_PER_POINT_FACTOR;
 
         for (const spring of this.springs) {
-            const currentLength = spring.p1.pos.sub(spring.p2.pos).mag();
+            // const currentLength = spring.p1.pos.sub(spring.p2.pos).mag();
+            this._tempVec1.copyFrom(spring.p1.pos).subInPlace(spring.p2.pos);
+            const currentLength = this._tempVec1.mag();
             if (currentLength > spring.restLength * localMaxSpringStretchFactor) {
                 this.isUnstable = true;
                 // console.warn(...)

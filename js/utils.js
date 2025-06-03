@@ -114,6 +114,25 @@ function addVectors(vectorA, vectorB) {
 // --- Vector2D Class ---
 class Vec2 {
     constructor(x = 0, y = 0) { this.x = x; this.y = y; }
+
+    // In-place operations
+    addInPlace(other) { this.x += other.x; this.y += other.y; return this; }
+    subInPlace(other) { this.x -= other.x; this.y -= other.y; return this; }
+    mulInPlace(scalar) { this.x *= scalar; this.y *= scalar; return this; }
+    divInPlace(scalar) { if (scalar !== 0) { this.x /= scalar; this.y /= scalar; } else { this.x = 0; this.y = 0; } return this; }
+    normalizeInPlace() { 
+        const m = this.mag(); 
+        if (m > 0) { 
+            this.divInPlace(m); 
+        } else {
+            this.x = 0; // Avoid NaN, provide a zero vector if magnitude is zero
+            this.y = 0;
+        }
+        return this; 
+    }
+    copyFrom(other) { this.x = other.x; this.y = other.y; return this; }
+
+    // Original operations that return new Vec2
     add(other) { return new Vec2(this.x + other.x, this.y + other.y); }
     sub(other) { return new Vec2(this.x - other.x, this.y - other.y); }
     mul(scalar) { return new Vec2(this.x * scalar, this.y * scalar); }

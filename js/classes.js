@@ -188,6 +188,11 @@ class SoftBody {
         this.id = id;
         this.massPoints = [];
         this.springs = [];
+
+        // Genetic blueprint
+        this.blueprintPoints = []; // Array of { relX, relY, radius, mass, nodeType, movementType, dyeColor, canBeGrabber, neuronDataBlueprint }
+        this.blueprintSprings = []; // Array of { p1Index, p2Index, restLength, isRigid } (indices refer to blueprintPoints)
+
         this.isUnstable = false;
         this.ticksSinceBirth = 0;
         this.canReproduce = false;
@@ -423,860 +428,343 @@ class SoftBody {
     }
 
     createShape(startX, startY, parentBody = null) {
-        this.massPoints = [];
-        this.springs = [];
+        this.massPoints = []; // Clear actual points
+        this.springs = [];  // Clear actual springs
+        this.blueprintPoints = []; // Clear any previous blueprint
+        this.blueprintSprings = [];// Clear any previous blueprint
 
         const baseRadius = 1 + Math.random() * 1; 
         const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE];
-        const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE]; // Ensure this is defined here
+        const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
 
         if (parentBody) {
-            // Morphological evolution from parent
-            // let lastPointPos = parentBody.massPoints.length > 0 ? parentBody.massPoints[parentBody.massPoints.length-1].pos.clone() : new Vec2(startX, startY); // Old problematic var
-            let referencePosForNewPoints = parentBody.massPoints.length > 0 
-                ? parentBody.massPoints[parentBody.massPoints.length - 1].pos.clone() 
-                : new Vec2(startX, startY);
+            // --- Reproduction: Inherit and Mutate Blueprint ---
 
-            parentBody.massPoints.forEach(parentPoint => {
-                let mass = parentPoint.mass * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-                mass = Math.max(0.1, Math.min(mass, 1.0));
+            // 1. Deep copy blueprint from parent
+            this.blueprintPoints = JSON.parse(JSON.stringify(parentBody.blueprintPoints));
+            this.blueprintSprings = JSON.parse(JSON.stringify(parentBody.blueprintSprings));
 
-                let oldNodeType = parentPoint.nodeType;
-                let nodeType = parentPoint.nodeType;
+            // 2. Mutate blueprint points (coordinates, types, properties)
+            this.blueprintPoints.forEach(bp => {
+                // Mutate relative coordinates
+                if (Math.random() < (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.5)) {
+                    bp.relX += (Math.random() - 0.5) * 2; // Smaller jitter for blueprint stability
+                    mutationStats.blueprintCoordinateChange = (mutationStats.blueprintCoordinateChange || 0) + 1;
+                }
+                if (Math.random() < (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.5)) {
+                    bp.relY += (Math.random() - 0.5) * 2;
+                    mutationStats.blueprintCoordinateChange = (mutationStats.blueprintCoordinateChange || 0) + 1;
+                }
+
+                // Mutate mass & radius
+                if (Math.random() < (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                    bp.mass = Math.max(0.1, Math.min(bp.mass * (1 + (Math.random() - 0.5) * 0.4), 1.0));
+                    mutationStats.blueprintMassRadiusChange = (mutationStats.blueprintMassRadiusChange || 0) + 1;
+                }
+                if (Math.random() < (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                    bp.radius = Math.max(0.5, Math.min(bp.radius * (1 + (Math.random() - 0.5) * 0.4), baseRadius * 2.5)); // Max based on baseRadius
+                     mutationStats.blueprintMassRadiusChange = (mutationStats.blueprintMassRadiusChange || 0) + 1;
+                }
+
+                // Mutate nodeType
                 if (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER)) {
-                    nodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
-                    if (nodeType !== oldNodeType) mutationStats.nodeTypeChange++;
+                    const oldNodeType = bp.nodeType;
+                    bp.nodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
+                    if (bp.nodeType !== oldNodeType) mutationStats.nodeTypeChange++;
                 }
 
-                let oldMovementType = parentPoint.movementType;
-                let movementType = parentPoint.movementType;
+                // Mutate movementType
                 if (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER)) { 
+                    const oldMovementType = bp.movementType;
                     const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
-                    movementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
-                    if (movementType !== oldMovementType) mutationStats.movementTypeChange++;
+                    bp.movementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
+                    if (bp.movementType !== oldMovementType) mutationStats.movementTypeChange++;
                 }
-
                 // Ensure Swimmer nodes are not Floating after potential mutation
-                if (nodeType === NodeType.SWIMMER && movementType === MovementType.FLOATING) {
-                    movementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
+                if (bp.nodeType === NodeType.SWIMMER && bp.movementType === MovementType.FLOATING) {
+                    bp.movementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
                 }
 
-                const offspringPoint = new MassPoint(
-                    parentPoint.pos.x + (Math.random() - 0.5) * 5,
-                    parentPoint.pos.y + (Math.random() - 0.5) * 5,
-                    mass,
-                    parentPoint.radius * (1 + (Math.random() - 0.5) * 0.2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER))
-                );
-                offspringPoint.nodeType = nodeType;
-                offspringPoint.movementType = movementType; // Assign new movement type
-                offspringPoint.dyeColor = [...parentPoint.dyeColor]; // Inherit dye color
-                offspringPoint.canBeGrabber = parentPoint.canBeGrabber; // Inherit grabber gene
+                // Mutate canBeGrabber gene
                 if (Math.random() < GRABBER_GENE_MUTATION_CHANCE) {
-                    // DEBUG LOG ADDED HERE
-                    if (this.id === 290 || this.id === 291 || this.id === 292) { // 'this' is the offspring being created
-                        console.warn(`MUTATION_DEBUG (L464): Offspring ${this.id} is having a point's canBeGrabber (orig from parent ${parentBody.id}) potentially flipped. Current offspringPoint canBeGrabber before flip: ${offspringPoint.canBeGrabber}`);
-                    }
-                    offspringPoint.canBeGrabber = !offspringPoint.canBeGrabber;
+                    bp.canBeGrabber = !bp.canBeGrabber;
                     mutationStats.grabberGeneChange++;
                 }
 
-                if (Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER)) { // Mutate dye color
-                    const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
-                    offspringPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                // Mutate dyeColor
+                if (Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                    bp.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
+                    mutationStats.blueprintDyeColorChange = (mutationStats.blueprintDyeColorChange || 0) + 1;
                 }
 
-                // Determine hiddenLayerSize for potential neuron
-                let newHiddenLayerSizeForNeuron = DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1));
-                if (parentPoint.neuronData && typeof parentPoint.neuronData.hiddenLayerSize === 'number') {
-                    newHiddenLayerSizeForNeuron = parentPoint.neuronData.hiddenLayerSize;
-                }
-                if (Math.random() < (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)) {
-                    newHiddenLayerSizeForNeuron += Math.floor((Math.random() * 6) - 3);
-                    newHiddenLayerSizeForNeuron = Math.max(DEFAULT_HIDDEN_LAYER_SIZE_MIN, Math.min(newHiddenLayerSizeForNeuron, DEFAULT_HIDDEN_LAYER_SIZE_MAX));
-                }
-
-                if (nodeType === NodeType.NEURON) {
-                    offspringPoint.neuronData = {
-                        isBrain: false, 
-                        hiddenLayerSize: newHiddenLayerSizeForNeuron
-                    };
+                // Mutate neuronDataBlueprint (specifically hiddenLayerSize if neuron)
+                if (bp.nodeType === NodeType.NEURON) {
+                    if (!bp.neuronDataBlueprint) { // Ensure it exists
+                        bp.neuronDataBlueprint = { hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) };
+                    }
+                    if (Math.random() < (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                        let newSize = bp.neuronDataBlueprint.hiddenLayerSize + Math.floor((Math.random() * 6) - 3); // Mutate by +/- up to 3
+                        bp.neuronDataBlueprint.hiddenLayerSize = Math.max(DEFAULT_HIDDEN_LAYER_SIZE_MIN, Math.min(newSize, DEFAULT_HIDDEN_LAYER_SIZE_MAX));
+                        mutationStats.blueprintNeuronHiddenSizeChange = (mutationStats.blueprintNeuronHiddenSizeChange || 0) + 1;
+                    }
                 } else {
-                    offspringPoint.neuronData = null; // Crucial: ensure non-neurons have null neuronData
-                }
-
-                if(offspringPoint.nodeType === NodeType.FIXED_ROOT) offspringPoint.movementType = MovementType.FIXED;
-                this.massPoints.push(offspringPoint);
-                referencePosForNewPoints = offspringPoint.pos.clone(); // Update reference position
-
-                if (Math.random() < this.pointAddChance * GLOBAL_MUTATION_RATE_MODIFIER) {
-                    // ... (new point creation logic) ...
-                    const newMass = 0.1 + Math.random() * 0.9;
-                    const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE];
-                    let newNodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
-                    const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
-                    let newMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
-
-                    if (newNodeType === NodeType.SWIMMER && newMovementType === MovementType.FLOATING) {
-                        newMovementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
-                    }
-
-                    const newPoint = new MassPoint(
-                        referencePosForNewPoints.x + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 2,
-                        referencePosForNewPoints.y + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 2,
-                        newMass,
-                        baseRadius * (0.8 + Math.random() * 0.4) 
-                    );
-                    newPoint.nodeType = newNodeType;
-                    newPoint.movementType = newMovementType;
-                    newPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
-                    if (Math.random() < GRABBER_GENE_MUTATION_CHANCE) { // Chance for new point to be a grabber
-                        newPoint.canBeGrabber = true;
-                        // Not counted in grabberGeneChange as it's an initial state, not a flip from parent
-                    } else {
-                        newPoint.canBeGrabber = false;
-                    }
-                    
-                    if (newNodeType === NodeType.NEURON) {
-                        newPoint.neuronData = {
-                            isBrain: false,
-                            hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
-                        };
-                    } else {
-                        newPoint.neuronData = null; 
-                    }
-                    this.massPoints.push(newPoint);
-                    mutationStats.pointAddActual++; // Count actual point addition
-                    referencePosForNewPoints = newPoint.pos.clone(); 
-
-                    // New spring connection logic for the newly added point
-                    const numSpringsToAddNewPoint = MIN_SPRINGS_PER_NEW_NODE + Math.floor(Math.random() * (MAX_SPRINGS_PER_NEW_NODE - MIN_SPRINGS_PER_NEW_NODE + 1));
-                    const existingPoints = this.massPoints.filter(p => p !== newPoint);
-                    const shuffledExistingPoints = existingPoints.sort(() => 0.5 - Math.random()); // Shuffle to pick random points
-
-                    for (let k = 0; k < Math.min(numSpringsToAddNewPoint, shuffledExistingPoints.length); k++) {
-                        const connectToPoint = shuffledExistingPoints[k];
-                        const dist = newPoint.pos.sub(connectToPoint.pos).mag();
-                        let newRestLength = dist * (1 + (Math.random() - 0.5) * 2 * NEW_SPRING_REST_LENGTH_VARIATION);
-                        newRestLength = Math.max(1, newRestLength);
-                        const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
-                        this.springs.push(new Spring(newPoint, connectToPoint, this.stiffness, this.springDamping, newRestLength, becomeRigid));
-                    }
+                    bp.neuronDataBlueprint = null; // Crucial: ensure non-neurons have null neuronDataBlueprint
                 }
             });
 
-            if (this.massPoints.length === 0) {
-                this.massPoints.push(new MassPoint(startX, startY, 0.5, baseRadius));
-            }
+            // 3. Mutate blueprint springs (restLength, isRigid)
+            this.blueprintSprings.forEach(bs => {
+                if (Math.random() < (SPRING_PROP_MUTATION_MAGNITUDE * GLOBAL_MUTATION_RATE_MODIFIER)) { // Use magnitude as chance here
+                    const oldRestLength = bs.restLength;
+                    bs.restLength = Math.max(1, bs.restLength * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE));
+                    if (Math.abs(bs.restLength - oldRestLength) > 0.01) mutationStats.springRestLength++;
+                }
+                if (Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                    const oldRigid = bs.isRigid;
+                    bs.isRigid = !bs.isRigid; // Simple flip for now
+                    if (bs.isRigid !== oldRigid) mutationStats.springRigidityFlip++;
+                }
+            });
 
-            // Spring creation/mutation when reproducing from a parent
-            this.springs = [];
-            if (parentBody.springs && parentBody.springs.length > 0) {
-                // Helper to count springs for a point
-                const countSpringsForPoint = (pointIndex, springList) => {
-                    let count = 0;
-                    for (const spring of springList) {
-                        if (this.massPoints.indexOf(spring.p1) === pointIndex || this.massPoints.indexOf(spring.p2) === pointIndex) {
-                            count++;
-                        }
-                    }
-                    return count;
+            // Step 4: Structural Blueprint Mutations (Point Add, Spring Add/Delete, Subdivision, Scale, etc.)
+            // --- Point Addition Mutation (Blueprint) ---
+            if (Math.random() < this.pointAddChance * GLOBAL_MUTATION_RATE_MODIFIER && this.blueprintPoints.length > 0) {
+                const lastBp = this.blueprintPoints[this.blueprintPoints.length - 1];
+                const newRelX = lastBp.relX + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 0.5; // Smaller offset for blueprint
+                const newRelY = lastBp.relY + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 0.5;
+                const newMass = 0.1 + Math.random() * 0.9;
+                const newRadius = baseRadius * (0.8 + Math.random() * 0.4);
+                let newNodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
+                const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
+                let newMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
+                if (newNodeType === NodeType.SWIMMER && newMovementType === MovementType.FLOATING) {
+                    newMovementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
+                }
+                const newBp = {
+                    relX: newRelX, relY: newRelY, radius: newRadius, mass: newMass,
+                    nodeType: newNodeType, movementType: newMovementType,
+                    dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
+                    canBeGrabber: Math.random() < GRABBER_GENE_MUTATION_CHANCE,
+                    neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null
                 };
+                this.blueprintPoints.push(newBp);
+                const newPointIndex = this.blueprintPoints.length - 1;
+                mutationStats.pointAddActual++;
 
-                parentBody.springs.forEach(parentSpring => {
-                    const p1Index = parentBody.massPoints.indexOf(parentSpring.p1);
-                    const p2Index = parentBody.massPoints.indexOf(parentSpring.p2);
+                // Connect new blueprint point with springs
+                const numSpringsToAddNewPoint = MIN_SPRINGS_PER_NEW_NODE + Math.floor(Math.random() * (MAX_SPRINGS_PER_NEW_NODE - MIN_SPRINGS_PER_NEW_NODE + 1));
+                const existingBpIndices = this.blueprintPoints.map((_, i) => i).filter(i => i !== newPointIndex);
+                const shuffledExistingBpIndices = existingBpIndices.sort(() => 0.5 - Math.random());
 
-                    if (p1Index !== -1 && p2Index !== -1 && p1Index < this.massPoints.length && p2Index < this.massPoints.length) {
-                        const offspringP1 = this.massPoints[p1Index];
-                        const offspringP2 = this.massPoints[p2Index];
-                        let keepSpring = true;
-
-                        // Chance to delete spring (if not orphaning)
-                        if (Math.random() < SPRING_DELETION_CHANCE) {
-                            // Temporarily remove to check for orphans
-                            const tempSprings = this.springs.filter(s => s !== parentSpring); // Incorrect: this.springs is new list
-                            // We need to check against the list of springs *being built*
-                            // This check is complex here, better to build a list and then filter, or check based on parent's spring counts
-                            // For now, let's simplify: only delete if both points have > 1 potential connection in parent.
-                            let p1ParentSprings = 0; parentBody.springs.forEach(s => { if(s.p1 === parentSpring.p1 || s.p2 === parentSpring.p1) p1ParentSprings++; });
-                            let p2ParentSprings = 0; parentBody.springs.forEach(s => { if(s.p1 === parentSpring.p2 || s.p2 === parentSpring.p2) p2ParentSprings++; });
-                            if(p1ParentSprings > 1 && p2ParentSprings > 1) {
-                                keepSpring = false;
-                            }
-                        }
-
-                        if (keepSpring) {
-                            let oldRestLength = parentSpring.restLength;
-                            let newRestLength = parentSpring.restLength * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE);
-                            newRestLength = Math.max(1, newRestLength); 
-                            if (Math.abs(newRestLength - oldRestLength) > 0.01) mutationStats.springRestLength++;
-
-                            let oldRigid = parentSpring.isRigid;
-                            const becomeRigid = (parentSpring.isRigid && Math.random() > MUTATION_CHANCE_BOOL) || (!parentSpring.isRigid && Math.random() < CHANCE_FOR_RIGID_SPRING); 
-                            if (becomeRigid !== oldRigid) mutationStats.springRigidityFlip++;
-                            
-                            this.springs.push(new Spring(offspringP1, offspringP2, this.stiffness, this.springDamping, newRestLength, becomeRigid));
-                        } else {
-                            mutationStats.springDeletion++; 
-                        }
-                    }
-                });
+                for (let k = 0; k < Math.min(numSpringsToAddNewPoint, shuffledExistingBpIndices.length); k++) {
+                    const connectToBpIndex = shuffledExistingBpIndices[k];
+                    const connectToBp = this.blueprintPoints[connectToBpIndex];
+                    const dist = Math.sqrt((newBp.relX - connectToBp.relX)**2 + (newBp.relY - connectToBp.relY)**2);
+                    let newRestLength = dist * (1 + (Math.random() - 0.5) * 2 * NEW_SPRING_REST_LENGTH_VARIATION);
+                    newRestLength = Math.max(1, newRestLength);
+                    const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
+                    this.blueprintSprings.push({ p1Index: newPointIndex, p2Index: connectToBpIndex, restLength: newRestLength, isRigid: becomeRigid });
+                }
             }
-            
-            // Chance to add a new spring between unconnected points
-            if (this.massPoints.length >= 2 && Math.random() < SPRING_ADDITION_CHANCE) {
-                let attempts = 0;
-                while(attempts < 10) { // Try a few times to find an unconnected pair
-                    const idx1 = Math.floor(Math.random() * this.massPoints.length);
-                    let idx2 = Math.floor(Math.random() * this.massPoints.length);
-                    if (idx1 === idx2 && this.massPoints.length > 1) {
-                        idx2 = (idx1 + 1) % this.massPoints.length;
-                    }
-                    if (idx1 === idx2) break; // Not enough points
 
-                    const pA = this.massPoints[idx1];
-                    const pB = this.massPoints[idx2];
-                    let alreadyConnected = false;
-                    for (const s of this.springs) {
-                        if ((s.p1 === pA && s.p2 === pB) || (s.p1 === pB && s.p2 === pA)) {
-                            alreadyConnected = true;
-                            break;
-                        }
+            // --- Spring Deletion Mutation (Blueprint) ---
+            if (this.blueprintSprings.length > this.blueprintPoints.length -1 && Math.random() < SPRING_DELETION_CHANCE) { // Ensure min connectivity
+                // Complex check to avoid orphaning needed here for blueprint springs
+                // For now, simple random deletion if enough springs exist
+                const springToDeleteIndex = Math.floor(Math.random() * this.blueprintSprings.length);
+                this.blueprintSprings.splice(springToDeleteIndex, 1);
+                mutationStats.springDeletion++;
+            }
+
+            // --- Spring Addition Mutation (Blueprint) ---
+            if (this.blueprintPoints.length >= 2 && Math.random() < SPRING_ADDITION_CHANCE) {
+                let attempts = 0;
+                while (attempts < 10) {
+                    const idx1 = Math.floor(Math.random() * this.blueprintPoints.length);
+                    let idx2 = Math.floor(Math.random() * this.blueprintPoints.length);
+                    if (idx1 === idx2 && this.blueprintPoints.length > 1) {
+                        idx2 = (idx1 + 1) % this.blueprintPoints.length;
                     }
+                    if (idx1 === idx2) break;
+
+                    const pA_bp = this.blueprintPoints[idx1];
+                    const pB_bp = this.blueprintPoints[idx2];
+                    let alreadyConnected = this.blueprintSprings.some(bs => 
+                        (bs.p1Index === idx1 && bs.p2Index === idx2) || (bs.p1Index === idx2 && bs.p2Index === idx1)
+                    );
                     if (!alreadyConnected) {
-                        const dist = pA.pos.sub(pB.pos).mag();
+                        const dist = Math.sqrt((pA_bp.relX - pB_bp.relX)**2 + (pA_bp.relY - pB_bp.relY)**2);
                         let newRestLength = dist * (1 + (Math.random() - 0.5) * 2 * NEW_SPRING_REST_LENGTH_VARIATION);
                         newRestLength = Math.max(1, newRestLength);
                         const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
-                        this.springs.push(new Spring(pA, pB, this.stiffness, this.springDamping, newRestLength, becomeRigid));
+                        this.blueprintSprings.push({ p1Index: idx1, p2Index: idx2, restLength: newRestLength, isRigid: becomeRigid });
                         mutationStats.springAddition++; 
-                        break; // Added one spring
+                        break;
                     }
                     attempts++;
                 }
             }
+            
+            // --- Spring Subdivision Mutation (Blueprint) ---
+            if (this.blueprintSprings.length > 0 && Math.random() < SPRING_SUBDIVISION_MUTATION_CHANCE) {
+                const springToSubdivideIndex = Math.floor(Math.random() * this.blueprintSprings.length);
+                const originalBs = this.blueprintSprings[springToSubdivideIndex];
+                    const bp1 = this.blueprintPoints[originalBs.p1Index];
+                    const bp2 = this.blueprintPoints[originalBs.p2Index];
 
-            // Spring Subdivision Mutation
-            if (this.massPoints.length > 0 && this.springs.length > 0) { // Need points and springs to subdivide
-                const springsToConsider = [...this.springs]; // Iterate over a copy as we modify this.springs
-                for (let i = springsToConsider.length - 1; i >= 0; i--) { 
-                    const originalSpring = springsToConsider[i];
-                    if (Math.random() < SPRING_SUBDIVISION_MUTATION_CHANCE) {
-                        const p1 = originalSpring.p1;
-                        const p2 = originalSpring.p2;
-
-                        const midX = (p1.pos.x + p2.pos.x) / 2;
-                        const midY = (p1.pos.y + p2.pos.y) / 2;
-                        const defaultRadiusForNewSubdivisionPoint = 1.5; // Define a default
-                        const newPointRadius = ((p1.radius || defaultRadiusForNewSubdivisionPoint) + (p2.radius || defaultRadiusForNewSubdivisionPoint)) / 2 * (0.8 + Math.random() * 0.4);
-                        const newPointMass = ((p1.mass || 0.5) + (p2.mass || 0.5)) / 2 * (0.8 + Math.random() * 0.4);
-                        
-                        const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE];
-                        let newNodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
-                        const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
-                        let newMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
-                        if (newNodeType === NodeType.SWIMMER && newMovementType === MovementType.FLOATING) {
-                            newMovementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
-                        }
-
-                        const newMidPoint = new MassPoint(midX, midY, Math.max(0.1, newPointMass), Math.max(0.5, newPointRadius));
-                        newMidPoint.nodeType = newNodeType;
-                        newMidPoint.movementType = newMovementType;
-                        const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE]; 
-                        newMidPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
-                        if (Math.random() < GRABBER_GENE_MUTATION_CHANCE) { // Chance for new subdivided point to be a grabber
-                            newMidPoint.canBeGrabber = true;
-                        } else {
-                            newMidPoint.canBeGrabber = false;
-                        }
-                        if (newNodeType === NodeType.NEURON) {
-                            newMidPoint.neuronData = {
-                                isBrain: false,
-                                hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
-                            };
-                        }
-                        this.massPoints.push(newMidPoint);
-
-                        const originalRestLength = originalSpring.restLength;
-                        const wasOriginalSpringRigid = originalSpring.isRigid;
-                        const stiffnessForNewSegments = wasOriginalSpringRigid ? RIGID_SPRING_STIFFNESS : this.stiffness;
-                        const dampingForNewSegments = wasOriginalSpringRigid ? RIGID_SPRING_DAMPING : this.springDamping;
-
-                        const originalSpringIndex = this.springs.indexOf(originalSpring);
-                        if (originalSpringIndex > -1) {
-                            this.springs.splice(originalSpringIndex, 1);
-                        }
-
-                        let restLength1 = p1.pos.sub(newMidPoint.pos).mag();
-                        if (originalRestLength > 1) { 
-                           restLength1 = originalRestLength / 2 * (1 + (Math.random() - 0.5) * 0.1);
-                        }
-                        this.springs.push(new Spring(p1, newMidPoint, stiffnessForNewSegments, dampingForNewSegments, Math.max(1, restLength1), wasOriginalSpringRigid));
-
-                        let restLength2 = newMidPoint.pos.sub(p2.pos).mag();
-                        if (originalRestLength > 1) {
-                           restLength2 = originalRestLength / 2 * (1 + (Math.random() - 0.5) * 0.1);
-                        }
-                        this.springs.push(new Spring(newMidPoint, p2, stiffnessForNewSegments, dampingForNewSegments, Math.max(1, restLength2), wasOriginalSpringRigid));
-                        mutationStats.springSubdivision++; 
-                        mutationStats.pointAddActual++; // A point is added during subdivision
+                    const midRelX = (bp1.relX + bp2.relX) / 2;
+                    const midRelY = (bp1.relY + bp2.relY) / 2;
+                    const newRadius = ((bp1.radius || baseRadius) + (bp2.radius || baseRadius)) / 2 * (0.8 + Math.random() * 0.4);
+                    const newMass = ((bp1.mass || 0.5) + (bp2.mass || 0.5)) / 2 * (0.8 + Math.random() * 0.4);
+                    let newNodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
+                    const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
+                    let newMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
+                     if (newNodeType === NodeType.SWIMMER && newMovementType === MovementType.FLOATING) {
+                        newMovementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
                     }
-                }
+
+                    const newMidBp = {
+                        relX: midRelX, relY: midRelY, radius: Math.max(0.5, newRadius), mass: Math.max(0.1, newMass),
+                        nodeType: newNodeType, movementType: newMovementType,
+                        dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
+                        canBeGrabber: Math.random() < GRABBER_GENE_MUTATION_CHANCE,
+                        neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null
+                    };
+                    this.blueprintPoints.push(newMidBp);
+                    const newMidPointIndex = this.blueprintPoints.length - 1;
+
+                    this.blueprintSprings.splice(springToSubdivideIndex, 1); // Remove original spring
+
+                    let restLength1 = Math.sqrt((bp1.relX - midRelX)**2 + (bp1.relY - midRelY)**2) * (1 + (Math.random() - 0.5) * 0.1);
+                    this.blueprintSprings.push({ p1Index: originalBs.p1Index, p2Index: newMidPointIndex, restLength: Math.max(1, restLength1), isRigid: originalBs.isRigid });
+
+                    let restLength2 = Math.sqrt((midRelX - bp2.relX)**2 + (midRelY - bp2.relY)**2) * (1 + (Math.random() - 0.5) * 0.1);
+                    this.blueprintSprings.push({ p1Index: newMidPointIndex, p2Index: originalBs.p2Index, restLength: Math.max(1, restLength2), isRigid: originalBs.isRigid });
+                    
+                    mutationStats.springSubdivision++; 
+                    mutationStats.pointAddActual++; 
             }
 
-            // Original spring connection logic based on radius is now replaced by above.
-            // The fallback if no springs were created for a multi-point body:
-            if (this.massPoints.length > 1 && this.springs.length === 0) {
-                for(let i = 0; i < this.massPoints.length -1; i++){
-                     const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
-                     this.springs.push(new Spring(this.massPoints[i], this.massPoints[i+1], this.stiffness, this.springDamping, null, becomeRigid));
-                }
-            }
-
-            // Segment Duplication Mutation (New)
-            if (Math.random() < SEGMENT_DUPLICATION_CHANCE && this.massPoints.length > 0) {
-                console.log(`Body ${this.id}: Attempting Segment Duplication.`);
-                const potentialSegments = this.findLinearSegments(MIN_SEGMENT_LENGTH_FOR_DUPLICATION, MAX_SEGMENT_LENGTH_FOR_DUPLICATION);
-                if (potentialSegments.length > 0) {
-                    console.log(`Body ${this.id}: Found ${potentialSegments.length} potential segments for duplication.`);
-                    const segmentToDuplicate = potentialSegments[Math.floor(Math.random() * potentialSegments.length)];
-                    const newPoints = [];
-                    const pointMap = new Map(); // Maps original point to new point
-
-                    // Duplicate points
-                    segmentToDuplicate.forEach(originalPoint => {
-                        const newX = originalPoint.pos.x + (Math.random() - 0.5) * 10; // Slight offset for new segment
-                        const newY = originalPoint.pos.y + (Math.random() - 0.5) * 10;
-                        const newPoint = new MassPoint(newX, newY, originalPoint.mass, originalPoint.radius);
-                        newPoint.nodeType = originalPoint.nodeType; // Inherit type
-                        newPoint.movementType = originalPoint.movementType; // Inherit movement
-                        newPoint.dyeColor = [...originalPoint.dyeColor]; // Inherit color
-                        newPoint.canBeGrabber = originalPoint.canBeGrabber; // Inherit grabber gene for duplicated point
-                        if (originalPoint.neuronData) { // Deep copy neuron data if exists
-                            newPoint.neuronData = JSON.parse(JSON.stringify(originalPoint.neuronData));
-                            newPoint.neuronData.isBrain = false; // Duplicated neurons are not the brain
-                        }
-                        this.massPoints.push(newPoint);
-                        newPoints.push(newPoint);
-                        pointMap.set(originalPoint, newPoint);
+            // --- Body Scale Mutation (Blueprint) ---
+            if (Math.random() < BODY_SCALE_MUTATION_CHANCE) {
+                const scaleFactor = 1.0 + (Math.random() - 0.5) * 2 * BODY_SCALE_MUTATION_MAGNITUDE;
+                if (scaleFactor > 0.1 && Math.abs(scaleFactor - 1.0) > 0.001) {
+                    this.blueprintPoints.forEach(bp => {
+                        bp.relX *= scaleFactor;
+                        bp.relY *= scaleFactor;
+                        bp.radius = Math.max(0.5, bp.radius * scaleFactor); 
                     });
-
-                    // Duplicate internal springs of the segment
-                    for (let k = 0; k < segmentToDuplicate.length - 1; k++) {
-                        const originalP1 = segmentToDuplicate[k];
-                        const originalP2 = segmentToDuplicate[k+1];
-                        // Find the original spring that connected these two points
-                        const originalInternalSpring = parentBody.springs.find(s => 
-                            (s.p1 === originalP1 && s.p2 === originalP2) || (s.p1 === originalP2 && s.p2 === originalP1)
-                        );
-                        
-                        const newP1 = pointMap.get(originalP1);
-                        const newP2 = pointMap.get(originalP2);
-
-                        if (newP1 && newP2) {
-                            let restL = newP1.pos.sub(newP2.pos).mag();
-                            let isRigid = Math.random() < CHANCE_FOR_RIGID_SPRING; 
-                            let _stiff = this.stiffness; // Corrected: Use underscore
-                            let _damp = this.springDamping; // Corrected: Use underscore
-
-                            if (originalInternalSpring) { 
-                                restL = originalInternalSpring.restLength * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE);
-                                isRigid = (originalInternalSpring.isRigid && Math.random() > MUTATION_CHANCE_BOOL) || (!originalInternalSpring.isRigid && Math.random() < CHANCE_FOR_RIGID_SPRING);
-                                if(isRigid){
-                                    _stiff = RIGID_SPRING_STIFFNESS;
-                                    _damp = RIGID_SPRING_DAMPING;
-                                }
-                            }
-                            restL = Math.max(1, restL);
-                            this.springs.push(new Spring(newP1, newP2, _stiff, _damp, restL, isRigid));
-                        }
-                    }
-
-                    // Connect the new segment (simple append for now)
-                    // Attach the first point of the new segment to the last point of the original segment
-                    if (newPoints.length > 0 && segmentToDuplicate.length > 0) {
-                        const attachToOriginalPoint = segmentToDuplicate[segmentToDuplicate.length - 1]; // Last point of original segment
-                        const attachNewPoint = newPoints[0]; // First point of new segment
-                        
-                        // Check if already connected (should not be, but good practice)
-                        let alreadyConnected = false;
-                        for (const s of this.springs) {
-                            if ((s.p1 === attachToOriginalPoint && s.p2 === attachNewPoint) || (s.p1 === attachNewPoint && s.p2 === attachToOriginalPoint)) {
-                                alreadyConnected = true; break;
-                            }
-                        }
-                        if (!alreadyConnected) {
-                            const dist = attachToOriginalPoint.pos.sub(attachNewPoint.pos).mag();
-                            let connectRestLength = dist * (1 + (Math.random() - 0.5) * 2 * NEW_SPRING_REST_LENGTH_VARIATION);
-                            connectRestLength = Math.max(1, connectRestLength);
-                            const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
-                            this.springs.push(new Spring(attachToOriginalPoint, attachNewPoint, this.stiffness, this.springDamping, connectRestLength, becomeRigid));
-                        }
-                    }
-                    mutationStats.segmentDuplication++; 
-                    console.log(`Body ${this.id}: Segment Duplication SUCCESSFUL. New points: ${newPoints.length}`);
-                } else {
-                    console.log(`Body ${this.id}: Segment Duplication FAILED - No suitable linear segments found.`);
-                }
-            }
-
-            // Add Box Mutation (New)
-            // Assumes ADD_BOX_MUTATION_CHANCE, NEW_BOX_SIDE_LENGTH_MIN, NEW_BOX_SIDE_LENGTH_MAX are globally defined
-            // if (Math.random() < (ADD_BOX_MUTATION_CHANCE || 0.05) && this.springs.length > 0 && this.massPoints.length >= 2) {
-            //     const axisSpringIndex = Math.floor(Math.random() * this.springs.length);
-            //     const axisSpring = this.springs[axisSpringIndex];
-            //     const P1 = axisSpring.p1;
-            //     const P2 = axisSpring.p2;
-            //
-            //     const vecP1P2 = P2.pos.sub(P1.pos);
-            //     if (vecP1P2.magSq() > 0.001) { // Ensure P1 and P2 are not coincident
-            //         let perpVec = new Vec2(-vecP1P2.y, vecP1P2.x).normalize();
-            //         if (Math.random() < 0.5) { // Randomly flip direction
-            //             perpVec = perpVec.mul(-1);
-            //         }
-            //
-            //         const chosenBoxSideLength = (NEW_BOX_SIDE_LENGTH_MIN || 10) + Math.random() * ((NEW_BOX_SIDE_LENGTH_MAX || 30) - (NEW_BOX_SIDE_LENGTH_MIN || 10));
-            //         const scaledPerpVec = perpVec.mul(chosenBoxSideLength);
-            //
-            //         const P3_pos = P2.pos.add(scaledPerpVec);
-            //         const P4_pos = P1.pos.add(scaledPerpVec);
-            //
-            //         const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE];
-            //         const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE]; // Assumes DYE_COLORS is global
-            //         const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
-            //
-            //         // Create P3
-            //         const avgParentRadiusP3 = (P1.radius + P2.radius) / 2; // Base on P1/P2 for consistency
-            //         const newRadiusP3 = Math.max(0.5, avgParentRadiusP3 * (0.8 + Math.random() * 0.4));
-            //         const newMassP3 = Math.max(0.1, ((P1.mass + P2.mass) / 2) * (0.8 + Math.random() * 0.4));
-            //         let nodeTypeP3 = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
-            //         let movementTypeP3 = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
-            //         if (nodeTypeP3 === NodeType.SWIMMER && movementTypeP3 === MovementType.FLOATING) {
-            //             movementTypeP3 = MovementType.NEUTRAL;
-            //         }
-            //         const P3_mp = new MassPoint(P3_pos.x, P3_pos.y, newMassP3, newRadiusP3);
-            //         P3_mp.nodeType = nodeTypeP3;
-            //         P3_mp.movementType = movementTypeP3;
-            //         P3_mp.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
-            //         P3_mp.canBeGrabber = Math.random() < (GRABBER_GENE_MUTATION_CHANCE || 0.1);
-            //         if (P3_mp.nodeType === NodeType.NEURON) {
-            //             P3_mp.neuronData = { isBrain: false, hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) };
-            //         }
-            //         this.massPoints.push(P3_mp);
-            //
-            //         // Create P4
-            //         const avgParentRadiusP4 = (P1.radius + P2.radius) / 2;
-            //         const newRadiusP4 = Math.max(0.5, avgParentRadiusP4 * (0.8 + Math.random() * 0.4));
-            //         const newMassP4 = Math.max(0.1, ((P1.mass + P2.mass) / 2) * (0.8 + Math.random() * 0.4));
-            //         let nodeTypeP4 = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
-            //         let movementTypeP4 = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
-            //          if (nodeTypeP4 === NodeType.SWIMMER && movementTypeP4 === MovementType.FLOATING) {
-            //             movementTypeP4 = MovementType.NEUTRAL;
-            //         }
-            //         const P4_mp = new MassPoint(P4_pos.x, P4_pos.y, newMassP4, newRadiusP4);
-            //         P4_mp.nodeType = nodeTypeP4;
-            //         P4_mp.movementType = movementTypeP4;
-            //         P4_mp.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
-            //         P4_mp.canBeGrabber = Math.random() < (GRABBER_GENE_MUTATION_CHANCE || 0.1);
-            //          if (P4_mp.nodeType === NodeType.NEURON) {
-            //             P4_mp.neuronData = { isBrain: false, hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) };
-            //         }
-            //         this.massPoints.push(P4_mp);
-            //
-            //         // Add new springs
-            //         const rigidChance = CHANCE_FOR_RIGID_SPRING || 0.1;
-            //         // Edge P2-P3
-            //         this.springs.push(new Spring(P2, P3_mp, this.stiffness, this.springDamping, chosenBoxSideLength, Math.random() < rigidChance));
-            //         // Edge P3-P4
-            //         this.springs.push(new Spring(P3_mp, P4_mp, this.stiffness, this.springDamping, vecP1P2.mag(), Math.random() < rigidChance));
-            //         // Edge P4-P1
-            //         this.springs.push(new Spring(P4_mp, P1, this.stiffness, this.springDamping, chosenBoxSideLength, Math.random() < rigidChance));
-            //         // Diagonal P1-P3
-            //         this.springs.push(new Spring(P1, P3_mp, this.stiffness, this.springDamping, P3_mp.pos.sub(P1.pos).mag(), Math.random() < rigidChance));
-            //         // Diagonal P2-P4
-            //         this.springs.push(new Spring(P2, P4_mp, this.stiffness, this.springDamping, P4_mp.pos.sub(P2.pos).mag(), Math.random() < rigidChance));
-            //
-            //         mutationStats.addBoxMutation = (mutationStats.addBoxMutation || 0) + 1;
-            //         console.log(`Body ${this.id}: Add Box Mutation SUCCESSFUL. Added 2 points, 5 springs.`);
-            //     }
-            // }
-
-            // Subgraph Translocation Mutation (EXPERIMENTAL AND SIMPLIFIED)
-            if (Math.random() < SUBGRAPH_TRANSLOCATION_CHANCE && this.massPoints.length > MIN_SUBGRAPH_SIZE_FOR_TRANSLOCATION + 1) { // Ensure enough points for a subgraph and a remaining body
-                let attempts = 0;
-                let success = false;
-                while (attempts < 5 && !success) { // Try a few times to find a suitable subgraph
-                    attempts++;
-
-                    const subgraphPoints = [];
-                    const subgraphInternalSprings = []; // Springs entirely within the subgraph
-                    const boundarySprings = [];       // Springs connecting subgraph to rest of body
-                    const mainBodyPoints = new Set(this.massPoints); // Assume all points are main body initially
-
-                    // 1. Select a random starting point for the subgraph
-                    const startPointIndex = Math.floor(Math.random() * this.massPoints.length);
-                    const startPoint = this.massPoints[startPointIndex];
-
-                    // 2. Grow the subgraph using BFS-like approach
-                    const queue = [startPoint];
-                    const visitedForSubgraph = new Set([startPoint]);
-                    subgraphPoints.push(startPoint);
-                    mainBodyPoints.delete(startPoint);
-
-                    let head = 0;
-                    while(head < queue.length && subgraphPoints.length < MAX_SUBGRAPH_SIZE_FOR_TRANSLOCATION) {
-                        const currentPoint = queue[head++];
-                        this.springs.forEach(spring => {
-                            let neighbor = null;
-                            if (spring.p1 === currentPoint && !visitedForSubgraph.has(spring.p2)) neighbor = spring.p2;
-                            else if (spring.p2 === currentPoint && !visitedForSubgraph.has(spring.p1)) neighbor = spring.p1;
-
-                            if (neighbor && subgraphPoints.length < MAX_SUBGRAPH_SIZE_FOR_TRANSLOCATION) {
-                                visitedForSubgraph.add(neighbor);
-                                subgraphPoints.push(neighbor);
-                                mainBodyPoints.delete(neighbor);
-                                queue.push(neighbor);
-                                subgraphInternalSprings.push(spring); // This spring is internal to the growing subgraph
-                            }
-                        });
-                    }
-                    
-                    if (subgraphPoints.length < MIN_SUBGRAPH_SIZE_FOR_TRANSLOCATION || mainBodyPoints.size === 0) {
-                        continue; // Subgraph too small or no main body left, try again
-                    }
-
-                    // Identify boundary springs (connecting subgraph to what's left)
-                    const tempSprings = [...this.springs]; // Work on a copy for modification
-                    this.springs = []; // Clear current springs, will rebuild
-
-                    tempSprings.forEach(spring => {
-                        const p1InSubgraph = subgraphPoints.includes(spring.p1);
-                        const p2InSubgraph = subgraphPoints.includes(spring.p2);
-                        if (p1InSubgraph && p2InSubgraph) {
-                            // This is an internal spring to the subgraph, keep it with subgraph points if we re-add them later.
-                            // For now, let's assume subgraphInternalSprings already captured these correctly during BFS growth.
-                            // This part needs careful thought: ensure internal springs are preserved and re-added correctly.
-                        } else if (p1InSubgraph || p2InSubgraph) {
-                            boundarySprings.push(spring); // These are the connections to cut
-                        } else {
-                            this.springs.push(spring); // Spring belongs to the main body
-                        }
+                    this.blueprintSprings.forEach(bs => {
+                        bs.restLength = Math.max(1, bs.restLength * scaleFactor); 
                     });
-                    
-                    // Simplified check: if there are no boundary springs, it means the subgraph was the whole body, or disconnected.
-                    if (boundarySprings.length === 0 && this.massPoints.length !== subgraphPoints.length) {
-                         this.springs = tempSprings; // Restore springs and try again
-                         continue;
-                    }
-
-                    // At this point, `this.springs` contains springs of the main body (potentially empty if subgraph was everything)
-                    // `subgraphPoints` has the points to move. We need to re-create their internal springs.
-                    // `boundarySprings` are severed.
-
-                    // --- Re-create internal springs for the subgraph --- (This is crucial and was missing) 
-                    const newSubgraphInternalSprings = [];
-                    for(let i = 0; i < subgraphPoints.length; i++){
-                        for(let j = i + 1; j < subgraphPoints.length; j++){
-                            const pA = subgraphPoints[i];
-                            const pB = subgraphPoints[j];
-                            // Check if these two points were connected in the original body
-                            const originalConnectingSpring = parentBody.springs.find(s => 
-                                (s.p1 === pA && s.p2 === pB) || (s.p1 === pB && s.p2 === pA)
-                            ) || tempSprings.find(s => /* Check in tempSprings if not found in parentBody.springs, for robustness */
-                                (s.p1 === pA && s.p2 === pB) || (s.p1 === pB && s.p2 === pA)
-                            );
-
-                            if(originalConnectingSpring){
-                                newSubgraphInternalSprings.push(new Spring(pA, pB, originalConnectingSpring.stiffness, originalConnectingSpring.dampingFactor, originalConnectingSpring.restLength, originalConnectingSpring.isRigid));
-                            }
-                        }
-                    }
-
-                    // 3. Select new attachment point on the (remaining) main body
-                    if (mainBodyPoints.size === 0) { // Should have been caught earlier, but double check
-                        this.springs = tempSprings; // Restore
-                        this.massPoints = [...mainBodyPoints, ...subgraphPoints]; // Restore points if they were conceptually removed
-                        continue;
-                    }
-                    const mainBodyPointsArray = Array.from(mainBodyPoints);
-                    const newAnchorNode = mainBodyPointsArray[Math.floor(Math.random() * mainBodyPointsArray.length)];
-                    
-                    // 4. Offset and re-attach subgraph points (conceptual, positions are already global)
-                    // For simplicity, connect the original startPoint of the subgraph to the newAnchorNode.
-                    const subgraphStartPointForConnection = subgraphPoints[0]; // The first point added to subgraph
-                    
-                    const dist = subgraphStartPointForConnection.pos.sub(newAnchorNode.pos).mag();
-                    let connectRestLength = dist * (1 + (Math.random() - 0.5) * 0.2);
-                    connectRestLength = Math.max(5, connectRestLength); // Min length for this new connection
-                    const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
-                    this.springs.push(new Spring(subgraphStartPointForConnection, newAnchorNode, this.stiffness, this.springDamping, connectRestLength, becomeRigid));
-
-                    // Add the subgraph's internal springs to the main list
-                    this.springs.push(...newSubgraphInternalSprings);
-                    
-                    console.log(`Subgraph translocation: ${subgraphPoints.length} points moved and reattached.`);
-                    success = true; // Mutation succeeded
-                    break; // Exit while loop
+                    this.offspringSpawnRadius *= scaleFactor; // This is a creature property, not blueprint, but scale it too
+                    this.offspringSpawnRadius = Math.max(10, this.offspringSpawnRadius); 
+                    mutationStats.bodyScale++;
                 }
             }
+            // TODO: Add blueprint versions of Segment Duplication, Symmetrical Duplication etc.
 
-            // Symmetrical Subgraph Duplication along an Edge (EXPERIMENTAL)
-            if (Math.random() < SYMMETRIC_SUBGRAPH_DUPLICATION_CHANCE && this.springs.length > 0 && this.massPoints.length >= MIN_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP) {
-                let attempts = 0;
-                let duplicationDone = false;
-                console.log(`Body ${this.id}: Attempting Symmetrical Subgraph Duplication.`);
-                while (attempts < 5 && !duplicationDone) {
-                    attempts++;
+            // Step 5: Instantiate Phenotype from the mutated blueprint
+            this._instantiatePhenotypeFromBlueprint(startX, startY);
 
-                    // 1. Select a random existing spring to be the axis
-                    const axisSpringIndex = Math.floor(Math.random() * this.springs.length);
-                    const axisSpring = this.springs[axisSpringIndex];
-                    const axisP1 = axisSpring.p1;
-                    const axisP2 = axisSpring.p2;
+        } else { 
+            // --- Initial Generation: Create Blueprint from Geometric Primitives ---
+            let initialTempMassPoints = []; // Temporary MassPoint objects to get initial geometry
+            let initialTempSprings = [];  // Temporary Spring objects
 
-                    // 2. Identify a "branch" connected to axisP2 (excluding axisP1)
-                    const branchPoints = [];
-                    const pointToNewPointMap = new Map();
-                    const springsForNewCollection = []; // To temporarily hold springs related to the branch & new duplicate
-
-                    const q = [];
-                    const visitedInBranch = new Set([axisP1, axisP2]); // Don't traverse back along axis or re-add axis points to branch
-
-                    // Find direct neighbors of axisP2 (excluding axisP1)
-                    this.springs.forEach(s => {
-                        if (s === axisSpring) return;
-                        if (s.p1 === axisP2 && !visitedInBranch.has(s.p2)) { q.push({point: s.p2, parentInBranch: axisP2, originalSpring: s}); visitedInBranch.add(s.p2); }
-                        else if (s.p2 === axisP2 && !visitedInBranch.has(s.p1)) { q.push({point: s.p1, parentInBranch: axisP2, originalSpring: s}); visitedInBranch.add(s.p1); }
-                    });
-
-                    let head = 0;
-                    while(head < q.length && branchPoints.length < (MAX_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP - 2)) {
-                        const currentItem = q[head++];
-                        const currentPoint = currentItem.point;
-                        branchPoints.push(currentPoint);
-                        // For this simpler version, we only duplicate a small branch directly off axisP2
-                        // More complex traversal to get a larger subgraph connected to axisP2 could be added here
-                    }
-
-                    if (branchPoints.length > 0) {
-                        // 3. Duplicate the branch points and their internal connections, attaching to axisP1
-                        const duplicatedBranchRootOriginal = branchPoints[0]; // The point in branch that was connected to axisP2
-                        
-                        branchPoints.forEach(originalBranchPoint => {
-                            const vecP2ToOriginal = originalBranchPoint.pos.sub(axisP2.pos);
-                            // New position: reflect across axisP1 relative to axisP2, or simply translate for now
-                            const newPos = axisP1.pos.add(vecP2ToOriginal); // Simple translation relative to axisP1
-                            
-                            const newDupPoint = new MassPoint(newPos.x, newPos.y, originalBranchPoint.mass, originalBranchPoint.radius);
-                            newDupPoint.nodeType = originalBranchPoint.nodeType; // Consider mutating these
-                            newDupPoint.movementType = originalBranchPoint.movementType;
-                            newDupPoint.dyeColor = [...originalBranchPoint.dyeColor];
-                            newDupPoint.canBeGrabber = originalBranchPoint.canBeGrabber; // Inherit grabber gene for duplicated point
-                            if (originalBranchPoint.neuronData) {
-                                newDupPoint.neuronData = JSON.parse(JSON.stringify(originalBranchPoint.neuronData));
-                                newDupPoint.neuronData.isBrain = false;
-                            }
-                            this.massPoints.push(newDupPoint);
-                            pointToNewPointMap.set(originalBranchPoint, newDupPoint);
-                        });
-
-                        // Duplicate internal springs within the branch
-                        branchPoints.forEach(bp1 => {
-                            branchPoints.forEach(bp2 => {
-                                if (this.massPoints.indexOf(bp1) < this.massPoints.indexOf(bp2)) { // Avoid double checking and self-loops
-                                    const originalBranchSpring = this.springs.find(s => 
-                                        (s.p1 === bp1 && s.p2 === bp2) || (s.p1 === bp2 && s.p2 === bp1)
-                                    );
-                                    if (originalBranchSpring) {
-                                        const newDupP1 = pointToNewPointMap.get(bp1);
-                                        const newDupP2 = pointToNewPointMap.get(bp2);
-                                        if (newDupP1 && newDupP2) {
-                                            this.springs.push(new Spring(newDupP1, newDupP2, 
-                                                originalBranchSpring.isRigid ? RIGID_SPRING_STIFFNESS : this.stiffness, 
-                                                originalBranchSpring.isRigid ? RIGID_SPRING_DAMPING : this.springDamping, 
-                                                originalBranchSpring.restLength, originalBranchSpring.isRigid));
-                                        }
-                                    }
-                                }
-                            });
-                        });
-                        
-                        // Connect the root of the duplicated branch to axisP1
-                        const duplicatedBranchRootNew = pointToNewPointMap.get(duplicatedBranchRootOriginal);
-                        if (duplicatedBranchRootNew) {
-                             const dist = duplicatedBranchRootNew.pos.sub(axisP1.pos).mag();
-                             let connectRestLength = dist * (1 + (Math.random() - 0.5) * 0.2);
-                             connectRestLength = Math.max(1, connectRestLength);
-                             const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING; // Or inherit from axisSpring?
-                             this.springs.push(new Spring(axisP1, duplicatedBranchRootNew, this.stiffness, this.springDamping, connectRestLength, becomeRigid));
-                        }
-
-                        console.log("Symmetric subgraph duplication occurred.");
-                        mutationStats.symmetricSubgraphDuplication = (mutationStats.symmetricSubgraphDuplication || 0) + 1;
-                        duplicationDone = true;
-                    } else {
-                        console.log(`Body ${this.id}: Symmetrical Subgraph Duplication attempt ${attempts} FAILED - No suitable branch found.`);
-                    }
-                }
-                if (!duplicationDone) {
-                    console.log(`Body ${this.id}: Symmetrical Subgraph Duplication FAILED after all attempts.`);
-                }
-            }
-
-            // Whole-Body Symmetrical Duplication (New - Highly Experimental)
-            // ---- Start of TEMPORARILY DISABLED BLOCK -----
-            /*
-            if (Math.random() < SYMMETRICAL_BODY_DUPLICATION_CHANCE && this.springs.length > 0 && this.massPoints.length >= 2) {
-                console.log(`Body ${this.id}: Attempting Whole-Body Symmetrical Duplication.`);
-                const originalPoints = [...this.massPoints];
-                const originalSprings = [...this.springs];
-                const pointMap = new Map(); // Maps original point object to its new duplicated point object
-
-                // 1. Select a random existing spring as the hinge/axis
-                const hingeSpringIndex = Math.floor(Math.random() * originalSprings.length);
-                const hingeSpring = originalSprings[hingeSpringIndex];
-                const hingeP1 = hingeSpring.p1;
-                const hingeP2 = hingeSpring.p2;
-
-                const newDuplicatedPoints = [];
-
-                // 2. Duplicate all points EXCEPT hingeP1 and hingeP2, and reflect them
-                originalPoints.forEach(p_orig => {
-                    if (p_orig === hingeP1 || p_orig === hingeP2) {
-                        pointMap.set(p_orig, p_orig); // Hinge points map to themselves (they are shared)
-                        return;
-                    }
-                    const reflectedPos = reflectPointAcrossLine(p_orig.pos, hingeP1.pos, hingeP2.pos);
-                    const p_new = new MassPoint(reflectedPos.x, reflectedPos.y, p_orig.mass, p_orig.radius);
-                    
-                    p_new.nodeType = p_orig.nodeType; // Inherit and potentially mutate later if desired
-                    p_new.movementType = p_orig.movementType;
-                    p_new.dyeColor = [...p_orig.dyeColor];
-                    p_new.canBeGrabber = p_orig.canBeGrabber; // Inherit grabber gene
-                    if (Math.random() < GRABBER_GENE_MUTATION_CHANCE * 0.25) { // Even lower chance during whole body duplication
-                        p_new.canBeGrabber = !p_new.canBeGrabber;
-                        // mutationStats.grabberGeneChange++; // Consider if this specific mutation should be counted
-                    }
-                    if (p_orig.neuronData) {
-                        p_new.neuronData = JSON.parse(JSON.stringify(p_orig.neuronData));
-                        if (p_new.neuronData) p_new.neuronData.isBrain = false; // Duplicated neurons are not the main brain
-                    }
-                    this.massPoints.push(p_new); // Add to the body's main point list
-                    newDuplicatedPoints.push(p_new);
-                    pointMap.set(p_orig, p_new);
-                });
-
-                // 3. Duplicate springs
-                const newSpringsToAdd = [];
-                originalSprings.forEach(s_orig => {
-                    if (s_orig === hingeSpring) return; // Don't duplicate the hinge spring itself
-
-                    const s_orig_p1 = s_orig.p1;
-                    const s_orig_p2 = s_orig.p2;
-
-                    const s_new_p1 = pointMap.get(s_orig_p1);
-                    const s_new_p2 = pointMap.get(s_orig_p2);
-
-                    if (s_new_p1 && s_new_p2 && s_new_p1 !== s_new_p2) { // Ensure both points were mapped and are distinct
-                        // Check if this new spring would be identical to the hinge spring if both ends are hinge points
-                        // (This check is implicitly handled by s_orig !== hingeSpring already if we are careful)
-                        
-                        // Create new spring with properties from original, possibly mutated
-                        let newRestLength = s_orig.restLength * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE * 0.5); // smaller mutation here
-                        newRestLength = Math.max(1, newRestLength);
-                        let isRigid = (s_orig.isRigid && Math.random() > MUTATION_CHANCE_BOOL*2) || (!s_orig.isRigid && Math.random() < CHANCE_FOR_RIGID_SPRING*0.5); // Less chance to flip rigidity for these
-                        
-                        let new_stiffness = isRigid ? RIGID_SPRING_STIFFNESS : this.stiffness;
-                        let new_damping = isRigid ? RIGID_SPRING_DAMPING : this.springDamping;
-
-                        newSpringsToAdd.push(new Spring(s_new_p1, s_new_p2, new_stiffness, new_damping, newRestLength, isRigid));
-                    }
-                });
-                this.springs.push(...newSpringsToAdd);
-                console.log("Whole-body symmetrical duplication occurred along an edge.");
-                mutationStats.symmetricalBodyDuplication = (mutationStats.symmetricalBodyDuplication || 0) + 1;
-            } else if (this.springs.length === 0 || this.massPoints.length < 2) {
-                // This else if condition is tricky because the Math.random() is the primary condition.
-                // We can log if the random chance passed but the other conditions failed.
-                // However, a separate log if the random chance itself fails is too verbose.
-                if (SYMMETRICAL_BODY_DUPLICATION_CHANCE > 0 && (this.springs.length === 0 || this.massPoints.length < 2)) {
-                     // console.log(`Body ${this.id}: Skipped Whole-Body Symmetrical Duplication due to insufficient points/springs (chance was ${SYMMETRICAL_BODY_DUPLICATION_CHANCE.toFixed(3)}).`);
-                }
-            }
-            */
-            // ---- End of TEMPORARILY DISABLED BLOCK -----
-
-        } else { // Initial generation - use old shape types
+            // Create initial geometric shape (grid, line, or star) using startX, startY as a reference origin for now
             const basePointDist = 5 + Math.random() * 3; 
             if (this.shapeType === 0) { // Grid
                 const numPointsX = 3; const numPointsY = 3; let gridPoints = [];
                 for (let i = 0; i < numPointsY; i++) { gridPoints[i] = []; for (let j = 0; j < numPointsX; j++) {
-                    const point = new MassPoint(startX + j * basePointDist, startY + i * basePointDist, 0.3 + Math.random() * 0.4, baseRadius);
-                    point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
-                    this.massPoints.push(point); gridPoints[i][j] = point;
+                    // Position points relative to an arbitrary origin (0,0) for now, will adjust with centroid
+                    const point = new MassPoint(j * basePointDist, i * basePointDist, 0.3 + Math.random() * 0.4, baseRadius);
+                    initialTempMassPoints.push(point); gridPoints[i][j] = point;
                 }}
-                for (let i=0; i<numPointsY; i++) for (let j=0; j<numPointsX-1; j++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
-                for (let j=0; j<numPointsX; j++) for (let i=0; i<numPointsY-1; i++) this.springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                for (let i=0; i<numPointsY; i++) for (let j=0; j<numPointsX-1; j++) initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                for (let j=0; j<numPointsX; j++) for (let i=0; i<numPointsY-1; i++) initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
                 for (let i=0; i<numPointsY-1; i++) for (let j=0; j<numPointsX-1; j++) {
-                    this.springs.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], this.stiffness*0.7, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
-                    this.springs.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], this.stiffness*0.7, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                    initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], this.stiffness*0.7, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                    initialTempSprings.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], this.stiffness*0.7, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
                 }
             } else if (this.shapeType === 1) { // Line
                 const numLinePoints = Math.floor(3 + Math.random() * 3); const isHorizontal = Math.random() < 0.5; let linePoints = [];
                 for (let i=0; i<numLinePoints; i++) {
-                    const x = startX + (isHorizontal ? i * basePointDist : 0); const y = startY + (isHorizontal ? 0 : i * basePointDist);
+                    const x = (isHorizontal ? i * basePointDist : 0);
+                    const y = (isHorizontal ? 0 : i * basePointDist);
                     const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
-                    point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
-                    this.massPoints.push(point); linePoints.push(point);
+                    initialTempMassPoints.push(point); linePoints.push(point);
                 }
-                for (let i=0; i<numLinePoints-1; i++) this.springs.push(new Spring(linePoints[i], linePoints[i+1], this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
-                if (numLinePoints > 2) this.springs.push(new Spring(linePoints[0], linePoints[numLinePoints-1], this.stiffness*0.5, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                for (let i=0; i<numLinePoints-1; i++) initialTempSprings.push(new Spring(linePoints[i], linePoints[i+1], this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                if (numLinePoints > 2) initialTempSprings.push(new Spring(linePoints[0], linePoints[numLinePoints-1], this.stiffness*0.5, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
             } else { // Star
-                const numOuterPoints = Math.floor(4 + Math.random()*3); const centralPoint = new MassPoint(startX, startY, (0.3+Math.random()*0.4)*1.5, baseRadius*1.2);
-                centralPoint.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
-                this.massPoints.push(centralPoint); const circleRadius = basePointDist * 1.5;
+                const numOuterPoints = Math.floor(4 + Math.random()*3);
+                const centralPoint = new MassPoint(0, 0, (0.3+Math.random()*0.4)*1.5, baseRadius*1.2); // Center at (0,0) for now
+                initialTempMassPoints.push(centralPoint);
+                const circleRadius = basePointDist * 1.5;
                 for (let i=0; i<numOuterPoints; i++) {
-                    const angle = (i / numOuterPoints) * Math.PI * 2; const x = startX + Math.cos(angle)*circleRadius; const y = startY + Math.sin(angle)*circleRadius;
+                    const angle = (i / numOuterPoints) * Math.PI * 2;
+                    const x = Math.cos(angle)*circleRadius;
+                    const y = Math.sin(angle)*circleRadius;
                     const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
-                    point.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
-                    this.massPoints.push(point);
-                    this.springs.push(new Spring(centralPoint, point, this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
-                    if (i>0) this.springs.push(new Spring(this.massPoints[this.massPoints.length-2], point, this.stiffness*0.8, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                    initialTempMassPoints.push(point);
+                    initialTempSprings.push(new Spring(centralPoint, point, this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                    if (i>0) initialTempSprings.push(new Spring(initialTempMassPoints[initialTempMassPoints.length-2], point, this.stiffness*0.8, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
                 }
-                if (numOuterPoints > 1) this.springs.push(new Spring(this.massPoints[1], this.massPoints[this.massPoints.length-1], this.stiffness*0.8, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                if (numOuterPoints > 1) initialTempSprings.push(new Spring(initialTempMassPoints[1], initialTempMassPoints[initialTempMassPoints.length-1], this.stiffness*0.8, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
             }
 
-            const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE];
-            const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
-
-            this.massPoints.forEach((p, idx) => {
+            // Calculate centroid of these initial temporary points (which were created around a local 0,0)
+            let centroidX = 0, centroidY = 0;
+            if (initialTempMassPoints.length > 0) {
+                initialTempMassPoints.forEach(p => { centroidX += p.pos.x; centroidY += p.pos.y; });
+                centroidX /= initialTempMassPoints.length;
+                centroidY /= initialTempMassPoints.length;
+            } 
+            
+            // Populate blueprintPoints from initialTempMassPoints, making coordinates relative to their own centroid
+            initialTempMassPoints.forEach(p_temp => {
                 let chosenNodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
+                const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
                 let chosenMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
-
-                // Ensure Swimmer nodes are not Floating
                 if (chosenNodeType === NodeType.SWIMMER && chosenMovementType === MovementType.FLOATING) {
-                    // Change to Neutral or Fixed if it was Floating
                     chosenMovementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
                 }
+                const canBeGrabberInitial = Math.random() < GRABBER_GENE_MUTATION_CHANCE;
+                const neuronDataBp = chosenNodeType === NodeType.NEURON ? {
+                    hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
+                } : null;
 
-                p.nodeType = chosenNodeType;
-                p.movementType = chosenMovementType;
+                this.blueprintPoints.push({
+                    relX: p_temp.pos.x - centroidX, // Store relative to calculated centroid of the initial shape
+                    relY: p_temp.pos.y - centroidY,
+                    radius: p_temp.radius,
+                    mass: p_temp.mass,
+                    nodeType: chosenNodeType,
+                    movementType: chosenMovementType,
+                    dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
+                    canBeGrabber: canBeGrabberInitial,
+                    neuronDataBlueprint: neuronDataBp
+                });
+            });
 
-                if (Math.random() < GRABBER_GENE_MUTATION_CHANCE) { // Initial chance for first-gen points
-                    p.canBeGrabber = true;
-                } else {
-                    p.canBeGrabber = false;
-                }
-
-                if (p.nodeType === NodeType.NEURON) {
-                     p.neuronData = {
-                        isBrain: false,
-                        hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
-                    };
-                } else {
-                    p.neuronData = null;
+            // Populate blueprintSprings from initialTempSprings
+            initialTempSprings.forEach(s_temp => {
+                const p1Index = initialTempMassPoints.indexOf(s_temp.p1);
+                const p2Index = initialTempMassPoints.indexOf(s_temp.p2);
+                if (p1Index !== -1 && p2Index !== -1) {
+                    this.blueprintSprings.push({
+                        p1Index: p1Index,
+                        p2Index: p2Index,
+                        restLength: s_temp.restLength, // This was calculated by Spring constructor from initial geometry
+                        isRigid: s_temp.isRigid
+                    });
                 }
             });
+            
+            // Instantiate actual phenotype using the new blueprint.
+            // The `startX, startY` provided to createShape becomes the target world position for the *centroid* of this new creature.
+            this._instantiatePhenotypeFromBlueprint(startX, startY); 
         }
 
         // Common post-creation neuron linking (for both initial and reproduced)
@@ -1297,6 +785,60 @@ class SoftBody {
                 }
             }
         });
+    }
+
+    _instantiatePhenotypeFromBlueprint(spawnX, spawnY) {
+        this.massPoints = [];
+        this.springs = [];
+
+        // 1. Instantiate MassPoints from blueprintPoints
+        for (const bp of this.blueprintPoints) {
+            // Calculate absolute world position
+            const worldX = spawnX + bp.relX;
+            const worldY = spawnY + bp.relY;
+
+            const newPoint = new MassPoint(worldX, worldY, bp.mass, bp.radius);
+            newPoint.nodeType = bp.nodeType;
+            newPoint.movementType = bp.movementType;
+            newPoint.dyeColor = [...bp.dyeColor]; // Ensure deep copy for array
+            newPoint.canBeGrabber = bp.canBeGrabber;
+
+            if (bp.neuronDataBlueprint) {
+                newPoint.neuronData = {
+                    // Copy properties from neuronDataBlueprint
+                    // isBrain will be determined later in initializeBrain
+                    isBrain: false, // Default, will be set by initializeBrain if this becomes the brain
+                    hiddenLayerSize: bp.neuronDataBlueprint.hiddenLayerSize,
+                    // sensorPointIndex and effectorPointIndex will be linked later
+                    sensorPointIndex: -1, 
+                    effectorPointIndex: -1
+                };
+            } else {
+                newPoint.neuronData = null;
+            }
+            this.massPoints.push(newPoint);
+        }
+
+        // 2. Instantiate Springs from blueprintSprings
+        for (const bs of this.blueprintSprings) {
+            if (bs.p1Index >= 0 && bs.p1Index < this.massPoints.length &&
+                bs.p2Index >= 0 && bs.p2Index < this.massPoints.length) {
+                
+                const p1 = this.massPoints[bs.p1Index];
+                const p2 = this.massPoints[bs.p2Index];
+
+                // Use the creature's overall stiffness and damping
+                // The blueprint spring carries restLength and isRigid
+                this.springs.push(new Spring(p1, p2, this.stiffness, this.springDamping, bs.restLength, bs.isRigid));
+            } else {
+                console.warn(`Body ${this.id}: Invalid spring blueprint indices ${bs.p1Index}, ${bs.p2Index} for ${this.massPoints.length} points.`);
+            }
+        }
+
+        // Recalculate things that depend on the final massPoints
+        this.calculateCurrentMaxEnergy(); 
+        // Note: initializeBrain() and primaryEyePoint assignment will happen after createShape() finishes
+        // in the main constructor flow.
     }
 
     // --- Main Update Method ---
@@ -2211,47 +1753,7 @@ class SoftBody {
                 if (isSpotClear) {
                     this.creatureEnergy -= energyForOneOffspring;
                     // Use the already constructed tempChild's points, but create a new SoftBody instance with proper ID and translated points.
-                    const finalChild = new SoftBody(nextSoftBodyId++, 0, 0, this); // Create with dummy coords first
-                    finalChild.massPoints = []; // Clear default points
-                    tempChild.massPoints.forEach(tp => { // Copy points and translate them
-                        const newP = new MassPoint(tp.pos.x + spawnX - tempChild.getAveragePosition().x, tp.pos.y + spawnY - tempChild.getAveragePosition().y, tp.mass, tp.radius, tp.color);
-                        newP.nodeType = tp.nodeType; newP.movementType = tp.movementType; newP.dyeColor = [...tp.dyeColor];
-                        if(tp.neuronData) newP.neuronData = JSON.parse(JSON.stringify(tp.neuronData)); // Deep copy neuron data
-                        if(newP.nodeType === NodeType.FIXED_ROOT) newP.movementType = MovementType.FIXED;
-                        finalChild.massPoints.push(newP);
-                    });
-                    // Recreate springs for the final child based on its actual points
-                    finalChild.springs = [];
-                    for (let k = 0; k < finalChild.massPoints.length; k++) {
-                        for (let l = k + 1; l < finalChild.massPoints.length; l++) {
-                            const p1_fc = finalChild.massPoints[k]; // Use distinct var names for final child points
-                            const p2_fc = finalChild.massPoints[l];
-                            const dist_fc = p1_fc.pos.sub(p2_fc.pos).mag();
-                            if (dist_fc < finalChild.springConnectionRadius && dist_fc > 0.1) {
-                                const becomeRigid_fc = Math.random() < CHANCE_FOR_RIGID_SPRING; // Apply chance here too
-                                finalChild.springs.push(new Spring(p1_fc, p2_fc, finalChild.stiffness, finalChild.springDamping, dist_fc, becomeRigid_fc));
-                            }
-                        }
-                    }
-                     if (finalChild.massPoints.length > 1 && finalChild.springs.length === 0) {
-                        for(let k_fc = 0; k_fc < finalChild.massPoints.length -1; k_fc++){ // Use distinct var names
-                            const becomeRigid_fc_fallback = Math.random() < CHANCE_FOR_RIGID_SPRING;
-                            finalChild.springs.push(new Spring(finalChild.massPoints[k_fc], finalChild.massPoints[k_fc+1], finalChild.stiffness, finalChild.springDamping, null, becomeRigid_fc_fallback));
-                        }
-                    }
-                    // Re-link neurons for the final child
-                    finalChild.massPoints.forEach((p, pIdx) => {
-                        if (p.nodeType === NodeType.NEURON && p.neuronData) {
-                            if (finalChild.massPoints.length > 1) {
-                                let newSensorIndex;
-                                do { newSensorIndex = Math.floor(Math.random() * finalChild.massPoints.length); } while (newSensorIndex === pIdx);
-                                p.neuronData.sensorPointIndex = newSensorIndex;
-                            } else { p.neuronData.sensorPointIndex = -1; }
-                            const effectorCandidates = finalChild.massPoints.map((ep, epIdx) => ep.nodeType === NodeType.EMITTER ? epIdx : -1).filter(epIdx => epIdx !== -1 && epIdx !== pIdx);
-                            if (effectorCandidates.length > 0) { p.neuronData.effectorPointIndex = effectorCandidates[Math.floor(Math.random() * effectorCandidates.length)]; } else { p.neuronData.effectorPointIndex = -1;}
-                        }
-                    });
-
+                    const finalChild = new SoftBody(nextSoftBodyId++, spawnX, spawnY, this);
 
                     finalChild.creatureEnergy = energyForOneOffspring; // Set energy for the actual child
                     offspring.push(finalChild);

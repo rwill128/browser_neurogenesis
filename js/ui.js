@@ -31,7 +31,6 @@ const creaturePopulationCeilingValueSpan = document.getElementById('creaturePopu
 const bodyFluidEntrainmentSlider = document.getElementById('bodyFluidEntrainment');
 const fluidCurrentStrengthSlider = document.getElementById('fluidCurrentStrength');
 const bodyPushStrengthSlider = document.getElementById('bodyPushStrength');
-const reproductionCooldownSlider = document.getElementById('reproductionCooldown');
 const bodyRepulsionStrengthSlider = document.getElementById('bodyRepulsionStrength');
 const bodyRepulsionRadiusFactorSlider = document.getElementById('bodyRepulsionRadiusFactor');
 const globalMutationRateSlider = document.getElementById('globalMutationRate');
@@ -52,7 +51,6 @@ const resetButton = document.getElementById('resetButton');
 const bodyFluidEntrainmentValueSpan = document.getElementById('bodyFluidEntrainmentValue');
 const fluidCurrentStrengthValueSpan = document.getElementById('fluidCurrentStrengthValue');
 const bodyPushStrengthValueSpan = document.getElementById('bodyPushStrengthValue');
-const reproductionCooldownValueSpan = document.getElementById('reproductionCooldownValue');
 const bodyRepulsionStrengthValueSpan = document.getElementById('bodyRepulsionStrengthValue');
 const bodyRepulsionRadiusFactorValueSpan = document.getElementById('bodyRepulsionRadiusFactorValue');
 const globalMutationRateValueSpan = document.getElementById('globalMutationRateValue');
@@ -198,7 +196,6 @@ function initializeAllSliderDisplays() {
         [bodyFluidEntrainmentSlider, "BODY_FLUID_ENTRAINMENT_FACTOR", true, bodyFluidEntrainmentValueSpan],
         [fluidCurrentStrengthSlider, "FLUID_CURRENT_STRENGTH_ON_BODY", true, fluidCurrentStrengthValueSpan],
         [bodyPushStrengthSlider, "SOFT_BODY_PUSH_STRENGTH", true, bodyPushStrengthValueSpan],
-        [reproductionCooldownSlider, "REPRODUCTION_COOLDOWN_TICKS", false, reproductionCooldownValueSpan],
         [bodyRepulsionStrengthSlider, "BODY_REPULSION_STRENGTH", true, bodyRepulsionStrengthValueSpan],
         [bodyRepulsionRadiusFactorSlider, "BODY_REPULSION_RADIUS_FACTOR", true, bodyRepulsionRadiusFactorValueSpan],
         [baseNodeCostSlider, "BASE_NODE_EXISTENCE_COST", true, baseNodeCostValueSpan],
@@ -322,6 +319,28 @@ function updateInfoPanel() {
         document.getElementById('infoBodyCostPhoto').textContent = selectedInspectBody.energyCostFromPhotosyntheticNodes.toFixed(2);
         document.getElementById('infoBodyCostGrabbing').textContent = selectedInspectBody.energyCostFromGrabbingNodes.toFixed(2);
         document.getElementById('infoBodyCostEye').textContent = selectedInspectBody.energyCostFromEyeNodes.toFixed(2);
+
+        // Add display for new reproduction cooldown properties
+        let reproGeneEl = document.getElementById('infoBodyReproCooldownGeneVal'); // Target the span directly
+        let reproGenePEL = document.getElementById('infoBodyReproCooldownGeneP'); // Target the p element
+        if (!reproGenePEL) { // If the paragraph doesn't exist, create it
+            reproGenePEL = createInfoPanelParagraph(infoPanel.querySelector('.info-section'), 'infoBodyReproCooldownGene', 'Repro. Cooldown Gene:');
+            reproGeneEl = reproGenePEL.querySelector('span'); // Get the span from the new P
+        } else {
+             reproGeneEl = reproGenePEL.querySelector('span'); // Ensure we have the span if P exists
+        }
+        if (reproGeneEl) reproGeneEl.textContent = selectedInspectBody.reproductionCooldownGene;
+        
+
+        let effectiveReproEl = document.getElementById('infoBodyEffectiveReproCooldownVal'); // Target the span
+        let effectiveReproPEL = document.getElementById('infoBodyEffectiveReproCooldownP'); // Target the P
+        if (!effectiveReproPEL) {
+            effectiveReproPEL = createInfoPanelParagraph(infoPanel.querySelector('.info-section'), 'infoBodyEffectiveReproCooldown', 'Effective Repro. Cooldown:');
+            effectiveReproEl = effectiveReproPEL.querySelector('span');
+        } else {
+            effectiveReproEl = effectiveReproPEL.querySelector('span');
+        }
+        if (effectiveReproEl) effectiveReproEl.textContent = selectedInspectBody.effectiveReproductionCooldown;
 
         allPointsInfoContainer.innerHTML = '<h5>All Mass Points</h5>';
         selectedInspectBody.massPoints.forEach((point, index) => {
@@ -683,7 +702,6 @@ clearEmittersButton.onclick = function() { velocityEmitters = []; }
 bodyFluidEntrainmentSlider.oninput = function() { BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(this.value); updateSliderDisplay(this, bodyFluidEntrainmentValueSpan); }
 fluidCurrentStrengthSlider.oninput = function() { FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(this.value); updateSliderDisplay(this, fluidCurrentStrengthValueSpan); }
 bodyPushStrengthSlider.oninput = function() { SOFT_BODY_PUSH_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, bodyPushStrengthValueSpan); }
-reproductionCooldownSlider.oninput = function() { REPRODUCTION_COOLDOWN_TICKS = parseInt(this.value); updateSliderDisplay(this, reproductionCooldownValueSpan); }
 bodyRepulsionStrengthSlider.oninput = function() { BODY_REPULSION_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, bodyRepulsionStrengthValueSpan); }
 bodyRepulsionRadiusFactorSlider.oninput = function() { BODY_REPULSION_RADIUS_FACTOR = parseFloat(this.value); updateSliderDisplay(this, bodyRepulsionRadiusFactorValueSpan); }
 globalMutationRateSlider.oninput = function() { GLOBAL_MUTATION_RATE_MODIFIER = parseFloat(this.value); updateSliderDisplay(this, globalMutationRateValueSpan); }
@@ -1345,3 +1363,41 @@ function updateStatsPanel() {
         globalEnergyCostsStatsDiv.innerHTML = energyCostsHTML;
     }
 } 
+
+// Helper to create and insert info panel paragraphs if they don't exist
+function createInfoPanelParagraph(parentElement, baseId, labelText) {
+    let pElement = document.getElementById(baseId + 'P');
+    if (!pElement) {
+        pElement = document.createElement('p');
+        pElement.id = baseId + 'P'; // e.g. infoBodyReproCooldownGeneP
+        
+        const strong = document.createElement('strong');
+        strong.textContent = labelText;
+        
+        const span = document.createElement('span');
+        span.id = baseId + 'Val'; // e.g. infoBodyReproCooldownGeneVal
+        
+        pElement.appendChild(strong);
+        pElement.appendChild(document.createTextNode(' ')); // Space
+        pElement.appendChild(span);
+        
+        // Insert before the 'Ticks Since Birth' paragraph, or at the end of the first .info-section
+        const ticksBirthElement = document.getElementById('infoBodyTicksBirthP'); // Assuming Ticks Since Birth P has an ID like this
+        const targetSection = parentElement.querySelector('.info-section h5 + p, .info-section h5') ? 
+                              parentElement.querySelector('.info-section h5 + p, .info-section h5').closest('.info-section') 
+                              : parentElement.querySelector('.info-section'); // Fallback to parentElement if it's the section
+        
+        if (targetSection) {
+            const referenceNode = targetSection.querySelector('#infoBodyTicksBirthP') || targetSection.querySelector('#infoBodyRewardStrategyP'); // Try to insert before Ticks or Reward Strategy
+            if (referenceNode) {
+                targetSection.insertBefore(pElement, referenceNode);
+            } else {
+                targetSection.appendChild(pElement); // Fallback: append to section
+            }
+        } else {
+             console.warn('Could not find target section to append info paragraph for', baseId);
+             parentElement.appendChild(pElement); // Absolute fallback
+        }
+    }
+    return pElement;
+}

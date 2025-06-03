@@ -305,6 +305,12 @@ class SoftBody {
             // RL Algorithm type inheritance (can add mutation if needed)
             this.rlAlgorithmType = parentBody.rlAlgorithmType || RLAlgorithmType.REINFORCE;
 
+            // Inherit and mutate reproductionCooldownGene
+            this.reproductionCooldownGene = parentBody.reproductionCooldownGene * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.2));
+            this.reproductionCooldownGene = Math.max(50, Math.min(Math.floor(this.reproductionCooldownGene), 20000)); // Clamp
+            if (this.reproductionCooldownGene !== parentBody.reproductionCooldownGene) {
+                mutationStats.reproductionCooldownGene = (mutationStats.reproductionCooldownGene || 0) + 1;
+            }
 
         } else {
             // Initial defaults for brand new creatures
@@ -333,6 +339,9 @@ class SoftBody {
             // New: Default Reward Strategy for brand new creatures
             const strategies = Object.values(RLRewardStrategy);
             this.rewardStrategy = strategies[Math.floor(Math.random() * strategies.length)];
+
+            // Initialize reproductionCooldownGene for new creatures
+            this.reproductionCooldownGene = 100 + Math.floor(Math.random() * 4901); // Random between 100 and 5000
         }
 
         // Clamp activation properties after they've been set/inherited/mutated
@@ -381,6 +390,12 @@ class SoftBody {
 
         // 3. Calculate dynamic max energy based on final point count
         this.calculateCurrentMaxEnergy(); 
+
+        // Calculate effective reproduction cooldown based on gene and point count
+        this.effectiveReproductionCooldown = Math.floor(this.reproductionCooldownGene * (1 + (0.2 * Math.max(0, this.massPoints.length - 1))));
+        if (this.massPoints.length === 0) { // Safety for empty body after blueprint instantiation (should not happen ideally)
+             this.effectiveReproductionCooldown = Math.floor(this.reproductionCooldownGene);
+        }
 
         // 4. Set initial creature energy
         this.creatureEnergy = this.currentMaxEnergy * OFFSPRING_INITIAL_ENERGY_SHARE; 
@@ -1407,7 +1422,7 @@ class SoftBody {
         this.creatureEnergy = Math.min(this.currentMaxEnergy, Math.max(0, this.creatureEnergy));
 
         this.ticksSinceBirth++;
-        if (this.ticksSinceBirth > REPRODUCTION_COOLDOWN_TICKS) {
+        if (this.ticksSinceBirth > this.effectiveReproductionCooldown) { // Use effective cooldown
             this.canReproduce = true;
         }
 
@@ -2343,7 +2358,7 @@ class SoftBody {
         }
 
         this.ticksSinceBirth++;
-        if (this.ticksSinceBirth > REPRODUCTION_COOLDOWN_TICKS) {
+        if (this.ticksSinceBirth > this.effectiveReproductionCooldown) { // Use effective cooldown
             this.canReproduce = true;
         }
     }

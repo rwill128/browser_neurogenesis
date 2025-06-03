@@ -87,7 +87,6 @@ let canCreaturesReproduceGlobally = true;
 let BODY_FLUID_ENTRAINMENT_FACTOR = 0.485;
 let FLUID_CURRENT_STRENGTH_ON_BODY = 19.7;
 let SOFT_BODY_PUSH_STRENGTH = 0.10;
-let REPRODUCTION_COOLDOWN_TICKS = 1000;
 let BODY_REPULSION_STRENGTH = 100.0;
 let BODY_REPULSION_RADIUS_FACTOR = 5.0;
 let GLOBAL_MUTATION_RATE_MODIFIER = 0.25;
@@ -232,7 +231,6 @@ function handleExportConfig() {
         eyeNodeCost: EYE_NODE_ENERGY_COST,
         baseMaxCreatureEnergy: BASE_MAX_CREATURE_ENERGY,
         energyPerMassPointBonus: ENERGY_PER_MASS_POINT_BONUS,
-        reproductionCooldown: REPRODUCTION_COOLDOWN_TICKS,
         bodyRepulsionStrength: BODY_REPULSION_STRENGTH,
         bodyRepulsionRadiusFactor: BODY_REPULSION_RADIUS_FACTOR,
         maxTimestepMs: MAX_DELTA_TIME_MS,
@@ -313,7 +311,6 @@ function applyImportedConfig(config) {
     if (config.bodyFluidEntrainment !== undefined) BODY_FLUID_ENTRAINMENT_FACTOR = config.bodyFluidEntrainment;
     if (config.fluidCurrentStrength !== undefined) FLUID_CURRENT_STRENGTH_ON_BODY = config.fluidCurrentStrength;
     if (config.softBodyPushStrength !== undefined) SOFT_BODY_PUSH_STRENGTH = config.softBodyPushStrength;
-    if (config.reproductionCooldown !== undefined) REPRODUCTION_COOLDOWN_TICKS = config.reproductionCooldown;
     if (config.bodyRepulsionStrength !== undefined) BODY_REPULSION_STRENGTH = config.bodyRepulsionStrength;
     if (config.bodyRepulsionRadiusFactor !== undefined) BODY_REPULSION_RADIUS_FACTOR = config.bodyRepulsionRadiusFactor;
     if (config.maxTimestepMs !== undefined) MAX_DELTA_TIME_MS = config.maxTimestepMs;
@@ -372,7 +369,6 @@ function applyImportedConfig(config) {
     swimmerNodeCostSlider.value = SWIMMER_NODE_ENERGY_COST;
     photosyntheticNodeCostSlider.value = PHOTOSYNTHETIC_NODE_ENERGY_COST;
     photosynthesisEfficiencySlider.value = PHOTOSYNTHESIS_EFFICIENCY;
-    reproductionCooldownSlider.value = REPRODUCTION_COOLDOWN_TICKS;
     bodyRepulsionStrengthSlider.value = BODY_REPULSION_STRENGTH;
     bodyRepulsionRadiusFactorSlider.value = BODY_REPULSION_RADIUS_FACTOR;
     maxTimestepSlider.value = MAX_DELTA_TIME_MS;

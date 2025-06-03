@@ -159,11 +159,12 @@ canvas.emitter-edit-mode {
 }
 
 #controls label.slider-label, #controls label.checkbox-label, #controls label.input-label { display: block; margin-bottom: 2px; font-size: 0.85em; font-weight: bold; color: #ddd; text-align: left; }
+#controls label.slider-label { margin-top: 12px; margin-bottom: 0px; }
 #controls label.checkbox-label { margin-top: 8px; display: flex; align-items: center; }
 #controls input[type="checkbox"] { margin-left: 5px; }
 #controls input[type="number"] { width: 100%; padding: 5px; margin-top: 2px; margin-bottom: 5px; box-sizing: border-box; background-color: #333; color: #eee; border: 1px solid #555; border-radius: 3px;}
-#controls span.slider-value { display: block; font-size: 0.8em; text-align: right; color: #00aeff; margin-bottom: 3px; min-height: 1em; }
-#controls input[type="range"] { width: 100%; margin-top: 0; box-sizing: border-box; }
+#controls span.slider-value { display: block; font-size: 0.8em; text-align: right; color: #00aeff; margin-bottom: 0px; min-height: 1em; }
+#controls input[type="range"] { width: 100%; margin-top: 0; padding-top: 0px; box-sizing: border-box; }
 #controls input[type="range"]:disabled + span.slider-value, #controls input[type="range"]:disabled ~ label.slider-label, #controls input[type="range"]:disabled { color: #777; opacity: 0.6; }
 #controls button { padding: 8px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 8px; width: 100%; box-sizing: border-box; }
 #controls button:hover { background-color: #0056b3; }

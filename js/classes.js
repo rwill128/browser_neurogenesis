@@ -910,6 +910,17 @@ class SoftBody {
 
     _applyDefaultActivationPatterns() {
         this.massPoints.forEach(point => {
+            // If the point is an EATER or PREDATOR, its exertion is controlled by the brain or defaults to 0.
+            // No default pattern-based exertion for these types.
+            if (point.nodeType === NodeType.EATER || point.nodeType === NodeType.PREDATOR) {
+                // If not controlled by a brain, their exertion will naturally be 0 from initialization or previous brain step.
+                // If a brain *is* controlling it, the brain's output will override this later in _applyBrainActionsToPoints.
+                // For clarity, we can ensure it's 0 here if no brain is influencing it yet for this frame.
+                // However, the main logic for brain control is separate. This ensures no *default pattern* applies.
+                point.currentExertionLevel = 0; 
+                return; // Skip pattern-based activation for these types
+            }
+
             let baseActivation = 0;
             const timeFactor = (this.ticksSinceBirth + this.defaultActivationPhaseOffset) / Math.max(1, this.defaultActivationPeriod);
 

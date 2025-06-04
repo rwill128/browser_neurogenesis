@@ -49,8 +49,8 @@ const MAX_SEGMENT_LENGTH_FOR_DUPLICATION = 7;  // Maximum number of points in a 
 const SEGMENT_DUPLICATION_OFFSET_SCALE = 1.0;  // How far to offset the duplicated segment (e.g., 1.0 = its own length)
 
 // Original Radius Multipliers (will become base values)
-const EATING_RADIUS_MULTIPLIER_BASE = 10.0;
-const PREDATION_RADIUS_MULTIPLIER_BASE = 7.5;
+const EATING_RADIUS_MULTIPLIER_BASE = 0.1;
+const PREDATION_RADIUS_MULTIPLIER_BASE = 0.1;
 
 // Exertion Bonuses for Radius Multipliers
 const EATING_RADIUS_MULTIPLIER_MAX_BONUS = 15.0;

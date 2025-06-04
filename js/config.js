@@ -459,6 +459,9 @@ const PARTICLE_PROXIMITY_REWARD_SCALE = 10.0;  // Scales the (0-1) proximity mag
 // New constant for Grabber Gene Mutation
 const GRABBER_GENE_MUTATION_CHANCE = 0.03; // Chance for a point to gain/lose grabber ability
 
+// New: Chance for an Eye node to change its target type (particle vs. foreign body point)
+const EYE_TARGET_TYPE_MUTATION_CHANCE = 0.05;
+
 // Default Activation Pattern for Brainless/Non-NN Controlled Nodes (New)
 const ActivationPatternType = {
     FLAT: 0,    // Constant exertion level

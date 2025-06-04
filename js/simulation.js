@@ -47,7 +47,8 @@ let mutationStats = { // New: For tracking mutation occurrences
     symmetricBodyDuplication: 0,
     bodyScale: 0,
     rewardStrategyChange: 0, // New stat for reward strategy mutations
-    grabberGeneChange: 0    // New stat for grabber gene mutations
+    grabberGeneChange: 0,    // New stat for grabber gene mutations
+    eyeTargetTypeChange: 0   // New: For eye target type mutations
 };
 
 function initializeSpatialGrid() {

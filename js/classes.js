@@ -20,6 +20,11 @@ const RLAlgorithmType = {
     SAC: 1        // Soft Actor-Critic
 };
 
+const EyeTargetType = {
+    PARTICLE: 0,
+    FOREIGN_BODY_POINT: 1
+};
+
 const MovementType = {
     FIXED: 0,    // Fixed in place, does not interact with fluid velocity but can affect it (if Swimmer)
     FLOATING: 1, // Pushed by fluid, cannot be a Swimmer
@@ -44,9 +49,10 @@ class MassPoint {
         this.isGrabbing = false; // New: For NN-controlled grabbing state
         this.isDesignatedEye = false; // New: To identify the creature's primary eye point
         this.canBeGrabber = false; // New: Gene, false by default
-        this.seesParticle = false;       // New: Eye state
-        this.nearestParticleMagnitude = 0; // New: Eye state (distance)
-        this.nearestParticleDirection = 0; // New: Eye state (angle)
+        this.eyeTargetType = EyeTargetType.PARTICLE; // New: What this eye targets
+        this.seesTarget = false;       // Renamed from seesParticle
+        this.nearestTargetMagnitude = 0; // Renamed from nearestParticleMagnitude
+        this.nearestTargetDirection = 0; // Renamed from nearestParticleDirection
     }
     applyForce(f) { this.force.addInPlace(f); } // Use addInPlace
 
@@ -233,6 +239,7 @@ class SoftBody {
         this.energyCostFromEyeNodes = 0;
 
         this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY; // Initial placeholder
+        this.blueprintRadius = 0; // New: Approximate radius based on blueprint points
 
         // Initialize heritable/mutable properties
         if (parentBody) {
@@ -508,6 +515,10 @@ class SoftBody {
                     const oldNodeType = bp.nodeType;
                     bp.nodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
                     if (bp.nodeType !== oldNodeType) mutationStats.nodeTypeChange++;
+                    // If it becomes an EYE, initialize eyeTargetType randomly
+                    if (bp.nodeType === NodeType.EYE && bp.eyeTargetType === undefined) {
+                        bp.eyeTargetType = Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT;
+                    }
                 }
 
                 // Mutate movementType
@@ -547,6 +558,15 @@ class SoftBody {
                 } else {
                     bp.neuronDataBlueprint = null; // Crucial: ensure non-neurons have null neuronDataBlueprint
                 }
+
+                // Mutate eyeTargetType if it's an EYE node
+                if (bp.nodeType === NodeType.EYE && bp.eyeTargetType !== undefined && Math.random() < EYE_TARGET_TYPE_MUTATION_CHANCE) {
+                    const oldEyeTargetType = bp.eyeTargetType;
+                    bp.eyeTargetType = (bp.eyeTargetType === EyeTargetType.PARTICLE) ? EyeTargetType.FOREIGN_BODY_POINT : EyeTargetType.PARTICLE;
+                    if (bp.eyeTargetType !== oldEyeTargetType) {
+                        mutationStats.eyeTargetTypeChange = (mutationStats.eyeTargetTypeChange || 0) + 1;
+                    }
+                }
             });
 
             // 3. Mutate blueprint springs (restLength, isRigid)
@@ -582,7 +602,8 @@ class SoftBody {
                     nodeType: newNodeType, movementType: newMovementType,
                     dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
                     canBeGrabber: Math.random() < GRABBER_GENE_MUTATION_CHANCE,
-                    neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null
+                    neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null,
+                    eyeTargetType: newNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined
                 };
                 this.blueprintPoints.push(newBp);
                 const newPointIndex = this.blueprintPoints.length - 1;
@@ -665,7 +686,8 @@ class SoftBody {
                         nodeType: newNodeType, movementType: newMovementType,
                         dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
                         canBeGrabber: Math.random() < GRABBER_GENE_MUTATION_CHANCE,
-                        neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null
+                        neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null,
+                        eyeTargetType: newNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined
                     };
                     this.blueprintPoints.push(newMidBp);
                     const newMidPointIndex = this.blueprintPoints.length - 1;
@@ -781,7 +803,8 @@ class SoftBody {
                     movementType: chosenMovementType,
                     dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
                     canBeGrabber: canBeGrabberInitial,
-                    neuronDataBlueprint: neuronDataBp
+                    neuronDataBlueprint: neuronDataBp,
+                    eyeTargetType: chosenNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined
                 });
             });
 
@@ -822,6 +845,29 @@ class SoftBody {
                 }
             }
         });
+        this._calculateBlueprintRadius(); // Calculate after all blueprint points are finalized
+    }
+
+    _calculateBlueprintRadius() {
+        if (!this.blueprintPoints || this.blueprintPoints.length === 0) {
+            this.blueprintRadius = 5; // Default small radius if no blueprint points
+            return;
+        }
+        let maxDistSq = 0;
+        this.blueprintPoints.forEach(bp => {
+            // relX, relY are distances from the blueprint's own centroid (0,0)
+            const distToPointCenterSq = bp.relX * bp.relX + bp.relY * bp.relY;
+            // Add the point's own radius to get distance to its edge
+            const effectiveDistToEdge = Math.sqrt(distToPointCenterSq) + (bp.radius || 0);
+            if (effectiveDistToEdge * effectiveDistToEdge > maxDistSq) {
+                maxDistSq = effectiveDistToEdge * effectiveDistToEdge;
+            }
+        });
+        this.blueprintRadius = Math.sqrt(maxDistSq);
+        if (isNaN(this.blueprintRadius) || this.blueprintRadius === 0) {
+            // Fallback if calculation results in NaN or 0 (e.g. single point at origin with 0 radius)
+            this.blueprintRadius = 5; 
+        }
     }
 
     _instantiatePhenotypeFromBlueprint(spawnX, spawnY) {
@@ -839,6 +885,7 @@ class SoftBody {
             newPoint.movementType = bp.movementType;
             newPoint.dyeColor = [...bp.dyeColor]; // Ensure deep copy for array
             newPoint.canBeGrabber = bp.canBeGrabber;
+            newPoint.eyeTargetType = bp.eyeTargetType === undefined ? EyeTargetType.PARTICLE : bp.eyeTargetType;
 
             if (bp.neuronDataBlueprint) {
                 newPoint.neuronData = {
@@ -943,11 +990,10 @@ class SoftBody {
     _updateEyeNodes() { // Removed particles argument
         this.massPoints.forEach(point => {
             if (point.nodeType === NodeType.EYE) {
-                point.seesParticle = false; // Reset first
-                point.nearestParticleMagnitude = 0;
-                point.nearestParticleDirection = 0;
+                point.seesTarget = false; // Reset first
+                point.nearestTargetMagnitude = 0;
+                point.nearestTargetDirection = 0;
                 let closestDistSq = EYE_DETECTION_RADIUS * EYE_DETECTION_RADIUS;
-                let nearestParticleFound = null;
 
                 // Determine the grid cell range to check based on EYE_DETECTION_RADIUS
                 const eyeGxMin = Math.max(0, Math.floor((point.pos.x - EYE_DETECTION_RADIUS) / GRID_CELL_SIZE));
@@ -955,32 +1001,61 @@ class SoftBody {
                 const eyeGyMin = Math.max(0, Math.floor((point.pos.y - EYE_DETECTION_RADIUS) / GRID_CELL_SIZE));
                 const eyeGyMax = Math.min(GRID_ROWS - 1, Math.floor((point.pos.y + EYE_DETECTION_RADIUS) / GRID_CELL_SIZE));
 
-                for (let gy = eyeGyMin; gy <= eyeGyMax; gy++) {
-                    for (let gx = eyeGxMin; gx <= eyeGxMax; gx++) {
-                        const cellIndex = gx + gy * GRID_COLS;
-                        if (spatialGrid[cellIndex] && spatialGrid[cellIndex].length > 0) {
-                            const cellBucket = spatialGrid[cellIndex];
-                            for (const item of cellBucket) {
-                                if (item.type === 'particle') {
-                                    const particle = item.particleRef;
-                                    if (particle.life <= 0) continue;
+                if (point.eyeTargetType === EyeTargetType.PARTICLE) {
+                    let nearestParticleFound = null;
+                    for (let gy = eyeGyMin; gy <= eyeGyMax; gy++) {
+                        for (let gx = eyeGxMin; gx <= eyeGxMax; gx++) {
+                            const cellIndex = gx + gy * GRID_COLS;
+                            if (spatialGrid[cellIndex] && spatialGrid[cellIndex].length > 0) {
+                                const cellBucket = spatialGrid[cellIndex];
+                                for (const item of cellBucket) {
+                                    if (item.type === 'particle') {
+                                        const particle = item.particleRef;
+                                        if (particle.life <= 0) continue;
 
-                                    const distSq = point.pos.sub(particle.pos).magSq();
-                                    if (distSq < closestDistSq) {
-                                        closestDistSq = distSq;
-                                        nearestParticleFound = particle;
+                                        const distSq = point.pos.sub(particle.pos).magSq();
+                                        if (distSq < closestDistSq) {
+                                            closestDistSq = distSq;
+                                            nearestParticleFound = particle;
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
-
-                if (nearestParticleFound) {
-                    point.seesParticle = true;
-                    const vecToParticle = nearestParticleFound.pos.sub(point.pos);
-                    point.nearestParticleMagnitude = vecToParticle.mag() / EYE_DETECTION_RADIUS; 
-                    point.nearestParticleDirection = Math.atan2(vecToParticle.y, vecToParticle.x);
+                    if (nearestParticleFound) {
+                        point.seesTarget = true;
+                        const vecToTarget = nearestParticleFound.pos.sub(point.pos);
+                        point.nearestTargetMagnitude = vecToTarget.mag() / EYE_DETECTION_RADIUS; 
+                        point.nearestTargetDirection = Math.atan2(vecToTarget.y, vecToTarget.x);
+                    }
+                } else if (point.eyeTargetType === EyeTargetType.FOREIGN_BODY_POINT) {
+                    let nearestForeignPointFound = null;
+                    for (let gy = eyeGyMin; gy <= eyeGyMax; gy++) {
+                        for (let gx = eyeGxMin; gx <= eyeGxMax; gx++) {
+                            const cellIndex = gx + gy * GRID_COLS;
+                            if (spatialGrid[cellIndex] && spatialGrid[cellIndex].length > 0) {
+                                const cellBucket = spatialGrid[cellIndex];
+                                for (const item of cellBucket) {
+                                    // Check for softbody_point, ensure it's not from the current body, and body is not unstable
+                                    if (item.type === 'softbody_point' && item.bodyRef !== this && !item.bodyRef.isUnstable) {
+                                        const foreignPoint = item.pointRef;
+                                        const distSq = point.pos.sub(foreignPoint.pos).magSq();
+                                        if (distSq < closestDistSq) {
+                                            closestDistSq = distSq;
+                                            nearestForeignPointFound = foreignPoint;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (nearestForeignPointFound) {
+                        point.seesTarget = true;
+                        const vecToTarget = nearestForeignPointFound.pos.sub(point.pos);
+                        point.nearestTargetMagnitude = vecToTarget.mag() / EYE_DETECTION_RADIUS;
+                        point.nearestTargetDirection = Math.atan2(vecToTarget.y, vecToTarget.x);
+                    }
                 }
             }
         });
@@ -1047,9 +1122,9 @@ class SoftBody {
         let eyeNodesFoundForInput = 0;
         this.massPoints.forEach(point => {
             if (point.nodeType === NodeType.EYE) {
-                inputVector.push(point.seesParticle ? 1 : 0);
-                inputVector.push(point.nearestParticleMagnitude); // Already normalized 0-1 or 0
-                inputVector.push((point.nearestParticleDirection / (Math.PI * 2)) + 0.5); // Normalize angle to ~0-1 (0 if no particle)
+                inputVector.push(point.seesTarget ? 1 : 0);
+                inputVector.push(point.nearestTargetMagnitude); // Already normalized 0-1 or 0
+                inputVector.push((point.nearestTargetDirection / (Math.PI * 2)) + 0.5); // Normalize angle to ~0-1 (0 if no target)
                 eyeNodesFoundForInput++;
             }
         });
@@ -1267,10 +1342,10 @@ class SoftBody {
                     let minParticleMagnitude = 1.0; 
                     let particleSeenByAnyEye = false;
                     this.massPoints.forEach(point => {
-                        if (point.nodeType === NodeType.EYE && point.seesParticle) {
+                        if (point.nodeType === NodeType.EYE && point.seesTarget) {
                             particleSeenByAnyEye = true;
-                            if (point.nearestParticleMagnitude < minParticleMagnitude) {
-                                minParticleMagnitude = point.nearestParticleMagnitude;
+                            if (point.nearestTargetMagnitude < minParticleMagnitude) {
+                                minParticleMagnitude = point.nearestTargetMagnitude;
                             }
                         }
                     });
@@ -1745,11 +1820,11 @@ class SoftBody {
         let successfullyPlacedOffspring = 0;
         let offspring = [];
 
-        // Cache bounding boxes of existing population
-        const existingBodyBBoxes = softBodyPopulation.map(body => {
-            if (body.isUnstable) return null; // or some indicator for unstable bodies
-            return body.getBoundingBox();
-        }).filter(bbox => bbox !== null);
+        // Cache bounding boxes of existing population - REMOVED
+        // const existingBodyBBoxes = softBodyPopulation.map(body => {
+        //     if (body.isUnstable) return null; // or some indicator for unstable bodies
+        //     return body.getBoundingBox();
+        // }).filter(bbox => bbox !== null);
 
 
         for (let i = 0; i < this.numOffspring; i++) {
@@ -1758,7 +1833,7 @@ class SoftBody {
             let placedThisOffspring = false;
             for (let attempt = 0; attempt < OFFSPRING_PLACEMENT_ATTEMPTS; attempt++) {
                 const angle = Math.random() * Math.PI * 2;
-                const radiusOffset = this.offspringSpawnRadius * (0.5 + Math.random() * 0.5);
+                const radiusOffset = this.offspringSpawnRadius * (0.5 + Math.random() * 0.5); // offspringSpawnRadius is a gene
                 const offsetX = Math.cos(angle) * radiusOffset;
                 const offsetY = Math.sin(angle) * radiusOffset;
 
@@ -1766,35 +1841,43 @@ class SoftBody {
                 let spawnX = parentAvgPos.x + offsetX;
                 let spawnY = parentAvgPos.y + offsetY;
 
-                // Tentatively create child to get its bounding box
+                // Tentatively create child. Its blueprintRadius will be calculated in its constructor.
                 const tempChild = new SoftBody( -1, spawnX, spawnY, this); // -1 ID for temp
-                if (tempChild.massPoints.length === 0) continue; // Should not happen with new logic
-                const childBBox = tempChild.getBoundingBox();
+                if (tempChild.massPoints.length === 0 || tempChild.blueprintRadius === 0) continue; 
+                // const childBBox = tempChild.getBoundingBox(); // REMOVED
 
-                // Adjust spawnX, spawnY to be the center of the child's tentative bbox
-                spawnX = spawnX - (childBBox.minX - spawnX) + childBBox.width / 2;
-                spawnY = spawnY - (childBBox.minY - spawnY) + childBBox.height / 2;
+                // Adjust spawnX, spawnY to be the center of the child's tentative bbox - REMOVED
+                // spawnX = spawnX - (childBBox.minX - spawnX) + childBBox.width / 2;
+                // spawnY = spawnY - (childBBox.minY - spawnY) + childBBox.height / 2;
 
-                const childWorldMinX = spawnX - childBBox.width / 2;
-                const childWorldMaxX = spawnX + childBBox.width / 2;
-                const childWorldMinY = spawnY - childBBox.height / 2;
-                const childWorldMaxY = spawnY + childBBox.height / 2;
+                // const childWorldMinX = spawnX - childBBox.width / 2; // REMOVED
+                // const childWorldMaxX = spawnX + childBBox.width / 2; // REMOVED
+                // const childWorldMinY = spawnY - childBBox.height / 2; // REMOVED
+                // const childWorldMaxY = spawnY + childBBox.height / 2; // REMOVED
 
 
                 let isSpotClear = true;
-                // Check against existing population
-                for (const otherBBox of existingBodyBBoxes) {
-                    // No need to check otherBody.isUnstable here as it's filtered during caching
-                    if (!(childWorldMaxX < otherBBox.minX || childWorldMinX > otherBBox.maxX || childWorldMaxY < otherBBox.minY || childWorldMinY > otherBBox.maxY)) {
-                        isSpotClear = false; break;
+                // Check against existing population using blueprintRadius
+                for (const otherBody of softBodyPopulation) {
+                    if (otherBody.isUnstable || otherBody === this) continue; // Don't check against self or unstable bodies
+                    const otherBodyCenter = otherBody.getAveragePosition(); // Still need center of existing bodies
+                    const distSq = (spawnX - otherBodyCenter.x)**2 + (spawnY - otherBodyCenter.y)**2;
+                    // Use the sum of blueprint radii plus a clearance value for the check
+                    const combinedRadii = tempChild.blueprintRadius + otherBody.blueprintRadius + OFFSPRING_PLACEMENT_CLEARANCE_RADIUS;
+                    if (distSq < combinedRadii * combinedRadii) {
+                        isSpotClear = false; 
+                        break;
                     }
                 }
                 // Check against already spawned new offspring in this cycle
                 if (isSpotClear) {
-                    for (const newBorn of offspring) {
-                        const newBornBBox = newBorn.getBoundingBox();
-                         if (!(childWorldMaxX < newBornBBox.minX || childWorldMinX > newBornBBox.maxX || childWorldMaxY < newBornBBox.minY || childWorldMinY > newBornBBox.maxY)) {
-                            isSpotClear = false; break;
+                    for (const newBorn of offspring) { // offspring contains fully created children
+                        const newBornCenter = newBorn.getAveragePosition();
+                        const distSq = (spawnX - newBornCenter.x)**2 + (spawnY - newBornCenter.y)**2;
+                        const combinedRadii = tempChild.blueprintRadius + newBorn.blueprintRadius + OFFSPRING_PLACEMENT_CLEARANCE_RADIUS;
+                        if (distSq < combinedRadii * combinedRadii) {
+                            isSpotClear = false; 
+                            break;
                         }
                     }
                 }

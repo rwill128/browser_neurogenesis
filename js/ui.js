@@ -365,10 +365,11 @@ function updateInfoPanel() {
 
             if (point.nodeType === NodeType.EYE) {
                 content += `<h6>Eye Sensor Data:</h6>`;
-                content += `<p><strong>Sees Particle:</strong> ${point.seesParticle}</p>`;
-                if (point.seesParticle) {
-                    content += `<p><strong>Particle Distance:</strong> ${(point.nearestParticleMagnitude * EYE_DETECTION_RADIUS).toFixed(1)} (norm: ${point.nearestParticleMagnitude.toFixed(3)})</p>`;
-                    content += `<p><strong>Particle Angle:</strong> ${(point.nearestParticleDirection * 180 / Math.PI).toFixed(1)}&deg;</p>`;
+                content += `<p><strong>Target Type:</strong> ${getEyeTargetTypeString(point.eyeTargetType)}</p>`;
+                content += `<p><strong>Sees Target:</strong> ${point.seesTarget}</p>`;
+                if (point.seesTarget) {
+                    content += `<p><strong>Target Distance:</strong> ${(point.nearestTargetMagnitude * EYE_DETECTION_RADIUS).toFixed(1)} (norm: ${point.nearestTargetMagnitude.toFixed(3)})</p>`;
+                    content += `<p><strong>Target Angle:</strong> ${(point.nearestTargetDirection * 180 / Math.PI).toFixed(1)}&deg;</p>`;
                 }
             }
 

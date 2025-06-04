@@ -217,6 +217,14 @@ function getRewardStrategyString(strategy) {
     }
 }
 
+function getEyeTargetTypeString(eyeTargetType) {
+    switch(eyeTargetType) {
+        case EyeTargetType.PARTICLE: return "Particle";
+        case EyeTargetType.FOREIGN_BODY_POINT: return "Foreign Body Point";
+        default: return "Unknown_EyeTargetType";
+    }
+}
+
 // Reflects point P across the line defined by L1 and L2
 function reflectPointAcrossLine(P, L1, L2) {
     // Line L1L2 direction vector

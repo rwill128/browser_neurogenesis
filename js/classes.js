@@ -241,6 +241,14 @@ class SoftBody {
         this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY; // Initial placeholder
         this.blueprintRadius = 0; // New: Approximate radius based on blueprint points
 
+        // Node counts for brain initialization optimization
+        this.numEmitterNodes = 0;
+        this.numSwimmerNodes = 0;
+        this.numEaterNodes = 0;
+        this.numPredatorNodes = 0;
+        this.numEyeNodes = 0;
+        this.numPotentialGrabberNodes = 0;
+
         // Initialize heritable/mutable properties
         if (parentBody) {
             this.stiffness = parentBody.stiffness * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
@@ -921,6 +929,25 @@ class SoftBody {
 
         // Recalculate things that depend on the final massPoints
         this.calculateCurrentMaxEnergy(); 
+
+        // Calculate and store node counts for brain initialization optimization
+        this.numEmitterNodes = 0; // Resetting here before counting
+        this.numSwimmerNodes = 0;
+        this.numEaterNodes = 0;
+        this.numPredatorNodes = 0;
+        this.numEyeNodes = 0;
+        this.numPotentialGrabberNodes = 0;
+
+        for (const p of this.massPoints) { // Changed from forEach to for...of for clarity
+            if (p.nodeType === NodeType.EMITTER) this.numEmitterNodes++;
+            else if (p.nodeType === NodeType.SWIMMER) this.numSwimmerNodes++;
+            else if (p.nodeType === NodeType.EATER) this.numEaterNodes++;
+            else if (p.nodeType === NodeType.PREDATOR) this.numPredatorNodes++;
+            else if (p.nodeType === NodeType.EYE) this.numEyeNodes++;
+
+            if (p.canBeGrabber) this.numPotentialGrabberNodes++;
+        }
+
         // Note: initializeBrain() and primaryEyePoint assignment will happen after createShape() finishes
         // in the main constructor flow.
     }
@@ -1644,12 +1671,16 @@ class SoftBody {
                                         const predationRadius = p1.radius * effectivePredationRadiusMultiplier;
                                         
                                         if (distSq < predationRadius * predationRadius) {
-                                            const effectiveEnergySapped = ENERGY_SAPPED_PER_PREDATION_BASE + (ENERGY_SAPPED_PER_PREDATION_MAX_BONUS * p1Exertion);
-                                            const energyToSap = Math.min(otherItem.bodyRef.creatureEnergy, effectiveEnergySapped);
-                                            if (energyToSap > 0) {
-                                                otherItem.bodyRef.creatureEnergy -= energyToSap;
-                                                this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyToSap); // Use currentMaxEnergy
-                                                this.energyGainedFromPredation += energyToSap;
+                                            // NEW CHECK: Has this prey body (otherItem.bodyRef) already been predated by THIS predator (this) this tick?
+                                            if (!this.preyPredatedThisTick.has(otherItem.bodyRef.id)) {
+                                                const effectiveEnergySapped = ENERGY_SAPPED_PER_PREDATION_BASE + (ENERGY_SAPPED_PER_PREDATION_MAX_BONUS * p1Exertion);
+                                                const energyToSap = Math.min(otherItem.bodyRef.creatureEnergy, effectiveEnergySapped); 
+                                                if (energyToSap > 0) {
+                                                    otherItem.bodyRef.creatureEnergy -= energyToSap;
+                                                    this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyToSap); 
+                                                    this.energyGainedFromPredation += energyToSap;
+                                                    this.preyPredatedThisTick.add(otherItem.bodyRef.id); // Mark this prey as predated for this tick
+                                                }
                                             }
                                         }
                                     }
@@ -1820,12 +1851,16 @@ class SoftBody {
         let successfullyPlacedOffspring = 0;
         let offspring = [];
 
-        // Cache bounding boxes of existing population - REMOVED
-        // const existingBodyBBoxes = softBodyPopulation.map(body => {
-        //     if (body.isUnstable) return null; // or some indicator for unstable bodies
-        //     return body.getBoundingBox();
-        // }).filter(bbox => bbox !== null);
-
+        // Pre-calculate spatial info for existing bodies to optimize collision checks
+        const existingBodiesSpatialInfo = [];
+        for (const body of softBodyPopulation) {
+            if (body !== this && !body.isUnstable) { // Don't include self or unstable bodies
+                existingBodiesSpatialInfo.push({
+                    center: body.getAveragePosition(),
+                    radius: body.blueprintRadius
+                });
+            }
+        }
 
         for (let i = 0; i < this.numOffspring; i++) {
             if (this.creatureEnergy < energyForOneOffspring) break; // Not enough energy for this one
@@ -1841,29 +1876,20 @@ class SoftBody {
                 let spawnX = parentAvgPos.x + offsetX;
                 let spawnY = parentAvgPos.y + offsetY;
 
-                // Tentatively create child. Its blueprintRadius will be calculated in its constructor.
-                const tempChild = new SoftBody( -1, spawnX, spawnY, this); // -1 ID for temp
-                if (tempChild.massPoints.length === 0 || tempChild.blueprintRadius === 0) continue; 
-                // const childBBox = tempChild.getBoundingBox(); // REMOVED
-
-                // Adjust spawnX, spawnY to be the center of the child's tentative bbox - REMOVED
-                // spawnX = spawnX - (childBBox.minX - spawnX) + childBBox.width / 2;
-                // spawnY = spawnY - (childBBox.minY - spawnY) + childBBox.height / 2;
-
-                // const childWorldMinX = spawnX - childBBox.width / 2; // REMOVED
-                // const childWorldMaxX = spawnX + childBBox.width / 2; // REMOVED
-                // const childWorldMinY = spawnY - childBBox.height / 2; // REMOVED
-                // const childWorldMaxY = spawnY + childBBox.height / 2; // REMOVED
-
+                // Create the potential child. Its blueprintRadius will be calculated in its constructor.
+                // We will assign a proper ID only if placement is successful.
+                let potentialChild = new SoftBody(-1, spawnX, spawnY, this); // Use -1 or a temporary ID marker
+                
+                if (potentialChild.massPoints.length === 0 || potentialChild.blueprintRadius === 0) continue; 
 
                 let isSpotClear = true;
-                // Check against existing population using blueprintRadius
-                for (const otherBody of softBodyPopulation) {
-                    if (otherBody.isUnstable || otherBody === this) continue; // Don't check against self or unstable bodies
-                    const otherBodyCenter = otherBody.getAveragePosition(); // Still need center of existing bodies
-                    const distSq = (spawnX - otherBodyCenter.x)**2 + (spawnY - otherBodyCenter.y)**2;
+                // Check against existing population using blueprintRadius and cached positions
+                for (const otherBodyInfo of existingBodiesSpatialInfo) {
+                    // if (otherBody.isUnstable || otherBody === this) continue; // Already filtered
+                    // const otherBodyCenter = otherBody.getAveragePosition(); // Use cached center
+                    const distSq = (spawnX - otherBodyInfo.center.x)**2 + (spawnY - otherBodyInfo.center.y)**2;
                     // Use the sum of blueprint radii plus a clearance value for the check
-                    const combinedRadii = tempChild.blueprintRadius + otherBody.blueprintRadius + OFFSPRING_PLACEMENT_CLEARANCE_RADIUS;
+                    const combinedRadii = potentialChild.blueprintRadius + otherBodyInfo.radius + OFFSPRING_PLACEMENT_CLEARANCE_RADIUS;
                     if (distSq < combinedRadii * combinedRadii) {
                         isSpotClear = false; 
                         break;
@@ -1874,7 +1900,7 @@ class SoftBody {
                     for (const newBorn of offspring) { // offspring contains fully created children
                         const newBornCenter = newBorn.getAveragePosition();
                         const distSq = (spawnX - newBornCenter.x)**2 + (spawnY - newBornCenter.y)**2;
-                        const combinedRadii = tempChild.blueprintRadius + newBorn.blueprintRadius + OFFSPRING_PLACEMENT_CLEARANCE_RADIUS;
+                        const combinedRadii = potentialChild.blueprintRadius + newBorn.blueprintRadius + OFFSPRING_PLACEMENT_CLEARANCE_RADIUS;
                         if (distSq < combinedRadii * combinedRadii) {
                             isSpotClear = false; 
                             break;
@@ -1885,10 +1911,16 @@ class SoftBody {
                 if (isSpotClear) {
                     this.creatureEnergy -= energyForOneOffspring;
                     // Use the already constructed tempChild's points, but create a new SoftBody instance with proper ID and translated points.
-                    const finalChild = new SoftBody(nextSoftBodyId++, spawnX, spawnY, this);
+                    // const finalChild = new SoftBody(nextSoftBodyId++, spawnX, spawnY, this);
 
-                    finalChild.creatureEnergy = energyForOneOffspring; // Set energy for the actual child
-                    offspring.push(finalChild);
+                    // finalChild.creatureEnergy = energyForOneOffspring; // Set energy for the actual child
+                    // offspring.push(finalChild);
+
+                    // Optimization: tempChild becomes the finalChild
+                    potentialChild.id = nextSoftBodyId++; // Assign final ID and increment global counter
+                    potentialChild.creatureEnergy = energyForOneOffspring;
+                    offspring.push(potentialChild);
+
                     successfullyPlacedOffspring++;
                     placedThisOffspring = true;
                     break; // Break from placement attempts for this offspring
@@ -1977,32 +2009,23 @@ class SoftBody {
         if (brainNode && brainNode.neuronData && brainNode.neuronData.isBrain) {
             const nd = brainNode.neuronData;
 
-            let numEmitterPoints = 0;
-            let numSwimmerPoints = 0;
-            let numEaterPoints = 0;
-            let numPredatorPoints = 0;
-            let numEyeNodes = 0;
-            let numPotentialGrabberPoints = 0;
-
-            this.massPoints.forEach(p => {
-                if (p.nodeType === NodeType.EMITTER) numEmitterPoints++;
-                else if (p.nodeType === NodeType.SWIMMER) numSwimmerPoints++;
-                else if (p.nodeType === NodeType.EATER) numEaterPoints++;
-                else if (p.nodeType === NodeType.PREDATOR) numPredatorPoints++;
-                else if (p.nodeType === NodeType.EYE) numEyeNodes++;
-
-                if (p.canBeGrabber) numPotentialGrabberPoints++; // Count only points that can be grabbers
-            });
+            // Use pre-calculated node counts from the SoftBody instance
+            const numEmitterPoints = this.numEmitterNodes;
+            const numSwimmerPoints = this.numSwimmerNodes;
+            const numEaterPoints = this.numEaterNodes;
+            const numPredatorPoints = this.numPredatorNodes;
+            const numEyeNodes = this.numEyeNodes;
+            const numPotentialGrabberPoints = this.numPotentialGrabberNodes;
 
             // DEBUG LOG ADDED HERE (in initializeBrain)
             // console.log(`Body ${this.id} initializeBrain Counts: Emitters: ${numEmitterPoints}, Swimmers: ${numSwimmerPoints}, Eaters: ${numEaterPoints}, Predators: ${numPredatorPoints}, Grabbers: ${numPotentialGrabberPoints}, Eyes: ${numEyeNodes}`);
             // Corrected log name for clarity
-            console.log(`Body ${this.id} initializeBrain Counts from .massPoints loop: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}, Ey:${numEyeNodes}`);
+            console.log(`Body ${this.id} initializeBrain Using Stored Counts: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}, Ey:${numEyeNodes}`);
 
             nd.inputVectorSize = NEURAL_INPUT_SIZE + (numEyeNodes * NEURAL_INPUTS_PER_EYE);
             
             // Log individual counts IMMEDIATELY BEFORE SUM
-            console.log(`Body ${this.id} initializeBrain Counts directly before sum: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}`);
+            console.log(`Body ${this.id} initializeBrain Counts (from stored) directly before sum: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}`);
 
             nd.outputVectorSize = (numEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
                                   (numSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
@@ -2350,6 +2373,7 @@ class SoftBody {
     }
 
     _finalizeUpdateAndCheckStability(dt) { 
+        this.preyPredatedThisTick = new Set(); // Initialize/clear for this body for this tick
         if (this.isUnstable) return; 
 
         // Inter-body repulsion & Predation
@@ -2403,12 +2427,16 @@ class SoftBody {
                                         const predationRadius = p1.radius * effectivePredationRadiusMultiplier;
                                         
                                         if (distSq < predationRadius * predationRadius) {
-                                            const effectiveEnergySapped = ENERGY_SAPPED_PER_PREDATION_BASE + (ENERGY_SAPPED_PER_PREDATION_MAX_BONUS * p1Exertion);
-                                            const energyToSap = Math.min(otherItem.bodyRef.creatureEnergy, effectiveEnergySapped);
-                                            if (energyToSap > 0) {
-                                                otherItem.bodyRef.creatureEnergy -= energyToSap;
-                                                this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyToSap); 
-                                                this.energyGainedFromPredation += energyToSap;
+                                            // NEW CHECK: Has this prey body (otherItem.bodyRef) already been predated by THIS predator (this) this tick?
+                                            if (!this.preyPredatedThisTick.has(otherItem.bodyRef.id)) {
+                                                const effectiveEnergySapped = ENERGY_SAPPED_PER_PREDATION_BASE + (ENERGY_SAPPED_PER_PREDATION_MAX_BONUS * p1Exertion);
+                                                const energyToSap = Math.min(otherItem.bodyRef.creatureEnergy, effectiveEnergySapped); 
+                                                if (energyToSap > 0) {
+                                                    otherItem.bodyRef.creatureEnergy -= energyToSap;
+                                                    this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyToSap); 
+                                                    this.energyGainedFromPredation += energyToSap;
+                                                    this.preyPredatedThisTick.add(otherItem.bodyRef.id); // Mark this prey as predated for this tick
+                                                }
                                             }
                                         }
                                     }

@@ -33,41 +33,69 @@ function initWebGL(canvas) {
 }
 
 async function initWebGPU(canvas) {
+    console.log("[gpuUtils.js] Attempting initWebGPU...");
     if (!navigator.gpu) {
         alert("WebGPU is not supported on your browser.");
         console.error("WebGPU not supported.");
         return null;
     }
+    console.log("[gpuUtils.js] navigator.gpu exists.");
 
-    const adapter = await navigator.gpu.requestAdapter();
+    let adapter = null;
+    try {
+        adapter = await navigator.gpu.requestAdapter();
+    } catch (e) {
+        console.error("[gpuUtils.js] Error requesting adapter:", e);
+        alert("Error requesting WebGPU adapter. See console.");
+        return null;
+    }
+
     if (!adapter) {
-        alert("WebGPU adapter is not available.");
-        console.error("WebGPU adapter not available.");
+        alert("WebGPU adapter is not available (returned null).");
+        console.error("[gpuUtils.js] WebGPU adapter not available (requestAdapter returned null).");
+        return null;
+    }
+    console.log("[gpuUtils.js] WebGPU Adapter obtained:", adapter);
+
+    let device = null;
+    try {
+        device = await adapter.requestDevice();
+    } catch (e) {
+        console.error("[gpuUtils.js] Error requesting device:", e);
+        alert("Error requesting WebGPU device. See console.");
         return null;
     }
 
-    const device = await adapter.requestDevice();
     if (!device) {
-        alert("WebGPU device is not available."); // Should not happen if adapter is available, but good practice
-        console.error("WebGPU device not available.");
+        alert("WebGPU device is not available (returned null).");
+        console.error("[gpuUtils.js] WebGPU device not available (requestDevice returned null).");
         return null;
     }
+    console.log("[gpuUtils.js] WebGPU Device obtained:", device);
 
     const context = canvas.getContext('webgpu');
     if (!context) {
         alert("Failed to get WebGPU context from canvas.");
-        console.error("Failed to get WebGPU context.");
+        console.error("[gpuUtils.js] Failed to get WebGPU context from canvas.");
         return null;
     }
+    console.log("[gpuUtils.js] WebGPU Context obtained.");
 
     const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-    context.configure({
-        device,
-        format: presentationFormat,
-        alphaMode: 'opaque', // or 'premultiplied'
-    });
+    console.log("[gpuUtils.js] Preferred canvas format:", presentationFormat);
+    try {
+        context.configure({
+            device,
+            format: presentationFormat,
+            alphaMode: 'opaque',
+        });
+    } catch (e) {
+        console.error("[gpuUtils.js] Error configuring WebGPU context:", e);
+        alert("Error configuring WebGPU context. See console.");
+        return null;
+    }
+    console.log("[gpuUtils.js] WebGPU Context configured successfully.");
 
-    console.log("WebGPU context initialized successfully.");
     return { device, context, presentationFormat, adapter };
 }
 

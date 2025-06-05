@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GPU Fluid Test</title>
+    <style>
+        body { margin: 0; padding: 20px; background: #000; color: white; font-family: Arial, sans-serif; }
+        canvas { border: 1px solid #fff; }
+        #controls { margin: 10px 0; }
+        button { margin: 5px; padding: 10px; }
+        #status { margin-top: 10px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <h1>GPU Fluid Simulation Test</h1>
+    <div id="controls">
+        <button onclick="toggleFluid()">Toggle GPU Fluid</button>
+        <button onclick="addDensityTest()">Add Density</button>
+        <button onclick="addVelocityTest()">Add Velocity</button>
+        <button onclick="clearFluid()">Clear</button>
+    </div>
+    <canvas id="testCanvas" width="800" height="600"></canvas>
+    <div id="status">Loading...</div>
+
+    <script>
+        // Minimal configuration needed for testing
+        const WORLD_WIDTH = 800;
+        const WORLD_HEIGHT = 600;
+        const FLUID_GRID_SIZE_CONTROL = 128;
+        const FLUID_DIFFUSION = 0.01;
+        const FLUID_VISCOSITY = 0.01;
+        const FLUID_FADE_RATE = 0.01;
+        const MAX_FLUID_VELOCITY_COMPONENT = 50;
+        const MAX_SIMULTANEOUS_FLUID_QUERIES = 256;
+        let USE_GPU_FLUID_SIMULATION = true;
+
+        let fluidField = null;
+        let isGpuEnabled = false;
+        let animationId = null;
+
+        // GPU Utils functions (simplified)
+        async function initWebGPU(canvas) {
+            if (!navigator.gpu) {
+                console.log('WebGPU not supported');
+                return null;
+            }
+
+            try {
+                const adapter = await navigator.gpu.requestAdapter();
+                if (!adapter) return null;
+
+                const device = await adapter.requestDevice();
+                const context = canvas.getContext('webgpu');
+                const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+
+                context.configure({
+                    device: device,
+                    format: presentationFormat,
+                });
+
+                return { adapter, device, context, presentationFormat };
+            } catch (error) {
+                console.error('WebGPU initialization failed:', error);
+                return null;
+            }
+        }
+
+        // Load the GPU fluid field class
+        async function loadGPUFluidField() {
+            try {
+                const response = await fetch('js/gpuFluidField.js');
+                const code = await response.text();
+                eval(code);
+                return true;
+            } catch (error) {
+                console.error('Failed to load GPUFluidField:', error);
+                return false;
+            }
+        }
+
+        async function initFluidTest() {
+            const canvas = document.getElementById('testCanvas');
+            const status = document.getElementById('status');
+
+            status.textContent = 'Initializing GPU Fluid Field...';
+
+            // Load the GPU fluid field class
+            const loaded = await loadGPUFluidField();
+            if (!loaded) {
+                status.textContent = 'Failed to load GPUFluidField class';
+                return;
+            }
+
+            try {
+                const dt = 1/60;
+                const scaleX = WORLD_WIDTH / FLUID_GRID_SIZE_CONTROL;
+                const scaleY = WORLD_HEIGHT / FLUID_GRID_SIZE_CONTROL;
+
+                fluidField = new GPUFluidField(canvas, FLUID_GRID_SIZE_CONTROL, FLUID_DIFFUSION, FLUID_VISCOSITY, dt, scaleX, scaleY);
+                await fluidField._initPromise;
+
+                if (fluidField.gpuEnabled) {
+                    isGpuEnabled = true;
+                    status.textContent = 'GPU Fluid Field initialized successfully! Click buttons to test.';
+                    
+                    // Test the IX method
+                    const testIndex = fluidField.IX(10, 10);
+                    console.log('IX(10, 10) =', testIndex);
+                    
+                    // Test basic properties
+                    console.log('Vx array length:', fluidField.Vx.length);
+                    console.log('Vy array length:', fluidField.Vy.length);
+                    console.log('DensityR array length:', fluidField.densityR.length);
+                    
+                    startRenderLoop();
+                } else {
+                    status.textContent = 'GPU Fluid Field failed to initialize - WebGPU not available';
+                }
+            } catch (error) {
+                status.textContent = 'Error initializing fluid field: ' + error.message;
+                console.error('Initialization error:', error);
+            }
+        }
+
+        function startRenderLoop() {
+            function render() {
+                if (fluidField && fluidField.gpuEnabled) {
+                    fluidField.step();
+                    fluidField.draw(null, 800, 600, 0, 0, 1);
+                }
+                animationId = requestAnimationFrame(render);
+            }
+            render();
+        }
+
+        function toggleFluid() {
+            USE_GPU_FLUID_SIMULATION = !USE_GPU_FLUID_SIMULATION;
+            document.getElementById('status').textContent = 
+                `GPU Fluid: ${USE_GPU_FLUID_SIMULATION ? 'ON' : 'OFF'}`;
+        }
+
+        function addDensityTest() {
+            if (fluidField && fluidField.gpuEnabled) {
+                const x = Math.random() * WORLD_WIDTH;
+                const y = Math.random() * WORLD_HEIGHT;
+                const r = Math.random() * 255;
+                const g = Math.random() * 255;
+                const b = Math.random() * 255;
+                
+                console.log(`Adding density at (${x.toFixed(1)}, ${y.toFixed(1)}) with color RGB(${r.toFixed(0)}, ${g.toFixed(0)}, ${b.toFixed(0)})`);
+                fluidField.addDensity(x, y, r, g, b, 20);
+            }
+        }
+
+        function addVelocityTest() {
+            if (fluidField && fluidField.gpuEnabled) {
+                const x = Math.random() * WORLD_WIDTH;
+                const y = Math.random() * WORLD_HEIGHT;
+                const vx = (Math.random() - 0.5) * 100;
+                const vy = (Math.random() - 0.5) * 100;
+                
+                console.log(`Adding velocity at (${x.toFixed(1)}, ${y.toFixed(1)}) with velocity (${vx.toFixed(1)}, ${vy.toFixed(1)})`);
+                fluidField.addVelocity(x, y, vx, vy, 15);
+            }
+        }
+
+        function clearFluid() {
+            if (fluidField && fluidField.gpuEnabled) {
+                fluidField.clear();
+                console.log('Fluid cleared');
+            }
+        }
+
+        // Initialize when page loads
+        window.addEventListener('load', initFluidTest);
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+        });
+    </script>
+</body>
+</html>

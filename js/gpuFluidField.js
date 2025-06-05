@@ -139,171 +139,59 @@ fn main(@location(0) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
     };
 
     constructor(canvas, size, diffusion, viscosity, dt, scaleX, scaleY) {
-        this.gpuEnabled = false; // Default to false
-        this.gl = null; // Keep for now, might be useful for mixed mode or progressive refactor
-        this.device = null; // WebGPU device
-        this.context = null; // WebGPU context
-        this.presentationFormat = null; // WebGPU presentation format
-        this.adapter = null; // WebGPU adapter
-
-        // Initialize properties
+        this.canvas = canvas;
         this.size = Math.round(size);
-        this.dt = dt;
         this.diffusion = diffusion;
         this.viscosity = viscosity;
+        this.dt = dt;
+        this.iterations = 4;
+        this.gpuEnabled = false;
+        
+        // CPU-compatible properties for interface compatibility
         this.scaleX = scaleX;
         this.scaleY = scaleY;
-        this.useWrapping = false; // Will need to handle this in shaders or logic
-        this.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT; // Ensure this is defined or passed
-        this.iterations = 4; // Standard solver iterations
-
-        // Placeholders for WebGL resources
-        this.programs = {}; // To store shader programs (e.g., diffuse, advect, project_divergence, etc.)
-        this.textures = {}; // To store textures (density, velocity - front and back for ping-pong)
-        this.framebuffers = {}; // For rendering to textures
-        this.quadVertexBuffer = null; // A simple quad to draw on for shader execution
-        this.vertexState = null; // For WebGPU pipeline vertex layout
-        this.sampler = null;     // For WebGPU sampler
-
-        console.log("GPUFluidField initialized with WebGL.");
-
-        // --- Define all shader sources as class properties ---
-        this.basicVertexShaderSource = `
-            attribute vec2 a_position;
-            attribute vec2 a_texCoord;
-            varying vec2 v_texCoord;
-            void main() {
-                gl_Position = vec4(a_position, 0.0, 1.0);
-                v_texCoord = a_texCoord;
-            }
-        `;
-
-        this.clearFragmentShaderSource = `
-            precision mediump float;
-            void main() {
-                gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
-            }
-        `;
+        this.useWrapping = false;
+        this.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT;
         
-        this.copyFragmentShaderSource = `
-            precision mediump float;
-            varying vec2 v_texCoord;
-            uniform sampler2D u_inputTexture;
-            void main() { gl_FragColor = texture2D(u_inputTexture, v_texCoord); }
-        `;
-
-        this.advectionFragmentShaderSource = `
-            precision mediump float;
-            varying vec2 v_texCoord;
-            uniform sampler2D u_velocityTexture;
-            uniform sampler2D u_sourceTexture;
-            uniform vec2 u_resolution;
-            uniform float u_dt;
-            uniform bool u_useWrapping;
-            void main() {
-                float dx = 1.0 / u_resolution.x;
-                float dy = 1.0 / u_resolution.y;
-                vec2 vel = texture2D(u_velocityTexture, v_texCoord).rg;
-                vec2 prevCoords = v_texCoord - vel * u_dt * vec2(dx, dy);
-                if (u_useWrapping) {
-                    prevCoords = (mod(prevCoords, 1.0) + 1.0);
-                    prevCoords = mod(prevCoords, 1.0);
-                } else {
-                    prevCoords = clamp(prevCoords, 0.0, 1.0);
-                }
-                gl_FragColor = texture2D(u_sourceTexture, prevCoords);
-            }
-        `;
-
-        this.diffusionFragmentShaderSource = `
-            precision mediump float;
-            varying vec2 v_texCoord;
-            uniform sampler2D u_x_prev_iter_Texture;
-            uniform sampler2D u_x0_Texture;
-            uniform vec2 u_resolution;
-            uniform float u_alpha;
-            uniform float u_rBeta;
-            void main() {
-                float dx = 1.0 / u_resolution.x;
-                float dy = 1.0 / u_resolution.y;
-                vec4 x0 = texture2D(u_x0_Texture, v_texCoord);
-                vec4 val_up    = texture2D(u_x_prev_iter_Texture, v_texCoord + vec2(0.0, dy));
-                vec4 val_down  = texture2D(u_x_prev_iter_Texture, v_texCoord - vec2(0.0, dy));
-                vec4 val_left  = texture2D(u_x_prev_iter_Texture, v_texCoord - vec2(dx, 0.0));
-                vec4 val_right = texture2D(u_x_prev_iter_Texture, v_texCoord + vec2(dx, 0.0));
-                gl_FragColor = (x0 + u_alpha * (val_up + val_down + val_left + val_right)) * u_rBeta;
-            }
-        `;
-
-        this.divergenceFragmentShaderSource = `
-            precision mediump float;
-            varying vec2 v_texCoord;
-            uniform sampler2D u_velocityTexture;
-            uniform vec2 u_resolution;
-            void main() {
-                float dx = 1.0 / u_resolution.x;
-                float dy = 1.0 / u_resolution.y;
-                float vx_left  = texture2D(u_velocityTexture, v_texCoord - vec2(dx, 0.0)).r;
-                float vx_right = texture2D(u_velocityTexture, v_texCoord + vec2(dx, 0.0)).r;
-                float vy_down  = texture2D(u_velocityTexture, v_texCoord - vec2(0.0, dy)).g;
-                float vy_up    = texture2D(u_velocityTexture, v_texCoord + vec2(0.0, dy)).g;
-                float divergence = (vx_right - vx_left) * (u_resolution.x * 0.5) + 
-                                   (vy_up    - vy_down)  * (u_resolution.y * 0.5);
-                gl_FragColor = vec4(divergence, 0.0, 0.0, 1.0);
-            }
-        `;
-
-        this.pressureSolveFragmentShaderSource = `
-            precision mediump float;
-            varying vec2 v_texCoord;
-            uniform sampler2D u_p_prev_iter_Texture;
-            uniform sampler2D u_divergenceTexture;
-            uniform vec2 u_resolution;
-            void main() {
-                float dx = 1.0 / u_resolution.x;
-                float divergence = texture2D(u_divergenceTexture, v_texCoord).r;
-                float p_left  = texture2D(u_p_prev_iter_Texture, v_texCoord - vec2(dx, 0.0)).r;
-                float p_right = texture2D(u_p_prev_iter_Texture, v_texCoord + vec2(dx, 0.0)).r;
-                float p_up    = texture2D(u_p_prev_iter_Texture, v_texCoord + vec2(0.0, dx)).r;
-                float p_down  = texture2D(u_p_prev_iter_Texture, v_texCoord - vec2(0.0, dx)).r;
-                float cellWidthSq = dx * dx;
-                float new_pressure = (p_left + p_right + p_up + p_down - divergence * cellWidthSq) * 0.25;
-                gl_FragColor = vec4(new_pressure, 0.0, 0.0, 1.0);
-            }
-        `;
-
-        this.gradientSubtractFragmentShaderSource = `
-            precision mediump float;
-            varying vec2 v_texCoord;
-            uniform sampler2D u_velocityTexture; 
-            uniform sampler2D u_pressureTexture;   
-            uniform vec2 u_resolution;            
-            void main() {
-                float dx_texel = 1.0 / u_resolution.x; 
-                float dy_texel = 1.0 / u_resolution.y;
-                vec2 current_velocity = texture2D(u_velocityTexture, v_texCoord).rg;
-                float p_left  = texture2D(u_pressureTexture, v_texCoord - vec2(dx_texel, 0.0)).r;
-                float p_right = texture2D(u_pressureTexture, v_texCoord + vec2(dx_texel, 0.0)).r;
-                float p_up    = texture2D(u_pressureTexture, v_texCoord + vec2(0.0, dy_texel)).r;
-                float p_down  = texture2D(u_pressureTexture, v_texCoord - vec2(0.0, dy_texel)).r;
-                vec2 gradient = vec2(
-                    (p_right - p_left) * u_resolution.x * 0.5,
-                    (p_up    - p_down) * u_resolution.y * 0.5
-                );
-                vec2 new_velocity = current_velocity - gradient;
-                gl_FragColor = vec4(new_velocity, 0.0, 1.0); 
-            }
-        `;
-
-        this.drawTextureFragmentShaderSource = `
-            precision mediump float;
-            varying vec2 v_texCoord;
-            uniform sampler2D u_textureToDraw;
-            void main() { gl_FragColor = texture2D(u_textureToDraw, v_texCoord); }
-        `;
-
-        // Store the promise for external awaiting if needed
+        // CPU-compatible arrays - these will be synced from GPU when needed
+        this.Vx = new Float32Array(this.size * this.size).fill(0);
+        this.Vy = new Float32Array(this.size * this.size).fill(0);
+        this.densityR = new Float32Array(this.size * this.size).fill(0);
+        this.densityG = new Float32Array(this.size * this.size).fill(0);
+        this.densityB = new Float32Array(this.size * this.size).fill(0);
+        
+        // GPU-specific properties
+        this.device = null;
+        this.context = null;
+        this.presentationFormat = null;
+        this.gl = null;
+        
+        this.textures = {};
+        this.framebuffers = {};
+        this.programs = {};
+        this.sampler = null;
+        this.quadVertexBuffer = null;
+        this.vertexState = null;
+        
+        // Compute query resources
+        this.fluidQueryComputePipeline = null;
+        this.queryUniformBuffer = null;
+        this.queryResultBuffer = null;
+        this.queryData = new Float32Array(MAX_SIMULTANEOUS_FLUID_QUERIES * 4); // x, y, vx, vy per query
+        
         this._initPromise = this._asyncInit(canvas);
+    }
+
+    // CPU-compatible IX method for grid index calculation
+    IX(x, y) {
+        if (this.useWrapping) {
+            x = (Math.floor(x) % this.size + this.size) % this.size;
+            y = (Math.floor(y) % this.size + this.size) % this.size;
+        } else {
+            x = Math.max(0, Math.min(x, this.size - 1));
+            y = Math.max(0, Math.min(y, this.size - 1));
+        }
+        return Math.floor(x) + Math.floor(y) * this.size;
     }
 
     async _asyncInit(canvas) {
@@ -336,6 +224,12 @@ fn main(@location(0) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
         this._initTextures();      // Sets up WebGPU textures (density, velocity etc.)
         // Framebuffers are part of render pass descriptors, so _initFramebuffers might be refactored/removed
         this._initShadersAndPipelines(); // Compiles WGSL, creates pipelines
+        
+        // Initialize compute query resources
+        console.log("GPUFluidField: Initializing compute query resources...");
+        this._initComputeQueryResources();
+        
+        console.log("GPUFluidField: WebGPU initialization complete.");
     }
 
     _initGeometry() {
@@ -540,6 +434,160 @@ fn main(@location(0) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
         } catch (error) {
             console.error("GPUFluidField: Error initializing WebGPU shaders/pipelines:", error);
             this.gpuEnabled = false; // Important: disable GPU if essential pipelines fail
+        }
+    }
+
+    _initComputeQueryResources() {
+        if (!this.device) return;
+        
+        try {
+            // Create compute shader for fluid queries
+            const computeShaderModule = this.device.createShaderModule({
+                label: 'Fluid Query Compute Shader',
+                code: `
+                    struct QueryData {
+                        x: f32,
+                        y: f32,
+                        vx: f32,
+                        vy: f32,
+                    }
+                    
+                    @group(0) @binding(0) var<storage, read_write> queries: array<QueryData>;
+                    @group(0) @binding(1) var velocityTexture: texture_2d<f32>;
+                    @group(0) @binding(2) var densityTexture: texture_2d<f32>;
+                    @group(0) @binding(3) var linearSampler: sampler;
+                    
+                    @compute @workgroup_size(64)
+                    fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+                        let index = global_id.x;
+                        if (index >= ${MAX_SIMULTANEOUS_FLUID_QUERIES}) {
+                            return;
+                        }
+                        
+                        let query = queries[index];
+                        let uv = vec2<f32>(query.x, query.y);
+                        
+                        // Sample velocity at query position
+                        let velocity = textureSampleLevel(velocityTexture, linearSampler, uv, 0.0);
+                        
+                        // Store results back
+                        queries[index].vx = velocity.x;
+                        queries[index].vy = velocity.y;
+                    }
+                `
+            });
+            
+            // Create compute pipeline
+            this.fluidQueryComputePipeline = this.device.createComputePipeline({
+                label: 'Fluid Query Compute Pipeline',
+                layout: 'auto',
+                compute: {
+                    module: computeShaderModule,
+                    entryPoint: 'main',
+                }
+            });
+            
+            // Create buffers for query data
+            this.queryUniformBuffer = this.device.createBuffer({
+                label: 'Query Uniform Buffer',
+                size: MAX_SIMULTANEOUS_FLUID_QUERIES * 4 * 4, // 4 floats per query * 4 bytes per float
+                usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+            });
+            
+            this.queryResultBuffer = this.device.createBuffer({
+                label: 'Query Result Buffer',
+                size: MAX_SIMULTANEOUS_FLUID_QUERIES * 4 * 4,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+            });
+            
+            console.log("GPUFluidField: Compute query resources initialized successfully.");
+            
+        } catch (error) {
+            console.error("GPUFluidField: Error initializing compute query resources:", error);
+            this.gpuEnabled = false;
+        }
+    }
+
+    // Method to sync GPU data back to CPU arrays for compatibility
+    async syncFromGPU() {
+        if (!this.device || !this.gpuEnabled) return;
+        
+        try {
+            // This would be used to read back velocity and density data from GPU textures
+            // For now, we'll implement a simplified version
+            console.log("GPUFluidField: GPU to CPU sync not fully implemented yet");
+        } catch (error) {
+            console.error("GPUFluidField: Error syncing from GPU:", error);
+        }
+    }
+    
+    // Method to perform batched fluid queries using compute shader
+    async queryFluidData(queries) {
+        if (!this.device || !this.fluidQueryComputePipeline || !queries.length) {
+            return [];
+        }
+        
+        try {
+            // Prepare query data
+            const queryData = new Float32Array(queries.length * 4);
+            for (let i = 0; i < queries.length; i++) {
+                const query = queries[i];
+                queryData[i * 4] = query.x / WORLD_WIDTH; // Convert to UV coordinates
+                queryData[i * 4 + 1] = 1.0 - (query.y / WORLD_HEIGHT); // Y-flip for UV
+                queryData[i * 4 + 2] = 0; // vx (to be filled by compute shader)
+                queryData[i * 4 + 3] = 0; // vy (to be filled by compute shader)
+            }
+            
+            // Upload query data
+            this.device.queue.writeBuffer(this.queryUniformBuffer, 0, queryData);
+            
+            // Create bind group for compute
+            const bindGroup = this.device.createBindGroup({
+                layout: this.fluidQueryComputePipeline.getBindGroupLayout(0),
+                entries: [
+                    { binding: 0, resource: { buffer: this.queryUniformBuffer } },
+                    { binding: 1, resource: this.textures.velocityPing.createView() },
+                    { binding: 2, resource: this.textures.densityPing.createView() },
+                    { binding: 3, resource: this.sampler },
+                ],
+            });
+            
+            // Dispatch compute shader
+            const commandEncoder = this.device.createCommandEncoder();
+            const computePass = commandEncoder.beginComputePass();
+            computePass.setPipeline(this.fluidQueryComputePipeline);
+            computePass.setBindGroup(0, bindGroup);
+            const workgroupCount = Math.ceil(queries.length / 64);
+            computePass.dispatchWorkgroups(workgroupCount);
+            computePass.end();
+            
+            // Copy results to readable buffer
+            commandEncoder.copyBufferToBuffer(
+                this.queryUniformBuffer, 0,
+                this.queryResultBuffer, 0,
+                queries.length * 4 * 4
+            );
+            
+            this.device.queue.submit([commandEncoder.finish()]);
+            
+            // Read back results
+            await this.queryResultBuffer.mapAsync(GPUMapMode.READ);
+            const resultData = new Float32Array(this.queryResultBuffer.getMappedRange());
+            
+            const results = [];
+            for (let i = 0; i < queries.length; i++) {
+                results.push({
+                    vx: resultData[i * 4 + 2],
+                    vy: resultData[i * 4 + 3]
+                });
+            }
+            
+            this.queryResultBuffer.unmap();
+            return results;
+            
+        } catch (error) {
+            console.error("GPUFluidField: Error in queryFluidData:", error);
+            return [];
         }
     }
 
@@ -1062,13 +1110,20 @@ fn main(@location(0) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
             }
 
             if (uniformValues) {
-                const alignedSize = Math.ceil(uniformBufferSize / 16) * 16;
+                // Fix uniform buffer size alignment - ensure minimum 48 bytes
+                const minSize = 48; // WebGPU minimum binding size requirement
+                const alignedSize = Math.max(minSize, Math.ceil(uniformBufferSize / 16) * 16);
                 uniformBuffer = this.device.createBuffer({
                     label: `Uniforms for ${pipelineName}`,
                     size: alignedSize,
                     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
                 });
-                this.device.queue.writeBuffer(uniformBuffer, 0, uniformValues, 0, uniformValues.length);
+                
+                // Create a properly sized array for the aligned buffer
+                const paddedValues = new Float32Array(alignedSize / 4);
+                paddedValues.set(uniformValues, 0); // Copy original values to the beginning
+                
+                this.device.queue.writeBuffer(uniformBuffer, 0, paddedValues, 0, paddedValues.length);
                 
                 let uniformBindingIndex = bindGroupEntries.length; // Default to next available binding
                 bindGroupEntries.push({ binding: uniformBindingIndex, resource: { buffer: uniformBuffer } });

@@ -486,5 +486,8 @@ const DEFAULT_ACTIVATION_PERIOD_MAX_TICKS = 300;
 let IS_HEADLESS_MODE = false; // New: For toggling drawing off
 let USE_GPU_FLUID_SIMULATION = false; // New: Switch for GPU fluid sim
 
+// === GPU Fluid Simulation Configuration ===
+const MAX_SIMULTANEOUS_FLUID_QUERIES = 256; // Maximum number of fluid queries per frame
+
 // --- Neural Network Constants ---
 // ... existing code ... 

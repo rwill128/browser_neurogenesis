@@ -23,8 +23,8 @@ const MAX_SPAN_PER_POINT_FACTOR = GRID_CELL_SIZE * 2;
 const DYE_PULL_RATE = 0.05;
 
 // Rigid Spring Properties (New)
-const RIGID_SPRING_STIFFNESS = 500000; 
-const RIGID_SPRING_DAMPING = 150;    
+const RIGID_SPRING_STIFFNESS = 500000;
+const RIGID_SPRING_DAMPING = 150;
 const CHANCE_FOR_RIGID_SPRING = 0.1; // 10% chance a spring becomes rigid
 
 // Spring Mutation Constants (New)
@@ -61,8 +61,8 @@ const ENERGY_SAPPED_PER_PREDATION_BASE = 3;
 const ENERGY_SAPPED_PER_PREDATION_MAX_BONUS = 7;
 
 // Dynamic Max Energy per Creature (New)
-const BASE_MAX_CREATURE_ENERGY = 100;      // Now acts as an absolute minimum max energy for any creature
-const ENERGY_PER_MASS_POINT_BONUS = 25;  // Energy capacity per point
+let BASE_MAX_CREATURE_ENERGY = 100;      // Now acts as an absolute minimum max energy for any creature
+let ENERGY_PER_MASS_POINT_BONUS = 25;  // Energy capacity per point
 const OFFSPRING_INITIAL_ENERGY_SHARE = 0.25;
 const REPRODUCTION_ADDITIONAL_COST_FACTOR = 0.1;
 const OFFSPRING_PLACEMENT_ATTEMPTS = 10;
@@ -111,7 +111,7 @@ let EYE_NODE_ENERGY_COST = 0.05;
 let PHOTOSYNTHESIS_EFFICIENCY = 100.0;
 
 // Eye Detection Radius (New)
-const EYE_DETECTION_RADIUS = 300; // Max distance an eye can see a particle
+let EYE_DETECTION_RADIUS = 300; // Max distance an eye can see a particle
 
 let FLUID_GRID_SIZE_CONTROL = 128;
 let FLUID_DIFFUSION = 0.00047;
@@ -296,7 +296,7 @@ function handleImportConfig(event) {
     if (importConfigFile) importConfigFile.value = ''; // Clear file input
 }
 
-function applyImportedConfig(config) {
+async function applyImportedConfig(config) {
     if (config.worldWidth !== undefined) WORLD_WIDTH = config.worldWidth;
     if (config.worldHeight !== undefined) WORLD_HEIGHT = config.worldHeight;
     if (canvas) {
@@ -350,10 +350,10 @@ function applyImportedConfig(config) {
 
     if (config.photosyntheticNodeCost !== undefined) PHOTOSYNTHETIC_NODE_ENERGY_COST = config.photosyntheticNodeCost;
     if (config.photosynthesisEfficiency !== undefined) PHOTOSYNTHESIS_EFFICIENCY = config.photosynthesisEfficiency;
-    
+
     if (config.eyeDetectionRadius !== undefined) EYE_DETECTION_RADIUS = config.eyeDetectionRadius;
     if (config.showFluidVelocity !== undefined) SHOW_FLUID_VELOCITY = config.showFluidVelocity;
-    
+
     worldWidthInput.value = WORLD_WIDTH;
     worldHeightInput.value = WORLD_HEIGHT;
     zoomSensitivitySlider.value = ZOOM_SENSITIVITY;
@@ -390,9 +390,9 @@ function applyImportedConfig(config) {
     emitterEditModeToggle.checked = IS_EMITTER_EDIT_MODE;
     showFluidVelocityToggle.checked = SHOW_FLUID_VELOCITY;
 
-    initializeAllSliderDisplays(); 
+    initializeAllSliderDisplays();
 
-    initFluidSimulation();
+    await initFluidSimulation(USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
     initNutrientMap();
     initLightMap();
     initViscosityMap();
@@ -433,7 +433,7 @@ function applyImportedConfig(config) {
     initializePopulation();
 
     console.log("Applied imported config. Reset population if needed for full effect on creatures.");
-} 
+}
 
 // Subgraph Translocation Mutation (New - Complex)
 const SUBGRAPH_TRANSLOCATION_CHANCE = 0.15;    // Chance a subgraph is moved, increased from 0.005

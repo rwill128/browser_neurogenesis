@@ -6,6 +6,11 @@ const STATS_UPDATE_INTERVAL = 60; // Update stats approx every 60 frames (e.g., 
 let frameTimeDisplayElement = null; // To store the DOM element
 let frameTimeAccumulator = 0;
 let frameCountForAvg = 0;
+const canvas = document.getElementById('simulationCanvas');
+const ctx = canvas.getContext('2d');
+const webgpuCanvas = document.getElementById('webgpuFluidCanvas');
+let offscreenFluidCanvas, offscreenFluidCtx;
+
 
 // --- Main Initialization Sequence ---
 async function main() {
@@ -21,6 +26,14 @@ async function main() {
     //     viewOffsetY_initial: viewOffsetY
     // });
 
+    if (!canvas) {
+        console.error("CRITICAL: 'canvas' element not found!");
+        return;
+    }
+
+    frameTimeDisplayElement = document.getElementById('frameTimeDisplay'); // Initialize here
+
+
     // Initialize ALL global config variables with hardcoded defaults first
     // This ensures they have a value even if JSON load fails or is incomplete.
     // These are already defined in config.js, so ensure they are loaded before this script.
@@ -31,14 +44,14 @@ async function main() {
 
     // initializeDefaultSliderVariables(); // Removed - global vars in config.js are the defaults
 
-    INITIAL_POPULATION_SIZE = CREATURE_POPULATION_FLOOR; 
+    INITIAL_POPULATION_SIZE = CREATURE_POPULATION_FLOOR;
 
     initializeSpatialGrid();
     initializeAllSliderDisplays(); // Syncs HTML sliders with JS global defaults and updates display spans
-    await initFluidSimulation(); // Await the async fluid simulation initialization
-    initNutrientMap(); 
-    initLightMap(); 
-    initViscosityMap(); 
+    await initFluidSimulation(USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
+    initNutrientMap();
+    initLightMap();
+    initViscosityMap();
     initParticles();
     initializePopulation();
     updateInstabilityIndicator();
@@ -52,7 +65,7 @@ function gameLoop(timestamp) {
     const loopStartTime = performance.now(); // Record start time of the loop
 
     deltaTime = (timestamp - lastTime) / 1000;
-    if (isNaN(deltaTime) || deltaTime <= 0) deltaTime = 1/60; // Ensure valid deltaTime
+    if (isNaN(deltaTime) || deltaTime <= 0) deltaTime = 1 / 60; // Ensure valid deltaTime
     lastTime = timestamp;
 
     const currentMaxDeltaTime = MAX_DELTA_TIME_MS / 1000.0;
@@ -64,7 +77,7 @@ function gameLoop(timestamp) {
         // Calculate global nutrient multiplier
         if (nutrientCyclePeriodSeconds > 0) {
             globalNutrientMultiplier = nutrientCycleBaseAmplitude + nutrientCycleWaveAmplitude * Math.sin((totalSimulationTime * 2 * Math.PI) / nutrientCyclePeriodSeconds);
-            globalNutrientMultiplier = Math.max(0.01, globalNutrientMultiplier); 
+            globalNutrientMultiplier = Math.max(0.01, globalNutrientMultiplier);
         } else {
             globalNutrientMultiplier = nutrientCycleBaseAmplitude + nutrientCycleWaveAmplitude;
         }
@@ -72,9 +85,9 @@ function gameLoop(timestamp) {
 
         // Calculate global light multiplier
         if (lightCyclePeriodSeconds > 0) {
-            globalLightMultiplier = (Math.sin((totalSimulationTime * 2 * Math.PI) / lightCyclePeriodSeconds) + 1) / 2; 
+            globalLightMultiplier = (Math.sin((totalSimulationTime * 2 * Math.PI) / lightCyclePeriodSeconds) + 1) / 2;
         } else {
-            globalLightMultiplier = 0.5; 
+            globalLightMultiplier = 0.5;
         }
         currentLightMultiplierDisplay.textContent = globalLightMultiplier.toFixed(2);
 
@@ -108,4 +121,4 @@ function gameLoop(timestamp) {
     animationFrameId = requestAnimationFrame(gameLoop); // Keep the loop going
 }
 
-main(); // Start the main sequence 
+document.addEventListener('DOMContentLoaded', main);

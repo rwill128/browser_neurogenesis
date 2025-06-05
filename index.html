@@ -193,6 +193,9 @@
                 <label for="showFluidVelocityToggle" class="checkbox-label">Show Fluid Velocity:
                     <input type="checkbox" id="showFluidVelocityToggle">
                 </label>
+                <label for="useGpuFluidToggle" class="checkbox-label">Use GPU for Fluid Sim (Experimental):
+                    <input type="checkbox" id="useGpuFluidToggle">
+                </label>
             </div>
             <div class="control-group">
                 <h4>Particles</h4>
@@ -358,9 +361,11 @@
     <!-- Configuration & Utilities -->
     <script src="js/config.js"></script>
     <script src="js/utils.js"></script>
+    <script src="js/gpuUtils.js"></script>
 
     <!-- Core Classes -->
     <script src="js/classes.js"></script>
+    <script src="js/gpuFluidField.js"></script>
 
     <!-- Environment and Simulation Logic -->
     <script src="js/environment.js"></script>

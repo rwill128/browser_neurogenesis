@@ -1451,6 +1451,7 @@ class SoftBody {
     }
 
     _updateEnergyBudget(dt, fluidFieldRef, nutrientField, lightField) {
+        // console.log("Body", this.id, "_updateEnergyBudget called. fluidFieldRef type:", fluidFieldRef ? fluidFieldRef.constructor.name : 'undefined');
         let currentFrameEnergyCost = 0;
         let currentFrameEnergyGain = 0;
         let poisonDamageThisFrame = 0; // Initialize here
@@ -1740,7 +1741,7 @@ class SoftBody {
 
             if (instabilityReason) {
                 this.isUnstable = true;
-                console.warn(`Soft body ID ${this.id}, Point Index ${this.massPoints.indexOf(point)}: Instability due to ${instabilityReason}. Point:`, JSON.parse(JSON.stringify(point.pos)));
+                //console.warn(`Soft body ID ${this.id}, Point Index ${this.massPoints.indexOf(point)}: Instability due to ${instabilityReason}. Point:`, JSON.parse(JSON.stringify(point.pos)));
                 break;
             }
         }
@@ -1750,7 +1751,7 @@ class SoftBody {
             const currentLength = spring.p1.pos.sub(spring.p2.pos).mag();
             if (currentLength > spring.restLength * localMaxSpringStretchFactor) {
                 this.isUnstable = true;
-                console.warn(`Soft body ID ${this.id} spring instability (over-stretched)! Spring rest: ${spring.restLength.toFixed(1)}, current: ${currentLength.toFixed(1)}`);
+                //console.warn(`Soft body ID ${this.id} spring instability (over-stretched)! Spring rest: ${spring.restLength.toFixed(1)}, current: ${currentLength.toFixed(1)}`);
                 break;
             }
         }
@@ -1761,7 +1762,7 @@ class SoftBody {
             if (bbox.width > this.massPoints.length * localMaxSpanPerPointFactor ||
                 bbox.height > this.massPoints.length * localMaxSpanPerPointFactor) {
                 this.isUnstable = true;
-                console.warn(`Soft body ID ${this.id} span instability! Width: ${bbox.width.toFixed(1)}, Height: ${bbox.height.toFixed(1)}, Points: ${this.massPoints.length}`);
+                //console.warn(`Soft body ID ${this.id} span instability! Width: ${bbox.width.toFixed(1)}, Height: ${bbox.height.toFixed(1)}, Points: ${this.massPoints.length}`);
             }
         }
         if (this.isUnstable) return;
@@ -2066,15 +2067,15 @@ class SoftBody {
         const numEyeNodes = this.numEyeNodes;
         const numPotentialGrabberPoints = this.numPotentialGrabberNodes;
 
-        console.log(`Body ${this.id} _calculateBrainVectorSizes: Using Stored Counts: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}, Ey:${numEyeNodes}`);
+        // console.log(`Body ${this.id} _calculateBrainVectorSizes: Using Stored Counts: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}, Ey:${numEyeNodes}`);
         nd.inputVectorSize = NEURAL_INPUT_SIZE + (numEyeNodes * NEURAL_INPUTS_PER_EYE);
-        console.log(`Body ${this.id} _calculateBrainVectorSizes: Counts (from stored) directly before sum: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}`);
+        // console.log(`Body ${this.id} _calculateBrainVectorSizes: Counts (from stored) directly before sum: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}`);
         nd.outputVectorSize = (numEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
                               (numSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
                               (numEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
                               (numPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
                               (numPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE);
-        console.log(`Body ${this.id} _calculateBrainVectorSizes: Calculated nd.outputVectorSize = ${nd.outputVectorSize}`);
+        // console.log(`Body ${this.id} _calculateBrainVectorSizes: Calculated nd.outputVectorSize = ${nd.outputVectorSize}`);
     }
 
     _initializeBrainWeightsAndBiases(brainNode) {
@@ -2086,13 +2087,13 @@ class SoftBody {
         if (!nd.weightsIH || nd.weightsIH.length !== nd.hiddenLayerSize || (nd.weightsIH.length > 0 && nd.weightsIH[0].length !== nd.inputVectorSize) ) {
             nd.weightsIH = initializeMatrix(nd.hiddenLayerSize, nd.inputVectorSize);
             nd.biasesH = initializeVector(nd.hiddenLayerSize);
-            console.log(`Body ${this.id} brain: Initialized weightsIH/biasesH. Inputs: ${nd.inputVectorSize}, Hidden: ${nd.hiddenLayerSize}`);
+            // console.log(`Body ${this.id} brain: Initialized weightsIH/biasesH. Inputs: ${nd.inputVectorSize}, Hidden: ${nd.hiddenLayerSize}`);
         }
         
         if (!nd.weightsHO || nd.weightsHO.length !== nd.outputVectorSize || (nd.weightsHO.length > 0 && nd.weightsHO[0].length !== nd.hiddenLayerSize) ) {
             nd.weightsHO = initializeMatrix(nd.outputVectorSize, nd.hiddenLayerSize);
             nd.biasesO = initializeVector(nd.outputVectorSize);
-            console.log(`Body ${this.id} brain: Initialized weightsHO/biasesO. Outputs: ${nd.outputVectorSize}, Hidden: ${nd.hiddenLayerSize}`);
+            // console.log(`Body ${this.id} brain: Initialized weightsHO/biasesO. Outputs: ${nd.outputVectorSize}, Hidden: ${nd.hiddenLayerSize}`);
         }
     }
 
@@ -2787,6 +2788,7 @@ class FluidField {
     }
 
     draw(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight, viewOffsetXWorld, viewOffsetYWorld, currentZoom) {
+        console.log("Drawing with CPU FluidField"); // Ensure this log is active
         const N = Math.round(this.size);
         if (N <= 0 || !Number.isFinite(N)) {
             console.error("FluidField.draw: Invalid N size:", N);

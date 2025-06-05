@@ -261,7 +261,8 @@ function handleExportConfig() {
         photosynthesisEfficiency: PHOTOSYNTHESIS_EFFICIENCY,
         eyeDetectionRadius: EYE_DETECTION_RADIUS,
         showFluidVelocity: SHOW_FLUID_VELOCITY,
-        isHeadlessMode: IS_HEADLESS_MODE
+        isHeadlessMode: IS_HEADLESS_MODE,
+        useGpuFluidSimulation: USE_GPU_FLUID_SIMULATION
     };
     const jsonString = JSON.stringify(config, null, 2);
     const blob = new Blob([jsonString], {type: "application/json"});
@@ -482,4 +483,8 @@ const DEFAULT_ACTIVATION_PERIOD_MAX_TICKS = 300;
 // Dynamic Max Energy per Creature (New)
 // ... existing code ... 
 
-let IS_HEADLESS_MODE = false; // New: For toggling drawing off 
+let IS_HEADLESS_MODE = false; // New: For toggling drawing off
+let USE_GPU_FLUID_SIMULATION = false; // New: Switch for GPU fluid sim
+
+// --- Neural Network Constants ---
+// ... existing code ... 

@@ -149,6 +149,8 @@ const currentNutrientMultiplierDisplay = document.getElementById('currentNutrien
 const currentLightMultiplierDisplay = document.getElementById('currentLightMultiplierDisplay');
 const showFluidVelocityToggle = document.getElementById('showFluidVelocityToggle');
 const headlessModeToggle = document.getElementById('headlessModeToggle'); // New headless mode toggle
+const useGpuFluidToggle = document.getElementById('useGpuFluidToggle'); 
+console.log("useGpuFluidToggle element:", useGpuFluidToggle); // Log to see if element is found
 
 // --- Mouse Interaction State Variables ---
 let selectedSoftBodyPoint = null;
@@ -956,7 +958,7 @@ copyInfoPanelButton.onclick = function() {
 
 showFluidVelocityToggle.onchange = function() { SHOW_FLUID_VELOCITY = this.checked; };
 
-headlessModeToggle.onchange = function() { // Event listener for headless mode toggle
+headlessModeToggle.onchange = function() { 
     IS_HEADLESS_MODE = this.checked;
     if (IS_HEADLESS_MODE) {
         console.log("Headless mode enabled: Drawing will be skipped.");
@@ -964,6 +966,17 @@ headlessModeToggle.onchange = function() { // Event listener for headless mode t
         console.log("Headless mode disabled: Drawing will resume.");
     }
 };
+
+if (useGpuFluidToggle) { // Check if the element exists before assigning onchange
+    useGpuFluidToggle.onchange = function() { 
+        console.log("useGpuFluidToggle changed!"); // Add this unconditional log
+        USE_GPU_FLUID_SIMULATION = this.checked;
+        console.log(`GPU Fluid Simulation toggled: ${USE_GPU_FLUID_SIMULATION}. Re-initializing fluid simulation.`);
+        initFluidSimulation(); // Re-initialize to apply the change
+    };
+} else {
+    console.error("useGpuFluidToggle element not found!");
+}
 
 canvas.addEventListener('mousedown', (e) => {
     updateMouse(e);

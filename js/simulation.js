@@ -117,13 +117,67 @@ function initializePopulation() {
 function initFluidSimulation() {
     const scaleX = WORLD_WIDTH / FLUID_GRID_SIZE_CONTROL;
     const scaleY = WORLD_HEIGHT / FLUID_GRID_SIZE_CONTROL;
-    fluidField = new FluidField(FLUID_GRID_SIZE_CONTROL, FLUID_DIFFUSION, FLUID_VISCOSITY, 1/60, scaleX, scaleY);
+    const dt_simulation = 1/60; // Assuming a target of 60fps for dt in fluid sim, can be adjusted
+
+    if (USE_GPU_FLUID_SIMULATION) {
+        console.log("Attempting to initialize GPUFluidField...");
+        console.log("Canvas element being passed to GPUFluidField:", canvas); // Log the canvas
+        if (!canvas || typeof canvas.getContext !== 'function') {
+            console.error("CRITICAL: Main canvas object is invalid or not a canvas element before GPUFluidField instantiation!");
+            // Fallback to CPU if canvas is bad
+            console.warn("Falling back to CPU FluidField due to invalid canvas.");
+            fluidField = new FluidField(FLUID_GRID_SIZE_CONTROL, FLUID_DIFFUSION, FLUID_VISCOSITY, dt_simulation, scaleX, scaleY);
+        } else {
+            fluidField = new GPUFluidField(canvas, FLUID_GRID_SIZE_CONTROL, FLUID_DIFFUSION, FLUID_VISCOSITY, dt_simulation, scaleX, scaleY);
+            
+            console.log("GPUFluidField instance created in simulation.js:", fluidField);
+            let gpuSeemsEnabled = false;
+            if (fluidField && typeof fluidField.gpuEnabled === 'boolean') {
+                gpuSeemsEnabled = fluidField.gpuEnabled;
+                console.log("fluidField.gpuEnabled right after new GPUFluidField():", gpuSeemsEnabled);
+            } else if (fluidField) {
+                console.error("fluidField exists, but fluidField.gpuEnabled is not a boolean or is missing! Value:", fluidField.gpuEnabled);
+            } else {
+                console.error("fluidField is null or undefined immediately after new GPUFluidField()!");
+            }
+
+            if (!gpuSeemsEnabled) { 
+                console.warn("Fallback Condition Met: GPUFluidField initialization appears to have failed or gpuEnabled is false. fluidField was:", fluidField, "gpuEnabled property was:", gpuSeemsEnabled);
+                fluidField = new FluidField(FLUID_GRID_SIZE_CONTROL, FLUID_DIFFUSION, FLUID_VISCOSITY, dt_simulation, scaleX, scaleY);
+            }
+        }
+    } else {
+        console.log("Initializing CPU FluidField.");
+        fluidField = new FluidField(FLUID_GRID_SIZE_CONTROL, FLUID_DIFFUSION, FLUID_VISCOSITY, dt_simulation, scaleX, scaleY);
+    }
+
     fluidField.useWrapping = IS_WORLD_WRAPPING;
-    fluidField.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT; // Pass the cap
-    velocityEmitters = [];
-    if (offscreenFluidCanvas) {
-        offscreenFluidCanvas.width = Math.round(FLUID_GRID_SIZE_CONTROL); // Ensure integer
-        offscreenFluidCanvas.height = Math.round(FLUID_GRID_SIZE_CONTROL); // Ensure integer
+    fluidField.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT; 
+    velocityEmitters = []; // Clear any existing emitters when re-initializing
+    
+    // Offscreen canvas for fluid visualization (if used by CPU version, GPU might render differently)
+    // This part might need adjustment depending on how GPUFluidField.draw is implemented
+    if (!USE_GPU_FLUID_SIMULATION || (fluidField instanceof FluidField)) { // Check if it's actually the CPU version
+        if (typeof OffscreenCanvas !== 'undefined') {
+            try {
+                offscreenFluidCanvas = new OffscreenCanvas(Math.round(FLUID_GRID_SIZE_CONTROL), Math.round(FLUID_GRID_SIZE_CONTROL));
+                offscreenFluidCtx = offscreenFluidCanvas.getContext('2d');
+                console.log("Offscreen canvas for fluid rendering initialized.");
+            } catch (e) {
+                console.warn("OffscreenCanvas is not supported or failed to initialize. Fluid rendering might be less smooth.", e);
+                offscreenFluidCanvas = null; 
+                offscreenFluidCtx = null;
+            }
+        } else {
+            console.warn("OffscreenCanvas is not supported. Fluid rendering might be less smooth.");
+            offscreenFluidCanvas = null; 
+            offscreenFluidCtx = null;
+        }
+    } else {
+        // If using GPU, we might not need the CPU-based offscreen canvas for fluid drawing
+        offscreenFluidCanvas = null; 
+        offscreenFluidCtx = null;
+        console.log("GPU fluid simulation active, CPU offscreen fluid canvas not initialized.");
     }
 }
 
@@ -306,7 +360,7 @@ function draw() {
         drawViscosityMap(ctx, canvas.width, canvas.height, viewOffsetX, viewOffsetY, viewZoom);
     }
 
-    console.log("[Debug] In draw() function, about to check SHOW_FLUID_VELOCITY. Value:", SHOW_FLUID_VELOCITY);
+    //console.log("[Debug] In draw() function, about to check SHOW_FLUID_VELOCITY. Value:", SHOW_FLUID_VELOCITY);
     if (SHOW_FLUID_VELOCITY && fluidField) {
         drawFluidVelocities(ctx, fluidField, canvas.width, canvas.height, viewOffsetX, viewOffsetY, viewZoom);
     }

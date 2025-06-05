@@ -35,7 +35,7 @@ async function main() {
 
     initializeSpatialGrid();
     initializeAllSliderDisplays(); // Syncs HTML sliders with JS global defaults and updates display spans
-    await initFluidSimulation(); // Await the async fluid simulation initialization
+    await initFluidSimulation(USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
     initNutrientMap(); 
     initLightMap(); 
     initViscosityMap(); 
@@ -108,4 +108,4 @@ function gameLoop(timestamp) {
     animationFrameId = requestAnimationFrame(gameLoop); // Keep the loop going
 }
 
-main(); // Start the main sequence 
+document.addEventListener('DOMContentLoaded', main);

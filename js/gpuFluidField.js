@@ -136,6 +136,77 @@ fn main(@location(0) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
     return textureSample(u_displayTexture, u_sampler, texCoord);
 }
         `,
+        fluidQueryCompute: `
+struct PointQuery {
+    position: vec2<f32>,
+    // query_idx: u32, // Implicit via global_invocation_id
+};
+
+struct FluidQueryResult {
+    density: vec4<f32>,
+    velocity: vec2<f32>,
+    nutrient: f32,
+    light: f32,
+    viscosity_multiplier: f32,
+};
+
+struct FluidGlobalUniforms {
+    world_to_grid_scale: vec2<f32>,
+    grid_dimensions: vec2<u32>,
+    // Add padding if needed for alignment, e.g., two f32s to make struct size multiple of 16 if vec2<u32> causes issues.
+    // For now, assume it aligns okay or the driver handles it.
+};
+
+@group(0) @binding(0) var<storage, read> point_queries: array<PointQuery>;     // Input: World positions to query
+@group(0) @binding(1) var<storage, read_write> query_results: array<FluidQueryResult>; // Output: Sampled data
+@group(0) @binding(2) var<uniform> globals: FluidGlobalUniforms;           // Uniforms: scales, dimensions
+
+@group(0) @binding(3) var texture_density: texture_2d<f32>;      // Current density texture (e.g., densityPing)
+@group(0) @binding(4) var texture_velocity: texture_2d<f32>;     // Current velocity texture (e.g., velocityPing)
+// Nutrient, Light, Viscosity are currently CPU-side only. 
+// When/if they move to GPU textures, add bindings for them here:
+// @group(0) @binding(5) var texture_nutrient: texture_2d<f32>;
+// @group(0) @binding(6) var texture_light: texture_2d<f32>;
+// @group(0) @binding(7) var texture_viscosity: texture_2d<f32>;
+
+// Sampler not typically needed for textureLoad with integer coords and LOD 0.
+// If textureSample was used, a sampler binding would be here.
+
+@compute @workgroup_size(64) // Can be tuned, e.g., 64 or 256
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let query_idx = global_id.x;
+
+    if (query_idx >= arrayLength(&point_queries)) {
+        return;
+    }
+
+    let query = point_queries[query_idx];
+    var result: FluidQueryResult;
+
+    // Convert world position to normalized texture coordinates (0-1) first, then to integer grid coords
+    // assuming query.position.y might need flipping from world to texture space if origins differ.
+    // let norm_tex_coord = vec2<f32>(query.position.x * globals.world_to_grid_scale.x, 
+    //                               (1.0 - query.position.y * globals.world_to_grid_scale.y) * globals.grid_dimensions.y / globals.grid_dimensions.y); // Example with Y flip
+    // For now, assuming direct scale to grid, and world Y matches texture Y direction for simplicity.
+    let grid_coord_f = query.position * globals.world_to_grid_scale; 
+    let grid_coord_i = vec2<i32>(floor(grid_coord_f));
+
+    // Clamp grid coordinates to be within texture dimensions
+    let clamped_coord = clamp(grid_coord_i, vec2<i32>(0,0), vec2<i32>(globals.grid_dimensions) - vec2<i32>(1,1));
+
+    result.density = textureLoad(texture_density, clamped_coord, 0); // LOD 0
+    let raw_velocity = textureLoad(texture_velocity, clamped_coord, 0);
+    result.velocity = raw_velocity.xy;
+
+    // Placeholder values for CPU-side fields
+    // When nutrient/light/viscosity are GPU textures, sample them here like density/velocity.
+    result.nutrient = 1.0;            // Default placeholder
+    result.light = 0.5;               // Default placeholder
+    result.viscosity_multiplier = 1.0; // Default placeholder
+
+    query_results[query_idx] = result;
+}
+        `,
     };
 
     constructor(canvas, size, diffusion, viscosity, dt, scaleX, scaleY) {
@@ -331,11 +402,66 @@ fn main(@location(0) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
 
     _initializeWebGPUResources() {
         if (!this.device) return;
-        this._initGeometry();      // Sets up quadVertexBuffer and vertexState
-        this._initSampler();       // Sets up a common sampler
-        this._initTextures();      // Sets up WebGPU textures (density, velocity etc.)
-        // Framebuffers are part of render pass descriptors, so _initFramebuffers might be refactored/removed
-        this._initShadersAndPipelines(); // Compiles WGSL, creates pipelines
+        console.log("GPUFluidField: Initializing WebGPU-specific resources...");
+        this._initGeometry();      
+        this._initSampler();       
+        this._initTextures();      
+        this._initShadersAndPipelines(); 
+        this._initComputeQueryResources(); // New call
+    }
+
+    _initComputeQueryResources() {
+        if (!this.device) return;
+        console.log("GPUFluidField: Initializing compute query resources...");
+
+        // Define struct sizes (in bytes) - ensure these match WGSL layout eventually, considering padding.
+        const pointQueryStructSizeBytes = 2 * Float32Array.BYTES_PER_ELEMENT; // vec2<f32> position
+        const fluidQueryResultStructSizeBytes = (4 + 2 + 1 + 1 + 1) * Float32Array.BYTES_PER_ELEMENT; // density:vec4, vel:vec2, nutr:f32, light:f32, visc:f32
+        const fluidGlobalsStructSizeBytes = (2 * Float32Array.BYTES_PER_ELEMENT) + (2 * Uint32Array.BYTES_PER_ELEMENT); // scale:vec2f, dims:vec2u
+                                          // Ensure alignment for u32 if it follows vec2f, usually 16 bytes total is fine.
+
+        this.pointQueriesBuffer = this.device.createBuffer({
+            label: "Point Queries Input Buffer",
+            size: MAX_SIMULTANEOUS_FLUID_QUERIES * pointQueryStructSizeBytes,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+
+        this.queryResultsBuffer = this.device.createBuffer({
+            label: "Query Results GPU Buffer",
+            size: MAX_SIMULTANEOUS_FLUID_QUERIES * fluidQueryResultStructSizeBytes,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC, // Source for copying to staging buffer
+        });
+
+        this.queryResultsStagingBuffer = this.device.createBuffer({
+            label: "Query Results Staging Buffer (CPU Read)",
+            size: MAX_SIMULTANEOUS_FLUID_QUERIES * fluidQueryResultStructSizeBytes,
+            usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST, // Destination for copy, mappable for CPU read
+        });
+
+        // Uniform buffer for compute shader globals
+        const initialFluidQueryUniforms = new ArrayBuffer(fluidGlobalsStructSizeBytes);
+        // Use Float32Array and Uint32Array views for setting data correctly
+        const uniformViewF32 = new Float32Array(initialFluidQueryUniforms);
+        const uniformViewU32 = new Uint32Array(initialFluidQueryUniforms);
+
+        // world_to_grid_scale: vec2<f32>
+        uniformViewF32[0] = this.size / WORLD_WIDTH;  // (FLUID_GRID_SIZE_CONTROL / WORLD_WIDTH) effectively 1.0 / this.scaleX
+        uniformViewF32[1] = this.size / WORLD_HEIGHT; // (FLUID_GRID_SIZE_CONTROL / WORLD_HEIGHT) effectively 1.0 / this.scaleY
+        
+        // grid_dimensions: vec2<u32> (offset by 2 floats = 8 bytes)
+        uniformViewU32[2] = this.size; // this.size is FLUID_GRID_SIZE_CONTROL
+        uniformViewU32[3] = this.size;
+
+        this.fluidQueryUniformsBuffer = this.device.createBuffer({
+            label: "Fluid Query Global Uniforms Buffer",
+            size: fluidGlobalsStructSizeBytes, // Should be multiple of 16 for uniform buffers ideally
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+            mappedAtCreation: true, // Create mapped to write initial values
+        });
+        new Uint8Array(this.fluidQueryUniformsBuffer.getMappedRange()).set(new Uint8Array(initialFluidQueryUniforms));
+        this.fluidQueryUniformsBuffer.unmap();
+
+        console.log("GPUFluidField: Compute query buffers and uniforms buffer created.");
     }
 
     _initGeometry() {
@@ -535,7 +661,22 @@ fn main(@location(0) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
                 primitive: { topology: 'triangle-list' },
             });
 
-            console.log("GPUFluidField: All WebGPU pipelines created successfully:", Object.keys(this.programs));
+            // --- Compute Pipeline for Fluid Queries ---
+            const fluidQueryComputeModule = this.device.createShaderModule({
+                label: 'Fluid Query Compute Shader Module',
+                code: this.wgslShaders.fluidQueryCompute,
+            });
+
+            this.programs.fluidQueryComputePipeline = this.device.createComputePipeline({
+                label: 'Fluid Query Compute Pipeline',
+                layout: 'auto', // Let WebGPU infer layout. For complex cases, create explicit GPUPipelineLayout.
+                compute: {
+                    module: fluidQueryComputeModule,
+                    entryPoint: 'main',
+                },
+            });
+            console.log("GPUFluidField: Fluid query compute pipeline created.");
+            console.log("GPUFluidField: All WebGPU pipelines (render & compute) created successfully:", Object.keys(this.programs));
 
         } catch (error) {
             console.error("GPUFluidField: Error initializing WebGPU shaders/pipelines:", error);
@@ -981,6 +1122,58 @@ fn main(@location(0) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
         }
     }
 
+    // --- NEW PLACEHOLDER DATA ACCESS METHODS ---
+    getDensityAtWorld(worldX, worldY) {
+        if (!this.gpuEnabled || !this.device) return [0,0,0,0]; // r,g,b,a - default transparent black
+        // TODO WebGPU: Implement proper texture readback or sampling via compute shader for accurate data.
+        // For now, return a dummy value.
+        // console.warn("GPUFluidField.getDensityAtWorld() is a placeholder.");
+        return [Math.random()*5, Math.random()*5, Math.random()*5, 0.1]; // Slight random color for testing
+    }
+
+    getVelocityAtWorld(worldX, worldY) {
+        if (!this.gpuEnabled || !this.device) return {vx: 0, vy: 0};
+        // TODO WebGPU: Implement proper texture readback or sampling.
+        // console.warn("GPUFluidField.getVelocityAtWorld() is a placeholder.");
+        return {vx: (Math.random()-0.5)*0.1, vy: (Math.random()-0.5)*0.1 }; // Slight random velocity
+    }
+
+    // For nutrient, light, viscosity, these are currently global CPU arrays.
+    // If/when these also move to GPU textures controlled by GPUFluidField, they'll need similar methods.
+    // For now, SoftBody will access the global CPU arrays directly for these specific fields.
+    // However, to make the interface consistent if GPUFluidField were to manage them:
+    getNutrientAtWorld(worldX, worldY) {
+        if (!this.gpuEnabled || !this.device) return 1.0; // Default nutrient
+        // This method assumes nutrientField is a GPU texture. Currently it's not.
+        // If it were, logic similar to getDensityAtWorld would be here.
+        // console.warn("GPUFluidField.getNutrientAtWorld() called, but nutrients are CPU-side. Returning default.");
+        // For placeholder, let's simulate getting it from a hypothetical GPU texture.
+        // We need to map worldX, worldY to grid coordinates first.
+        const gx = Math.floor(worldX / this.scaleX); // scaleX is world_units_per_grid_cell for the GPU grid
+        const gy = Math.floor(worldY / this.scaleY);
+        // Here you would sample the GPU nutrient texture if it existed.
+        // Since it doesn't, we return a default or try to access the global CPU one (which SoftBody will do anyway).
+        // To avoid breaking SoftBody if it expects this method from a GPU field, return default.
+        return 1.0 + (Math.random()-0.5)*0.2; // Default nutrient slightly varied
+    }
+
+    getLightAtWorld(worldX, worldY) {
+        if (!this.gpuEnabled || !this.device) return 0.5; // Default light
+        // console.warn("GPUFluidField.getLightAtWorld() called, but light is CPU-side. Returning default.");
+        return 0.5 + (Math.random()-0.5)*0.1;
+    }
+
+    getViscosityAtWorld(worldX, worldY) {
+        if (!this.gpuEnabled || !this.device) return 1.0; // Default viscosity multiplier
+        // console.warn("GPUFluidField.getViscosityAtWorld() called, but viscosity is CPU-side. Returning default.");
+        return 1.0;
+    }
+
+    // IX method is specific to CPU fluid field for direct array access. 
+    // GPU field doesn't have a direct equivalent for external callers in the same way.
+    // If SoftBody needs cell indices for GPUFluidField, it would calculate them itself using
+    // this.scaleX, this.scaleY, this.size, as these are public.
+
     // --- Internal WebGL Helper Methods (Private-like) ---
     _createTexture(gl, target, width, height, internalFormat, format, type, data, filter = gl.NEAREST, wrap = gl.CLAMP_TO_EDGE) {
         const texture = gl.createTexture();
@@ -1112,5 +1305,99 @@ fn main(@location(0) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
         } else if (this.gl) { 
             // ... (Existing WebGL logic remains unchanged)
         }
+    }
+
+    // --- NEW COMPUTE SHADER BASED DATA QUERY METHOD ---
+    async queryFluidPropertiesForPoints(pointsToQuery) { // pointsToQuery is an array of {worldX, worldY, ...any other IDs}
+        if (!this.device || !this.gpuEnabled || !this.programs.fluidQueryComputePipeline) {
+            console.warn("GPUFluidField.queryFluidPropertiesForPoints: WebGPU not ready or compute pipeline missing.");
+            // Fallback: return array of default values matching expected structure
+            return pointsToQuery.map(() => ({
+                density: [0, 0, 0, 0],
+                velocity: { vx: 0, vy: 0 },
+                nutrient: 1.0,
+                light: 0.5,
+                viscosity_multiplier: 1.0
+            }));
+        }
+
+        const numPoints = Math.min(pointsToQuery.length, MAX_SIMULTANEOUS_FLUID_QUERIES);
+        if (numPoints === 0) return [];
+
+        // 1. Prepare Input Buffer Data
+        const pointQueryStructSizeBytes = 2 * Float32Array.BYTES_PER_ELEMENT; // vec2<f32> position
+        const inputDataArrayBuffer = new ArrayBuffer(numPoints * pointQueryStructSizeBytes);
+        const inputDataView = new Float32Array(inputDataArrayBuffer);
+
+        for (let i = 0; i < numPoints; i++) {
+            inputDataView[i * 2 + 0] = pointsToQuery[i].worldX;
+            // Assuming world Y up, texture Y up for now as per compute shader direct scale
+            // If texture Y is inverted relative to world Y for sampling in render passes, 
+            // ensure compute shader query also accounts for this if necessary or use consistent coords.
+            // The compute shader uses `query.position * globals.world_to_grid_scale;`
+            // If world_to_grid_scale.y is positive, it assumes Y is not inverted by this stage.
+            inputDataView[i * 2 + 1] = pointsToQuery[i].worldY; 
+        }
+        this.device.queue.writeBuffer(this.pointQueriesBuffer, 0, inputDataArrayBuffer, 0, numPoints * pointQueryStructSizeBytes);
+
+        // 2. Create Bind Group
+        const bindGroup = this.device.createBindGroup({
+            label: "Fluid Query Compute Bind Group",
+            layout: this.programs.fluidQueryComputePipeline.getBindGroupLayout(0), // Assuming layout is at group 0
+            entries: [
+                { binding: 0, resource: { buffer: this.pointQueriesBuffer, size: numPoints * pointQueryStructSizeBytes } },
+                { binding: 1, resource: { buffer: this.queryResultsBuffer, size: numPoints * this._getFluidQueryResultStructSizeBytes() } }, // Use a helper for size
+                { binding: 2, resource: { buffer: this.fluidQueryUniformsBuffer } },
+                { binding: 3, resource: this.textures.densityPing.createView() }, // Or current density texture
+                { binding: 4, resource: this.textures.velocityPing.createView() }, // Or current velocity texture
+                // TODO: Add nutrient, light, viscosity texture views when they are on GPU
+            ],
+        });
+
+        // 3. Dispatch Compute Shader
+        const commandEncoder = this.device.createCommandEncoder({ label: "Fluid Query Command Encoder" });
+        const passEncoder = commandEncoder.beginComputePass({ label: "Fluid Query Compute Pass" });
+        passEncoder.setPipeline(this.programs.fluidQueryComputePipeline);
+        passEncoder.setBindGroup(0, bindGroup);
+        const workgroupSize = 64; // Must match @workgroup_size in WGSL
+        passEncoder.dispatchWorkgroups(Math.ceil(numPoints / workgroupSize));
+        passEncoder.end();
+
+        // 4. Copy Results to Staging Buffer
+        const resultsBufferSize = numPoints * this._getFluidQueryResultStructSizeBytes();
+        commandEncoder.copyBufferToBuffer(
+            this.queryResultsBuffer, 0,       // Source
+            this.queryResultsStagingBuffer, 0, // Destination
+            resultsBufferSize                 // Size
+        );
+
+        // 5. Submit and Map
+        this.device.queue.submit([commandEncoder.finish()]);
+        
+        await this.queryResultsStagingBuffer.mapAsync(GPUMapMode.READ, 0, resultsBufferSize);
+        const resultsArrayBuffer = this.queryResultsStagingBuffer.getMappedRange(0, resultsBufferSize);
+        const outputDataView = new Float32Array(resultsArrayBuffer.slice(0)); // Create a copy for unmapping
+        this.queryResultsStagingBuffer.unmap();
+
+        // 6. Process and Return Results
+        const results = [];
+        const resultFloatsPerPoint = this._getFluidQueryResultStructSizeBytes() / Float32Array.BYTES_PER_ELEMENT;
+        for (let i = 0; i < numPoints; i++) {
+            const offset = i * resultFloatsPerPoint;
+            results.push({
+                density: [outputDataView[offset + 0], outputDataView[offset + 1], outputDataView[offset + 2], outputDataView[offset + 3]],
+                velocity: { vx: outputDataView[offset + 4], vy: outputDataView[offset + 5] },
+                nutrient: outputDataView[offset + 6],
+                light: outputDataView[offset + 7],
+                viscosity_multiplier: outputDataView[offset + 8],
+                // originalQueryData: pointsToQuery[i] // Optionally include original query data if needed for mapping back
+            });
+        }
+        return results;
+    }
+
+    // Helper to get struct size, useful if it becomes more complex or padded
+    _getFluidQueryResultStructSizeBytes() {
+        return (4 + 2 + 1 + 1 + 1) * Float32Array.BYTES_PER_ELEMENT; // density:vec4, vel:vec2, nutr:f32, light:f32, visc:f32
     }
 }

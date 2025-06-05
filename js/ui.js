@@ -1,7 +1,9 @@
 // --- DOM Element Selections ---
 const canvas = document.getElementById('simulationCanvas');
 const ctx = canvas.getContext('2d');
-let offscreenFluidCanvas, offscreenFluidCtx; // For smoother fluid rendering
+const webgpuCanvas = document.getElementById('webgpuFluidCanvas');
+let offscreenFluidCanvas, offscreenFluidCtx;
+
 
 const worldWidthInput = document.getElementById('worldWidthInput');
 const worldHeightInput = document.getElementById('worldHeightInput');
@@ -149,12 +151,12 @@ const currentNutrientMultiplierDisplay = document.getElementById('currentNutrien
 const currentLightMultiplierDisplay = document.getElementById('currentLightMultiplierDisplay');
 const showFluidVelocityToggle = document.getElementById('showFluidVelocityToggle');
 const headlessModeToggle = document.getElementById('headlessModeToggle'); // New headless mode toggle
-const useGpuFluidToggle = document.getElementById('useGpuFluidToggle'); 
+const useGpuFluidToggle = document.getElementById('useGpuFluidToggle');
 console.log("useGpuFluidToggle element:", useGpuFluidToggle); // Log to see if element is found
 
 // --- Mouse Interaction State Variables ---
 let selectedSoftBodyPoint = null;
-let mouse = { x: 0, y: 0, prevX: 0, prevY: 0, isDown: false, dx:0, dy:0 };
+let mouse = {x: 0, y: 0, prevX: 0, prevY: 0, isDown: false, dx: 0, dy: 0};
 // isRightDragging already declared in config.js
 let panStartMouseDisplayX = 0;
 let panStartMouseDisplayY = 0;
@@ -172,15 +174,15 @@ function updateSliderDisplay(slider, span) {
         span.textContent = value.toFixed(4);
     } else if (slider.id === 'bodyFluidEntrainment' || slider.id === 'fluidFade') { // fluidFadeSlider was fluidFadeValueSpan
         span.textContent = value.toFixed(3);
-    } else if (slider.id === 'globalMutationRate' || slider.id === 'bodyPushStrength' || 
-               slider.id === 'photosyntheticNodeCost' || slider.id === 'maxFluidVelocityComponentSlider' ||
-               slider.id === 'particleFluidInfluence') {
+    } else if (slider.id === 'globalMutationRate' || slider.id === 'bodyPushStrength' ||
+        slider.id === 'photosyntheticNodeCost' || slider.id === 'maxFluidVelocityComponentSlider' ||
+        slider.id === 'particleFluidInfluence') {
         span.textContent = value.toFixed(2);
-    } else if (slider.id === 'fluidCurrentStrength' || slider.id === 'bodyRepulsionStrength' || 
-               slider.id === 'bodyRepulsionRadiusFactor' || slider.id === 'baseNodeCost' || 
-               slider.id === 'emitterNodeCost' || slider.id === 'eaterNodeCost' || 
-               slider.id === 'predatorNodeCost' || slider.id === 'photosynthesisEfficiency' || 
-               slider.id === 'emitterStrength') {
+    } else if (slider.id === 'fluidCurrentStrength' || slider.id === 'bodyRepulsionStrength' ||
+        slider.id === 'bodyRepulsionRadiusFactor' || slider.id === 'baseNodeCost' ||
+        slider.id === 'emitterNodeCost' || slider.id === 'eaterNodeCost' ||
+        slider.id === 'predatorNodeCost' || slider.id === 'photosynthesisEfficiency' ||
+        slider.id === 'emitterStrength') {
         span.textContent = value.toFixed(1);
     } else if (slider.id === 'fluidDiffusion' || slider.id === 'fluidViscosity') {
         span.textContent = value.toExponential(1);
@@ -284,6 +286,7 @@ function updateInstabilityIndicator() {
         instabilityLight.classList.remove('unstable');
     }
 }
+
 function updatePopulationCount() {
     populationCountDisplay.textContent = `Population: ${softBodyPopulation.length}`;
     particleCountDisplay.textContent = `Particles: ${particles.length}`;
@@ -331,10 +334,10 @@ function updateInfoPanel() {
             reproGenePEL = createInfoPanelParagraph(infoPanel.querySelector('.info-section'), 'infoBodyReproCooldownGene', 'Repro. Cooldown Gene:');
             reproGeneEl = reproGenePEL.querySelector('span'); // Get the span from the new P
         } else {
-             reproGeneEl = reproGenePEL.querySelector('span'); // Ensure we have the span if P exists
+            reproGeneEl = reproGenePEL.querySelector('span'); // Ensure we have the span if P exists
         }
         if (reproGeneEl) reproGeneEl.textContent = selectedInspectBody.reproductionCooldownGene;
-        
+
 
         let effectiveReproEl = document.getElementById('infoBodyEffectiveReproCooldownVal'); // Target the span
         let effectiveReproPEL = document.getElementById('infoBodyEffectiveReproCooldownP'); // Target the P
@@ -407,8 +410,8 @@ function updateInfoPanel() {
         if (!infoPanel.classList.contains('open')) {
             infoPanel.classList.add('open');
         }
-    } else { 
-        allPointsInfoContainer.innerHTML = ''; 
+    } else {
+        allPointsInfoContainer.innerHTML = '';
         document.getElementById('infoBodyId').textContent = '-';
         document.getElementById('infoBodyStiffness').textContent = '-';
         document.getElementById('infoBodyDamping').textContent = '-';
@@ -532,7 +535,7 @@ function getMouseWorldCoordinates(displayMouseX, displayMouseY) {
     const worldX = (mouseOnUnscaledBitmapX / viewZoom) + viewOffsetX;
     const worldY = (mouseOnUnscaledBitmapY / viewZoom) + viewOffsetY;
 
-    return { x: worldX, y: worldY };
+    return {x: worldX, y: worldY};
 }
 
 // --- Event Listeners ---
@@ -549,11 +552,19 @@ document.addEventListener('keydown', (e) => {
     const panSpeed = VIEW_PAN_SPEED / viewZoom;
 
 
-    switch(e.key.toLowerCase()) {
-        case 'w': viewOffsetY = Math.max(0, viewOffsetY - panSpeed); break;
-        case 's': viewOffsetY = Math.min(maxPanY, viewOffsetY + panSpeed); break;
-        case 'a': viewOffsetX = Math.max(0, viewOffsetX - panSpeed); break;
-        case 'd': viewOffsetX = Math.min(maxPanX, viewOffsetX + panSpeed); break;
+    switch (e.key.toLowerCase()) {
+        case 'w':
+            viewOffsetY = Math.max(0, viewOffsetY - panSpeed);
+            break;
+        case 's':
+            viewOffsetY = Math.min(maxPanY, viewOffsetY + panSpeed);
+            break;
+        case 'a':
+            viewOffsetX = Math.max(0, viewOffsetX - panSpeed);
+            break;
+        case 'd':
+            viewOffsetX = Math.min(maxPanX, viewOffsetX + panSpeed);
+            break;
         case 'p':
             IS_SIMULATION_PAUSED = !IS_SIMULATION_PAUSED;
             pauseResumeButton.textContent = IS_SIMULATION_PAUSED ? "Resume" : "Pause";
@@ -566,14 +577,20 @@ document.addEventListener('keydown', (e) => {
 });
 
 
-worldWrapToggle.onchange = function() {
+worldWrapToggle.onchange = function () {
     IS_WORLD_WRAPPING = this.checked;
     if (fluidField) fluidField.useWrapping = IS_WORLD_WRAPPING;
 }
-maxTimestepSlider.oninput = function() { MAX_DELTA_TIME_MS = parseInt(this.value); updateSliderDisplay(this, maxTimestepValueSpan); }
-zoomSensitivitySlider.oninput = function() { ZOOM_SENSITIVITY = parseFloat(this.value); updateSliderDisplay(this, zoomSensitivityValueSpan); }
+maxTimestepSlider.oninput = function () {
+    MAX_DELTA_TIME_MS = parseInt(this.value);
+    updateSliderDisplay(this, maxTimestepValueSpan);
+}
+zoomSensitivitySlider.oninput = function () {
+    ZOOM_SENSITIVITY = parseFloat(this.value);
+    updateSliderDisplay(this, zoomSensitivityValueSpan);
+}
 
-pauseResumeButton.onclick = function() {
+pauseResumeButton.onclick = function () {
     IS_SIMULATION_PAUSED = !IS_SIMULATION_PAUSED;
     this.textContent = IS_SIMULATION_PAUSED ? "Resume" : "Pause";
     if (!IS_SIMULATION_PAUSED) {
@@ -581,22 +598,22 @@ pauseResumeButton.onclick = function() {
         requestAnimationFrame(gameLoop); // gameLoop is in main.js
     }
 }
-toggleControlsButton.onclick = function() {
+toggleControlsButton.onclick = function () {
     controlsPanel.classList.toggle('open');
 }
 
-toggleStatsPanelButton.onclick = function() {
+toggleStatsPanelButton.onclick = function () {
     statsPanel.classList.toggle('open');
     if (statsPanel.classList.contains('open')) {
         updateStatsPanel();
     }
 }
 
-closeStatsPanelButton.onclick = function() {
+closeStatsPanelButton.onclick = function () {
     statsPanel.classList.remove('open');
 }
 
-copyStatsPanelButton.onclick = function() {
+copyStatsPanelButton.onclick = function () {
     const nodeStatsDiv = document.getElementById('nodeTypeStats');
     const mutationStatsDiv = document.getElementById('mutationTypeStats');
     let textToCopy = "Simulation Statistics\n----------------------\n\n";
@@ -679,20 +696,32 @@ document.addEventListener('fullscreenchange', () => {
         screensaverButton.textContent = "Enter Screensaver";
         screensaverButton.classList.remove('in-screensaver');
     } else {
-         document.body.classList.add('css-screensaver-active');
-         screensaverButton.textContent = "Exit Screensaver";
-         screensaverButton.classList.add('in-screensaver');
+        document.body.classList.add('css-screensaver-active');
+        screensaverButton.textContent = "Exit Screensaver";
+        screensaverButton.classList.add('in-screensaver');
     }
 });
 
 
-creaturePopulationFloorSlider.oninput = function() { CREATURE_POPULATION_FLOOR = parseInt(this.value); updateSliderDisplay(this, creaturePopulationFloorValueSpan); }
-creaturePopulationCeilingSlider.oninput = function() { CREATURE_POPULATION_CEILING = parseInt(this.value); updateSliderDisplay(this, creaturePopulationCeilingValueSpan); }
-particlePopulationFloorSlider.oninput = function() { PARTICLE_POPULATION_FLOOR = parseInt(this.value); updateSliderDisplay(this, particlePopulationFloorValueSpan); }
-particlePopulationCeilingSlider.oninput = function() { PARTICLE_POPULATION_CEILING = parseInt(this.value); updateSliderDisplay(this, particlePopulationCeilingValueSpan); }
+creaturePopulationFloorSlider.oninput = function () {
+    CREATURE_POPULATION_FLOOR = parseInt(this.value);
+    updateSliderDisplay(this, creaturePopulationFloorValueSpan);
+}
+creaturePopulationCeilingSlider.oninput = function () {
+    CREATURE_POPULATION_CEILING = parseInt(this.value);
+    updateSliderDisplay(this, creaturePopulationCeilingValueSpan);
+}
+particlePopulationFloorSlider.oninput = function () {
+    PARTICLE_POPULATION_FLOOR = parseInt(this.value);
+    updateSliderDisplay(this, particlePopulationFloorValueSpan);
+}
+particlePopulationCeilingSlider.oninput = function () {
+    PARTICLE_POPULATION_CEILING = parseInt(this.value);
+    updateSliderDisplay(this, particlePopulationCeilingValueSpan);
+}
 
 
-emitterEditModeToggle.onchange = function() {
+emitterEditModeToggle.onchange = function () {
     IS_EMITTER_EDIT_MODE = this.checked;
     canvas.classList.toggle('emitter-edit-mode', IS_EMITTER_EDIT_MODE);
     if (!IS_EMITTER_EDIT_MODE) {
@@ -700,29 +729,79 @@ emitterEditModeToggle.onchange = function() {
         emitterDragStartCell = null;
     }
 }
-emitterStrengthSlider.oninput = function() { EMITTER_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, emitterStrengthValueSpan); }
-clearEmittersButton.onclick = function() { velocityEmitters = []; }
+emitterStrengthSlider.oninput = function () {
+    EMITTER_STRENGTH = parseFloat(this.value);
+    updateSliderDisplay(this, emitterStrengthValueSpan);
+}
+clearEmittersButton.onclick = function () {
+    velocityEmitters = [];
+}
 
 
-bodyFluidEntrainmentSlider.oninput = function() { BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(this.value); updateSliderDisplay(this, bodyFluidEntrainmentValueSpan); }
-fluidCurrentStrengthSlider.oninput = function() { FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(this.value); updateSliderDisplay(this, fluidCurrentStrengthValueSpan); }
-bodyPushStrengthSlider.oninput = function() { SOFT_BODY_PUSH_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, bodyPushStrengthValueSpan); }
-bodyRepulsionStrengthSlider.oninput = function() { BODY_REPULSION_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, bodyRepulsionStrengthValueSpan); }
-bodyRepulsionRadiusFactorSlider.oninput = function() { BODY_REPULSION_RADIUS_FACTOR = parseFloat(this.value); updateSliderDisplay(this, bodyRepulsionRadiusFactorValueSpan); }
-globalMutationRateSlider.oninput = function() { GLOBAL_MUTATION_RATE_MODIFIER = parseFloat(this.value); updateSliderDisplay(this, globalMutationRateValueSpan); }
+bodyFluidEntrainmentSlider.oninput = function () {
+    BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(this.value);
+    updateSliderDisplay(this, bodyFluidEntrainmentValueSpan);
+}
+fluidCurrentStrengthSlider.oninput = function () {
+    FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(this.value);
+    updateSliderDisplay(this, fluidCurrentStrengthValueSpan);
+}
+bodyPushStrengthSlider.oninput = function () {
+    SOFT_BODY_PUSH_STRENGTH = parseFloat(this.value);
+    updateSliderDisplay(this, bodyPushStrengthValueSpan);
+}
+bodyRepulsionStrengthSlider.oninput = function () {
+    BODY_REPULSION_STRENGTH = parseFloat(this.value);
+    updateSliderDisplay(this, bodyRepulsionStrengthValueSpan);
+}
+bodyRepulsionRadiusFactorSlider.oninput = function () {
+    BODY_REPULSION_RADIUS_FACTOR = parseFloat(this.value);
+    updateSliderDisplay(this, bodyRepulsionRadiusFactorValueSpan);
+}
+globalMutationRateSlider.oninput = function () {
+    GLOBAL_MUTATION_RATE_MODIFIER = parseFloat(this.value);
+    updateSliderDisplay(this, globalMutationRateValueSpan);
+}
 
-baseNodeCostSlider.oninput = function() { BASE_NODE_EXISTENCE_COST = parseFloat(this.value); updateSliderDisplay(this, baseNodeCostValueSpan); }
-emitterNodeCostSlider.oninput = function() { EMITTER_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, emitterNodeCostValueSpan); }
-eaterNodeCostSlider.oninput = function() { EATER_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, eaterNodeCostValueSpan); }
-predatorNodeCostSlider.oninput = function() { PREDATOR_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, predatorNodeCostValueSpan); }
-neuronNodeCostSlider.oninput = function() { NEURON_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, neuronNodeCostValueSpan); }
-photosyntheticNodeCostSlider.oninput = function() { PHOTOSYNTHETIC_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, photosyntheticNodeCostValueSpan); }
-photosynthesisEfficiencySlider.oninput = function() { PHOTOSYNTHESIS_EFFICIENCY = parseFloat(this.value); updateSliderDisplay(this, photosynthesisEfficiencyValueSpan); }
-swimmerNodeCostSlider.oninput = function() { SWIMMER_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, swimmerNodeCostValueSpan); }
-eyeNodeCostSlider.oninput = function() { EYE_NODE_ENERGY_COST = parseFloat(this.value); updateSliderDisplay(this, eyeNodeCostValueSpan); }
+baseNodeCostSlider.oninput = function () {
+    BASE_NODE_EXISTENCE_COST = parseFloat(this.value);
+    updateSliderDisplay(this, baseNodeCostValueSpan);
+}
+emitterNodeCostSlider.oninput = function () {
+    EMITTER_NODE_ENERGY_COST = parseFloat(this.value);
+    updateSliderDisplay(this, emitterNodeCostValueSpan);
+}
+eaterNodeCostSlider.oninput = function () {
+    EATER_NODE_ENERGY_COST = parseFloat(this.value);
+    updateSliderDisplay(this, eaterNodeCostValueSpan);
+}
+predatorNodeCostSlider.oninput = function () {
+    PREDATOR_NODE_ENERGY_COST = parseFloat(this.value);
+    updateSliderDisplay(this, predatorNodeCostValueSpan);
+}
+neuronNodeCostSlider.oninput = function () {
+    NEURON_NODE_ENERGY_COST = parseFloat(this.value);
+    updateSliderDisplay(this, neuronNodeCostValueSpan);
+}
+photosyntheticNodeCostSlider.oninput = function () {
+    PHOTOSYNTHETIC_NODE_ENERGY_COST = parseFloat(this.value);
+    updateSliderDisplay(this, photosyntheticNodeCostValueSpan);
+}
+photosynthesisEfficiencySlider.oninput = function () {
+    PHOTOSYNTHESIS_EFFICIENCY = parseFloat(this.value);
+    updateSliderDisplay(this, photosynthesisEfficiencyValueSpan);
+}
+swimmerNodeCostSlider.oninput = function () {
+    SWIMMER_NODE_ENERGY_COST = parseFloat(this.value);
+    updateSliderDisplay(this, swimmerNodeCostValueSpan);
+}
+eyeNodeCostSlider.oninput = function () {
+    EYE_NODE_ENERGY_COST = parseFloat(this.value);
+    updateSliderDisplay(this, eyeNodeCostValueSpan);
+}
 
 
-resetButton.onclick = function() {
+resetButton.onclick = function () {
     initializePopulation();
     isAnySoftBodyUnstable = false;
     updateInstabilityIndicator();
@@ -739,7 +818,7 @@ resetButton.onclick = function() {
     }
 }
 
-resizeWorldButton.onclick = function() {
+resizeWorldButton.onclick = function () {
     const newWidth = parseInt(worldWidthInput.value);
     const newHeight = parseInt(worldHeightInput.value);
 
@@ -759,10 +838,10 @@ resizeWorldButton.onclick = function() {
     viewOffsetY = 0;
 
     initializeSpatialGrid();
-    initFluidSimulation();
+    initFluidSimulation(USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
     initParticles();
     initializePopulation();
-    initNutrientMap(); 
+    initNutrientMap();
     initLightMap();
     initViscosityMap();
     isAnySoftBodyUnstable = false;
@@ -770,117 +849,189 @@ resizeWorldButton.onclick = function() {
     console.log(`World resized to ${WORLD_WIDTH}x${WORLD_HEIGHT} and simulation reset.`);
 }
 
-fluidGridSizeSlider.oninput = function() {
+fluidGridSizeSlider.oninput = function () {
     FLUID_GRID_SIZE_CONTROL = parseInt(this.value);
     updateSliderDisplay(this, fluidGridSizeValueSpan);
     velocityEmitters = [];
-    initFluidSimulation();
+initFluidSimulation(USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
     initParticles();
-    initNutrientMap(); 
-    initLightMap(); 
+    initNutrientMap();
+    initLightMap();
     initViscosityMap();
 }
-fluidDiffusionSlider.oninput = function() { FLUID_DIFFUSION = parseFloat(this.value); updateSliderDisplay(this, fluidDiffusionValueSpan); if(fluidField) fluidField.diffusion = FLUID_DIFFUSION;}
-fluidViscositySlider.oninput = function() { 
-    FLUID_VISCOSITY = parseFloat(this.value); 
-    // console.log("Fluid Viscosity slider raw value:", this.value, "Parsed FLUID_VISCOSITY:", FLUID_VISCOSITY); // DEBUG
-    updateSliderDisplay(this, fluidViscosityValueSpan); 
-    if(fluidField) fluidField.viscosity = FLUID_VISCOSITY;
+fluidDiffusionSlider.oninput = function () {
+    FLUID_DIFFUSION = parseFloat(this.value);
+    updateSliderDisplay(this, fluidDiffusionValueSpan);
+    if (fluidField) fluidField.diffusion = FLUID_DIFFUSION;
 }
-fluidFadeSlider.oninput = function() { FLUID_FADE_RATE = parseFloat(this.value); updateSliderDisplay(this, fluidFadeValueSpan);}
-maxFluidVelocityComponentSlider.oninput = function() { MAX_FLUID_VELOCITY_COMPONENT = parseFloat(this.value); updateSliderDisplay(this, maxFluidVelocityComponentValueSpan); if(fluidField) fluidField.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT;}
-clearFluidButton.onclick = function() { if(fluidField) fluidField.clear(); }
+fluidViscositySlider.oninput = function () {
+    FLUID_VISCOSITY = parseFloat(this.value);
+    // console.log("Fluid Viscosity slider raw value:", this.value, "Parsed FLUID_VISCOSITY:", FLUID_VISCOSITY); // DEBUG
+    updateSliderDisplay(this, fluidViscosityValueSpan);
+    if (fluidField) fluidField.viscosity = FLUID_VISCOSITY;
+}
+fluidFadeSlider.oninput = function () {
+    FLUID_FADE_RATE = parseFloat(this.value);
+    updateSliderDisplay(this, fluidFadeValueSpan);
+}
+maxFluidVelocityComponentSlider.oninput = function () {
+    MAX_FLUID_VELOCITY_COMPONENT = parseFloat(this.value);
+    updateSliderDisplay(this, maxFluidVelocityComponentValueSpan);
+    if (fluidField) fluidField.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT;
+}
+clearFluidButton.onclick = function () {
+    if (fluidField) fluidField.clear();
+}
 
-particlesPerSecondSlider.oninput = function() {
+particlesPerSecondSlider.oninput = function () {
     PARTICLES_PER_SECOND = parseInt(this.value);
     updateSliderDisplay(this, particlesPerSecondValueSpan);
 }
-particleFluidInfluenceSlider.oninput = function() { PARTICLE_FLUID_INFLUENCE = parseFloat(this.value); updateSliderDisplay(this, particleFluidInfluenceValueSpan); }
-particleLifeDecaySlider.oninput = function() { PARTICLE_BASE_LIFE_DECAY = parseFloat(this.value); updateSliderDisplay(this, particleLifeDecayValueSpan); }
-infiniteParticleLifeToggle.onchange = function() {
+particleFluidInfluenceSlider.oninput = function () {
+    PARTICLE_FLUID_INFLUENCE = parseFloat(this.value);
+    updateSliderDisplay(this, particleFluidInfluenceValueSpan);
+}
+particleLifeDecaySlider.oninput = function () {
+    PARTICLE_BASE_LIFE_DECAY = parseFloat(this.value);
+    updateSliderDisplay(this, particleLifeDecayValueSpan);
+}
+infiniteParticleLifeToggle.onchange = function () {
     IS_PARTICLE_LIFE_INFINITE = this.checked;
     particleLifeDecaySlider.disabled = IS_PARTICLE_LIFE_INFINITE;
     particleLifeDecayLabel.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#ddd';
     particleLifeDecayValueSpan.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
 }
-resetParticlesButton.onclick = function() { initParticles(); }
+resetParticlesButton.onclick = function () {
+    initParticles();
+}
 
 exportConfigButton.onclick = handleExportConfig;
 importConfigButton.onclick = () => importConfigFile.click();
 importConfigFile.onchange = handleImportConfig;
-closeInfoPanelButton.onclick = () => { infoPanel.classList.remove('open'); selectedInspectBody = null; selectedInspectPoint = null; }
+closeInfoPanelButton.onclick = () => {
+    infoPanel.classList.remove('open');
+    selectedInspectBody = null;
+    selectedInspectPoint = null;
+}
 
-showNutrientMapToggle.onchange = function() { 
-    SHOW_NUTRIENT_MAP = this.checked; 
+showNutrientMapToggle.onchange = function () {
+    SHOW_NUTRIENT_MAP = this.checked;
     console.log("[Debug] showNutrientMapToggle changed. SHOW_NUTRIENT_MAP is now:", SHOW_NUTRIENT_MAP);
 };
-nutrientEditModeToggle.onchange = function() {
+nutrientEditModeToggle.onchange = function () {
     IS_NUTRIENT_EDIT_MODE = this.checked;
     if (IS_NUTRIENT_EDIT_MODE) {
         emitterEditModeToggle.checked = false;
         IS_EMITTER_EDIT_MODE = false;
         canvas.classList.remove('emitter-edit-mode');
-        lightEditModeToggle.checked = false; IS_LIGHT_EDIT_MODE = false;
-        viscosityEditModeToggle.checked = false; IS_VISCOSITY_EDIT_MODE = false;
-    } 
+        lightEditModeToggle.checked = false;
+        IS_LIGHT_EDIT_MODE = false;
+        viscosityEditModeToggle.checked = false;
+        IS_VISCOSITY_EDIT_MODE = false;
+    }
 };
 
-nutrientBrushValueSlider.oninput = function() { NUTRIENT_BRUSH_VALUE = parseFloat(this.value); updateSliderDisplay(this, nutrientBrushValueSpan); }
-nutrientBrushSizeSlider.oninput = function() { NUTRIENT_BRUSH_SIZE = parseInt(this.value); updateSliderDisplay(this, nutrientBrushSizeSpan); }
-nutrientBrushStrengthSlider.oninput = function() { NUTRIENT_BRUSH_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, nutrientBrushStrengthSpan); }
-clearNutrientMapButton.onclick = function() {
-    initNutrientMap(); 
+nutrientBrushValueSlider.oninput = function () {
+    NUTRIENT_BRUSH_VALUE = parseFloat(this.value);
+    updateSliderDisplay(this, nutrientBrushValueSpan);
+}
+nutrientBrushSizeSlider.oninput = function () {
+    NUTRIENT_BRUSH_SIZE = parseInt(this.value);
+    updateSliderDisplay(this, nutrientBrushSizeSpan);
+}
+nutrientBrushStrengthSlider.oninput = function () {
+    NUTRIENT_BRUSH_STRENGTH = parseFloat(this.value);
+    updateSliderDisplay(this, nutrientBrushStrengthSpan);
+}
+clearNutrientMapButton.onclick = function () {
+    initNutrientMap();
     console.log("Nutrient map cleared.");
 };
 
-showLightMapToggle.onchange = function() { 
-    SHOW_LIGHT_MAP = this.checked; 
+showLightMapToggle.onchange = function () {
+    SHOW_LIGHT_MAP = this.checked;
     console.log("[Debug] showLightMapToggle changed. SHOW_LIGHT_MAP is now:", SHOW_LIGHT_MAP);
 };
-lightEditModeToggle.onchange = function() {
+lightEditModeToggle.onchange = function () {
     IS_LIGHT_EDIT_MODE = this.checked;
     if (IS_LIGHT_EDIT_MODE) {
-        emitterEditModeToggle.checked = false; IS_EMITTER_EDIT_MODE = false;
-        nutrientEditModeToggle.checked = false; IS_NUTRIENT_EDIT_MODE = false;
-        viscosityEditModeToggle.checked = false; IS_VISCOSITY_EDIT_MODE = false;
+        emitterEditModeToggle.checked = false;
+        IS_EMITTER_EDIT_MODE = false;
+        nutrientEditModeToggle.checked = false;
+        IS_NUTRIENT_EDIT_MODE = false;
+        viscosityEditModeToggle.checked = false;
+        IS_VISCOSITY_EDIT_MODE = false;
         canvas.classList.remove('emitter-edit-mode');
-    } 
+    }
 };
-lightBrushValueSlider.oninput = function() { LIGHT_BRUSH_VALUE = parseFloat(this.value); updateSliderDisplay(this, lightBrushValueSpan); }
-lightBrushSizeSlider.oninput = function() { LIGHT_BRUSH_SIZE = parseInt(this.value); updateSliderDisplay(this, lightBrushSizeSpan); }
-lightBrushStrengthSlider.oninput = function() { LIGHT_BRUSH_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, lightBrushStrengthSpan); }
-clearLightMapButton.onclick = function() {
+lightBrushValueSlider.oninput = function () {
+    LIGHT_BRUSH_VALUE = parseFloat(this.value);
+    updateSliderDisplay(this, lightBrushValueSpan);
+}
+lightBrushSizeSlider.oninput = function () {
+    LIGHT_BRUSH_SIZE = parseInt(this.value);
+    updateSliderDisplay(this, lightBrushSizeSpan);
+}
+lightBrushStrengthSlider.oninput = function () {
+    LIGHT_BRUSH_STRENGTH = parseFloat(this.value);
+    updateSliderDisplay(this, lightBrushStrengthSpan);
+}
+clearLightMapButton.onclick = function () {
     initLightMap();
     console.log("Light map reset to surface pattern.");
 };
 
-showViscosityMapToggle.onchange = function() { 
-    SHOW_VISCOSITY_MAP = this.checked; 
+showViscosityMapToggle.onchange = function () {
+    SHOW_VISCOSITY_MAP = this.checked;
     console.log("[Debug] showViscosityMapToggle changed. SHOW_VISCOSITY_MAP is now:", SHOW_VISCOSITY_MAP);
 };
-viscosityEditModeToggle.onchange = function() {
+viscosityEditModeToggle.onchange = function () {
     IS_VISCOSITY_EDIT_MODE = this.checked;
     if (IS_VISCOSITY_EDIT_MODE) {
-        emitterEditModeToggle.checked = false; IS_EMITTER_EDIT_MODE = false;
-        nutrientEditModeToggle.checked = false; IS_NUTRIENT_EDIT_MODE = false;
-        lightEditModeToggle.checked = false; IS_LIGHT_EDIT_MODE = false;
+        emitterEditModeToggle.checked = false;
+        IS_EMITTER_EDIT_MODE = false;
+        nutrientEditModeToggle.checked = false;
+        IS_NUTRIENT_EDIT_MODE = false;
+        lightEditModeToggle.checked = false;
+        IS_LIGHT_EDIT_MODE = false;
         canvas.classList.remove('emitter-edit-mode');
     }
 };
-viscosityBrushValueSlider.oninput = function() { VISCOSITY_BRUSH_VALUE = parseFloat(this.value); updateSliderDisplay(this, viscosityBrushValueSpan); }
-viscosityBrushSizeSlider.oninput = function() { VISCOSITY_BRUSH_SIZE = parseInt(this.value); updateSliderDisplay(this, viscosityBrushSizeSpan); }
-viscosityBrushStrengthSlider.oninput = function() { VISCOSITY_BRUSH_STRENGTH = parseFloat(this.value); updateSliderDisplay(this, viscosityBrushStrengthSpan); }
-clearViscosityMapButton.onclick = function() {
-    initViscosityMap(); 
+viscosityBrushValueSlider.oninput = function () {
+    VISCOSITY_BRUSH_VALUE = parseFloat(this.value);
+    updateSliderDisplay(this, viscosityBrushValueSpan);
+}
+viscosityBrushSizeSlider.oninput = function () {
+    VISCOSITY_BRUSH_SIZE = parseInt(this.value);
+    updateSliderDisplay(this, viscosityBrushSizeSpan);
+}
+viscosityBrushStrengthSlider.oninput = function () {
+    VISCOSITY_BRUSH_STRENGTH = parseFloat(this.value);
+    updateSliderDisplay(this, viscosityBrushStrengthSpan);
+}
+clearViscosityMapButton.onclick = function () {
+    initViscosityMap();
     console.log("Viscosity map reset to normal.");
 };
 
-nutrientCyclePeriodSlider.oninput = function() { nutrientCyclePeriodSeconds = parseInt(this.value); updateSliderDisplay(this, nutrientCyclePeriodSpan); };
-nutrientCycleBaseAmplitudeSlider.oninput = function() { nutrientCycleBaseAmplitude = parseFloat(this.value); updateSliderDisplay(this, nutrientCycleBaseAmplitudeSpan); };
-nutrientCycleWaveAmplitudeSlider.oninput = function() { nutrientCycleWaveAmplitude = parseFloat(this.value); updateSliderDisplay(this, nutrientCycleWaveAmplitudeSpan); };
-lightCyclePeriodSlider.oninput = function() { lightCyclePeriodSeconds = parseInt(this.value); updateSliderDisplay(this, lightCyclePeriodSpan); };
+nutrientCyclePeriodSlider.oninput = function () {
+    nutrientCyclePeriodSeconds = parseInt(this.value);
+    updateSliderDisplay(this, nutrientCyclePeriodSpan);
+};
+nutrientCycleBaseAmplitudeSlider.oninput = function () {
+    nutrientCycleBaseAmplitude = parseFloat(this.value);
+    updateSliderDisplay(this, nutrientCycleBaseAmplitudeSpan);
+};
+nutrientCycleWaveAmplitudeSlider.oninput = function () {
+    nutrientCycleWaveAmplitude = parseFloat(this.value);
+    updateSliderDisplay(this, nutrientCycleWaveAmplitudeSpan);
+};
+lightCyclePeriodSlider.oninput = function () {
+    lightCyclePeriodSeconds = parseInt(this.value);
+    updateSliderDisplay(this, lightCyclePeriodSpan);
+};
 
-viewEntireSimButton.onclick = function() {
+viewEntireSimButton.onclick = function () {
     const targetZoomX = canvas.clientWidth / WORLD_WIDTH;
     const targetZoomY = canvas.clientHeight / WORLD_HEIGHT;
     viewZoom = Math.min(targetZoomX, targetZoomY); // Zoom to fit entire world
@@ -917,14 +1068,14 @@ viewEntireSimButton.onclick = function() {
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
 }
 
-copyInfoPanelButton.onclick = function() {
+copyInfoPanelButton.onclick = function () {
     if (!selectedInspectBody) {
         showMessageModal("No creature selected to copy info from.");
         return;
     }
     let infoText = "";
     const panelElements = infoPanel.querySelectorAll('.info-section p, .info-section h5, .point-info-entry p, .point-info-entry h6');
-    
+
     panelElements.forEach(el => {
         let label = "";
         let value = "";
@@ -936,7 +1087,7 @@ copyInfoPanelButton.onclick = function() {
                 label = strongTag.textContent.trim();
                 let allText = el.textContent.trim();
                 value = allText.substring(label.length).trim();
-                 if (value.startsWith(":")) value = value.substring(1).trim(); 
+                if (value.startsWith(":")) value = value.substring(1).trim();
                 infoText += label + ": " + value + "\n";
             } else {
                 infoText += el.textContent.trim() + "\n";
@@ -956,9 +1107,11 @@ copyInfoPanelButton.onclick = function() {
     });
 }
 
-showFluidVelocityToggle.onchange = function() { SHOW_FLUID_VELOCITY = this.checked; };
+showFluidVelocityToggle.onchange = function () {
+    SHOW_FLUID_VELOCITY = this.checked;
+};
 
-headlessModeToggle.onchange = function() { 
+headlessModeToggle.onchange = function () {
     IS_HEADLESS_MODE = this.checked;
     if (IS_HEADLESS_MODE) {
         console.log("Headless mode enabled: Drawing will be skipped.");
@@ -968,11 +1121,11 @@ headlessModeToggle.onchange = function() {
 };
 
 if (useGpuFluidToggle) { // Check if the element exists before assigning onchange
-    useGpuFluidToggle.onchange = function() { 
+    useGpuFluidToggle.onchange = function () {
         console.log("useGpuFluidToggle changed!"); // Add this unconditional log
         USE_GPU_FLUID_SIMULATION = this.checked;
         console.log(`GPU Fluid Simulation toggled: ${USE_GPU_FLUID_SIMULATION}. Re-initializing fluid simulation.`);
-        initFluidSimulation(); // Re-initialize to apply the change
+        initFluidSimulation(USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
     };
 } else {
     console.error("useGpuFluidToggle element not found!");
@@ -983,7 +1136,7 @@ canvas.addEventListener('mousedown', (e) => {
 
     if (e.button === 2) { // Right mouse button
         isRightDragging = true;
-        mouse.isDown = false; 
+        mouse.isDown = false;
         panStartMouseDisplayX = mouse.x;
         panStartMouseDisplayY = mouse.y;
         panInitialViewOffsetX = viewOffsetX;
@@ -1002,55 +1155,58 @@ canvas.addEventListener('mousedown', (e) => {
             if (IS_SIMULATION_PAUSED) return;
             const gridX = Math.floor(simMouseX / fluidField.scaleX);
             const gridY = Math.floor(simMouseY / fluidField.scaleY);
-            emitterDragStartCell = { gridX, gridY, mouseStartX: simMouseX, mouseStartY: simMouseY };
+            emitterDragStartCell = {gridX, gridY, mouseStartX: simMouseX, mouseStartY: simMouseY};
             currentEmitterPreview = {
                 startX: (gridX + 0.5) * fluidField.scaleX,
                 startY: (gridY + 0.5) * fluidField.scaleY,
                 endX: simMouseX,
                 endY: simMouseY
             };
-            selectedInspectBody = null; selectedInspectPoint = null; updateInfoPanel();
+            selectedInspectBody = null;
+            selectedInspectPoint = null;
+            updateInfoPanel();
             return;
         }
 
         if (IS_NUTRIENT_EDIT_MODE) {
             if (IS_SIMULATION_PAUSED) return;
             isPaintingNutrients = true;
-            paintNutrientBrush(simMouseX, simMouseY); 
-            selectedInspectBody = null; updateInfoPanel(); 
+            paintNutrientBrush(simMouseX, simMouseY);
+            selectedInspectBody = null;
+            updateInfoPanel();
             selectedSoftBodyPoint = null;
-            return; 
-        }
-        else if (IS_LIGHT_EDIT_MODE) { 
+            return;
+        } else if (IS_LIGHT_EDIT_MODE) {
             if (IS_SIMULATION_PAUSED) return;
             isPaintingLight = true;
             paintLightBrush(simMouseX, simMouseY);
-            selectedInspectBody = null; updateInfoPanel(); 
+            selectedInspectBody = null;
+            updateInfoPanel();
             selectedSoftBodyPoint = null;
-            return; 
-        }
-        else if (IS_VISCOSITY_EDIT_MODE) {
+            return;
+        } else if (IS_VISCOSITY_EDIT_MODE) {
             if (IS_SIMULATION_PAUSED) return;
             isPaintingViscosity = true;
             paintViscosityBrush(simMouseX, simMouseY);
-            selectedInspectBody = null; updateInfoPanel(); 
+            selectedInspectBody = null;
+            updateInfoPanel();
             selectedSoftBodyPoint = null;
-            return; 
+            return;
         }
 
         let clickedOnPoint = false;
-        selectedInspectBody = null; 
+        selectedInspectBody = null;
         selectedInspectPoint = null;
 
         for (let body of softBodyPopulation) {
             if (body.isUnstable) continue;
             for (let i = 0; i < body.massPoints.length; i++) {
                 const point = body.massPoints[i];
-                const dist = Math.sqrt((point.pos.x - simMouseX)**2 + (point.pos.y - simMouseY)**2);
-                if (dist < point.radius * 2.5 ) {
-                    selectedSoftBodyPoint = { body: body, point: point };
+                const dist = Math.sqrt((point.pos.x - simMouseX) ** 2 + (point.pos.y - simMouseY) ** 2);
+                if (dist < point.radius * 2.5) {
+                    selectedSoftBodyPoint = {body: body, point: point};
                     selectedInspectBody = body;
-                    selectedInspectPoint = point; 
+                    selectedInspectPoint = point;
                     selectedInspectPointIndex = i;
 
                     if (!IS_SIMULATION_PAUSED) {
@@ -1059,12 +1215,12 @@ canvas.addEventListener('mousedown', (e) => {
                         point.prevPos.y = point.pos.y;
                     }
                     clickedOnPoint = true;
-                    break; 
+                    break;
                 }
             }
-            if(clickedOnPoint) break; 
+            if (clickedOnPoint) break;
         }
-        updateInfoPanel(); 
+        updateInfoPanel();
     }
 });
 
@@ -1091,8 +1247,8 @@ canvas.addEventListener('mousemove', (e) => {
         const effectiveViewportWidth = canvas.clientWidth / viewZoom; // This is viewport width in world units
         const effectiveViewportHeight = canvas.clientHeight / viewZoom; // This is viewport height in world units
         // Correct maxPan calculations for clamping viewOffset
-        const maxPanX = Math.max(0, WORLD_WIDTH - (canvas.clientWidth / bitmapDisplayScale / viewZoom) );
-        const maxPanY = Math.max(0, WORLD_HEIGHT - (canvas.clientHeight / bitmapDisplayScale / viewZoom) );
+        const maxPanX = Math.max(0, WORLD_WIDTH - (canvas.clientWidth / bitmapDisplayScale / viewZoom));
+        const maxPanY = Math.max(0, WORLD_HEIGHT - (canvas.clientHeight / bitmapDisplayScale / viewZoom));
 
         viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
         viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
@@ -1119,18 +1275,18 @@ canvas.addEventListener('mousemove', (e) => {
             point.prevPos.y = point.pos.y;
             point.pos.x = simMouseX;
             point.pos.y = simMouseY;
-        } else if (fluidField) { 
+        } else if (fluidField) {
             const fluidGridX = Math.floor(simMouseX / fluidField.scaleX);
             const fluidGridY = Math.floor(simMouseY / fluidField.scaleY);
             const r1 = Math.random() * 100 + 155;
             const g1 = Math.random() * 50 + 25;
             const b1 = Math.random() * 100 + 100;
-            fluidField.addDensity(fluidGridX, fluidGridY, r1, g1, b1, 150 + Math.random()*50);
+            fluidField.addDensity(fluidGridX, fluidGridY, r1, g1, b1, 150 + Math.random() * 50);
 
             const r2 = Math.random() * 50 + 25;
             const g2 = Math.random() * 100 + 155;
             const b2 = Math.random() * 100 + 155;
-            fluidField.addDensity(fluidGridX, fluidGridY, r2, g2, b2, 150 + Math.random()*50);
+            fluidField.addDensity(fluidGridX, fluidGridY, r2, g2, b2, 150 + Math.random() * 50);
 
             const fluidVelX = worldMouseDx * FLUID_MOUSE_DRAG_VELOCITY_SCALE;
             const fluidVelY = worldMouseDy * FLUID_MOUSE_DRAG_VELOCITY_SCALE;
@@ -1142,17 +1298,15 @@ canvas.addEventListener('mousemove', (e) => {
         currentEmitterPreview.endY = simMouseY;
     }
 
-    if (IS_NUTRIENT_EDIT_MODE && isPaintingNutrients && mouse.isDown && !IS_SIMULATION_PAUSED) { 
+    if (IS_NUTRIENT_EDIT_MODE && isPaintingNutrients && mouse.isDown && !IS_SIMULATION_PAUSED) {
         paintNutrientBrush(simMouseX, simMouseY);
-        return; 
-    }
-    else if (IS_LIGHT_EDIT_MODE && isPaintingLight && mouse.isDown && !IS_SIMULATION_PAUSED) {
+        return;
+    } else if (IS_LIGHT_EDIT_MODE && isPaintingLight && mouse.isDown && !IS_SIMULATION_PAUSED) {
         paintLightBrush(simMouseX, simMouseY);
-        return; 
-    }
-    else if (IS_VISCOSITY_EDIT_MODE && isPaintingViscosity && mouse.isDown && !IS_SIMULATION_PAUSED) {
+        return;
+    } else if (IS_VISCOSITY_EDIT_MODE && isPaintingViscosity && mouse.isDown && !IS_SIMULATION_PAUSED) {
         paintViscosityBrush(simMouseX, simMouseY);
-        return; 
+        return;
     }
 });
 
@@ -1165,10 +1319,12 @@ canvas.addEventListener('mouseup', (e) => {
         if (isPaintingNutrients) {
             isPaintingNutrients = false;
         }
-        if (isPaintingLight) { 
+        if (isPaintingLight) {
             isPaintingLight = false;
         }
-        if (isPaintingViscosity) { isPaintingViscosity = false; }
+        if (isPaintingViscosity) {
+            isPaintingViscosity = false;
+        }
 
         if (IS_EMITTER_EDIT_MODE && emitterDragStartCell && fluidField && !IS_SIMULATION_PAUSED) {
             const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
@@ -1210,10 +1366,10 @@ canvas.addEventListener('mouseup', (e) => {
         }
     }
 });
- canvas.addEventListener('mouseleave', () => {
-    mouse.isDown = false; 
-    isRightDragging = false; 
-    if (IS_EMITTER_EDIT_MODE && emitterDragStartCell) { 
+canvas.addEventListener('mouseleave', () => {
+    mouse.isDown = false;
+    isRightDragging = false;
+    if (IS_EMITTER_EDIT_MODE && emitterDragStartCell) {
         const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
         const simMouseX = worldCoords.x;
         const simMouseY = worldCoords.y;
@@ -1240,7 +1396,7 @@ canvas.addEventListener('mouseup', (e) => {
     if (selectedSoftBodyPoint) {
         const point = selectedSoftBodyPoint.point;
         point.isFixed = false;
-         const worldDx = (mouse.dx / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
+        const worldDx = (mouse.dx / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
         const worldDy = (mouse.dy / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
         point.prevPos.x = point.pos.x - worldDx * 1.0;
         point.prevPos.y = point.pos.y - worldDy * 1.0;
@@ -1250,10 +1406,12 @@ canvas.addEventListener('mouseup', (e) => {
     if (isPaintingNutrients) {
         isPaintingNutrients = false;
     }
-    if (isPaintingLight) { 
+    if (isPaintingLight) {
         isPaintingLight = false;
     }
-    if (isPaintingViscosity) { isPaintingViscosity = false; }
+    if (isPaintingViscosity) {
+        isPaintingViscosity = false;
+    }
 });
 
 canvas.addEventListener('contextmenu', (e) => {
@@ -1278,11 +1436,11 @@ canvas.addEventListener('wheel', (e) => {
     const minZoomToSeeAllY = canvas.clientHeight / WORLD_HEIGHT;
     let dynamicMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
     if (WORLD_WIDTH <= canvas.clientWidth && WORLD_HEIGHT <= canvas.clientHeight) {
-        dynamicMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY); 
+        dynamicMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
     } else {
         dynamicMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
     }
-    dynamicMinZoom = Math.max(0.01, dynamicMinZoom); 
+    dynamicMinZoom = Math.max(0.01, dynamicMinZoom);
 
     viewZoom = Math.max(dynamicMinZoom, Math.min(newZoom, MAX_ZOOM));
 
@@ -1305,7 +1463,7 @@ canvas.addEventListener('wheel', (e) => {
     const mouseOnScaledBitmapY = displayMouseY - letterboxOffsetYcss;
     const mouseOnUnscaledBitmapX = mouseOnScaledBitmapX / bitmapDisplayScale;
     const mouseOnUnscaledBitmapY = mouseOnScaledBitmapY / bitmapDisplayScale;
-    
+
     viewOffsetX = worldMouseBeforeZoom.x - (mouseOnUnscaledBitmapX / viewZoom);
     viewOffsetY = worldMouseBeforeZoom.y - (mouseOnUnscaledBitmapY / viewZoom);
 
@@ -1314,9 +1472,12 @@ canvas.addEventListener('wheel', (e) => {
     const maxPanY = Math.max(0, WORLD_HEIGHT - (cssClientHeight / bitmapDisplayScale / viewZoom));
     viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
-}); 
+});
 
-eyeDetectionRadiusSlider.oninput = function() { EYE_DETECTION_RADIUS = parseInt(this.value); updateSliderDisplay(this, eyeDetectionRadiusValueSpan); } 
+eyeDetectionRadiusSlider.oninput = function () {
+    EYE_DETECTION_RADIUS = parseInt(this.value);
+    updateSliderDisplay(this, eyeDetectionRadiusValueSpan);
+}
 
 function updateStatsPanel() {
     if (!nodeTypeStatsDiv) return;
@@ -1387,7 +1548,7 @@ function updateStatsPanel() {
         energyCostsHTML += `<p><strong>Eye Nodes:</strong> <span class="stat-value">${globalEnergyCosts.eyeNodes.toFixed(2)}</span></p>`;
         globalEnergyCostsStatsDiv.innerHTML = energyCostsHTML;
     }
-} 
+}
 
 // Helper to create and insert info panel paragraphs if they don't exist
 function createInfoPanelParagraph(parentElement, baseId, labelText) {
@@ -1395,23 +1556,23 @@ function createInfoPanelParagraph(parentElement, baseId, labelText) {
     if (!pElement) {
         pElement = document.createElement('p');
         pElement.id = baseId + 'P'; // e.g. infoBodyReproCooldownGeneP
-        
+
         const strong = document.createElement('strong');
         strong.textContent = labelText;
-        
+
         const span = document.createElement('span');
         span.id = baseId + 'Val'; // e.g. infoBodyReproCooldownGeneVal
-        
+
         pElement.appendChild(strong);
         pElement.appendChild(document.createTextNode(' ')); // Space
         pElement.appendChild(span);
-        
+
         // Insert before the 'Ticks Since Birth' paragraph, or at the end of the first .info-section
         const ticksBirthElement = document.getElementById('infoBodyTicksBirthP'); // Assuming Ticks Since Birth P has an ID like this
-        const targetSection = parentElement.querySelector('.info-section h5 + p, .info-section h5') ? 
-                              parentElement.querySelector('.info-section h5 + p, .info-section h5').closest('.info-section') 
-                              : parentElement.querySelector('.info-section'); // Fallback to parentElement if it's the section
-        
+        const targetSection = parentElement.querySelector('.info-section h5 + p, .info-section h5') ?
+            parentElement.querySelector('.info-section h5 + p, .info-section h5').closest('.info-section')
+            : parentElement.querySelector('.info-section'); // Fallback to parentElement if it's the section
+
         if (targetSection) {
             const referenceNode = targetSection.querySelector('#infoBodyTicksBirthP') || targetSection.querySelector('#infoBodyRewardStrategyP'); // Try to insert before Ticks or Reward Strategy
             if (referenceNode) {
@@ -1420,8 +1581,8 @@ function createInfoPanelParagraph(parentElement, baseId, labelText) {
                 targetSection.appendChild(pElement); // Fallback: append to section
             }
         } else {
-             console.warn('Could not find target section to append info paragraph for', baseId);
-             parentElement.appendChild(pElement); // Absolute fallback
+            console.warn('Could not find target section to append info paragraph for', baseId);
+            parentElement.appendChild(pElement); // Absolute fallback
         }
     }
     return pElement;

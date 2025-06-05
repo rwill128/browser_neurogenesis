@@ -32,6 +32,45 @@ function initWebGL(canvas) {
     return gl;
 }
 
+async function initWebGPU(canvas) {
+    if (!navigator.gpu) {
+        alert("WebGPU is not supported on your browser.");
+        console.error("WebGPU not supported.");
+        return null;
+    }
+
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) {
+        alert("WebGPU adapter is not available.");
+        console.error("WebGPU adapter not available.");
+        return null;
+    }
+
+    const device = await adapter.requestDevice();
+    if (!device) {
+        alert("WebGPU device is not available."); // Should not happen if adapter is available, but good practice
+        console.error("WebGPU device not available.");
+        return null;
+    }
+
+    const context = canvas.getContext('webgpu');
+    if (!context) {
+        alert("Failed to get WebGPU context from canvas.");
+        console.error("Failed to get WebGPU context.");
+        return null;
+    }
+
+    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+    context.configure({
+        device,
+        format: presentationFormat,
+        alphaMode: 'opaque', // or 'premultiplied'
+    });
+
+    console.log("WebGPU context initialized successfully.");
+    return { device, context, presentationFormat, adapter };
+}
+
 function createShader(gl, type, source) {
     const shader = gl.createShader(type);
     gl.shaderSource(shader, source);

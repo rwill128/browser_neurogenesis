@@ -114,7 +114,7 @@ function initializePopulation() {
 }
 
 
-function initFluidSimulation() {
+async function initFluidSimulation() {
     const scaleX = WORLD_WIDTH / FLUID_GRID_SIZE_CONTROL;
     const scaleY = WORLD_HEIGHT / FLUID_GRID_SIZE_CONTROL;
     const dt_simulation = 1/60; // Assuming a target of 60fps for dt in fluid sim, can be adjusted
@@ -124,25 +124,17 @@ function initFluidSimulation() {
         console.log("Canvas element being passed to GPUFluidField:", canvas); // Log the canvas
         if (!canvas || typeof canvas.getContext !== 'function') {
             console.error("CRITICAL: Main canvas object is invalid or not a canvas element before GPUFluidField instantiation!");
-            // Fallback to CPU if canvas is bad
             console.warn("Falling back to CPU FluidField due to invalid canvas.");
             fluidField = new FluidField(FLUID_GRID_SIZE_CONTROL, FLUID_DIFFUSION, FLUID_VISCOSITY, dt_simulation, scaleX, scaleY);
         } else {
             fluidField = new GPUFluidField(canvas, FLUID_GRID_SIZE_CONTROL, FLUID_DIFFUSION, FLUID_VISCOSITY, dt_simulation, scaleX, scaleY);
+            await fluidField._initPromise; // Wait for the async initialization to complete
             
-            console.log("GPUFluidField instance created in simulation.js:", fluidField);
-            let gpuSeemsEnabled = false;
-            if (fluidField && typeof fluidField.gpuEnabled === 'boolean') {
-                gpuSeemsEnabled = fluidField.gpuEnabled;
-                console.log("fluidField.gpuEnabled right after new GPUFluidField():", gpuSeemsEnabled);
-            } else if (fluidField) {
-                console.error("fluidField exists, but fluidField.gpuEnabled is not a boolean or is missing! Value:", fluidField.gpuEnabled);
-            } else {
-                console.error("fluidField is null or undefined immediately after new GPUFluidField()!");
-            }
+            console.log("GPUFluidField instance created and awaited in simulation.js.");
+            // console.log("fluidField.gpuEnabled after new GPUFluidField() and await:", fluidField.gpuEnabled); // Log to see the state
 
-            if (!gpuSeemsEnabled) { 
-                console.warn("Fallback Condition Met: GPUFluidField initialization appears to have failed or gpuEnabled is false. fluidField was:", fluidField, "gpuEnabled property was:", gpuSeemsEnabled);
+            if (!fluidField.gpuEnabled) { 
+                console.warn("Fallback Condition Met: GPUFluidField initialization failed or gpuEnabled is false after await. fluidField.gpuEnabled was:", fluidField.gpuEnabled);
                 fluidField = new FluidField(FLUID_GRID_SIZE_CONTROL, FLUID_DIFFUSION, FLUID_VISCOSITY, dt_simulation, scaleX, scaleY);
             }
         }

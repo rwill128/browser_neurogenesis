@@ -35,7 +35,7 @@ async function main() {
 
     initializeSpatialGrid();
     initializeAllSliderDisplays(); // Syncs HTML sliders with JS global defaults and updates display spans
-    initFluidSimulation();
+    await initFluidSimulation(); // Await the async fluid simulation initialization
     initNutrientMap(); 
     initLightMap(); 
     initViscosityMap(); 

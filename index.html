@@ -61,6 +61,7 @@
         <button id="toggleControlsButton" class="ui-button-top-right">Controls</button>
         <button id="screensaverButton" class="ui-button-top-left">Enter Screensaver</button>
         <button id="viewEntireSimButton" class="ui-button-top-left">View Entire Sim</button>
+        <div id="frameTimeDisplay" class="ui-info-top-left">Frame Time: - ms</div>
 
         <div id="controls">
             <div class="control-group">
@@ -74,6 +75,9 @@
 
                 <label for="worldWrapToggle" class="checkbox-label">Wrap Edges:
                     <input type="checkbox" id="worldWrapToggle">
+                </label>
+                <label for="headlessModeToggle" class="checkbox-label">Headless (No Drawing):
+                    <input type="checkbox" id="headlessModeToggle">
                 </label>
                 <label for="maxTimestep" class="slider-label">Max Timestep (ms):</label>
                 <span id="maxTimestepValue" class="slider-value">10</span>
@@ -128,20 +132,20 @@
             <div class="control-group">
                 <h4>Energy Costs / Frame</h4>
                 <label for="baseNodeCost" class="slider-label">Base     Node Cost:</label>
-                <span id="baseNodeCostValue" class="slider-value">0.05</span>
-                <input type="range" id="baseNodeCost" min="0.0" max="50.0" value="0.05" step="0.01">
+                <span id="baseNodeCostValue" class="slider-value">0.0</span>
+                <input type="range" id="baseNodeCost" min="0.0" max="50.0" value="0.0" step="0.01">
 
                 <label for="emitterNodeCost" class="slider-label">Emitter Node Cost:</label>
                 <span id="emitterNodeCostValue" class="slider-value">0.1</span>
                 <input type="range" id="emitterNodeCost" min="0.0" max="50.0" value="0.5" step="0.01">
 
                 <label for="eaterNodeCost" class="slider-label">Eater Node Cost:</label>
-                <span id="eaterNodeCostValue" class="slider-value">0.1</span>
-                <input type="range" id="eaterNodeCost" min="0.0" max="50.0" value="0.1" step="0.01">
+                <span id="eaterNodeCostValue" class="slider-value">10.0</span>
+                <input type="range" id="eaterNodeCost" min="0.0" max="50.0" value="10.0" step="0.01">
 
                 <label for="predatorNodeCost" class="slider-label">Predator Node Cost:</label>
-                <span id="predatorNodeCostValue" class="slider-value">0.1</span>
-                <input type="range" id="predatorNodeCost" min="0.0" max="100.0" value="0.1" step="0.01">
+                <span id="predatorNodeCostValue" class="slider-value">10.0</span>
+                <input type="range" id="predatorNodeCost" min="0.0" max="100.0" value="10.0" step="0.01">
 
                 <label for="neuronNodeCost" class="slider-label">Neuron Node Cost:</label>
                 <span id="neuronNodeCostValue" class="slider-value">0.001</span>

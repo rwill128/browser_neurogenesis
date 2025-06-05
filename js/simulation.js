@@ -208,7 +208,10 @@ function updatePhysics(dt) {
             body.updateSelf(dt, fluidField);
             if (body.isUnstable) {
                 currentAnyUnstable = true;
-            } else if (body.creatureEnergy >= body.reproductionEnergyThreshold && body.canReproduce && canCreaturesReproduceGlobally) {
+            } else if (body.creatureEnergy >= body.reproductionEnergyThreshold && 
+                       body.canReproduce && 
+                       canCreaturesReproduceGlobally &&
+                       body.failedReproductionCooldown <= 0) {
                 newOffspring.push(...body.reproduce());
             }
         }

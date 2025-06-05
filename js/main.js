@@ -3,6 +3,9 @@ let deltaTime = 0;
 let animationFrameId = null;
 let statsUpdateCounter = 0; // New counter for throttling stats update
 const STATS_UPDATE_INTERVAL = 60; // Update stats approx every 60 frames (e.g., once per second at 60fps)
+let frameTimeDisplayElement = null; // To store the DOM element
+let frameTimeAccumulator = 0;
+let frameCountForAvg = 0;
 
 // --- Main Initialization Sequence ---
 async function main() {
@@ -40,11 +43,14 @@ async function main() {
     initializePopulation();
     updateInstabilityIndicator();
     lastTime = performance.now(); // Initialize lastTime before starting the loop
+    frameTimeDisplayElement = document.getElementById('frameTimeDisplay'); // Get the element
     animationFrameId = requestAnimationFrame(gameLoop);
 }
 
 // --- Game Loop ---
 function gameLoop(timestamp) {
+    const loopStartTime = performance.now(); // Record start time of the loop
+
     deltaTime = (timestamp - lastTime) / 1000;
     if (isNaN(deltaTime) || deltaTime <= 0) deltaTime = 1/60; // Ensure valid deltaTime
     lastTime = timestamp;
@@ -75,14 +81,29 @@ function gameLoop(timestamp) {
         updatePhysics(effectiveDeltaTime); // Only update physics if not paused
     }
 
-    draw(); // Draw on every frame, regardless of pause state
+    if (!IS_HEADLESS_MODE) {
+        draw(); // Draw on every frame, unless in headless mode
+    }
 
     // Update stats panel if open, but throttled
     statsUpdateCounter++;
-    if (statsPanel && statsPanel.classList.contains('open') && statsUpdateCounter >= STATS_UPDATE_INTERVAL) {
-        updateStatsPanel();
+    if (statsUpdateCounter >= STATS_UPDATE_INTERVAL) {
+        if (statsPanel && statsPanel.classList.contains('open')) {
+            updateStatsPanel();
+        }
+        if (frameTimeDisplayElement && frameCountForAvg > 0) {
+            const avgFrameTime = frameTimeAccumulator / frameCountForAvg;
+            frameTimeDisplayElement.textContent = `Frame Time: ${avgFrameTime.toFixed(2)} ms`;
+            frameTimeAccumulator = 0;
+            frameCountForAvg = 0;
+        }
         statsUpdateCounter = 0;
     }
+
+    const loopEndTime = performance.now();
+    const currentFrameDuration = loopEndTime - loopStartTime;
+    frameTimeAccumulator += currentFrameDuration;
+    frameCountForAvg++;
 
     animationFrameId = requestAnimationFrame(gameLoop); // Keep the loop going
 }

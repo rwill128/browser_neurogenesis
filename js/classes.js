@@ -12,7 +12,8 @@ const NodeType = {
 const RLRewardStrategy = {
     ENERGY_CHANGE: 0,
     REPRODUCTION_EVENT: 1,
-    PARTICLE_PROXIMITY: 2
+    PARTICLE_PROXIMITY: 2,
+    ENERGY_SECOND_DERIVATIVE: 3 // New: Reward based on the change in energy change rate
 };
 
 const RLAlgorithmType = {
@@ -248,6 +249,9 @@ class SoftBody {
         this.numPredatorNodes = 0;
         this.numEyeNodes = 0;
         this.numPotentialGrabberNodes = 0;
+
+        this.failedReproductionCooldown = 0; // New: Cooldown after a failed reproduction attempt
+        this.energyGainedFromPhotosynthesisThisTick = 0; // New: Photosynthesis gain in the current tick
 
         // Initialize heritable/mutable properties
         if (parentBody) {
@@ -1110,6 +1114,11 @@ class SoftBody {
         const nd = brainNode.neuronData;
         const inputVector = [];
 
+        // Calculate energy derivatives for NN input
+        const currentEnergyChange = this.creatureEnergy - (nd.previousEnergyForReward || this.creatureEnergy); // Ensure previousEnergyForReward is defined
+        const energySecondDerivative = currentEnergyChange - (nd.previousEnergyChangeForNN || 0);
+        const normalizedEnergySecondDerivative = Math.tanh(energySecondDerivative / (this.currentMaxEnergy * 0.05 || 1));
+
         // Start with base inputs (dye, energy, CoM pos/vel, nutrient)
         if (fluidFieldRef) {
             const brainGx = Math.floor(brainNode.pos.x / fluidFieldRef.scaleX);
@@ -1145,6 +1154,9 @@ class SoftBody {
             inputVector.push(0.5);
         }
 
+        // Add the new energy second derivative input
+        inputVector.push(normalizedEnergySecondDerivative);
+
         // Add Eye Inputs (iterate through all points, add if it's an Eye)
         let eyeNodesFoundForInput = 0;
         this.massPoints.forEach(point => {
@@ -1160,6 +1172,9 @@ class SoftBody {
         while(inputVector.length < nd.inputVectorSize) { inputVector.push(0); }
         if(inputVector.length > nd.inputVectorSize) { inputVector.splice(nd.inputVectorSize); }
         
+        // Update previous energy change for the next tick's calculation
+        nd.previousEnergyChangeForNN = currentEnergyChange;
+
         return inputVector;
     }
 
@@ -1355,7 +1370,7 @@ class SoftBody {
             let reward = 0;
             switch (this.rewardStrategy) {
                 case RLRewardStrategy.ENERGY_CHANGE:
-                    reward = this.creatureEnergy - nd.previousEnergyForReward;
+                    reward = (this.creatureEnergy - nd.previousEnergyForReward) - this.energyGainedFromPhotosynthesisThisTick;
                     break;
                 case RLRewardStrategy.REPRODUCTION_EVENT:
                     if (this.justReproduced) {
@@ -1382,8 +1397,17 @@ class SoftBody {
                         reward = 0; 
                     }
                     break;
+                case RLRewardStrategy.ENERGY_SECOND_DERIVATIVE:
+                    // Recalculate currentEnergyChange and energySecondDerivative for reward
+                    // nd.previousEnergyForReward holds energy from *before* this tick's budget update
+                    // this.creatureEnergy holds energy *after* this tick's budget update
+                    const currentEnergyChangeForReward = this.creatureEnergy - (nd.previousEnergyForReward || this.creatureEnergy);
+                    // nd.previousEnergyChangeForNN was updated in _gatherBrainInputs based on the previous state of previousEnergyForReward
+                    const energySecondDerivativeForReward = currentEnergyChangeForReward - (nd.previousEnergyChangeForNN || 0);
+                    reward = energySecondDerivativeForReward * ENERGY_SECOND_DERIVATIVE_REWARD_SCALE;
+                    break;
                 default:
-                    reward = this.creatureEnergy - nd.previousEnergyForReward; // Fallback
+                    reward = (this.creatureEnergy - nd.previousEnergyForReward) - this.energyGainedFromPhotosynthesisThisTick; // Fallback
             }
 
             nd.experienceBuffer.push({
@@ -1430,6 +1454,7 @@ class SoftBody {
         let currentFrameEnergyCost = 0;
         let currentFrameEnergyGain = 0;
         let poisonDamageThisFrame = 0; // Initialize here
+        this.energyGainedFromPhotosynthesisThisTick = 0; // Reset for the current tick
 
         const hasFluidField = fluidFieldRef !== null && typeof fluidFieldRef !== 'undefined';
         const hasNutrientField = nutrientField !== null && typeof nutrientField !== 'undefined';
@@ -1513,7 +1538,8 @@ class SoftBody {
                     const effectiveLightValue = baseLightValue * globalLightMultiplier; 
                     const energyGainThisPoint = effectiveLightValue * PHOTOSYNTHESIS_EFFICIENCY * (point.radius / 5) * dt;
                         currentFrameEnergyGain += energyGainThisPoint;
-                    this.energyGainedFromPhotosynthesis += energyGainThisPoint;
+                    this.energyGainedFromPhotosynthesis += energyGainThisPoint; // Lifetime total
+                    this.energyGainedFromPhotosynthesisThisTick += energyGainThisPoint; // Current tick total
                 }
                     break;
                 // Note: Neuron, Grabbing, Eye costs are handled by separate 'if' statements below
@@ -1845,9 +1871,16 @@ class SoftBody {
 
 
     reproduce() {
+        if (this.failedReproductionCooldown > 0) {
+            this.failedReproductionCooldown--;
+            return []; // On cooldown from a previous failed attempt
+        }
+
         if (this.isUnstable || !this.canReproduce || !canCreaturesReproduceGlobally) return []; // Check global flag
 
         const energyForOneOffspring = this.currentMaxEnergy * OFFSPRING_INITIAL_ENERGY_SHARE; // Use currentMaxEnergy for cost basis
+        let hadEnoughEnergyForAttempt = this.creatureEnergy >= energyForOneOffspring;
+
         let successfullyPlacedOffspring = 0;
         let offspring = [];
 
@@ -1937,6 +1970,9 @@ class SoftBody {
             this.ticksSinceBirth = 0;
             this.canReproduce = false;
             this.justReproduced = true; // Set the flag here
+        } else if (hadEnoughEnergyForAttempt && successfullyPlacedOffspring === 0) {
+            // If had enough energy but couldn't place any offspring (e.g., due to space)
+            this.failedReproductionCooldown = FAILED_REPRODUCTION_COOLDOWN_TICKS;
         }
         return offspring;
     }
@@ -1975,8 +2011,21 @@ class SoftBody {
     }
 
     initializeBrain() {
+        const brainNode = this._findOrCreateBrainNode();
+
+        if (brainNode && brainNode.neuronData && brainNode.neuronData.isBrain) {
+            this._calculateBrainVectorSizes(brainNode);
+            this._initializeBrainWeightsAndBiases(brainNode);
+            this._initializeBrainRLComponents(brainNode);
+        } else {
+            // No brain node found or brainNode.neuronData is missing somehow
+            // console.warn(`Body ${this.id} initializeBrain: No suitable brain node found or neuronData missing.`);
+        }
+    }
+
+    _findOrCreateBrainNode() {
         let brainNode = null;
-        // First, try to find an already designated brain (e.g., from a parent or loaded config)
+        // First, try to find an already designated brain
         for (const point of this.massPoints) {
             if (point.neuronData && point.neuronData.isBrain) {
                 brainNode = point;
@@ -1984,7 +2033,7 @@ class SoftBody {
             }
         }
 
-        // If no brain was pre-designated, find the first NEURON type node and make it the brain.
+        // If no brain was pre-designated, find the first NEURON type node
         if (!brainNode) {
             for (const point of this.massPoints) {
                 if (point.nodeType === NodeType.NEURON) {
@@ -1994,78 +2043,67 @@ class SoftBody {
                         };
                     }
                     point.neuronData.isBrain = true;
-                    brainNode = point; // Assign it as the brain for subsequent logic
-                    // Ensure other neurons are not brains (important if multiple neurons exist)
+                    brainNode = point; 
+                    // Ensure other neurons are not brains
                     this.massPoints.forEach(otherP => {
                         if (otherP !== point && otherP.nodeType === NodeType.NEURON && otherP.neuronData) {
                             otherP.neuronData.isBrain = false;
                         }
                     });
-                    break; // Found and assigned a brain
+                    break; 
                 }
             }
         }
+        return brainNode;
+    }
 
-        if (brainNode && brainNode.neuronData && brainNode.neuronData.isBrain) {
-            const nd = brainNode.neuronData;
+    _calculateBrainVectorSizes(brainNode) {
+        const nd = brainNode.neuronData;
+        const numEmitterPoints = this.numEmitterNodes;
+        const numSwimmerPoints = this.numSwimmerNodes;
+        const numEaterPoints = this.numEaterNodes;
+        const numPredatorPoints = this.numPredatorNodes;
+        const numEyeNodes = this.numEyeNodes;
+        const numPotentialGrabberPoints = this.numPotentialGrabberNodes;
 
-            // Use pre-calculated node counts from the SoftBody instance
-            const numEmitterPoints = this.numEmitterNodes;
-            const numSwimmerPoints = this.numSwimmerNodes;
-            const numEaterPoints = this.numEaterNodes;
-            const numPredatorPoints = this.numPredatorNodes;
-            const numEyeNodes = this.numEyeNodes;
-            const numPotentialGrabberPoints = this.numPotentialGrabberNodes;
+        console.log(`Body ${this.id} _calculateBrainVectorSizes: Using Stored Counts: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}, Ey:${numEyeNodes}`);
+        nd.inputVectorSize = NEURAL_INPUT_SIZE + (numEyeNodes * NEURAL_INPUTS_PER_EYE);
+        console.log(`Body ${this.id} _calculateBrainVectorSizes: Counts (from stored) directly before sum: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}`);
+        nd.outputVectorSize = (numEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
+                              (numSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
+                              (numEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
+                              (numPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
+                              (numPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE);
+        console.log(`Body ${this.id} _calculateBrainVectorSizes: Calculated nd.outputVectorSize = ${nd.outputVectorSize}`);
+    }
 
-            // DEBUG LOG ADDED HERE (in initializeBrain)
-            // console.log(`Body ${this.id} initializeBrain Counts: Emitters: ${numEmitterPoints}, Swimmers: ${numSwimmerPoints}, Eaters: ${numEaterPoints}, Predators: ${numPredatorPoints}, Grabbers: ${numPotentialGrabberPoints}, Eyes: ${numEyeNodes}`);
-            // Corrected log name for clarity
-            console.log(`Body ${this.id} initializeBrain Using Stored Counts: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}, Ey:${numEyeNodes}`);
-
-            nd.inputVectorSize = NEURAL_INPUT_SIZE + (numEyeNodes * NEURAL_INPUTS_PER_EYE);
-            
-            // Log individual counts IMMEDIATELY BEFORE SUM
-            console.log(`Body ${this.id} initializeBrain Counts (from stored) directly before sum: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}`);
-
-            nd.outputVectorSize = (numEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
-                                  (numSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
-                                  (numEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
-                                  (numPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
-                                  (numPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE);
-
-            console.log(`Body ${this.id} initializeBrain: Calculated nd.outputVectorSize = ${nd.outputVectorSize} (using E:${numEmitterPoints},S:${numSwimmerPoints},Ea:${numEaterPoints},P:${numPredatorPoints},G:${numPotentialGrabberPoints})`);
-
-            // Ensure hiddenLayerSize is valid or initialize it if it's from an older creature version
-            if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < DEFAULT_HIDDEN_LAYER_SIZE_MIN || nd.hiddenLayerSize > DEFAULT_HIDDEN_LAYER_SIZE_MAX) {
-                nd.hiddenLayerSize = DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1));
-            }
-
-            // Initialize weights and biases only once for this creature instance
-            // (or if hiddenLayerSize was just reset)
-            if (!nd.weightsIH || nd.weightsIH.length !== nd.hiddenLayerSize || (nd.weightsIH.length > 0 && nd.weightsIH[0].length !== nd.inputVectorSize) ) {
-                nd.weightsIH = initializeMatrix(nd.hiddenLayerSize, nd.inputVectorSize);
-                nd.biasesH = initializeVector(nd.hiddenLayerSize);
-                console.log(`Body ${this.id} brain: Initialized weightsIH/biasesH. Inputs: ${nd.inputVectorSize}, Hidden: ${nd.hiddenLayerSize}`);
-            }
-            
-            if (!nd.weightsHO || nd.weightsHO.length !== nd.outputVectorSize || (nd.weightsHO.length > 0 && nd.weightsHO[0].length !== nd.hiddenLayerSize) ) {
-                nd.weightsHO = initializeMatrix(nd.outputVectorSize, nd.hiddenLayerSize);
-                nd.biasesO = initializeVector(nd.outputVectorSize);
-                console.log(`Body ${this.id} brain: Initialized weightsHO/biasesO. Outputs: ${nd.outputVectorSize}, Hidden: ${nd.hiddenLayerSize}`);
-            }
-            
-            // nd.lastInitializedNumEyeNodes = numEyeNodes; // No longer needed to track changes within initializeBrain
-
-            // Initialize RL components if they don't exist
-            if (!nd.experienceBuffer) nd.experienceBuffer = [];
-            if (typeof nd.framesSinceLastTrain !== 'number') nd.framesSinceLastTrain = 0; 
-            if (typeof nd.previousEnergyForReward !== 'number') nd.previousEnergyForReward = this.creatureEnergy;
-            if (typeof nd.lastAvgNormalizedReward !== 'number') nd.lastAvgNormalizedReward = 0;
-            if (typeof nd.maxExperienceBufferSize !== 'number') nd.maxExperienceBufferSize = 10;
-
-        } else {
-            // No brain node found or brainNode.neuronData is missing somehow
+    _initializeBrainWeightsAndBiases(brainNode) {
+        const nd = brainNode.neuronData;
+        if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < DEFAULT_HIDDEN_LAYER_SIZE_MIN || nd.hiddenLayerSize > DEFAULT_HIDDEN_LAYER_SIZE_MAX) {
+            nd.hiddenLayerSize = DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1));
         }
+
+        if (!nd.weightsIH || nd.weightsIH.length !== nd.hiddenLayerSize || (nd.weightsIH.length > 0 && nd.weightsIH[0].length !== nd.inputVectorSize) ) {
+            nd.weightsIH = initializeMatrix(nd.hiddenLayerSize, nd.inputVectorSize);
+            nd.biasesH = initializeVector(nd.hiddenLayerSize);
+            console.log(`Body ${this.id} brain: Initialized weightsIH/biasesH. Inputs: ${nd.inputVectorSize}, Hidden: ${nd.hiddenLayerSize}`);
+        }
+        
+        if (!nd.weightsHO || nd.weightsHO.length !== nd.outputVectorSize || (nd.weightsHO.length > 0 && nd.weightsHO[0].length !== nd.hiddenLayerSize) ) {
+            nd.weightsHO = initializeMatrix(nd.outputVectorSize, nd.hiddenLayerSize);
+            nd.biasesO = initializeVector(nd.outputVectorSize);
+            console.log(`Body ${this.id} brain: Initialized weightsHO/biasesO. Outputs: ${nd.outputVectorSize}, Hidden: ${nd.hiddenLayerSize}`);
+        }
+    }
+
+    _initializeBrainRLComponents(brainNode) {
+        const nd = brainNode.neuronData;
+        if (!nd.experienceBuffer) nd.experienceBuffer = [];
+        if (typeof nd.framesSinceLastTrain !== 'number') nd.framesSinceLastTrain = 0; 
+        if (typeof nd.previousEnergyForReward !== 'number') nd.previousEnergyForReward = this.creatureEnergy;
+        if (typeof nd.previousEnergyChangeForNN !== 'number') nd.previousEnergyChangeForNN = 0; // New: For 2nd derivative input
+        if (typeof nd.lastAvgNormalizedReward !== 'number') nd.lastAvgNormalizedReward = 0;
+        if (typeof nd.maxExperienceBufferSize !== 'number') nd.maxExperienceBufferSize = 10;
     }
 
     calculateDiscountedRewards(rewards, gamma) {

@@ -148,6 +148,7 @@ const lightCyclePeriodSpan = document.getElementById('lightCyclePeriodSpan');
 const currentNutrientMultiplierDisplay = document.getElementById('currentNutrientMultiplierDisplay');
 const currentLightMultiplierDisplay = document.getElementById('currentLightMultiplierDisplay');
 const showFluidVelocityToggle = document.getElementById('showFluidVelocityToggle');
+const headlessModeToggle = document.getElementById('headlessModeToggle'); // New headless mode toggle
 
 // --- Mouse Interaction State Variables ---
 let selectedSoftBodyPoint = null;
@@ -271,6 +272,7 @@ function initializeAllSliderDisplays() {
     showViscosityMapToggle.checked = SHOW_VISCOSITY_MAP;
     viscosityEditModeToggle.checked = IS_VISCOSITY_EDIT_MODE;
     showFluidVelocityToggle.checked = SHOW_FLUID_VELOCITY;
+    headlessModeToggle.checked = IS_HEADLESS_MODE; // Ensure headless toggle reflects JS var on init
 }
 
 function updateInstabilityIndicator() {
@@ -953,6 +955,15 @@ copyInfoPanelButton.onclick = function() {
 }
 
 showFluidVelocityToggle.onchange = function() { SHOW_FLUID_VELOCITY = this.checked; };
+
+headlessModeToggle.onchange = function() { // Event listener for headless mode toggle
+    IS_HEADLESS_MODE = this.checked;
+    if (IS_HEADLESS_MODE) {
+        console.log("Headless mode enabled: Drawing will be skipped.");
+    } else {
+        console.log("Headless mode disabled: Drawing will resume.");
+    }
+};
 
 canvas.addEventListener('mousedown', (e) => {
     updateMouse(e);

@@ -76,6 +76,8 @@ const NEW_POINT_OFFSET_RADIUS = 15;
 let isAnySoftBodyUnstable = false;
 const RED_DYE_POISON_STRENGTH = 0.5;
 
+// Cooldown for failed reproduction attempts
+const FAILED_REPRODUCTION_COOLDOWN_TICKS = 100;
 
 // --- Global Variables & Constants (with initial hardcoded defaults) ---
 let CREATURE_POPULATION_FLOOR = 100;
@@ -97,10 +99,10 @@ let EMITTER_STRENGTH = 3.0;
 const EMITTER_MOUSE_DRAG_SCALE = 0.1;
 const FLUID_MOUSE_DRAG_VELOCITY_SCALE = 0.1;
 
-let BASE_NODE_EXISTENCE_COST = 0.05;
+let BASE_NODE_EXISTENCE_COST = 0.0;
 let EMITTER_NODE_ENERGY_COST = 0.1;
-let EATER_NODE_ENERGY_COST = 0.1;
-let PREDATOR_NODE_ENERGY_COST = 0.1;
+let EATER_NODE_ENERGY_COST = 10.0;
+let PREDATOR_NODE_ENERGY_COST = 10.0;
 let NEURON_NODE_ENERGY_COST = 0.001;
 let SWIMMER_NODE_ENERGY_COST = 0.1;
 let PHOTOSYNTHETIC_NODE_ENERGY_COST = 0.1;
@@ -174,7 +176,7 @@ let lastPanMouseX = 0;
 let lastPanMouseY = 0;
 
 // --- Neural Network Constants ---
-const NEURAL_INPUT_SIZE = 9;
+const NEURAL_INPUT_SIZE = 10;
 const NEURAL_OUTPUTS_PER_PREDATOR = 2;
 const NEURAL_OUTPUTS_PER_EATER = 2;
 const NEURAL_OUTPUTS_PER_NEURON_EFFECTOR = 0;
@@ -258,7 +260,8 @@ function handleExportConfig() {
         photosyntheticNodeCost: PHOTOSYNTHETIC_NODE_ENERGY_COST,
         photosynthesisEfficiency: PHOTOSYNTHESIS_EFFICIENCY,
         eyeDetectionRadius: EYE_DETECTION_RADIUS,
-        showFluidVelocity: SHOW_FLUID_VELOCITY
+        showFluidVelocity: SHOW_FLUID_VELOCITY,
+        isHeadlessMode: IS_HEADLESS_MODE
     };
     const jsonString = JSON.stringify(config, null, 2);
     const blob = new Blob([jsonString], {type: "application/json"});
@@ -455,6 +458,7 @@ const DEFAULT_SURVIVAL_REWARD_WEIGHT = 0.01; // Small constant reward for living
 // New constants for RLRewardStrategy
 const RLRewardStrategy_MUTATION_CHANCE = 0.05; // Chance to mutate reward strategy
 const PARTICLE_PROXIMITY_REWARD_SCALE = 10.0;  // Scales the (0-1) proximity magnitude
+const ENERGY_SECOND_DERIVATIVE_REWARD_SCALE = 5.0; // Scales the energy 2nd derivative reward
 
 // New constant for Grabber Gene Mutation
 const GRABBER_GENE_MUTATION_CHANCE = 0.03; // Chance for a point to gain/lose grabber ability
@@ -477,3 +481,5 @@ const DEFAULT_ACTIVATION_PERIOD_MAX_TICKS = 300;
 
 // Dynamic Max Energy per Creature (New)
 // ... existing code ... 
+
+let IS_HEADLESS_MODE = false; // New: For toggling drawing off 

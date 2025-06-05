@@ -213,6 +213,7 @@ function getRewardStrategyString(strategy) {
         case RLRewardStrategy.ENERGY_CHANGE: return "Energy Change";
         case RLRewardStrategy.REPRODUCTION_EVENT: return "Reproduction Event";
         case RLRewardStrategy.PARTICLE_PROXIMITY: return "Particle Proximity";
+        case RLRewardStrategy.ENERGY_SECOND_DERIVATIVE: return "Energy Change Rate Change";
         default: return "Unknown_Strategy";
     }
 }

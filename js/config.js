@@ -75,6 +75,7 @@ const ADD_POINT_MUTATION_CHANCE = 0.03;
 const NEW_POINT_OFFSET_RADIUS = 15;
 let isAnySoftBodyUnstable = false;
 const RED_DYE_POISON_STRENGTH = 0.5;
+const JET_MAX_VELOCITY_GENE_DEFAULT = 2.0;
 
 // Cooldown for failed reproduction attempts
 const FAILED_REPRODUCTION_COOLDOWN_TICKS = 100;
@@ -185,9 +186,10 @@ const NEURAL_OUTPUTS_PER_EMITTER = 8;
 const NEURAL_OUTPUTS_PER_SWIMMER = 6;
 const NEURAL_OUTPUTS_PER_JET = 6;
 const NEURAL_OUTPUTS_PER_GRABBER_TOGGLE = 2;
+const NEURAL_INPUTS_PER_FLUID_SENSOR = 2; // For Swimmers and Jets: vx, vy of the fluid at the node's location
 
 // Eye Node Specific NN Inputs (if an eye is present)
-const NEURAL_INPUTS_PER_EYE = 3; // seesParticle (0/1), nearestParticleMagnitude (normalized), nearestParticleDirection (angle)
+const NEURAL_INPUTS_PER_EYE = 3; // seesTarget (0/1), nearestTargetMagnitude (normalized), nearestTargetDirection (angle)
 
 const DEFAULT_HIDDEN_LAYER_SIZE_MIN = 5;
 const DEFAULT_HIDDEN_LAYER_SIZE_MAX = 30;

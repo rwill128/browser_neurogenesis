@@ -20,7 +20,8 @@ let globalEnergyCosts = {
     swimmerNodes: 0,
     photosyntheticNodes: 0,
     grabbingNodes: 0,
-    eyeNodes: 0
+    eyeNodes: 0,
+    jetNodes: 0
 };
 
 let mutationStats = { // New: For tracking mutation occurrences
@@ -48,7 +49,8 @@ let mutationStats = { // New: For tracking mutation occurrences
     bodyScale: 0,
     rewardStrategyChange: 0, // New stat for reward strategy mutations
     grabberGeneChange: 0,    // New stat for grabber gene mutations
-    eyeTargetTypeChange: 0   // New: For eye target type mutations
+    eyeTargetTypeChange: 0,   // New: For eye target type mutations
+    jetMaxVelocityGene: 0
 };
 
 function initializeSpatialGrid() {
@@ -297,6 +299,7 @@ function updatePhysics(dt) {
             globalEnergyCosts.photosyntheticNodes += body.energyCostFromPhotosyntheticNodes;
             globalEnergyCosts.grabbingNodes += body.energyCostFromGrabbingNodes;
             globalEnergyCosts.eyeNodes += body.energyCostFromEyeNodes;
+            globalEnergyCosts.jetNodes += body.energyCostFromJetNodes;
 
             softBodyPopulation.splice(i, 1);
             removedCount++;
@@ -536,6 +539,7 @@ globalEnergyCosts.swimmerNodes = 0;
 globalEnergyCosts.photosyntheticNodes = 0;
 globalEnergyCosts.grabbingNodes = 0;
 globalEnergyCosts.eyeNodes = 0;
+globalEnergyCosts.jetNodes = 0;
 
 if (statsPanel.classList.contains('open')) {
     // ... existing code ...

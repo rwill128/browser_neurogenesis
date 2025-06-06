@@ -5,7 +5,8 @@ const NodeType = {
     NEURON: 3,
     EMITTER: 4, // For dye
     SWIMMER: 5, // For propulsion
-    EYE: 6      // New: For particle detection
+    EYE: 6,      // New: For particle detection
+    JET: 7       // New: For fluid propulsion
     // Old types like NEUTRAL, FLOATING, FIXED_ROOT, EMITTER_SWIMMER are removed
 };
 
@@ -54,6 +55,9 @@ class MassPoint {
         this.seesTarget = false;       // Renamed from seesParticle
         this.nearestTargetMagnitude = 0; // Renamed from nearestParticleMagnitude
         this.nearestTargetDirection = 0; // Renamed from nearestParticleDirection
+        this.maxEffectiveJetVelocity = 0; // New: For JET type
+        this.sensedFluidVelocity = new Vec2(); // For JET and SWIMMER
+        this.jetData = { currentMagnitude: 0, currentAngle: 0 }; // For JET type
     }
     applyForce(f) { this.force.addInPlace(f); } // Use addInPlace
 
@@ -118,6 +122,8 @@ class MassPoint {
             mainColor = 'rgba(255,165,0,0.9)';
         } else if (this.nodeType === NodeType.EYE) { // New Eye color
             mainColor = 'rgba(180, 180, 250, 0.9)'; // Light purple/blue for Eye
+        } else if (this.nodeType === NodeType.JET) { // New Jet color
+            mainColor = 'rgba(255, 255, 100, 0.9)'; // Yellow for Jet
         }
         ctx.fillStyle = mainColor;
         ctx.fill();
@@ -238,6 +244,7 @@ class SoftBody {
         this.energyCostFromPhotosyntheticNodes = 0;
         this.energyCostFromGrabbingNodes = 0;
         this.energyCostFromEyeNodes = 0;
+        this.energyCostFromJetNodes = 0;
 
         this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY; // Initial placeholder
         this.blueprintRadius = 0; // New: Approximate radius based on blueprint points
@@ -248,6 +255,7 @@ class SoftBody {
         this.numEaterNodes = 0;
         this.numPredatorNodes = 0;
         this.numEyeNodes = 0;
+        this.numJetNodes = 0;
         this.numPotentialGrabberNodes = 0;
 
         this.failedReproductionCooldown = 0; // New: Cooldown after a failed reproduction attempt
@@ -271,6 +279,10 @@ class SoftBody {
             let oldEmitterStrength = parentBody.emitterStrength;
             this.emitterStrength = parentBody.emitterStrength * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
             if (this.emitterStrength !== oldEmitterStrength) mutationStats.emitterStrength++;
+
+            let oldJetMaxVel = parentBody.jetMaxVelocityGene;
+            this.jetMaxVelocityGene = parentBody.jetMaxVelocityGene * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+            if (this.jetMaxVelocityGene !== oldJetMaxVel) mutationStats.jetMaxVelocityGene++;
 
             let offspringNumChange = (Math.random() < Math.max(0, Math.min(1, MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER))) ? (Math.random() < 0.5 ? -1 : 1) : 0;
             this.numOffspring = parentBody.numOffspring + offspringNumChange;
@@ -361,6 +373,7 @@ class SoftBody {
             this.offspringSpawnRadius = 50 + Math.random() * 50;
             this.pointAddChance = 0.02 + Math.random() * 0.06;
             this.springConnectionRadius = 40 + Math.random() * 40;
+            this.jetMaxVelocityGene = JET_MAX_VELOCITY_GENE_DEFAULT * (0.8 + Math.random() * 0.4);
             this.reproductionEnergyThreshold = BASE_MAX_CREATURE_ENERGY; // Will be refined based on actual max energy
 
             // Default Activation Pattern Properties for new creature
@@ -399,6 +412,7 @@ class SoftBody {
         this.offspringSpawnRadius = Math.max(20, Math.min(this.offspringSpawnRadius, 150));
         this.pointAddChance = Math.max(0, Math.min(0.5, this.pointAddChance));
         this.springConnectionRadius = Math.max(10, Math.min(this.springConnectionRadius, 100));
+        this.jetMaxVelocityGene = Math.max(0.1, Math.min(this.jetMaxVelocityGene, 50.0));
 
         this.fluidEntrainment = BODY_FLUID_ENTRAINMENT_FACTOR;
         this.fluidCurrentStrength = FLUID_CURRENT_STRENGTH_ON_BODY;
@@ -490,7 +504,7 @@ class SoftBody {
         this.blueprintSprings = [];// Clear any previous blueprint
 
         const baseRadius = 1 + Math.random() * 1; 
-        const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE];
+        const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE, NodeType.JET];
         const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
 
         if (parentBody) {
@@ -639,7 +653,8 @@ class SoftBody {
                     dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
                     canBeGrabber: Math.random() < GRABBER_GENE_MUTATION_CHANCE,
                     neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null,
-                    eyeTargetType: newNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined
+                    eyeTargetType: newNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined,
+                    maxEffectiveJetVelocity: this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4)
                 };
                 this.blueprintPoints.push(newBp);
                 const newPointIndex = this.blueprintPoints.length - 1;
@@ -727,7 +742,8 @@ class SoftBody {
                         dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
                         canBeGrabber: Math.random() < GRABBER_GENE_MUTATION_CHANCE,
                         neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null,
-                        eyeTargetType: newNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined
+                        eyeTargetType: newNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined,
+                        maxEffectiveJetVelocity: this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4)
                     };
                     this.blueprintPoints.push(newMidBp);
                     const newMidPointIndex = this.blueprintPoints.length - 1;
@@ -851,7 +867,8 @@ class SoftBody {
                     dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
                     canBeGrabber: canBeGrabberInitial,
                     neuronDataBlueprint: neuronDataBp,
-                    eyeTargetType: chosenNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined
+                    eyeTargetType: chosenNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined,
+                    maxEffectiveJetVelocity: this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4)
                 });
             });
 
@@ -935,6 +952,7 @@ class SoftBody {
             newPoint.dyeColor = [...bp.dyeColor]; // Ensure deep copy for array
             newPoint.canBeGrabber = bp.canBeGrabber;
             newPoint.eyeTargetType = bp.eyeTargetType === undefined ? EyeTargetType.PARTICLE : bp.eyeTargetType;
+            newPoint.maxEffectiveJetVelocity = this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4);
 
             if (bp.neuronDataBlueprint) {
                 newPoint.neuronData = {
@@ -977,6 +995,7 @@ class SoftBody {
         this.numEaterNodes = 0;
         this.numPredatorNodes = 0;
         this.numEyeNodes = 0;
+        this.numJetNodes = 0;
         this.numPotentialGrabberNodes = 0;
 
         for (const p of this.massPoints) { // Changed from forEach to for...of for clarity
@@ -985,6 +1004,7 @@ class SoftBody {
             else if (p.nodeType === NodeType.EATER) this.numEaterNodes++;
             else if (p.nodeType === NodeType.PREDATOR) this.numPredatorNodes++;
             else if (p.nodeType === NodeType.EYE) this.numEyeNodes++;
+            else if (p.nodeType === NodeType.JET) this.numJetNodes++;
 
             if (p.canBeGrabber) this.numPotentialGrabberNodes++;
         }
@@ -1021,6 +1041,7 @@ class SoftBody {
     _updateSensoryInputsAndDefaultActivations(fluidFieldRef, nutrientField, lightField) { // Removed particles argument
         this._applyDefaultActivationPatterns();
         this._updateEyeNodes(); // Removed particles argument
+        this._updateJetAndSwimmerFluidSensor(fluidFieldRef);
     }
 
     _applyDefaultActivationPatterns() {
@@ -1194,6 +1215,14 @@ class SoftBody {
         // Add the new energy second derivative input
         inputVector.push(normalizedEnergySecondDerivative);
 
+        // Add fluid sensor inputs for Swimmers and Jets
+        this.massPoints.forEach(point => {
+            if (point.nodeType === NodeType.SWIMMER || point.nodeType === NodeType.JET) {
+                inputVector.push(Math.tanh(point.sensedFluidVelocity.x));
+                inputVector.push(Math.tanh(point.sensedFluidVelocity.y));
+            }
+        });
+
         // Add Eye Inputs (iterate through all points, add if it's an Eye)
         let eyeNodesFoundForInput = 0;
         this.massPoints.forEach(point => {
@@ -1239,11 +1268,13 @@ class SoftBody {
         let currentNumEaterPoints = 0;
         let currentNumPredatorPoints = 0;
         let currentNumPotentialGrabberPoints = 0;
+        let currentNumJetPoints = 0;
         this.massPoints.forEach(p => {
             if (p.nodeType === NodeType.EMITTER) currentNumEmitterPoints++;
             else if (p.nodeType === NodeType.SWIMMER) currentNumSwimmerPoints++;
             else if (p.nodeType === NodeType.EATER) currentNumEaterPoints++;
             else if (p.nodeType === NodeType.PREDATOR) currentNumPredatorPoints++;
+            else if (p.nodeType === NodeType.JET) currentNumJetPoints++;
             if (p.canBeGrabber) currentNumPotentialGrabberPoints++;
         });
 
@@ -1251,6 +1282,7 @@ class SoftBody {
                                            (currentNumSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
                                            (currentNumEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
                                            (currentNumPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
+                                           (currentNumJetPoints * NEURAL_OUTPUTS_PER_JET) +
                                            (currentNumPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE);
 
         if (nd.outputVectorSize !== recalculatedOutputVectorSize) {
@@ -1258,7 +1290,7 @@ class SoftBody {
             const pointTypes = this.massPoints.map((p, idx) => `Idx ${idx}: Type ${p.nodeType} Grabber: ${p.canBeGrabber}`).join(', ');
             console.warn(`Body ${this.id} Current Points (${this.massPoints.length}): [${pointTypes}]`);
             // Log counts that led to recalculatedOutputVectorSize
-            console.warn(`Body ${this.id} Recalculated Counts: Emitters: ${currentNumEmitterPoints}, Swimmers: ${currentNumSwimmerPoints}, Eaters: ${currentNumEaterPoints}, Predators: ${currentNumPredatorPoints}, Grabbers: ${currentNumPotentialGrabberPoints}`);
+            console.warn(`Body ${this.id} Recalculated Counts: Emitters: ${currentNumEmitterPoints}, Swimmers: ${currentNumSwimmerPoints}, Eaters: ${currentNumEaterPoints}, Predators: ${currentNumPredatorPoints}, Jets: ${currentNumJetPoints}, Grabbers: ${currentNumPotentialGrabberPoints}`);
             // To see what it was at birth, you'd need to check the initializeBrain logs for this body ID.
         }
 
@@ -1372,6 +1404,38 @@ class SoftBody {
                     // DEBUG LOG ADDED HERE
                     console.warn(`Body ${this.id} _applyBrainActionsToPoints (Predator): Skipped logging. rawOutputs.length: ${nd.rawOutputs ? nd.rawOutputs.length : 'undefined'}, outputStartRawIdx: ${outputStartRawIdx}, NEURAL_OUTPUTS_PER_PREDATOR: ${NEURAL_OUTPUTS_PER_PREDATOR}, current nd.outputVectorSize: ${nd.outputVectorSize}`);
                     currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR; }
+            }
+        });
+
+        // Process Jets
+        this.massPoints.forEach(point => {
+            if (point.nodeType === NodeType.JET) {
+                const outputStartRawIdx = currentRawOutputIndex;
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_JET) {
+                    const detailsForThisJet = [];
+                    let localPairIdx = 0;
+
+                    const magnitudeResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                    detailsForThisJet.push(magnitudeResult.detail);
+                    const rawMagnitude = magnitudeResult.value;
+
+                    const directionResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                    detailsForThisJet.push(directionResult.detail);
+                    const angle = directionResult.value;
+
+                    const exertionResultJet = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                    detailsForThisJet.push(exertionResultJet.detail);
+                    point.currentExertionLevel = sigmoid(exertionResultJet.value);
+
+                    point.jetData.currentMagnitude = sigmoid(rawMagnitude) * MAX_JET_OUTPUT_MAGNITUDE * point.currentExertionLevel;
+                    point.jetData.currentAngle = angle;
+
+                    nd.currentFrameActionDetails.push(...detailsForThisJet);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_JET;
+                } else {
+                    console.warn(`Body ${this.id} _applyBrainActionsToPoints (Jet): Skipped logging. rawOutputs.length: ${nd.rawOutputs ? nd.rawOutputs.length : 'undefined'}, outputStartRawIdx: ${outputStartRawIdx}, NEURAL_OUTPUTS_PER_JET: ${NEURAL_OUTPUTS_PER_JET}, current nd.outputVectorSize: ${nd.outputVectorSize}`);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_JET;
+                }
             }
         });
 
@@ -1555,6 +1619,11 @@ class SoftBody {
                     const swimmerCostThisFrame = SWIMMER_NODE_ENERGY_COST * exertionSq * costMultiplier;
                 currentFrameEnergyCost += swimmerCostThisFrame;
                 this.energyCostFromSwimmerNodes += swimmerCostThisFrame * dt;
+                    break;
+                case NodeType.JET:
+                    const jetCostThisFrame = JET_NODE_ENERGY_COST * exertionSq * costMultiplier;
+                    currentFrameEnergyCost += jetCostThisFrame;
+                    this.energyCostFromJetNodes += jetCostThisFrame * dt;
                     break;
                 case NodeType.EATER:
                     const eaterCostThisFrame = EATER_NODE_ENERGY_COST * exertionSq * costMultiplier;
@@ -1834,15 +1903,20 @@ class SoftBody {
         const numEaterPoints = this.numEaterNodes;
         const numPredatorPoints = this.numPredatorNodes;
         const numEyeNodes = this.numEyeNodes;
+        const numJetNodes = this.numJetNodes;
         const numPotentialGrabberPoints = this.numPotentialGrabberNodes;
 
         // console.log(`Body ${this.id} _calculateBrainVectorSizes: Using Stored Counts: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}, Ey:${numEyeNodes}`);
-        nd.inputVectorSize = NEURAL_INPUT_SIZE + (numEyeNodes * NEURAL_INPUTS_PER_EYE);
-        // console.log(`Body ${this.id} _calculateBrainVectorSizes: Counts (from stored) directly before sum: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}`);
+        nd.inputVectorSize = NEURAL_INPUT_SIZE +
+                             (numEyeNodes * NEURAL_INPUTS_PER_EYE) +
+                             (numSwimmerPoints * NEURAL_INPUTS_PER_FLUID_SENSOR) +
+                             (numJetNodes * NEURAL_INPUTS_PER_FLUID_SENSOR);
+        // console.log(`Body ${this.id} _calculateBrainVectorSizes: Counts (from stored) directly before sum: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${predatorPoints}, G:${numPotentialGrabberPoints}`);
         nd.outputVectorSize = (numEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
                               (numSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
                               (numEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
                               (numPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
+                              (numJetNodes * NEURAL_OUTPUTS_PER_JET) +
                               (numPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE);
         // console.log(`Body ${this.id} _calculateBrainVectorSizes: Calculated nd.outputVectorSize = ${nd.outputVectorSize}`);
     }
@@ -2178,6 +2252,66 @@ class SoftBody {
                 }
             }
         }
+
+        if (fluidFieldRef) {
+            for (let point of this.massPoints) {
+                if (point.isFixed) continue; 
+                if (point.nodeType === NodeType.JET) {
+                    const exertion = point.currentExertionLevel || 0;
+                    if (exertion > 0.01) {
+                        const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
+                        const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
+                        
+                        if (!isFinite(fluidGridX) || !isFinite(fluidGridY)) continue;
+
+                        const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
+                        if(idx < 0 || idx >= fluidFieldRef.Vx.length) continue;
+
+                        const currentFluidVelX = fluidFieldRef.Vx[idx];
+                        const currentFluidVelY = fluidFieldRef.Vy[idx];
+                        const currentFluidSpeedSq = currentFluidVelX**2 + currentFluidVelY**2;
+
+                        if (currentFluidSpeedSq < point.maxEffectiveJetVelocity**2) {
+                            const finalMagnitude = point.jetData.currentMagnitude; // Magnitude from NN
+                            const angle = point.jetData.currentAngle; // Angle from NN
+                            const appliedForceX = finalMagnitude * Math.cos(angle);
+                            const appliedForceY = finalMagnitude * Math.sin(angle);
+                            fluidFieldRef.addVelocity(fluidGridX, fluidGridY, appliedForceX, appliedForceY);
+                        }
+                    }
+                }
+
+                const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
+                const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
+                if (!isFinite(fluidGridX) || !isFinite(fluidGridY)) continue;
+
+                const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
+                if(idx < 0 || idx >= fluidFieldRef.Vx.length) continue;
+
+
+                if (point.nodeType === NodeType.SWIMMER) {
+                    const rawFluidVx = fluidFieldRef.Vx[idx];
+                    const rawFluidVy = fluidFieldRef.Vy[idx];
+                    
+                    // Use temporary vectors from SoftBody instance (this._tempVec1, this._tempVec2)
+                    // Calculate currentPointDisplacementPx * (1.0 - this.fluidEntrainment) and store in this._tempVec1
+                    this._tempVec1.copyFrom(point.pos).subInPlace(point.prevPos).mulInPlace(1.0 - this.fluidEntrainment);
+                    
+                    // Calculate effectiveFluidDisplacementPx * this.fluidEntrainment and store in this._tempVec2
+                    // effectiveFluidDisplacementPx was: fluidDisplacementPx.mul(this.fluidCurrentStrength)
+                    // fluidDisplacementPx was: new Vec2(rawFluidVx * fluidFieldRef.scaleX * dt, rawFluidVy * fluidFieldRef.scaleY * dt)
+                    this._tempVec2.x = rawFluidVx * fluidFieldRef.scaleX * dt;
+                    this._tempVec2.y = rawFluidVy * fluidFieldRef.scaleY * dt;
+                    this._tempVec2.mulInPlace(this.fluidCurrentStrength).mulInPlace(this.fluidEntrainment);
+                    
+                    // blendedDisplacementPx = _tempVec1 + _tempVec2 (result in _tempVec1)
+                    this._tempVec1.addInPlace(this._tempVec2);
+                    
+                    // point.prevPos = point.pos.clone().sub(blendedDisplacementPx);
+                    point.prevPos.copyFrom(point.pos).subInPlace(this._tempVec1);
+                }
+            }
+        }
     }
 
     _finalizeUpdateAndCheckStability(dt) { 
@@ -2355,6 +2489,21 @@ class SoftBody {
         if (nonRigidSprings.length === 0) return RIGID_SPRING_DAMPING;
         const totalDamping = nonRigidSprings.reduce((sum, spring) => sum + spring.dampingFactor, 0);
         return totalDamping / nonRigidSprings.length;
+    }
+
+    _updateJetAndSwimmerFluidSensor(fluidFieldRef) {
+        if (!fluidFieldRef) return;
+        this.massPoints.forEach(point => {
+            if (point.nodeType === NodeType.JET || point.nodeType === NodeType.SWIMMER) {
+                const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
+                const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
+                const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
+                const fluidVelX = fluidFieldRef.Vx[idx];
+                const fluidVelY = fluidFieldRef.Vy[idx];
+                point.sensedFluidVelocity.x = fluidVelX;
+                point.sensedFluidVelocity.y = fluidVelY;
+            }
+        });
     }
 }
 

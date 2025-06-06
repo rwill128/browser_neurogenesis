@@ -44,9 +44,11 @@ const neuronNodeCostSlider = document.getElementById('neuronNodeCost');
 const photosyntheticNodeCostSlider = document.getElementById('photosyntheticNodeCost');
 const photosynthesisEfficiencySlider = document.getElementById('photosynthesisEfficiency');
 const swimmerNodeCostSlider = document.getElementById('swimmerNodeCost');
+const jetNodeCostSlider = document.getElementById('jetNodeCostSlider');
 const eyeNodeCostSlider = document.getElementById('eyeNodeCostSlider');
 const eyeDetectionRadiusSlider = document.getElementById('eyeDetectionRadiusSlider');
 const neuronChanceSlider = document.getElementById('neuronChanceSlider');
+const jetMaxVelocityGeneSlider = document.getElementById('jetMaxVelocityGeneSlider');
 
 const instabilityLight = document.getElementById('instabilityLight');
 const populationCountDisplay = document.getElementById('populationCount');
@@ -65,9 +67,11 @@ const neuronNodeCostValueSpan = document.getElementById('neuronNodeCostValue');
 const photosyntheticNodeCostValueSpan = document.getElementById('photosyntheticNodeCostValue');
 const photosynthesisEfficiencyValueSpan = document.getElementById('photosynthesisEfficiencyValue');
 const swimmerNodeCostValueSpan = document.getElementById('swimmerNodeCostValue');
+const jetNodeCostValueSpan = document.getElementById('jetNodeCostValueSpan');
 const eyeNodeCostValueSpan = document.getElementById('eyeNodeCostValueSpan');
 const eyeDetectionRadiusValueSpan = document.getElementById('eyeDetectionRadiusValueSpan');
 const neuronChanceValueSpan = document.getElementById('neuronChanceValueSpan');
+const jetMaxVelocityGeneValueSpan = document.getElementById('jetMaxVelocityGeneValueSpan');
 
 const fluidGridSizeSlider = document.getElementById('fluidGridSize');
 const fluidGridSizeValueSpan = document.getElementById('fluidGridSizeValue');
@@ -211,11 +215,13 @@ function initializeAllSliderDisplays() {
         [predatorNodeCostSlider, "PREDATOR_NODE_ENERGY_COST", true, predatorNodeCostValueSpan],
         [neuronNodeCostSlider, "NEURON_NODE_ENERGY_COST", true, neuronNodeCostValueSpan],
         [swimmerNodeCostSlider, "SWIMMER_NODE_ENERGY_COST", true, swimmerNodeCostValueSpan],
+        [jetNodeCostSlider, "JET_NODE_ENERGY_COST", true, jetNodeCostValueSpan],
         [photosyntheticNodeCostSlider, "PHOTOSYNTHETIC_NODE_ENERGY_COST", true, photosyntheticNodeCostValueSpan],
         [photosynthesisEfficiencySlider, "PHOTOSYNTHESIS_EFFICIENCY", true, photosynthesisEfficiencyValueSpan],
         [eyeNodeCostSlider, "EYE_NODE_ENERGY_COST", true, eyeNodeCostValueSpan],
         [eyeDetectionRadiusSlider, "EYE_DETECTION_RADIUS", false, eyeDetectionRadiusValueSpan],
         [neuronChanceSlider, "NEURON_CHANCE", true, neuronChanceValueSpan],
+        [jetMaxVelocityGeneSlider, "JET_MAX_VELOCITY_GENE_DEFAULT", true, jetMaxVelocityGeneValueSpan],
         [fluidGridSizeSlider, "FLUID_GRID_SIZE_CONTROL", false, fluidGridSizeValueSpan],
         [fluidDiffusionSlider, "FLUID_DIFFUSION", true, fluidDiffusionValueSpan],
         [fluidViscositySlider, "FLUID_VISCOSITY", true, fluidViscosityValueSpan],
@@ -326,6 +332,7 @@ function updateInfoPanel() {
         document.getElementById('infoBodyCostPredator').textContent = selectedInspectBody.energyCostFromPredatorNodes.toFixed(2);
         document.getElementById('infoBodyCostNeuron').textContent = selectedInspectBody.energyCostFromNeuronNodes.toFixed(2);
         document.getElementById('infoBodyCostSwimmer').textContent = selectedInspectBody.energyCostFromSwimmerNodes.toFixed(2);
+        document.getElementById('infoBodyCostJet').textContent = selectedInspectBody.energyCostFromJetNodes.toFixed(2);
         document.getElementById('infoBodyCostPhoto').textContent = selectedInspectBody.energyCostFromPhotosyntheticNodes.toFixed(2);
         document.getElementById('infoBodyCostGrabbing').textContent = selectedInspectBody.energyCostFromGrabbingNodes.toFixed(2);
         document.getElementById('infoBodyCostEye').textContent = selectedInspectBody.energyCostFromEyeNodes.toFixed(2);
@@ -366,6 +373,9 @@ function updateInfoPanel() {
             content += `<p><strong>Can Be Grabber:</strong> ${point.canBeGrabber}</p>`;
             if (point.nodeType === NodeType.EMITTER) {
                 content += `<p><strong>Dye Color:</strong> R:${point.dyeColor[0].toFixed(0)} G:${point.dyeColor[1].toFixed(0)} B:${point.dyeColor[2].toFixed(0)}</p>`;
+            }
+            if (point.nodeType === NodeType.JET) {
+                content += `<p><strong>Max Effective Velocity:</strong> ${point.maxEffectiveJetVelocity.toFixed(2)}</p>`;
             }
             if (point.isGrabbing) {
                 content += `<p><strong>State:</strong> Grabbing</p>`;
@@ -443,6 +453,7 @@ function updateInfoPanel() {
         document.getElementById('infoBodyCostPredator').textContent = '-';
         document.getElementById('infoBodyCostNeuron').textContent = '-';
         document.getElementById('infoBodyCostSwimmer').textContent = '-';
+        document.getElementById('infoBodyCostJet').textContent = '-';
         document.getElementById('infoBodyCostPhoto').textContent = '-';
         document.getElementById('infoBodyCostGrabbing').textContent = '-';
         document.getElementById('infoBodyCostEye').textContent = '-';
@@ -798,6 +809,10 @@ swimmerNodeCostSlider.oninput = function () {
     SWIMMER_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, swimmerNodeCostValueSpan);
 }
+jetNodeCostSlider.oninput = function () {
+    JET_NODE_ENERGY_COST = parseFloat(this.value);
+    updateSliderDisplay(this, jetNodeCostValueSpan);
+}
 eyeNodeCostSlider.oninput = function () {
     EYE_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, eyeNodeCostValueSpan);
@@ -805,6 +820,10 @@ eyeNodeCostSlider.oninput = function () {
 neuronChanceSlider.oninput = function() {
     NEURON_CHANCE = parseFloat(this.value);
     updateSliderDisplay(this, neuronChanceValueSpan);
+}
+jetMaxVelocityGeneSlider.oninput = function() {
+    JET_MAX_VELOCITY_GENE_DEFAULT = parseFloat(this.value);
+    updateSliderDisplay(this, jetMaxVelocityGeneValueSpan);
 }
 
 
@@ -1550,6 +1569,7 @@ function updateStatsPanel() {
         energyCostsHTML += `<p><strong>Predator Nodes:</strong> <span class="stat-value">${globalEnergyCosts.predatorNodes.toFixed(2)}</span></p>`;
         energyCostsHTML += `<p><strong>Neuron Nodes:</strong> <span class="stat-value">${globalEnergyCosts.neuronNodes.toFixed(2)}</span></p>`;
         energyCostsHTML += `<p><strong>Swimmer Nodes:</strong> <span class="stat-value">${globalEnergyCosts.swimmerNodes.toFixed(2)}</span></p>`;
+        energyCostsHTML += `<p><strong>Jet Nodes:</strong> <span class="stat-value">${globalEnergyCosts.jetNodes.toFixed(2)}</span></p>`;
         energyCostsHTML += `<p><strong>Photosynthetic Nodes:</strong> <span class="stat-value">${globalEnergyCosts.photosyntheticNodes.toFixed(2)}</span></p>`;
         energyCostsHTML += `<p><strong>Grabbing Nodes:</strong> <span class="stat-value">${globalEnergyCosts.grabbingNodes.toFixed(2)}</span></p>`;
         energyCostsHTML += `<p><strong>Eye Nodes:</strong> <span class="stat-value">${globalEnergyCosts.eyeNodes.toFixed(2)}</span></p>`;

@@ -1,6 +1,6 @@
 // --- Viewport and World Dimensions ---
-let WORLD_WIDTH = 12000;
-let WORLD_HEIGHT = 9000;
+let WORLD_WIDTH = 20000;
+let WORLD_HEIGHT = 16000;
 const VIEW_PAN_SPEED = 80;
 
 let viewOffsetX = 0;
@@ -19,7 +19,7 @@ let GRID_ROWS = Math.ceil(WORLD_HEIGHT / GRID_CELL_SIZE);
 const NEURON_CHANCE = 0.1;
 const MAX_PIXELS_PER_FRAME_DISPLACEMENT = 300;
 const MAX_SPRING_STRETCH_FACTOR = 20.0;
-const MAX_SPAN_PER_POINT_FACTOR = GRID_CELL_SIZE * 2;
+const MAX_SPAN_PER_POINT_FACTOR = GRID_CELL_SIZE * 3;
 const DYE_PULL_RATE = 0.05;
 
 // Rigid Spring Properties (New)
@@ -81,7 +81,7 @@ const FAILED_REPRODUCTION_COOLDOWN_TICKS = 100;
 
 // --- Global Variables & Constants (with initial hardcoded defaults) ---
 let CREATURE_POPULATION_FLOOR = 100;
-let CREATURE_POPULATION_CEILING = 2000;
+let CREATURE_POPULATION_CEILING = 10000;
 let PARTICLE_POPULATION_FLOOR = 0;
 let PARTICLE_POPULATION_CEILING = 60000;
 let canCreaturesReproduceGlobally = true;
@@ -108,6 +108,7 @@ let SWIMMER_NODE_ENERGY_COST = 0.1;
 let PHOTOSYNTHETIC_NODE_ENERGY_COST = 0.1;
 let GRABBING_NODE_ENERGY_COST = 0.25;
 let EYE_NODE_ENERGY_COST = 0.05;
+let JET_NODE_ENERGY_COST = 0.5;
 let PHOTOSYNTHESIS_EFFICIENCY = 100.0;
 
 // Eye Detection Radius (New)
@@ -182,6 +183,7 @@ const NEURAL_OUTPUTS_PER_EATER = 2;
 const NEURAL_OUTPUTS_PER_NEURON_EFFECTOR = 0;
 const NEURAL_OUTPUTS_PER_EMITTER = 8;
 const NEURAL_OUTPUTS_PER_SWIMMER = 6;
+const NEURAL_OUTPUTS_PER_JET = 6;
 const NEURAL_OUTPUTS_PER_GRABBER_TOGGLE = 2;
 
 // Eye Node Specific NN Inputs (if an eye is present)
@@ -190,6 +192,7 @@ const NEURAL_INPUTS_PER_EYE = 3; // seesParticle (0/1), nearestParticleMagnitude
 const DEFAULT_HIDDEN_LAYER_SIZE_MIN = 5;
 const DEFAULT_HIDDEN_LAYER_SIZE_MAX = 30;
 const MAX_SWIMMER_OUTPUT_MAGNITUDE = 1.0;
+const MAX_JET_OUTPUT_MAGNITUDE = 2.0;
 const MAX_NEURAL_EMISSION_PULL_STRENGTH = 1.0;
 
 // --- RL Training Constants ---
@@ -231,6 +234,7 @@ function handleExportConfig() {
         swimmerNodeCost: SWIMMER_NODE_ENERGY_COST,
         grabbingNodeCost: GRABBING_NODE_ENERGY_COST,
         eyeNodeCost: EYE_NODE_ENERGY_COST,
+        jetNodeCost: JET_NODE_ENERGY_COST,
         baseMaxCreatureEnergy: BASE_MAX_CREATURE_ENERGY,
         energyPerMassPointBonus: ENERGY_PER_MASS_POINT_BONUS,
         bodyRepulsionStrength: BODY_REPULSION_STRENGTH,
@@ -251,6 +255,7 @@ function handleExportConfig() {
         viewZoom: viewZoom,
         viewOffsetX: viewOffsetX,
         viewOffsetY: viewOffsetY,
+        jetMaxVelocityGene: JET_MAX_VELOCITY_GENE_DEFAULT,
         nutrientFieldData: nutrientField ? Array.from(nutrientField) : null,
         nutrientMapSize: nutrientField ? Math.round(FLUID_GRID_SIZE_CONTROL) : 0,
         lightFieldData: lightField ? Array.from(lightField) : null,
@@ -329,6 +334,7 @@ function applyImportedConfig(config) {
     if (config.swimmerNodeCost !== undefined) SWIMMER_NODE_ENERGY_COST = config.swimmerNodeCost;
     if (config.grabbingNodeCost !== undefined) GRABBING_NODE_ENERGY_COST = config.grabbingNodeCost;
     if (config.eyeNodeCost !== undefined) EYE_NODE_ENERGY_COST = config.eyeNodeCost;
+    if (config.jetNodeCost !== undefined) JET_NODE_ENERGY_COST = config.jetNodeCost;
     if (config.baseMaxCreatureEnergy !== undefined) BASE_MAX_CREATURE_ENERGY = config.baseMaxCreatureEnergy;
     if (config.energyPerMassPointBonus !== undefined) ENERGY_PER_MASS_POINT_BONUS = config.energyPerMassPointBonus;
     if (config.emitterStrength !== undefined) EMITTER_STRENGTH = config.emitterStrength;
@@ -337,7 +343,7 @@ function applyImportedConfig(config) {
     if (config.viewZoom !== undefined) viewZoom = config.viewZoom;
     if (config.viewOffsetX !== undefined) viewOffsetX = config.viewOffsetX;
     if (config.viewOffsetY !== undefined) viewOffsetY = config.viewOffsetY;
-
+    if (config.jetMaxVelocityGene !== undefined) JET_MAX_VELOCITY_GENE_DEFAULT = config.jetMaxVelocityGene;
 
     if (config.fluidDiffusion !== undefined) FLUID_DIFFUSION = config.fluidDiffusion;
     if (config.fluidViscosity !== undefined) FLUID_VISCOSITY = config.fluidViscosity;
@@ -375,6 +381,8 @@ function applyImportedConfig(config) {
     swimmerNodeCostSlider.value = SWIMMER_NODE_ENERGY_COST;
     photosyntheticNodeCostSlider.value = PHOTOSYNTHETIC_NODE_ENERGY_COST;
     photosynthesisEfficiencySlider.value = PHOTOSYNTHESIS_EFFICIENCY;
+    jetNodeCostSlider.value = JET_NODE_ENERGY_COST;
+    jetMaxVelocityGeneSlider.value = JET_MAX_VELOCITY_GENE_DEFAULT;
     bodyRepulsionStrengthSlider.value = BODY_REPULSION_STRENGTH;
     bodyRepulsionRadiusFactorSlider.value = BODY_REPULSION_RADIUS_FACTOR;
     maxTimestepSlider.value = MAX_DELTA_TIME_MS;

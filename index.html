@@ -14,6 +14,7 @@
                 <button id="copyInfoPanelButton" title="Copy Info to Clipboard">Copy</button>
                 <div class="info-section">
                     <h5>Soft Body Info</h5>
+                    <button id="exportCreatureButton" title="Export this creature's blueprint" style="position: absolute; top: 45px; right: 45px; background: #28a745; color: white; border: none; padding: 3px 7px; cursor: pointer; border-radius: 3px; font-size: 0.9em;">Export</button>
                     <p><strong>ID:</strong> <span id="infoBodyId">-</span></p>
                     <p><strong>Avg Stiffness:</strong> <span id="infoBodyStiffness">-</span></p>
                     <p><strong>Avg Damping:</strong> <span id="infoBodyDamping">-</span></p>
@@ -255,6 +256,12 @@
                 <button id="exportConfigButton">Export Config</button>
                 <input type="file" id="importConfigFile" accept=".json" style="display: none;">
                 <button id="importConfigButton">Import Config</button>
+            </div>
+            <div class="control-group">
+                <h4>Creature Import/Export</h4>
+                <input type="file" id="importCreatureFile" accept=".json" style="display: none;">
+                <button id="importCreatureButton">Import Creature & Place</button>
+                <p id="creatureImportStatus" style="font-size: 0.8em; color: #bbb; text-align: center; margin-top: 5px;"></p>
             </div>
             <div class="control-group">
                 <h4>Environment Maps</h4>

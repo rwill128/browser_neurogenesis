@@ -103,6 +103,10 @@ const particleCountDisplay = document.getElementById('particleCount');
 const exportConfigButton = document.getElementById('exportConfigButton');
 const importConfigFile = document.getElementById('importConfigFile');
 const importConfigButton = document.getElementById('importConfigButton');
+const importCreatureButton = document.getElementById('importCreatureButton');
+const importCreatureFile = document.getElementById('importCreatureFile');
+const creatureImportStatus = document.getElementById('creatureImportStatus');
+const exportCreatureButton = document.getElementById('exportCreatureButton');
 
 const emitterEditModeToggle = document.getElementById('emitterEditModeToggle');
 const emitterStrengthSlider = document.getElementById('emitterStrength');
@@ -965,7 +969,7 @@ resetParticlesButton.onclick = function () {
 
 exportConfigButton.onclick = handleExportConfig;
 importConfigButton.onclick = () => importConfigFile.click();
-importConfigFile.onchange = handleImportConfig;
+importConfigFile.onchange = (event) => handleImportConfig(event, canvas, webgpuCanvas);
 closeInfoPanelButton.onclick = () => {
     infoPanel.classList.remove('open');
     selectedInspectBody = null;
@@ -1208,6 +1212,11 @@ canvas.addEventListener('mousedown', (e) => {
         const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
         const simMouseX = worldCoords.x;
         const simMouseY = worldCoords.y;
+
+        if (IS_CREATURE_IMPORT_MODE && IMPORTED_CREATURE_DATA) {
+            placeImportedCreature(simMouseX, simMouseY);
+            return; // Exit after placing
+        }
 
         if (IS_EMITTER_EDIT_MODE && fluidField) {
             if (IS_SIMULATION_PAUSED) return;
@@ -1723,5 +1732,79 @@ function handleNodeTypeLabelClick(nodeTypeName) {
     } else {
         console.log(`No creatures found with node type ${getNodeTypeString(nodeType)}`);
         cyclingNodeType = null;
+    }
+}
+
+exportCreatureButton.onclick = handleExportCreature;
+importCreatureButton.onclick = () => importCreatureFile.click();
+importCreatureFile.onchange = handleImportCreature;
+
+function handleExportCreature() {
+    if (!selectedInspectBody) {
+        showMessageModal("No creature selected to export.");
+        return;
+    }
+
+    const creatureBlueprint = selectedInspectBody.exportBlueprint();
+    const jsonString = JSON.stringify(creatureBlueprint, null, 2);
+    const blob = new Blob([jsonString], {type: "application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `creature_${selectedInspectBody.id}_blueprint.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    console.log(`Exported blueprint for creature ${selectedInspectBody.id}.`);
+}
+
+function handleImportCreature(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const importedData = JSON.parse(e.target.result);
+            // Basic validation
+            if (importedData.version && importedData.blueprintPoints && importedData.blueprintSprings) {
+                IMPORTED_CREATURE_DATA = importedData;
+                IS_CREATURE_IMPORT_MODE = true;
+                creatureImportStatus.textContent = "Click to place creature. Right-click to cancel.";
+                canvas.style.cursor = 'copy';
+                console.log("Creature blueprint loaded. Awaiting placement.");
+            } else {
+                throw new Error("Invalid creature blueprint file format.");
+            }
+        } catch (error) {
+            console.error("Error parsing imported creature blueprint:", error);
+            showMessageModal("Failed to import creature. Make sure it's a valid blueprint JSON file.");
+            creatureImportStatus.textContent = "";
+            IS_CREATURE_IMPORT_MODE = false;
+            IMPORTED_CREATURE_DATA = null;
+        }
+    };
+    reader.readAsText(file);
+    importCreatureFile.value = ''; // Clear file input
+}
+
+function placeImportedCreature(worldX, worldY) {
+    if (!IS_CREATURE_IMPORT_MODE || !IMPORTED_CREATURE_DATA) return;
+
+    try {
+        const newCreature = new SoftBody(nextSoftBodyId++, worldX, worldY, IMPORTED_CREATURE_DATA, true);
+        softBodyPopulation.push(newCreature);
+        console.log(`Placed imported creature with new ID ${newCreature.id} at (${worldX.toFixed(0)}, ${worldY.toFixed(0)}).`);
+
+        // Keep import mode active to allow placing multiple creatures
+
+    } catch(error) {
+        console.error("Error creating creature from imported data:", error);
+        showMessageModal("An error occurred while creating the creature from the blueprint.");
+        IS_CREATURE_IMPORT_MODE = false;
+        IMPORTED_CREATURE_DATA = null;
+        creatureImportStatus.textContent = "";
+        canvas.style.cursor = 'default';
     }
 }

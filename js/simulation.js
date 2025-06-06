@@ -114,7 +114,7 @@ function initializePopulation() {
         const margin = 50;
         const randX = margin + Math.random() * (WORLD_WIDTH - margin * 2);
         const randY = margin + Math.random() * (WORLD_HEIGHT - margin * 2);
-        softBodyPopulation.push(new SoftBody(nextSoftBodyId++, randX, randY));
+        softBodyPopulation.push(new SoftBody(nextSoftBodyId++, randX, randY, null));
     }
     // lastTime = performance.now(); // This will be handled in main.js
     updatePopulationCount();
@@ -319,7 +319,7 @@ function updatePhysics(dt) {
                  const margin = 50;
                  const randX = margin + Math.random() * (WORLD_WIDTH - margin * 2);
                  const randY = margin + Math.random() * (WORLD_HEIGHT - margin * 2);
-                 softBodyPopulation.push(new SoftBody(nextSoftBodyId++, randX, randY));
+                 softBodyPopulation.push(new SoftBody(nextSoftBodyId++, randX, randY, null));
              } else {
                  break; // Stop if ceiling is reached during floor maintenance
              }

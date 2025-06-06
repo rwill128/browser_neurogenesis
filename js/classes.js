@@ -215,7 +215,7 @@ class Spring {
 
 // --- SoftBody Class ---
 class SoftBody {
-    constructor(id, initialX, initialY, parentBody = null) {
+    constructor(id, initialX, initialY, creationData = null, isBlueprint = false) {
         this.id = id;
         this.massPoints = [];
         this.springs = [];
@@ -227,7 +227,7 @@ class SoftBody {
         this.isUnstable = false;
         this.ticksSinceBirth = 0;
         this.canReproduce = false;
-        this.shapeType = parentBody ? parentBody.shapeType : Math.floor(Math.random() * 3);
+        this.shapeType = creationData ? creationData.shapeType : Math.floor(Math.random() * 3);
         this.justReproduced = false; // New: Flag for reproduction reward
 
         this.energyGainedFromPhotosynthesis = 0;
@@ -262,207 +262,245 @@ class SoftBody {
         this.energyGainedFromPhotosynthesisThisTick = 0; // New: Photosynthesis gain in the current tick
 
         // Initialize heritable/mutable properties
-        if (parentBody) {
-            this.stiffness = parentBody.stiffness * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-            if (this.stiffness !== parentBody.stiffness) mutationStats.springStiffness++;
-            this.springDamping = parentBody.springDamping * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-            if (this.springDamping !== parentBody.springDamping) mutationStats.springDamping++;
+        if (isBlueprint && creationData) {
+            // --- CREATION FROM IMPORTED BLUEPRINT ---
+            const blueprint = creationData;
+            this.stiffness = blueprint.stiffness;
+            this.springDamping = blueprint.springDamping;
+            this.motorImpulseInterval = blueprint.motorImpulseInterval;
+            this.motorImpulseMagnitudeCap = blueprint.motorImpulseMagnitudeCap;
+            this.emitterStrength = blueprint.emitterStrength;
+            this.emitterDirection = new Vec2(blueprint.emitterDirection.x, blueprint.emitterDirection.y);
+            this.numOffspring = blueprint.numOffspring;
+            this.offspringSpawnRadius = blueprint.offspringSpawnRadius;
+            this.pointAddChance = blueprint.pointAddChance;
+            this.springConnectionRadius = blueprint.springConnectionRadius;
+            this.jetMaxVelocityGene = blueprint.jetMaxVelocityGene;
+            this.reproductionEnergyThreshold = blueprint.reproductionEnergyThreshold;
+            this.reproductionCooldownGene = blueprint.reproductionCooldownGene;
+            this.defaultActivationPattern = blueprint.defaultActivationPattern;
+            this.defaultActivationLevel = blueprint.defaultActivationLevel;
+            this.defaultActivationPeriod = blueprint.defaultActivationPeriod;
+            this.defaultActivationPhaseOffset = blueprint.defaultActivationPhaseOffset;
+            this.rlAlgorithmType = blueprint.rlAlgorithmType;
+            this.rewardStrategy = blueprint.rewardStrategy;
             
-            let oldMotorInterval = parentBody.motorImpulseInterval;
-            this.motorImpulseInterval = parentBody.motorImpulseInterval * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-            if (Math.floor(this.motorImpulseInterval) !== Math.floor(oldMotorInterval)) mutationStats.motorInterval++;
+            // Directly use the blueprint's structure
+            this.blueprintPoints = JSON.parse(JSON.stringify(blueprint.blueprintPoints));
+            this.blueprintSprings = JSON.parse(JSON.stringify(blueprint.blueprintSprings));
+            this._instantiatePhenotypeFromBlueprint(initialX, initialY);
 
-            let oldMotorCap = parentBody.motorImpulseMagnitudeCap;
-            this.motorImpulseMagnitudeCap = parentBody.motorImpulseMagnitudeCap * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-            if (this.motorImpulseMagnitudeCap !== oldMotorCap) mutationStats.motorCap++;
+        } else {
+            // --- CREATION FROM PARENT (REPRODUCTION) OR FROM SCRATCH ---
+            const parentBody = creationData; // In this case, creationData is the parentBody
+            if (parentBody) {
+                this.stiffness = parentBody.stiffness * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+                if (this.stiffness !== parentBody.stiffness) mutationStats.springStiffness++;
+                this.springDamping = parentBody.springDamping * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+                if (this.springDamping !== parentBody.springDamping) mutationStats.springDamping++;
+                
+                let oldMotorInterval = parentBody.motorImpulseInterval;
+                this.motorImpulseInterval = parentBody.motorImpulseInterval * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+                if (Math.floor(this.motorImpulseInterval) !== Math.floor(oldMotorInterval)) mutationStats.motorInterval++;
 
-            let oldEmitterStrength = parentBody.emitterStrength;
-            this.emitterStrength = parentBody.emitterStrength * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-            if (this.emitterStrength !== oldEmitterStrength) mutationStats.emitterStrength++;
+                let oldMotorCap = parentBody.motorImpulseMagnitudeCap;
+                this.motorImpulseMagnitudeCap = parentBody.motorImpulseMagnitudeCap * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+                if (this.motorImpulseMagnitudeCap !== oldMotorCap) mutationStats.motorCap++;
 
-            let oldJetMaxVel = parentBody.jetMaxVelocityGene;
-            this.jetMaxVelocityGene = parentBody.jetMaxVelocityGene * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-            if (this.jetMaxVelocityGene !== oldJetMaxVel) mutationStats.jetMaxVelocityGene++;
+                let oldEmitterStrength = parentBody.emitterStrength;
+                this.emitterStrength = parentBody.emitterStrength * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+                if (this.emitterStrength !== oldEmitterStrength) mutationStats.emitterStrength++;
 
-            let offspringNumChange = (Math.random() < Math.max(0, Math.min(1, MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER))) ? (Math.random() < 0.5 ? -1 : 1) : 0;
-            this.numOffspring = parentBody.numOffspring + offspringNumChange;
-            if (offspringNumChange !== 0) mutationStats.numOffspring++;
+                let oldJetMaxVel = parentBody.jetMaxVelocityGene;
+                this.jetMaxVelocityGene = parentBody.jetMaxVelocityGene * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+                if (this.jetMaxVelocityGene !== oldJetMaxVel) mutationStats.jetMaxVelocityGene++;
 
-            let oldOffspringSpawnRadius = parentBody.offspringSpawnRadius;
-            this.offspringSpawnRadius = parentBody.offspringSpawnRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.5));
-            if (this.offspringSpawnRadius !== oldOffspringSpawnRadius) mutationStats.offspringSpawnRadius++;
-            
-            let oldPointAddChance = parentBody.pointAddChance;
-            this.pointAddChance = parentBody.pointAddChance * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 2));
-            if (this.pointAddChance !== oldPointAddChance) mutationStats.pointAddChanceGene++;
+                let offspringNumChange = (Math.random() < Math.max(0, Math.min(1, MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER))) ? (Math.random() < 0.5 ? -1 : 1) : 0;
+                this.numOffspring = parentBody.numOffspring + offspringNumChange;
+                if (offspringNumChange !== 0) mutationStats.numOffspring++;
 
-            let oldSpringConnectionRadius = parentBody.springConnectionRadius;
-            this.springConnectionRadius = parentBody.springConnectionRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-            if (this.springConnectionRadius !== oldSpringConnectionRadius) mutationStats.springConnectionRadiusGene++;
-            
-            if (parentBody.emitterDirection) {
-                const oldEmitterDirX = parentBody.emitterDirection.x;
-                const angleMutation = (Math.random() - 0.5) * Math.PI * 0.2 * GLOBAL_MUTATION_RATE_MODIFIER;
-                const cosA = Math.cos(angleMutation);
-                const sinA = Math.sin(angleMutation);
-                this.emitterDirection = new Vec2(parentBody.emitterDirection.x * cosA - parentBody.emitterDirection.y * sinA, parentBody.emitterDirection.x * sinA + parentBody.emitterDirection.y * cosA).normalize();
-                if (this.emitterDirection.x !== oldEmitterDirX) mutationStats.emitterDirection++; // Simplified check
-            } else {
-                this.emitterDirection = new Vec2(Math.random()*2-1, Math.random()*2-1).normalize();
-                console.warn(`Parent body ${parentBody.id} was missing emitterDirection. Offspring ${this.id} gets random emitterDirection.`);
-                mutationStats.emitterDirection++; // Count as a change if parent was missing it
-            }
-            
-            let oldReproThreshold = parentBody.reproductionEnergyThreshold;
-            this.reproductionEnergyThreshold = parentBody.reproductionEnergyThreshold; 
-            // Mutation of reproductionEnergyThreshold happens later, after currentMaxEnergy is set for the offspring
+                let oldOffspringSpawnRadius = parentBody.offspringSpawnRadius;
+                this.offspringSpawnRadius = parentBody.offspringSpawnRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.5));
+                if (this.offspringSpawnRadius !== oldOffspringSpawnRadius) mutationStats.offspringSpawnRadius++;
+                
+                let oldPointAddChance = parentBody.pointAddChance;
+                this.pointAddChance = parentBody.pointAddChance * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 2));
+                if (this.pointAddChance !== oldPointAddChance) mutationStats.pointAddChanceGene++;
 
-            // Inherit and mutate activation pattern properties
-            if (Math.random() < ACTIVATION_PATTERN_MUTATION_CHANCE) {
-                const patterns = Object.values(ActivationPatternType);
-                this.defaultActivationPattern = patterns[Math.floor(Math.random() * patterns.length)];
-            } else {
-                this.defaultActivationPattern = parentBody.defaultActivationPattern;
-            }
-            this.defaultActivationLevel = parentBody.defaultActivationLevel * (1 + (Math.random() - 0.5) * 2 * ACTIVATION_PARAM_MUTATION_MAGNITUDE);
-            this.defaultActivationPeriod = parentBody.defaultActivationPeriod * (1 + (Math.random() - 0.5) * 2 * ACTIVATION_PARAM_MUTATION_MAGNITUDE);
-            this.defaultActivationPhaseOffset = parentBody.defaultActivationPhaseOffset + (Math.random() - 0.5) * (parentBody.defaultActivationPeriod * 0.2); 
-            
-            // Inherit/Mutate Reward Strategy
-            if (Math.random() < RLRewardStrategy_MUTATION_CHANCE) {
-                const strategies = Object.values(RLRewardStrategy);
-                let newStrategy = strategies[Math.floor(Math.random() * strategies.length)];
-                if (newStrategy !== parentBody.rewardStrategy) {
-                    this.rewardStrategy = newStrategy;
-                    mutationStats.rewardStrategyChange++;
+                let oldSpringConnectionRadius = parentBody.springConnectionRadius;
+                this.springConnectionRadius = parentBody.springConnectionRadius * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
+                if (this.springConnectionRadius !== oldSpringConnectionRadius) mutationStats.springConnectionRadiusGene++;
+                
+                if (parentBody.emitterDirection) {
+                    const oldEmitterDirX = parentBody.emitterDirection.x;
+                    const angleMutation = (Math.random() - 0.5) * Math.PI * 0.2 * GLOBAL_MUTATION_RATE_MODIFIER;
+                    const cosA = Math.cos(angleMutation);
+                    const sinA = Math.sin(angleMutation);
+                    this.emitterDirection = new Vec2(parentBody.emitterDirection.x * cosA - parentBody.emitterDirection.y * sinA, parentBody.emitterDirection.x * sinA + parentBody.emitterDirection.y * cosA).normalize();
+                    if (this.emitterDirection.x !== oldEmitterDirX) mutationStats.emitterDirection++; // Simplified check
                 } else {
-                    if (strategies.length > 1) {
-                        let tempStrategies = strategies.filter(s => s !== parentBody.rewardStrategy);
-                        if (tempStrategies.length > 0) {
-                            this.rewardStrategy = tempStrategies[Math.floor(Math.random() * tempStrategies.length)];
-                            mutationStats.rewardStrategyChange++; 
+                    this.emitterDirection = new Vec2(Math.random()*2-1, Math.random()*2-1).normalize();
+                    console.warn(`Parent body ${parentBody.id} was missing emitterDirection. Offspring ${this.id} gets random emitterDirection.`);
+                    mutationStats.emitterDirection++; // Count as a change if parent was missing it
+                }
+                
+                let oldReproThreshold = parentBody.reproductionEnergyThreshold;
+                this.reproductionEnergyThreshold = parentBody.reproductionEnergyThreshold; 
+                // Mutation of reproductionEnergyThreshold happens later, after currentMaxEnergy is set for the offspring
+
+                // Inherit and mutate activation pattern properties
+                if (Math.random() < ACTIVATION_PATTERN_MUTATION_CHANCE) {
+                    const patterns = Object.values(ActivationPatternType);
+                    this.defaultActivationPattern = patterns[Math.floor(Math.random() * patterns.length)];
+                } else {
+                    this.defaultActivationPattern = parentBody.defaultActivationPattern;
+                }
+                this.defaultActivationLevel = parentBody.defaultActivationLevel * (1 + (Math.random() - 0.5) * 2 * ACTIVATION_PARAM_MUTATION_MAGNITUDE);
+                this.defaultActivationPeriod = parentBody.defaultActivationPeriod * (1 + (Math.random() - 0.5) * 2 * ACTIVATION_PARAM_MUTATION_MAGNITUDE);
+                this.defaultActivationPhaseOffset = parentBody.defaultActivationPhaseOffset + (Math.random() - 0.5) * (parentBody.defaultActivationPeriod * 0.2); 
+                
+                // Inherit/Mutate Reward Strategy
+                if (Math.random() < RLRewardStrategy_MUTATION_CHANCE) {
+                    const strategies = Object.values(RLRewardStrategy);
+                    let newStrategy = strategies[Math.floor(Math.random() * strategies.length)];
+                    if (newStrategy !== parentBody.rewardStrategy) {
+                        this.rewardStrategy = newStrategy;
+                        mutationStats.rewardStrategyChange++;
+                    } else {
+                        if (strategies.length > 1) {
+                            let tempStrategies = strategies.filter(s => s !== parentBody.rewardStrategy);
+                            if (tempStrategies.length > 0) {
+                                this.rewardStrategy = tempStrategies[Math.floor(Math.random() * tempStrategies.length)];
+                                mutationStats.rewardStrategyChange++; 
+                            } else {
+                                this.rewardStrategy = parentBody.rewardStrategy;
+                            }
                         } else {
                             this.rewardStrategy = parentBody.rewardStrategy;
                         }
-                    } else {
-                        this.rewardStrategy = parentBody.rewardStrategy;
                     }
+                } else {
+                    this.rewardStrategy = parentBody.rewardStrategy;
                 }
+                // RL Algorithm type inheritance (can add mutation if needed)
+                this.rlAlgorithmType = parentBody.rlAlgorithmType || RLAlgorithmType.REINFORCE;
+
+                // Inherit and mutate reproductionCooldownGene
+                this.reproductionCooldownGene = parentBody.reproductionCooldownGene * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.2));
+                this.reproductionCooldownGene = Math.max(50, Math.min(Math.floor(this.reproductionCooldownGene), 20000)); // Clamp
+                if (this.reproductionCooldownGene !== parentBody.reproductionCooldownGene) {
+                    mutationStats.reproductionCooldownGene = (mutationStats.reproductionCooldownGene || 0) + 1;
+                }
+
             } else {
-                this.rewardStrategy = parentBody.rewardStrategy;
+                // Initial defaults for brand new creatures
+                this.stiffness = 500 + Math.random() * 2500;
+                this.springDamping = 5 + Math.random() * 20;
+                this.motorImpulseInterval = 30 + Math.floor(Math.random() * 90);
+                this.motorImpulseMagnitudeCap = 0.5 + Math.random() * 2.0;
+                this.emitterStrength = 0.2 + Math.random() * 1.0;
+                this.emitterDirection = new Vec2(Math.random()*2-1, Math.random()*2-1).normalize();
+                this.numOffspring = 1 + Math.floor(Math.random() * 3);
+                this.offspringSpawnRadius = 50 + Math.random() * 50;
+                this.pointAddChance = 0.02 + Math.random() * 0.06;
+                this.springConnectionRadius = 40 + Math.random() * 40;
+                this.jetMaxVelocityGene = JET_MAX_VELOCITY_GENE_DEFAULT * (0.8 + Math.random() * 0.4);
+                this.reproductionEnergyThreshold = BASE_MAX_CREATURE_ENERGY; // Will be refined based on actual max energy
+
+                // Default Activation Pattern Properties for new creature
+                const patterns = Object.values(ActivationPatternType);
+                this.defaultActivationPattern = patterns[Math.floor(Math.random() * patterns.length)];
+                this.defaultActivationLevel = DEFAULT_ACTIVATION_LEVEL_MIN + Math.random() * (DEFAULT_ACTIVATION_LEVEL_MAX - DEFAULT_ACTIVATION_LEVEL_MIN);
+                this.defaultActivationPeriod = DEFAULT_ACTIVATION_PERIOD_MIN_TICKS + Math.floor(Math.random() * (DEFAULT_ACTIVATION_PERIOD_MAX_TICKS - DEFAULT_ACTIVATION_PERIOD_MIN_TICKS + 1));
+                this.defaultActivationPhaseOffset = Math.random() * this.defaultActivationPeriod;
+                
+                // Default RL Algorithm for brand new creatures
+                this.rlAlgorithmType = RLAlgorithmType.REINFORCE; 
+                
+                // New: Default Reward Strategy for brand new creatures
+                const strategies = Object.values(RLRewardStrategy);
+                this.rewardStrategy = strategies[Math.floor(Math.random() * strategies.length)];
+
+                // Initialize reproductionCooldownGene for new creatures
+                this.reproductionCooldownGene = 100 + Math.floor(Math.random() * 4901); // Random between 100 and 5000
             }
-            // RL Algorithm type inheritance (can add mutation if needed)
-            this.rlAlgorithmType = parentBody.rlAlgorithmType || RLAlgorithmType.REINFORCE;
 
-            // Inherit and mutate reproductionCooldownGene
-            this.reproductionCooldownGene = parentBody.reproductionCooldownGene * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.2));
-            this.reproductionCooldownGene = Math.max(50, Math.min(Math.floor(this.reproductionCooldownGene), 20000)); // Clamp
-            if (this.reproductionCooldownGene !== parentBody.reproductionCooldownGene) {
-                mutationStats.reproductionCooldownGene = (mutationStats.reproductionCooldownGene || 0) + 1;
+            // Clamp activation properties after they've been set/inherited/mutated
+            this.defaultActivationLevel = Math.max(DEFAULT_ACTIVATION_LEVEL_MIN * 0.1, Math.min(this.defaultActivationLevel, DEFAULT_ACTIVATION_LEVEL_MAX * 2.0)); // Wider clamping for more variance
+            this.defaultActivationPeriod = Math.max(DEFAULT_ACTIVATION_PERIOD_MIN_TICKS * 0.25, Math.min(this.defaultActivationPeriod, DEFAULT_ACTIVATION_PERIOD_MAX_TICKS * 2.0));
+            this.defaultActivationPeriod = Math.floor(this.defaultActivationPeriod);
+            if (this.defaultActivationPeriod === 0) this.defaultActivationPeriod = 1; // Avoid division by zero
+            if (this.defaultActivationPhaseOffset < 0) this.defaultActivationPhaseOffset += this.defaultActivationPeriod;
+            this.defaultActivationPhaseOffset %= this.defaultActivationPeriod;
+
+            // Clamp other properties (already existing logic)
+            this.stiffness = Math.max(100, Math.min(this.stiffness, 10000));
+            this.springDamping = Math.max(0.1, Math.min(this.springDamping, 50));
+            this.motorImpulseInterval = Math.max(10, Math.floor(this.motorImpulseInterval));
+            this.motorImpulseMagnitudeCap = Math.max(0, Math.min(this.motorImpulseMagnitudeCap, 5.0));
+            this.emitterStrength = Math.max(0, Math.min(this.emitterStrength, 3.0));
+            this.numOffspring = Math.max(1, Math.min(this.numOffspring, 5));
+            this.offspringSpawnRadius = Math.max(20, Math.min(this.offspringSpawnRadius, 150));
+            this.pointAddChance = Math.max(0, Math.min(0.5, this.pointAddChance));
+            this.springConnectionRadius = Math.max(10, Math.min(this.springConnectionRadius, 100));
+            this.jetMaxVelocityGene = Math.max(0.1, Math.min(this.jetMaxVelocityGene, 50.0));
+
+            this.fluidEntrainment = BODY_FLUID_ENTRAINMENT_FACTOR;
+            this.fluidCurrentStrength = FLUID_CURRENT_STRENGTH_ON_BODY;
+            this.bodyPushStrength = SOFT_BODY_PUSH_STRENGTH;
+
+            // 1. Create shape (points and initial springs)
+            // If created from blueprint, this is already done.
+            if (!isBlueprint) {
+                this.createShape(initialX, initialY, parentBody);
             }
 
-        } else {
-            // Initial defaults for brand new creatures
-            this.stiffness = 500 + Math.random() * 2500;
-            this.springDamping = 5 + Math.random() * 20;
-            this.motorImpulseInterval = 30 + Math.floor(Math.random() * 90);
-            this.motorImpulseMagnitudeCap = 0.5 + Math.random() * 2.0;
-            this.emitterStrength = 0.2 + Math.random() * 1.0;
-            this.emitterDirection = new Vec2(Math.random()*2-1, Math.random()*2-1).normalize();
-            this.numOffspring = 1 + Math.floor(Math.random() * 3);
-            this.offspringSpawnRadius = 50 + Math.random() * 50;
-            this.pointAddChance = 0.02 + Math.random() * 0.06;
-            this.springConnectionRadius = 40 + Math.random() * 40;
-            this.jetMaxVelocityGene = JET_MAX_VELOCITY_GENE_DEFAULT * (0.8 + Math.random() * 0.4);
-            this.reproductionEnergyThreshold = BASE_MAX_CREATURE_ENERGY; // Will be refined based on actual max energy
+            // 2. Body Scale Mutation (if offspring)
+            const parentBodyForMutation = isBlueprint ? null : creationData;
+            if (parentBodyForMutation && Math.random() < BODY_SCALE_MUTATION_CHANCE) {
+                const scaleFactor = 1.0 + (Math.random() - 0.5) * 2 * BODY_SCALE_MUTATION_MAGNITUDE;
+                if (scaleFactor > 0.1 && Math.abs(scaleFactor - 1.0) > 0.001) { // Check if it actually scaled
+                    this.springs.forEach(spring => {
+                        spring.restLength *= scaleFactor;
+                        spring.restLength = Math.max(1, spring.restLength); 
+                    });
+                    this.massPoints.forEach(point => {
+                        point.radius *= scaleFactor;
+                        point.radius = Math.max(0.5, point.radius); 
+                    });
+                    this.offspringSpawnRadius *= scaleFactor;
+                    this.offspringSpawnRadius = Math.max(10, this.offspringSpawnRadius); 
+                    mutationStats.bodyScale++;
+                }
+            }
 
-            // Default Activation Pattern Properties for new creature
-            const patterns = Object.values(ActivationPatternType);
-            this.defaultActivationPattern = patterns[Math.floor(Math.random() * patterns.length)];
-            this.defaultActivationLevel = DEFAULT_ACTIVATION_LEVEL_MIN + Math.random() * (DEFAULT_ACTIVATION_LEVEL_MAX - DEFAULT_ACTIVATION_LEVEL_MIN);
-            this.defaultActivationPeriod = DEFAULT_ACTIVATION_PERIOD_MIN_TICKS + Math.floor(Math.random() * (DEFAULT_ACTIVATION_PERIOD_MAX_TICKS - DEFAULT_ACTIVATION_PERIOD_MIN_TICKS + 1));
-            this.defaultActivationPhaseOffset = Math.random() * this.defaultActivationPeriod;
+            // 3. Calculate dynamic max energy based on final point count
+            this.calculateCurrentMaxEnergy();
+
+            // Calculate effective reproduction cooldown based on gene and point count
+            this.effectiveReproductionCooldown = Math.floor(this.reproductionCooldownGene * (1 + (0.2 * Math.max(0, this.massPoints.length - 1))));
+            if (this.massPoints.length === 0) { // Safety for empty body after blueprint instantiation (should not happen ideally)
+                 this.effectiveReproductionCooldown = Math.floor(this.reproductionCooldownGene);
+            }
+
+            // 4. Set initial creature energy
+            this.creatureEnergy = this.currentMaxEnergy * OFFSPRING_INITIAL_ENERGY_SHARE;
+
+            let oldReproThresholdForStat = this.reproductionEnergyThreshold; // Capture before mutation
+            if (!isBlueprint && parentBodyForMutation) {
+                this.reproductionEnergyThreshold = this.reproductionEnergyThreshold * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.2));
+            } else if (!parentBodyForMutation) { // This is for brand new from scratch or imported
+                this.reproductionEnergyThreshold = this.currentMaxEnergy * (0.75 + Math.random() * 0.2);
+            }
+            // For blueprints, the threshold is already set, but we still clamp it.
+            this.reproductionEnergyThreshold = Math.max(this.currentMaxEnergy * 0.05, Math.min(this.reproductionEnergyThreshold, this.currentMaxEnergy));
+            this.reproductionEnergyThreshold = Math.round(this.reproductionEnergyThreshold);
+            if (parentBodyForMutation && this.reproductionEnergyThreshold !== oldReproThresholdForStat) { // Only count if from parent and changed
+                mutationStats.reproductionEnergyThreshold++;
+            }
             
-            // Default RL Algorithm for brand new creatures
-            this.rlAlgorithmType = RLAlgorithmType.REINFORCE; 
-            
-            // New: Default Reward Strategy for brand new creatures
-            const strategies = Object.values(RLRewardStrategy);
-            this.rewardStrategy = strategies[Math.floor(Math.random() * strategies.length)];
-
-            // Initialize reproductionCooldownGene for new creatures
-            this.reproductionCooldownGene = 100 + Math.floor(Math.random() * 4901); // Random between 100 and 5000
         }
 
-        // Clamp activation properties after they've been set/inherited/mutated
-        this.defaultActivationLevel = Math.max(DEFAULT_ACTIVATION_LEVEL_MIN * 0.1, Math.min(this.defaultActivationLevel, DEFAULT_ACTIVATION_LEVEL_MAX * 2.0)); // Wider clamping for more variance
-        this.defaultActivationPeriod = Math.max(DEFAULT_ACTIVATION_PERIOD_MIN_TICKS * 0.25, Math.min(this.defaultActivationPeriod, DEFAULT_ACTIVATION_PERIOD_MAX_TICKS * 2.0));
-        this.defaultActivationPeriod = Math.floor(this.defaultActivationPeriod);
-        if (this.defaultActivationPeriod === 0) this.defaultActivationPeriod = 1; // Avoid division by zero
-        if (this.defaultActivationPhaseOffset < 0) this.defaultActivationPhaseOffset += this.defaultActivationPeriod;
-        this.defaultActivationPhaseOffset %= this.defaultActivationPeriod;
-
-        // Clamp other properties (already existing logic)
-        this.stiffness = Math.max(100, Math.min(this.stiffness, 10000));
-        this.springDamping = Math.max(0.1, Math.min(this.springDamping, 50));
-        this.motorImpulseInterval = Math.max(10, Math.floor(this.motorImpulseInterval));
-        this.motorImpulseMagnitudeCap = Math.max(0, Math.min(this.motorImpulseMagnitudeCap, 5.0));
-        this.emitterStrength = Math.max(0, Math.min(this.emitterStrength, 3.0));
-        this.numOffspring = Math.max(1, Math.min(this.numOffspring, 5));
-        this.offspringSpawnRadius = Math.max(20, Math.min(this.offspringSpawnRadius, 150));
-        this.pointAddChance = Math.max(0, Math.min(0.5, this.pointAddChance));
-        this.springConnectionRadius = Math.max(10, Math.min(this.springConnectionRadius, 100));
-        this.jetMaxVelocityGene = Math.max(0.1, Math.min(this.jetMaxVelocityGene, 50.0));
-
-        this.fluidEntrainment = BODY_FLUID_ENTRAINMENT_FACTOR;
-        this.fluidCurrentStrength = FLUID_CURRENT_STRENGTH_ON_BODY;
-        this.bodyPushStrength = SOFT_BODY_PUSH_STRENGTH;
-
-        // 1. Create shape (points and initial springs)
-        this.createShape(initialX, initialY, parentBody);
-
-        // 2. Body Scale Mutation (if offspring)
-        if (parentBody && Math.random() < BODY_SCALE_MUTATION_CHANCE) {
-            const scaleFactor = 1.0 + (Math.random() - 0.5) * 2 * BODY_SCALE_MUTATION_MAGNITUDE;
-            if (scaleFactor > 0.1 && Math.abs(scaleFactor - 1.0) > 0.001) { // Check if it actually scaled
-                this.springs.forEach(spring => {
-                    spring.restLength *= scaleFactor;
-                    spring.restLength = Math.max(1, spring.restLength); 
-                });
-                this.massPoints.forEach(point => {
-                    point.radius *= scaleFactor;
-                    point.radius = Math.max(0.5, point.radius); 
-                });
-                this.offspringSpawnRadius *= scaleFactor;
-                this.offspringSpawnRadius = Math.max(10, this.offspringSpawnRadius); 
-                mutationStats.bodyScale++;
-            }
-        }
-
-        // 3. Calculate dynamic max energy based on final point count
-        this.calculateCurrentMaxEnergy(); 
-
-        // Calculate effective reproduction cooldown based on gene and point count
-        this.effectiveReproductionCooldown = Math.floor(this.reproductionCooldownGene * (1 + (0.2 * Math.max(0, this.massPoints.length - 1))));
-        if (this.massPoints.length === 0) { // Safety for empty body after blueprint instantiation (should not happen ideally)
-             this.effectiveReproductionCooldown = Math.floor(this.reproductionCooldownGene);
-        }
-
-        // 4. Set initial creature energy
-        this.creatureEnergy = this.currentMaxEnergy * OFFSPRING_INITIAL_ENERGY_SHARE; 
-
-        let oldReproThresholdForStat = this.reproductionEnergyThreshold; // Capture before mutation
-        if (parentBody) {
-            this.reproductionEnergyThreshold = this.reproductionEnergyThreshold * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.2));
-        } else {
-            this.reproductionEnergyThreshold = this.currentMaxEnergy * (0.75 + Math.random() * 0.2);
-        }
-        this.reproductionEnergyThreshold = Math.max(this.currentMaxEnergy * 0.05, Math.min(this.reproductionEnergyThreshold, this.currentMaxEnergy));
-        this.reproductionEnergyThreshold = Math.round(this.reproductionEnergyThreshold);
-        if (this.reproductionEnergyThreshold !== oldReproThresholdForStat && parentBody) { // Only count if from parent and changed
-            mutationStats.reproductionEnergyThreshold++;
-        }
-        
         this.primaryEyePoint = null; // New: For the creature's main eye
         if (this.massPoints.length > 0) {
             // Attempt to find an existing EYE node to designate as primary
@@ -2218,6 +2256,34 @@ class SoftBody {
             }
         }
         return uniqueSegments;
+    }
+
+    exportBlueprint() {
+        const blueprint = {
+            version: 1,
+            stiffness: this.stiffness,
+            springDamping: this.springDamping,
+            motorImpulseInterval: this.motorImpulseInterval,
+            motorImpulseMagnitudeCap: this.motorImpulseMagnitudeCap,
+            emitterStrength: this.emitterStrength,
+            emitterDirection: { x: this.emitterDirection.x, y: this.emitterDirection.y },
+            numOffspring: this.numOffspring,
+            offspringSpawnRadius: this.offspringSpawnRadius,
+            pointAddChance: this.pointAddChance,
+            springConnectionRadius: this.springConnectionRadius,
+            reproductionEnergyThreshold: this.reproductionEnergyThreshold,
+            jetMaxVelocityGene: this.jetMaxVelocityGene,
+            reproductionCooldownGene: this.reproductionCooldownGene,
+            defaultActivationPattern: this.defaultActivationPattern,
+            defaultActivationLevel: this.defaultActivationLevel,
+            defaultActivationPeriod: this.defaultActivationPeriod,
+            defaultActivationPhaseOffset: this.defaultActivationPhaseOffset,
+            rlAlgorithmType: this.rlAlgorithmType,
+            rewardStrategy: this.rewardStrategy,
+            blueprintPoints: this.blueprintPoints,
+            blueprintSprings: this.blueprintSprings
+        };
+        return blueprint;
     }
 
     _performPhysicalUpdates(dt, fluidFieldRef) {

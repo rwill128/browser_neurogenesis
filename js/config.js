@@ -285,7 +285,7 @@ function handleExportConfig() {
     console.log("Config exported.");
 }
 
-function handleImportConfig(event) {
+function handleImportConfig(event, canvas, webgpuCanvas) {
     const file = event.target.files[0];
     if (!file) return;
 
@@ -293,7 +293,7 @@ function handleImportConfig(event) {
     reader.onload = (e) => {
         try {
             const importedConfig = JSON.parse(e.target.result);
-            applyImportedConfig(importedConfig);
+            applyImportedConfig(importedConfig, canvas, webgpuCanvas);
             console.log("Config imported successfully.");
         } catch (error) {
             console.error("Error parsing imported config:", error);
@@ -304,7 +304,7 @@ function handleImportConfig(event) {
     if (importConfigFile) importConfigFile.value = ''; // Clear file input
 }
 
-function applyImportedConfig(config) {
+function applyImportedConfig(config, canvas, webgpuCanvas) {
     if (config.worldWidth !== undefined) WORLD_WIDTH = config.worldWidth;
     if (config.worldHeight !== undefined) WORLD_HEIGHT = config.worldHeight;
     if (canvas) {
@@ -405,7 +405,7 @@ function applyImportedConfig(config) {
 
     initializeAllSliderDisplays(); 
 
-    initFluidSimulation();
+    initFluidSimulation(USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
     initNutrientMap();
     initLightMap();
     initViscosityMap();
@@ -498,6 +498,8 @@ const DEFAULT_ACTIVATION_PERIOD_MAX_TICKS = 300;
 
 let IS_HEADLESS_MODE = false; // New: For toggling drawing off
 let USE_GPU_FLUID_SIMULATION = false; // New: Switch for GPU fluid sim
+let IS_CREATURE_IMPORT_MODE = false; // New: For placing an imported creature
+let IMPORTED_CREATURE_DATA = null;   // New: To hold the data of the creature to be imported
 
 // --- Neural Network Constants ---
 // ... existing code ... 

@@ -471,17 +471,6 @@ const REWARD_WEIGHT_MAX = 2.0; // Allow weights to go slightly above 1 or be neg
 const REPRODUCTION_REWARD_VALUE = 50.0; // Bonus reward for successful reproduction
 const DEFAULT_SURVIVAL_REWARD_WEIGHT = 0.01; // Small constant reward for living
 
-// New constants for RLRewardStrategy
-const RLRewardStrategy = {
-    ENERGY_CHANGE: 0,
-    REPRODUCTION_EVENT: 1,
-    PARTICLE_PROXIMITY: 2,
-    ENERGY_SECOND_DERIVATIVE: 3, // New: Reward based on the change in energy change rate
-    CREATURE_PROXIMITY: 4,
-    CREATURE_DISTANCE: 5
-};
-
-
 const RLRewardStrategy_MUTATION_CHANCE = 0.05; // Chance to mutate reward strategy
 const PARTICLE_PROXIMITY_REWARD_SCALE = 10.0;  // Scales the (0-1) proximity magnitude
 const ENERGY_SECOND_DERIVATIVE_REWARD_SCALE = 5.0; // Scales the energy 2nd derivative reward

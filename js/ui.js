@@ -1610,18 +1610,27 @@ function updateStatsPanel() {
             const percentage = ((count / totalNodes) * 100).toFixed(2);
             const typeString = getNodeTypeString(typeEnum);
 
+            const statLineContainer = document.createElement('div');
+            statLineContainer.className = 'stat-line-container';
+
             const p = document.createElement('p');
+            p.style.margin = '0';
             p.innerHTML = `<strong>${typeString}:</strong> <span class="stat-value">${count} (${percentage}%)</span>`;
+            statLineContainer.appendChild(p);
 
             if (count > 0) {
-                p.classList.add('clickable-stat');
-                p.title = `Click to cycle through creatures with ${typeString} nodes`;
-                p.onclick = () => { handleNodeTypeLabelClick(typeName); };
+                const button = document.createElement('button');
+                button.textContent = '🔍';
+                button.classList.add('stats-panel-button');
+                button.title = `Find next creature with a ${typeString} node`;
+                button.onclick = () => { handleNodeTypeLabelClick(typeName); };
+                statLineContainer.appendChild(button);
             }
-            nodeTypeStatsDiv.appendChild(p);
+            nodeTypeStatsDiv.appendChild(statLineContainer);
         }
         const totalP = document.createElement('p');
         totalP.innerHTML = `<strong>Total Nodes:</strong> <span class="stat-value">${totalNodes}</span>`;
+        totalP.style.marginTop = '8px';
         nodeTypeStatsDiv.appendChild(totalP);
     }
 

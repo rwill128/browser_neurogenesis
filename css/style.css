@@ -402,14 +402,28 @@ body.css-screensaver-active #canvasContainer {
     margin-right: 5px; /* Space between label and value */
 }
 
-#nodeTypeStats p.clickable-stat > strong {
-    cursor: pointer;
-    text-decoration: underline;
-    color: #7fdbff;
-    transition: color 0.2s;
+.stat-line-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2px;
 }
-#nodeTypeStats p.clickable-stat:hover > strong {
-    color: #aaddff; /* A slightly brighter blue on hover */
+
+.stats-panel-button {
+    margin-left: 10px;
+    padding: 1px 5px;
+    font-size: 0.8em;
+    cursor: pointer;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    line-height: 1.5;
+    user-select: none; /* Prevent text selection on click */
+}
+
+.stats-panel-button:hover {
+    background-color: #0056b3;
 }
 
 /* Style for the value part after the strong tag */

@@ -2175,56 +2175,71 @@ class SoftBody {
     }
 
     _performPhysicalUpdates(dt, fluidFieldRef) {
-        // Fluid interactions
         if (fluidFieldRef) {
             for (let point of this.massPoints) {
-                if (point.isFixed) continue; 
+                if (point.isFixed) continue;
 
                 const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
                 const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
+
+                if (!isFinite(fluidGridX) || !isFinite(fluidGridY)) continue;
+                
                 const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
+                if (idx < 0 || idx >= fluidFieldRef.Vx.length) continue;
 
                 if (point.movementType === MovementType.FLOATING) {
                     const rawFluidVx = fluidFieldRef.Vx[idx];
                     const rawFluidVy = fluidFieldRef.Vy[idx];
-                    
-                    // Use temporary vectors from SoftBody instance (this._tempVec1, this._tempVec2)
-                    // Calculate currentPointDisplacementPx * (1.0 - this.fluidEntrainment) and store in this._tempVec1
                     this._tempVec1.copyFrom(point.pos).subInPlace(point.prevPos).mulInPlace(1.0 - this.fluidEntrainment);
-                    
-                    // Calculate effectiveFluidDisplacementPx * this.fluidEntrainment and store in this._tempVec2
-                    // effectiveFluidDisplacementPx was: fluidDisplacementPx.mul(this.fluidCurrentStrength)
-                    // fluidDisplacementPx was: new Vec2(rawFluidVx * fluidFieldRef.scaleX * dt, rawFluidVy * fluidFieldRef.scaleY * dt)
                     this._tempVec2.x = rawFluidVx * fluidFieldRef.scaleX * dt;
                     this._tempVec2.y = rawFluidVy * fluidFieldRef.scaleY * dt;
                     this._tempVec2.mulInPlace(this.fluidCurrentStrength).mulInPlace(this.fluidEntrainment);
-                    
-                    // blendedDisplacementPx = _tempVec1 + _tempVec2 (result in _tempVec1)
                     this._tempVec1.addInPlace(this._tempVec2);
                     
                     // point.prevPos = point.pos.clone().sub(blendedDisplacementPx);
                     point.prevPos.copyFrom(point.pos).subInPlace(this._tempVec1);
                 }
-                
-                if (point.nodeType === NodeType.EMITTER) { 
-                    let dyeEmissionStrength = 50 * point.currentExertionLevel; 
+
+                if (point.nodeType === NodeType.EMITTER) {
+                    let dyeEmissionStrength = 50 * point.currentExertionLevel;
                     fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], dyeEmissionStrength);
+                }
+
+                if (point.nodeType === NodeType.JET) {
+                    const exertion = point.currentExertionLevel || 0;
+                    if (exertion > 0.01) {
+                        const currentFluidVelX = fluidFieldRef.Vx[idx];
+                        const currentFluidVelY = fluidFieldRef.Vy[idx];
+                        const currentFluidSpeedSq = currentFluidVelX ** 2 + currentFluidVelY ** 2;
+
+                        if (currentFluidSpeedSq < point.maxEffectiveJetVelocity ** 2) {
+                            const finalMagnitude = point.jetData.currentMagnitude;
+                            const angle = point.jetData.currentAngle;
+                            const appliedForceX = finalMagnitude * Math.cos(angle);
+                            const appliedForceY = finalMagnitude * Math.sin(angle);
+                            fluidFieldRef.addVelocity(fluidGridX, fluidGridY, appliedForceX, appliedForceY);
+                        }
+                    }
                 }
             }
         }
 
-        for (let spring of this.springs) spring.applyForce();
-        for (let point of this.massPoints) point.update(dt);
+        for (let spring of this.springs) {
+            spring.applyForce();
+        }
 
-        const MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ = (MAX_PIXELS_PER_FRAME_DISPLACEMENT)**2;
         for (let point of this.massPoints) {
-            if (point.isFixed) continue; 
+            point.update(dt);
+        }
 
-            const displacementSq = (point.pos.x - point.prevPos.x)**2 + (point.pos.y - point.prevPos.y)**2;
+        const MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ = (MAX_PIXELS_PER_FRAME_DISPLACEMENT) ** 2;
+        for (let point of this.massPoints) {
+            if (point.isFixed) continue;
+
+            const displacementSq = (point.pos.x - point.prevPos.x) ** 2 + (point.pos.y - point.prevPos.y) ** 2;
             if (displacementSq > MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ || isNaN(point.pos.x) || isNaN(point.pos.y) || !isFinite(point.pos.x) || !isFinite(point.pos.y)) {
                 this.isUnstable = true;
-                // console.warn(...)
-                return; 
+                return;
             }
 
             const implicitVelX = point.pos.x - point.prevPos.x;

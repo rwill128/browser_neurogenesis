@@ -215,6 +215,8 @@ function getRewardStrategyString(strategy) {
         case RLRewardStrategy.REPRODUCTION_EVENT: return "Reproduction Event";
         case RLRewardStrategy.PARTICLE_PROXIMITY: return "Particle Proximity";
         case RLRewardStrategy.ENERGY_SECOND_DERIVATIVE: return "Energy Change Rate Change";
+        case RLRewardStrategy.CREATURE_PROXIMITY: return "Creature Proximity";
+        case RLRewardStrategy.CREATURE_DISTANCE: return "Creature Distance";
         default: return "Unknown_Strategy";
     }
 }

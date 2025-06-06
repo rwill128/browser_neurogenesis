@@ -472,9 +472,21 @@ const REPRODUCTION_REWARD_VALUE = 50.0; // Bonus reward for successful reproduct
 const DEFAULT_SURVIVAL_REWARD_WEIGHT = 0.01; // Small constant reward for living
 
 // New constants for RLRewardStrategy
+const RLRewardStrategy = {
+    ENERGY_CHANGE: 0,
+    REPRODUCTION_EVENT: 1,
+    PARTICLE_PROXIMITY: 2,
+    ENERGY_SECOND_DERIVATIVE: 3, // New: Reward based on the change in energy change rate
+    CREATURE_PROXIMITY: 4,
+    CREATURE_DISTANCE: 5
+};
+
+
 const RLRewardStrategy_MUTATION_CHANCE = 0.05; // Chance to mutate reward strategy
 const PARTICLE_PROXIMITY_REWARD_SCALE = 10.0;  // Scales the (0-1) proximity magnitude
 const ENERGY_SECOND_DERIVATIVE_REWARD_SCALE = 5.0; // Scales the energy 2nd derivative reward
+const CREATURE_PROXIMITY_REWARD_SCALE = 5.0;
+const CREATURE_DISTANCE_REWARD_SCALE = 5.0;
 
 // New constant for Grabber Gene Mutation
 const GRABBER_GENE_MUTATION_CHANCE = 0.03; // Chance for a point to gain/lose grabber ability
@@ -502,6 +514,3 @@ let IS_HEADLESS_MODE = false; // New: For toggling drawing off
 let USE_GPU_FLUID_SIMULATION = false; // New: Switch for GPU fluid sim
 let IS_CREATURE_IMPORT_MODE = false; // New: For placing an imported creature
 let IMPORTED_CREATURE_DATA = null;   // New: To hold the data of the creature to be imported
-
-// --- Neural Network Constants ---
-// ... existing code ... 

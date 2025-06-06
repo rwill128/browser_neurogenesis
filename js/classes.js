@@ -14,7 +14,9 @@ const RLRewardStrategy = {
     ENERGY_CHANGE: 0,
     REPRODUCTION_EVENT: 1,
     PARTICLE_PROXIMITY: 2,
-    ENERGY_SECOND_DERIVATIVE: 3 // New: Reward based on the change in energy change rate
+    ENERGY_SECOND_DERIVATIVE: 3, // New: Reward based on the change in energy change rate
+    CREATURE_PROXIMITY: 4,
+    CREATURE_DISTANCE: 5,
 };
 
 const RLAlgorithmType = {
@@ -2596,8 +2598,6 @@ class SoftBody {
     }
 }
 
-
-// --- FluidField Class (Simplified) ---
 class FluidField {
     constructor(size, diffusion, viscosity, dt, scaleX, scaleY) {
         this.size = Math.round(size);

@@ -6,7 +6,9 @@ const NodeType = {
     EMITTER: 4, // For dye
     SWIMMER: 5, // For propulsion
     EYE: 6,      // New: For particle detection
-    JET: 7       // New: For fluid propulsion
+    JET: 7,       // New: For fluid propulsion
+    ATTRACTOR: 8,
+    REPULSOR: 9
     // Old types like NEUTRAL, FLOATING, FIXED_ROOT, EMITTER_SWIMMER are removed
 };
 
@@ -133,6 +135,20 @@ class MassPoint {
             ctx.fillStyle = `rgba(255, 50, 50, ${0.15 + exertion * 0.2})`; // Increased base opacity
             ctx.fill();
         }
+        if (this.nodeType === NodeType.ATTRACTOR) {
+            const effectiveAttractionRadiusMultiplier = ATTRACTION_RADIUS_MULTIPLIER_BASE + (ATTRACTION_RADIUS_MULTIPLIER_MAX_BONUS * exertion);
+            ctx.beginPath();
+            ctx.arc(this.pos.x, this.pos.y, this.radius * effectiveAttractionRadiusMultiplier, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255, 105, 180, ${0.1 + exertion * 0.2})`;
+            ctx.fill();
+        }
+        if (this.nodeType === NodeType.REPULSOR) {
+            const effectiveRepulsionRadiusMultiplier = REPULSION_RADIUS_MULTIPLIER_BASE + (REPULSION_RADIUS_MULTIPLIER_MAX_BONUS * exertion);
+            ctx.beginPath();
+            ctx.arc(this.pos.x, this.pos.y, this.radius * effectiveRepulsionRadiusMultiplier, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(128, 0, 128, ${0.1 + exertion * 0.2})`;
+            ctx.fill();
+        }
 
 
         ctx.beginPath();
@@ -154,6 +170,10 @@ class MassPoint {
             mainColor = 'rgba(180, 180, 250, 0.9)'; // Light purple/blue for Eye
         } else if (this.nodeType === NodeType.JET) { // New Jet color
             mainColor = 'rgba(255, 255, 100, 0.9)'; // Yellow for Jet
+        } else if (this.nodeType === NodeType.ATTRACTOR) {
+            mainColor = 'rgba(255, 105, 180, 0.9)'; // Hot Pink for Attractor
+        } else if (this.nodeType === NodeType.REPULSOR) {
+            mainColor = 'rgba(128, 0, 128, 0.9)';   // Purple for Repulsor
         }
         ctx.fillStyle = mainColor;
         ctx.fill();
@@ -275,6 +295,8 @@ class SoftBody {
         this.energyCostFromGrabbingNodes = 0;
         this.energyCostFromEyeNodes = 0;
         this.energyCostFromJetNodes = 0;
+        this.energyCostFromAttractorNodes = 0;
+        this.energyCostFromRepulsorNodes = 0;
 
         this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY; // Initial placeholder
         this.blueprintRadius = 0; // New: Approximate radius based on blueprint points
@@ -287,6 +309,8 @@ class SoftBody {
         this.numEyeNodes = 0;
         this.numJetNodes = 0;
         this.numPotentialGrabberNodes = 0;
+        this.numAttractorNodes = 0;
+        this.numRepulsorNodes = 0;
 
         this.failedReproductionCooldown = 0; // New: Cooldown after a failed reproduction attempt
         this.energyGainedFromPhotosynthesisThisTick = 0; // New: Photosynthesis gain in the current tick
@@ -572,7 +596,7 @@ class SoftBody {
         this.blueprintSprings = [];// Clear any previous blueprint
 
         const baseRadius = 1 + Math.random() * 1; 
-        const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE, NodeType.JET];
+        const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE, NodeType.JET, NodeType.ATTRACTOR, NodeType.REPULSOR];
         const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
 
         if (parentBody) {
@@ -1070,6 +1094,8 @@ class SoftBody {
         this.numEyeNodes = 0;
         this.numJetNodes = 0;
         this.numPotentialGrabberNodes = 0;
+        this.numAttractorNodes = 0;
+        this.numRepulsorNodes = 0;
 
         for (const p of this.massPoints) { // Changed from forEach to for...of for clarity
             if (p.nodeType === NodeType.EMITTER) this.numEmitterNodes++;
@@ -1078,6 +1104,8 @@ class SoftBody {
             else if (p.nodeType === NodeType.PREDATOR) this.numPredatorNodes++;
             else if (p.nodeType === NodeType.EYE) this.numEyeNodes++;
             else if (p.nodeType === NodeType.JET) this.numJetNodes++;
+            else if (p.nodeType === NodeType.ATTRACTOR) this.numAttractorNodes++;
+            else if (p.nodeType === NodeType.REPULSOR) this.numRepulsorNodes++;
 
             if (p.canBeGrabber) this.numPotentialGrabberNodes++;
         }
@@ -1382,12 +1410,16 @@ class SoftBody {
         let currentNumPredatorPoints = 0;
         let currentNumPotentialGrabberPoints = 0;
         let currentNumJetPoints = 0;
+        let currentNumAttractorPoints = 0;
+        let currentNumRepulsorPoints = 0;
         this.massPoints.forEach(p => {
             if (p.nodeType === NodeType.EMITTER) currentNumEmitterPoints++;
             else if (p.nodeType === NodeType.SWIMMER) currentNumSwimmerPoints++;
             else if (p.nodeType === NodeType.EATER) currentNumEaterPoints++;
             else if (p.nodeType === NodeType.PREDATOR) currentNumPredatorPoints++;
             else if (p.nodeType === NodeType.JET) currentNumJetPoints++;
+            else if (p.nodeType === NodeType.ATTRACTOR) currentNumAttractorPoints++;
+            else if (p.nodeType === NodeType.REPULSOR) currentNumRepulsorPoints++;
             if (p.canBeGrabber) currentNumPotentialGrabberPoints++;
         });
 
@@ -1396,14 +1428,16 @@ class SoftBody {
                                            (currentNumEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
                                            (currentNumPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
                                            (currentNumJetPoints * NEURAL_OUTPUTS_PER_JET) +
-                                           (currentNumPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE);
+                                           (currentNumPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) +
+                                           (currentNumAttractorPoints * NEURAL_OUTPUTS_PER_ATTRACTOR) +
+                                           (currentNumRepulsorPoints * NEURAL_OUTPUTS_PER_REPULSOR);
 
         if (nd.outputVectorSize !== recalculatedOutputVectorSize) {
             console.warn(`Body ${this.id} _applyBrainActionsToPoints: MISMATCH between stored nd.outputVectorSize (${nd.outputVectorSize}) and recalculatedOutputVectorSize (${recalculatedOutputVectorSize}) based on current points.`);
             const pointTypes = this.massPoints.map((p, idx) => `Idx ${idx}: Type ${p.nodeType} Grabber: ${p.canBeGrabber}`).join(', ');
             console.warn(`Body ${this.id} Current Points (${this.massPoints.length}): [${pointTypes}]`);
             // Log counts that led to recalculatedOutputVectorSize
-            console.warn(`Body ${this.id} Recalculated Counts: Emitters: ${currentNumEmitterPoints}, Swimmers: ${currentNumSwimmerPoints}, Eaters: ${currentNumEaterPoints}, Predators: ${currentNumPredatorPoints}, Jets: ${currentNumJetPoints}, Grabbers: ${currentNumPotentialGrabberPoints}`);
+            console.warn(`Body ${this.id} Recalculated Counts: Emitters: ${currentNumEmitterPoints}, Swimmers: ${currentNumSwimmerPoints}, Eaters: ${currentNumEaterPoints}, Predators: ${currentNumPredatorPoints}, Jets: ${currentNumJetPoints}, Grabbers: ${currentNumPotentialGrabberPoints}, Attractors: ${currentNumAttractorPoints}, Repulsors: ${currentNumRepulsorPoints}`);
             // To see what it was at birth, you'd need to check the initializeBrain logs for this body ID.
         }
 
@@ -1551,6 +1585,44 @@ class SoftBody {
                 } else {
                     console.warn(`Body ${this.id} _applyBrainActionsToPoints (Jet): Skipped logging. rawOutputs.length: ${nd.rawOutputs ? nd.rawOutputs.length : 'undefined'}, outputStartRawIdx: ${outputStartRawIdx}, NEURAL_OUTPUTS_PER_JET: ${NEURAL_OUTPUTS_PER_JET}, current nd.outputVectorSize: ${nd.outputVectorSize}`);
                     currentRawOutputIndex += NEURAL_OUTPUTS_PER_JET;
+                }
+            }
+        });
+
+        // Process Attractors
+        this.massPoints.forEach((point, pointIndex) => {
+            if (point.nodeType === NodeType.ATTRACTOR) {
+                const outputStartRawIdx = currentRawOutputIndex;
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_ATTRACTOR) {
+                    const details = [];
+                    const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
+                    exertionRes.detail.label = `Attractor @P${pointIndex} Exertion`;
+                    details.push(exertionRes.detail);
+                    point.currentExertionLevel = sigmoid(exertionRes.value);
+                    nd.currentFrameActionDetails.push(...details);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_ATTRACTOR;
+                } else {
+                    console.warn(`Body ${this.id} _applyBrainActionsToPoints (Attractor): Skipped logging. rawOutputs.length: ${nd.rawOutputs ? nd.rawOutputs.length : 'undefined'}, outputStartRawIdx: ${outputStartRawIdx}, NEURAL_OUTPUTS_PER_ATTRACTOR: ${NEURAL_OUTPUTS_PER_ATTRACTOR}, current nd.outputVectorSize: ${nd.outputVectorSize}`);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_ATTRACTOR;
+                }
+            }
+        });
+
+        // Process Repulsors
+        this.massPoints.forEach((point, pointIndex) => {
+            if (point.nodeType === NodeType.REPULSOR) {
+                const outputStartRawIdx = currentRawOutputIndex;
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_REPULSOR) {
+                    const details = [];
+                    const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
+                    exertionRes.detail.label = `Repulsor @P${pointIndex} Exertion`;
+                    details.push(exertionRes.detail);
+                    point.currentExertionLevel = sigmoid(exertionRes.value);
+                    nd.currentFrameActionDetails.push(...details);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_REPULSOR;
+                } else {
+                    console.warn(`Body ${this.id} _applyBrainActionsToPoints (Repulsor): Skipped logging. rawOutputs.length: ${nd.rawOutputs ? nd.rawOutputs.length : 'undefined'}, outputStartRawIdx: ${outputStartRawIdx}, NEURAL_OUTPUTS_PER_REPULSOR: ${NEURAL_OUTPUTS_PER_REPULSOR}, current nd.outputVectorSize: ${nd.outputVectorSize}`);
+                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_REPULSOR;
                 }
             }
         });
@@ -1820,6 +1892,16 @@ class SoftBody {
                     this.energyGainedFromPhotosynthesisThisTick += energyGainThisPoint; // Current tick total
                 }
                     break;
+                case NodeType.ATTRACTOR:
+                    const attractorCostThisFrame = ATTRACTOR_NODE_ENERGY_COST * costMultiplier;
+                    currentFrameEnergyCost += attractorCostThisFrame;
+                    this.energyCostFromAttractorNodes += attractorCostThisFrame * dt;
+                    break;
+                case NodeType.REPULSOR:
+                    const repulsorCostThisFrame = REPULSOR_NODE_ENERGY_COST * costMultiplier;
+                    currentFrameEnergyCost += repulsorCostThisFrame;
+                    this.energyCostFromRepulsorNodes += repulsorCostThisFrame * dt;
+                    break;
                 // Note: Neuron, Grabbing, Eye costs are handled by separate 'if' statements below
                 // as they can co-exist or have different conditions than the primary functional type.
             }
@@ -2076,6 +2158,8 @@ class SoftBody {
         const numEyeNodes = this.numEyeNodes;
         const numJetNodes = this.numJetNodes;
         const numPotentialGrabberPoints = this.numPotentialGrabberNodes;
+        const numAttractorPoints = this.numAttractorNodes;
+        const numRepulsorPoints = this.numRepulsorNodes;
 
         // console.log(`Body ${this.id} _calculateBrainVectorSizes: Using Stored Counts: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}, Ey:${numEyeNodes}`);
         nd.inputVectorSize = NEURAL_INPUT_SIZE_BASE +
@@ -2089,7 +2173,9 @@ class SoftBody {
                               (numEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
                               (numPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
                               (numJetNodes * NEURAL_OUTPUTS_PER_JET) +
-                              (numPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE);
+                              (numPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) +
+                              (numAttractorPoints * NEURAL_OUTPUTS_PER_ATTRACTOR) +
+                              (numRepulsorPoints * NEURAL_OUTPUTS_PER_REPULSOR);
         // console.log(`Body ${this.id} _calculateBrainVectorSizes: Calculated nd.outputVectorSize = ${nd.outputVectorSize}`);
     }
 
@@ -2486,6 +2572,66 @@ class SoftBody {
 
         for (let i_p1 = 0; i_p1 < this.massPoints.length; i_p1++) {
             const p1 = this.massPoints[i_p1];
+
+            // Attractor/Repulsor logic: find nearest foreign point and apply force
+            if ((p1.nodeType === NodeType.ATTRACTOR || p1.nodeType === NodeType.REPULSOR) && (p1.currentExertionLevel || 0) > 0.01) {
+                let nearestForeignPoint = null;
+                const isAttractor = p1.nodeType === NodeType.ATTRACTOR;
+                const p1Exertion = p1.currentExertionLevel;
+
+                const radiusMultiplierConfig = isAttractor ?
+                    { base: ATTRACTION_RADIUS_MULTIPLIER_BASE, bonus: ATTRACTION_RADIUS_MULTIPLIER_MAX_BONUS } :
+                    { base: REPULSION_RADIUS_MULTIPLIER_BASE, bonus: REPULSION_RADIUS_MULTIPLIER_MAX_BONUS };
+                const radiusMultiplier = radiusMultiplierConfig.base + (radiusMultiplierConfig.bonus * p1Exertion);
+                const interactionRadius = p1.radius * radiusMultiplier;
+                let min_dist_sq = interactionRadius * interactionRadius; // Start search radius at max interaction radius
+
+                const p1Gx_force = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(p1.pos.x / GRID_CELL_SIZE)));
+                const p1Gy_force = Math.max(0, Math.min(GRID_ROWS - 1, Math.floor(p1.pos.y / GRID_CELL_SIZE)));
+                const searchRadiusInCells = Math.ceil(interactionRadius / GRID_CELL_SIZE);
+
+                for (let dy = -searchRadiusInCells; dy <= searchRadiusInCells; dy++) {
+                    for (let dx = -searchRadiusInCells; dx <= searchRadiusInCells; dx++) {
+                        const checkGx = p1Gx_force + dx;
+                        const checkGy = p1Gy_force + dy;
+                        if (checkGx >= 0 && checkGx < GRID_COLS && checkGy >= 0 && checkGy < GRID_ROWS) {
+                            const cellIndex = checkGx + checkGy * GRID_COLS;
+                            if (Array.isArray(spatialGrid[cellIndex])) {
+                                const cellBucket = spatialGrid[cellIndex];
+                                for (const otherItem of cellBucket) {
+                                    if (otherItem.type === 'softbody_point' && otherItem.bodyRef !== this && !otherItem.bodyRef.isUnstable) {
+                                        const p2_candidate = otherItem.pointRef;
+                                        tempDiffVec.copyFrom(p1.pos).subInPlace(p2_candidate.pos);
+                                        const distSq = tempDiffVec.magSq();
+                                        if (distSq < min_dist_sq) {
+                                            min_dist_sq = distSq;
+                                            nearestForeignPoint = p2_candidate;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (nearestForeignPoint) {
+                    const maxForce = isAttractor ? ATTRACTOR_MAX_FORCE : REPULSOR_MAX_FORCE;
+                    const forceMagnitude = p1Exertion * maxForce * (1.0 - (Math.sqrt(min_dist_sq) / interactionRadius));
+                    const finalForceMagnitude = isAttractor ? -forceMagnitude : forceMagnitude;
+
+                    const forceDir = this._tempVec2.copyFrom(p1.pos).subInPlace(nearestForeignPoint.pos).normalizeInPlace();
+                    const forceOnP1 = forceDir.mulInPlace(finalForceMagnitude);
+
+                    if (!p1.isFixed) {
+                        p1.applyForce(forceOnP1);
+                    }
+                    if (!nearestForeignPoint.isFixed) {
+                        nearestForeignPoint.applyForce(forceOnP1.clone().mulInPlace(-1));
+                    }
+                }
+            }
+
+
             if (p1.isFixed) continue;
 
             const p1Gx = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(p1.pos.x / GRID_CELL_SIZE)));
@@ -3011,4 +3157,4 @@ class Particle {
         ctx.arc(this.pos.x, this.pos.y, this.size, 0, Math.PI * 2);
         ctx.fill();
     }
-} 
+}

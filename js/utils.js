@@ -186,6 +186,8 @@ function getNodeTypeString(nodeType) {
         case NodeType.SWIMMER: return "Swimmer (Propulsion)";
         case NodeType.EYE: return "Eye (Particle Detector)";
         case NodeType.JET: return "Jet (Fluid Propulsion)";
+        case NodeType.ATTRACTOR: return "Attractor";
+        case NodeType.REPULSOR: return "Repulsor";
         default: return "Unknown_NodeType";
     }
 }

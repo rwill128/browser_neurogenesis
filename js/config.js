@@ -55,6 +55,10 @@ const PREDATION_RADIUS_MULTIPLIER_BASE = 0.1;
 // Exertion Bonuses for Radius Multipliers
 const EATING_RADIUS_MULTIPLIER_MAX_BONUS = 15.0;
 const PREDATION_RADIUS_MULTIPLIER_MAX_BONUS = 12.5;
+const ATTRACTION_RADIUS_MULTIPLIER_BASE = 0.1;
+const ATTRACTION_RADIUS_MULTIPLIER_MAX_BONUS = 20.0;
+const REPULSION_RADIUS_MULTIPLIER_BASE = 0.1;
+const REPULSION_RADIUS_MULTIPLIER_MAX_BONUS = 20.0;
 
 const ENERGY_PER_PARTICLE = 25;
 const ENERGY_SAPPED_PER_PREDATION_BASE = 3;
@@ -110,6 +114,8 @@ let PHOTOSYNTHETIC_NODE_ENERGY_COST = 0.1;
 let GRABBING_NODE_ENERGY_COST = 0.25;
 let EYE_NODE_ENERGY_COST = 0.05;
 let JET_NODE_ENERGY_COST = 0.5;
+let ATTRACTOR_NODE_ENERGY_COST = 1.0;
+let REPULSOR_NODE_ENERGY_COST = 1.0;
 let PHOTOSYNTHESIS_EFFICIENCY = 100.0;
 
 // Eye Detection Radius (New)
@@ -182,7 +188,8 @@ const NEURAL_INPUT_SIZE_BASE = 10;
 const NEURAL_INPUTS_PER_SPRING_SENSOR = 1; // For now, just the normalized length
 const NEURAL_OUTPUTS_PER_PREDATOR = 2;
 const NEURAL_OUTPUTS_PER_EATER = 2;
-const NEURAL_OUTPUTS_PER_NEURON_EFFECTOR = 0;
+const NEURAL_OUTPUTS_PER_ATTRACTOR = 2;
+const NEURAL_OUTPUTS_PER_REPULSOR = 2;
 const NEURAL_OUTPUTS_PER_EMITTER = 8;
 const NEURAL_OUTPUTS_PER_SWIMMER = 4;
 const NEURAL_OUTPUTS_PER_JET = 4;
@@ -196,6 +203,8 @@ const DEFAULT_HIDDEN_LAYER_SIZE_MIN = 5;
 const DEFAULT_HIDDEN_LAYER_SIZE_MAX = 30;
 const MAX_SWIMMER_OUTPUT_MAGNITUDE = 1.0;
 const MAX_JET_OUTPUT_MAGNITUDE = 2.0;
+const ATTRACTOR_MAX_FORCE = 5.0;
+const REPULSOR_MAX_FORCE = 5.0;
 const MAX_NEURAL_EMISSION_PULL_STRENGTH = 1.0;
 
 // --- RL Training Constants ---
@@ -238,6 +247,8 @@ function handleExportConfig() {
         grabbingNodeCost: GRABBING_NODE_ENERGY_COST,
         eyeNodeCost: EYE_NODE_ENERGY_COST,
         jetNodeCost: JET_NODE_ENERGY_COST,
+        attractorNodeCost: ATTRACTOR_NODE_ENERGY_COST,
+        repulsorNodeCost: REPULSOR_NODE_ENERGY_COST,
         baseMaxCreatureEnergy: BASE_MAX_CREATURE_ENERGY,
         energyPerMassPointBonus: ENERGY_PER_MASS_POINT_BONUS,
         bodyRepulsionStrength: BODY_REPULSION_STRENGTH,
@@ -338,6 +349,8 @@ function applyImportedConfig(config, canvas, webgpuCanvas) {
     if (config.grabbingNodeCost !== undefined) GRABBING_NODE_ENERGY_COST = config.grabbingNodeCost;
     if (config.eyeNodeCost !== undefined) EYE_NODE_ENERGY_COST = config.eyeNodeCost;
     if (config.jetNodeCost !== undefined) JET_NODE_ENERGY_COST = config.jetNodeCost;
+    if (config.attractorNodeCost !== undefined) ATTRACTOR_NODE_ENERGY_COST = config.attractorNodeCost;
+    if (config.repulsorNodeCost !== undefined) REPULSOR_NODE_ENERGY_COST = config.repulsorNodeCost;
     if (config.baseMaxCreatureEnergy !== undefined) BASE_MAX_CREATURE_ENERGY = config.baseMaxCreatureEnergy;
     if (config.energyPerMassPointBonus !== undefined) ENERGY_PER_MASS_POINT_BONUS = config.energyPerMassPointBonus;
     if (config.emitterStrength !== undefined) EMITTER_STRENGTH = config.emitterStrength;

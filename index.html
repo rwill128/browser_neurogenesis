@@ -45,6 +45,8 @@
                     <p><strong>Neuron Nodes:</strong> <span id="infoBodyCostNeuron">-</span></p>
                     <p><strong>Swimmer Nodes:</strong> <span id="infoBodyCostSwimmer">-</span></p>
                     <p><strong>Jet Nodes:</strong> <span id="infoBodyCostJet">-</span></p>
+                    <p><strong>Attractor Nodes:</strong> <span id="infoBodyCostAttractor">-</span></p>
+                    <p><strong>Repulsor Nodes:</strong> <span id="infoBodyCostRepulsor">-</span></p>
                     <p><strong>Photosynthetic Nodes:</strong> <span id="infoBodyCostPhoto">-</span></p>
                     <p><strong>Grabbing Nodes:</strong> <span id="infoBodyCostGrabbing">-</span></p>
                     <p><strong>Eye Nodes:</strong> <span id="infoBodyCostEye">-</span></p>
@@ -169,6 +171,14 @@
                 <label for="jetNodeCostSlider" class="slider-label">Jet Node Cost:</label>
                 <span id="jetNodeCostValueSpan" class="slider-value">0.5</span>
                 <input type="range" id="jetNodeCostSlider" min="0.0" max="50.0" value="0.5" step="0.01">
+
+                <label for="attractorNodeCostSlider" class="slider-label">Attractor Node Cost:</label>
+                <span id="attractorNodeCostValueSpan" class="slider-value">1.0</span>
+                <input type="range" id="attractorNodeCostSlider" min="0.0" max="50.0" value="1.0" step="0.01">
+
+                <label for="repulsorNodeCostSlider" class="slider-label">Repulsor Node Cost:</label>
+                <span id="repulsorNodeCostValueSpan" class="slider-value">1.0</span>
+                <input type="range" id="repulsorNodeCostSlider" min="0.0" max="50.0" value="1.0" step="0.01">
 
                 <label for="eyeNodeCostSlider" class="slider-label">Eye Node Cost:</label>
                 <span id="eyeNodeCostValueSpan" class="slider-value">0.05</span>

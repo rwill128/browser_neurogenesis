@@ -21,7 +21,9 @@ let globalEnergyCosts = {
     photosyntheticNodes: 0,
     grabbingNodes: 0,
     eyeNodes: 0,
-    jetNodes: 0
+    jetNodes: 0,
+    attractorNodes: 0,
+    repulsorNodes: 0
 };
 
 let mutationStats = { // New: For tracking mutation occurrences
@@ -305,6 +307,8 @@ function updatePhysics(dt) {
             globalEnergyCosts.grabbingNodes += body.energyCostFromGrabbingNodes;
             globalEnergyCosts.eyeNodes += body.energyCostFromEyeNodes;
             globalEnergyCosts.jetNodes += body.energyCostFromJetNodes;
+            globalEnergyCosts.attractorNodes += body.energyCostFromAttractorNodes;
+            globalEnergyCosts.repulsorNodes += body.energyCostFromRepulsorNodes;
 
             softBodyPopulation.splice(i, 1);
             removedCount++;

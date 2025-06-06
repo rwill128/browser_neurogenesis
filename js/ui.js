@@ -45,6 +45,8 @@ const photosyntheticNodeCostSlider = document.getElementById('photosyntheticNode
 const photosynthesisEfficiencySlider = document.getElementById('photosynthesisEfficiency');
 const swimmerNodeCostSlider = document.getElementById('swimmerNodeCost');
 const jetNodeCostSlider = document.getElementById('jetNodeCostSlider');
+const attractorNodeCostSlider = document.getElementById('attractorNodeCostSlider');
+const repulsorNodeCostSlider = document.getElementById('repulsorNodeCostSlider');
 const eyeNodeCostSlider = document.getElementById('eyeNodeCostSlider');
 const eyeDetectionRadiusSlider = document.getElementById('eyeDetectionRadiusSlider');
 const neuronChanceSlider = document.getElementById('neuronChanceSlider');
@@ -68,6 +70,8 @@ const photosyntheticNodeCostValueSpan = document.getElementById('photosyntheticN
 const photosynthesisEfficiencyValueSpan = document.getElementById('photosynthesisEfficiencyValue');
 const swimmerNodeCostValueSpan = document.getElementById('swimmerNodeCostValue');
 const jetNodeCostValueSpan = document.getElementById('jetNodeCostValueSpan');
+const attractorNodeCostValueSpan = document.getElementById('attractorNodeCostValueSpan');
+const repulsorNodeCostValueSpan = document.getElementById('repulsorNodeCostValueSpan');
 const eyeNodeCostValueSpan = document.getElementById('eyeNodeCostValueSpan');
 const eyeDetectionRadiusValueSpan = document.getElementById('eyeDetectionRadiusValueSpan');
 const neuronChanceValueSpan = document.getElementById('neuronChanceValueSpan');
@@ -225,6 +229,8 @@ function initializeAllSliderDisplays() {
         [neuronNodeCostSlider, "NEURON_NODE_ENERGY_COST", true, neuronNodeCostValueSpan],
         [swimmerNodeCostSlider, "SWIMMER_NODE_ENERGY_COST", true, swimmerNodeCostValueSpan],
         [jetNodeCostSlider, "JET_NODE_ENERGY_COST", true, jetNodeCostValueSpan],
+        [attractorNodeCostSlider, "ATTRACTOR_NODE_ENERGY_COST", true, attractorNodeCostValueSpan],
+        [repulsorNodeCostSlider, "REPULSOR_NODE_ENERGY_COST", true, repulsorNodeCostValueSpan],
         [photosyntheticNodeCostSlider, "PHOTOSYNTHETIC_NODE_ENERGY_COST", true, photosyntheticNodeCostValueSpan],
         [photosynthesisEfficiencySlider, "PHOTOSYNTHESIS_EFFICIENCY", true, photosynthesisEfficiencyValueSpan],
         [eyeNodeCostSlider, "EYE_NODE_ENERGY_COST", true, eyeNodeCostValueSpan],
@@ -342,6 +348,8 @@ function updateInfoPanel() {
         document.getElementById('infoBodyCostNeuron').textContent = selectedInspectBody.energyCostFromNeuronNodes.toFixed(2);
         document.getElementById('infoBodyCostSwimmer').textContent = selectedInspectBody.energyCostFromSwimmerNodes.toFixed(2);
         document.getElementById('infoBodyCostJet').textContent = selectedInspectBody.energyCostFromJetNodes.toFixed(2);
+        document.getElementById('infoBodyCostAttractor').textContent = selectedInspectBody.energyCostFromAttractorNodes.toFixed(2);
+        document.getElementById('infoBodyCostRepulsor').textContent = selectedInspectBody.energyCostFromRepulsorNodes.toFixed(2);
         document.getElementById('infoBodyCostPhoto').textContent = selectedInspectBody.energyCostFromPhotosyntheticNodes.toFixed(2);
         document.getElementById('infoBodyCostGrabbing').textContent = selectedInspectBody.energyCostFromGrabbingNodes.toFixed(2);
         document.getElementById('infoBodyCostEye').textContent = selectedInspectBody.energyCostFromEyeNodes.toFixed(2);
@@ -490,6 +498,8 @@ function updateInfoPanel() {
         document.getElementById('infoBodyCostNeuron').textContent = '-';
         document.getElementById('infoBodyCostSwimmer').textContent = '-';
         document.getElementById('infoBodyCostJet').textContent = '-';
+        document.getElementById('infoBodyCostAttractor').textContent = '-';
+        document.getElementById('infoBodyCostRepulsor').textContent = '-';
         document.getElementById('infoBodyCostPhoto').textContent = '-';
         document.getElementById('infoBodyCostGrabbing').textContent = '-';
         document.getElementById('infoBodyCostEye').textContent = '-';
@@ -849,6 +859,14 @@ jetNodeCostSlider.oninput = function () {
     JET_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, jetNodeCostValueSpan);
 }
+attractorNodeCostSlider.oninput = function () {
+    ATTRACTOR_NODE_ENERGY_COST = parseFloat(this.value);
+    updateSliderDisplay(this, attractorNodeCostValueSpan);
+}
+repulsorNodeCostSlider.oninput = function () {
+    REPULSOR_NODE_ENERGY_COST = parseFloat(this.value);
+    updateSliderDisplay(this, repulsorNodeCostValueSpan);
+}
 eyeNodeCostSlider.oninput = function () {
     EYE_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, eyeNodeCostValueSpan);
@@ -887,6 +905,8 @@ resetButton.onclick = function () {
     globalEnergyCosts.grabbingNodes = 0;
     globalEnergyCosts.eyeNodes = 0;
     globalEnergyCosts.jetNodes = 0;
+    globalEnergyCosts.attractorNodes = 0;
+    globalEnergyCosts.repulsorNodes = 0;
 
     if (statsPanel.classList.contains('open')) {
         updateStatsPanel(); // Update if open
@@ -1665,6 +1685,8 @@ function updateStatsPanel() {
         energyCostsHTML += `<p><strong>Neuron Nodes:</strong> <span class="stat-value">${globalEnergyCosts.neuronNodes.toFixed(2)}</span></p>`;
         energyCostsHTML += `<p><strong>Swimmer Nodes:</strong> <span class="stat-value">${globalEnergyCosts.swimmerNodes.toFixed(2)}</span></p>`;
         energyCostsHTML += `<p><strong>Jet Nodes:</strong> <span class="stat-value">${globalEnergyCosts.jetNodes.toFixed(2)}</span></p>`;
+        energyCostsHTML += `<p><strong>Attractor Nodes:</strong> <span class="stat-value">${globalEnergyCosts.attractorNodes.toFixed(2)}</span></p>`;
+        energyCostsHTML += `<p><strong>Repulsor Nodes:</strong> <span class="stat-value">${globalEnergyCosts.repulsorNodes.toFixed(2)}</span></p>`;
         energyCostsHTML += `<p><strong>Photosynthetic Nodes:</strong> <span class="stat-value">${globalEnergyCosts.photosyntheticNodes.toFixed(2)}</span></p>`;
         energyCostsHTML += `<p><strong>Grabbing Nodes:</strong> <span class="stat-value">${globalEnergyCosts.grabbingNodes.toFixed(2)}</span></p>`;
         energyCostsHTML += `<p><strong>Eye Nodes:</strong> <span class="stat-value">${globalEnergyCosts.eyeNodes.toFixed(2)}</span></p>`;

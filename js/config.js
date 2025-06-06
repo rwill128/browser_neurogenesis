@@ -25,7 +25,7 @@ const DYE_PULL_RATE = 0.05;
 // Rigid Spring Properties (New)
 const RIGID_SPRING_STIFFNESS = 500000; 
 const RIGID_SPRING_DAMPING = 150;    
-const CHANCE_FOR_RIGID_SPRING = 0.1; // 10% chance a spring becomes rigid
+const CHANCE_FOR_RIGID_SPRING = 0.5; // 50% chance a spring becomes rigid
 
 // Spring Mutation Constants (New)
 const SPRING_DELETION_CHANCE = 0.02;          // Chance an existing spring is deleted (if not orphaning a node)

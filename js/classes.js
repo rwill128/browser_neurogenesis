@@ -1282,16 +1282,13 @@ class SoftBody {
         nd.currentFrameInputVectorWithLabels.push({ label: 'Relative CoM Pos Y', value: Math.tanh(relComPosY) });
 
         const comVel = this.getAverageVelocity();
-        const brainVelX = brainNode.pos.x - brainNode.prevPos.x;
-        const brainVelY = brainNode.pos.y - brainNode.prevPos.y;
-        const relComVelX = comVel.x - brainVelX;
-        const relComVelY = comVel.y - brainVelY;
-        const normRelComVelX = Math.tanh(relComVelX / MAX_PIXELS_PER_FRAME_DISPLACEMENT);
-        const normRelComVelY = Math.tanh(relComVelY / MAX_PIXELS_PER_FRAME_DISPLACEMENT);
-        inputVector.push(normRelComVelX);
-        inputVector.push(normRelComVelY);
-        nd.currentFrameInputVectorWithLabels.push({ label: 'Relative CoM Vel X', value: normRelComVelX });
-        nd.currentFrameInputVectorWithLabels.push({ label: 'Relative CoM Vel Y', value: normRelComVelY });
+        // Use absolute CoM velocity, not relative to brain
+        const normComVelX = Math.tanh(comVel.x / MAX_PIXELS_PER_FRAME_DISPLACEMENT);
+        const normComVelY = Math.tanh(comVel.y / MAX_PIXELS_PER_FRAME_DISPLACEMENT);
+        inputVector.push(normComVelX);
+        inputVector.push(normComVelY);
+        nd.currentFrameInputVectorWithLabels.push({ label: 'CoM Vel X', value: normComVelX });
+        nd.currentFrameInputVectorWithLabels.push({ label: 'CoM Vel Y', value: normComVelY });
 
         if (nutrientField && fluidFieldRef) {
             const brainGx = Math.floor(brainNode.pos.x / fluidFieldRef.scaleX);
@@ -1661,10 +1658,10 @@ class SoftBody {
                 case RLRewardStrategy.REL_COM_POS_Y_POS: reward = Math.max(0, findInputValue('Relative CoM Pos Y')); break;
                 case RLRewardStrategy.REL_COM_POS_Y_NEG: reward = Math.max(0, -findInputValue('Relative CoM Pos Y')); break;
                 
-                case RLRewardStrategy.REL_COM_VEL_X_POS: reward = Math.max(0, findInputValue('Relative CoM Vel X')); break;
-                case RLRewardStrategy.REL_COM_VEL_X_NEG: reward = Math.max(0, -findInputValue('Relative CoM Vel X')); break;
-                case RLRewardStrategy.REL_COM_VEL_Y_POS: reward = Math.max(0, findInputValue('Relative CoM Vel Y')); break;
-                case RLRewardStrategy.REL_COM_VEL_Y_NEG: reward = Math.max(0, -findInputValue('Relative CoM Vel Y')); break;
+                case RLRewardStrategy.REL_COM_VEL_X_POS: reward = Math.max(0, findInputValue('CoM Vel X')); break;
+                case RLRewardStrategy.REL_COM_VEL_X_NEG: reward = Math.max(0, -findInputValue('CoM Vel X')); break;
+                case RLRewardStrategy.REL_COM_VEL_Y_POS: reward = Math.max(0, findInputValue('CoM Vel Y')); break;
+                case RLRewardStrategy.REL_COM_VEL_Y_NEG: reward = Math.max(0, -findInputValue('CoM Vel Y')); break;
 
                 case RLRewardStrategy.SENSED_NUTRIENT: reward = findInputValue('Nutrient @Brain'); break;
                 case RLRewardStrategy.SENSED_NUTRIENT_INV: reward = 1.0 - findInputValue('Nutrient @Brain'); break;

@@ -262,7 +262,8 @@ function handleExportConfig() {
         eyeDetectionRadius: EYE_DETECTION_RADIUS,
         showFluidVelocity: SHOW_FLUID_VELOCITY,
         isHeadlessMode: IS_HEADLESS_MODE,
-        useGpuFluidSimulation: USE_GPU_FLUID_SIMULATION
+        useGpuFluidSimulation: USE_GPU_FLUID_SIMULATION,
+        neuronChance: NEURON_CHANCE
     };
     const jsonString = JSON.stringify(config, null, 2);
     const blob = new Blob([jsonString], {type: "application/json"});
@@ -353,6 +354,7 @@ function applyImportedConfig(config) {
     
     if (config.eyeDetectionRadius !== undefined) EYE_DETECTION_RADIUS = config.eyeDetectionRadius;
     if (config.showFluidVelocity !== undefined) SHOW_FLUID_VELOCITY = config.showFluidVelocity;
+    if (config.neuronChance !== undefined) NEURON_CHANCE = config.neuronChance;
     
     worldWidthInput.value = WORLD_WIDTH;
     worldHeightInput.value = WORLD_HEIGHT;
@@ -389,6 +391,7 @@ function applyImportedConfig(config) {
     emitterStrengthSlider.value = EMITTER_STRENGTH;
     emitterEditModeToggle.checked = IS_EMITTER_EDIT_MODE;
     showFluidVelocityToggle.checked = SHOW_FLUID_VELOCITY;
+    neuronChanceSlider.value = NEURON_CHANCE;
 
     initializeAllSliderDisplays(); 
 

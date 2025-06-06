@@ -525,8 +525,14 @@ class SoftBody {
                 // Mutate nodeType
                 if (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER)) {
                     const oldNodeType = bp.nodeType;
-                    bp.nodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
+                    if (Math.random() < NEURON_CHANCE) {
+                        bp.nodeType = NodeType.NEURON;
+                    } else {
+                        const otherNodeTypes = availableFunctionalNodeTypes.filter(t => t !== NodeType.NEURON);
+                        bp.nodeType = otherNodeTypes[Math.floor(Math.random() * otherNodeTypes.length)];
+                    }
                     if (bp.nodeType !== oldNodeType) mutationStats.nodeTypeChange++;
+
                     // If it becomes an EYE, initialize eyeTargetType randomly
                     if (bp.nodeType === NodeType.EYE && bp.eyeTargetType === undefined) {
                         bp.eyeTargetType = Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT;
@@ -603,7 +609,15 @@ class SoftBody {
                 const newRelY = lastBp.relY + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 0.5;
                 const newMass = 0.1 + Math.random() * 0.9;
                 const newRadius = baseRadius * (0.8 + Math.random() * 0.4);
-                let newNodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
+                
+                let newNodeType;
+                if (Math.random() < NEURON_CHANCE) {
+                    newNodeType = NodeType.NEURON;
+                } else {
+                    const otherNodeTypes = availableFunctionalNodeTypes.filter(t => t !== NodeType.NEURON);
+                    newNodeType = otherNodeTypes[Math.floor(Math.random() * otherNodeTypes.length)];
+                }
+
                 const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
                 let newMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
                 if (newNodeType === NodeType.SWIMMER && newMovementType === MovementType.FLOATING) {
@@ -795,7 +809,14 @@ class SoftBody {
             
             // Populate blueprintPoints from initialTempMassPoints, making coordinates relative to their own centroid
             initialTempMassPoints.forEach(p_temp => {
-                let chosenNodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
+                let chosenNodeType;
+                if (Math.random() < NEURON_CHANCE) {
+                    chosenNodeType = NodeType.NEURON;
+                } else {
+                    const otherNodeTypes = availableFunctionalNodeTypes.filter(t => t !== NodeType.NEURON);
+                    chosenNodeType = otherNodeTypes[Math.floor(Math.random() * otherNodeTypes.length)];
+                }
+
                 const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
                 let chosenMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
                 if (chosenNodeType === NodeType.SWIMMER && chosenMovementType === MovementType.FLOATING) {

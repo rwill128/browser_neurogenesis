@@ -46,6 +46,7 @@ const photosynthesisEfficiencySlider = document.getElementById('photosynthesisEf
 const swimmerNodeCostSlider = document.getElementById('swimmerNodeCost');
 const eyeNodeCostSlider = document.getElementById('eyeNodeCostSlider');
 const eyeDetectionRadiusSlider = document.getElementById('eyeDetectionRadiusSlider');
+const neuronChanceSlider = document.getElementById('neuronChanceSlider');
 
 const instabilityLight = document.getElementById('instabilityLight');
 const populationCountDisplay = document.getElementById('populationCount');
@@ -66,6 +67,7 @@ const photosynthesisEfficiencyValueSpan = document.getElementById('photosynthesi
 const swimmerNodeCostValueSpan = document.getElementById('swimmerNodeCostValue');
 const eyeNodeCostValueSpan = document.getElementById('eyeNodeCostValueSpan');
 const eyeDetectionRadiusValueSpan = document.getElementById('eyeDetectionRadiusValueSpan');
+const neuronChanceValueSpan = document.getElementById('neuronChanceValueSpan');
 
 const fluidGridSizeSlider = document.getElementById('fluidGridSize');
 const fluidGridSizeValueSpan = document.getElementById('fluidGridSizeValue');
@@ -176,7 +178,7 @@ function updateSliderDisplay(slider, span) {
         span.textContent = value.toFixed(3);
     } else if (slider.id === 'globalMutationRate' || slider.id === 'bodyPushStrength' ||
         slider.id === 'photosyntheticNodeCost' || slider.id === 'maxFluidVelocityComponentSlider' ||
-        slider.id === 'particleFluidInfluence') {
+        slider.id === 'particleFluidInfluence' || slider.id === 'neuronChanceSlider') {
         span.textContent = value.toFixed(2);
     } else if (slider.id === 'fluidCurrentStrength' || slider.id === 'bodyRepulsionStrength' ||
         slider.id === 'bodyRepulsionRadiusFactor' || slider.id === 'baseNodeCost' ||
@@ -213,6 +215,7 @@ function initializeAllSliderDisplays() {
         [photosynthesisEfficiencySlider, "PHOTOSYNTHESIS_EFFICIENCY", true, photosynthesisEfficiencyValueSpan],
         [eyeNodeCostSlider, "EYE_NODE_ENERGY_COST", true, eyeNodeCostValueSpan],
         [eyeDetectionRadiusSlider, "EYE_DETECTION_RADIUS", false, eyeDetectionRadiusValueSpan],
+        [neuronChanceSlider, "NEURON_CHANCE", true, neuronChanceValueSpan],
         [fluidGridSizeSlider, "FLUID_GRID_SIZE_CONTROL", false, fluidGridSizeValueSpan],
         [fluidDiffusionSlider, "FLUID_DIFFUSION", true, fluidDiffusionValueSpan],
         [fluidViscositySlider, "FLUID_VISCOSITY", true, fluidViscosityValueSpan],
@@ -798,6 +801,10 @@ swimmerNodeCostSlider.oninput = function () {
 eyeNodeCostSlider.oninput = function () {
     EYE_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, eyeNodeCostValueSpan);
+}
+neuronChanceSlider.oninput = function() {
+    NEURON_CHANCE = parseFloat(this.value);
+    updateSliderDisplay(this, neuronChanceValueSpan);
 }
 
 

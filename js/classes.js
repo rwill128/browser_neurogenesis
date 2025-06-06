@@ -652,11 +652,13 @@ class SoftBody {
                     if (bs.isRigid !== oldRigid) mutationStats.springRigidityFlip++;
                 }
                  if (Math.random() < (SPRING_PROP_MUTATION_MAGNITUDE * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                    if (typeof bs.stiffness === 'undefined') bs.stiffness = this.stiffness;
                     const oldStiffness = bs.stiffness;
                     bs.stiffness = Math.max(100, Math.min(bs.stiffness * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE), 10000));
                     if (Math.abs(bs.stiffness - oldStiffness) > 0.01) mutationStats.springStiffness++;
                 }
                 if (Math.random() < (SPRING_PROP_MUTATION_MAGNITUDE * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                    if (typeof bs.damping === 'undefined') bs.damping = this.springDamping;
                     const oldDamping = bs.damping;
                     bs.damping = Math.max(0.1, Math.min(bs.damping * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE), 50));
                     if (Math.abs(bs.damping - oldDamping) > 0.01) mutationStats.springDamping++;
@@ -789,10 +791,10 @@ class SoftBody {
                     this.blueprintSprings.splice(springToSubdivideIndex, 1); // Remove original spring
 
                     let restLength1 = Math.sqrt((bp1.relX - midRelX)**2 + (bp1.relY - midRelY)**2) * (1 + (Math.random() - 0.5) * 0.1);
-                    this.blueprintSprings.push({ p1Index: originalBs.p1Index, p2Index: newMidPointIndex, restLength: Math.max(1, restLength1), isRigid: originalBs.isRigid, stiffness: originalBs.stiffness, damping: originalBs.dampingFactor });
+                    this.blueprintSprings.push({ p1Index: originalBs.p1Index, p2Index: newMidPointIndex, restLength: Math.max(1, restLength1), isRigid: originalBs.isRigid, stiffness: originalBs.stiffness, damping: originalBs.damping });
 
                     let restLength2 = Math.sqrt((midRelX - bp2.relX)**2 + (midRelY - bp2.relY)**2) * (1 + (Math.random() - 0.5) * 0.1);
-                    this.blueprintSprings.push({ p1Index: newMidPointIndex, p2Index: originalBs.p2Index, restLength: Math.max(1, restLength2), isRigid: originalBs.isRigid, stiffness: originalBs.stiffness, damping: originalBs.dampingFactor });
+                    this.blueprintSprings.push({ p1Index: newMidPointIndex, p2Index: originalBs.p2Index, restLength: Math.max(1, restLength2), isRigid: originalBs.isRigid, stiffness: originalBs.stiffness, damping: originalBs.damping });
                     
                     mutationStats.springSubdivision++; 
                     mutationStats.pointAddActual++; 
@@ -1016,9 +1018,12 @@ class SoftBody {
                 const p1 = this.massPoints[bs.p1Index];
                 const p2 = this.massPoints[bs.p2Index];
 
+                const springStiffness = bs.stiffness === undefined ? this.stiffness : bs.stiffness;
+                const springDamping = bs.damping === undefined ? this.springDamping : bs.damping;
+
                 // Use the creature's overall stiffness and damping
                 // The blueprint spring carries restLength and isRigid
-                this.springs.push(new Spring(p1, p2, bs.stiffness, bs.damping, bs.restLength, bs.isRigid));
+                this.springs.push(new Spring(p1, p2, springStiffness, springDamping, bs.restLength, bs.isRigid));
             } else {
                 console.warn(`Body ${this.id}: Invalid spring blueprint indices ${bs.p1Index}, ${bs.p2Index} for ${this.massPoints.length} points.`);
             }

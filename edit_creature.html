@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Creature Blueprint Editor</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background-color: #1a1a1a;
+            color: #eee;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h1 {
+            color: #00aeff;
+        }
+        #editorContainer {
+            width: 80%;
+            max-width: 900px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        textarea {
+            width: 100%;
+            height: 60vh;
+            background-color: #2a2a2a;
+            color: #eee;
+            border: 1px solid #555;
+            border-radius: 5px;
+            padding: 10px;
+            box-sizing: border-box;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        .button-container {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        input[type="file"] {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Creature Blueprint Editor</h1>
+    <div id="editorContainer">
+        <p>Load a creature blueprint JSON file to view and edit its contents. After editing, you can save the blueprint and import it back into the main simulation.</p>
+        <div class="button-container">
+            <input type="file" id="loadBlueprintFile" accept=".json">
+            <button id="loadBlueprintButton">Load Blueprint</button>
+            <button id="saveBlueprintButton">Save Blueprint</button>
+        </div>
+        <textarea id="jsonEditor" placeholder="Blueprint JSON will appear here..."></textarea>
+    </div>
+
+    <script>
+        const loadBlueprintButton = document.getElementById('loadBlueprintButton');
+        const loadBlueprintFile = document.getElementById('loadBlueprintFile');
+        const saveBlueprintButton = document.getElementById('saveBlueprintButton');
+        const jsonEditor = document.getElementById('jsonEditor');
+        let loadedFileName = 'edited_creature_blueprint.json';
+
+        loadBlueprintButton.addEventListener('click', () => {
+            loadBlueprintFile.click();
+        });
+
+        loadBlueprintFile.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            loadedFileName = file.name;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const jsonData = JSON.parse(e.target.result);
+                    jsonEditor.value = JSON.stringify(jsonData, null, 2);
+                } catch (error) {
+                    alert('Error parsing JSON file: ' + error.message);
+                    jsonEditor.value = "Failed to load blueprint. Invalid JSON.";
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        saveBlueprintButton.addEventListener('click', () => {
+            try {
+                // Validate that the content is valid JSON before saving
+                const blueprintData = JSON.parse(jsonEditor.value);
+                const jsonString = JSON.stringify(blueprintData, null, 2);
+                const blob = new Blob([jsonString], {type: "application/json"});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = loadedFileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                alert('Invalid JSON in editor. Cannot save. Please correct errors.\\n\\n' + error.message);
+            }
+        });
+
+    </script>
+
+</body>
+</html> 

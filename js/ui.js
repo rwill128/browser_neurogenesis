@@ -1489,6 +1489,13 @@ canvas.addEventListener('mouseleave', () => {
 
 canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    if (IS_CREATURE_IMPORT_MODE) {
+        IS_CREATURE_IMPORT_MODE = false;
+        IMPORTED_CREATURE_DATA = null;
+        creatureImportStatus.textContent = "";
+        canvas.style.cursor = 'default';
+        console.log("Creature import cancelled via right-click.");
+    }
 });
 
 

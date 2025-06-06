@@ -598,9 +598,9 @@ class SoftBody {
                     bp.movementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
                     if (bp.movementType !== oldMovementType) mutationStats.movementTypeChange++;
                 }
-                // Ensure Swimmer nodes are not Floating after potential mutation
-                if (bp.nodeType === NodeType.SWIMMER && bp.movementType === MovementType.FLOATING) {
-                    bp.movementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
+                // Ensure Swimmer nodes are always Neutral type
+                if (bp.nodeType === NodeType.SWIMMER) {
+                    bp.movementType = MovementType.NEUTRAL;
                 }
 
                 // Mutate canBeGrabber gene
@@ -684,8 +684,8 @@ class SoftBody {
 
                 const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
                 let newMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
-                if (newNodeType === NodeType.SWIMMER && newMovementType === MovementType.FLOATING) {
-                    newMovementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
+                if (newNodeType === NodeType.SWIMMER) {
+                    newMovementType = MovementType.NEUTRAL;
                 }
                 const newBp = {
                     relX: newRelX, relY: newRelY, radius: newRadius, mass: newMass,
@@ -772,8 +772,8 @@ class SoftBody {
                     let newNodeType = availableFunctionalNodeTypes[Math.floor(Math.random() * availableFunctionalNodeTypes.length)];
                     const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
                     let newMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
-                     if (newNodeType === NodeType.SWIMMER && newMovementType === MovementType.FLOATING) {
-                        newMovementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
+                    if (newNodeType === NodeType.SWIMMER) {
+                        newMovementType = MovementType.NEUTRAL;
                     }
 
                     const newMidBp = {
@@ -889,8 +889,8 @@ class SoftBody {
 
                 const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
                 let chosenMovementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
-                if (chosenNodeType === NodeType.SWIMMER && chosenMovementType === MovementType.FLOATING) {
-                    chosenMovementType = (Math.random() < 0.5) ? MovementType.NEUTRAL : MovementType.FIXED;
+                if (chosenNodeType === NodeType.SWIMMER) {
+                    chosenMovementType = MovementType.NEUTRAL;
                 }
                 const canBeGrabberInitial = Math.random() < GRABBER_GENE_MUTATION_CHANCE;
                 const neuronDataBp = chosenNodeType === NodeType.NEURON ? {
@@ -1432,12 +1432,9 @@ class SoftBody {
                     detailsForThisSwimmer.push(directionResult.detail);
                     const angle = directionResult.value; 
 
-                    const exertionResultSwimmer = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                    exertionResultSwimmer.detail.label = `Swimmer @P${pointIndex} Exertion`;
-                    detailsForThisSwimmer.push(exertionResultSwimmer.detail);
-                    point.currentExertionLevel = sigmoid(exertionResultSwimmer.value); // NN sets exertion for Swimmer
+                    point.currentExertionLevel = sigmoid(rawMagnitude);
 
-                    const finalMagnitude = sigmoid(rawMagnitude) * MAX_SWIMMER_OUTPUT_MAGNITUDE * this.emitterStrength * point.currentExertionLevel;
+                    const finalMagnitude = point.currentExertionLevel * MAX_SWIMMER_OUTPUT_MAGNITUDE;
                     const appliedForceX = finalMagnitude * Math.cos(angle);
                     const appliedForceY = finalMagnitude * Math.sin(angle);
                     
@@ -1508,13 +1505,8 @@ class SoftBody {
                     detailsForThisJet.push(directionResult.detail);
                     const angle = directionResult.value;
 
-                    const exertionResultJet = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                    exertionResultJet.detail.label = `Jet @P${pointIndex} Exertion`;
-                    detailsForThisJet.push(exertionResultJet.detail);
-                    point.currentExertionLevel = sigmoid(exertionResultJet.value);
-
-                    point.jetData.currentMagnitude = sigmoid(rawMagnitude) * MAX_JET_OUTPUT_MAGNITUDE * point.currentExertionLevel;
-                    point.jetData.currentAngle = angle;
+                    point.currentExertionLevel = sigmoid(rawMagnitude);
+                    point.jetData.currentMagnitude = point.currentExertionLevel * MAX_JET_OUTPUT_MAGNITUDE;
 
                     nd.currentFrameActionDetails.push(...detailsForThisJet);
                     currentRawOutputIndex += NEURAL_OUTPUTS_PER_JET;
@@ -2294,28 +2286,18 @@ class SoftBody {
     _performPhysicalUpdates(dt, fluidFieldRef) {
         if (fluidFieldRef) {
             for (let point of this.massPoints) {
-                if (point.isFixed) continue;
-
                 const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
                 const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
 
                 if (!isFinite(fluidGridX) || !isFinite(fluidGridY)) continue;
                 
                 const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
-                if (idx < 0 || idx >= fluidFieldRef.Vx.length) continue;
+                // Check index validity once, for all interactions.
+                // Assuming Vx, Vy, density arrays all have the same length.
+                if (idx < 0 || idx >= (fluidFieldRef.Vx ? fluidFieldRef.Vx.length : (fluidFieldRef.textures.velocityPing ? fluidFieldRef.size * fluidFieldRef.size : 0))) continue;
 
-                if (point.movementType === MovementType.FLOATING) {
-                    const rawFluidVx = fluidFieldRef.Vx[idx];
-                    const rawFluidVy = fluidFieldRef.Vy[idx];
-                    this._tempVec1.copyFrom(point.pos).subInPlace(point.prevPos).mulInPlace(1.0 - this.fluidEntrainment);
-                    this._tempVec2.x = rawFluidVx * fluidFieldRef.scaleX * dt;
-                    this._tempVec2.y = rawFluidVy * fluidFieldRef.scaleY * dt;
-                    this._tempVec2.mulInPlace(this.fluidCurrentStrength).mulInPlace(this.fluidEntrainment);
-                    this._tempVec1.addInPlace(this._tempVec2);
-                    
-                    point.prevPos.copyFrom(point.pos).subInPlace(this._tempVec1);
-                }
 
+                // --- Fluid Interactions (should occur even if fixed) ---
                 if (point.nodeType === NodeType.EMITTER) {
                     let dyeEmissionStrength = 50 * point.currentExertionLevel;
                     fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], dyeEmissionStrength);
@@ -2324,8 +2306,8 @@ class SoftBody {
                 if (point.nodeType === NodeType.JET) {
                     const exertion = point.currentExertionLevel || 0;
                     if (exertion > 0.01) {
-                        const currentFluidVelX = fluidFieldRef.Vx[idx];
-                        const currentFluidVelY = fluidFieldRef.Vy[idx];
+                        const currentFluidVelX = fluidFieldRef.Vx ? fluidFieldRef.Vx[idx] : 0; // Placeholder for GPU
+                        const currentFluidVelY = fluidFieldRef.Vy ? fluidFieldRef.Vy[idx] : 0; // Placeholder for GPU
                         const currentFluidSpeedSq = currentFluidVelX ** 2 + currentFluidVelY ** 2;
 
                         if (currentFluidSpeedSq < point.maxEffectiveJetVelocity ** 2) {
@@ -2336,6 +2318,21 @@ class SoftBody {
                             fluidFieldRef.addVelocity(fluidGridX, fluidGridY, appliedForceX, appliedForceY);
                         }
                     }
+                }
+                
+                // --- Physics Updates for Mobile Points Only ---
+                if (point.isFixed) continue;
+
+                if (point.movementType === MovementType.FLOATING) {
+                    const rawFluidVx = fluidFieldRef.Vx ? fluidFieldRef.Vx[idx] : 0;
+                    const rawFluidVy = fluidFieldRef.Vy ? fluidFieldRef.Vy[idx] : 0;
+                    this._tempVec1.copyFrom(point.pos).subInPlace(point.prevPos).mulInPlace(1.0 - this.fluidEntrainment);
+                    this._tempVec2.x = rawFluidVx * fluidFieldRef.scaleX * dt;
+                    this._tempVec2.y = rawFluidVy * fluidFieldRef.scaleY * dt;
+                    this._tempVec2.mulInPlace(this.fluidCurrentStrength).mulInPlace(this.fluidEntrainment);
+                    this._tempVec1.addInPlace(this._tempVec2);
+                    
+                    point.prevPos.copyFrom(point.pos).subInPlace(this._tempVec1);
                 }
             }
         }

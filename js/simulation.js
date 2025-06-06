@@ -529,23 +529,3 @@ function drawFluidVelocities(ctx, fluidData, viewportCanvasWidth, viewportCanvas
         }
     }
 }
-
-// Reset global energy gains
-globalEnergyGains.photosynthesis = 0;
-globalEnergyGains.eating = 0;
-globalEnergyGains.predation = 0;
-// Reset global energy costs
-globalEnergyCosts.baseNodes = 0;
-globalEnergyCosts.emitterNodes = 0;
-globalEnergyCosts.eaterNodes = 0;
-globalEnergyCosts.predatorNodes = 0;
-globalEnergyCosts.neuronNodes = 0;
-globalEnergyCosts.swimmerNodes = 0;
-globalEnergyCosts.photosyntheticNodes = 0;
-globalEnergyCosts.grabbingNodes = 0;
-globalEnergyCosts.eyeNodes = 0;
-globalEnergyCosts.jetNodes = 0;
-
-if (statsPanel.classList.contains('open')) {
-    // ... existing code ...
-}

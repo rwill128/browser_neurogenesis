@@ -179,7 +179,6 @@ let lastPanMouseY = 0;
 
 // --- Neural Network Constants ---
 const NEURAL_INPUT_SIZE_BASE = 10;
-const MAX_SPRING_SENSORS = 15;
 const NEURAL_INPUTS_PER_SPRING_SENSOR = 1; // For now, just the normalized length
 const NEURAL_OUTPUTS_PER_PREDATOR = 2;
 const NEURAL_OUTPUTS_PER_EATER = 2;

@@ -1308,26 +1308,17 @@ class SoftBody {
         inputVector.push(normalizedEnergySecondDerivative);
         nd.currentFrameInputVectorWithLabels.push({ label: 'Energy Δ-Rate', value: normalizedEnergySecondDerivative });
 
-        // NEW: Add spring length inputs
-        for (let i = 0; i < MAX_SPRING_SENSORS; i++) {
-            if (i < this.springs.length) {
-                const spring = this.springs[i];
-                // Calculate current length (avoiding intermediate Vec2 allocation)
-                const dx = spring.p1.pos.x - spring.p2.pos.x;
-                const dy = spring.p1.pos.y - spring.p2.pos.y;
-                const currentLength = Math.sqrt(dx*dx + dy*dy);
+        // Add spring length inputs for every spring the creature has.
+        this.springs.forEach((spring, i) => {
+            const dx = spring.p1.pos.x - spring.p2.pos.x;
+            const dy = spring.p1.pos.y - spring.p2.pos.y;
+            const currentLength = Math.sqrt(dx*dx + dy*dy);
 
-                // Normalize and add to input vector
-                // tanh will keep the value between -1 and 1, centered at 0 for no change.
-                const normalizedLength = Math.tanh((currentLength / spring.restLength) - 1.0);
-                inputVector.push(normalizedLength);
-                nd.currentFrameInputVectorWithLabels.push({ label: `Spring ${i} Length`, value: normalizedLength });
-            } else {
-                // Pad with default value (0, indicating rest length) if creature has fewer springs than sensors
-                inputVector.push(0);
-                nd.currentFrameInputVectorWithLabels.push({ label: `Spring ${i} Length`, value: 0 });
-            }
-        }
+            // tanh will keep the value between -1 and 1, centered at 0 for no change.
+            const normalizedLength = Math.tanh((currentLength / spring.restLength) - 1.0);
+            inputVector.push(normalizedLength);
+            nd.currentFrameInputVectorWithLabels.push({ label: `Spring ${i} Length`, value: normalizedLength });
+        });
 
         // Add fluid sensor inputs for Swimmers and Jets
         this.massPoints.forEach((point, pointIndex) => {
@@ -2091,7 +2082,7 @@ class SoftBody {
                              (numEyeNodes * NEURAL_INPUTS_PER_EYE) +
                              (numSwimmerPoints * NEURAL_INPUTS_PER_FLUID_SENSOR) +
                              (numJetNodes * NEURAL_INPUTS_PER_FLUID_SENSOR) +
-                             (MAX_SPRING_SENSORS * NEURAL_INPUTS_PER_SPRING_SENSOR);
+                             (this.springs.length * NEURAL_INPUTS_PER_SPRING_SENSOR);
         // console.log(`Body ${this.id} _calculateBrainVectorSizes: Counts (from stored) directly before sum: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${predatorPoints}, G:${numPotentialGrabberPoints}`);
         nd.outputVectorSize = (numEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
                               (numSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +

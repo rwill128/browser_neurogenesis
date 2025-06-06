@@ -185,6 +185,7 @@ function getNodeTypeString(nodeType) {
         case NodeType.EMITTER: return "Emitter (Dye)";
         case NodeType.SWIMMER: return "Swimmer (Propulsion)";
         case NodeType.EYE: return "Eye (Particle Detector)";
+        case NodeType.JET: return "Jet (Fluid Propulsion)";
         default: return "Unknown_NodeType";
     }
 }

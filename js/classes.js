@@ -599,6 +599,16 @@ class SoftBody {
                     bs.isRigid = !bs.isRigid; // Simple flip for now
                     if (bs.isRigid !== oldRigid) mutationStats.springRigidityFlip++;
                 }
+                 if (Math.random() < (SPRING_PROP_MUTATION_MAGNITUDE * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                    const oldStiffness = bs.stiffness;
+                    bs.stiffness = Math.max(100, Math.min(bs.stiffness * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE), 10000));
+                    if (Math.abs(bs.stiffness - oldStiffness) > 0.01) mutationStats.springStiffness++;
+                }
+                if (Math.random() < (SPRING_PROP_MUTATION_MAGNITUDE * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                    const oldDamping = bs.damping;
+                    bs.damping = Math.max(0.1, Math.min(bs.damping * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE), 50));
+                    if (Math.abs(bs.damping - oldDamping) > 0.01) mutationStats.springDamping++;
+                }
             });
 
             // Step 4: Structural Blueprint Mutations (Point Add, Spring Add/Delete, Subdivision, Scale, etc.)
@@ -647,7 +657,9 @@ class SoftBody {
                     let newRestLength = dist * (1 + (Math.random() - 0.5) * 2 * NEW_SPRING_REST_LENGTH_VARIATION);
                     newRestLength = Math.max(1, newRestLength);
                     const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
-                    this.blueprintSprings.push({ p1Index: newPointIndex, p2Index: connectToBpIndex, restLength: newRestLength, isRigid: becomeRigid });
+                    const newStiffness = 500 + Math.random() * 2500;
+                    const newDamping = 5 + Math.random() * 20;
+                    this.blueprintSprings.push({ p1Index: newPointIndex, p2Index: connectToBpIndex, restLength: newRestLength, isRigid: becomeRigid, stiffness: newStiffness, damping: newDamping });
                 }
             }
 
@@ -681,7 +693,9 @@ class SoftBody {
                         let newRestLength = dist * (1 + (Math.random() - 0.5) * 2 * NEW_SPRING_REST_LENGTH_VARIATION);
                         newRestLength = Math.max(1, newRestLength);
                         const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
-                        this.blueprintSprings.push({ p1Index: idx1, p2Index: idx2, restLength: newRestLength, isRigid: becomeRigid });
+                        const newStiffness = 500 + Math.random() * 2500;
+                        const newDamping = 5 + Math.random() * 20;
+                        this.blueprintSprings.push({ p1Index: idx1, p2Index: idx2, restLength: newRestLength, isRigid: becomeRigid, stiffness: newStiffness, damping: newDamping });
                         mutationStats.springAddition++; 
                         break;
                     }
@@ -721,10 +735,10 @@ class SoftBody {
                     this.blueprintSprings.splice(springToSubdivideIndex, 1); // Remove original spring
 
                     let restLength1 = Math.sqrt((bp1.relX - midRelX)**2 + (bp1.relY - midRelY)**2) * (1 + (Math.random() - 0.5) * 0.1);
-                    this.blueprintSprings.push({ p1Index: originalBs.p1Index, p2Index: newMidPointIndex, restLength: Math.max(1, restLength1), isRigid: originalBs.isRigid });
+                    this.blueprintSprings.push({ p1Index: originalBs.p1Index, p2Index: newMidPointIndex, restLength: Math.max(1, restLength1), isRigid: originalBs.isRigid, stiffness: originalBs.stiffness, damping: originalBs.dampingFactor });
 
                     let restLength2 = Math.sqrt((midRelX - bp2.relX)**2 + (midRelY - bp2.relY)**2) * (1 + (Math.random() - 0.5) * 0.1);
-                    this.blueprintSprings.push({ p1Index: newMidPointIndex, p2Index: originalBs.p2Index, restLength: Math.max(1, restLength2), isRigid: originalBs.isRigid });
+                    this.blueprintSprings.push({ p1Index: newMidPointIndex, p2Index: originalBs.p2Index, restLength: Math.max(1, restLength2), isRigid: originalBs.isRigid, stiffness: originalBs.stiffness, damping: originalBs.dampingFactor });
                     
                     mutationStats.springSubdivision++; 
                     mutationStats.pointAddActual++; 
@@ -766,11 +780,11 @@ class SoftBody {
                     const point = new MassPoint(j * basePointDist, i * basePointDist, 0.3 + Math.random() * 0.4, baseRadius);
                     initialTempMassPoints.push(point); gridPoints[i][j] = point;
                 }}
-                for (let i=0; i<numPointsY; i++) for (let j=0; j<numPointsX-1; j++) initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
-                for (let j=0; j<numPointsX; j++) for (let i=0; i<numPointsY-1; i++) initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                for (let i=0; i<numPointsY; i++) for (let j=0; j<numPointsX-1; j++) initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                for (let j=0; j<numPointsX; j++) for (let i=0; i<numPointsY-1; i++) initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
                 for (let i=0; i<numPointsY-1; i++) for (let j=0; j<numPointsX-1; j++) {
-                    initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], this.stiffness*0.7, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
-                    initialTempSprings.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], this.stiffness*0.7, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                    initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], (500 + Math.random() * 2500)*0.7, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                    initialTempSprings.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], (500 + Math.random() * 2500)*0.7, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
                 }
             } else if (this.shapeType === 1) { // Line
                 const numLinePoints = Math.floor(3 + Math.random() * 3); const isHorizontal = Math.random() < 0.5; let linePoints = [];
@@ -780,8 +794,8 @@ class SoftBody {
                     const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
                     initialTempMassPoints.push(point); linePoints.push(point);
                 }
-                for (let i=0; i<numLinePoints-1; i++) initialTempSprings.push(new Spring(linePoints[i], linePoints[i+1], this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
-                if (numLinePoints > 2) initialTempSprings.push(new Spring(linePoints[0], linePoints[numLinePoints-1], this.stiffness*0.5, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                for (let i=0; i<numLinePoints-1; i++) initialTempSprings.push(new Spring(linePoints[i], linePoints[i+1], 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                if (numLinePoints > 2) initialTempSprings.push(new Spring(linePoints[0], linePoints[numLinePoints-1], (500 + Math.random() * 2500)*0.5, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
             } else { // Star
                 const numOuterPoints = Math.floor(4 + Math.random()*3);
                 const centralPoint = new MassPoint(0, 0, (0.3+Math.random()*0.4)*1.5, baseRadius*1.2); // Center at (0,0) for now
@@ -793,10 +807,10 @@ class SoftBody {
                     const y = Math.sin(angle)*circleRadius;
                     const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
                     initialTempMassPoints.push(point);
-                    initialTempSprings.push(new Spring(centralPoint, point, this.stiffness, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
-                    if (i>0) initialTempSprings.push(new Spring(initialTempMassPoints[initialTempMassPoints.length-2], point, this.stiffness*0.8, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                    initialTempSprings.push(new Spring(centralPoint, point, 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                    if (i>0) initialTempSprings.push(new Spring(initialTempMassPoints[initialTempMassPoints.length-2], point, (500 + Math.random() * 2500)*0.8, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
                 }
-                if (numOuterPoints > 1) initialTempSprings.push(new Spring(initialTempMassPoints[1], initialTempMassPoints[initialTempMassPoints.length-1], this.stiffness*0.8, this.springDamping, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                if (numOuterPoints > 1) initialTempSprings.push(new Spring(initialTempMassPoints[1], initialTempMassPoints[initialTempMassPoints.length-1], (500 + Math.random() * 2500)*0.8, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
             }
 
             // Calculate centroid of these initial temporary points (which were created around a local 0,0)
@@ -850,7 +864,9 @@ class SoftBody {
                         p1Index: p1Index,
                         p2Index: p2Index,
                         restLength: s_temp.restLength, // This was calculated by Spring constructor from initial geometry
-                        isRigid: s_temp.isRigid
+                        isRigid: s_temp.isRigid,
+                        stiffness: s_temp.stiffness,
+                        damping: s_temp.dampingFactor
                     });
                 }
             });
@@ -946,7 +962,7 @@ class SoftBody {
 
                 // Use the creature's overall stiffness and damping
                 // The blueprint spring carries restLength and isRigid
-                this.springs.push(new Spring(p1, p2, this.stiffness, this.springDamping, bs.restLength, bs.isRigid));
+                this.springs.push(new Spring(p1, p2, bs.stiffness, bs.damping, bs.restLength, bs.isRigid));
             } else {
                 console.warn(`Body ${this.id}: Invalid spring blueprint indices ${bs.p1Index}, ${bs.p2Index} for ${this.massPoints.length} points.`);
             }
@@ -2323,6 +2339,22 @@ class SoftBody {
         if (this.ticksSinceBirth > this.effectiveReproductionCooldown) { // Use effective cooldown
             this.canReproduce = true;
         }
+    }
+
+    getAverageStiffness() {
+        if (this.springs.length === 0) return 0;
+        const nonRigidSprings = this.springs.filter(s => !s.isRigid);
+        if (nonRigidSprings.length === 0) return RIGID_SPRING_STIFFNESS;
+        const totalStiffness = nonRigidSprings.reduce((sum, spring) => sum + spring.stiffness, 0);
+        return totalStiffness / nonRigidSprings.length;
+    }
+
+    getAverageDamping() {
+        if (this.springs.length === 0) return 0;
+        const nonRigidSprings = this.springs.filter(s => !s.isRigid);
+        if (nonRigidSprings.length === 0) return RIGID_SPRING_DAMPING;
+        const totalDamping = nonRigidSprings.reduce((sum, spring) => sum + spring.dampingFactor, 0);
+        return totalDamping / nonRigidSprings.length;
     }
 }
 

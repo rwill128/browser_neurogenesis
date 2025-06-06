@@ -24,8 +24,8 @@ let globalEnergyCosts = {
 };
 
 let mutationStats = { // New: For tracking mutation occurrences
-    stiffness: 0,
-    damping: 0,
+    springStiffness: 0,
+    springDamping: 0,
     motorInterval: 0,
     motorCap: 0,
     emitterStrength: 0,

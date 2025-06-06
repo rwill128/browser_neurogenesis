@@ -298,8 +298,8 @@ function updatePopulationCount() {
 function updateInfoPanel() {
     if (selectedInspectBody && selectedInspectPoint) {
         document.getElementById('infoBodyId').textContent = selectedInspectBody.id;
-        document.getElementById('infoBodyStiffness').textContent = selectedInspectBody.stiffness.toFixed(2);
-        document.getElementById('infoBodyDamping').textContent = selectedInspectBody.springDamping.toFixed(2);
+        document.getElementById('infoBodyStiffness').textContent = selectedInspectBody.getAverageStiffness().toFixed(2);
+        document.getElementById('infoBodyDamping').textContent = selectedInspectBody.getAverageDamping().toFixed(2);
         document.getElementById('infoBodyMotorInterval').textContent = selectedInspectBody.motorImpulseInterval;
         document.getElementById('infoBodyMotorCap').textContent = selectedInspectBody.motorImpulseMagnitudeCap.toFixed(2);
         document.getElementById('infoBodyEmitterStrength').textContent = selectedInspectBody.emitterStrength.toFixed(2);

@@ -372,7 +372,7 @@ body.css-screensaver-active #canvasContainer {
     font-weight: bold; /* Keep strong tags bold if needed */
 }
 
-#nodeTypeStats p strong, /* Ensure strong tags in nodeTypeStats are also bolded if needed */
+#nodeTypeStats p strong,
 #mutationTypeStats p strong {
     font-weight: bold;
     color: #00aeff; /* Match the heading color for emphasis on the label part */
@@ -400,6 +400,16 @@ body.css-screensaver-active #canvasContainer {
     font-weight: bold;
     color: #bbb; /* Color for the label part like 'Stiffness:' */
     margin-right: 5px; /* Space between label and value */
+}
+
+#nodeTypeStats p.clickable-stat > strong {
+    cursor: pointer;
+    text-decoration: underline;
+    color: #7fdbff;
+    transition: color 0.2s;
+}
+#nodeTypeStats p.clickable-stat:hover > strong {
+    color: #aaddff; /* A slightly brighter blue on hover */
 }
 
 /* Style for the value part after the strong tag */

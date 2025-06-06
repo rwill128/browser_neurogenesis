@@ -160,6 +160,11 @@ const headlessModeToggle = document.getElementById('headlessModeToggle'); // New
 const useGpuFluidToggle = document.getElementById('useGpuFluidToggle');
 console.log("useGpuFluidToggle element:", useGpuFluidToggle); // Log to see if element is found
 
+// --- Cycling through creatures with specific node types ---
+let cyclingNodeType = null;
+let cyclingCreatureList = [];
+let cyclingCreatureIndex = -1;
+
 // --- Mouse Interaction State Variables ---
 let selectedSoftBodyPoint = null;
 let mouse = {x: 0, y: 0, prevX: 0, prevY: 0, isDown: false, dx: 0, dy: 0};
@@ -1512,6 +1517,8 @@ function updateStatsPanel() {
     const globalEnergyCostsStatsDiv = document.getElementById('globalEnergyCostsStats'); // New: Get the costs div
 
     // Node Type Proportions
+    nodeTypeStatsDiv.innerHTML = ''; // Clear existing content
+
     const nodeCounts = {};
     let totalNodes = 0;
     for (const typeName in NodeType) {
@@ -1525,19 +1532,36 @@ function updateStatsPanel() {
             totalNodes++;
         });
     });
-    let statsHTML = "<p><strong>Node Type Proportions:</strong></p>";
+    
+    const title = document.createElement('p');
+    title.innerHTML = "<strong>Node Type Proportions:</strong>";
+    nodeTypeStatsDiv.appendChild(title);
+
     if (totalNodes === 0) {
-        statsHTML += "<p>No creatures to analyze.</p>";
+        const noCreatures = document.createElement('p');
+        noCreatures.textContent = "No creatures to analyze.";
+        nodeTypeStatsDiv.appendChild(noCreatures);
     } else {
         for (const typeName in NodeType) {
             const typeEnum = NodeType[typeName];
             const count = nodeCounts[typeEnum];
             const percentage = ((count / totalNodes) * 100).toFixed(2);
-            statsHTML += `<p><strong>${getNodeTypeString(typeEnum)}:</strong> <span class=\"stat-value\">${count} (${percentage}%)</span></p>`;
+            const typeString = getNodeTypeString(typeEnum);
+
+            const p = document.createElement('p');
+            p.innerHTML = `<strong>${typeString}:</strong> <span class="stat-value">${count} (${percentage}%)</span>`;
+
+            if (count > 0) {
+                p.classList.add('clickable-stat');
+                p.title = `Click to cycle through creatures with ${typeString} nodes`;
+                p.onclick = () => { handleNodeTypeLabelClick(typeName); };
+            }
+            nodeTypeStatsDiv.appendChild(p);
         }
-        statsHTML += `<p><strong>Total Nodes:</strong> <span class=\"stat-value\">${totalNodes}</span></p>`;
+        const totalP = document.createElement('p');
+        totalP.innerHTML = `<strong>Total Nodes:</strong> <span class="stat-value">${totalNodes}</span>`;
+        nodeTypeStatsDiv.appendChild(totalP);
     }
-    nodeTypeStatsDiv.innerHTML = statsHTML;
 
     // Mutation Type Counts
     if (mutationTypeStatsDiv) {
@@ -1613,4 +1637,58 @@ function createInfoPanelParagraph(parentElement, baseId, labelText) {
         }
     }
     return pElement;
+}
+
+function focusOnCreature(creature) {
+    if (!creature || creature.isUnstable || creature.massPoints.length === 0) return;
+
+    const creatureCenter = creature.getAveragePosition();
+    const creatureRadius = creature.blueprintRadius || creature.getBoundingBox().width / 2;
+
+    const smallerViewportDim = Math.min(canvas.clientWidth, canvas.clientHeight);
+    const targetZoom = smallerViewportDim / (creatureRadius * 2 * 3); 
+    
+    viewZoom = Math.min(MAX_ZOOM, Math.max(0.2, targetZoom)); 
+
+    viewOffsetX = creatureCenter.x - (canvas.clientWidth / viewZoom / 2);
+    viewOffsetY = creatureCenter.y - (canvas.clientHeight / viewZoom / 2);
+
+    const effectiveViewportWidth = canvas.clientWidth / viewZoom;
+    const effectiveViewportHeight = canvas.clientHeight / viewZoom;
+    const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
+    const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
+    viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
+    viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
+
+    selectedInspectBody = creature;
+    selectedInspectPoint = creature.massPoints[0];
+    selectedInspectPointIndex = 0;
+    updateInfoPanel();
+}
+
+function handleNodeTypeLabelClick(nodeTypeName) {
+    const nodeType = NodeType[nodeTypeName];
+
+    if (cyclingNodeType !== nodeType) {
+        cyclingNodeType = nodeType;
+        cyclingCreatureList = softBodyPopulation.filter(body =>
+            !body.isUnstable && body.massPoints.some(point => point.nodeType === nodeType)
+        );
+        cyclingCreatureIndex = 0;
+    } else if (cyclingCreatureList.length > 0) {
+        cyclingCreatureIndex = (cyclingCreatureIndex + 1) % cyclingCreatureList.length;
+    } else { // This case can happen if the list became empty since the last click
+        cyclingCreatureList = softBodyPopulation.filter(body =>
+            !body.isUnstable && body.massPoints.some(point => point.nodeType === nodeType)
+        );
+        cyclingCreatureIndex = 0;
+    }
+
+    if (cyclingCreatureList.length > 0) {
+        const creatureToFocus = cyclingCreatureList[cyclingCreatureIndex];
+        focusOnCreature(creatureToFocus);
+    } else {
+        console.log(`No creatures found with node type ${getNodeTypeString(nodeType)}`);
+        cyclingNodeType = null;
+    }
 }

@@ -217,6 +217,33 @@ function getRewardStrategyString(strategy) {
         case RLRewardStrategy.ENERGY_SECOND_DERIVATIVE: return "Energy Change Rate Change";
         case RLRewardStrategy.CREATURE_PROXIMITY: return "Creature Proximity";
         case RLRewardStrategy.CREATURE_DISTANCE: return "Creature Distance";
+        case RLRewardStrategy.SENSED_DYE_R: return "Sensed Dye (Red)";
+        case RLRewardStrategy.SENSED_DYE_R_INV: return "Avoid Dye (Red)";
+        case RLRewardStrategy.SENSED_DYE_G: return "Sensed Dye (Green)";
+        case RLRewardStrategy.SENSED_DYE_G_INV: return "Avoid Dye (Green)";
+        case RLRewardStrategy.SENSED_DYE_B: return "Sensed Dye (Blue)";
+        case RLRewardStrategy.SENSED_DYE_B_INV: return "Avoid Dye (Blue)";
+        case RLRewardStrategy.ENERGY_RATIO: return "High Energy Ratio";
+        case RLRewardStrategy.ENERGY_RATIO_INV: return "Low Energy Ratio";
+        case RLRewardStrategy.REL_COM_POS_X_POS: return "CoM Right of Brain";
+        case RLRewardStrategy.REL_COM_POS_X_NEG: return "CoM Left of Brain";
+        case RLRewardStrategy.REL_COM_POS_Y_POS: return "CoM Below Brain";
+        case RLRewardStrategy.REL_COM_POS_Y_NEG: return "CoM Above Brain";
+        case RLRewardStrategy.REL_COM_VEL_X_POS: return "CoM Velocity Right";
+        case RLRewardStrategy.REL_COM_VEL_X_NEG: return "CoM Velocity Left";
+        case RLRewardStrategy.REL_COM_VEL_Y_POS: return "CoM Velocity Down";
+        case RLRewardStrategy.REL_COM_VEL_Y_NEG: return "CoM Velocity Up";
+        case RLRewardStrategy.SENSED_NUTRIENT: return "High Nutrients";
+        case RLRewardStrategy.SENSED_NUTRIENT_INV: return "Low Nutrients";
+        case RLRewardStrategy.AVG_SPRING_COMPRESSION: return "Springs Compressed";
+        case RLRewardStrategy.AVG_SPRING_EXTENSION: return "Springs Extended";
+        case RLRewardStrategy.AVG_FLUID_VEL_X_POS: return "In Rightward Fluid";
+        case RLRewardStrategy.AVG_FLUID_VEL_X_NEG: return "In Leftward Fluid";
+        case RLRewardStrategy.AVG_FLUID_VEL_Y_POS: return "In Downward Fluid";
+        case RLRewardStrategy.AVG_FLUID_VEL_Y_NEG: return "In Upward Fluid";
+        case RLRewardStrategy.EYE_SEES_TARGET: return "Eye Sees Target";
+        case RLRewardStrategy.EYE_TARGET_PROXIMITY: return "Eye Near Target";
+        case RLRewardStrategy.EYE_TARGET_DISTANCE: return "Eye Far From Target";
         default: return "Unknown_Strategy";
     }
 }

@@ -17,6 +17,34 @@ const RLRewardStrategy = {
     ENERGY_SECOND_DERIVATIVE: 3, // New: Reward based on the change in energy change rate
     CREATURE_PROXIMITY: 4,
     CREATURE_DISTANCE: 5,
+    // New rewards based on NN inputs
+    SENSED_DYE_R: 6,
+    SENSED_DYE_R_INV: 7,
+    SENSED_DYE_G: 8,
+    SENSED_DYE_G_INV: 9,
+    SENSED_DYE_B: 10,
+    SENSED_DYE_B_INV: 11,
+    ENERGY_RATIO: 12,
+    ENERGY_RATIO_INV: 13,
+    REL_COM_POS_X_POS: 14,
+    REL_COM_POS_X_NEG: 15,
+    REL_COM_POS_Y_POS: 16,
+    REL_COM_POS_Y_NEG: 17,
+    REL_COM_VEL_X_POS: 18,
+    REL_COM_VEL_X_NEG: 19,
+    REL_COM_VEL_Y_POS: 20,
+    REL_COM_VEL_Y_NEG: 21,
+    SENSED_NUTRIENT: 22,
+    SENSED_NUTRIENT_INV: 23,
+    AVG_SPRING_COMPRESSION: 24,
+    AVG_SPRING_EXTENSION: 25,
+    AVG_FLUID_VEL_X_POS: 26,
+    AVG_FLUID_VEL_X_NEG: 27,
+    AVG_FLUID_VEL_Y_POS: 28,
+    AVG_FLUID_VEL_Y_NEG: 29,
+    EYE_SEES_TARGET: 30,
+    EYE_TARGET_PROXIMITY: 31,
+    EYE_TARGET_DISTANCE: 32,
 };
 
 const RLAlgorithmType = {
@@ -1570,6 +1598,18 @@ class SoftBody {
         const nd = brainNode.neuronData;
         if (nd.currentFrameActionDetails && nd.currentFrameActionDetails.length > 0) {
             let reward = 0;
+
+            const findInputValue = (label) => {
+                const entry = nd.currentFrameInputVectorWithLabels.find(item => item.label === label);
+                return entry ? entry.value : 0;
+            };
+            const findAndAverageInputValues = (labelPrefix) => {
+                const entries = nd.currentFrameInputVectorWithLabels.filter(item => item.label.startsWith(labelPrefix));
+                if (entries.length === 0) return 0;
+                const sum = entries.reduce((acc, item) => acc + item.value, 0);
+                return sum / entries.length;
+            };
+
             switch (this.rewardStrategy) {
                 case RLRewardStrategy.ENERGY_CHANGE:
                     reward = (this.creatureEnergy - nd.previousEnergyForReward) - this.energyGainedFromPhotosynthesisThisTick;
@@ -1600,14 +1640,56 @@ class SoftBody {
                     }
                     break;
                 case RLRewardStrategy.ENERGY_SECOND_DERIVATIVE:
-                    // Recalculate currentEnergyChange and energySecondDerivative for reward
-                    // nd.previousEnergyForReward holds energy from *before* this tick's budget update
-                    // this.creatureEnergy holds energy *after* this tick's budget update
                     const currentEnergyChangeForReward = this.creatureEnergy - (nd.previousEnergyForReward || this.creatureEnergy);
-                    // nd.previousEnergyChangeForNN was updated in _gatherBrainInputs based on the previous state of previousEnergyForReward
                     const energySecondDerivativeForReward = currentEnergyChangeForReward - (nd.previousEnergyChangeForNN || 0);
                     reward = energySecondDerivativeForReward * ENERGY_SECOND_DERIVATIVE_REWARD_SCALE;
                     break;
+                
+                // New reward strategies based on inputs
+                case RLRewardStrategy.SENSED_DYE_R: reward = findInputValue('Sensed Dye (R) @Brain'); break;
+                case RLRewardStrategy.SENSED_DYE_R_INV: reward = 1.0 - findInputValue('Sensed Dye (R) @Brain'); break;
+                case RLRewardStrategy.SENSED_DYE_G: reward = findInputValue('Sensed Dye (G) @Brain'); break;
+                case RLRewardStrategy.SENSED_DYE_G_INV: reward = 1.0 - findInputValue('Sensed Dye (G) @Brain'); break;
+                case RLRewardStrategy.SENSED_DYE_B: reward = findInputValue('Sensed Dye (B) @Brain'); break;
+                case RLRewardStrategy.SENSED_DYE_B_INV: reward = 1.0 - findInputValue('Sensed Dye (B) @Brain'); break;
+                
+                case RLRewardStrategy.ENERGY_RATIO: reward = findInputValue('Energy Ratio'); break;
+                case RLRewardStrategy.ENERGY_RATIO_INV: reward = 1.0 - findInputValue('Energy Ratio'); break;
+
+                case RLRewardStrategy.REL_COM_POS_X_POS: reward = Math.max(0, findInputValue('Relative CoM Pos X')); break;
+                case RLRewardStrategy.REL_COM_POS_X_NEG: reward = Math.max(0, -findInputValue('Relative CoM Pos X')); break;
+                case RLRewardStrategy.REL_COM_POS_Y_POS: reward = Math.max(0, findInputValue('Relative CoM Pos Y')); break;
+                case RLRewardStrategy.REL_COM_POS_Y_NEG: reward = Math.max(0, -findInputValue('Relative CoM Pos Y')); break;
+                
+                case RLRewardStrategy.REL_COM_VEL_X_POS: reward = Math.max(0, findInputValue('Relative CoM Vel X')); break;
+                case RLRewardStrategy.REL_COM_VEL_X_NEG: reward = Math.max(0, -findInputValue('Relative CoM Vel X')); break;
+                case RLRewardStrategy.REL_COM_VEL_Y_POS: reward = Math.max(0, findInputValue('Relative CoM Vel Y')); break;
+                case RLRewardStrategy.REL_COM_VEL_Y_NEG: reward = Math.max(0, -findInputValue('Relative CoM Vel Y')); break;
+
+                case RLRewardStrategy.SENSED_NUTRIENT: reward = findInputValue('Nutrient @Brain'); break;
+                case RLRewardStrategy.SENSED_NUTRIENT_INV: reward = 1.0 - findInputValue('Nutrient @Brain'); break;
+
+                case RLRewardStrategy.AVG_SPRING_EXTENSION: reward = Math.max(0, findAndAverageInputValues('Spring')); break;
+                case RLRewardStrategy.AVG_SPRING_COMPRESSION: reward = Math.max(0, -findAndAverageInputValues('Spring')); break;
+                
+                case RLRewardStrategy.AVG_FLUID_VEL_X_POS: reward = Math.max(0, findAndAverageInputValues('Fluid Vel X')); break;
+                case RLRewardStrategy.AVG_FLUID_VEL_X_NEG: reward = Math.max(0, -findAndAverageInputValues('Fluid Vel X')); break;
+                case RLRewardStrategy.AVG_FLUID_VEL_Y_POS: reward = Math.max(0, findAndAverageInputValues('Fluid Vel Y')); break;
+                case RLRewardStrategy.AVG_FLUID_VEL_Y_NEG: reward = Math.max(0, -findAndAverageInputValues('Fluid Vel Y')); break;
+                
+                case RLRewardStrategy.EYE_SEES_TARGET:
+                    const seesTargetValues = nd.currentFrameInputVectorWithLabels.filter(item => item.label.endsWith('Sees Target')).map(i => i.value);
+                    reward = seesTargetValues.some(v => v > 0) ? 1.0 : 0.0;
+                    break;
+                case RLRewardStrategy.EYE_TARGET_PROXIMITY:
+                    const distValues = nd.currentFrameInputVectorWithLabels.filter(item => item.label.endsWith('Target Dist') && item.value > 0).map(i => i.value);
+                    if (distValues.length > 0) reward = 1.0 - Math.min(...distValues);
+                    break;
+                case RLRewardStrategy.EYE_TARGET_DISTANCE:
+                    const distValuesFar = nd.currentFrameInputVectorWithLabels.filter(item => item.label.endsWith('Target Dist') && item.value > 0).map(i => i.value);
+                    if (distValuesFar.length > 0) reward = Math.min(...distValuesFar);
+                    break;
+
                 default:
                     reward = (this.creatureEnergy - nd.previousEnergyForReward) - this.energyGainedFromPhotosynthesisThisTick; // Fallback
             }

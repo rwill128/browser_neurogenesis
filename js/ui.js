@@ -413,8 +413,35 @@ function updateInfoPanel() {
                     if (typeof point.neuronData.lastAvgNormalizedReward === 'number') {
                         content += `<p><strong>Avg Batch Reward:</strong> ${point.neuronData.lastAvgNormalizedReward.toFixed(3)}</p>`;
                     }
-                    if (point.neuronData.rawOutputs && point.neuronData.rawOutputs.length > 0) {
-                        content += `<p><strong>Raw Outputs:</strong> [${point.neuronData.rawOutputs.map(o => o.toFixed(2)).join(', ')}]</p>`;
+                    
+                    // NEW: Display Labeled Inputs
+                    if (point.neuronData.currentFrameInputVectorWithLabels && point.neuronData.currentFrameInputVectorWithLabels.length > 0) {
+                        content += `<h6>Brain Inputs (Real-time):</h6>`;
+                        point.neuronData.currentFrameInputVectorWithLabels.forEach(input => {
+                             content += `<p><strong style="color:#aadeff;">${input.label}:</strong> <span class="stat-value">${input.value.toFixed(3)}</span></p>`;
+                        });
+                    }
+
+                    // NEW: Display Labeled Outputs/Actions
+                    if (point.neuronData.currentFrameActionDetails && point.neuronData.currentFrameActionDetails.length > 0) {
+                        content += `<h6>Brain Actions (Real-time Outputs):</h6>`;
+                        point.neuronData.currentFrameActionDetails.forEach(action => {
+                            // Determine the final action value based on the label, as some are sigmoided, some are not.
+                            let finalValueDisplay = "";
+                            if (action.label.includes("Direction")) {
+                                // Angle, not sigmoided
+                                finalValueDisplay = `${(action.sampledAction).toFixed(2)} rad`;
+                            } else if (action.label.includes("Toggle")) {
+                                // Boolean based on sigmoid
+                                finalValueDisplay = sigmoid(action.sampledAction) > 0.5 ? "ON" : "OFF";
+                            }
+                            else {
+                                // Default to sigmoid for magnitude, exertion, color channels
+                                finalValueDisplay = `${sigmoid(action.sampledAction).toFixed(3)}`;
+                            }
+                           
+                            content += `<p><strong style="color:#aadeff;">${action.label}:</strong> <span class="stat-value">${finalValueDisplay}</span> <em style="font-size:0.9em; color:#999;">(&mu;:${action.mean.toFixed(2)}, &sigma;:${action.stdDev.toFixed(2)})</em></p>`;
+                        });
                     }
                 } else {
                     content += `<h6>Neuron (Non-Brain)</h6>`;
@@ -1226,15 +1253,14 @@ canvas.addEventListener('mousedown', (e) => {
         }
 
         let clickedOnPoint = false;
-        selectedInspectBody = null;
-        selectedInspectPoint = null;
-
+        // Try to find a new point that was clicked.
         for (let body of softBodyPopulation) {
             if (body.isUnstable) continue;
             for (let i = 0; i < body.massPoints.length; i++) {
                 const point = body.massPoints[i];
                 const dist = Math.sqrt((point.pos.x - simMouseX) ** 2 + (point.pos.y - simMouseY) ** 2);
                 if (dist < point.radius * 2.5) {
+                    // A point was clicked. Update the selection for both inspection and dragging.
                     selectedSoftBodyPoint = {body: body, point: point};
                     selectedInspectBody = body;
                     selectedInspectPoint = point;
@@ -1250,6 +1276,13 @@ canvas.addEventListener('mousedown', (e) => {
                 }
             }
             if (clickedOnPoint) break;
+        }
+
+        if (!clickedOnPoint) {
+            // No point was clicked, indicating an interaction with the fluid.
+            // We keep the info panel open by not clearing selectedInspectBody.
+            // We only clear the point for dragging to prevent moving the old selection.
+            selectedSoftBodyPoint = null;
         }
         updateInfoPanel();
     }

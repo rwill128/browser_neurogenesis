@@ -50,7 +50,12 @@ let mutationStats = { // New: For tracking mutation occurrences
     rewardStrategyChange: 0, // New stat for reward strategy mutations
     grabberGeneChange: 0,    // New stat for grabber gene mutations
     eyeTargetTypeChange: 0,   // New: For eye target type mutations
-    jetMaxVelocityGene: 0
+    jetMaxVelocityGene: 0,
+    reproductionCooldownGene: 0,
+    blueprintMassRadiusChange: 0,
+    blueprintDyeColorChange: 0,
+    blueprintCoordinateChange: 0,
+    blueprintNeuronHiddenSizeChange: 0
 };
 
 function initializeSpatialGrid() {

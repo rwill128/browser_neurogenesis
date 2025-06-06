@@ -264,9 +264,9 @@ class SoftBody {
         // Initialize heritable/mutable properties
         if (parentBody) {
             this.stiffness = parentBody.stiffness * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-            if (this.stiffness !== parentBody.stiffness) mutationStats.stiffness++;
+            if (this.stiffness !== parentBody.stiffness) mutationStats.springStiffness++;
             this.springDamping = parentBody.springDamping * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));
-            if (this.springDamping !== parentBody.springDamping) mutationStats.damping++;
+            if (this.springDamping !== parentBody.springDamping) mutationStats.springDamping++;
             
             let oldMotorInterval = parentBody.motorImpulseInterval;
             this.motorImpulseInterval = parentBody.motorImpulseInterval * (1 + (Math.random() - 0.5) * 2 * (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER));

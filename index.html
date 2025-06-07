@@ -391,18 +391,33 @@
 
     <!-- Configuration & Utilities -->
     <script src="js/config.js" defer></script>
+    <script src="js/common/constants.js" defer></script>
     <script src="js/utils.js" defer></script>
-    <script src="js/gpuUtils.js" defer></script>
+    
+    <!-- Physics Components -->
+    <script src="js/physics/massPoint.js" defer></script>
+    <script src="js/physics/spring.js" defer></script>
+    
+    <!-- Fluid Simulation -->
+    <script src="js/fluid/cpuFluidField.js" defer></script>
+    <script src="js/fluid/gpuUtils.js" defer></script>
+    <script src="js/fluid/gpuFluidField.js" defer></script>
 
-    <!-- Core Classes -->
-    <script src="js/classes.js" defer></script>
-    <script src="js/gpuFluidField.js" defer></script>
+    <!-- Core Creature Logic -->
+    <script src="js/core/brain.js" defer></script>
+    <script src="js/core/softBody.js" defer></script>
+
+    <!-- Common Components -->
+    <script src="js/common/particle.js" defer></script>
 
     <!-- Environment and Simulation Logic -->
     <script src="js/environment.js" defer></script>
     <script src="js/simulation.js" defer></script>
 
     <!-- UI Logic -->
+    <script src="js/ui/sliders.js" defer></script>
+    <script src="js/ui/panels.js" defer></script>
+    <script src="js/ui/input.js" defer></script>
     <script src="js/ui.js" defer></script>
 
     <!-- Main Entry Point & Game Loop -->

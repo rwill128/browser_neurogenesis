@@ -34,7 +34,9 @@ async function main() {
     INITIAL_POPULATION_SIZE = CREATURE_POPULATION_FLOOR; 
 
     initializeSpatialGrid();
-    initializeAllSliderDisplays(); // Syncs HTML sliders with JS global defaults and updates display spans
+    initializeAllSliderDisplays();
+    initializeInputListeners(); // Add this
+    initializePanelListeners(); // Add this
     await initFluidSimulation(USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
     initNutrientMap(); 
     initLightMap(); 

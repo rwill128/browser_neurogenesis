@@ -641,14 +641,6 @@ worldWrapToggle.onchange = function () {
     IS_WORLD_WRAPPING = this.checked;
     if (fluidField) fluidField.useWrapping = IS_WORLD_WRAPPING;
 }
-maxTimestepSlider.oninput = function () {
-    MAX_DELTA_TIME_MS = parseInt(this.value);
-    updateSliderDisplay(this, maxTimestepValueSpan);
-}
-zoomSensitivitySlider.oninput = function () {
-    ZOOM_SENSITIVITY = parseFloat(this.value);
-    updateSliderDisplay(this, zoomSensitivityValueSpan);
-}
 
 pauseResumeButton.onclick = function () {
     IS_SIMULATION_PAUSED = !IS_SIMULATION_PAUSED;
@@ -763,24 +755,6 @@ document.addEventListener('fullscreenchange', () => {
 });
 
 
-creaturePopulationFloorSlider.oninput = function () {
-    CREATURE_POPULATION_FLOOR = parseInt(this.value);
-    updateSliderDisplay(this, creaturePopulationFloorValueSpan);
-}
-creaturePopulationCeilingSlider.oninput = function () {
-    CREATURE_POPULATION_CEILING = parseInt(this.value);
-    updateSliderDisplay(this, creaturePopulationCeilingValueSpan);
-}
-particlePopulationFloorSlider.oninput = function () {
-    PARTICLE_POPULATION_FLOOR = parseInt(this.value);
-    updateSliderDisplay(this, particlePopulationFloorValueSpan);
-}
-particlePopulationCeilingSlider.oninput = function () {
-    PARTICLE_POPULATION_CEILING = parseInt(this.value);
-    updateSliderDisplay(this, particlePopulationCeilingValueSpan);
-}
-
-
 emitterEditModeToggle.onchange = function () {
     IS_EMITTER_EDIT_MODE = this.checked;
     canvas.classList.toggle('emitter-edit-mode', IS_EMITTER_EDIT_MODE);
@@ -789,97 +763,9 @@ emitterEditModeToggle.onchange = function () {
         emitterDragStartCell = null;
     }
 }
-emitterStrengthSlider.oninput = function () {
-    EMITTER_STRENGTH = parseFloat(this.value);
-    updateSliderDisplay(this, emitterStrengthValueSpan);
-}
 clearEmittersButton.onclick = function () {
     velocityEmitters = [];
 }
-
-
-bodyFluidEntrainmentSlider.oninput = function () {
-    BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(this.value);
-    updateSliderDisplay(this, bodyFluidEntrainmentValueSpan);
-}
-fluidCurrentStrengthSlider.oninput = function () {
-    FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(this.value);
-    updateSliderDisplay(this, fluidCurrentStrengthValueSpan);
-}
-bodyPushStrengthSlider.oninput = function () {
-    SOFT_BODY_PUSH_STRENGTH = parseFloat(this.value);
-    updateSliderDisplay(this, bodyPushStrengthValueSpan);
-}
-bodyRepulsionStrengthSlider.oninput = function () {
-    BODY_REPULSION_STRENGTH = parseFloat(this.value);
-    updateSliderDisplay(this, bodyRepulsionStrengthValueSpan);
-}
-bodyRepulsionRadiusFactorSlider.oninput = function () {
-    BODY_REPULSION_RADIUS_FACTOR = parseFloat(this.value);
-    updateSliderDisplay(this, bodyRepulsionRadiusFactorValueSpan);
-}
-globalMutationRateSlider.oninput = function () {
-    GLOBAL_MUTATION_RATE_MODIFIER = parseFloat(this.value);
-    updateSliderDisplay(this, globalMutationRateValueSpan);
-}
-
-baseNodeCostSlider.oninput = function () {
-    BASE_NODE_EXISTENCE_COST = parseFloat(this.value);
-    updateSliderDisplay(this, baseNodeCostValueSpan);
-}
-emitterNodeCostSlider.oninput = function () {
-    EMITTER_NODE_ENERGY_COST = parseFloat(this.value);
-    updateSliderDisplay(this, emitterNodeCostValueSpan);
-}
-eaterNodeCostSlider.oninput = function () {
-    EATER_NODE_ENERGY_COST = parseFloat(this.value);
-    updateSliderDisplay(this, eaterNodeCostValueSpan);
-}
-predatorNodeCostSlider.oninput = function () {
-    PREDATOR_NODE_ENERGY_COST = parseFloat(this.value);
-    updateSliderDisplay(this, predatorNodeCostValueSpan);
-}
-neuronNodeCostSlider.oninput = function () {
-    NEURON_NODE_ENERGY_COST = parseFloat(this.value);
-    updateSliderDisplay(this, neuronNodeCostValueSpan);
-}
-photosyntheticNodeCostSlider.oninput = function () {
-    PHOTOSYNTHETIC_NODE_ENERGY_COST = parseFloat(this.value);
-    updateSliderDisplay(this, photosyntheticNodeCostValueSpan);
-}
-photosynthesisEfficiencySlider.oninput = function () {
-    PHOTOSYNTHESIS_EFFICIENCY = parseFloat(this.value);
-    updateSliderDisplay(this, photosynthesisEfficiencyValueSpan);
-}
-swimmerNodeCostSlider.oninput = function () {
-    SWIMMER_NODE_ENERGY_COST = parseFloat(this.value);
-    updateSliderDisplay(this, swimmerNodeCostValueSpan);
-}
-jetNodeCostSlider.oninput = function () {
-    JET_NODE_ENERGY_COST = parseFloat(this.value);
-    updateSliderDisplay(this, jetNodeCostValueSpan);
-}
-attractorNodeCostSlider.oninput = function () {
-    ATTRACTOR_NODE_ENERGY_COST = parseFloat(this.value);
-    updateSliderDisplay(this, attractorNodeCostValueSpan);
-}
-repulsorNodeCostSlider.oninput = function () {
-    REPULSOR_NODE_ENERGY_COST = parseFloat(this.value);
-    updateSliderDisplay(this, repulsorNodeCostValueSpan);
-}
-eyeNodeCostSlider.oninput = function () {
-    EYE_NODE_ENERGY_COST = parseFloat(this.value);
-    updateSliderDisplay(this, eyeNodeCostValueSpan);
-}
-neuronChanceSlider.oninput = function() {
-    NEURON_CHANCE = parseFloat(this.value);
-    updateSliderDisplay(this, neuronChanceValueSpan);
-}
-jetMaxVelocityGeneSlider.oninput = function() {
-    JET_MAX_VELOCITY_GENE_DEFAULT = parseFloat(this.value);
-    updateSliderDisplay(this, jetMaxVelocityGeneValueSpan);
-}
-
 
 resetButton.onclick = function () {
     initializePopulation();
@@ -1161,45 +1047,6 @@ viewEntireSimButton.onclick = function () {
     const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
     viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
-}
-
-copyInfoPanelButton.onclick = function () {
-    if (!selectedInspectBody) {
-        showMessageModal("No creature selected to copy info from.");
-        return;
-    }
-    let infoText = "";
-    const panelElements = infoPanel.querySelectorAll('.info-section p, .info-section h5, .point-info-entry p, .point-info-entry h6');
-
-    panelElements.forEach(el => {
-        let label = "";
-        let value = "";
-        if (el.tagName === 'H5' || el.tagName === 'H6') {
-            infoText += el.textContent.trim() + "\n";
-        } else if (el.tagName === 'P') {
-            const strongTag = el.querySelector('strong');
-            if (strongTag) {
-                label = strongTag.textContent.trim();
-                let allText = el.textContent.trim();
-                value = allText.substring(label.length).trim();
-                if (value.startsWith(":")) value = value.substring(1).trim();
-                infoText += label + ": " + value + "\n";
-            } else {
-                infoText += el.textContent.trim() + "\n";
-            }
-        }
-    });
-
-    navigator.clipboard.writeText(infoText.trim()).then(() => {
-        const originalText = copyInfoPanelButton.textContent;
-        copyInfoPanelButton.textContent = "Copied!";
-        setTimeout(() => {
-            copyInfoPanelButton.textContent = originalText;
-        }, 1500);
-    }).catch(err => {
-        console.error('Failed to copy text: ', err);
-        showMessageModal("Failed to copy info. See console for details.");
-    });
 }
 
 showFluidVelocityToggle.onchange = function () {

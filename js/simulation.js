@@ -57,7 +57,8 @@ let mutationStats = { // New: For tracking mutation occurrences
     blueprintMassRadiusChange: 0,
     blueprintDyeColorChange: 0,
     blueprintCoordinateChange: 0,
-    blueprintNeuronHiddenSizeChange: 0
+    blueprintNeuronHiddenSizeChange: 0,
+    shapeAddition: 0
 };
 
 function initializeSpatialGrid() {

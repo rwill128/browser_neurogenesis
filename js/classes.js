@@ -873,6 +873,116 @@ class SoftBody {
             }
             // TODO: Add blueprint versions of Segment Duplication, Symmetrical Duplication etc.
 
+            // --- Shape Addition Mutation (Blueprint) ---
+            if (this.blueprintPoints.length >= 2 && Math.random() < 0.02) { // 2% chance
+                const blueprintPointsForHull = this.blueprintPoints.map(bp => ({ x: bp.relX, y: bp.relY, originalBlueprintPoint: bp }));
+                if (blueprintPointsForHull.length >= 3) {
+                    const hullPointsWithOriginal = convexHull(blueprintPointsForHull);
+                    if (hullPointsWithOriginal && hullPointsWithOriginal.length >= 2) {
+                        const hullIndices = hullPointsWithOriginal.map(p => this.blueprintPoints.indexOf(p.originalBlueprintPoint));
+
+                        let externalEdge = null;
+                        let p1_hull_idx, p2_hull_idx;
+                        let attempts = 0;
+                        let foundValidEdge = false;
+
+                        while (attempts < hullIndices.length * 2 && !foundValidEdge) {
+                            let randHullStartIdx = Math.floor(Math.random() * hullIndices.length);
+                            p1_hull_idx = hullIndices[randHullStartIdx];
+                            p2_hull_idx = hullIndices[(randHullStartIdx + 1) % hullIndices.length];
+
+                            if (this.blueprintSprings.some(bs => (bs.p1Index === p1_hull_idx && bs.p2Index === p2_hull_idx) || (bs.p1Index === p2_hull_idx && bs.p2Index === p1_hull_idx))) {
+                                foundValidEdge = true;
+                                externalEdge = {
+                                    p1: this.blueprintPoints[p1_hull_idx],
+                                    p2: this.blueprintPoints[p2_hull_idx],
+                                };
+                            }
+                            attempts++;
+                        }
+
+                        if (externalEdge) {
+                            const P1_bp = externalEdge.p1;
+                            const P2_bp = externalEdge.p2;
+                            const p1_idx = this.blueprintPoints.indexOf(P1_bp);
+                            const p2_idx = this.blueprintPoints.indexOf(P2_bp);
+                            const P1 = new Vec2(P1_bp.relX, P1_bp.relY);
+                            const P2 = new Vec2(P2_bp.relX, P2_bp.relY);
+                            const sideVector = P2.sub(P1);
+                            const sideLength = sideVector.mag();
+
+                            if (sideLength > 1) {
+                                let normal = new Vec2(-sideVector.y, sideVector.x).normalize();
+                                const midPoint = P1.add(sideVector.mul(0.5));
+                                if (Vec2.dot(normal, midPoint) > 0) {
+                                    normal.mulInPlace(-1);
+                                }
+
+                                const newPoints = [];
+                                const shapeType = Math.random() < 0.5 ? 'square' : 'pentagon';
+                                let newSpringsInfo = [];
+
+                                if (shapeType === 'square') {
+                                    const P4 = P1.add(normal.mul(sideLength));
+                                    const P3 = P2.add(normal.mul(sideLength));
+                                    newPoints.push(P4, P3);
+                                    newSpringsInfo = [
+                                        { from: p2_idx, toNew: 1, len: sideLength },
+                                        { new1: 1, toNew: 0, len: sideLength },
+                                        { new1: 0, to: p1_idx, len: sideLength },
+                                        { from: p1_idx, toNew: 1, len: sideLength * Math.SQRT2 }
+                                    ];
+                                } else { // Pentagon
+                                    const angle = -72 * Math.PI / 180;
+                                    const P1_minus_P2 = P1.sub(P2);
+                                    let P3_vec = new Vec2(P1_minus_P2.x * Math.cos(angle) - P1_minus_P2.y * Math.sin(angle), P1_minus_P2.x * Math.sin(angle) + P1_minus_P2.y * Math.cos(angle));
+                                    const P3 = P2.add(P3_vec);
+
+                                    const P2_minus_P3 = P2.sub(P3);
+                                    let P4_vec = new Vec2(P2_minus_P3.x * Math.cos(angle) - P2_minus_P3.y * Math.sin(angle), P2_minus_P3.x * Math.sin(angle) + P2_minus_P3.y * Math.cos(angle));
+                                    const P4 = P3.add(P4_vec);
+
+                                    const P2_minus_P1 = P2.sub(P1);
+                                    let P5_vec = new Vec2(P2_minus_P1.x * Math.cos(-angle) - P2_minus_P1.y * Math.sin(-angle), P2_minus_P1.x * Math.sin(-angle) + P2_minus_P1.y * Math.sin(-angle));
+                                    const P5 = P1.add(P5_vec);
+                                    
+                                    newPoints.push(P3, P4, P5);
+                                    newSpringsInfo = [
+                                        { from: p2_idx, toNew: 0, len: sideLength },
+                                        { new1: 0, toNew: 1, len: sideLength },
+                                        { new1: 1, toNew: 2, len: sideLength },
+                                        { new1: 2, to: p1_idx, len: sideLength },
+                                        { from: p1_idx, toNew: 0, len: P3.sub(P1).mag() },
+                                        { from: p2_idx, toNew: 2, len: P5.sub(P2).mag() }
+                                    ];
+                                }
+                                
+                                const firstNewPointIndex = this.blueprintPoints.length;
+                                newPoints.forEach(p_vec => {
+                                    this.blueprintPoints.push({
+                                        relX: p_vec.x, relY: p_vec.y,
+                                        radius: (P1_bp.radius + P2_bp.radius) / 2,
+                                        mass: (P1_bp.mass + P2_bp.mass) / 2,
+                                        nodeType: P1_bp.nodeType, movementType: P1_bp.movementType,
+                                        dyeColor: P1_bp.dyeColor, canBeGrabber: P1_bp.canBeGrabber,
+                                        neuronDataBlueprint: null
+                                    });
+                                });
+
+                                newSpringsInfo.forEach(info => {
+                                    const p1 = info.from !== undefined ? info.from : firstNewPointIndex + info.new1;
+                                    const p2 = info.to !== undefined ? info.to : firstNewPointIndex + info.toNew;
+                                    this.blueprintSprings.push({ p1Index: p1, p2Index: p2, restLength: info.len, isRigid: false, stiffness: this.stiffness, damping: this.springDamping });
+                                });
+                                
+                                mutationStats.shapeAddition++;
+                            }
+                        }
+                    }
+                }
+            }
+            // TODO: Add blueprint versions of Segment Duplication, Symmetrical Duplication etc.
+
             // Step 5: Instantiate Phenotype from the mutated blueprint
             this._instantiatePhenotypeFromBlueprint(startX, startY);
 
@@ -2534,6 +2644,11 @@ class SoftBody {
                 return;
             }
 
+            if (point.pos.x < 0 || point.pos.x > WORLD_WIDTH || point.pos.y < 0 || point.pos.y > WORLD_HEIGHT) {
+                this.isUnstable = true;
+                return;
+            }
+
             const implicitVelX = point.pos.x - point.prevPos.x;
             const implicitVelY = point.pos.y - point.prevPos.y;
 
@@ -2705,41 +2820,41 @@ class SoftBody {
                 const effectiveEatingRadiusMultiplier = EATING_RADIUS_MULTIPLIER_BASE + (EATING_RADIUS_MULTIPLIER_MAX_BONUS * pointExertion);
                 const eatingRadius = point.radius * effectiveEatingRadiusMultiplier;
                 const eatingRadiusSq = eatingRadius * eatingRadius;
-                const eaterGx = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(point.pos.x / GRID_CELL_SIZE)));
-                const eaterGy = Math.max(0, Math.min(GRID_ROWS - 1, Math.floor(point.pos.y / GRID_CELL_SIZE)));
 
-                for (let dy = -1; dy <= 1; dy++) { 
-                    for (let dx = -1; dx <= 1; dx++) {
-                        const checkGx = eaterGx + dx;
-                        const checkGy = eaterGy + dy;
-                        if (checkGx >= 0 && checkGx < GRID_COLS && checkGy >= 0 && checkGy < GRID_ROWS) {
-                            const cellIndex = checkGx + checkGy * GRID_COLS;
-                            if (Array.isArray(spatialGrid[cellIndex])) {
-                                const cellBucket = spatialGrid[cellIndex];
-                                for (let k = cellBucket.length - 1; k >= 0; k--) { 
-                                    const item = cellBucket[k];
-                                    if (item.type === 'particle') {
-                                        const particle = item.particleRef;
-                                        if (particle.life > 0 && !particle.isEaten) {
-                                            // const distSq = point.pos.sub(particle.pos).magSq();
-                                            this._tempVec1.copyFrom(point.pos).subInPlace(particle.pos);
-                                            const distSq = this._tempVec1.magSq();
-                                            if (distSq < eatingRadiusSq) {
-                                                particle.isEaten = true;
-                                                particle.life = 0; 
-                                                
-                                                let energyGain = ENERGY_PER_PARTICLE;
-                                                if (nutrientField && fluidField) { // fluidFieldRef is fluidField in this context
-                                                    const particleGx = Math.floor(particle.pos.x / fluidField.scaleX);
-                                                    const particleGy = Math.floor(particle.pos.y / fluidField.scaleY);
-                                                    const nutrientIdxAtParticle = fluidField.IX(particleGx, particleGy);
-                                                    const baseNutrientValueAtParticle = nutrientField[nutrientIdxAtParticle] !== undefined ? nutrientField[nutrientIdxAtParticle] : 1.0;
-                                                    const effectiveNutrientAtParticle = baseNutrientValueAtParticle * globalNutrientMultiplier;
-                                                    energyGain *= Math.max(MIN_NUTRIENT_VALUE, effectiveNutrientAtParticle);
-                                                }
-                                                this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyGain); // Use currentMaxEnergy
-                                                this.energyGainedFromEating += energyGain;
+                // Determine the grid cell range to check based on eatingRadius
+                const eaterGxMin = Math.max(0, Math.floor((point.pos.x - eatingRadius) / GRID_CELL_SIZE));
+                const eaterGxMax = Math.min(GRID_COLS - 1, Math.floor((point.pos.x + eatingRadius) / GRID_CELL_SIZE));
+                const eaterGyMin = Math.max(0, Math.floor((point.pos.y - eatingRadius) / GRID_CELL_SIZE));
+                const eaterGyMax = Math.min(GRID_ROWS - 1, Math.floor((point.pos.y + eatingRadius) / GRID_CELL_SIZE));
+
+                for (let gy = eaterGyMin; gy <= eaterGyMax; gy++) {
+                    for (let gx = eaterGxMin; gx <= eaterGxMax; gx++) {
+                        const cellIndex = gx + gy * GRID_COLS;
+                        if (Array.isArray(spatialGrid[cellIndex])) {
+                            const cellBucket = spatialGrid[cellIndex];
+                            for (let k = cellBucket.length - 1; k >= 0; k--) { 
+                                const item = cellBucket[k];
+                                if (item.type === 'particle') {
+                                    const particle = item.particleRef;
+                                    if (particle.life > 0 && !particle.isEaten) {
+                                        // const distSq = point.pos.sub(particle.pos).magSq();
+                                        this._tempVec1.copyFrom(point.pos).subInPlace(particle.pos);
+                                        const distSq = this._tempVec1.magSq();
+                                        if (distSq < eatingRadiusSq) {
+                                            particle.isEaten = true;
+                                            particle.life = 0; 
+                                            
+                                            let energyGain = ENERGY_PER_PARTICLE;
+                                            if (nutrientField && fluidField) { // fluidFieldRef is fluidField in this context
+                                                const particleGx = Math.floor(particle.pos.x / fluidField.scaleX);
+                                                const particleGy = Math.floor(particle.pos.y / fluidField.scaleY);
+                                                const nutrientIdxAtParticle = fluidField.IX(particleGx, particleGy);
+                                                const baseNutrientValueAtParticle = nutrientField[nutrientIdxAtParticle] !== undefined ? nutrientField[nutrientIdxAtParticle] : 1.0;
+                                                const effectiveNutrientAtParticle = baseNutrientValueAtParticle * globalNutrientMultiplier;
+                                                energyGain *= Math.max(MIN_NUTRIENT_VALUE, effectiveNutrientAtParticle);
                                             }
+                                            this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyGain); // Use currentMaxEnergy
+                                            this.energyGainedFromEating += energyGain;
                                         }
                                     }
                                 }
@@ -2777,6 +2892,13 @@ class SoftBody {
         }
 
         this.ticksSinceBirth++;
+
+        // Check for max age
+        if (this.ticksSinceBirth > MAX_CREATURE_AGE_TICKS) {
+            this.isUnstable = true;
+            return; // Creature dies of old age
+        }
+        
         if (this.ticksSinceBirth > this.effectiveReproductionCooldown) { // Use effective cooldown
             this.canReproduce = true;
         }

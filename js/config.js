@@ -84,6 +84,8 @@ const JET_MAX_VELOCITY_GENE_DEFAULT = 2.0;
 // Cooldown for failed reproduction attempts
 const FAILED_REPRODUCTION_COOLDOWN_TICKS = 100;
 
+let MAX_CREATURE_AGE_TICKS = 10000;
+
 // --- Global Variables & Constants (with initial hardcoded defaults) ---
 let CREATURE_POPULATION_FLOOR = 100;
 let CREATURE_POPULATION_CEILING = 10000;
@@ -282,7 +284,8 @@ function handleExportConfig() {
         showFluidVelocity: SHOW_FLUID_VELOCITY,
         isHeadlessMode: IS_HEADLESS_MODE,
         useGpuFluidSimulation: USE_GPU_FLUID_SIMULATION,
-        neuronChance: NEURON_CHANCE
+        neuronChance: NEURON_CHANCE,
+        maxCreatureAgeTicks: MAX_CREATURE_AGE_TICKS
     };
     const jsonString = JSON.stringify(config, null, 2);
     const blob = new Blob([jsonString], {type: "application/json"});
@@ -377,6 +380,7 @@ function applyImportedConfig(config, canvas, webgpuCanvas) {
     if (config.eyeDetectionRadius !== undefined) EYE_DETECTION_RADIUS = config.eyeDetectionRadius;
     if (config.showFluidVelocity !== undefined) SHOW_FLUID_VELOCITY = config.showFluidVelocity;
     if (config.neuronChance !== undefined) NEURON_CHANCE = config.neuronChance;
+    if (config.maxCreatureAgeTicks !== undefined) MAX_CREATURE_AGE_TICKS = config.maxCreatureAgeTicks;
     
     worldWidthInput.value = WORLD_WIDTH;
     worldHeightInput.value = WORLD_HEIGHT;

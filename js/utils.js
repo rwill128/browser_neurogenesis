@@ -258,6 +258,35 @@ function getEyeTargetTypeString(eyeTargetType) {
     }
 }
 
+function cross_product(p1, p2, p3) {
+    return (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+}
+
+function convexHull(points) {
+    points.sort((a, b) => a.x !== b.x ? a.x - b.x : a.y - b.y);
+
+    const lower = [];
+    for (const p of points) {
+        while (lower.length >= 2 && cross_product(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+            lower.pop();
+        }
+        lower.push(p);
+    }
+
+    const upper = [];
+    for (let i = points.length - 1; i >= 0; i--) {
+        const p = points[i];
+        while (upper.length >= 2 && cross_product(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+            upper.pop();
+        }
+        upper.push(p);
+    }
+
+    lower.pop();
+    upper.pop();
+    return lower.concat(upper);
+}
+
 // Reflects point P across the line defined by L1 and L2
 function reflectPointAcrossLine(P, L1, L2) {
     // Line L1L2 direction vector

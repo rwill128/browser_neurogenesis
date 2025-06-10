@@ -1,9 +1,12 @@
+import config from './config.js';
+import { initializeSpatialGrid, initializePopulation, initFluidSimulation, initNutrientMap, initLightMap, initViscosityMap, initParticles, softBodyPopulation, particles, fluidField } from './simulation.js';
+import { perlin, getNodeTypeString, getRewardStrategyString, getEyeTargetTypeString, getMovementTypeString, sigmoid } from './utils.js';
+
 // --- DOM Element Selections ---
 const canvas = document.getElementById('simulationCanvas');
-const ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d', { alpha: false });
 const webgpuCanvas = document.getElementById('webgpuFluidCanvas');
 let offscreenFluidCanvas, offscreenFluidCtx;
-
 
 const worldWidthInput = document.getElementById('worldWidthInput');
 const worldHeightInput = document.getElementById('worldHeightInput');
@@ -164,9 +167,8 @@ const lightCyclePeriodSpan = document.getElementById('lightCyclePeriodSpan');
 const currentNutrientMultiplierDisplay = document.getElementById('currentNutrientMultiplierDisplay');
 const currentLightMultiplierDisplay = document.getElementById('currentLightMultiplierDisplay');
 const showFluidVelocityToggle = document.getElementById('showFluidVelocityToggle');
-const headlessModeToggle = document.getElementById('headlessModeToggle'); // New headless mode toggle
+const headlessModeToggle = document.getElementById('headlessModeToggle');
 const useGpuFluidToggle = document.getElementById('useGpuFluidToggle');
-console.log("useGpuFluidToggle element:", useGpuFluidToggle); // Log to see if element is found
 
 // --- Cycling through creatures with specific node types ---
 let cyclingNodeType = null;
@@ -174,13 +176,7 @@ let cyclingCreatureList = [];
 let cyclingCreatureIndex = -1;
 
 // --- Mouse Interaction State Variables ---
-let selectedSoftBodyPoint = null;
 let mouse = {x: 0, y: 0, prevX: 0, prevY: 0, isDown: false, dx: 0, dy: 0};
-// isRightDragging already declared in config.js
-let panStartMouseDisplayX = 0;
-let panStartMouseDisplayY = 0;
-let panInitialViewOffsetX = 0;
-let panInitialViewOffsetY = 0;
 
 // --- UI Update Functions ---
 function updateSliderDisplay(slider, span) {
@@ -267,44 +263,44 @@ function initializeAllSliderDisplays() {
         [viscosityBrushStrengthSlider, "VISCOSITY_BRUSH_STRENGTH", true, viscosityBrushStrengthSpan]
     ];
 
-    worldWidthInput.value = WORLD_WIDTH;
-    worldHeightInput.value = WORLD_HEIGHT;
+    worldWidthInput.value = config.WORLD_WIDTH;
+    worldHeightInput.value = config.WORLD_HEIGHT;
 
     allSliders.forEach(([sliderElement, jsVarName, isFloat, spanElement]) => {
-        if (sliderElement && typeof window[jsVarName] !== 'undefined') {
+        if (sliderElement && typeof config[jsVarName] !== 'undefined') {
             // Set the JS global variable from the HTML slider's current value attribute
-            window[jsVarName] = isFloat ? parseFloat(sliderElement.value) : parseInt(sliderElement.value);
+            config[jsVarName] = isFloat ? parseFloat(sliderElement.value) : parseInt(sliderElement.value);
             // Then update the display span to match this initial value
             if (spanElement) {
                 updateSliderDisplay(sliderElement, spanElement);
             }
         } else {
             if (!sliderElement) console.warn(`Slider element for ${jsVarName} not found.`);
-            if (typeof window[jsVarName] === 'undefined') console.warn(`Global JS variable ${jsVarName} not found.`);
+            if (typeof config[jsVarName] === 'undefined') console.warn(`Global JS variable ${jsVarName} not found.`);
         }
     });
 
     // Update checkbox states based on global JS variables (which have their defaults from config.js)
-    particleLifeDecaySlider.disabled = IS_PARTICLE_LIFE_INFINITE;
-    particleLifeDecayLabel.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#ddd';
-    particleLifeDecayValueSpan.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
-    worldWrapToggle.checked = IS_WORLD_WRAPPING;
-    emitterEditModeToggle.checked = IS_EMITTER_EDIT_MODE;
-    infiniteParticleLifeToggle.checked = IS_PARTICLE_LIFE_INFINITE;
-    canvas.classList.toggle('emitter-edit-mode', IS_EMITTER_EDIT_MODE);
+    particleLifeDecaySlider.disabled = config.IS_PARTICLE_LIFE_INFINITE;
+    particleLifeDecayLabel.style.color = config.IS_PARTICLE_LIFE_INFINITE ? '#777' : '#ddd';
+    particleLifeDecayValueSpan.style.color = config.IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
+    worldWrapToggle.checked = config.IS_WORLD_WRAPPING;
+    emitterEditModeToggle.checked = config.IS_EMITTER_EDIT_MODE;
+    infiniteParticleLifeToggle.checked = config.IS_PARTICLE_LIFE_INFINITE;
+    canvas.classList.toggle('emitter-edit-mode', config.IS_EMITTER_EDIT_MODE);
 
-    showNutrientMapToggle.checked = SHOW_NUTRIENT_MAP;
-    nutrientEditModeToggle.checked = IS_NUTRIENT_EDIT_MODE;
-    showLightMapToggle.checked = SHOW_LIGHT_MAP;
-    lightEditModeToggle.checked = IS_LIGHT_EDIT_MODE;
-    showViscosityMapToggle.checked = SHOW_VISCOSITY_MAP;
-    viscosityEditModeToggle.checked = IS_VISCOSITY_EDIT_MODE;
-    showFluidVelocityToggle.checked = SHOW_FLUID_VELOCITY;
-    headlessModeToggle.checked = IS_HEADLESS_MODE; // Ensure headless toggle reflects JS var on init
+    showNutrientMapToggle.checked = config.SHOW_NUTRIENT_MAP;
+    nutrientEditModeToggle.checked = config.IS_NUTRIENT_EDIT_MODE;
+    showLightMapToggle.checked = config.SHOW_LIGHT_MAP;
+    lightEditModeToggle.checked = config.IS_LIGHT_EDIT_MODE;
+    showViscosityMapToggle.checked = config.SHOW_VISCOSITY_MAP;
+    viscosityEditModeToggle.checked = config.IS_VISCOSITY_EDIT_MODE;
+    showFluidVelocityToggle.checked = config.SHOW_FLUID_VELOCITY;
+    headlessModeToggle.checked = config.IS_HEADLESS_MODE; // Ensure headless toggle reflects JS var on init
 }
 
 function updateInstabilityIndicator() {
-    if (isAnySoftBodyUnstable) {
+    if (config.isAnySoftBodyUnstable) {
         instabilityLight.classList.add('unstable');
     } else {
         instabilityLight.classList.remove('unstable');
@@ -317,42 +313,42 @@ function updatePopulationCount() {
 }
 
 function updateInfoPanel() {
-    if (selectedInspectBody && selectedInspectPoint) {
-        document.getElementById('infoBodyId').textContent = selectedInspectBody.id;
-        document.getElementById('infoBodyStiffness').textContent = selectedInspectBody.getAverageStiffness().toFixed(2);
-        document.getElementById('infoBodyDamping').textContent = selectedInspectBody.getAverageDamping().toFixed(2);
-        document.getElementById('infoBodyMotorInterval').textContent = selectedInspectBody.motorImpulseInterval;
-        document.getElementById('infoBodyMotorCap').textContent = selectedInspectBody.motorImpulseMagnitudeCap.toFixed(2);
-        document.getElementById('infoBodyEmitterStrength').textContent = selectedInspectBody.emitterStrength.toFixed(2);
-        document.getElementById('infoBodyEmitterDirX').textContent = selectedInspectBody.emitterDirection.x.toFixed(2);
-        document.getElementById('infoBodyEmitterDirY').textContent = selectedInspectBody.emitterDirection.y.toFixed(2);
-        document.getElementById('infoBodyNumOffspring').textContent = selectedInspectBody.numOffspring;
-        document.getElementById('infoBodyOffspringRadius').textContent = selectedInspectBody.offspringSpawnRadius.toFixed(1);
-        document.getElementById('infoBodyPointAddChance').textContent = selectedInspectBody.pointAddChance.toFixed(3);
-        document.getElementById('infoBodySpringConnectionRadius').textContent = selectedInspectBody.springConnectionRadius.toFixed(1);
-        document.getElementById('infoBodyEnergy').textContent = selectedInspectBody.creatureEnergy.toFixed(2);
-        document.getElementById('infoBodyReproEnergyThreshold').textContent = selectedInspectBody.reproductionEnergyThreshold;
-        document.getElementById('infoBodyCurrentMaxEnergy').textContent = selectedInspectBody.currentMaxEnergy.toFixed(2);
-        document.getElementById('infoBodyTicksBirth').textContent = selectedInspectBody.ticksSinceBirth;
-        document.getElementById('infoBodyCanReproduce').textContent = selectedInspectBody.canReproduce;
-        document.getElementById('infoBodyRewardStrategy').textContent = getRewardStrategyString(selectedInspectBody.rewardStrategy);
-        document.getElementById('infoBodyEnergyPhoto').textContent = selectedInspectBody.energyGainedFromPhotosynthesis.toFixed(2);
-        document.getElementById('infoBodyEnergyEat').textContent = selectedInspectBody.energyGainedFromEating.toFixed(2);
-        document.getElementById('infoBodyEnergyPred').textContent = selectedInspectBody.energyGainedFromPredation.toFixed(2);
+    if (config.selectedInspectBody && config.selectedInspectPoint) {
+        document.getElementById('infoBodyId').textContent = config.selectedInspectBody.id;
+        document.getElementById('infoBodyStiffness').textContent = config.selectedInspectBody.getAverageStiffness().toFixed(2);
+        document.getElementById('infoBodyDamping').textContent = config.selectedInspectBody.getAverageDamping().toFixed(2);
+        document.getElementById('infoBodyMotorInterval').textContent = config.selectedInspectBody.motorImpulseInterval;
+        document.getElementById('infoBodyMotorCap').textContent = config.selectedInspectBody.motorImpulseMagnitudeCap.toFixed(2);
+        document.getElementById('infoBodyEmitterStrength').textContent = config.selectedInspectBody.emitterStrength.toFixed(2);
+        document.getElementById('infoBodyEmitterDirX').textContent = config.selectedInspectBody.emitterDirection.x.toFixed(2);
+        document.getElementById('infoBodyEmitterDirY').textContent = config.selectedInspectBody.emitterDirection.y.toFixed(2);
+        document.getElementById('infoBodyNumOffspring').textContent = config.selectedInspectBody.numOffspring;
+        document.getElementById('infoBodyOffspringRadius').textContent = config.selectedInspectBody.offspringSpawnRadius.toFixed(1);
+        document.getElementById('infoBodyPointAddChance').textContent = config.selectedInspectBody.pointAddChance.toFixed(3);
+        document.getElementById('infoBodySpringConnectionRadius').textContent = config.selectedInspectBody.springConnectionRadius.toFixed(1);
+        document.getElementById('infoBodyEnergy').textContent = config.selectedInspectBody.creatureEnergy.toFixed(2);
+        document.getElementById('infoBodyReproEnergyThreshold').textContent = config.selectedInspectBody.reproductionEnergyThreshold;
+        document.getElementById('infoBodyCurrentMaxEnergy').textContent = config.selectedInspectBody.currentMaxEnergy.toFixed(2);
+        document.getElementById('infoBodyTicksBirth').textContent = config.selectedInspectBody.ticksSinceBirth;
+        document.getElementById('infoBodyCanReproduce').textContent = config.selectedInspectBody.canReproduce;
+        document.getElementById('infoBodyRewardStrategy').textContent = getRewardStrategyString(config.selectedInspectBody.rewardStrategy);
+        document.getElementById('infoBodyEnergyPhoto').textContent = config.selectedInspectBody.energyGainedFromPhotosynthesis.toFixed(2);
+        document.getElementById('infoBodyEnergyEat').textContent = config.selectedInspectBody.energyGainedFromEating.toFixed(2);
+        document.getElementById('infoBodyEnergyPred').textContent = config.selectedInspectBody.energyGainedFromPredation.toFixed(2);
 
         // Populate new energy cost fields
-        document.getElementById('infoBodyCostBase').textContent = selectedInspectBody.energyCostFromBaseNodes.toFixed(2);
-        document.getElementById('infoBodyCostEmitter').textContent = selectedInspectBody.energyCostFromEmitterNodes.toFixed(2);
-        document.getElementById('infoBodyCostEater').textContent = selectedInspectBody.energyCostFromEaterNodes.toFixed(2);
-        document.getElementById('infoBodyCostPredator').textContent = selectedInspectBody.energyCostFromPredatorNodes.toFixed(2);
-        document.getElementById('infoBodyCostNeuron').textContent = selectedInspectBody.energyCostFromNeuronNodes.toFixed(2);
-        document.getElementById('infoBodyCostSwimmer').textContent = selectedInspectBody.energyCostFromSwimmerNodes.toFixed(2);
-        document.getElementById('infoBodyCostJet').textContent = selectedInspectBody.energyCostFromJetNodes.toFixed(2);
-        document.getElementById('infoBodyCostAttractor').textContent = selectedInspectBody.energyCostFromAttractorNodes.toFixed(2);
-        document.getElementById('infoBodyCostRepulsor').textContent = selectedInspectBody.energyCostFromRepulsorNodes.toFixed(2);
-        document.getElementById('infoBodyCostPhoto').textContent = selectedInspectBody.energyCostFromPhotosyntheticNodes.toFixed(2);
-        document.getElementById('infoBodyCostGrabbing').textContent = selectedInspectBody.energyCostFromGrabbingNodes.toFixed(2);
-        document.getElementById('infoBodyCostEye').textContent = selectedInspectBody.energyCostFromEyeNodes.toFixed(2);
+        document.getElementById('infoBodyCostBase').textContent = config.selectedInspectBody.energyCostFromBaseNodes.toFixed(2);
+        document.getElementById('infoBodyCostEmitter').textContent = config.selectedInspectBody.energyCostFromEmitterNodes.toFixed(2);
+        document.getElementById('infoBodyCostEater').textContent = config.selectedInspectBody.energyCostFromEaterNodes.toFixed(2);
+        document.getElementById('infoBodyCostPredator').textContent = config.selectedInspectBody.energyCostFromPredatorNodes.toFixed(2);
+        document.getElementById('infoBodyCostNeuron').textContent = config.selectedInspectBody.energyCostFromNeuronNodes.toFixed(2);
+        document.getElementById('infoBodyCostSwimmer').textContent = config.selectedInspectBody.energyCostFromSwimmerNodes.toFixed(2);
+        document.getElementById('infoBodyCostJet').textContent = config.selectedInspectBody.energyCostFromJetNodes.toFixed(2);
+        document.getElementById('infoBodyCostAttractor').textContent = config.selectedInspectBody.energyCostFromAttractorNodes.toFixed(2);
+        document.getElementById('infoBodyCostRepulsor').textContent = config.selectedInspectBody.energyCostFromRepulsorNodes.toFixed(2);
+        document.getElementById('infoBodyCostPhoto').textContent = config.selectedInspectBody.energyCostFromPhotosyntheticNodes.toFixed(2);
+        document.getElementById('infoBodyCostGrabbing').textContent = config.selectedInspectBody.energyCostFromGrabbingNodes.toFixed(2);
+        document.getElementById('infoBodyCostEye').textContent = config.selectedInspectBody.energyCostFromEyeNodes.toFixed(2);
 
         // Add display for new reproduction cooldown properties
         let reproGeneEl = document.getElementById('infoBodyReproCooldownGeneVal'); // Target the span directly
@@ -363,7 +359,7 @@ function updateInfoPanel() {
         } else {
             reproGeneEl = reproGenePEL.querySelector('span'); // Ensure we have the span if P exists
         }
-        if (reproGeneEl) reproGeneEl.textContent = selectedInspectBody.reproductionCooldownGene;
+        if (reproGeneEl) reproGeneEl.textContent = config.selectedInspectBody.reproductionCooldownGene;
 
 
         let effectiveReproEl = document.getElementById('infoBodyEffectiveReproCooldownVal'); // Target the span
@@ -374,10 +370,10 @@ function updateInfoPanel() {
         } else {
             effectiveReproEl = effectiveReproPEL.querySelector('span');
         }
-        if (effectiveReproEl) effectiveReproEl.textContent = selectedInspectBody.effectiveReproductionCooldown;
+        if (effectiveReproEl) effectiveReproEl.textContent = config.selectedInspectBody.effectiveReproductionCooldown;
 
         allPointsInfoContainer.innerHTML = '<h5>All Mass Points</h5>';
-        selectedInspectBody.massPoints.forEach((point, index) => {
+        config.selectedInspectBody.massPoints.forEach((point, index) => {
             const pointEntryDiv = document.createElement('div');
             pointEntryDiv.className = 'point-info-entry';
 
@@ -388,10 +384,10 @@ function updateInfoPanel() {
             content += `<p><strong>Radius:</strong> ${point.radius.toFixed(2)}</p>`;
             content += `<p><strong>World Pos:</strong> X: ${point.pos.x.toFixed(2)}, Y: ${point.pos.y.toFixed(2)}</p>`;
             content += `<p><strong>Can Be Grabber:</strong> ${point.canBeGrabber}</p>`;
-            if (point.nodeType === NodeType.EMITTER) {
+            if (point.nodeType === config.NodeType.EMITTER) {
                 content += `<p><strong>Dye Color:</strong> R:${point.dyeColor[0].toFixed(0)} G:${point.dyeColor[1].toFixed(0)} B:${point.dyeColor[2].toFixed(0)}</p>`;
             }
-            if (point.nodeType === NodeType.JET) {
+            if (point.nodeType === config.NodeType.JET) {
                 content += `<p><strong>Max Effective Velocity:</strong> ${point.maxEffectiveJetVelocity.toFixed(2)}</p>`;
             }
             if (point.isGrabbing) {
@@ -400,19 +396,19 @@ function updateInfoPanel() {
                 content += `<p><strong>State:</strong> Normal</p>`;
             }
 
-            if (point.nodeType === NodeType.EYE) {
+            if (point.nodeType === config.NodeType.EYE) {
                 content += `<h6>Eye Sensor Data:</h6>`;
                 content += `<p><strong>Target Type:</strong> ${getEyeTargetTypeString(point.eyeTargetType)}</p>`;
                 content += `<p><strong>Sees Target:</strong> ${point.seesTarget}</p>`;
                 if (point.seesTarget) {
-                    content += `<p><strong>Target Distance:</strong> ${(point.nearestTargetMagnitude * EYE_DETECTION_RADIUS).toFixed(1)} (norm: ${point.nearestTargetMagnitude.toFixed(3)})</p>`;
+                    content += `<p><strong>Target Distance:</strong> ${(point.nearestTargetMagnitude * config.EYE_DETECTION_RADIUS).toFixed(1)} (norm: ${point.nearestTargetMagnitude.toFixed(3)})</p>`;
                     content += `<p><strong>Target Angle:</strong> ${(point.nearestTargetDirection * 180 / Math.PI).toFixed(1)}&deg;</p>`;
                 }
             }
 
-            if (point.nodeType === NodeType.NEURON && point.neuronData) {
+            if (point.nodeType === config.NodeType.NEURON && point.neuronData) {
                 if (typeof point.neuronData.hiddenLayerSize === 'undefined') {
-                    const bodyIdForLog = selectedInspectBody ? selectedInspectBody.id : 'UnknownBody';
+                    const bodyIdForLog = config.selectedInspectBody ? config.selectedInspectBody.id : 'UnknownBody';
                     console.warn(`Neuron in Body ${bodyIdForLog}, Point Index ${index}, has neuronData, but hiddenLayerSize is UNDEFINED. neuronData:`, JSON.parse(JSON.stringify(point.neuronData)));
                 }
 
@@ -559,57 +555,36 @@ function updateMouse(e) {
 }
 
 function getMouseWorldCoordinates(displayMouseX, displayMouseY) {
-    // displayMouseX, displayMouseY are mouse coordinates relative to the canvas CSS dimensions (e.g., from event.clientX - rect.left)
-
-    // Canvas internal bitmap dimensions (now fixed, e.g., 1920x1080)
     const bitmapInternalWidth = canvas.width;
     const bitmapInternalHeight = canvas.height;
-
-    // Canvas CSS dimensions (how it's displayed on the page)
     const cssClientWidth = canvas.clientWidth;
     const cssClientHeight = canvas.clientHeight;
-
-    // How the internal bitmap is scaled to fit the CSS dimensions, maintaining aspect ratio
     const bitmapDisplayScale = Math.min(cssClientWidth / bitmapInternalWidth, cssClientHeight / bitmapInternalHeight);
-
-    // The size of the (scaled) internal bitmap as it appears within the CSS box
     const displayedBitmapWidthInCss = bitmapInternalWidth * bitmapDisplayScale;
     const displayedBitmapHeightInCss = bitmapInternalHeight * bitmapDisplayScale;
-
-    // Offset if the scaled bitmap is letterboxed/pillarboxed within the CSS box
     const letterboxOffsetXcss = (cssClientWidth - displayedBitmapWidthInCss) / 2;
     const letterboxOffsetYcss = (cssClientHeight - displayedBitmapHeightInCss) / 2;
-
-    // Coordinates of the mouse click *on the scaled bitmap image*
     const mouseOnScaledBitmapX = displayMouseX - letterboxOffsetXcss;
     const mouseOnScaledBitmapY = displayMouseY - letterboxOffsetYcss;
-
-    // Convert these coordinates to what they would be on the *unscaled internal bitmap*
     const mouseOnUnscaledBitmapX = mouseOnScaledBitmapX / bitmapDisplayScale;
     const mouseOnUnscaledBitmapY = mouseOnScaledBitmapY / bitmapDisplayScale;
-
-    // Now, transform from unscaled internal bitmap coordinates to world coordinates
-    // This transformation is the inverse of what's applied in the main draw call:
-    // canvas_bitmap_x = (world_x - viewOffsetX) * viewZoom
-    // canvas_bitmap_y = (world_y - viewOffsetY) * viewZoom
-    const worldX = (mouseOnUnscaledBitmapX / viewZoom) + viewOffsetX;
-    const worldY = (mouseOnUnscaledBitmapY / viewZoom) + viewOffsetY;
-
+    const worldX = (mouseOnUnscaledBitmapX / config.viewZoom) + config.viewOffsetX;
+    const worldY = (mouseOnUnscaledBitmapY / config.viewZoom) + config.viewOffsetY;
     return {x: worldX, y: worldY};
 }
 
 // --- Event Listeners ---
 document.addEventListener('keydown', (e) => {
     // Allow 'P' to toggle pause, and WASD for panning regardless of pause state.
-    if (e.key.toLowerCase() !== 'p' && e.key.toLowerCase() !== 'w' && e.key.toLowerCase() !== 'a' && e.key.toLowerCase() !== 's' && e.key.toLowerCase() !== 'd' && IS_SIMULATION_PAUSED) {
+    if (e.key.toLowerCase() !== 'p' && e.key.toLowerCase() !== 'w' && e.key.toLowerCase() !== 'a' && e.key.toLowerCase() !== 's' && e.key.toLowerCase() !== 'd' && config.IS_SIMULATION_PAUSED) {
         return; // Only block other keys if paused
     }
 
-    const effectiveViewportWidth = canvas.clientWidth / viewZoom;
-    const effectiveViewportHeight = canvas.clientHeight / viewZoom;
-    const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
-    const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
-    const panSpeed = VIEW_PAN_SPEED / viewZoom;
+    const effectiveViewportWidth = canvas.clientWidth / config.viewZoom;
+    const effectiveViewportHeight = canvas.clientHeight / config.viewZoom;
+    const maxPanX = Math.max(0, config.WORLD_WIDTH - effectiveViewportWidth);
+    const maxPanY = Math.max(0, config.WORLD_HEIGHT - effectiveViewportHeight);
+    const panSpeed = config.VIEW_PAN_SPEED / viewZoom;
 
 
     switch (e.key.toLowerCase()) {
@@ -626,9 +601,9 @@ document.addEventListener('keydown', (e) => {
             viewOffsetX = Math.min(maxPanX, viewOffsetX + panSpeed);
             break;
         case 'p':
-            IS_SIMULATION_PAUSED = !IS_SIMULATION_PAUSED;
-            pauseResumeButton.textContent = IS_SIMULATION_PAUSED ? "Resume" : "Pause";
-            if (!IS_SIMULATION_PAUSED) {
+            config.IS_SIMULATION_PAUSED = !config.IS_SIMULATION_PAUSED;
+            pauseResumeButton.textContent = config.IS_SIMULATION_PAUSED ? "Resume" : "Pause";
+            if (!config.IS_SIMULATION_PAUSED) {
                 lastTime = performance.now(); // lastTime is in main.js
                 requestAnimationFrame(gameLoop); // gameLoop is in main.js
             }
@@ -638,22 +613,22 @@ document.addEventListener('keydown', (e) => {
 
 
 worldWrapToggle.onchange = function () {
-    IS_WORLD_WRAPPING = this.checked;
-    if (fluidField) fluidField.useWrapping = IS_WORLD_WRAPPING;
+    config.IS_WORLD_WRAPPING = this.checked;
+    if (fluidField) fluidField.useWrapping = config.IS_WORLD_WRAPPING;
 }
 maxTimestepSlider.oninput = function () {
-    MAX_DELTA_TIME_MS = parseInt(this.value);
+    config.MAX_DELTA_TIME_MS = parseInt(this.value);
     updateSliderDisplay(this, maxTimestepValueSpan);
 }
 zoomSensitivitySlider.oninput = function () {
-    ZOOM_SENSITIVITY = parseFloat(this.value);
+    config.ZOOM_SENSITIVITY = parseFloat(this.value);
     updateSliderDisplay(this, zoomSensitivityValueSpan);
 }
 
 pauseResumeButton.onclick = function () {
-    IS_SIMULATION_PAUSED = !IS_SIMULATION_PAUSED;
-    this.textContent = IS_SIMULATION_PAUSED ? "Resume" : "Pause";
-    if (!IS_SIMULATION_PAUSED) {
+    config.IS_SIMULATION_PAUSED = !config.IS_SIMULATION_PAUSED;
+    this.textContent = config.IS_SIMULATION_PAUSED ? "Resume" : "Pause";
+    if (!config.IS_SIMULATION_PAUSED) {
         lastTime = performance.now(); // lastTime is in main.js
         requestAnimationFrame(gameLoop); // gameLoop is in main.js
     }
@@ -662,12 +637,14 @@ toggleControlsButton.onclick = function () {
     controlsPanel.classList.toggle('open');
 }
 
-toggleStatsPanelButton.onclick = function () {
+function toggleStatsPanel() {
     statsPanel.classList.toggle('open');
     if (statsPanel.classList.contains('open')) {
         updateStatsPanel();
     }
 }
+
+toggleStatsPanelButton.onclick = toggleStatsPanel;
 
 closeStatsPanelButton.onclick = function () {
     statsPanel.classList.remove('open');
@@ -764,33 +741,33 @@ document.addEventListener('fullscreenchange', () => {
 
 
 creaturePopulationFloorSlider.oninput = function () {
-    CREATURE_POPULATION_FLOOR = parseInt(this.value);
+    config.CREATURE_POPULATION_FLOOR = parseInt(this.value);
     updateSliderDisplay(this, creaturePopulationFloorValueSpan);
 }
 creaturePopulationCeilingSlider.oninput = function () {
-    CREATURE_POPULATION_CEILING = parseInt(this.value);
+    config.CREATURE_POPULATION_CEILING = parseInt(this.value);
     updateSliderDisplay(this, creaturePopulationCeilingValueSpan);
 }
 particlePopulationFloorSlider.oninput = function () {
-    PARTICLE_POPULATION_FLOOR = parseInt(this.value);
+    config.PARTICLE_POPULATION_FLOOR = parseInt(this.value);
     updateSliderDisplay(this, particlePopulationFloorValueSpan);
 }
 particlePopulationCeilingSlider.oninput = function () {
-    PARTICLE_POPULATION_CEILING = parseInt(this.value);
+    config.PARTICLE_POPULATION_CEILING = parseInt(this.value);
     updateSliderDisplay(this, particlePopulationCeilingValueSpan);
 }
 
 
 emitterEditModeToggle.onchange = function () {
-    IS_EMITTER_EDIT_MODE = this.checked;
-    canvas.classList.toggle('emitter-edit-mode', IS_EMITTER_EDIT_MODE);
-    if (!IS_EMITTER_EDIT_MODE) {
+    config.IS_EMITTER_EDIT_MODE = this.checked;
+    canvas.classList.toggle('emitter-edit-mode', config.IS_EMITTER_EDIT_MODE);
+    if (!config.IS_EMITTER_EDIT_MODE) {
         currentEmitterPreview = null;
         emitterDragStartCell = null;
     }
 }
 emitterStrengthSlider.oninput = function () {
-    EMITTER_STRENGTH = parseFloat(this.value);
+    config.EMITTER_STRENGTH = parseFloat(this.value);
     updateSliderDisplay(this, emitterStrengthValueSpan);
 }
 clearEmittersButton.onclick = function () {
@@ -799,84 +776,84 @@ clearEmittersButton.onclick = function () {
 
 
 bodyFluidEntrainmentSlider.oninput = function () {
-    BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(this.value);
+    config.BODY_FLUID_ENTRAINMENT_FACTOR = parseFloat(this.value);
     updateSliderDisplay(this, bodyFluidEntrainmentValueSpan);
 }
 fluidCurrentStrengthSlider.oninput = function () {
-    FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(this.value);
+    config.FLUID_CURRENT_STRENGTH_ON_BODY = parseFloat(this.value);
     updateSliderDisplay(this, fluidCurrentStrengthValueSpan);
 }
 bodyPushStrengthSlider.oninput = function () {
-    SOFT_BODY_PUSH_STRENGTH = parseFloat(this.value);
+    config.SOFT_BODY_PUSH_STRENGTH = parseFloat(this.value);
     updateSliderDisplay(this, bodyPushStrengthValueSpan);
 }
 bodyRepulsionStrengthSlider.oninput = function () {
-    BODY_REPULSION_STRENGTH = parseFloat(this.value);
+    config.BODY_REPULSION_STRENGTH = parseFloat(this.value);
     updateSliderDisplay(this, bodyRepulsionStrengthValueSpan);
 }
 bodyRepulsionRadiusFactorSlider.oninput = function () {
-    BODY_REPULSION_RADIUS_FACTOR = parseFloat(this.value);
+    config.BODY_REPULSION_RADIUS_FACTOR = parseFloat(this.value);
     updateSliderDisplay(this, bodyRepulsionRadiusFactorValueSpan);
 }
 globalMutationRateSlider.oninput = function () {
-    GLOBAL_MUTATION_RATE_MODIFIER = parseFloat(this.value);
+    config.GLOBAL_MUTATION_RATE_MODIFIER = parseFloat(this.value);
     updateSliderDisplay(this, globalMutationRateValueSpan);
 }
 
 baseNodeCostSlider.oninput = function () {
-    BASE_NODE_EXISTENCE_COST = parseFloat(this.value);
+    config.BASE_NODE_EXISTENCE_COST = parseFloat(this.value);
     updateSliderDisplay(this, baseNodeCostValueSpan);
 }
 emitterNodeCostSlider.oninput = function () {
-    EMITTER_NODE_ENERGY_COST = parseFloat(this.value);
+    config.EMITTER_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, emitterNodeCostValueSpan);
 }
 eaterNodeCostSlider.oninput = function () {
-    EATER_NODE_ENERGY_COST = parseFloat(this.value);
+    config.EATER_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, eaterNodeCostValueSpan);
 }
 predatorNodeCostSlider.oninput = function () {
-    PREDATOR_NODE_ENERGY_COST = parseFloat(this.value);
+    config.PREDATOR_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, predatorNodeCostValueSpan);
 }
 neuronNodeCostSlider.oninput = function () {
-    NEURON_NODE_ENERGY_COST = parseFloat(this.value);
+    config.NEURON_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, neuronNodeCostValueSpan);
 }
 photosyntheticNodeCostSlider.oninput = function () {
-    PHOTOSYNTHETIC_NODE_ENERGY_COST = parseFloat(this.value);
+    config.PHOTOSYNTHETIC_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, photosyntheticNodeCostValueSpan);
 }
 photosynthesisEfficiencySlider.oninput = function () {
-    PHOTOSYNTHESIS_EFFICIENCY = parseFloat(this.value);
+    config.PHOTOSYNTHESIS_EFFICIENCY = parseFloat(this.value);
     updateSliderDisplay(this, photosynthesisEfficiencyValueSpan);
 }
 swimmerNodeCostSlider.oninput = function () {
-    SWIMMER_NODE_ENERGY_COST = parseFloat(this.value);
+    config.SWIMMER_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, swimmerNodeCostValueSpan);
 }
 jetNodeCostSlider.oninput = function () {
-    JET_NODE_ENERGY_COST = parseFloat(this.value);
+    config.JET_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, jetNodeCostValueSpan);
 }
 attractorNodeCostSlider.oninput = function () {
-    ATTRACTOR_NODE_ENERGY_COST = parseFloat(this.value);
+    config.ATTRACTOR_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, attractorNodeCostValueSpan);
 }
 repulsorNodeCostSlider.oninput = function () {
-    REPULSOR_NODE_ENERGY_COST = parseFloat(this.value);
+    config.REPULSOR_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, repulsorNodeCostValueSpan);
 }
 eyeNodeCostSlider.oninput = function () {
-    EYE_NODE_ENERGY_COST = parseFloat(this.value);
+    config.EYE_NODE_ENERGY_COST = parseFloat(this.value);
     updateSliderDisplay(this, eyeNodeCostValueSpan);
 }
 neuronChanceSlider.oninput = function() {
-    NEURON_CHANCE = parseFloat(this.value);
+    config.NEURON_CHANCE = parseFloat(this.value);
     updateSliderDisplay(this, neuronChanceValueSpan);
 }
 jetMaxVelocityGeneSlider.oninput = function() {
-    JET_MAX_VELOCITY_GENE_DEFAULT = parseFloat(this.value);
+    config.JET_MAX_VELOCITY_GENE_DEFAULT = parseFloat(this.value);
     updateSliderDisplay(this, jetMaxVelocityGeneValueSpan);
 }
 
@@ -919,15 +896,15 @@ resizeWorldButton.onclick = function () {
 
     if (isNaN(newWidth) || isNaN(newHeight) || newWidth < 500 || newHeight < 500 || newWidth > 40000 || newHeight > 40000) {
         showMessageModal("Invalid world dimensions. Min 500x500, Max 40000x40000.");
-        worldWidthInput.value = WORLD_WIDTH;
-        worldHeightInput.value = WORLD_HEIGHT;
+        worldWidthInput.value = config.WORLD_WIDTH;
+        worldHeightInput.value = config.WORLD_HEIGHT;
         return;
     }
-    WORLD_WIDTH = newWidth;
-    WORLD_HEIGHT = newHeight;
-    // canvas.width = WORLD_WIDTH; // Remove - canvas size is fixed
-    // canvas.height = WORLD_HEIGHT; // Remove - canvas size is fixed
-    // MAX_DISPLACEMENT_SQ_THRESHOLD = (WORLD_WIDTH / 5) * (WORLD_WIDTH / 5); // This constant is not used here
+    config.WORLD_WIDTH = newWidth;
+    config.WORLD_HEIGHT = newHeight;
+    // canvas.width = config.WORLD_WIDTH; // Remove - canvas size is fixed
+    // canvas.height = config.WORLD_HEIGHT; // Remove - canvas size is fixed
+    // MAX_DISPLACEMENT_SQ_THRESHOLD = (config.WORLD_WIDTH / 5) * (config.WORLD_WIDTH / 5); // This constant is not used here
 
     viewOffsetX = 0;
     viewOffsetY = 0;
@@ -941,11 +918,11 @@ resizeWorldButton.onclick = function () {
     initViscosityMap();
     isAnySoftBodyUnstable = false;
     updateInstabilityIndicator();
-    console.log(`World resized to ${WORLD_WIDTH}x${WORLD_HEIGHT} and simulation reset.`);
+    console.log(`World resized to ${config.WORLD_WIDTH}x${config.WORLD_HEIGHT} and simulation reset.`);
 }
 
 fluidGridSizeSlider.oninput = function () {
-    FLUID_GRID_SIZE_CONTROL = parseInt(this.value);
+    config.FLUID_GRID_SIZE_CONTROL = parseInt(this.value);
     updateSliderDisplay(this, fluidGridSizeValueSpan);
     velocityEmitters = [];
 initFluidSimulation(USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
@@ -955,46 +932,46 @@ initFluidSimulation(USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
     initViscosityMap();
 }
 fluidDiffusionSlider.oninput = function () {
-    FLUID_DIFFUSION = parseFloat(this.value);
+    config.FLUID_DIFFUSION = parseFloat(this.value);
     updateSliderDisplay(this, fluidDiffusionValueSpan);
-    if (fluidField) fluidField.diffusion = FLUID_DIFFUSION;
+    if (fluidField) fluidField.diffusion = config.FLUID_DIFFUSION;
 }
 fluidViscositySlider.oninput = function () {
-    FLUID_VISCOSITY = parseFloat(this.value);
-    // console.log("Fluid Viscosity slider raw value:", this.value, "Parsed FLUID_VISCOSITY:", FLUID_VISCOSITY); // DEBUG
+    config.FLUID_VISCOSITY = parseFloat(this.value);
+    // console.log("Fluid Viscosity slider raw value:", this.value, "Parsed FLUID_VISCOSITY:", config.FLUID_VISCOSITY); // DEBUG
     updateSliderDisplay(this, fluidViscosityValueSpan);
-    if (fluidField) fluidField.viscosity = FLUID_VISCOSITY;
+    if (fluidField) fluidField.viscosity = config.FLUID_VISCOSITY;
 }
 fluidFadeSlider.oninput = function () {
-    FLUID_FADE_RATE = parseFloat(this.value);
+    config.FLUID_FADE_RATE = parseFloat(this.value);
     updateSliderDisplay(this, fluidFadeValueSpan);
 }
 maxFluidVelocityComponentSlider.oninput = function () {
-    MAX_FLUID_VELOCITY_COMPONENT = parseFloat(this.value);
+    config.MAX_FLUID_VELOCITY_COMPONENT = parseFloat(this.value);
     updateSliderDisplay(this, maxFluidVelocityComponentValueSpan);
-    if (fluidField) fluidField.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT;
+    if (fluidField) fluidField.maxVelComponent = config.MAX_FLUID_VELOCITY_COMPONENT;
 }
 clearFluidButton.onclick = function () {
     if (fluidField) fluidField.clear();
 }
 
 particlesPerSecondSlider.oninput = function () {
-    PARTICLES_PER_SECOND = parseInt(this.value);
+    config.PARTICLES_PER_SECOND = parseInt(this.value);
     updateSliderDisplay(this, particlesPerSecondValueSpan);
 }
 particleFluidInfluenceSlider.oninput = function () {
-    PARTICLE_FLUID_INFLUENCE = parseFloat(this.value);
+    config.PARTICLE_FLUID_INFLUENCE = parseFloat(this.value);
     updateSliderDisplay(this, particleFluidInfluenceValueSpan);
 }
 particleLifeDecaySlider.oninput = function () {
-    PARTICLE_BASE_LIFE_DECAY = parseFloat(this.value);
+    config.PARTICLE_BASE_LIFE_DECAY = parseFloat(this.value);
     updateSliderDisplay(this, particleLifeDecayValueSpan);
 }
 infiniteParticleLifeToggle.onchange = function () {
-    IS_PARTICLE_LIFE_INFINITE = this.checked;
-    particleLifeDecaySlider.disabled = IS_PARTICLE_LIFE_INFINITE;
-    particleLifeDecayLabel.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#ddd';
-    particleLifeDecayValueSpan.style.color = IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
+    config.IS_PARTICLE_LIFE_INFINITE = this.checked;
+    particleLifeDecaySlider.disabled = config.IS_PARTICLE_LIFE_INFINITE;
+    particleLifeDecayLabel.style.color = config.IS_PARTICLE_LIFE_INFINITE ? '#777' : '#ddd';
+    particleLifeDecayValueSpan.style.color = config.IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
 }
 resetParticlesButton.onclick = function () {
     initParticles();
@@ -1002,7 +979,7 @@ resetParticlesButton.onclick = function () {
 
 exportConfigButton.onclick = handleExportConfig;
 importConfigButton.onclick = () => importConfigFile.click();
-importConfigFile.onchange = (event) => handleImportConfig(event, canvas, webgpuCanvas);
+importConfigFile.onchange = (event) => config.handleImportConfig(event, canvas, webgpuCanvas);
 closeInfoPanelButton.onclick = () => {
     infoPanel.classList.remove('open');
     selectedInspectBody = null;
@@ -1010,32 +987,32 @@ closeInfoPanelButton.onclick = () => {
 }
 
 showNutrientMapToggle.onchange = function () {
-    SHOW_NUTRIENT_MAP = this.checked;
-    console.log("[Debug] showNutrientMapToggle changed. SHOW_NUTRIENT_MAP is now:", SHOW_NUTRIENT_MAP);
+    config.SHOW_NUTRIENT_MAP = this.checked;
+    console.log("[Debug] showNutrientMapToggle changed. SHOW_NUTRIENT_MAP is now:", config.SHOW_NUTRIENT_MAP);
 };
 nutrientEditModeToggle.onchange = function () {
-    IS_NUTRIENT_EDIT_MODE = this.checked;
-    if (IS_NUTRIENT_EDIT_MODE) {
+    config.IS_NUTRIENT_EDIT_MODE = this.checked;
+    if (config.IS_NUTRIENT_EDIT_MODE) {
         emitterEditModeToggle.checked = false;
-        IS_EMITTER_EDIT_MODE = false;
+        config.IS_EMITTER_EDIT_MODE = false;
         canvas.classList.remove('emitter-edit-mode');
         lightEditModeToggle.checked = false;
-        IS_LIGHT_EDIT_MODE = false;
+        config.IS_LIGHT_EDIT_MODE = false;
         viscosityEditModeToggle.checked = false;
-        IS_VISCOSITY_EDIT_MODE = false;
+        config.IS_VISCOSITY_EDIT_MODE = false;
     }
 };
 
 nutrientBrushValueSlider.oninput = function () {
-    NUTRIENT_BRUSH_VALUE = parseFloat(this.value);
+    config.NUTRIENT_BRUSH_VALUE = parseFloat(this.value);
     updateSliderDisplay(this, nutrientBrushValueSpan);
 }
 nutrientBrushSizeSlider.oninput = function () {
-    NUTRIENT_BRUSH_SIZE = parseInt(this.value);
+    config.NUTRIENT_BRUSH_SIZE = parseInt(this.value);
     updateSliderDisplay(this, nutrientBrushSizeSpan);
 }
 nutrientBrushStrengthSlider.oninput = function () {
-    NUTRIENT_BRUSH_STRENGTH = parseFloat(this.value);
+    config.NUTRIENT_BRUSH_STRENGTH = parseFloat(this.value);
     updateSliderDisplay(this, nutrientBrushStrengthSpan);
 }
 clearNutrientMapButton.onclick = function () {
@@ -1044,31 +1021,31 @@ clearNutrientMapButton.onclick = function () {
 };
 
 showLightMapToggle.onchange = function () {
-    SHOW_LIGHT_MAP = this.checked;
-    console.log("[Debug] showLightMapToggle changed. SHOW_LIGHT_MAP is now:", SHOW_LIGHT_MAP);
+    config.SHOW_LIGHT_MAP = this.checked;
+    console.log("[Debug] showLightMapToggle changed. SHOW_LIGHT_MAP is now:", config.SHOW_LIGHT_MAP);
 };
 lightEditModeToggle.onchange = function () {
-    IS_LIGHT_EDIT_MODE = this.checked;
-    if (IS_LIGHT_EDIT_MODE) {
+    config.IS_LIGHT_EDIT_MODE = this.checked;
+    if (config.IS_LIGHT_EDIT_MODE) {
         emitterEditModeToggle.checked = false;
-        IS_EMITTER_EDIT_MODE = false;
+        config.IS_EMITTER_EDIT_MODE = false;
         nutrientEditModeToggle.checked = false;
-        IS_NUTRIENT_EDIT_MODE = false;
+        config.IS_NUTRIENT_EDIT_MODE = false;
         viscosityEditModeToggle.checked = false;
-        IS_VISCOSITY_EDIT_MODE = false;
+        config.IS_VISCOSITY_EDIT_MODE = false;
         canvas.classList.remove('emitter-edit-mode');
     }
 };
 lightBrushValueSlider.oninput = function () {
-    LIGHT_BRUSH_VALUE = parseFloat(this.value);
+    config.LIGHT_BRUSH_VALUE = parseFloat(this.value);
     updateSliderDisplay(this, lightBrushValueSpan);
 }
 lightBrushSizeSlider.oninput = function () {
-    LIGHT_BRUSH_SIZE = parseInt(this.value);
+    config.LIGHT_BRUSH_SIZE = parseInt(this.value);
     updateSliderDisplay(this, lightBrushSizeSpan);
 }
 lightBrushStrengthSlider.oninput = function () {
-    LIGHT_BRUSH_STRENGTH = parseFloat(this.value);
+    config.LIGHT_BRUSH_STRENGTH = parseFloat(this.value);
     updateSliderDisplay(this, lightBrushStrengthSpan);
 }
 clearLightMapButton.onclick = function () {
@@ -1077,31 +1054,31 @@ clearLightMapButton.onclick = function () {
 };
 
 showViscosityMapToggle.onchange = function () {
-    SHOW_VISCOSITY_MAP = this.checked;
-    console.log("[Debug] showViscosityMapToggle changed. SHOW_VISCOSITY_MAP is now:", SHOW_VISCOSITY_MAP);
+    config.SHOW_VISCOSITY_MAP = this.checked;
+    console.log("[Debug] showViscosityMapToggle changed. SHOW_VISCOSITY_MAP is now:", config.SHOW_VISCOSITY_MAP);
 };
 viscosityEditModeToggle.onchange = function () {
-    IS_VISCOSITY_EDIT_MODE = this.checked;
-    if (IS_VISCOSITY_EDIT_MODE) {
+    config.IS_VISCOSITY_EDIT_MODE = this.checked;
+    if (config.IS_VISCOSITY_EDIT_MODE) {
         emitterEditModeToggle.checked = false;
-        IS_EMITTER_EDIT_MODE = false;
+        config.IS_EMITTER_EDIT_MODE = false;
         nutrientEditModeToggle.checked = false;
-        IS_NUTRIENT_EDIT_MODE = false;
+        config.IS_NUTRIENT_EDIT_MODE = false;
         lightEditModeToggle.checked = false;
-        IS_LIGHT_EDIT_MODE = false;
+        config.IS_LIGHT_EDIT_MODE = false;
         canvas.classList.remove('emitter-edit-mode');
     }
 };
 viscosityBrushValueSlider.oninput = function () {
-    VISCOSITY_BRUSH_VALUE = parseFloat(this.value);
+    config.VISCOSITY_BRUSH_VALUE = parseFloat(this.value);
     updateSliderDisplay(this, viscosityBrushValueSpan);
 }
 viscosityBrushSizeSlider.oninput = function () {
-    VISCOSITY_BRUSH_SIZE = parseInt(this.value);
+    config.VISCOSITY_BRUSH_SIZE = parseInt(this.value);
     updateSliderDisplay(this, viscosityBrushSizeSpan);
 }
 viscosityBrushStrengthSlider.oninput = function () {
-    VISCOSITY_BRUSH_STRENGTH = parseFloat(this.value);
+    config.VISCOSITY_BRUSH_STRENGTH = parseFloat(this.value);
     updateSliderDisplay(this, viscosityBrushStrengthSpan);
 }
 clearViscosityMapButton.onclick = function () {
@@ -1110,33 +1087,33 @@ clearViscosityMapButton.onclick = function () {
 };
 
 nutrientCyclePeriodSlider.oninput = function () {
-    nutrientCyclePeriodSeconds = parseInt(this.value);
+    config.nutrientCyclePeriodSeconds = parseInt(this.value);
     updateSliderDisplay(this, nutrientCyclePeriodSpan);
 };
 nutrientCycleBaseAmplitudeSlider.oninput = function () {
-    nutrientCycleBaseAmplitude = parseFloat(this.value);
+    config.nutrientCycleBaseAmplitude = parseFloat(this.value);
     updateSliderDisplay(this, nutrientCycleBaseAmplitudeSpan);
 };
 nutrientCycleWaveAmplitudeSlider.oninput = function () {
-    nutrientCycleWaveAmplitude = parseFloat(this.value);
+    config.nutrientCycleWaveAmplitude = parseFloat(this.value);
     updateSliderDisplay(this, nutrientCycleWaveAmplitudeSpan);
 };
 lightCyclePeriodSlider.oninput = function () {
-    lightCyclePeriodSeconds = parseInt(this.value);
+    config.lightCyclePeriodSeconds = parseInt(this.value);
     updateSliderDisplay(this, lightCyclePeriodSpan);
 };
 
 viewEntireSimButton.onclick = function () {
-    const targetZoomX = canvas.clientWidth / WORLD_WIDTH;
-    const targetZoomY = canvas.clientHeight / WORLD_HEIGHT;
+    const targetZoomX = canvas.clientWidth / config.WORLD_WIDTH;
+    const targetZoomY = canvas.clientHeight / config.WORLD_HEIGHT;
     viewZoom = Math.min(targetZoomX, targetZoomY); // Zoom to fit entire world
-    viewZoom = Math.min(viewZoom, MAX_ZOOM); // Respect MAX_ZOOM
+    viewZoom = Math.min(viewZoom, config.MAX_ZOOM); // Respect MAX_ZOOM
     // Ensure MIN_ZOOM calculation from wheel event is considered if it was more restrictive
-    const minZoomToSeeAllX = canvas.clientWidth / WORLD_WIDTH;
-    const minZoomToSeeAllY = canvas.clientHeight / WORLD_HEIGHT;
+    const minZoomToSeeAllX = canvas.clientWidth / config.WORLD_WIDTH;
+    const minZoomToSeeAllY = canvas.clientHeight / config.WORLD_HEIGHT;
     let currentMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
     currentMinZoom = Math.min(1.0, currentMinZoom);
-    if (WORLD_WIDTH <= canvas.clientWidth && WORLD_HEIGHT <= canvas.clientHeight) {
+    if (config.WORLD_WIDTH <= canvas.clientWidth && config.WORLD_HEIGHT <= canvas.clientHeight) {
         currentMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
     } else {
         currentMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
@@ -1146,24 +1123,24 @@ viewEntireSimButton.onclick = function () {
 
     // Center the view
     // Calculate the dimensions of the world as they would appear on screen at the new zoom level
-    const worldDisplayWidth = WORLD_WIDTH * viewZoom;
-    const worldDisplayHeight = WORLD_HEIGHT * viewZoom;
+    const worldDisplayWidth = config.WORLD_WIDTH * viewZoom;
+    const worldDisplayHeight = config.WORLD_HEIGHT * viewZoom;
 
     // Calculate required offset to center this displayed world within the canvas
     // This calculation needs to be in world coordinates for viewOffsetX/Y
-    viewOffsetX = (WORLD_WIDTH / 2) - (canvas.clientWidth / viewZoom / 2);
-    viewOffsetY = (WORLD_HEIGHT / 2) - (canvas.clientHeight / viewZoom / 2);
+    viewOffsetX = (config.WORLD_WIDTH / 2) - (canvas.clientWidth / viewZoom / 2);
+    viewOffsetY = (config.WORLD_HEIGHT / 2) - (canvas.clientHeight / viewZoom / 2);
 
     // Clamp offsets to prevent viewing outside world boundaries
     const effectiveViewportWidth = canvas.clientWidth / viewZoom;
     const effectiveViewportHeight = canvas.clientHeight / viewZoom;
-    const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
-    const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
+    const maxPanX = Math.max(0, config.WORLD_WIDTH - effectiveViewportWidth);
+    const maxPanY = Math.max(0, config.WORLD_HEIGHT - effectiveViewportHeight);
     viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
 }
 
-copyInfoPanelButton.onclick = function () {
+function copyInfoToClipboard() {
     if (!selectedInspectBody) {
         showMessageModal("No creature selected to copy info from.");
         return;
@@ -1202,13 +1179,25 @@ copyInfoPanelButton.onclick = function () {
     });
 }
 
+copyInfoPanelButton.onclick = copyInfoToClipboard;
+
+function toggleInfoPanel() {
+    infoPanel.classList.toggle('open');
+    if (!infoPanel.classList.contains('open')) {
+        selectedInspectBody = null;
+        selectedInspectPoint = null;
+    }
+}
+
+closeInfoPanelButton.onclick = toggleInfoPanel;
+
 showFluidVelocityToggle.onchange = function () {
-    SHOW_FLUID_VELOCITY = this.checked;
+    config.SHOW_FLUID_VELOCITY = this.checked;
 };
 
 headlessModeToggle.onchange = function () {
-    IS_HEADLESS_MODE = this.checked;
-    if (IS_HEADLESS_MODE) {
+    config.IS_HEADLESS_MODE = this.checked;
+    if (config.IS_HEADLESS_MODE) {
         console.log("Headless mode enabled: Drawing will be skipped.");
     } else {
         console.log("Headless mode disabled: Drawing will resume.");
@@ -1218,9 +1207,9 @@ headlessModeToggle.onchange = function () {
 if (useGpuFluidToggle) { // Check if the element exists before assigning onchange
     useGpuFluidToggle.onchange = function () {
         console.log("useGpuFluidToggle changed!"); // Add this unconditional log
-        USE_GPU_FLUID_SIMULATION = this.checked;
-        console.log(`GPU Fluid Simulation toggled: ${USE_GPU_FLUID_SIMULATION}. Re-initializing fluid simulation.`);
-        initFluidSimulation(USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
+        config.USE_GPU_FLUID_SIMULATION = this.checked;
+        console.log(`GPU Fluid Simulation toggled: ${config.USE_GPU_FLUID_SIMULATION}. Re-initializing fluid simulation.`);
+        initFluidSimulation(config.USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
     };
 } else {
     console.error("useGpuFluidToggle element not found!");
@@ -1230,67 +1219,67 @@ canvas.addEventListener('mousedown', (e) => {
     updateMouse(e);
 
     if (e.button === 2) { // Right mouse button
-        isRightDragging = true;
+        config.isRightDragging = true;
         mouse.isDown = false;
-        panStartMouseDisplayX = mouse.x;
-        panStartMouseDisplayY = mouse.y;
-        panInitialViewOffsetX = viewOffsetX;
-        panInitialViewOffsetY = viewOffsetY;
+        config.panStartMouseDisplayX = mouse.x;
+        config.panStartMouseDisplayY = mouse.y;
+        config.panInitialViewOffsetX = config.viewOffsetX;
+        config.panInitialViewOffsetY = config.viewOffsetY;
         e.preventDefault();
         return;
     } else if (e.button === 0) { // Left mouse button
         mouse.isDown = true;
-        isRightDragging = false;
+        config.isRightDragging = false;
 
         const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
         const simMouseX = worldCoords.x;
         const simMouseY = worldCoords.y;
 
-        if (IS_CREATURE_IMPORT_MODE && IMPORTED_CREATURE_DATA) {
+        if (config.IS_CREATURE_IMPORT_MODE && config.IMPORTED_CREATURE_DATA) {
             placeImportedCreature(simMouseX, simMouseY);
             return; // Exit after placing
         }
 
-        if (IS_EMITTER_EDIT_MODE && fluidField) {
-            if (IS_SIMULATION_PAUSED) return;
+        if (config.IS_EMITTER_EDIT_MODE && fluidField) {
+            if (config.IS_SIMULATION_PAUSED) return;
             const gridX = Math.floor(simMouseX / fluidField.scaleX);
             const gridY = Math.floor(simMouseY / fluidField.scaleY);
-            emitterDragStartCell = {gridX, gridY, mouseStartX: simMouseX, mouseStartY: simMouseY};
-            currentEmitterPreview = {
+            config.emitterDragStartCell = {gridX, gridY, mouseStartX: simMouseX, mouseStartY: simMouseY};
+            config.currentEmitterPreview = {
                 startX: (gridX + 0.5) * fluidField.scaleX,
                 startY: (gridY + 0.5) * fluidField.scaleY,
                 endX: simMouseX,
                 endY: simMouseY
             };
-            selectedInspectBody = null;
-            selectedInspectPoint = null;
+            config.selectedInspectBody = null;
+            config.selectedInspectPoint = null;
             updateInfoPanel();
             return;
         }
 
-        if (IS_NUTRIENT_EDIT_MODE) {
-            if (IS_SIMULATION_PAUSED) return;
-            isPaintingNutrients = true;
+        if (config.IS_NUTRIENT_EDIT_MODE) {
+            if (config.IS_SIMULATION_PAUSED) return;
+            config.isPaintingNutrients = true;
             paintNutrientBrush(simMouseX, simMouseY);
-            selectedInspectBody = null;
+            config.selectedInspectBody = null;
             updateInfoPanel();
-            selectedSoftBodyPoint = null;
+            config.selectedSoftBodyPoint = null;
             return;
-        } else if (IS_LIGHT_EDIT_MODE) {
-            if (IS_SIMULATION_PAUSED) return;
-            isPaintingLight = true;
+        } else if (config.IS_LIGHT_EDIT_MODE) {
+            if (config.IS_SIMULATION_PAUSED) return;
+            config.isPaintingLight = true;
             paintLightBrush(simMouseX, simMouseY);
-            selectedInspectBody = null;
+            config.selectedInspectBody = null;
             updateInfoPanel();
-            selectedSoftBodyPoint = null;
+            config.selectedSoftBodyPoint = null;
             return;
-        } else if (IS_VISCOSITY_EDIT_MODE) {
-            if (IS_SIMULATION_PAUSED) return;
-            isPaintingViscosity = true;
+        } else if (config.IS_VISCOSITY_EDIT_MODE) {
+            if (config.IS_SIMULATION_PAUSED) return;
+            config.isPaintingViscosity = true;
             paintViscosityBrush(simMouseX, simMouseY);
-            selectedInspectBody = null;
+            config.selectedInspectBody = null;
             updateInfoPanel();
-            selectedSoftBodyPoint = null;
+            config.selectedSoftBodyPoint = null;
             return;
         }
 
@@ -1303,12 +1292,12 @@ canvas.addEventListener('mousedown', (e) => {
                 const dist = Math.sqrt((point.pos.x - simMouseX) ** 2 + (point.pos.y - simMouseY) ** 2);
                 if (dist < point.radius * 2.5) {
                     // A point was clicked. Update the selection for both inspection and dragging.
-                    selectedSoftBodyPoint = {body: body, point: point};
-                    selectedInspectBody = body;
-                    selectedInspectPoint = point;
-                    selectedInspectPointIndex = i;
+                    config.selectedSoftBodyPoint = {body: body, point: point};
+                    config.selectedInspectBody = body;
+                    config.selectedInspectPoint = point;
+                    config.selectedInspectPointIndex = i;
 
-                    if (!IS_SIMULATION_PAUSED) {
+                    if (!config.IS_SIMULATION_PAUSED) {
                         point.isFixed = true;
                         point.prevPos.x = point.pos.x;
                         point.prevPos.y = point.pos.y;
@@ -1324,7 +1313,7 @@ canvas.addEventListener('mousedown', (e) => {
             // No point was clicked, indicating an interaction with the fluid.
             // We keep the info panel open by not clearing selectedInspectBody.
             // We only clear the point for dragging to prevent moving the old selection.
-            selectedSoftBodyPoint = null;
+            config.selectedSoftBodyPoint = null;
         }
         updateInfoPanel();
     }
@@ -1333,31 +1322,31 @@ canvas.addEventListener('mousedown', (e) => {
 canvas.addEventListener('mousemove', (e) => {
     updateMouse(e);
 
-    if (isRightDragging) {
+    if (config.isRightDragging) {
         const currentDisplayMouseX = mouse.x;
         const currentDisplayMouseY = mouse.y;
 
-        const displayDx = currentDisplayMouseX - panStartMouseDisplayX;
-        const displayDy = currentDisplayMouseY - panStartMouseDisplayY;
+        const displayDx = currentDisplayMouseX - config.panStartMouseDisplayX;
+        const displayDy = currentDisplayMouseY - config.panStartMouseDisplayY;
 
         // Scale factor of the internal bitmap to its displayed size on the CSS canvas
         const bitmapDisplayScale = Math.min(canvas.clientWidth / canvas.width, canvas.clientHeight / canvas.height);
 
         // How much the world should shift, based on mouse movement on the displayed bitmap, scaled by current zoom
-        const panDeltaX_world = displayDx / (bitmapDisplayScale * viewZoom);
-        const panDeltaY_world = displayDy / (bitmapDisplayScale * viewZoom);
+        const panDeltaX_world = displayDx / (bitmapDisplayScale * config.viewZoom);
+        const panDeltaY_world = displayDy / (bitmapDisplayScale * config.viewZoom);
 
-        viewOffsetX = panInitialViewOffsetX - panDeltaX_world;
-        viewOffsetY = panInitialViewOffsetY - panDeltaY_world;
+        config.viewOffsetX = config.panInitialViewOffsetX - panDeltaX_world;
+        config.viewOffsetY = config.panInitialViewOffsetY - panDeltaY_world;
 
-        const effectiveViewportWidth = canvas.clientWidth / viewZoom; // This is viewport width in world units
-        const effectiveViewportHeight = canvas.clientHeight / viewZoom; // This is viewport height in world units
+        const effectiveViewportWidth = canvas.clientWidth / config.viewZoom; // This is viewport width in world units
+        const effectiveViewportHeight = canvas.clientHeight / config.viewZoom; // This is viewport height in world units
         // Correct maxPan calculations for clamping viewOffset
-        const maxPanX = Math.max(0, WORLD_WIDTH - (canvas.clientWidth / bitmapDisplayScale / viewZoom));
-        const maxPanY = Math.max(0, WORLD_HEIGHT - (canvas.clientHeight / bitmapDisplayScale / viewZoom));
+        const maxPanX = Math.max(0, config.WORLD_WIDTH - (canvas.clientWidth / bitmapDisplayScale / config.viewZoom));
+        const maxPanY = Math.max(0, config.WORLD_HEIGHT - (canvas.clientHeight / bitmapDisplayScale / config.viewZoom));
 
-        viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
-        viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
+        config.viewOffsetX = Math.max(0, Math.min(config.viewOffsetX, maxPanX));
+        config.viewOffsetY = Math.max(0, Math.min(config.viewOffsetY, maxPanY));
         return;
     }
 
@@ -1371,12 +1360,12 @@ canvas.addEventListener('mousemove', (e) => {
     const worldMouseDy = simMouseY - worldPrevCoords.y;
 
 
-    if (mouse.isDown && !IS_SIMULATION_PAUSED) { // Only do these if NOT paused
-        if (IS_EMITTER_EDIT_MODE && emitterDragStartCell) {
-            currentEmitterPreview.endX = simMouseX;
-            currentEmitterPreview.endY = simMouseY;
-        } else if (selectedSoftBodyPoint) {
-            const point = selectedSoftBodyPoint.point;
+    if (mouse.isDown && !config.IS_SIMULATION_PAUSED) { // Only do these if NOT paused
+        if (config.IS_EMITTER_EDIT_MODE && config.emitterDragStartCell) {
+            config.currentEmitterPreview.endX = simMouseX;
+            config.currentEmitterPreview.endY = simMouseY;
+        } else if (config.selectedSoftBodyPoint) {
+            const point = config.selectedSoftBodyPoint.point;
             point.prevPos.x = point.pos.x;
             point.prevPos.y = point.pos.y;
             point.pos.x = simMouseX;
@@ -1394,23 +1383,23 @@ canvas.addEventListener('mousemove', (e) => {
             const b2 = Math.random() * 100 + 155;
             fluidField.addDensity(fluidGridX, fluidGridY, r2, g2, b2, 150 + Math.random() * 50);
 
-            const fluidVelX = worldMouseDx * FLUID_MOUSE_DRAG_VELOCITY_SCALE;
-            const fluidVelY = worldMouseDy * FLUID_MOUSE_DRAG_VELOCITY_SCALE;
+            const fluidVelX = worldMouseDx * config.FLUID_MOUSE_DRAG_VELOCITY_SCALE;
+            const fluidVelY = worldMouseDy * config.FLUID_MOUSE_DRAG_VELOCITY_SCALE;
             fluidField.addVelocity(fluidGridX, fluidGridY, fluidVelX, fluidVelY);
         }
-    } else if (mouse.isDown && IS_EMITTER_EDIT_MODE && emitterDragStartCell) {
+    } else if (mouse.isDown && config.IS_EMITTER_EDIT_MODE && config.emitterDragStartCell) {
         // Allow emitter preview to update even if paused, but don't affect sim state
-        currentEmitterPreview.endX = simMouseX;
-        currentEmitterPreview.endY = simMouseY;
+        config.currentEmitterPreview.endX = simMouseX;
+        config.currentEmitterPreview.endY = simMouseY;
     }
 
-    if (IS_NUTRIENT_EDIT_MODE && isPaintingNutrients && mouse.isDown && !IS_SIMULATION_PAUSED) {
+    if (config.IS_NUTRIENT_EDIT_MODE && config.isPaintingNutrients && mouse.isDown && !config.IS_SIMULATION_PAUSED) {
         paintNutrientBrush(simMouseX, simMouseY);
         return;
-    } else if (IS_LIGHT_EDIT_MODE && isPaintingLight && mouse.isDown && !IS_SIMULATION_PAUSED) {
+    } else if (config.IS_LIGHT_EDIT_MODE && config.isPaintingLight && mouse.isDown && !config.IS_SIMULATION_PAUSED) {
         paintLightBrush(simMouseX, simMouseY);
         return;
-    } else if (IS_VISCOSITY_EDIT_MODE && isPaintingViscosity && mouse.isDown && !IS_SIMULATION_PAUSED) {
+    } else if (config.IS_VISCOSITY_EDIT_MODE && config.isPaintingViscosity && mouse.isDown && !config.IS_SIMULATION_PAUSED) {
         paintViscosityBrush(simMouseX, simMouseY);
         return;
     }
@@ -1418,113 +1407,113 @@ canvas.addEventListener('mousemove', (e) => {
 
 canvas.addEventListener('mouseup', (e) => {
     if (e.button === 2) { // Right mouse button up
-        isRightDragging = false;
+        config.isRightDragging = false;
         e.preventDefault();
     } else if (e.button === 0) { // Left mouse button up
         mouse.isDown = false;
-        if (isPaintingNutrients) {
-            isPaintingNutrients = false;
+        if (config.isPaintingNutrients) {
+            config.isPaintingNutrients = false;
         }
-        if (isPaintingLight) {
-            isPaintingLight = false;
+        if (config.isPaintingLight) {
+            config.isPaintingLight = false;
         }
-        if (isPaintingViscosity) {
-            isPaintingViscosity = false;
+        if (config.isPaintingViscosity) {
+            config.isPaintingViscosity = false;
         }
 
-        if (IS_EMITTER_EDIT_MODE && emitterDragStartCell && fluidField && !IS_SIMULATION_PAUSED) {
+        if (config.IS_EMITTER_EDIT_MODE && config.emitterDragStartCell && fluidField && !config.IS_SIMULATION_PAUSED) {
             const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
             const simMouseX = worldCoords.x;
             const simMouseY = worldCoords.y;
 
-            const worldForceX = (simMouseX - emitterDragStartCell.mouseStartX) * EMITTER_MOUSE_DRAG_SCALE;
-            const worldForceY = (simMouseY - emitterDragStartCell.mouseStartY) * EMITTER_MOUSE_DRAG_SCALE;
+            const worldForceX = (simMouseX - config.emitterDragStartCell.mouseStartX) * config.EMITTER_MOUSE_DRAG_SCALE;
+            const worldForceY = (simMouseY - config.emitterDragStartCell.mouseStartY) * config.EMITTER_MOUSE_DRAG_SCALE;
 
             const gridForceX = worldForceX / fluidField.scaleX;
             const gridForceY = worldForceY / fluidField.scaleY;
 
 
-            const existingEmitter = velocityEmitters.find(em => em.gridX === emitterDragStartCell.gridX && em.gridY === emitterDragStartCell.gridY);
+            const existingEmitter = config.velocityEmitters.find(em => em.gridX === config.emitterDragStartCell.gridX && em.gridY === config.emitterDragStartCell.gridY);
             if (existingEmitter) {
                 existingEmitter.forceX = gridForceX;
                 existingEmitter.forceY = gridForceY;
             } else {
-                velocityEmitters.push({
-                    gridX: emitterDragStartCell.gridX,
-                    gridY: emitterDragStartCell.gridY,
+                config.velocityEmitters.push({
+                    gridX: config.emitterDragStartCell.gridX,
+                    gridY: config.emitterDragStartCell.gridY,
                     forceX: gridForceX,
                     forceY: gridForceY
                 });
             }
-            emitterDragStartCell = null;
-            currentEmitterPreview = null;
+            config.emitterDragStartCell = null;
+            config.currentEmitterPreview = null;
         }
-        if (selectedSoftBodyPoint) {
-            const point = selectedSoftBodyPoint.point;
-            if (!IS_SIMULATION_PAUSED) {
+        if (config.selectedSoftBodyPoint) {
+            const point = config.selectedSoftBodyPoint.point;
+            if (!config.IS_SIMULATION_PAUSED) {
                 point.isFixed = false;
-                const worldDx = (mouse.dx / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
-                const worldDy = (mouse.dy / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
+                const worldDx = (mouse.dx / Math.min(canvas.clientWidth / config.WORLD_WIDTH, canvas.clientHeight / config.WORLD_HEIGHT) / config.viewZoom);
+                const worldDy = (mouse.dy / Math.min(canvas.clientWidth / config.WORLD_WIDTH, canvas.clientHeight / config.WORLD_HEIGHT) / config.viewZoom);
                 point.prevPos.x = point.pos.x - worldDx * 1.0;
                 point.prevPos.y = point.pos.y - worldDy * 1.0;
             }
-            selectedSoftBodyPoint = null;
+            config.selectedSoftBodyPoint = null;
         }
     }
 });
 canvas.addEventListener('mouseleave', () => {
     mouse.isDown = false;
-    isRightDragging = false;
-    if (IS_EMITTER_EDIT_MODE && emitterDragStartCell) {
+    config.isRightDragging = false;
+    if (config.IS_EMITTER_EDIT_MODE && config.emitterDragStartCell) {
         const worldCoords = getMouseWorldCoordinates(mouse.x, mouse.y);
         const simMouseX = worldCoords.x;
         const simMouseY = worldCoords.y;
-        const worldForceX = (simMouseX - emitterDragStartCell.mouseStartX) * EMITTER_MOUSE_DRAG_SCALE;
-        const worldForceY = (simMouseY - emitterDragStartCell.mouseStartY) * EMITTER_MOUSE_DRAG_SCALE;
+        const worldForceX = (simMouseX - config.emitterDragStartCell.mouseStartX) * config.EMITTER_MOUSE_DRAG_SCALE;
+        const worldForceY = (simMouseY - config.emitterDragStartCell.mouseStartY) * config.EMITTER_MOUSE_DRAG_SCALE;
         const gridForceX = worldForceX / fluidField.scaleX;
         const gridForceY = worldForceY / fluidField.scaleY;
-        const existingEmitter = velocityEmitters.find(em => em.gridX === emitterDragStartCell.gridX && em.gridY === emitterDragStartCell.gridY);
+        const existingEmitter = config.velocityEmitters.find(em => em.gridX === config.emitterDragStartCell.gridX && em.gridY === config.emitterDragStartCell.gridY);
         if (existingEmitter) {
             existingEmitter.forceX = gridForceX;
             existingEmitter.forceY = gridForceY;
         } else {
-            velocityEmitters.push({
-                gridX: emitterDragStartCell.gridX,
-                gridY: emitterDragStartCell.gridY,
+            config.velocityEmitters.push({
+                gridX: config.emitterDragStartCell.gridX,
+                gridY: config.emitterDragStartCell.gridY,
                 forceX: gridForceX,
                 forceY: gridForceY
             });
         }
     }
-    emitterDragStartCell = null;
-    currentEmitterPreview = null;
+    config.emitterDragStartCell = null;
+    config.currentEmitterPreview = null;
 
-    if (selectedSoftBodyPoint) {
-        const point = selectedSoftBodyPoint.point;
+    if (config.selectedSoftBodyPoint) {
+        const point = config.selectedSoftBodyPoint.point;
         point.isFixed = false;
-        const worldDx = (mouse.dx / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
-        const worldDy = (mouse.dy / Math.min(canvas.clientWidth / WORLD_WIDTH, canvas.clientHeight / WORLD_HEIGHT) / viewZoom);
+        const worldDx = (mouse.dx / Math.min(canvas.clientWidth / config.WORLD_WIDTH, canvas.clientHeight / config.WORLD_HEIGHT) / config.viewZoom);
+        const worldDy = (mouse.dy / Math.min(canvas.clientWidth / config.WORLD_WIDTH, canvas.clientHeight / config.WORLD_HEIGHT) / config.viewZoom);
         point.prevPos.x = point.pos.x - worldDx * 1.0;
         point.prevPos.y = point.pos.y - worldDy * 1.0;
-        selectedSoftBodyPoint = null;
+        config.selectedSoftBodyPoint = null;
     }
 
-    if (isPaintingNutrients) {
-        isPaintingNutrients = false;
+    if (config.isPaintingNutrients) {
+        config.isPaintingNutrients = false;
     }
-    if (isPaintingLight) {
-        isPaintingLight = false;
+    if (config.isPaintingLight) {
+        config.isPaintingLight = false;
     }
-    if (isPaintingViscosity) {
-        isPaintingViscosity = false;
+    if (config.isPaintingViscosity) {
+        config.isPaintingViscosity = false;
     }
 });
 
 canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    if (IS_CREATURE_IMPORT_MODE) {
-        IS_CREATURE_IMPORT_MODE = false;
-        IMPORTED_CREATURE_DATA = null;
+    if (config.IS_CREATURE_IMPORT_MODE) {
+        config.IS_CREATURE_IMPORT_MODE = false;
+        config.IMPORTED_CREATURE_DATA = null;
         creatureImportStatus.textContent = "";
         canvas.style.cursor = 'default';
         console.log("Creature import cancelled via right-click.");
@@ -1543,19 +1532,19 @@ canvas.addEventListener('wheel', (e) => {
 
     const scroll = e.deltaY < 0 ? 1 : -1;
     const oldZoom = viewZoom;
-    let newZoom = viewZoom * Math.pow(1 + ZOOM_SENSITIVITY * 10, scroll);
+    let newZoom = viewZoom * Math.pow(1 + config.ZOOM_SENSITIVITY * 10, scroll);
 
-    const minZoomToSeeAllX = canvas.clientWidth / WORLD_WIDTH;
-    const minZoomToSeeAllY = canvas.clientHeight / WORLD_HEIGHT;
+    const minZoomToSeeAllX = canvas.clientWidth / config.WORLD_WIDTH;
+    const minZoomToSeeAllY = canvas.clientHeight / config.WORLD_HEIGHT;
     let dynamicMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
-    if (WORLD_WIDTH <= canvas.clientWidth && WORLD_HEIGHT <= canvas.clientHeight) {
+    if (config.WORLD_WIDTH <= canvas.clientWidth && config.WORLD_HEIGHT <= canvas.clientHeight) {
         dynamicMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
     } else {
         dynamicMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
     }
     dynamicMinZoom = Math.max(0.01, dynamicMinZoom);
 
-    viewZoom = Math.max(dynamicMinZoom, Math.min(newZoom, MAX_ZOOM));
+    viewZoom = Math.max(dynamicMinZoom, Math.min(newZoom, config.MAX_ZOOM));
 
     // After zoom, the same mouse display position will point to a different world coordinate.
     // We want the world point that was under the mouse before zoom to still be under the mouse.
@@ -1581,14 +1570,14 @@ canvas.addEventListener('wheel', (e) => {
     viewOffsetY = worldMouseBeforeZoom.y - (mouseOnUnscaledBitmapY / viewZoom);
 
     // Clamp offsets
-    const maxPanX = Math.max(0, WORLD_WIDTH - (cssClientWidth / bitmapDisplayScale / viewZoom));
-    const maxPanY = Math.max(0, WORLD_HEIGHT - (cssClientHeight / bitmapDisplayScale / viewZoom));
+    const maxPanX = Math.max(0, config.WORLD_WIDTH - (cssClientWidth / bitmapDisplayScale / viewZoom));
+    const maxPanY = Math.max(0, config.WORLD_HEIGHT - (cssClientHeight / bitmapDisplayScale / viewZoom));
     viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
 });
 
 eyeDetectionRadiusSlider.oninput = function () {
-    EYE_DETECTION_RADIUS = parseInt(this.value);
+    config.EYE_DETECTION_RADIUS = parseInt(this.value);
     updateSliderDisplay(this, eyeDetectionRadiusValueSpan);
 }
 
@@ -1741,21 +1730,21 @@ function focusOnCreature(creature) {
     const smallerViewportDim = Math.min(canvas.clientWidth, canvas.clientHeight);
     const targetZoom = smallerViewportDim / (creatureRadius * 2 * 3); 
     
-    viewZoom = Math.min(MAX_ZOOM, Math.max(0.2, targetZoom)); 
+    viewZoom = Math.min(config.MAX_ZOOM, Math.max(0.2, targetZoom)); 
 
     viewOffsetX = creatureCenter.x - (canvas.clientWidth / viewZoom / 2);
     viewOffsetY = creatureCenter.y - (canvas.clientHeight / viewZoom / 2);
 
     const effectiveViewportWidth = canvas.clientWidth / viewZoom;
     const effectiveViewportHeight = canvas.clientHeight / viewZoom;
-    const maxPanX = Math.max(0, WORLD_WIDTH - effectiveViewportWidth);
-    const maxPanY = Math.max(0, WORLD_HEIGHT - effectiveViewportHeight);
+    const maxPanX = Math.max(0, config.WORLD_WIDTH - effectiveViewportWidth);
+    const maxPanY = Math.max(0, config.WORLD_HEIGHT - effectiveViewportHeight);
     viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
 
-    selectedInspectBody = creature;
-    selectedInspectPoint = creature.massPoints[0];
-    selectedInspectPointIndex = 0;
+    config.selectedInspectBody = creature;
+    config.selectedInspectPoint = creature.massPoints[0];
+    config.selectedInspectPointIndex = 0;
     updateInfoPanel();
 }
 
@@ -1784,6 +1773,76 @@ function handleNodeTypeLabelClick(nodeTypeName) {
         console.log(`No creatures found with node type ${getNodeTypeString(nodeType)}`);
         cyclingNodeType = null;
     }
+}
+
+function handleExportConfig() {
+    const exportedConfig = {};
+    for (const key in config) {
+        // Exclude non-serializable or state-related properties
+        if (typeof config[key] !== 'function' && key !== 'velocityEmitters' && key !== 'currentEmitterPreview' && key !== 'emitterDragStartCell' && key !== 'selectedInspectBody' && key !== 'selectedInspectPoint' && key !== 'selectedInspectPointIndex') {
+            exportedConfig[key] = config[key];
+        }
+    }
+    // Manually add velocityEmitters if needed, assuming it's an array of simple objects
+    exportedConfig.velocityEmitters = config.velocityEmitters;
+
+    const jsonString = JSON.stringify(exportedConfig, null, 2);
+    const blob = new Blob([jsonString], {type: "application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'sim_config.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    console.log("Config exported.");
+}
+
+function handleImportConfig(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const importedConfig = JSON.parse(e.target.result);
+            applyImportedConfig(importedConfig);
+            console.log("Config imported successfully.");
+        } catch (error) {
+            console.error("Error parsing imported config:", error);
+            showMessageModal("Failed to import config. Make sure it's a valid JSON file.");
+        }
+    };
+    reader.readAsText(file);
+    if (importConfigFile) importConfigFile.value = ''; // Clear file input
+}
+
+function applyImportedConfig(importedConfig) {
+    // Overwrite properties of the existing config object
+    for (const key in importedConfig) {
+        if (config.hasOwnProperty(key)) {
+            config[key] = importedConfig[key];
+        }
+    }
+
+    if (canvas) {
+        // These might not be in the config file, so we handle them separately
+        // Or better, ensure they are part of the export/import
+        config.WORLD_WIDTH = importedConfig.WORLD_WIDTH || config.WORLD_WIDTH;
+        config.WORLD_HEIGHT = importedConfig.WORLD_HEIGHT || config.WORLD_HEIGHT;
+    }
+    initializeSpatialGrid(); // This function now uses the config object
+
+    // Re-initialize things that depend on the new config
+    initializeAllSliderDisplays(); // This function should now be in ui.js and imported
+    initFluidSimulation(config.USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
+    initNutrientMap();
+    initLightMap();
+    initViscosityMap();
+    initParticles();
+    initializePopulation();
+    console.log("Applied imported config. Reset population if needed for full effect on creatures.");
 }
 
 exportCreatureButton.onclick = handleExportCreature;
@@ -1820,8 +1879,8 @@ function handleImportCreature(event) {
             const importedData = JSON.parse(e.target.result);
             // Basic validation
             if (importedData.version && importedData.blueprintPoints && importedData.blueprintSprings) {
-                IMPORTED_CREATURE_DATA = importedData;
-                IS_CREATURE_IMPORT_MODE = true;
+                config.IMPORTED_CREATURE_DATA = importedData;
+                config.IS_CREATURE_IMPORT_MODE = true;
                 creatureImportStatus.textContent = "Click to place creature. Right-click to cancel.";
                 canvas.style.cursor = 'copy';
                 console.log("Creature blueprint loaded. Awaiting placement.");
@@ -1832,8 +1891,8 @@ function handleImportCreature(event) {
             console.error("Error parsing imported creature blueprint:", error);
             showMessageModal("Failed to import creature. Make sure it's a valid blueprint JSON file.");
             creatureImportStatus.textContent = "";
-            IS_CREATURE_IMPORT_MODE = false;
-            IMPORTED_CREATURE_DATA = null;
+            config.IS_CREATURE_IMPORT_MODE = false;
+            config.IMPORTED_CREATURE_DATA = null;
         }
     };
     reader.readAsText(file);
@@ -1841,10 +1900,10 @@ function handleImportCreature(event) {
 }
 
 function placeImportedCreature(worldX, worldY) {
-    if (!IS_CREATURE_IMPORT_MODE || !IMPORTED_CREATURE_DATA) return;
+    if (!config.IS_CREATURE_IMPORT_MODE || !config.IMPORTED_CREATURE_DATA) return;
 
     try {
-        const newCreature = new SoftBody(nextSoftBodyId++, worldX, worldY, IMPORTED_CREATURE_DATA, true);
+        const newCreature = new SoftBody(nextSoftBodyId++, worldX, worldY, config.IMPORTED_CREATURE_DATA, true);
         softBodyPopulation.push(newCreature);
         console.log(`Placed imported creature with new ID ${newCreature.id} at (${worldX.toFixed(0)}, ${worldY.toFixed(0)}).`);
 
@@ -1853,9 +1912,24 @@ function placeImportedCreature(worldX, worldY) {
     } catch(error) {
         console.error("Error creating creature from imported data:", error);
         showMessageModal("An error occurred while creating the creature from the blueprint.");
-        IS_CREATURE_IMPORT_MODE = false;
-        IMPORTED_CREATURE_DATA = null;
+        config.IS_CREATURE_IMPORT_MODE = false;
+        config.IMPORTED_CREATURE_DATA = null;
         creatureImportStatus.textContent = "";
         canvas.style.cursor = 'default';
     }
 }
+
+let viewZoom = 1.0;
+let viewOffsetX = 0.0;
+let viewOffsetY = 0.0;
+
+export { 
+    canvas, webgpuCanvas, ctx, viewZoom, viewOffsetX, viewOffsetY, 
+    worldWidthInput, worldHeightInput, 
+    updateInstabilityIndicator, updatePopulationCount, updateStatsPanel, 
+    updateInfoPanel, copyInfoToClipboard, toggleInfoPanel, toggleStatsPanel, 
+    initializeAllSliderDisplays, handleExportConfig, handleImportConfig, applyImportedConfig,
+    handleExportCreature, handleImportCreature, placeImportedCreature,
+    updateMouse, getMouseWorldCoordinates,
+    mouse
+};

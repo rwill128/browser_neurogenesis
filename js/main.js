@@ -1,91 +1,86 @@
+import config from './config.js';
+import './classes/constants.js';
+import './classes/MassPoint.js';
+import './classes/Spring.js';
+import './classes/Brain.js';
+import './classes/SoftBody.js';
+import './classes/FluidField.js';
+import './classes/Particle.js';
+import { initializeSpatialGrid, initializePopulation, updatePhysics, initFluidSimulation, initParticles, initNutrientMap, initLightMap, initViscosityMap } from './simulation.js';
+import { 
+    canvas, webgpuCanvas, worldWidthInput, worldHeightInput,
+    updateInstabilityIndicator, initializeAllSliderDisplays, updatePopulationCount, updateStatsPanel, updateInfoPanel
+} from './ui.js';
+
 let lastTime = 0;
 let deltaTime = 0;
 let animationFrameId = null;
-let statsUpdateCounter = 0; // New counter for throttling stats update
-const STATS_UPDATE_INTERVAL = 60; // Update stats approx every 60 frames (e.g., once per second at 60fps)
-let frameTimeDisplayElement = null; // To store the DOM element
+let statsUpdateCounter = 0;
+const STATS_UPDATE_INTERVAL = 60;
+let frameTimeDisplayElement = null;
 let frameTimeAccumulator = 0;
 let frameCountForAvg = 0;
 
-// --- Main Initialization Sequence ---
 async function main() {
-    // console.log('[Initial Sim State] Before any setup:', {
-    //     WORLD_WIDTH_initial_input: worldWidthInput.value,
-    //     WORLD_HEIGHT_initial_input: worldHeightInput.value,
-    //     canvas_initial_W: canvas.width,
-    //     canvas_initial_H: canvas.height,
-    //     canvas_client_W: canvas.clientWidth,
-    //     canvas_client_H: canvas.clientHeight,
-    //     viewZoom_initial: viewZoom,
-    //     viewOffsetX_initial: viewOffsetX,
-    //     viewOffsetY_initial: viewOffsetY
-    // });
+    config.WORLD_WIDTH = parseInt(worldWidthInput.value) || 8000;
+    config.WORLD_HEIGHT = parseInt(worldHeightInput.value) || 6000;
+    canvas.width = 1920;
+    canvas.height = 1080;
 
-    // Initialize ALL global config variables with hardcoded defaults first
-    // This ensures they have a value even if JSON load fails or is incomplete.
-    // These are already defined in config.js, so ensure they are loaded before this script.
-    WORLD_WIDTH = parseInt(worldWidthInput.value) || 8000;
-    WORLD_HEIGHT = parseInt(worldHeightInput.value) || 6000;
-    canvas.width = 1920; // Set canvas internal size to fixed HD
-    canvas.height = 1080; // Set canvas internal size to fixed HD
+    config.GRID_COLS = Math.ceil(config.WORLD_WIDTH / config.GRID_CELL_SIZE);
+    config.GRID_ROWS = Math.ceil(config.WORLD_HEIGHT / config.GRID_CELL_SIZE);
 
-    // initializeDefaultSliderVariables(); // Removed - global vars in config.js are the defaults
-
-    INITIAL_POPULATION_SIZE = CREATURE_POPULATION_FLOOR; 
+    config.INITIAL_POPULATION_SIZE = config.CREATURE_POPULATION_FLOOR; 
 
     initializeSpatialGrid();
-    initializeAllSliderDisplays(); // Syncs HTML sliders with JS global defaults and updates display spans
-    await initFluidSimulation(USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
+    initializeAllSliderDisplays();
+    await initFluidSimulation(config.USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
     initNutrientMap(); 
     initLightMap(); 
     initViscosityMap(); 
     initParticles();
     initializePopulation();
     updateInstabilityIndicator();
-    lastTime = performance.now(); // Initialize lastTime before starting the loop
-    frameTimeDisplayElement = document.getElementById('frameTimeDisplay'); // Get the element
+    lastTime = performance.now();
+    frameTimeDisplayElement = document.getElementById('frameTimeDisplay');
     animationFrameId = requestAnimationFrame(gameLoop);
 }
 
-// --- Game Loop ---
 function gameLoop(timestamp) {
-    const loopStartTime = performance.now(); // Record start time of the loop
+    const loopStartTime = performance.now();
 
     deltaTime = (timestamp - lastTime) / 1000;
-    if (isNaN(deltaTime) || deltaTime <= 0) deltaTime = 1/60; // Ensure valid deltaTime
+    if (isNaN(deltaTime) || deltaTime <= 0) deltaTime = 1/60;
     lastTime = timestamp;
 
-    const currentMaxDeltaTime = MAX_DELTA_TIME_MS / 1000.0;
+    const currentMaxDeltaTime = config.MAX_DELTA_TIME_MS / 1000.0;
     const effectiveDeltaTime = Math.min(deltaTime, currentMaxDeltaTime);
 
-    if (!IS_SIMULATION_PAUSED) {
-        totalSimulationTime += effectiveDeltaTime;
+    if (!config.IS_SIMULATION_PAUSED) {
+        config.totalSimulationTime += effectiveDeltaTime;
 
-        // Calculate global nutrient multiplier
-        if (nutrientCyclePeriodSeconds > 0) {
-            globalNutrientMultiplier = nutrientCycleBaseAmplitude + nutrientCycleWaveAmplitude * Math.sin((totalSimulationTime * 2 * Math.PI) / nutrientCyclePeriodSeconds);
-            globalNutrientMultiplier = Math.max(0.01, globalNutrientMultiplier); 
+        if (config.nutrientCyclePeriodSeconds > 0) {
+            config.globalNutrientMultiplier = config.nutrientCycleBaseAmplitude + config.nutrientCycleWaveAmplitude * Math.sin((config.totalSimulationTime * 2 * Math.PI) / config.nutrientCyclePeriodSeconds);
+            config.globalNutrientMultiplier = Math.max(0.01, config.globalNutrientMultiplier); 
         } else {
-            globalNutrientMultiplier = nutrientCycleBaseAmplitude + nutrientCycleWaveAmplitude;
+            config.globalNutrientMultiplier = config.nutrientCycleBaseAmplitude + config.nutrientCycleWaveAmplitude;
         }
-        currentNutrientMultiplierDisplay.textContent = globalNutrientMultiplier.toFixed(2);
+        currentNutrientMultiplierDisplay.textContent = config.globalNutrientMultiplier.toFixed(2);
 
-        // Calculate global light multiplier
-        if (lightCyclePeriodSeconds > 0) {
-            globalLightMultiplier = (Math.sin((totalSimulationTime * 2 * Math.PI) / lightCyclePeriodSeconds) + 1) / 2; 
+        if (config.lightCyclePeriodSeconds > 0) {
+            config.globalLightMultiplier = (Math.sin((config.totalSimulationTime * 2 * Math.PI) / config.lightCyclePeriodSeconds) + 1) / 2; 
         } else {
-            globalLightMultiplier = 0.5; 
+            config.globalLightMultiplier = 0.5; 
         }
-        currentLightMultiplierDisplay.textContent = globalLightMultiplier.toFixed(2);
+        currentLightMultiplierDisplay.textContent = config.globalLightMultiplier.toFixed(2);
 
-        updatePhysics(effectiveDeltaTime); // Only update physics if not paused
+        updatePhysics(effectiveDeltaTime);
     }
 
-    if (!IS_HEADLESS_MODE) {
-        draw(); // Draw on every frame, unless in headless mode
+    if (!config.IS_HEADLESS_MODE) {
+        draw();
     }
 
-    // Update stats panel if open, but throttled
     statsUpdateCounter++;
     if (statsUpdateCounter >= STATS_UPDATE_INTERVAL) {
         if (statsPanel && statsPanel.classList.contains('open')) {
@@ -105,7 +100,7 @@ function gameLoop(timestamp) {
     frameTimeAccumulator += currentFrameDuration;
     frameCountForAvg++;
 
-    animationFrameId = requestAnimationFrame(gameLoop); // Keep the loop going
+    animationFrameId = requestAnimationFrame(gameLoop);
 }
 
 document.addEventListener('DOMContentLoaded', main);

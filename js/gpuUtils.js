@@ -127,3 +127,7 @@ function createProgram(gl, vertexShader, fragmentShader) {
     }
     return program;
 }
+
+export function isWebGpuSupported() {
+    return !!navigator.gpu;
+}

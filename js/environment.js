@@ -1,82 +1,10 @@
-let nutrientField = null;
-let lightField = null;
-let viscosityField = null;
-
-function initNutrientMap() {
-    const size = Math.round(FLUID_GRID_SIZE_CONTROL);
-    if (size <= 0 || !Number.isFinite(size)) {
-        console.error("Invalid size for nutrient map:", size);
-        nutrientField = new Float32Array(0); // Empty array if size is invalid
-        return;
-    }
-    // nutrientField = new Float32Array(size * size).fill(1.0); // Old: Default to 1.0 (neutral)
-    nutrientField = new Float32Array(size * size);
-    const noiseScale = 0.05; // Same scale as light map for consistency, can be different
-    const noiseOffsetX = Math.random() * 1000 + 1000; // Different random offset seed
-    const noiseOffsetY = Math.random() * 1000 + 1000; // Different random offset seed
-
-    for (let y = 0; y < size; y++) {
-        for (let x = 0; x < size; x++) {
-            let noiseValue = perlin.noise(x * noiseScale + noiseOffsetX, y * noiseScale + noiseOffsetY);
-            // Map Perlin noise (-1 to 1) to our desired nutrient range (MIN_NUTRIENT_VALUE to MAX_NUTRIENT_VALUE)
-            let mappedValue = ((noiseValue + 1) / 2) * (MAX_NUTRIENT_VALUE - MIN_NUTRIENT_VALUE) + MIN_NUTRIENT_VALUE;
-            nutrientField[y * size + x] = Math.max(MIN_NUTRIENT_VALUE, Math.min(MAX_NUTRIENT_VALUE, mappedValue));
-        }
-    }
-    console.log(`Nutrient map initialized to ${size}x${size} with Perlin noise pattern.`);
-}
-
-function initLightMap() {
-    const size = Math.round(FLUID_GRID_SIZE_CONTROL);
-    if (size <= 0 || !Number.isFinite(size)) {
-        console.error("Invalid size for light map:", size);
-        lightField = new Float32Array(0);
-        return;
-    }
-    lightField = new Float32Array(size * size);
-    const noiseScale = 0.05; // Adjust for patchiness; smaller = larger patches
-    const noiseOffsetX = Math.random() * 1000; 
-    const noiseOffsetY = Math.random() * 1000;
-
-    for (let y_coord = 0; y_coord < size; y_coord++) { 
-        for (let x = 0; x < size; x++) {
-            let noiseValue = perlin.noise(x * noiseScale + noiseOffsetX, y_coord * noiseScale + noiseOffsetY);
-            noiseValue = (noiseValue + 1) / 2; // Map to 0-1 range
-            lightField[y_coord * size + x] = Math.max(MIN_LIGHT_VALUE, Math.min(MAX_LIGHT_VALUE, noiseValue));
-        }
-    }
-    console.log(`Light map initialized to ${size}x${size} with Perlin noise pattern.`);
-}
-
-function initViscosityMap() {
-    const size = Math.round(FLUID_GRID_SIZE_CONTROL);
-    if (size <= 0 || !Number.isFinite(size)) {
-        console.error("Invalid size for viscosity map:", size);
-        viscosityField = new Float32Array(0);
-        return;
-    }
-    // viscosityField = new Float32Array(size * size).fill(1.0); // Old: Default to 1.0 (normal viscosity)
-    viscosityField = new Float32Array(size * size);
-    const noiseScale = 0.06; // Slightly different scale for variety, or keep same as others (0.05)
-    const noiseOffsetX = Math.random() * 1000 + 2000; // Different random offset seed
-    const noiseOffsetY = Math.random() * 1000 + 2000; // Different random offset seed
-
-    for (let y = 0; y < size; y++) {
-        for (let x = 0; x < size; x++) {
-            let noiseValue = perlin.noise(x * noiseScale + noiseOffsetX, y * noiseScale + noiseOffsetY);
-            // Map Perlin noise (-1 to 1) to our desired viscosity range 
-            let mappedValue = ((noiseValue + 1) / 2) * (MAX_VISCOSITY_MULTIPLIER - MIN_VISCOSITY_MULTIPLIER) + MIN_VISCOSITY_MULTIPLIER;
-            viscosityField[y * size + x] = Math.max(MIN_VISCOSITY_MULTIPLIER, Math.min(MAX_VISCOSITY_MULTIPLIER, mappedValue));
-        }
-    }
-    console.log(`Viscosity map initialized to ${size}x${size} with Perlin noise pattern.`);
-}
-
+import config from './config.js';
+import { nutrientField, lightField, viscosityField, fluidField } from './simulation.js';
 
 function paintNutrientBrush(worldX, worldY) {
-    if (!nutrientField || !fluidField || FLUID_GRID_SIZE_CONTROL <= 0) return;
+    if (!nutrientField || !fluidField || config.FLUID_GRID_SIZE_CONTROL <= 0) return;
 
-    const N = Math.round(FLUID_GRID_SIZE_CONTROL);
+    const N = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     const gridX = Math.floor(worldX / fluidField.scaleX);
     const gridY = Math.floor(worldY / fluidField.scaleY);
     const brushRadius = Math.floor(NUTRIENT_BRUSH_SIZE / 2);
@@ -105,9 +33,9 @@ function paintNutrientBrush(worldX, worldY) {
 }
 
 function paintLightBrush(worldX, worldY) {
-    if (!lightField || !fluidField || FLUID_GRID_SIZE_CONTROL <= 0) return;
+    if (!lightField || !fluidField || config.FLUID_GRID_SIZE_CONTROL <= 0) return;
 
-    const N = Math.round(FLUID_GRID_SIZE_CONTROL);
+    const N = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     const gridX = Math.floor(worldX / fluidField.scaleX);
     const gridY = Math.floor(worldY / fluidField.scaleY);
     const brushRadius = Math.floor(LIGHT_BRUSH_SIZE / 2);
@@ -131,8 +59,8 @@ function paintLightBrush(worldX, worldY) {
 }
 
 function paintViscosityBrush(worldX, worldY) {
-    if (!viscosityField || !fluidField || FLUID_GRID_SIZE_CONTROL <= 0) return;
-    const N = Math.round(FLUID_GRID_SIZE_CONTROL);
+    if (!viscosityField || !fluidField || config.FLUID_GRID_SIZE_CONTROL <= 0) return;
+    const N = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     const gridX = Math.floor(worldX / fluidField.scaleX);
     const gridY = Math.floor(worldY / fluidField.scaleY);
     const brushRadius = Math.floor(VISCOSITY_BRUSH_SIZE / 2);
@@ -155,9 +83,9 @@ function paintViscosityBrush(worldX, worldY) {
 
 // --- Drawing ---
 function drawNutrientMap(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight, viewOffsetXWorld, viewOffsetYWorld, currentZoom) {
-    if (!SHOW_NUTRIENT_MAP || !nutrientField || !fluidField) return;
+    if (!config.SHOW_NUTRIENT_MAP || !nutrientField || !fluidField) return;
 
-    const N = Math.round(FLUID_GRID_SIZE_CONTROL);
+    const N = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     if (N <= 0) return;
 
     const worldCellWidth = WORLD_WIDTH / N;
@@ -176,7 +104,7 @@ function drawNutrientMap(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight,
     for (let j = startRow; j <= endRow; j++) {
         for (let i = startCol; i <= endCol; i++) {
             const baseNutrientValue = nutrientField[fluidField.IX(i, j)]; 
-            const effectiveNutrientValue = baseNutrientValue * globalNutrientMultiplier;
+            const effectiveNutrientValue = baseNutrientValue * config.globalNutrientMultiplier;
             let r = 0, g = 0, b = 0, a = 0;
 
             if (effectiveNutrientValue < 1.0) { // Desert-like
@@ -203,9 +131,9 @@ function drawNutrientMap(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight,
 }
 
 function drawLightMap(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight, viewOffsetXWorld, viewOffsetYWorld, currentZoom) {
-    if (!SHOW_LIGHT_MAP || !lightField || !fluidField) return;
+    if (!config.SHOW_LIGHT_MAP || !lightField || !fluidField) return;
 
-    const N = Math.round(FLUID_GRID_SIZE_CONTROL);
+    const N = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     if (N <= 0) return;
 
     const worldCellWidth = WORLD_WIDTH / N;
@@ -224,7 +152,7 @@ function drawLightMap(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight, vi
     for (let j = startRow; j <= endRow; j++) {
         for (let i = startCol; i <= endCol; i++) {
             const baseLightValue = lightField[fluidField.IX(i, j)]; 
-            const effectiveLightValue = baseLightValue * globalLightMultiplier;
+            const effectiveLightValue = baseLightValue * config.globalLightMultiplier;
             const intensity = Math.floor(effectiveLightValue * 200); 
             const bluePart = Math.floor((1 - effectiveLightValue) * 50); 
             const alpha = effectiveLightValue * 0.15 + (1 - effectiveLightValue) * 0.05; 
@@ -240,8 +168,8 @@ function drawLightMap(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight, vi
 }
 
 function drawViscosityMap(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight, viewOffsetXWorld, viewOffsetYWorld, currentZoom) {
-    if (!SHOW_VISCOSITY_MAP || !viscosityField || !fluidField) return;
-    const N = Math.round(FLUID_GRID_SIZE_CONTROL);
+    if (!config.SHOW_VISCOSITY_MAP || !viscosityField || !fluidField) return;
+    const N = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     if (N <= 0) return;
     const worldCellWidth = WORLD_WIDTH / N;
     const worldCellHeight = WORLD_HEIGHT / N;

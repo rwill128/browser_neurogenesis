@@ -173,32 +173,43 @@ const PerlinNoise = function() {
                                          this.grad(this.p[B+1], x-1,y_param-1)));
     }
 };
+
 const perlin = new PerlinNoise(); // Instantiate it
 
-
 function getNodeTypeString(nodeType) {
-    switch(nodeType) {
-        case NodeType.PREDATOR: return "Predator";
-        case NodeType.EATER: return "Eater";
-        case NodeType.PHOTOSYNTHETIC: return "Photosynthetic";
-        case NodeType.NEURON: return "Neuron";
-        case NodeType.EMITTER: return "Emitter (Dye)";
-        case NodeType.SWIMMER: return "Swimmer (Propulsion)";
-        case NodeType.EYE: return "Eye (Particle Detector)";
-        case NodeType.JET: return "Jet (Fluid Propulsion)";
-        case NodeType.ATTRACTOR: return "Attractor";
-        case NodeType.REPULSOR: return "Repulsor";
-        default: return "Unknown_NodeType";
+    for (const key in NodeType) {
+        if (NodeType[key] === nodeType) {
+            return key;
+        }
     }
+    return "Unknown";
+}
+
+function getRewardStrategyString(strategy) {
+    for (const key in RLRewardStrategy) {
+        if (RLRewardStrategy[key] === strategy) {
+            return key;
+        }
+    }
+    return "Unknown";
+}
+
+function getEyeTargetTypeString(targetType) {
+    for (const key in EyeTargetType) {
+        if (EyeTargetType[key] === targetType) {
+            return key;
+        }
+    }
+    return "Unknown";
 }
 
 function getMovementTypeString(movementType) {
-    switch(movementType) {
-        case MovementType.FIXED: return "Fixed";
-        case MovementType.FLOATING: return "Floating";
-        case MovementType.NEUTRAL: return "Neutral";
-        default: return "Unknown_MovementType";
+    for (const key in MovementType) {
+        if (MovementType[key] === movementType) {
+            return key;
+        }
     }
+    return "Unknown";
 }
 
 function getSensedChannelString(channelId) {
@@ -208,53 +219,6 @@ function getSensedChannelString(channelId) {
         case DyeChannel.BLUE: return "Blue";
         case DyeChannel.AVERAGE: return "Average Intensity";
         default: return "Unknown";
-    }
-}
-
-function getRewardStrategyString(strategy) {
-    switch(strategy) {
-        case RLRewardStrategy.ENERGY_CHANGE: return "Energy Change";
-        case RLRewardStrategy.REPRODUCTION_EVENT: return "Reproduction Event";
-        case RLRewardStrategy.PARTICLE_PROXIMITY: return "Particle Proximity";
-        case RLRewardStrategy.ENERGY_SECOND_DERIVATIVE: return "Energy Change Rate Change";
-        case RLRewardStrategy.CREATURE_PROXIMITY: return "Creature Proximity";
-        case RLRewardStrategy.CREATURE_DISTANCE: return "Creature Distance";
-        case RLRewardStrategy.SENSED_DYE_R: return "Sensed Dye (Red)";
-        case RLRewardStrategy.SENSED_DYE_R_INV: return "Avoid Dye (Red)";
-        case RLRewardStrategy.SENSED_DYE_G: return "Sensed Dye (Green)";
-        case RLRewardStrategy.SENSED_DYE_G_INV: return "Avoid Dye (Green)";
-        case RLRewardStrategy.SENSED_DYE_B: return "Sensed Dye (Blue)";
-        case RLRewardStrategy.SENSED_DYE_B_INV: return "Avoid Dye (Blue)";
-        case RLRewardStrategy.ENERGY_RATIO: return "High Energy Ratio";
-        case RLRewardStrategy.ENERGY_RATIO_INV: return "Low Energy Ratio";
-        case RLRewardStrategy.REL_COM_POS_X_POS: return "CoM Right of Brain";
-        case RLRewardStrategy.REL_COM_POS_X_NEG: return "CoM Left of Brain";
-        case RLRewardStrategy.REL_COM_POS_Y_POS: return "CoM Below Brain";
-        case RLRewardStrategy.REL_COM_POS_Y_NEG: return "CoM Above Brain";
-        case RLRewardStrategy.REL_COM_VEL_X_POS: return "CoM Velocity Right";
-        case RLRewardStrategy.REL_COM_VEL_X_NEG: return "CoM Velocity Left";
-        case RLRewardStrategy.REL_COM_VEL_Y_POS: return "CoM Velocity Down";
-        case RLRewardStrategy.REL_COM_VEL_Y_NEG: return "CoM Velocity Up";
-        case RLRewardStrategy.SENSED_NUTRIENT: return "High Nutrients";
-        case RLRewardStrategy.SENSED_NUTRIENT_INV: return "Low Nutrients";
-        case RLRewardStrategy.AVG_SPRING_COMPRESSION: return "Springs Compressed";
-        case RLRewardStrategy.AVG_SPRING_EXTENSION: return "Springs Extended";
-        case RLRewardStrategy.AVG_FLUID_VEL_X_POS: return "In Rightward Fluid";
-        case RLRewardStrategy.AVG_FLUID_VEL_X_NEG: return "In Leftward Fluid";
-        case RLRewardStrategy.AVG_FLUID_VEL_Y_POS: return "In Downward Fluid";
-        case RLRewardStrategy.AVG_FLUID_VEL_Y_NEG: return "In Upward Fluid";
-        case RLRewardStrategy.EYE_SEES_TARGET: return "Eye Sees Target";
-        case RLRewardStrategy.EYE_TARGET_PROXIMITY: return "Eye Near Target";
-        case RLRewardStrategy.EYE_TARGET_DISTANCE: return "Eye Far From Target";
-        default: return "Unknown_Strategy";
-    }
-}
-
-function getEyeTargetTypeString(eyeTargetType) {
-    switch(eyeTargetType) {
-        case EyeTargetType.PARTICLE: return "Particle";
-        case EyeTargetType.FOREIGN_BODY_POINT: return "Foreign Body Point";
-        default: return "Unknown_EyeTargetType";
     }
 }
 
@@ -313,4 +277,6 @@ function reflectPointAcrossLine(P, L1, L2) {
     const reflectedY = 2 * My - P.y;
 
     return new Vec2(reflectedX, reflectedY);
-} 
+}
+
+export { perlin, getNodeTypeString, getRewardStrategyString, getEyeTargetTypeString, getMovementTypeString, sampleGaussian, logPdfGaussian, sigmoid, initializeMatrix, initializeVector, multiplyMatrixVector, addVectors, convexHull }; 

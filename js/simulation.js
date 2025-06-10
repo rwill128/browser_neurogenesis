@@ -121,8 +121,6 @@ function updateSpatialGrid() {
 // --- Simulation Setup ---
 function initializePopulation() {
     softBodyPopulation = [];
-    isAnySoftBodyUnstable = false;
-    updateInstabilityIndicator();
     nextSoftBodyId = 0;
 
     for (let i = 0; i < config.CREATURE_POPULATION_FLOOR; i++) { // Use floor for initial pop
@@ -131,8 +129,8 @@ function initializePopulation() {
         const randY = margin + Math.random() * (config.WORLD_HEIGHT - margin * 2);
         softBodyPopulation.push(new SoftBody(nextSoftBodyId++, randX, randY, null));
     }
-    // lastTime = performance.now(); // This will be handled in main.js
-    updatePopulationCount();
+    config.isAnySoftBodyUnstable = false; // Reset the flag
+    console.log(`Initialized population with ${softBodyPopulation.length} creatures.`);
 }
 
 
@@ -263,7 +261,7 @@ function updatePhysics(dt) {
         fluidField.step();
     }
 
-    canCreaturesReproduceGlobally = softBodyPopulation.length < config.CREATURE_POPULATION_CEILING;
+    let canCreaturesReproduceGlobally = softBodyPopulation.length < config.CREATURE_POPULATION_CEILING;
 
     let currentAnyUnstable = false;
     let newOffspring = [];
@@ -294,10 +292,10 @@ function updatePhysics(dt) {
         }
     }
 
-    if(currentAnyUnstable && !isAnySoftBodyUnstable) {
-        isAnySoftBodyUnstable = true;
-    } else if (!currentAnyUnstable && isAnySoftBodyUnstable && !softBodyPopulation.some(b => b.isUnstable)) {
-        isAnySoftBodyUnstable = false;
+    if(currentAnyUnstable && !config.isAnySoftBodyUnstable) {
+        config.isAnySoftBodyUnstable = true;
+    } else if (!currentAnyUnstable && config.isAnySoftBodyUnstable && !softBodyPopulation.some(b => b.isUnstable)) {
+        config.isAnySoftBodyUnstable = false;
     }
     updateInstabilityIndicator();
 

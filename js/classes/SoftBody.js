@@ -1,3 +1,6 @@
+import config from '../config.js';
+import { Vec2 } from '../utils.js';
+
 // --- SoftBody Class ---
 export class SoftBody {
     constructor(id, initialX, initialY, creationData = null, isBlueprint = false) {
@@ -33,7 +36,7 @@ export class SoftBody {
         this.energyCostFromAttractorNodes = 0;
         this.energyCostFromRepulsorNodes = 0;
 
-        this.currentMaxEnergy = BASE_MAX_CREATURE_ENERGY; // Initial placeholder
+        this.currentMaxEnergy = config.BASE_MAX_CREATURE_ENERGY; // Initial placeholder
         this.blueprintRadius = 0; // New: Approximate radius based on blueprint points
 
         // Node counts for brain initialization optimization

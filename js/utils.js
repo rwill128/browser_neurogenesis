@@ -111,39 +111,6 @@ function addVectors(vectorA, vectorB) {
     return result;
 }
 
-// --- Vector2D Class ---
-class Vec2 {
-    constructor(x = 0, y = 0) { this.x = x; this.y = y; }
-
-    // In-place operations
-    addInPlace(other) { this.x += other.x; this.y += other.y; return this; }
-    subInPlace(other) { this.x -= other.x; this.y -= other.y; return this; }
-    mulInPlace(scalar) { this.x *= scalar; this.y *= scalar; return this; }
-    divInPlace(scalar) { if (scalar !== 0) { this.x /= scalar; this.y /= scalar; } else { this.x = 0; this.y = 0; } return this; }
-    normalizeInPlace() { 
-        const m = this.mag(); 
-        if (m > 0) { 
-            this.divInPlace(m); 
-        } else {
-            this.x = 0; // Avoid NaN, provide a zero vector if magnitude is zero
-            this.y = 0;
-        }
-        return this; 
-    }
-    copyFrom(other) { this.x = other.x; this.y = other.y; return this; }
-
-    // Original operations that return new Vec2
-    add(other) { return new Vec2(this.x + other.x, this.y + other.y); }
-    sub(other) { return new Vec2(this.x - other.x, this.y - other.y); }
-    mul(scalar) { return new Vec2(this.x * scalar, this.y * scalar); }
-    div(scalar) { return scalar !== 0 ? new Vec2(this.x / scalar, this.y / scalar) : new Vec2(); }
-    mag() { return Math.sqrt(this.x * this.x + this.y * this.y); }
-    magSq() { return this.x * this.x + this.y * this.y; }
-    normalize() { const m = this.mag(); return m > 0 ? this.div(m) : new Vec2(); }
-    static dot(v1, v2) { return v1.x * v2.x + v1.y * v2.y; }
-    clone() { return new Vec2(this.x, this.y); }
-}
-
 // Simple Perlin Noise placeholder
 const PerlinNoise = function() {
     this.p = new Uint8Array(512);
@@ -277,6 +244,42 @@ function reflectPointAcrossLine(P, L1, L2) {
     const reflectedY = 2 * My - P.y;
 
     return new Vec2(reflectedX, reflectedY);
+}
+
+// Simple vector class
+export class Vec2 {
+    constructor(x = 0, y = 0) {
+        this.x = x;
+        this.y = y;
+    }
+
+    // In-place operations
+    addInPlace(other) { this.x += other.x; this.y += other.y; return this; }
+    subInPlace(other) { this.x -= other.x; this.y -= other.y; return this; }
+    mulInPlace(scalar) { this.x *= scalar; this.y *= scalar; return this; }
+    divInPlace(scalar) { if (scalar !== 0) { this.x /= scalar; this.y /= scalar; } else { this.x = 0; this.y = 0; } return this; }
+    normalizeInPlace() {
+        const m = this.mag();
+        if (m > 0) {
+            this.divInPlace(m);
+        } else {
+            this.x = 0; // Avoid NaN, provide a zero vector if magnitude is zero
+            this.y = 0;
+        }
+        return this;
+    }
+    copyFrom(other) { this.x = other.x; this.y = other.y; return this; }
+
+    // Original operations that return new Vec2
+    add(other) { return new Vec2(this.x + other.x, this.y + other.y); }
+    sub(other) { return new Vec2(this.x - other.x, this.y - other.y); }
+    mul(scalar) { return new Vec2(this.x * scalar, this.y * scalar); }
+    div(scalar) { return scalar !== 0 ? new Vec2(this.x / scalar, this.y / scalar) : new Vec2(); }
+    mag() { return Math.sqrt(this.x * this.x + this.y * this.y); }
+    magSq() { return this.x * this.x + this.y * this.y; }
+    normalize() { const m = this.mag(); return m > 0 ? this.div(m) : new Vec2(); }
+    static dot(v1, v2) { return v1.x * v2.x + v1.y * v2.y; }
+    clone() { return new Vec2(this.x, this.y); }
 }
 
 export { perlin, getNodeTypeString, getRewardStrategyString, getEyeTargetTypeString, getMovementTypeString, sampleGaussian, logPdfGaussian, sigmoid, initializeMatrix, initializeVector, multiplyMatrixVector, addVectors, convexHull }; 

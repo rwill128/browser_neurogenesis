@@ -1,4 +1,5 @@
 import config from '../config.js';
+import { Vec2 } from "../utils.js";
 
 // --- MassPoint Class (Soft Body with Verlet Integration) ---
 export class MassPoint {

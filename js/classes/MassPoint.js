@@ -1,5 +1,6 @@
 import config from '../config.js';
 import { Vec2 } from "../utils.js";
+import {EyeTargetType, MovementType, NodeType} from "./constants.js";
 
 // --- MassPoint Class (Soft Body with Verlet Integration) ---
 export class MassPoint {

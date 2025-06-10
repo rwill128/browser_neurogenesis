@@ -1,4 +1,4 @@
-const NodeType = {
+export const NodeType = {
     PREDATOR: 0,
     EATER: 1,
     PHOTOSYNTHETIC: 2,
@@ -12,7 +12,7 @@ const NodeType = {
     // Old types like NEUTRAL, FLOATING, FIXED_ROOT, EMITTER_SWIMMER are removed
 };
 
-const RLRewardStrategy = {
+export const RLRewardStrategy = {
     ENERGY_CHANGE: 0,
     REPRODUCTION_EVENT: 1,
     PARTICLE_PROXIMITY: 2,
@@ -49,17 +49,17 @@ const RLRewardStrategy = {
     EYE_TARGET_DISTANCE: 32,
 };
 
-const RLAlgorithmType = {
+export const RLAlgorithmType = {
     REINFORCE: 0, // Your current policy gradient
     SAC: 1        // Soft Actor-Critic
 };
 
-const EyeTargetType = {
+export const EyeTargetType = {
     PARTICLE: 0,
     FOREIGN_BODY_POINT: 1
 };
 
-const MovementType = {
+export const MovementType = {
     FIXED: 0,    // Fixed in place, does not interact with fluid velocity but can affect it (if Swimmer)
     FLOATING: 1, // Pushed by fluid, cannot be a Swimmer
     NEUTRAL: 2   // Standard soft body physics, only interacts with fluid if Swimmer (by pushing it)

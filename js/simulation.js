@@ -237,9 +237,9 @@ function updatePhysics(dt) {
     } // If particles.length >= PARTICLE_POPULATION_CEILING, do nothing for rate-based emission
 
 
-    if (selectedSoftBodyPoint && selectedSoftBodyPoint.point.isFixed && fluidField) {
-        const activeBody = selectedSoftBodyPoint.body;
-        const point = selectedSoftBodyPoint.point;
+    if (config.selectedSoftBodyPoint && config.selectedSoftBodyPoint.point.isFixed && fluidField) {
+        const activeBody = config.selectedSoftBodyPoint.body;
+        const point = config.selectedSoftBodyPoint.point;
         const displacementX = point.pos.x - point.prevPos.x;
         const displacementY = point.pos.y - point.prevPos.y;
         const movementMagnitudeSq = displacementX*displacementX + displacementY*displacementY;

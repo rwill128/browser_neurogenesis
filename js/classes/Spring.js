@@ -1,4 +1,5 @@
 import config from '../config.js';
+import {Vec2} from "../utils.js";
 
 // --- Spring Class (Soft Body) ---
 export class Spring {

@@ -1,4 +1,8 @@
-class Brain {
+import {NodeType} from "./constants.js";
+import config from '../config.js';
+import {addVectors, initializeMatrix, initializeVector, multiplyMatrixVector} from "../utils.js";
+
+export class Brain {
     constructor(softBody) {
         this.softBody = softBody;
         this.brainNode = null;
@@ -31,7 +35,7 @@ class Brain {
                 if (point.nodeType === NodeType.NEURON) {
                     if (!point.neuronData) { // Ensure neuronData exists
                         point.neuronData = {
-                            hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
+                            hiddenLayerSize: config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MAX - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
                         };
                     }
                     point.neuronData.isBrain = true;
@@ -63,26 +67,26 @@ class Brain {
         const numAttractorPoints = softBody.numAttractorNodes;
         const numRepulsorPoints = softBody.numRepulsorNodes;
 
-        nd.inputVectorSize = NEURAL_INPUT_SIZE_BASE +
-                             (numEyeNodes * NEURAL_INPUTS_PER_EYE) +
-                             (numSwimmerPoints * NEURAL_INPUTS_PER_FLUID_SENSOR) +
-                             (numJetNodes * NEURAL_INPUTS_PER_FLUID_SENSOR) +
-                             (softBody.springs.length * NEURAL_INPUTS_PER_SPRING_SENSOR);
+        nd.inputVectorSize = config.NEURAL_INPUT_SIZE_BASE +
+                             (numEyeNodes * config.NEURAL_INPUTS_PER_EYE) +
+                             (numSwimmerPoints * config.NEURAL_INPUTS_PER_FLUID_SENSOR) +
+                             (numJetNodes * config.NEURAL_INPUTS_PER_FLUID_SENSOR) +
+                             (softBody.springs.length * config.NEURAL_INPUTS_PER_SPRING_SENSOR);
 
-        nd.outputVectorSize = (numEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
-                              (numSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
-                              (numEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
-                              (numPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
-                              (numJetNodes * NEURAL_OUTPUTS_PER_JET) +
-                              (numPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) +
-                              (numAttractorPoints * NEURAL_OUTPUTS_PER_ATTRACTOR) +
-                              (numRepulsorPoints * NEURAL_OUTPUTS_PER_REPULSOR);
+        nd.outputVectorSize = (numEmitterPoints * config.NEURAL_OUTPUTS_PER_EMITTER) +
+                              (numSwimmerPoints * config.NEURAL_OUTPUTS_PER_SWIMMER) +
+                              (numEaterPoints * config.NEURAL_OUTPUTS_PER_EATER) +
+                              (numPredatorPoints * config.NEURAL_OUTPUTS_PER_PREDATOR) +
+                              (numJetNodes * config.NEURAL_OUTPUTS_PER_JET) +
+                              (numPotentialGrabberPoints * config.NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) +
+                              (numAttractorPoints * config.NEURAL_OUTPUTS_PER_ATTRACTOR) +
+                              (numRepulsorPoints * config.NEURAL_OUTPUTS_PER_REPULSOR);
     }
 
     _initializeBrainWeightsAndBiases() {
         const nd = this.brainNode.neuronData;
-        if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < DEFAULT_HIDDEN_LAYER_SIZE_MIN || nd.hiddenLayerSize > DEFAULT_HIDDEN_LAYER_SIZE_MAX) {
-            nd.hiddenLayerSize = DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1));
+        if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < config.DEFAULT_HIDDEN_LAYER_SIZE_MIN || nd.hiddenLayerSize > config.DEFAULT_HIDDEN_LAYER_SIZE_MAX) {
+            nd.hiddenLayerSize = config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.config.DEFAULT_HIDDEN_LAYER_SIZE_MAX - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1));
         }
 
         if (!nd.weightsIH || nd.weightsIH.length !== nd.hiddenLayerSize || (nd.weightsIH.length > 0 && nd.weightsIH[0].length !== nd.inputVectorSize) ) {
@@ -170,8 +174,8 @@ class Brain {
         nd.currentFrameInputVectorWithLabels.push({ label: 'Relative CoM Pos Y', value: Math.tanh(relComPosY) });
 
         const comVel = softBody.getAverageVelocity();
-        const normComVelX = Math.tanh(comVel.x / MAX_PIXELS_PER_FRAME_DISPLACEMENT);
-        const normComVelY = Math.tanh(comVel.y / MAX_PIXELS_PER_FRAME_DISPLACEMENT);
+        const normComVelX = Math.tanh(comVel.x / config.MAX_PIXELS_PER_FRAME_DISPLACEMENT);
+        const normComVelY = Math.tanh(comVel.y / config.MAX_PIXELS_PER_FRAME_DISPLACEMENT);
         inputVector.push(normComVelX);
         inputVector.push(normComVelY);
         nd.currentFrameInputVectorWithLabels.push({ label: 'CoM Vel X', value: normComVelX });
@@ -182,7 +186,7 @@ class Brain {
             const brainGy = Math.floor(this.brainNode.pos.y / fluidFieldRef.scaleY);
             const nutrientIdx = fluidFieldRef.IX(brainGx, brainGy);
             const currentNutrient = nutrientField[nutrientIdx] !== undefined ? nutrientField[nutrientIdx] : 1.0;
-            const normalizedNutrient = (currentNutrient - MIN_NUTRIENT_VALUE) / (MAX_NUTRIENT_VALUE - MIN_NUTRIENT_VALUE);
+            const normalizedNutrient = (currentNutrient - config.MIN_NUTRIENT_VALUE) / (config.MAX_NUTRIENT_VALUE - config.MIN_NUTRIENT_VALUE);
             const finalNutrientVal = Math.max(0, Math.min(1, normalizedNutrient));
             inputVector.push(finalNutrientVal);
             nd.currentFrameInputVectorWithLabels.push({ label: 'Nutrient @Brain', value: finalNutrientVal });
@@ -267,14 +271,14 @@ class Brain {
             if (p.canBeGrabber) currentNumPotentialGrabberPoints++;
         });
 
-        const recalculatedOutputVectorSize = (currentNumEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
-                                           (currentNumSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
-                                           (currentNumEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
-                                           (currentNumPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
-                                           (currentNumJetPoints * NEURAL_OUTPUTS_PER_JET) +
-                                           (currentNumPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) +
-                                           (currentNumAttractorPoints * NEURAL_OUTPUTS_PER_ATTRACTOR) +
-                                           (currentNumRepulsorPoints * NEURAL_OUTPUTS_PER_REPULSOR);
+        const recalculatedOutputVectorSize = (currentNumEmitterPoints * config.NEURAL_OUTPUTS_PER_EMITTER) +
+                                           (currentNumSwimmerPoints * config.NEURAL_OUTPUTS_PER_SWIMMER) +
+                                           (currentNumEaterPoints * config.NEURAL_OUTPUTS_PER_EATER) +
+                                           (currentNumPredatorPoints * config.NEURAL_OUTPUTS_PER_PREDATOR) +
+                                           (currentNumJetPoints * config.NEURAL_OUTPUTS_PER_JET) +
+                                           (currentNumPotentialGrabberPoints * config.NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) +
+                                           (currentNumAttractorPoints * config.NEURAL_OUTPUTS_PER_ATTRACTOR) +
+                                           (currentNumRepulsorPoints * config.NEURAL_OUTPUTS_PER_REPULSOR);
 
         if (nd.outputVectorSize !== recalculatedOutputVectorSize) {
             // console.warn(`Body ${softBody.id} _applyBrainActionsToPoints: MISMATCH between stored nd.outputVectorSize (${nd.outputVectorSize}) and recalculatedOutputVectorSize (${recalculatedOutputVectorSize}) based on current points.`);
@@ -294,7 +298,7 @@ class Brain {
         softBody.massPoints.forEach((point, pointIndex) => {
             if (point.nodeType === NodeType.EMITTER) {
                 const outputStartRawIdx = currentRawOutputIndex;
-                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_EMITTER) {
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_EMITTER) {
                     const detailsForThisEmitter = [];
                     let localPairIdx = 0;
                     for (let i = 0; i < 3; i++) {
@@ -309,9 +313,9 @@ class Brain {
                     detailsForThisEmitter.push(exertionRes.detail);
                     point.currentExertionLevel = sigmoid(exertionRes.value);
                     nd.currentFrameActionDetails.push(...detailsForThisEmitter);
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_EMITTER;
                 } else {
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_EMITTER;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_EMITTER;
                 }
             }
         });
@@ -319,7 +323,7 @@ class Brain {
         softBody.massPoints.forEach((point, pointIndex) => {
             if (point.nodeType === NodeType.SWIMMER) {
                 const outputStartRawIdx = currentRawOutputIndex;
-                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_SWIMMER) {
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_SWIMMER) {
                     const detailsForThisSwimmer = [];
                     let localPairIdx = 0;
 
@@ -341,9 +345,9 @@ class Brain {
                     
                     point.applyForce(new Vec2(appliedForceX / dt, appliedForceY / dt));
                     nd.currentFrameActionDetails.push(...detailsForThisSwimmer);
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_SWIMMER;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_SWIMMER;
                 } else {
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_SWIMMER;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_SWIMMER;
                 }
             }
         });
@@ -351,16 +355,16 @@ class Brain {
         softBody.massPoints.forEach((point, pointIndex) => {
             if (point.nodeType === NodeType.EATER) {
                 const outputStartRawIdx = currentRawOutputIndex;
-                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_EATER) {
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_EATER) {
                     const details = [];
                     const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
                     exertionRes.detail.label = `Eater @P${pointIndex} Exertion`;
                     details.push(exertionRes.detail);
                     point.currentExertionLevel = sigmoid(exertionRes.value);
                     nd.currentFrameActionDetails.push(...details);
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_EATER;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_EATER;
                 } else {
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_EATER;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_EATER;
                 }
             }
         });
@@ -368,16 +372,16 @@ class Brain {
         softBody.massPoints.forEach((point, pointIndex) => {
             if (point.nodeType === NodeType.PREDATOR) {
                 const outputStartRawIdx = currentRawOutputIndex;
-                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_PREDATOR) {
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_PREDATOR) {
                     const details = [];
                     const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
                     exertionRes.detail.label = `Predator @P${pointIndex} Exertion`;
                     details.push(exertionRes.detail);
                     point.currentExertionLevel = sigmoid(exertionRes.value);
                     nd.currentFrameActionDetails.push(...details);
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_PREDATOR;
                 } else {
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_PREDATOR;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_PREDATOR;
                 }
             }
         });
@@ -385,7 +389,7 @@ class Brain {
         softBody.massPoints.forEach((point, pointIndex) => {
             if (point.nodeType === NodeType.JET) {
                 const outputStartRawIdx = currentRawOutputIndex;
-                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_JET) {
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_JET) {
                     const detailsForThisJet = [];
                     let localPairIdx = 0;
 
@@ -404,9 +408,9 @@ class Brain {
                     point.jetData.currentAngle = angle;
 
                     nd.currentFrameActionDetails.push(...detailsForThisJet);
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_JET;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_JET;
                 } else {
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_JET;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_JET;
                 }
             }
         });
@@ -414,16 +418,16 @@ class Brain {
         softBody.massPoints.forEach((point, pointIndex) => {
             if (point.nodeType === NodeType.ATTRACTOR) {
                 const outputStartRawIdx = currentRawOutputIndex;
-                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_ATTRACTOR) {
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_ATTRACTOR) {
                     const details = [];
                     const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
                     exertionRes.detail.label = `Attractor @P${pointIndex} Exertion`;
                     details.push(exertionRes.detail);
                     point.currentExertionLevel = sigmoid(exertionRes.value);
                     nd.currentFrameActionDetails.push(...details);
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_ATTRACTOR;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_ATTRACTOR;
                 } else {
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_ATTRACTOR;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_ATTRACTOR;
                 }
             }
         });
@@ -431,16 +435,16 @@ class Brain {
         softBody.massPoints.forEach((point, pointIndex) => {
             if (point.nodeType === NodeType.REPULSOR) {
                 const outputStartRawIdx = currentRawOutputIndex;
-                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_REPULSOR) {
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_REPULSOR) {
                     const details = [];
                     const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
                     exertionRes.detail.label = `Repulsor @P${pointIndex} Exertion`;
                     details.push(exertionRes.detail);
                     point.currentExertionLevel = sigmoid(exertionRes.value);
                     nd.currentFrameActionDetails.push(...details);
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_REPULSOR;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_REPULSOR;
                 } else {
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_REPULSOR;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_REPULSOR;
                 }
             }
         });
@@ -448,7 +452,7 @@ class Brain {
         softBody.massPoints.forEach((point, pointIndex) => {
             if (point.canBeGrabber) {
                 const outputStartRawIdx = currentRawOutputIndex;
-                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) {
+                if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) {
                     const detailsForThisGrab = [];
                     const grabToggleResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
                     grabToggleResult.detail.label = `Grabber @P${pointIndex} Toggle`;
@@ -456,9 +460,9 @@ class Brain {
                     point.isGrabbing = sigmoid(grabToggleResult.value) > 0.5;
                     
                     nd.currentFrameActionDetails.push(...detailsForThisGrab);
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
                 } else {
-                    currentRawOutputIndex += NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
+                    currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
                 }
             }
         });

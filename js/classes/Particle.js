@@ -1,4 +1,5 @@
 import config from '../config.js';
+import {Vec2} from "../utils.js";
 
 // --- Particle Class (for fluid visualization) ---
 export class Particle {

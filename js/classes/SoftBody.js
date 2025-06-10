@@ -1,5 +1,9 @@
 import config from '../config.js';
 import { Vec2 } from '../utils.js';
+import { NodeType, RLRewardStrategy, RLAlgorithmType, EyeTargetType, MovementType } from './constants.js';
+import {MassPoint} from "./MassPoint.js";
+import {Spring} from "./Spring.js";
+import {Brain} from "./Brain.js";
 
 // --- SoftBody Class ---
 export class SoftBody {
@@ -153,7 +157,7 @@ export class SoftBody {
                 
                 // Inherit/Mutate Reward Strategy
                 if (Math.random() < config.RLRewardStrategy_MUTATION_CHANCE) {
-                    const strategies = Object.values(config.RLRewardStrategy);
+                    const strategies = Object.values(RLRewardStrategy);
                     let newStrategy = strategies[Math.floor(Math.random() * strategies.length)];
                     if (newStrategy !== parentBody.rewardStrategy) {
                         this.rewardStrategy = newStrategy;
@@ -175,7 +179,7 @@ export class SoftBody {
                     this.rewardStrategy = parentBody.rewardStrategy;
                 }
                 // RL Algorithm type inheritance (can add mutation if needed)
-                this.rlAlgorithmType = parentBody.rlAlgorithmType || config.RLAlgorithmType.REINFORCE;
+                this.rlAlgorithmType = parentBody.rlAlgorithmType || RLAlgorithmType.REINFORCE;
 
                 // Inherit and mutate reproductionCooldownGene
                 this.reproductionCooldownGene = parentBody.reproductionCooldownGene * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER * 0.2));
@@ -207,10 +211,10 @@ export class SoftBody {
                 this.defaultActivationPhaseOffset = Math.random() * this.defaultActivationPeriod;
                 
                 // Default RL Algorithm for brand new creatures
-                this.rlAlgorithmType = config.RLAlgorithmType.REINFORCE; 
+                this.rlAlgorithmType = RLAlgorithmType.REINFORCE; 
                 
                 // New: Default Reward Strategy for brand new creatures
-                const strategies = Object.values(config.RLRewardStrategy);
+                const strategies = Object.values(RLRewardStrategy);
                 this.rewardStrategy = strategies[Math.floor(Math.random() * strategies.length)];
 
                 // Initialize reproductionCooldownGene for new creatures
@@ -304,11 +308,11 @@ export class SoftBody {
                 }
             }
             // If no EYE node found, and we want to ensure one, we could designate/change one here.
-            // For now, it's only set if an EYE node is already present (e.g. from mutation or initial gen).
+            // For now, it's only set if an EYE node is already present (e.g., from mutation or initial gen).
             // If still null, the NN input for eye will be default/neutral.
         }
 
-        this.initializeBrain(); 
+        this.brain = new Brain(this); 
 
         // Temporary vectors for calculations to reduce allocations
         this._tempVec1 = new Vec2();
@@ -319,7 +323,7 @@ export class SoftBody {
         if (this.massPoints.length === 0) {
             this.currentMaxEnergy = 0; 
         } else {
-            this.currentMaxEnergy = this.massPoints.length * ENERGY_PER_MASS_POINT_BONUS;
+            this.currentMaxEnergy = this.massPoints.length * config.ENERGY_PER_MASS_POINT_BONUS;
             // Ensure currentMaxEnergy is at least 1 if points exist and ENERGY_PER_MASS_POINT_BONUS might be zero or very small.
             if (this.currentMaxEnergy < 1) { 
                 this.currentMaxEnergy = 1;
@@ -335,7 +339,7 @@ export class SoftBody {
 
         const baseRadius = 1 + Math.random() * 1; 
         const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE, NodeType.JET, NodeType.ATTRACTOR, NodeType.REPULSOR];
-        const dyeColorChoices = [DYE_COLORS.RED, DYE_COLORS.GREEN, DYE_COLORS.BLUE];
+        const dyeColorChoices = [config.DYE_COLORS.RED, config.DYE_COLORS.GREEN, config.DYE_COLORS.BLUE];
 
         if (parentBody) {
             // --- Reproduction: Inherit and Mutate Blueprint ---
@@ -347,35 +351,35 @@ export class SoftBody {
             // 2. Mutate blueprint points (coordinates, types, properties)
             this.blueprintPoints.forEach(bp => {
                 // Mutate relative coordinates
-                if (Math.random() < (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.5)) {
+                if (Math.random() < (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER * 0.5)) {
                     bp.relX += (Math.random() - 0.5) * 2; // Smaller jitter for blueprint stability
-                    mutationStats.blueprintCoordinateChange = (mutationStats.blueprintCoordinateChange || 0) + 1;
+                    config.mutationStats.blueprintCoordinateChange = (config.mutationStats.blueprintCoordinateChange || 0) + 1;
                 }
-                if (Math.random() < (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER * 0.5)) {
+                if (Math.random() < (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER * 0.5)) {
                     bp.relY += (Math.random() - 0.5) * 2;
-                    mutationStats.blueprintCoordinateChange = (mutationStats.blueprintCoordinateChange || 0) + 1;
+                    config.mutationStats.blueprintCoordinateChange = (config.mutationStats.blueprintCoordinateChange || 0) + 1;
                 }
 
                 // Mutate mass & radius
-                if (Math.random() < (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                if (Math.random() < (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                     bp.mass = Math.max(0.1, Math.min(bp.mass * (1 + (Math.random() - 0.5) * 0.4), 1.0));
-                    mutationStats.blueprintMassRadiusChange = (mutationStats.blueprintMassRadiusChange || 0) + 1;
+                    config.mutationStats.blueprintMassRadiusChange = (config.mutationStats.blueprintMassRadiusChange || 0) + 1;
                 }
-                if (Math.random() < (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                if (Math.random() < (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                     bp.radius = Math.max(0.5, Math.min(bp.radius * (1 + (Math.random() - 0.5) * 0.4), baseRadius * 2.5)); // Max based on baseRadius
-                     mutationStats.blueprintMassRadiusChange = (mutationStats.blueprintMassRadiusChange || 0) + 1;
+                     config.mutationStats.blueprintMassRadiusChange = (config.mutationStats.blueprintMassRadiusChange || 0) + 1;
                 }
 
                 // Mutate nodeType
-                if (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                if (Math.random() < (config.MUTATION_CHANCE_NODE_TYPE * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                     const oldNodeType = bp.nodeType;
-                    if (Math.random() < NEURON_CHANCE) {
+                    if (Math.random() < config.NEURON_CHANCE) {
                         bp.nodeType = NodeType.NEURON;
                     } else {
                         const otherNodeTypes = availableFunctionalNodeTypes.filter(t => t !== NodeType.NEURON);
                         bp.nodeType = otherNodeTypes[Math.floor(Math.random() * otherNodeTypes.length)];
                     }
-                    if (bp.nodeType !== oldNodeType) mutationStats.nodeTypeChange++;
+                    if (bp.nodeType !== oldNodeType) config.mutationStats.nodeTypeChange++;
 
                     // If it becomes an EYE, initialize eyeTargetType randomly
                     if (bp.nodeType === NodeType.EYE && bp.eyeTargetType === undefined) {
@@ -384,11 +388,11 @@ export class SoftBody {
                 }
 
                 // Mutate movementType
-                if (Math.random() < (MUTATION_CHANCE_NODE_TYPE * GLOBAL_MUTATION_RATE_MODIFIER)) { 
+                if (Math.random() < (config.MUTATION_CHANCE_NODE_TYPE * config.GLOBAL_MUTATION_RATE_MODIFIER)) { 
                     const oldMovementType = bp.movementType;
                     const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
                     bp.movementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
-                    if (bp.movementType !== oldMovementType) mutationStats.movementTypeChange++;
+                    if (bp.movementType !== oldMovementType) config.mutationStats.movementTypeChange++;
                 }
                 // Ensure Swimmer nodes are always Neutral type
                 if (bp.nodeType === NodeType.SWIMMER) {
@@ -396,78 +400,78 @@ export class SoftBody {
                 }
 
                 // Mutate canBeGrabber gene
-                if (Math.random() < GRABBER_GENE_MUTATION_CHANCE) {
+                if (Math.random() < config.GRABBER_GENE_MUTATION_CHANCE) {
                     bp.canBeGrabber = !bp.canBeGrabber;
-                    mutationStats.grabberGeneChange++;
+                    config.mutationStats.grabberGeneChange++;
                 }
 
                 // Mutate dyeColor
-                if (Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                if (Math.random() < (config.MUTATION_CHANCE_BOOL * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                     bp.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
-                    mutationStats.blueprintDyeColorChange = (mutationStats.blueprintDyeColorChange || 0) + 1;
+                    config.mutationStats.blueprintDyeColorChange = (config.mutationStats.blueprintDyeColorChange || 0) + 1;
                 }
 
                 // Mutate neuronDataBlueprint (specifically hiddenLayerSize if neuron)
                 if (bp.nodeType === NodeType.NEURON) {
                     if (!bp.neuronDataBlueprint) { // Ensure it exists
-                        bp.neuronDataBlueprint = { hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) };
+                        bp.neuronDataBlueprint = { hiddenLayerSize: config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MAX - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) };
                     }
-                    if (Math.random() < (MUTATION_RATE_PERCENT * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                    if (Math.random() < (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                         let newSize = bp.neuronDataBlueprint.hiddenLayerSize + Math.floor((Math.random() * 6) - 3); // Mutate by +/- up to 3
-                        bp.neuronDataBlueprint.hiddenLayerSize = Math.max(DEFAULT_HIDDEN_LAYER_SIZE_MIN, Math.min(newSize, DEFAULT_HIDDEN_LAYER_SIZE_MAX));
-                        mutationStats.blueprintNeuronHiddenSizeChange = (mutationStats.blueprintNeuronHiddenSizeChange || 0) + 1;
+                        bp.neuronDataBlueprint.hiddenLayerSize = Math.max(config.DEFAULT_HIDDEN_LAYER_SIZE_MIN, Math.min(newSize, config.DEFAULT_HIDDEN_LAYER_SIZE_MAX));
+                        config.mutationStats.blueprintNeuronHiddenSizeChange = (config.mutationStats.blueprintNeuronHiddenSizeChange || 0) + 1;
                     }
                 } else {
                     bp.neuronDataBlueprint = null; // Crucial: ensure non-neurons have null neuronDataBlueprint
                 }
 
                 // Mutate eyeTargetType if it's an EYE node
-                if (bp.nodeType === NodeType.EYE && bp.eyeTargetType !== undefined && Math.random() < EYE_TARGET_TYPE_MUTATION_CHANCE) {
+                if (bp.nodeType === NodeType.EYE && bp.eyeTargetType !== undefined && Math.random() < config.EYE_TARGET_TYPE_MUTATION_CHANCE) {
                     const oldEyeTargetType = bp.eyeTargetType;
                     bp.eyeTargetType = (bp.eyeTargetType === EyeTargetType.PARTICLE) ? EyeTargetType.FOREIGN_BODY_POINT : EyeTargetType.PARTICLE;
                     if (bp.eyeTargetType !== oldEyeTargetType) {
-                        mutationStats.eyeTargetTypeChange = (mutationStats.eyeTargetTypeChange || 0) + 1;
+                        config.mutationStats.eyeTargetTypeChange = (config.mutationStats.eyeTargetTypeChange || 0) + 1;
                     }
                 }
             });
 
             // 3. Mutate blueprint springs (restLength, isRigid)
             this.blueprintSprings.forEach(bs => {
-                if (Math.random() < (SPRING_PROP_MUTATION_MAGNITUDE * GLOBAL_MUTATION_RATE_MODIFIER)) { // Use magnitude as chance here
+                if (Math.random() < (config.SPRING_PROP_MUTATION_MAGNITUDE * config.GLOBAL_MUTATION_RATE_MODIFIER)) { // Use magnitude as chance here
                     const oldRestLength = bs.restLength;
-                    bs.restLength = Math.max(1, bs.restLength * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE));
-                    if (Math.abs(bs.restLength - oldRestLength) > 0.01) mutationStats.springRestLength++;
+                    bs.restLength = Math.max(1, bs.restLength * (1 + (Math.random() - 0.5) * 2 * config.SPRING_PROP_MUTATION_MAGNITUDE));
+                    if (Math.abs(bs.restLength - oldRestLength) > 0.01) config.mutationStats.springRestLength++;
                 }
-                if (Math.random() < (MUTATION_CHANCE_BOOL * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                if (Math.random() < (config.MUTATION_CHANCE_BOOL * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                     const oldRigid = bs.isRigid;
                     bs.isRigid = !bs.isRigid; // Simple flip for now
-                    if (bs.isRigid !== oldRigid) mutationStats.springRigidityFlip++;
+                    if (bs.isRigid !== oldRigid) config.mutationStats.springRigidityFlip++;
                 }
-                 if (Math.random() < (SPRING_PROP_MUTATION_MAGNITUDE * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                 if (Math.random() < (config.SPRING_PROP_MUTATION_MAGNITUDE * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                     if (typeof bs.stiffness === 'undefined') bs.stiffness = this.stiffness;
                     const oldStiffness = bs.stiffness;
-                    bs.stiffness = Math.max(100, Math.min(bs.stiffness * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE), 10000));
-                    if (Math.abs(bs.stiffness - oldStiffness) > 0.01) mutationStats.springStiffness++;
+                    bs.stiffness = Math.max(100, Math.min(bs.stiffness * (1 + (Math.random() - 0.5) * 2 * config.SPRING_PROP_MUTATION_MAGNITUDE), 10000));
+                    if (Math.abs(bs.stiffness - oldStiffness) > 0.01) config.mutationStats.springStiffness++;
                 }
-                if (Math.random() < (SPRING_PROP_MUTATION_MAGNITUDE * GLOBAL_MUTATION_RATE_MODIFIER)) {
+                if (Math.random() < (config.SPRING_PROP_MUTATION_MAGNITUDE * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                     if (typeof bs.damping === 'undefined') bs.damping = this.springDamping;
                     const oldDamping = bs.damping;
-                    bs.damping = Math.max(0.1, Math.min(bs.damping * (1 + (Math.random() - 0.5) * 2 * SPRING_PROP_MUTATION_MAGNITUDE), 50));
-                    if (Math.abs(bs.damping - oldDamping) > 0.01) mutationStats.springDamping++;
+                    bs.damping = Math.max(0.1, Math.min(bs.damping * (1 + (Math.random() - 0.5) * 2 * config.SPRING_PROP_MUTATION_MAGNITUDE), 50));
+                    if (Math.abs(bs.damping - oldDamping) > 0.01) config.mutationStats.springDamping++;
                 }
             });
 
             // Step 4: Structural Blueprint Mutations (Point Add, Spring Add/Delete, Subdivision, Scale, etc.)
             // --- Point Addition Mutation (Blueprint) ---
-            if (Math.random() < this.pointAddChance * GLOBAL_MUTATION_RATE_MODIFIER && this.blueprintPoints.length > 0) {
+            if (Math.random() < this.pointAddChance * config.GLOBAL_MUTATION_RATE_MODIFIER && this.blueprintPoints.length > 0) {
                 const lastBp = this.blueprintPoints[this.blueprintPoints.length - 1];
-                const newRelX = lastBp.relX + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 0.5; // Smaller offset for blueprint
-                const newRelY = lastBp.relY + (Math.random() - 0.5) * NEW_POINT_OFFSET_RADIUS * 0.5;
+                const newRelX = lastBp.relX + (Math.random() - 0.5) * config.NEW_POINT_OFFSET_RADIUS * 0.5; // Smaller offset for blueprint
+                const newRelY = lastBp.relY + (Math.random() - 0.5) * config.NEW_POINT_OFFSET_RADIUS * 0.5;
                 const newMass = 0.1 + Math.random() * 0.9;
                 const newRadius = baseRadius * (0.8 + Math.random() * 0.4);
                 
                 let newNodeType;
-                if (Math.random() < NEURON_CHANCE) {
+                if (Math.random() < config.NEURON_CHANCE) {
                     newNodeType = NodeType.NEURON;
                 } else {
                     const otherNodeTypes = availableFunctionalNodeTypes.filter(t => t !== NodeType.NEURON);
@@ -483,17 +487,17 @@ export class SoftBody {
                     relX: newRelX, relY: newRelY, radius: newRadius, mass: newMass,
                     nodeType: newNodeType, movementType: newMovementType,
                     dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
-                    canBeGrabber: Math.random() < GRABBER_GENE_MUTATION_CHANCE,
-                    neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null,
+                    canBeGrabber: Math.random() < config.GRABBER_GENE_MUTATION_CHANCE,
+                    neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MAX - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null,
                     eyeTargetType: newNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined,
                     maxEffectiveJetVelocity: this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4)
                 };
                 this.blueprintPoints.push(newBp);
                 const newPointIndex = this.blueprintPoints.length - 1;
-                mutationStats.pointAddActual++;
+                config.mutationStats.pointAddActual++;
 
                 // Connect new blueprint point with springs
-                const numSpringsToAddNewPoint = MIN_SPRINGS_PER_NEW_NODE + Math.floor(Math.random() * (MAX_SPRINGS_PER_NEW_NODE - MIN_SPRINGS_PER_NEW_NODE + 1));
+                const numSpringsToAddNewPoint = config.MIN_SPRINGS_PER_NEW_NODE + Math.floor(Math.random() * (config.MAX_SPRINGS_PER_NEW_NODE - config.MIN_SPRINGS_PER_NEW_NODE + 1));
                 const existingBpIndices = this.blueprintPoints.map((_, i) => i).filter(i => i !== newPointIndex);
                 const shuffledExistingBpIndices = existingBpIndices.sort(() => 0.5 - Math.random());
 
@@ -501,9 +505,9 @@ export class SoftBody {
                     const connectToBpIndex = shuffledExistingBpIndices[k];
                     const connectToBp = this.blueprintPoints[connectToBpIndex];
                     const dist = Math.sqrt((newBp.relX - connectToBp.relX)**2 + (newBp.relY - connectToBp.relY)**2);
-                    let newRestLength = dist * (1 + (Math.random() - 0.5) * 2 * NEW_SPRING_REST_LENGTH_VARIATION);
+                    let newRestLength = dist * (1 + (Math.random() - 0.5) * 2 * config.NEW_SPRING_REST_LENGTH_VARIATION);
                     newRestLength = Math.max(1, newRestLength);
-                    const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
+                    const becomeRigid = Math.random() < config.CHANCE_FOR_RIGID_SPRING;
                     const newStiffness = 500 + Math.random() * 2500;
                     const newDamping = 5 + Math.random() * 20;
                     this.blueprintSprings.push({ p1Index: newPointIndex, p2Index: connectToBpIndex, restLength: newRestLength, isRigid: becomeRigid, stiffness: newStiffness, damping: newDamping });
@@ -511,7 +515,8 @@ export class SoftBody {
             }
 
             // --- Spring Deletion Mutation (Blueprint) ---
-            if (this.blueprintSprings.length > this.blueprintPoints.length -1 && Math.random() < SPRING_DELETION_CHANCE) { // Ensure min connectivity
+            if (this.blueprintSprings.length > this.blueprintPoints.length -1 && Math.random() < config.SPRING_DELETION_CHANCE) { // Ensure min connectivity
+            // Ensure min connectivity
                 // Complex check to avoid orphaning needed here for blueprint springs
                 // For now, simple random deletion if enough springs exist
                 const springToDeleteIndex = Math.floor(Math.random() * this.blueprintSprings.length);
@@ -539,7 +544,7 @@ export class SoftBody {
                         const dist = Math.sqrt((pA_bp.relX - pB_bp.relX)**2 + (pA_bp.relY - pB_bp.relY)**2);
                         let newRestLength = dist * (1 + (Math.random() - 0.5) * 2 * NEW_SPRING_REST_LENGTH_VARIATION);
                         newRestLength = Math.max(1, newRestLength);
-                        const becomeRigid = Math.random() < CHANCE_FOR_RIGID_SPRING;
+                        const becomeRigid = Math.random() < config.CHANCE_FOR_RIGID_SPRING;
                         const newStiffness = 500 + Math.random() * 2500;
                         const newDamping = 5 + Math.random() * 20;
                         this.blueprintSprings.push({ p1Index: idx1, p2Index: idx2, restLength: newRestLength, isRigid: becomeRigid, stiffness: newStiffness, damping: newDamping });
@@ -573,7 +578,7 @@ export class SoftBody {
                         nodeType: newNodeType, movementType: newMovementType,
                         dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
                         canBeGrabber: Math.random() < GRABBER_GENE_MUTATION_CHANCE,
-                        neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null,
+                        neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MIN - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null,
                         eyeTargetType: newNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined,
                         maxEffectiveJetVelocity: this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4)
                     };
@@ -738,11 +743,11 @@ export class SoftBody {
                     const point = new MassPoint(j * basePointDist, i * basePointDist, 0.3 + Math.random() * 0.4, baseRadius);
                     initialTempMassPoints.push(point); gridPoints[i][j] = point;
                 }}
-                for (let i=0; i<numPointsY; i++) for (let j=0; j<numPointsX-1; j++) initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
-                for (let j=0; j<numPointsX; j++) for (let i=0; i<numPointsY-1; i++) initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                for (let i=0; i<numPointsY; i++) for (let j=0; j<numPointsX-1; j++) initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
+                for (let j=0; j<numPointsX; j++) for (let i=0; i<numPointsY-1; i++) initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
                 for (let i=0; i<numPointsY-1; i++) for (let j=0; j<numPointsX-1; j++) {
-                    initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], (500 + Math.random() * 2500)*0.7, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
-                    initialTempSprings.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], (500 + Math.random() * 2500)*0.7, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                    initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], (500 + Math.random() * 2500)*0.7, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
+                    initialTempSprings.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], (500 + Math.random() * 2500)*0.7, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
                 }
             } else if (this.shapeType === 1) { // Line
                 const numLinePoints = Math.floor(3 + Math.random() * 3); const isHorizontal = Math.random() < 0.5; let linePoints = [];
@@ -752,8 +757,8 @@ export class SoftBody {
                     const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
                     initialTempMassPoints.push(point); linePoints.push(point);
                 }
-                for (let i=0; i<numLinePoints-1; i++) initialTempSprings.push(new Spring(linePoints[i], linePoints[i+1], 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
-                if (numLinePoints > 2) initialTempSprings.push(new Spring(linePoints[0], linePoints[numLinePoints-1], (500 + Math.random() * 2500)*0.5, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                for (let i=0; i<numLinePoints-1; i++) initialTempSprings.push(new Spring(linePoints[i], linePoints[i+1], 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
+                if (numLinePoints > 2) initialTempSprings.push(new Spring(linePoints[0], linePoints[numLinePoints-1], (500 + Math.random() * 2500)*0.5, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
             } else { // Star
                 const numOuterPoints = Math.floor(4 + Math.random()*3);
                 const centralPoint = new MassPoint(0, 0, (0.3+Math.random()*0.4)*1.5, baseRadius*1.2); // Center at (0,0) for now
@@ -765,10 +770,10 @@ export class SoftBody {
                     const y = Math.sin(angle)*circleRadius;
                     const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
                     initialTempMassPoints.push(point);
-                    initialTempSprings.push(new Spring(centralPoint, point, 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
-                    if (i>0) initialTempSprings.push(new Spring(initialTempMassPoints[initialTempMassPoints.length-2], point, (500 + Math.random() * 2500)*0.8, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                    initialTempSprings.push(new Spring(centralPoint, point, 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
+                    if (i>0) initialTempSprings.push(new Spring(initialTempMassPoints[initialTempMassPoints.length-2], point, (500 + Math.random() * 2500)*0.8, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
                 }
-                if (numOuterPoints > 1) initialTempSprings.push(new Spring(initialTempMassPoints[1], initialTempMassPoints[initialTempMassPoints.length-1], (500 + Math.random() * 2500)*0.8, 5 + Math.random() * 20, null, Math.random() < CHANCE_FOR_RIGID_SPRING));
+                if (numOuterPoints > 1) initialTempSprings.push(new Spring(initialTempMassPoints[1], initialTempMassPoints[initialTempMassPoints.length-1], (500 + Math.random() * 2500)*0.8, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
             }
 
             // Calculate centroid of these initial temporary points (which were created around a local 0,0)
@@ -782,7 +787,7 @@ export class SoftBody {
             // Populate blueprintPoints from initialTempMassPoints, making coordinates relative to their own centroid
             initialTempMassPoints.forEach(p_temp => {
                 let chosenNodeType;
-                if (Math.random() < NEURON_CHANCE) {
+                if (Math.random() < config.NEURON_CHANCE) {
                     chosenNodeType = NodeType.NEURON;
                 } else {
                     const otherNodeTypes = availableFunctionalNodeTypes.filter(t => t !== NodeType.NEURON);
@@ -794,9 +799,9 @@ export class SoftBody {
                 if (chosenNodeType === NodeType.SWIMMER) {
                     chosenMovementType = MovementType.NEUTRAL;
                 }
-                const canBeGrabberInitial = Math.random() < GRABBER_GENE_MUTATION_CHANCE;
+                const canBeGrabberInitial = Math.random() < config.GRABBER_GENE_MUTATION_CHANCE;
                 const neuronDataBp = chosenNodeType === NodeType.NEURON ? {
-                    hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
+                    hiddenLayerSize: config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MIN - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
                 } : null;
 
                 this.blueprintPoints.push({
@@ -1836,7 +1841,7 @@ export class SoftBody {
                 if (point.nodeType === NodeType.NEURON) {
                     if (!point.neuronData) { // Ensure neuronData exists
                         point.neuronData = { 
-                            hiddenLayerSize: DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
+                            hiddenLayerSize: config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MIN - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
                         };
                     }
                     point.neuronData.isBrain = true;
@@ -1886,8 +1891,8 @@ export class SoftBody {
 
     _initializeBrainWeightsAndBiases(brainNode) {
         const nd = brainNode.neuronData;
-        if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < DEFAULT_HIDDEN_LAYER_SIZE_MIN || nd.hiddenLayerSize > DEFAULT_HIDDEN_LAYER_SIZE_MAX) {
-            nd.hiddenLayerSize = DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (DEFAULT_HIDDEN_LAYER_SIZE_MAX - DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1));
+        if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < config.DEFAULT_HIDDEN_LAYER_SIZE_MIN || nd.hiddenLayerSize > config.DEFAULT_HIDDEN_LAYER_SIZE_MIN) {
+            nd.hiddenLayerSize = config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MIN - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1));
         }
 
         if (!nd.weightsIH || nd.weightsIH.length !== nd.hiddenLayerSize || (nd.weightsIH.length > 0 && nd.weightsIH[0].length !== nd.inputVectorSize) ) {

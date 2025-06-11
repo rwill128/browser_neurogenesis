@@ -635,4 +635,4 @@ function initViscosityMap() {
     console.log(`Viscosity map initialized to ${size}x${size} with Perlin noise pattern.`);
 }
 
-export { initializeSpatialGrid, initializePopulation, updatePhysics, initFluidSimulation, initParticles, initNutrientMap, initLightMap, initViscosityMap, nutrientField, lightField, viscosityField, softBodyPopulation, fluidField, nextSoftBodyId, particles, spatialGrid };
+export { initializeSpatialGrid, initializePopulation, updatePhysics, initFluidSimulation, initParticles, initNutrientMap, mutationStats, initLightMap, initViscosityMap, nutrientField, lightField, viscosityField, softBodyPopulation, fluidField, nextSoftBodyId, particles, spatialGrid };

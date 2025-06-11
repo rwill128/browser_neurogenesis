@@ -4,6 +4,7 @@ import { NodeType, RLRewardStrategy, RLAlgorithmType, EyeTargetType, MovementTyp
 import {MassPoint} from "./MassPoint.js";
 import {Spring} from "./Spring.js";
 import {Brain} from "./Brain.js";
+import {fluidField} from "../simulation.js";
 
 // --- SoftBody Class ---
 export class SoftBody {
@@ -1461,7 +1462,7 @@ export class SoftBody {
                 }
 
                 if (nearestForeignPoint) {
-                    const maxForce = isAttractor ? ATTRACTOR_MAX_FORCE : REPULSOR_MAX_FORCE;
+                    const maxForce = isAttractor ? config.ATTRACTOR_MAX_FORCE : config.REPULSOR_MAX_FORCE;
                     const forceMagnitude = p1Exertion * maxForce * (1.0 - (Math.sqrt(min_dist_sq) / interactionRadius));
                     const finalForceMagnitude = isAttractor ? -forceMagnitude : forceMagnitude;
 
@@ -1511,7 +1512,7 @@ export class SoftBody {
                                         // p1.applyForce(repulsionForce);
 
                                         tempForceVec.copyFrom(tempDiffVec).normalizeInPlace();
-                                        const repulsionForceMag = BODY_REPULSION_STRENGTH * overlap * 0.5;
+                                        const repulsionForceMag = config.BODY_REPULSION_STRENGTH * overlap * 0.5;
                                         tempForceVec.mulInPlace(repulsionForceMag);
                                         p1.applyForce(tempForceVec);
                                     }
@@ -1575,7 +1576,7 @@ export class SoftBody {
                                             particle.isEaten = true;
                                             particle.life = 0; 
 
-                                            let energyGain = ENERGY_PER_PARTICLE;
+                                            let energyGain = config.ENERGY_PER_PARTICLE;
                                             if (this.nutrientField && fluidField) { // fluidFieldRef is fluidField in this context
                                                 const particleGx = Math.floor(particle.pos.x / fluidField.scaleX);
                                                 const particleGy = Math.floor(particle.pos.y / fluidField.scaleY);

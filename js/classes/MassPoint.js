@@ -58,28 +58,28 @@ export class MassPoint {
         // Draw interaction radii first (underneath the point)
         const exertion = this.currentExertionLevel || 0; // Default to 0 if undefined
 
-        if (this.nodeType === config.NodeType.EATER) {
+        if (this.nodeType === NodeType.EATER) {
             const effectiveEatingRadiusMultiplier = config.EATING_RADIUS_MULTIPLIER_BASE + (config.EATING_RADIUS_MULTIPLIER_MAX_BONUS * exertion);
             ctx.beginPath();
             ctx.arc(this.pos.x, this.pos.y, this.radius * effectiveEatingRadiusMultiplier, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(255, 165, 0, ${0.15 + exertion * 0.2})`; // Increased base opacity
             ctx.fill();
         }
-        if (this.nodeType === config.NodeType.PREDATOR) {
+        if (this.nodeType === NodeType.PREDATOR) {
             const effectivePredationRadiusMultiplier = config.PREDATION_RADIUS_MULTIPLIER_BASE + (config.PREDATION_RADIUS_MULTIPLIER_MAX_BONUS * exertion);
             ctx.beginPath();
             ctx.arc(this.pos.x, this.pos.y, this.radius * effectivePredationRadiusMultiplier, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(255, 50, 50, ${0.15 + exertion * 0.2})`; // Increased base opacity
             ctx.fill();
         }
-        if (this.nodeType === config.NodeType.ATTRACTOR) {
+        if (this.nodeType === NodeType.ATTRACTOR) {
             const effectiveAttractionRadiusMultiplier = config.ATTRACTION_RADIUS_MULTIPLIER_BASE + (config.ATTRACTION_RADIUS_MULTIPLIER_MAX_BONUS * exertion);
             ctx.beginPath();
             ctx.arc(this.pos.x, this.pos.y, this.radius * effectiveAttractionRadiusMultiplier, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(255, 105, 180, ${0.1 + exertion * 0.2})`;
             ctx.fill();
         }
-        if (this.nodeType === config.NodeType.REPULSOR) {
+        if (this.nodeType === NodeType.REPULSOR) {
             const effectiveRepulsionRadiusMultiplier = config.REPULSION_RADIUS_MULTIPLIER_BASE + (config.REPULSION_RADIUS_MULTIPLIER_MAX_BONUS * exertion);
             ctx.beginPath();
             ctx.arc(this.pos.x, this.pos.y, this.radius * effectiveRepulsionRadiusMultiplier, 0, Math.PI * 2);
@@ -91,25 +91,25 @@ export class MassPoint {
         ctx.beginPath();
         ctx.arc(this.pos.x, this.pos.y, this.radius, 0, Math.PI * 2);
         let mainColor = this.isFixed ? 'rgba(255,0,0,0.9)' : this.color;
-        if (this.nodeType === config.NodeType.NEURON) {
+        if (this.nodeType === NodeType.NEURON) {
             mainColor = 'rgba(200, 100, 255, 0.9)';
-        } else if (this.nodeType === config.NodeType.PREDATOR) {
+        } else if (this.nodeType === NodeType.PREDATOR) {
             mainColor = 'rgba(255, 50, 50, 0.9)';
-        } else if (this.nodeType === config.NodeType.SWIMMER) {
+        } else if (this.nodeType === NodeType.SWIMMER) {
              mainColor = 'rgba(0,200,255,0.9)'; // Bright blue for Swimmer
-        } else if (this.nodeType === config.NodeType.PHOTOSYNTHETIC) { 
+        } else if (this.nodeType === NodeType.PHOTOSYNTHETIC) { 
             mainColor = 'rgba(60, 179, 113, 0.9)'; // MediumSeaGreen for photosynthesis
-        } else if (this.nodeType === config.NodeType.EMITTER) {
+        } else if (this.nodeType === NodeType.EMITTER) {
             mainColor = 'rgba(0,255,100,0.9)';
-        } else if (this.nodeType === config.NodeType.EATER) {
+        } else if (this.nodeType === NodeType.EATER) {
             mainColor = 'rgba(255,165,0,0.9)';
-        } else if (this.nodeType === config.NodeType.EYE) { // New Eye color
+        } else if (this.nodeType === NodeType.EYE) { // New Eye color
             mainColor = 'rgba(180, 180, 250, 0.9)'; // Light purple/blue for Eye
-        } else if (this.nodeType === config.NodeType.JET) { // New Jet color
+        } else if (this.nodeType === NodeType.JET) { // New Jet color
             mainColor = 'rgba(255, 255, 100, 0.9)'; // Yellow for Jet
-        } else if (this.nodeType === config.NodeType.ATTRACTOR) {
+        } else if (this.nodeType === NodeType.ATTRACTOR) {
             mainColor = 'rgba(255, 105, 180, 0.9)'; // Hot Pink for Attractor
-        } else if (this.nodeType === config.NodeType.REPULSOR) {
+        } else if (this.nodeType === NodeType.REPULSOR) {
             mainColor = 'rgba(128, 0, 128, 0.9)';   // Purple for Repulsor
         }
         ctx.fillStyle = mainColor;
@@ -123,7 +123,7 @@ export class MassPoint {
         ctx.restore(); // Restore context state to remove shadow for subsequent drawings
 
 
-        if (this.nodeType === config.NodeType.NEURON) {
+        if (this.nodeType === NodeType.NEURON) {
             ctx.beginPath(); // Inner dot for neuron
             ctx.arc(this.pos.x, this.pos.y, this.radius * 0.5, 0, Math.PI * 2);
             ctx.fillStyle = 'rgba(250, 200, 255, 0.9)';

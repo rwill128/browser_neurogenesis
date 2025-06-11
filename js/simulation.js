@@ -5,6 +5,15 @@ import { FluidField } from './classes/FluidField.js';
 import { GPUFluidField } from './gpuFluidField.js';
 import { isWebGpuSupported } from './gpuUtils.js';
 import { perlin } from './utils.js';
+import {
+    canvas,
+    ctx, updateInfoPanel,
+    updateInstabilityIndicator,
+    updatePopulationCount,
+    viewOffsetX,
+    viewOffsetY,
+    viewZoom
+} from "./ui.js";
 
 let offscreenFluidCanvas, offscreenFluidCtx;
 let spatialGrid;
@@ -15,7 +24,6 @@ let nextSoftBodyId = 0;
 let nutrientField = null;
 let lightField = null;
 let viscosityField = null;
-const restitution = 0.4; // Moved from global constants as it's physics-specific
 
 let globalEnergyGains = {
     photosynthesis: 0,
@@ -127,7 +135,12 @@ function initializePopulation() {
         const margin = 50;
         const randX = margin + Math.random() * (config.WORLD_WIDTH - margin * 2);
         const randY = margin + Math.random() * (config.WORLD_HEIGHT - margin * 2);
-        softBodyPopulation.push(new SoftBody(nextSoftBodyId++, randX, randY, null));
+        const softBody = new SoftBody(nextSoftBodyId++, randX, randY, null);
+        softBody.setNutrientField(nutrientField);
+        softBody.setLightField(lightField);
+        softBody.setParticles(particles);
+        softBody.setSpatialGrid(spatialGrid);
+        softBodyPopulation.push(softBody);
     }
     config.isAnySoftBodyUnstable = false; // Reset the flag
     console.log(`Initialized population with ${softBodyPopulation.length} creatures.`);
@@ -146,10 +159,11 @@ async function initFluidSimulation(targetCanvas) {
             console.error("CRITICAL: Target canvas for GPUFluidField is invalid!");
             console.warn("Falling back to CPU FluidField due to invalid target canvas.");
             fluidField = new FluidField(config.FLUID_GRID_SIZE_CONTROL, config.FLUID_DIFFUSION, config.FLUID_VISCOSITY, dt_simulation, scaleX, scaleY);
+            fluidField.setViscosityField(viscosityField);
         } else {
             fluidField = new GPUFluidField(targetCanvas, config.FLUID_GRID_SIZE_CONTROL, config.FLUID_DIFFUSION, config.FLUID_VISCOSITY, dt_simulation, scaleX, scaleY);
             await fluidField._initPromise; 
-            
+
             // console.log("GPUFluidField instance created and awaited in simulation.js.");
 
             // Check if GPUFluidField successfully initialized in WebGPU mode (fluidField.device would be set)
@@ -158,6 +172,7 @@ async function initFluidSimulation(targetCanvas) {
             if (!fluidField.gpuEnabled || (!fluidField.device && !fluidField.gl)) { 
                 console.warn("Fallback to CPU: GPUFluidField initialization failed (neither WebGPU nor WebGL succeeded), or gpuEnabled is false.");
                 fluidField = new FluidField(config.FLUID_GRID_SIZE_CONTROL, config.FLUID_DIFFUSION, config.FLUID_VISCOSITY, dt_simulation, scaleX, scaleY);
+                fluidField.setViscosityField(viscosityField);
             } else if (fluidField.device) {
                 console.log("GPUFluidField successfully initialized with WebGPU in simulation.js.");
             } else if (fluidField.gl) {
@@ -167,6 +182,7 @@ async function initFluidSimulation(targetCanvas) {
     } else {
         console.log("Initializing CPU FluidField...");
         fluidField = new FluidField(config.FLUID_GRID_SIZE_CONTROL, config.FLUID_DIFFUSION, config.FLUID_VISCOSITY, dt_simulation, scaleX, scaleY);
+        fluidField.setViscosityField(viscosityField);
     }
 
     // Initialize offscreen canvas for CPU fluid rendering if not using GPU, or if GPU failed completely
@@ -334,7 +350,12 @@ function updatePhysics(dt) {
                  const margin = 50;
                  const randX = margin + Math.random() * (config.WORLD_WIDTH - margin * 2);
                  const randY = margin + Math.random() * (config.WORLD_HEIGHT - margin * 2);
-                 softBodyPopulation.push(new SoftBody(nextSoftBodyId++, randX, randY, null));
+                 const softBody = new SoftBody(nextSoftBodyId++, randX, randY, null);
+                 softBody.setNutrientField(nutrientField);
+                 softBody.setLightField(lightField);
+                 softBody.setParticles(particles);
+                 softBody.setSpatialGrid(spatialGrid);
+                 softBodyPopulation.push(softBody);
              } else {
                  break; // Stop if ceiling is reached during floor maintenance
              }
@@ -348,7 +369,7 @@ function updatePhysics(dt) {
 }
 
 // --- Drawing --- (draw() function is now standalone)
-function draw() {
+export function draw() {
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -447,7 +468,7 @@ function draw() {
         }
     }
 
-    if (selectedInspectBody && selectedInspectPoint) {
+    if (config.selectedInspectBody && config.selectedInspectPoint) {
         updateInfoPanel(); // This function is in ui.js, ensure it's accessible
     }
 
@@ -598,7 +619,6 @@ function initViscosityMap() {
         viscosityField = new Float32Array(0);
         return;
     }
-    // viscosityField = new Float32Array(size * size).fill(1.0); // Old: Default to 1.0 (normal viscosity)
     viscosityField = new Float32Array(size * size);
     const noiseScale = 0.06; // Slightly different scale for variety, or keep same as others (0.05)
     const noiseOffsetX = Math.random() * 1000 + 2000; // Different random offset seed
@@ -615,4 +635,4 @@ function initViscosityMap() {
     console.log(`Viscosity map initialized to ${size}x${size} with Perlin noise pattern.`);
 }
 
-export { initializeSpatialGrid, initializePopulation, updatePhysics, initFluidSimulation, initParticles, initNutrientMap, initLightMap, initViscosityMap, nutrientField, lightField, viscosityField, softBodyPopulation, fluidField, particles };
+export { initializeSpatialGrid, initializePopulation, updatePhysics, initFluidSimulation, initParticles, initNutrientMap, initLightMap, initViscosityMap, nutrientField, lightField, viscosityField, softBodyPopulation, fluidField, particles, spatialGrid };

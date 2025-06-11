@@ -1,5 +1,5 @@
 import config from './config.js';
-import { initializeSpatialGrid, initializePopulation, initFluidSimulation, initNutrientMap, initLightMap, initViscosityMap, initParticles, softBodyPopulation, particles, fluidField } from './simulation.js';
+import { initializeSpatialGrid, initializePopulation, initFluidSimulation, initNutrientMap, initLightMap, initViscosityMap, initParticles, softBodyPopulation, particles, fluidField, spatialGrid } from './simulation.js';
 import { perlin, getNodeTypeString, getRewardStrategyString, getEyeTargetTypeString, getMovementTypeString, sigmoid } from './utils.js';
 
 // --- DOM Element Selections ---
@@ -421,7 +421,7 @@ function updateInfoPanel() {
                     if (typeof point.neuronData.lastAvgNormalizedReward === 'number') {
                         content += `<p><strong>Avg Batch Reward:</strong> ${point.neuronData.lastAvgNormalizedReward.toFixed(3)}</p>`;
                     }
-                    
+
                     // NEW: Display Labeled Inputs
                     if (point.neuronData.currentFrameInputVectorWithLabels && point.neuronData.currentFrameInputVectorWithLabels.length > 0) {
                         content += `<h6>Brain Inputs (Real-time):</h6>`;
@@ -447,7 +447,7 @@ function updateInfoPanel() {
                                 // Default to sigmoid for magnitude, exertion, color channels
                                 finalValueDisplay = `${sigmoid(action.sampledAction).toFixed(3)}`;
                             }
-                           
+
                             content += `<p><strong style="color:#aadeff;">${action.label}:</strong> <span class="stat-value">${finalValueDisplay}</span> <em style="font-size:0.9em; color:#999;">(&mu;:${action.mean.toFixed(2)}, &sigma;:${action.stdDev.toFixed(2)})</em></p>`;
                         });
                     }
@@ -1603,7 +1603,7 @@ function updateStatsPanel() {
             totalNodes++;
         });
     });
-    
+
     const title = document.createElement('p');
     title.innerHTML = "<strong>Node Type Proportions:</strong>";
     nodeTypeStatsDiv.appendChild(title);
@@ -1729,7 +1729,7 @@ function focusOnCreature(creature) {
 
     const smallerViewportDim = Math.min(canvas.clientWidth, canvas.clientHeight);
     const targetZoom = smallerViewportDim / (creatureRadius * 2 * 3); 
-    
+
     viewZoom = Math.min(config.MAX_ZOOM, Math.max(0.2, targetZoom)); 
 
     viewOffsetX = creatureCenter.x - (canvas.clientWidth / viewZoom / 2);
@@ -1904,6 +1904,10 @@ function placeImportedCreature(worldX, worldY) {
 
     try {
         const newCreature = new SoftBody(nextSoftBodyId++, worldX, worldY, config.IMPORTED_CREATURE_DATA, true);
+        newCreature.setNutrientField(nutrientField);
+        newCreature.setLightField(lightField);
+        newCreature.setParticles(particles);
+        newCreature.setSpatialGrid(spatialGrid);
         softBodyPopulation.push(newCreature);
         console.log(`Placed imported creature with new ID ${newCreature.id} at (${worldX.toFixed(0)}, ${worldY.toFixed(0)}).`);
 

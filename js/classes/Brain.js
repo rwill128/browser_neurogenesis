@@ -1,6 +1,13 @@
-import {NodeType} from "./constants.js";
+import {NodeType, RLRewardStrategy} from "./constants.js";
 import config from '../config.js';
-import {addVectors, initializeMatrix, initializeVector, multiplyMatrixVector} from "../utils.js";
+import {
+    addVectors,
+    initializeMatrix,
+    initializeVector,
+    logPdfGaussian,
+    multiplyMatrixVector,
+    sampleGaussian, sigmoid, Vec2
+} from "../utils.js";
 
 export class Brain {
     constructor(softBody) {
@@ -166,8 +173,8 @@ export class Brain {
         nd.currentFrameInputVectorWithLabels.push({ label: 'Energy Ratio', value: energyRatio });
 
         const comPos = softBody.getAveragePosition();
-        const relComPosX = (comPos.x - this.brainNode.pos.x) / WORLD_WIDTH;
-        const relComPosY = (comPos.y - this.brainNode.pos.y) / WORLD_HEIGHT;
+        const relComPosX = (comPos.x - this.brainNode.pos.x) / config.WORLD_WIDTH;
+        const relComPosY = (comPos.y - this.brainNode.pos.y) / config.WORLD_HEIGHT;
         inputVector.push(Math.tanh(relComPosX));
         inputVector.push(Math.tanh(relComPosY));
         nd.currentFrameInputVectorWithLabels.push({ label: 'Relative CoM Pos X', value: Math.tanh(relComPosX) });
@@ -229,10 +236,10 @@ export class Brain {
                 nd.currentFrameInputVectorWithLabels.push({ label: `Eye @P${pointIndex} Target Dir`, value: targetDirVal });
             }
         });
-        
+
         while(inputVector.length < nd.inputVectorSize) { inputVector.push(0); }
         if(inputVector.length > nd.inputVectorSize) { inputVector.splice(nd.inputVectorSize); }
-        
+
         nd.previousEnergyChangeForNN = currentEnergyChange;
 
         return inputVector;
@@ -339,10 +346,10 @@ export class Brain {
 
                     point.currentExertionLevel = sigmoid(rawMagnitude);
 
-                    const finalMagnitude = point.currentExertionLevel * MAX_SWIMMER_OUTPUT_MAGNITUDE;
+                    const finalMagnitude = point.currentExertionLevel * config.MAX_SWIMMER_OUTPUT_MAGNITUDE;
                     const appliedForceX = finalMagnitude * Math.cos(angle);
                     const appliedForceY = finalMagnitude * Math.sin(angle);
-                    
+
                     point.applyForce(new Vec2(appliedForceX / dt, appliedForceY / dt));
                     nd.currentFrameActionDetails.push(...detailsForThisSwimmer);
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_SWIMMER;
@@ -404,7 +411,7 @@ export class Brain {
                     const angle = directionResult.value;
 
                     point.currentExertionLevel = sigmoid(rawMagnitude);
-                    point.jetData.currentMagnitude = point.currentExertionLevel * MAX_JET_OUTPUT_MAGNITUDE;
+                    point.jetData.currentMagnitude = point.currentExertionLevel * config.MAX_JET_OUTPUT_MAGNITUDE;
                     point.jetData.currentAngle = angle;
 
                     nd.currentFrameActionDetails.push(...detailsForThisJet);
@@ -414,7 +421,7 @@ export class Brain {
                 }
             }
         });
-        
+
         softBody.massPoints.forEach((point, pointIndex) => {
             if (point.nodeType === NodeType.ATTRACTOR) {
                 const outputStartRawIdx = currentRawOutputIndex;
@@ -458,7 +465,7 @@ export class Brain {
                     grabToggleResult.detail.label = `Grabber @P${pointIndex} Toggle`;
                     detailsForThisGrab.push(grabToggleResult.detail);
                     point.isGrabbing = sigmoid(grabToggleResult.value) > 0.5;
-                    
+
                     nd.currentFrameActionDetails.push(...detailsForThisGrab);
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
                 } else {
@@ -510,7 +517,7 @@ export class Brain {
                         }
                     });
                     if (particleSeenByAnyEye) {
-                        reward = (1.0 - minParticleMagnitude) * PARTICLE_PROXIMITY_REWARD_SCALE;
+                        reward = (1.0 - minParticleMagnitude) * config.PARTICLE_PROXIMITY_REWARD_SCALE;
                     } else {
                         reward = 0;
                     }
@@ -518,16 +525,16 @@ export class Brain {
                 case RLRewardStrategy.ENERGY_SECOND_DERIVATIVE:
                     const currentEnergyChangeForReward = softBody.creatureEnergy - (nd.previousEnergyForReward || softBody.creatureEnergy);
                     const energySecondDerivativeForReward = currentEnergyChangeForReward - (nd.previousEnergyChangeForNN || 0);
-                    reward = energySecondDerivativeForReward * ENERGY_SECOND_DERIVATIVE_REWARD_SCALE;
+                    reward = energySecondDerivativeForReward * config.ENERGY_SECOND_DERIVATIVE_REWARD_SCALE;
                     break;
-                
+
                 case RLRewardStrategy.SENSED_DYE_R: reward = findInputValue('Sensed Dye (R) @Brain'); break;
                 case RLRewardStrategy.SENSED_DYE_R_INV: reward = 1.0 - findInputValue('Sensed Dye (R) @Brain'); break;
                 case RLRewardStrategy.SENSED_DYE_G: reward = findInputValue('Sensed Dye (G) @Brain'); break;
                 case RLRewardStrategy.SENSED_DYE_G_INV: reward = 1.0 - findInputValue('Sensed Dye (G) @Brain'); break;
                 case RLRewardStrategy.SENSED_DYE_B: reward = findInputValue('Sensed Dye (B) @Brain'); break;
                 case RLRewardStrategy.SENSED_DYE_B_INV: reward = 1.0 - findInputValue('Sensed Dye (B) @Brain'); break;
-                
+
                 case RLRewardStrategy.ENERGY_RATIO: reward = findInputValue('Energy Ratio'); break;
                 case RLRewardStrategy.ENERGY_RATIO_INV: reward = 1.0 - findInputValue('Energy Ratio'); break;
 
@@ -535,7 +542,7 @@ export class Brain {
                 case RLRewardStrategy.REL_COM_POS_X_NEG: reward = Math.max(0, -findInputValue('Relative CoM Pos X')); break;
                 case RLRewardStrategy.REL_COM_POS_Y_POS: reward = Math.max(0, findInputValue('Relative CoM Pos Y')); break;
                 case RLRewardStrategy.REL_COM_POS_Y_NEG: reward = Math.max(0, -findInputValue('Relative CoM Pos Y')); break;
-                
+
                 case RLRewardStrategy.REL_COM_VEL_X_POS: reward = Math.max(0, findInputValue('CoM Vel X')); break;
                 case RLRewardStrategy.REL_COM_VEL_X_NEG: reward = Math.max(0, -findInputValue('CoM Vel X')); break;
                 case RLRewardStrategy.REL_COM_VEL_Y_POS: reward = Math.max(0, findInputValue('CoM Vel Y')); break;
@@ -546,12 +553,12 @@ export class Brain {
 
                 case RLRewardStrategy.AVG_SPRING_EXTENSION: reward = Math.max(0, findAndAverageInputValues('Spring')); break;
                 case RLRewardStrategy.AVG_SPRING_COMPRESSION: reward = Math.max(0, -findAndAverageInputValues('Spring')); break;
-                
+
                 case RLRewardStrategy.AVG_FLUID_VEL_X_POS: reward = Math.max(0, findAndAverageInputValues('Fluid Vel X')); break;
                 case RLRewardStrategy.AVG_FLUID_VEL_X_NEG: reward = Math.max(0, -findAndAverageInputValues('Fluid Vel X')); break;
                 case RLRewardStrategy.AVG_FLUID_VEL_Y_POS: reward = Math.max(0, findAndAverageInputValues('Fluid Vel Y')); break;
                 case RLRewardStrategy.AVG_FLUID_VEL_Y_NEG: reward = Math.max(0, -findAndAverageInputValues('Fluid Vel Y')); break;
-                
+
                 case RLRewardStrategy.EYE_SEES_TARGET:
                     const seesTargetValues = nd.currentFrameInputVectorWithLabels.filter(item => item.label.endsWith('Sees Target')).map(i => i.value);
                     reward = seesTargetValues.some(v => v > 0) ? 1.0 : 0.0;
@@ -584,11 +591,11 @@ export class Brain {
     _triggerBrainPolicyUpdateIfNeeded() {
         const nd = this.brainNode.neuronData;
         nd.framesSinceLastTrain++;
-        if (nd.framesSinceLastTrain >= TRAINING_INTERVAL_FRAMES) {
+        if (nd.framesSinceLastTrain >= config.TRAINING_INTERVAL_FRAMES) {
             this.updateBrainPolicy();
         }
     }
-    
+
     calculateDiscountedRewards(rewards, gamma) {
         const discountedRewards = new Array(rewards.length);
         let runningAdd = 0;
@@ -611,7 +618,7 @@ export class Brain {
         const actionDetailsBatch = nd.experienceBuffer.map(exp => exp.actionDetails);
         const rewards = nd.experienceBuffer.map(exp => exp.reward);
 
-        const discountedRewards = this.calculateDiscountedRewards(rewards, DISCOUNT_FACTOR_GAMMA);
+        const discountedRewards = this.calculateDiscountedRewards(rewards, config.DISCOUNT_FACTOR_GAMMA);
 
         let meanDiscountedReward = 0;
         for (const r of discountedRewards) meanDiscountedReward += r;
@@ -620,7 +627,7 @@ export class Brain {
         let stdDevDiscountedReward = 0;
         for (const r of discountedRewards) stdDevDiscountedReward += (r - meanDiscountedReward) ** 2;
         stdDevDiscountedReward = Math.sqrt(stdDevDiscountedReward / discountedRewards.length);
-        
+
         const normalizedDiscountedRewards = discountedRewards.map(
             r => (r - meanDiscountedReward) / (stdDevDiscountedReward + 1e-6)
         );
@@ -631,7 +638,7 @@ export class Brain {
         const gradBiasesO_acc = initializeVector(nd.outputVectorSize, 0);
         const gradWeightsIH_acc = initializeMatrix(nd.hiddenLayerSize, nd.inputVectorSize, 0);
         const gradBiasesH_acc = initializeVector(nd.hiddenLayerSize, 0);
-        
+
         for (let t = 0; t < nd.experienceBuffer.length; t++) {
             const state_t = states[t];
             const actionDetails_t = actionDetailsBatch[t];
@@ -640,14 +647,14 @@ export class Brain {
             const hiddenLayerInputs_t = multiplyMatrixVector(nd.weightsIH, state_t);
             const hiddenLayerBiasedInputs_t = addVectors(hiddenLayerInputs_t, nd.biasesH);
             const hiddenActivations_t = hiddenLayerBiasedInputs_t.map(val => Math.tanh(val));
-            
+
             let currentActionDetailIdx = 0;
             for (let i = 0; i < nd.outputVectorSize / 2; i++) {
                 const meanOutputIdx = i * 2;
                 const stdDevOutputIdx = i * 2 + 1;
 
                 const ad = actionDetails_t[currentActionDetailIdx];
-                
+
                 if (!ad) { 
                     currentActionDetailIdx++;
                     continue; 
@@ -657,7 +664,7 @@ export class Brain {
                 const { sampledAction, mean, stdDev } = ad;
                 const grad_logProb_d_mean = (sampledAction - mean) / (stdDev * stdDev + 1e-9); 
                 const grad_logProb_d_stdDev_output = (((sampledAction - mean) ** 2) - (stdDev * stdDev)) / (stdDev * stdDev * stdDev + 1e-9);
-                
+
                 const error_mean = G_t_normalized * grad_logProb_d_mean;
                 const error_stdDev = G_t_normalized * grad_logProb_d_stdDev_output * (stdDev - 1e-6);
 
@@ -700,15 +707,15 @@ export class Brain {
         const batchSize = nd.experienceBuffer.length;
         for (let j = 0; j < nd.outputVectorSize; j++) {
             for (let k = 0; k < nd.hiddenLayerSize; k++) {
-                nd.weightsHO[j][k] += LEARNING_RATE * gradWeightsHO_acc[j][k] / batchSize;
+                nd.weightsHO[j][k] += config.LEARNING_RATE * gradWeightsHO_acc[j][k] / batchSize;
             }
-            nd.biasesO[j] += LEARNING_RATE * gradBiasesO_acc[j] / batchSize;
+            nd.biasesO[j] += config.LEARNING_RATE * gradBiasesO_acc[j] / batchSize;
         }
         for (let h = 0; h < nd.hiddenLayerSize; h++) {
             for (let i = 0; i < nd.inputVectorSize; i++) {
-                nd.weightsIH[h][i] += LEARNING_RATE * gradWeightsIH_acc[h][i] / batchSize;
+                nd.weightsIH[h][i] += config.LEARNING_RATE * gradWeightsIH_acc[h][i] / batchSize;
             }
-            nd.biasesH[h] += LEARNING_RATE * gradBiasesH_acc[h] / batchSize;
+            nd.biasesH[h] += config.LEARNING_RATE * gradBiasesH_acc[h] / batchSize;
         }
 
         nd.experienceBuffer = [];

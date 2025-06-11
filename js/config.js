@@ -8,7 +8,6 @@ const config = {
     viewOffsetY: 0,
     viewZoom: 1.0,
     ZOOM_SENSITIVITY: 0.02,
-    MAX_ZOOM: 40.0,
     MIN_ZOOM: 0.1,
     isRightDragging: false,
 

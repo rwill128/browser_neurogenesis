@@ -10,6 +10,7 @@ export class FluidField {
         this.scaleY = scaleY; 
         this.useWrapping = false;
         this.maxVelComponent = config.MAX_FLUID_VELOCITY_COMPONENT;
+        this.viscosityField = null;
 
         this.densityR = new Float32Array(this.size * this.size).fill(0);
         this.densityG = new Float32Array(this.size * this.size).fill(0);
@@ -67,8 +68,8 @@ export class FluidField {
                     let effective_cRecip = cRecipGlobal;
 
                     if ((field_type === 'velX' || field_type === 'velY')) {
-                        if (viscosityField && viscosityField[idx] !== undefined) { 
-                            const localViscosityMultiplier = Math.max(config.MIN_VISCOSITY_MULTIPLIER, Math.min(viscosityField[idx], config.MAX_VISCOSITY_MULTIPLIER));
+                        if (this.viscosityField && this.viscosityField[idx] !== undefined) { 
+                            const localViscosityMultiplier = Math.max(config.MIN_VISCOSITY_MULTIPLIER, Math.min(this.viscosityField[idx], config.MAX_VISCOSITY_MULTIPLIER));
                             const cell_specific_diff_rate = base_diff_rate * localViscosityMultiplier; 
                             const temp_effective_a = dt_param * cell_specific_diff_rate * (this.size - 2) * (this.size - 2);
                             const temp_denominator_c = 1 + 4 * temp_effective_a;
@@ -150,7 +151,7 @@ export class FluidField {
                 s0 = 1.0 - s1;
                 t1 = y - j0;
                 t0 = 1.0 - t1;
-                
+
                 d_out[current_idx] = s0 * (t0 * d_in[this.IX(i0,j0)] + t1 * d_in[this.IX(i0,j1)]) +
                                      s1 * (t0 * d_in[this.IX(i1,j0)] + t1 * d_in[this.IX(i1,j1)]);
             }
@@ -262,4 +263,8 @@ export class FluidField {
         this.Vx.fill(0); this.Vy.fill(0);
         this.Vx0.fill(0); this.Vy0.fill(0);
     }
-} 
+
+    setViscosityField(field) {
+        this.viscosityField = field;
+    }
+}

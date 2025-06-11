@@ -11,6 +11,10 @@ export class SoftBody {
         this.id = id;
         this.massPoints = [];
         this.springs = [];
+        this.nutrientField = null;
+        this.lightField = null;
+        this.particles = null;
+        this.spatialGrid = null;
 
         // Genetic blueprint
         this.blueprintPoints = []; // Array of { relX, relY, radius, mass, nodeType, movementType, dyeColor, canBeGrabber, neuronDataBlueprint }
@@ -80,7 +84,7 @@ export class SoftBody {
             this.defaultActivationPhaseOffset = blueprint.defaultActivationPhaseOffset;
             this.rlAlgorithmType = blueprint.rlAlgorithmType;
             this.rewardStrategy = blueprint.rewardStrategy;
-            
+
             // Directly use the blueprint's structure
             this.blueprintPoints = JSON.parse(JSON.stringify(blueprint.blueprintPoints));
             this.blueprintSprings = JSON.parse(JSON.stringify(blueprint.blueprintSprings));
@@ -94,7 +98,7 @@ export class SoftBody {
                 if (this.stiffness !== parentBody.stiffness) config.mutationStats.springStiffness++;
                 this.springDamping = parentBody.springDamping * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
                 if (this.springDamping !== parentBody.springDamping) config.mutationStats.springDamping++;
-                
+
                 let oldMotorInterval = parentBody.motorImpulseInterval;
                 this.motorImpulseInterval = parentBody.motorImpulseInterval * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
                 if (Math.floor(this.motorImpulseInterval) !== Math.floor(oldMotorInterval)) config.mutationStats.motorInterval++;
@@ -118,7 +122,7 @@ export class SoftBody {
                 let oldOffspringSpawnRadius = parentBody.offspringSpawnRadius;
                 this.offspringSpawnRadius = parentBody.offspringSpawnRadius * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER * 0.5));
                 if (this.offspringSpawnRadius !== oldOffspringSpawnRadius) config.mutationStats.offspringSpawnRadius++;
-                
+
                 let oldPointAddChance = parentBody.pointAddChance;
                 this.pointAddChance = parentBody.pointAddChance * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER * 2));
                 if (this.pointAddChance !== oldPointAddChance) config.mutationStats.pointAddChanceGene++;
@@ -126,7 +130,7 @@ export class SoftBody {
                 let oldSpringConnectionRadius = parentBody.springConnectionRadius;
                 this.springConnectionRadius = parentBody.springConnectionRadius * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
                 if (this.springConnectionRadius !== oldSpringConnectionRadius) config.mutationStats.springConnectionRadiusGene++;
-                
+
                 if (parentBody.emitterDirection) {
                     const oldEmitterDirX = parentBody.emitterDirection.x;
                     const angleMutation = (Math.random() - 0.5) * Math.PI * 0.2 * config.GLOBAL_MUTATION_RATE_MODIFIER;
@@ -139,7 +143,7 @@ export class SoftBody {
                     console.warn(`Parent body ${parentBody.id} was missing emitterDirection. Offspring ${this.id} gets random emitterDirection.`);
                     config.mutationStats.emitterDirection++; // Count as a change if parent was missing it
                 }
-                
+
                 let oldReproThreshold = parentBody.reproductionEnergyThreshold;
                 this.reproductionEnergyThreshold = parentBody.reproductionEnergyThreshold; 
                 // Mutation of reproductionEnergyThreshold happens later, after currentMaxEnergy is set for the offspring
@@ -154,7 +158,7 @@ export class SoftBody {
                 this.defaultActivationLevel = parentBody.defaultActivationLevel * (1 + (Math.random() - 0.5) * 2 * config.ACTIVATION_PARAM_MUTATION_MAGNITUDE);
                 this.defaultActivationPeriod = parentBody.defaultActivationPeriod * (1 + (Math.random() - 0.5) * 2 * config.ACTIVATION_PARAM_MUTATION_MAGNITUDE);
                 this.defaultActivationPhaseOffset = parentBody.defaultActivationPhaseOffset + (Math.random() - 0.5) * (parentBody.defaultActivationPeriod * 0.2); 
-                
+
                 // Inherit/Mutate Reward Strategy
                 if (Math.random() < config.RLRewardStrategy_MUTATION_CHANCE) {
                     const strategies = Object.values(RLRewardStrategy);
@@ -209,10 +213,10 @@ export class SoftBody {
                 this.defaultActivationLevel = config.DEFAULT_ACTIVATION_LEVEL_MIN + Math.random() * (config.DEFAULT_ACTIVATION_LEVEL_MAX - config.DEFAULT_ACTIVATION_LEVEL_MIN);
                 this.defaultActivationPeriod = config.DEFAULT_ACTIVATION_PERIOD_MIN_TICKS + Math.floor(Math.random() * (config.DEFAULT_ACTIVATION_PERIOD_MAX_TICKS - config.DEFAULT_ACTIVATION_PERIOD_MIN_TICKS + 1));
                 this.defaultActivationPhaseOffset = Math.random() * this.defaultActivationPeriod;
-                
+
                 // Default RL Algorithm for brand new creatures
                 this.rlAlgorithmType = RLAlgorithmType.REINFORCE; 
-                
+
                 // New: Default Reward Strategy for brand new creatures
                 const strategies = Object.values(RLRewardStrategy);
                 this.rewardStrategy = strategies[Math.floor(Math.random() * strategies.length)];
@@ -294,7 +298,7 @@ export class SoftBody {
             if (parentBodyForMutation && this.reproductionEnergyThreshold !== oldReproThresholdForStat) { // Only count if from parent and changed
                 config.mutationStats.reproductionEnergyThreshold++;
             }
-            
+
         }
 
         this.primaryEyePoint = null; // New: For the creature's main eye
@@ -469,7 +473,7 @@ export class SoftBody {
                 const newRelY = lastBp.relY + (Math.random() - 0.5) * config.NEW_POINT_OFFSET_RADIUS * 0.5;
                 const newMass = 0.1 + Math.random() * 0.9;
                 const newRadius = baseRadius * (0.8 + Math.random() * 0.4);
-                
+
                 let newNodeType;
                 if (Math.random() < config.NEURON_CHANCE) {
                     newNodeType = NodeType.NEURON;
@@ -554,7 +558,7 @@ export class SoftBody {
                     attempts++;
                 }
             }
-            
+
             // --- Spring Subdivision Mutation (Blueprint) ---
             if (this.blueprintSprings.length > 0 && Math.random() < SPRING_SUBDIVISION_MUTATION_CHANCE) {
                 const springToSubdivideIndex = Math.floor(Math.random() * this.blueprintSprings.length);
@@ -592,7 +596,7 @@ export class SoftBody {
 
                     let restLength2 = Math.sqrt((midRelX - bp2.relX)**2 + (midRelY - bp2.relY)**2) * (1 + (Math.random() - 0.5) * 0.1);
                     this.blueprintSprings.push({ p1Index: newMidPointIndex, p2Index: originalBs.p2Index, restLength: Math.max(1, restLength2), isRigid: originalBs.isRigid, stiffness: originalBs.stiffness, damping: originalBs.damping });
-                    
+
                     mutationStats.springSubdivision++; 
                     mutationStats.pointAddActual++; 
             }
@@ -688,7 +692,7 @@ export class SoftBody {
                                     const P2_minus_P1 = P2.sub(P1);
                                     let P5_vec = new Vec2(P2_minus_P1.x * Math.cos(-angle) - P2_minus_P1.y * Math.sin(-angle), P2_minus_P1.x * Math.sin(-angle) + P2_minus_P1.y * Math.sin(-angle));
                                     const P5 = P1.add(P5_vec);
-                                    
+
                                     newPoints.push(P3, P4, P5);
                                     newSpringsInfo = [
                                         { from: p2_idx, toNew: 0, len: sideLength },
@@ -699,7 +703,7 @@ export class SoftBody {
                                         { from: p2_idx, toNew: 2, len: P5.sub(P2).mag() }
                                     ];
                                 }
-                                
+
                                 const firstNewPointIndex = this.blueprintPoints.length;
                                 newPoints.forEach(p_vec => {
                                     this.blueprintPoints.push({
@@ -717,7 +721,7 @@ export class SoftBody {
                                     const p2 = info.to !== undefined ? info.to : firstNewPointIndex + info.toNew;
                                     this.blueprintSprings.push({ p1Index: p1, p2Index: p2, restLength: info.len, isRigid: false, stiffness: this.stiffness, damping: this.springDamping });
                                 });
-                                
+
                                 mutationStats.shapeAddition++;
                             }
                         }
@@ -783,7 +787,7 @@ export class SoftBody {
                 centroidX /= initialTempMassPoints.length;
                 centroidY /= initialTempMassPoints.length;
             } 
-            
+
             // Populate blueprintPoints from initialTempMassPoints, making coordinates relative to their own centroid
             initialTempMassPoints.forEach(p_temp => {
                 let chosenNodeType;
@@ -834,7 +838,7 @@ export class SoftBody {
                     });
                 }
             });
-            
+
             // Instantiate actual phenotype using the new blueprint.
             // The `startX, startY` provided to createShape becomes the target world position for the *centroid* of this new creature.
             this._instantiatePhenotypeFromBlueprint(startX, startY); 
@@ -921,7 +925,7 @@ export class SoftBody {
         for (const bs of this.blueprintSprings) {
             if (bs.p1Index >= 0 && bs.p1Index < this.massPoints.length &&
                 bs.p2Index >= 0 && bs.p2Index < this.massPoints.length) {
-                
+
                 const p1 = this.massPoints[bs.p1Index];
                 const p2 = this.massPoints[bs.p2Index];
 
@@ -971,17 +975,17 @@ export class SoftBody {
     updateSelf(dt, fluidFieldRef) {
         if (this.isUnstable) return;
 
-        this._updateSensoryInputsAndDefaultActivations(fluidFieldRef, nutrientField, lightField); // Removed particles argument
-        
+        this._updateSensoryInputsAndDefaultActivations(fluidFieldRef, this.nutrientField, this.lightField); // Removed particles argument
+
         let brainNode = this.massPoints.find(p => p.neuronData && p.neuronData.isBrain);
 
         if (brainNode) {
-            this._processBrain(brainNode, dt, fluidFieldRef, nutrientField, lightField); // Removed particles argument
+            this._processBrain(brainNode, dt, fluidFieldRef, this.nutrientField, this.lightField); // Removed particles argument
         } else {
             this._applyFallbackBehaviors(dt, fluidFieldRef);
         }
 
-        this._updateEnergyBudget(dt, fluidFieldRef, nutrientField, lightField); // nutrientField and lightField are global
+        this._updateEnergyBudget(dt, fluidFieldRef, this.nutrientField, this.lightField); // nutrientField and lightField are class properties
         if (this.isUnstable) return; // Death from energy budget check
 
         this._performPhysicalUpdates(dt, fluidFieldRef);
@@ -996,6 +1000,22 @@ export class SoftBody {
         this._applyDefaultActivationPatterns();
         this._updateEyeNodes(); // Removed particles argument
         this._updateJetAndSwimmerFluidSensor(fluidFieldRef);
+    }
+
+    setNutrientField(field) {
+        this.nutrientField = field;
+    }
+
+    setLightField(field) {
+        this.lightField = field;
+    }
+
+    setParticles(particles) {
+        this.particles = particles;
+    }
+
+    setSpatialGrid(grid) {
+        this.spatialGrid = grid;
     }
 
     _applyDefaultActivationPatterns() {
@@ -1015,13 +1035,13 @@ export class SoftBody {
             const timeFactor = (this.ticksSinceBirth + this.defaultActivationPhaseOffset) / Math.max(1, this.defaultActivationPeriod);
 
             switch (this.defaultActivationPattern) {
-                case ActivationPatternType.FLAT:
+                case config.ActivationPatternType.FLAT:
                     baseActivation = this.defaultActivationLevel;
                     break;
-                case ActivationPatternType.SINE:
+                case config.ActivationPatternType.SINE:
                     baseActivation = this.defaultActivationLevel * (Math.sin(2 * Math.PI * timeFactor) * 0.5 + 0.5); // Ranges 0 to level
                     break;
-                case ActivationPatternType.PULSE:
+                case config.ActivationPatternType.PULSE:
                     // Simple pulse: on for 10% of period, uses defaultActivationLevel as max
                     baseActivation = (timeFactor % 1.0 < 0.1) ? this.defaultActivationLevel : 0;
                     break;
@@ -1036,21 +1056,21 @@ export class SoftBody {
                 point.seesTarget = false; // Reset first
                 point.nearestTargetMagnitude = 0;
                 point.nearestTargetDirection = 0;
-                let closestDistSq = EYE_DETECTION_RADIUS * EYE_DETECTION_RADIUS;
+                let closestDistSq = config.EYE_DETECTION_RADIUS * config.EYE_DETECTION_RADIUS;
 
-                // Determine the grid cell range to check based on EYE_DETECTION_RADIUS
-                const eyeGxMin = Math.max(0, Math.floor((point.pos.x - EYE_DETECTION_RADIUS) / GRID_CELL_SIZE));
-                const eyeGxMax = Math.min(GRID_COLS - 1, Math.floor((point.pos.x + EYE_DETECTION_RADIUS) / GRID_CELL_SIZE));
-                const eyeGyMin = Math.max(0, Math.floor((point.pos.y - EYE_DETECTION_RADIUS) / GRID_CELL_SIZE));
-                const eyeGyMax = Math.min(GRID_ROWS - 1, Math.floor((point.pos.y + EYE_DETECTION_RADIUS) / GRID_CELL_SIZE));
+                // Determine the grid cell range to check based on config.EYE_DETECTION_RADIUS
+                const eyeGxMin = Math.max(0, Math.floor((point.pos.x - config.EYE_DETECTION_RADIUS) / config.GRID_CELL_SIZE));
+                const eyeGxMax = Math.min(config.GRID_COLS - 1, Math.floor((point.pos.x + config.EYE_DETECTION_RADIUS) / config.GRID_CELL_SIZE));
+                const eyeGyMin = Math.max(0, Math.floor((point.pos.y - config.EYE_DETECTION_RADIUS) / config.GRID_CELL_SIZE));
+                const eyeGyMax = Math.min(config.GRID_ROWS - 1, Math.floor((point.pos.y + config.EYE_DETECTION_RADIUS) / config.GRID_CELL_SIZE));
 
                 if (point.eyeTargetType === EyeTargetType.PARTICLE) {
                     let nearestParticleFound = null;
                     for (let gy = eyeGyMin; gy <= eyeGyMax; gy++) {
                         for (let gx = eyeGxMin; gx <= eyeGxMax; gx++) {
-                            const cellIndex = gx + gy * GRID_COLS;
-                            if (spatialGrid[cellIndex] && spatialGrid[cellIndex].length > 0) {
-                                const cellBucket = spatialGrid[cellIndex];
+                            const cellIndex = gx + gy * config.GRID_COLS;
+                            if (this.spatialGrid[cellIndex] && this.spatialGrid[cellIndex].length > 0) {
+                                const cellBucket = this.spatialGrid[cellIndex];
                                 for (const item of cellBucket) {
                                     if (item.type === 'particle') {
                                         const particle = item.particleRef;
@@ -1069,16 +1089,16 @@ export class SoftBody {
                     if (nearestParticleFound) {
                         point.seesTarget = true;
                         const vecToTarget = nearestParticleFound.pos.sub(point.pos);
-                        point.nearestTargetMagnitude = vecToTarget.mag() / EYE_DETECTION_RADIUS; 
+                        point.nearestTargetMagnitude = vecToTarget.mag() / config.EYE_DETECTION_RADIUS; 
                         point.nearestTargetDirection = Math.atan2(vecToTarget.y, vecToTarget.x);
                     }
                 } else if (point.eyeTargetType === EyeTargetType.FOREIGN_BODY_POINT) {
                     let nearestForeignPointFound = null;
                     for (let gy = eyeGyMin; gy <= eyeGyMax; gy++) {
                         for (let gx = eyeGxMin; gx <= eyeGxMax; gx++) {
-                            const cellIndex = gx + gy * GRID_COLS;
-                            if (spatialGrid[cellIndex] && spatialGrid[cellIndex].length > 0) {
-                                const cellBucket = spatialGrid[cellIndex];
+                            const cellIndex = gx + gy * config.GRID_COLS;
+                            if (this.spatialGrid[cellIndex] && this.spatialGrid[cellIndex].length > 0) {
+                                const cellBucket = this.spatialGrid[cellIndex];
                                 for (const item of cellBucket) {
                                     // Check for softbody_point, ensure it's not from the current body, and body is not unstable
                                     if (item.type === 'softbody_point' && item.bodyRef !== this && !item.bodyRef.isUnstable) {
@@ -1096,7 +1116,7 @@ export class SoftBody {
                     if (nearestForeignPointFound) {
                         point.seesTarget = true;
                         const vecToTarget = nearestForeignPointFound.pos.sub(point.pos);
-                        point.nearestTargetMagnitude = vecToTarget.mag() / EYE_DETECTION_RADIUS;
+                        point.nearestTargetMagnitude = vecToTarget.mag() / config.EYE_DETECTION_RADIUS;
                         point.nearestTargetDirection = Math.atan2(vecToTarget.y, vecToTarget.x);
                     }
                 }
@@ -1105,21 +1125,8 @@ export class SoftBody {
     }
 
     _processBrain(brainNode, dt, fluidFieldRef, nutrientField, lightField) {
-        const nd = brainNode.neuronData;
-        if (!nd || !nd.weightsIH || !nd.biasesH || !nd.weightsHO || !nd.biasesO ||
-            typeof nd.inputVectorSize !== 'number' ||
-            typeof nd.hiddenLayerSize !== 'number' ||
-            typeof nd.outputVectorSize !== 'number') {
-            // console.warn(`Body ${this.id} brain is missing essential data for processing.`);
-            this._applyFallbackBehaviors(dt, fluidFieldRef); // Fallback if brain data is incomplete
-            return;
-        }
-
-        const inputVector = this._gatherBrainInputs(brainNode, fluidFieldRef, nutrientField, lightField, particles);
-        this._propagateBrainOutputs(brainNode, inputVector);
-        this._applyBrainActionsToPoints(brainNode, dt);
-        this._updateBrainTrainingBuffer(brainNode, inputVector); // Reward logic now inside this method or called from it
-        this._triggerBrainPolicyUpdateIfNeeded(brainNode);
+        // Delegate to the Brain class for brain processing
+        this.brain.process(dt, fluidFieldRef, nutrientField, lightField);
     }
 
     _applyFallbackBehaviors(dt, fluidFieldRef) {
@@ -1149,15 +1156,15 @@ export class SoftBody {
         this.energyGainedFromPhotosynthesisThisTick = 0; // Reset for the current tick
 
         const hasFluidField = fluidFieldRef !== null && typeof fluidFieldRef !== 'undefined';
-        const hasNutrientField = nutrientField !== null && typeof nutrientField !== 'undefined';
-        const hasLightField = lightField !== null && typeof lightField !== 'undefined';
+        const hasNutrientField = this.nutrientField !== null && typeof this.nutrientField !== 'undefined';
+        const hasLightField = this.lightField !== null && typeof this.lightField !== 'undefined';
 
         const scaleX = hasFluidField ? fluidFieldRef.scaleX : 0;
         const scaleY = hasFluidField ? fluidFieldRef.scaleY : 0;
 
         for (const point of this.massPoints) {
             // --- Red Dye Poison Effect (Moved inside main loop) ---
-            if (hasFluidField && RED_DYE_POISON_STRENGTH > 0) {
+            if (hasFluidField && config.RED_DYE_POISON_STRENGTH > 0) {
                 // const fluidGridX = Math.floor(point.pos.x / scaleX); // gx already calculated below
                 // const fluidGridY = Math.floor(point.pos.y / scaleY); // gy already calculated below
                 // let tempMapIdxForPoison = fluidFieldRef.IX(fluidGridX, fluidGridY); // mapIdx used below is the same
@@ -1175,23 +1182,23 @@ export class SoftBody {
                 mapIdx = fluidFieldRef.IX(gx, gy);
 
                 // --- Red Dye Poison Calculation (using mapIdx) ---
-                if (RED_DYE_POISON_STRENGTH > 0) {
+                if (config.RED_DYE_POISON_STRENGTH > 0) {
                     const redDensity = (fluidFieldRef.densityR[mapIdx] || 0) / 255;
                     if (redDensity > 0.01) {
-                        poisonDamageThisFrame += redDensity * RED_DYE_POISON_STRENGTH * (point.radius / 5);
+                        poisonDamageThisFrame += redDensity * config.RED_DYE_POISON_STRENGTH * (point.radius / 5);
                     }
                 }
                 // --- End of Red Dye Poison Calculation ---
 
                 if (hasNutrientField) {
-                    const baseNutrientValue = nutrientField[mapIdx] !== undefined ? nutrientField[mapIdx] : 1.0;
-                    const effectiveNutrientValue = baseNutrientValue * globalNutrientMultiplier;
-                    costMultiplier = 1.0 / Math.max(MIN_NUTRIENT_VALUE, effectiveNutrientValue);
+                    const baseNutrientValue = this.nutrientField[mapIdx] !== undefined ? this.nutrientField[mapIdx] : 1.0;
+                    const effectiveNutrientValue = baseNutrientValue * config.globalNutrientMultiplier;
+                    costMultiplier = 1.0 / Math.max(config.MIN_NUTRIENT_VALUE, effectiveNutrientValue);
                 }
             }
 
 
-            const baseNodeCostThisFrame = BASE_NODE_EXISTENCE_COST * costMultiplier;
+            const baseNodeCostThisFrame = config.BASE_NODE_EXISTENCE_COST * costMultiplier;
             currentFrameEnergyCost += baseNodeCostThisFrame;
             this.energyCostFromBaseNodes += baseNodeCostThisFrame * dt;
 
@@ -1201,51 +1208,51 @@ export class SoftBody {
             // NodeType specific costs
             switch (point.nodeType) {
                 case NodeType.EMITTER:
-                    const emitterCostThisFrame = EMITTER_NODE_ENERGY_COST * exertionSq * costMultiplier;
+                    const emitterCostThisFrame = config.EMITTER_NODE_ENERGY_COST * exertionSq * costMultiplier;
                 currentFrameEnergyCost += emitterCostThisFrame;
                 this.energyCostFromEmitterNodes += emitterCostThisFrame * dt;
                     break;
                 case NodeType.SWIMMER:
-                    const swimmerCostThisFrame = SWIMMER_NODE_ENERGY_COST * exertionSq * costMultiplier;
+                    const swimmerCostThisFrame = config.SWIMMER_NODE_ENERGY_COST * exertionSq * costMultiplier;
                 currentFrameEnergyCost += swimmerCostThisFrame;
                 this.energyCostFromSwimmerNodes += swimmerCostThisFrame * dt;
                     break;
                 case NodeType.JET:
-                    const jetCostThisFrame = JET_NODE_ENERGY_COST * exertionSq * costMultiplier;
+                    const jetCostThisFrame = config.JET_NODE_ENERGY_COST * exertionSq * costMultiplier;
                     currentFrameEnergyCost += jetCostThisFrame;
                     this.energyCostFromJetNodes += jetCostThisFrame * dt;
                     break;
                 case NodeType.EATER:
-                    const eaterCostThisFrame = EATER_NODE_ENERGY_COST * exertionSq * costMultiplier;
+                    const eaterCostThisFrame = config.EATER_NODE_ENERGY_COST * exertionSq * costMultiplier;
                 currentFrameEnergyCost += eaterCostThisFrame;
                 this.energyCostFromEaterNodes += eaterCostThisFrame * dt;
                     break;
                 case NodeType.PREDATOR:
-                    const predatorCostThisFrame = PREDATOR_NODE_ENERGY_COST * exertionSq * costMultiplier;
+                    const predatorCostThisFrame = config.PREDATOR_NODE_ENERGY_COST * exertionSq * costMultiplier;
                 currentFrameEnergyCost += predatorCostThisFrame;
                 this.energyCostFromPredatorNodes += predatorCostThisFrame * dt;
                     break;
                 case NodeType.PHOTOSYNTHETIC:
-                const photosyntheticCostThisFrame = PHOTOSYNTHETIC_NODE_ENERGY_COST * costMultiplier;
+                const photosyntheticCostThisFrame = config.PHOTOSYNTHETIC_NODE_ENERGY_COST * costMultiplier;
                 currentFrameEnergyCost += photosyntheticCostThisFrame;
                 this.energyCostFromPhotosyntheticNodes += photosyntheticCostThisFrame * dt;
 
                     if (hasLightField && hasFluidField && mapIdx !== -1) { // mapIdx would have been calculated if hasFluidField
-                        const baseLightValue = lightField[mapIdx] !== undefined ? lightField[mapIdx] : 0.0;
-                    const effectiveLightValue = baseLightValue * globalLightMultiplier; 
-                    const energyGainThisPoint = effectiveLightValue * PHOTOSYNTHESIS_EFFICIENCY * (point.radius / 5) * dt;
+                        const baseLightValue = this.lightField[mapIdx] !== undefined ? this.lightField[mapIdx] : 0.0;
+                    const effectiveLightValue = baseLightValue * config.globalLightMultiplier; 
+                    const energyGainThisPoint = effectiveLightValue * config.PHOTOSYNTHESIS_EFFICIENCY * (point.radius / 5) * dt;
                         currentFrameEnergyGain += energyGainThisPoint;
                     this.energyGainedFromPhotosynthesis += energyGainThisPoint; // Lifetime total
                     this.energyGainedFromPhotosynthesisThisTick += energyGainThisPoint; // Current tick total
                 }
                     break;
                 case NodeType.ATTRACTOR:
-                    const attractorCostThisFrame = ATTRACTOR_NODE_ENERGY_COST * costMultiplier;
+                    const attractorCostThisFrame = config.ATTRACTOR_NODE_ENERGY_COST * costMultiplier;
                     currentFrameEnergyCost += attractorCostThisFrame;
                     this.energyCostFromAttractorNodes += attractorCostThisFrame * dt;
                     break;
                 case NodeType.REPULSOR:
-                    const repulsorCostThisFrame = REPULSOR_NODE_ENERGY_COST * costMultiplier;
+                    const repulsorCostThisFrame = config.REPULSOR_NODE_ENERGY_COST * costMultiplier;
                     currentFrameEnergyCost += repulsorCostThisFrame;
                     this.energyCostFromRepulsorNodes += repulsorCostThisFrame * dt;
                     break;
@@ -1257,10 +1264,10 @@ export class SoftBody {
             if (point.nodeType === NodeType.NEURON) { // This check is okay, as NodeType is exclusive.
                 let neuronCostThisFrame = 0;
                 if (point.neuronData && point.neuronData.isBrain) {
-                    neuronCostThisFrame = NEURON_NODE_ENERGY_COST * 5 * costMultiplier;
-                    neuronCostThisFrame += (point.neuronData.hiddenLayerSize || 0) * NEURON_NODE_ENERGY_COST * 0.1 * costMultiplier;
+                    neuronCostThisFrame = config.NEURON_NODE_ENERGY_COST * 5 * costMultiplier;
+                    neuronCostThisFrame += (point.neuronData.hiddenLayerSize || 0) * config.NEURON_NODE_ENERGY_COST * 0.1 * costMultiplier;
                 } else {
-                    neuronCostThisFrame = NEURON_NODE_ENERGY_COST * costMultiplier;
+                    neuronCostThisFrame = config.NEURON_NODE_ENERGY_COST * costMultiplier;
                 }
                 currentFrameEnergyCost += neuronCostThisFrame;
                 this.energyCostFromNeuronNodes += neuronCostThisFrame * dt;
@@ -1268,19 +1275,19 @@ export class SoftBody {
 
             // Grabbing cost (independent of NodeType, depends on isGrabbing state)
             if (point.isGrabbing) { 
-                const grabbingCostThisFrame = GRABBING_NODE_ENERGY_COST * costMultiplier;
+                const grabbingCostThisFrame = config.GRABBING_NODE_ENERGY_COST * costMultiplier;
                 currentFrameEnergyCost += grabbingCostThisFrame; 
                 this.energyCostFromGrabbingNodes += grabbingCostThisFrame * dt;
             }
 
             // Eye cost (independent of NodeType, depends on isDesignatedEye state)
             if (point.isDesignatedEye) {
-                 const eyeCostThisFrame = EYE_NODE_ENERGY_COST * costMultiplier;
+                 const eyeCostThisFrame = config.EYE_NODE_ENERGY_COST * costMultiplier;
                  currentFrameEnergyCost += eyeCostThisFrame;
                  this.energyCostFromEyeNodes += eyeCostThisFrame * dt;
             }
         }
-        
+
         // Apply poison damage after the loop, before other adjustments
         if (poisonDamageThisFrame > 0) {
             this.creatureEnergy -= poisonDamageThisFrame * dt * 60; // dt is in seconds, scale strength to be per-second
@@ -1296,13 +1303,14 @@ export class SoftBody {
     }
 
     _performPhysicalUpdates(dt, fluidFieldRef) {
+        const restitution = 0.4; // Local constant for boundary collision restitution
         if (fluidFieldRef) {
             for (let point of this.massPoints) {
                 const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
                 const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
 
                 if (!isFinite(fluidGridX) || !isFinite(fluidGridY)) continue;
-                
+
                 const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
                 // Check index validity once, for all interactions.
                 // Assuming Vx, Vy, density arrays all have the same length.
@@ -1331,7 +1339,7 @@ export class SoftBody {
                         }
                     }
                 }
-                
+
                 // --- Physics Updates for Mobile Points Only ---
                 if (point.isFixed) continue;
 
@@ -1343,7 +1351,7 @@ export class SoftBody {
                     this._tempVec2.y = rawFluidVy * fluidFieldRef.scaleY * dt;
                     this._tempVec2.mulInPlace(this.fluidCurrentStrength).mulInPlace(this.fluidEntrainment);
                     this._tempVec1.addInPlace(this._tempVec2);
-                    
+
                     point.prevPos.copyFrom(point.pos).subInPlace(this._tempVec1);
                 }
             }
@@ -1357,7 +1365,7 @@ export class SoftBody {
             point.update(dt);
         }
 
-        const MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ = (MAX_PIXELS_PER_FRAME_DISPLACEMENT) ** 2;
+        const MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ = (config.MAX_PIXELS_PER_FRAME_DISPLACEMENT) ** 2;
         for (let point of this.massPoints) {
             if (point.isFixed) continue;
 
@@ -1367,7 +1375,7 @@ export class SoftBody {
                 return;
             }
 
-            if (point.pos.x < 0 || point.pos.x > WORLD_WIDTH || point.pos.y < 0 || point.pos.y > WORLD_HEIGHT) {
+            if (point.pos.x < 0 || point.pos.x > config.WORLD_WIDTH || point.pos.y < 0 || point.pos.y > config.WORLD_HEIGHT) {
                 this.isUnstable = true;
                 return;
             }
@@ -1375,24 +1383,24 @@ export class SoftBody {
             const implicitVelX = point.pos.x - point.prevPos.x;
             const implicitVelY = point.pos.y - point.prevPos.y;
 
-            if (IS_WORLD_WRAPPING) {
-                if (point.pos.x < 0) { point.pos.x += WORLD_WIDTH; point.prevPos.x += WORLD_WIDTH; }
-                else if (point.pos.x > WORLD_WIDTH) { point.pos.x -= WORLD_WIDTH; point.prevPos.x -= WORLD_WIDTH; }
-                if (point.pos.y < 0) { point.pos.y += WORLD_HEIGHT; point.prevPos.y += WORLD_HEIGHT; }
-                else if (point.pos.y > WORLD_HEIGHT) { point.pos.y -= WORLD_HEIGHT; point.prevPos.y -= WORLD_HEIGHT; }
+            if (config.IS_WORLD_WRAPPING) {
+                if (point.pos.x < 0) { point.pos.x += config.WORLD_WIDTH; point.prevPos.x += config.WORLD_WIDTH; }
+                else if (point.pos.x > config.WORLD_WIDTH) { point.pos.x -= config.WORLD_WIDTH; point.prevPos.x -= config.WORLD_WIDTH; }
+                if (point.pos.y < 0) { point.pos.y += config.WORLD_HEIGHT; point.prevPos.y += config.WORLD_HEIGHT; }
+                else if (point.pos.y > config.WORLD_HEIGHT) { point.pos.y -= config.WORLD_HEIGHT; point.prevPos.y -= config.WORLD_HEIGHT; }
             } else {
                 if (point.pos.x - point.radius < 0) {
                     point.pos.x = point.radius;
                     point.prevPos.x = point.pos.x - implicitVelX * restitution;
-                } else if (point.pos.x + point.radius > WORLD_WIDTH) {
-                    point.pos.x = WORLD_WIDTH - point.radius;
+                } else if (point.pos.x + point.radius > config.WORLD_WIDTH) {
+                    point.pos.x = config.WORLD_WIDTH - point.radius;
                     point.prevPos.x = point.pos.x - implicitVelX * restitution;
                 }
                 if (point.pos.y - point.radius < 0) {
                     point.pos.y = point.radius;
                     point.prevPos.y = point.pos.y - implicitVelY * restitution;
-                } else if (point.pos.y + point.radius > WORLD_HEIGHT) {
-                    point.pos.y = WORLD_HEIGHT - point.radius;
+                } else if (point.pos.y + point.radius > config.WORLD_HEIGHT) {
+                    point.pos.y = config.WORLD_HEIGHT - point.radius;
                     point.prevPos.y = point.pos.y - implicitVelY * restitution;
                 }
             }
@@ -1418,24 +1426,24 @@ export class SoftBody {
                 const p1Exertion = p1.currentExertionLevel;
 
                 const radiusMultiplierConfig = isAttractor ?
-                    { base: ATTRACTION_RADIUS_MULTIPLIER_BASE, bonus: ATTRACTION_RADIUS_MULTIPLIER_MAX_BONUS } :
-                    { base: REPULSION_RADIUS_MULTIPLIER_BASE, bonus: REPULSION_RADIUS_MULTIPLIER_MAX_BONUS };
+                    { base: config.ATTRACTION_RADIUS_MULTIPLIER_BASE, bonus: config.ATTRACTION_RADIUS_MULTIPLIER_MAX_BONUS } :
+                    { base: config.REPULSION_RADIUS_MULTIPLIER_BASE, bonus: config.REPULSION_RADIUS_MULTIPLIER_MAX_BONUS };
                 const radiusMultiplier = radiusMultiplierConfig.base + (radiusMultiplierConfig.bonus * p1Exertion);
                 const interactionRadius = p1.radius * radiusMultiplier;
                 let min_dist_sq = interactionRadius * interactionRadius; // Start search radius at max interaction radius
 
-                const p1Gx_force = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(p1.pos.x / GRID_CELL_SIZE)));
-                const p1Gy_force = Math.max(0, Math.min(GRID_ROWS - 1, Math.floor(p1.pos.y / GRID_CELL_SIZE)));
-                const searchRadiusInCells = Math.ceil(interactionRadius / GRID_CELL_SIZE);
+                const p1Gx_force = Math.max(0, Math.min(config.GRID_COLS - 1, Math.floor(p1.pos.x / config.GRID_CELL_SIZE)));
+                const p1Gy_force = Math.max(0, Math.min(config.GRID_ROWS - 1, Math.floor(p1.pos.y / config.GRID_CELL_SIZE)));
+                const searchRadiusInCells = Math.ceil(interactionRadius / config.GRID_CELL_SIZE);
 
                 for (let dy = -searchRadiusInCells; dy <= searchRadiusInCells; dy++) {
                     for (let dx = -searchRadiusInCells; dx <= searchRadiusInCells; dx++) {
                         const checkGx = p1Gx_force + dx;
                         const checkGy = p1Gy_force + dy;
-                        if (checkGx >= 0 && checkGx < GRID_COLS && checkGy >= 0 && checkGy < GRID_ROWS) {
-                            const cellIndex = checkGx + checkGy * GRID_COLS;
-                            if (Array.isArray(spatialGrid[cellIndex])) {
-                                const cellBucket = spatialGrid[cellIndex];
+                        if (checkGx >= 0 && checkGx < config.GRID_COLS && checkGy >= 0 && checkGy < config.GRID_ROWS) {
+                            const cellIndex = checkGx + checkGy * config.GRID_COLS;
+                            if (Array.isArray(this.spatialGrid[cellIndex])) {
+                                const cellBucket = this.spatialGrid[cellIndex];
                                 for (const otherItem of cellBucket) {
                                     if (otherItem.type === 'softbody_point' && otherItem.bodyRef !== this && !otherItem.bodyRef.isUnstable) {
                                         const p2_candidate = otherItem.pointRef;
@@ -1472,18 +1480,18 @@ export class SoftBody {
 
             if (p1.isFixed) continue;
 
-            const p1Gx = Math.max(0, Math.min(GRID_COLS - 1, Math.floor(p1.pos.x / GRID_CELL_SIZE)));
-            const p1Gy = Math.max(0, Math.min(GRID_ROWS - 1, Math.floor(p1.pos.y / GRID_CELL_SIZE)));
+            const p1Gx = Math.max(0, Math.min(config.GRID_COLS - 1, Math.floor(p1.pos.x / config.GRID_CELL_SIZE)));
+            const p1Gy = Math.max(0, Math.min(config.GRID_ROWS - 1, Math.floor(p1.pos.y / config.GRID_CELL_SIZE)));
 
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
                     const checkGx = p1Gx + dx;
                     const checkGy = p1Gy + dy;
 
-                    if (checkGx >= 0 && checkGx < GRID_COLS && checkGy >= 0 && checkGy < GRID_ROWS) {
-                        const cellIndex = checkGx + checkGy * GRID_COLS;
-                        if (Array.isArray(spatialGrid[cellIndex])) {
-                            const cellBucket = spatialGrid[cellIndex];
+                    if (checkGx >= 0 && checkGx < config.GRID_COLS && checkGy >= 0 && checkGy < config.GRID_ROWS) {
+                        const cellIndex = checkGx + checkGy * config.GRID_COLS;
+                        if (Array.isArray(this.spatialGrid[cellIndex])) {
+                            const cellBucket = this.spatialGrid[cellIndex];
                             for (const otherItem of cellBucket) {
                                 if (otherItem.type === 'softbody_point') {
                                     if (otherItem.bodyRef === this) continue;
@@ -1493,7 +1501,7 @@ export class SoftBody {
                                     // const diff = p1.pos.sub(p2.pos);
                                     tempDiffVec.copyFrom(p1.pos).subInPlace(p2.pos);
                                     const distSq = tempDiffVec.magSq();
-                                    const interactionRadius = (p1.radius + p2.radius) * BODY_REPULSION_RADIUS_FACTOR;
+                                    const interactionRadius = (p1.radius + p2.radius) * config.BODY_REPULSION_RADIUS_FACTOR;
 
                                     if (distSq < interactionRadius * interactionRadius && distSq > 0.0001) {
                                         const dist = Math.sqrt(distSq);
@@ -1501,7 +1509,7 @@ export class SoftBody {
                                         // const forceDir = diff.normalize();
                                         // const repulsionForce = forceDir.mul(repulsionForceMag);
                                         // p1.applyForce(repulsionForce);
-                                        
+
                                         tempForceVec.copyFrom(tempDiffVec).normalizeInPlace();
                                         const repulsionForceMag = BODY_REPULSION_STRENGTH * overlap * 0.5;
                                         tempForceVec.mulInPlace(repulsionForceMag);
@@ -1510,13 +1518,13 @@ export class SoftBody {
 
                                     if (p1.nodeType === NodeType.PREDATOR) {
                                         const p1Exertion = p1.currentExertionLevel || 0;
-                                        const effectivePredationRadiusMultiplier = PREDATION_RADIUS_MULTIPLIER_BASE + (PREDATION_RADIUS_MULTIPLIER_MAX_BONUS * p1Exertion);
+                                        const effectivePredationRadiusMultiplier = config.PREDATION_RADIUS_MULTIPLIER_BASE + (config.PREDATION_RADIUS_MULTIPLIER_MAX_BONUS * p1Exertion);
                                         const predationRadius = p1.radius * effectivePredationRadiusMultiplier;
-                                        
+
                                         if (distSq < predationRadius * predationRadius) {
                                             // NEW CHECK: Has this prey body (otherItem.bodyRef) already been predated by THIS predator (this) this tick?
                                             if (!this.preyPredatedThisTick.has(otherItem.bodyRef.id)) {
-                                                const effectiveEnergySapped = ENERGY_SAPPED_PER_PREDATION_BASE + (ENERGY_SAPPED_PER_PREDATION_MAX_BONUS * p1Exertion);
+                                                const effectiveEnergySapped = config.ENERGY_SAPPED_PER_PREDATION_BASE + (config.ENERGY_SAPPED_PER_PREDATION_MAX_BONUS * p1Exertion);
                                                 const energyToSap = Math.min(otherItem.bodyRef.creatureEnergy, effectiveEnergySapped); 
                                                 if (energyToSap > 0) {
                                                     otherItem.bodyRef.creatureEnergy -= energyToSap;
@@ -1540,21 +1548,21 @@ export class SoftBody {
             if (point.isFixed) continue; 
             if (point.nodeType === NodeType.EATER) { 
                 const pointExertion = point.currentExertionLevel || 0;
-                const effectiveEatingRadiusMultiplier = EATING_RADIUS_MULTIPLIER_BASE + (EATING_RADIUS_MULTIPLIER_MAX_BONUS * pointExertion);
+                const effectiveEatingRadiusMultiplier = config.EATING_RADIUS_MULTIPLIER_BASE + (config.EATING_RADIUS_MULTIPLIER_MAX_BONUS * pointExertion);
                 const eatingRadius = point.radius * effectiveEatingRadiusMultiplier;
                 const eatingRadiusSq = eatingRadius * eatingRadius;
 
                 // Determine the grid cell range to check based on eatingRadius
-                const eaterGxMin = Math.max(0, Math.floor((point.pos.x - eatingRadius) / GRID_CELL_SIZE));
-                const eaterGxMax = Math.min(GRID_COLS - 1, Math.floor((point.pos.x + eatingRadius) / GRID_CELL_SIZE));
-                const eaterGyMin = Math.max(0, Math.floor((point.pos.y - eatingRadius) / GRID_CELL_SIZE));
-                const eaterGyMax = Math.min(GRID_ROWS - 1, Math.floor((point.pos.y + eatingRadius) / GRID_CELL_SIZE));
+                const eaterGxMin = Math.max(0, Math.floor((point.pos.x - eatingRadius) / config.GRID_CELL_SIZE));
+                const eaterGxMax = Math.min(config.GRID_COLS - 1, Math.floor((point.pos.x + eatingRadius) / config.GRID_CELL_SIZE));
+                const eaterGyMin = Math.max(0, Math.floor((point.pos.y - eatingRadius) / config.GRID_CELL_SIZE));
+                const eaterGyMax = Math.min(config.GRID_ROWS - 1, Math.floor((point.pos.y + eatingRadius) / config.GRID_CELL_SIZE));
 
                 for (let gy = eaterGyMin; gy <= eaterGyMax; gy++) {
                     for (let gx = eaterGxMin; gx <= eaterGxMax; gx++) {
-                        const cellIndex = gx + gy * GRID_COLS;
-                        if (Array.isArray(spatialGrid[cellIndex])) {
-                            const cellBucket = spatialGrid[cellIndex];
+                        const cellIndex = gx + gy * config.GRID_COLS;
+                        if (Array.isArray(this.spatialGrid[cellIndex])) {
+                            const cellBucket = this.spatialGrid[cellIndex];
                             for (let k = cellBucket.length - 1; k >= 0; k--) { 
                                 const item = cellBucket[k];
                                 if (item.type === 'particle') {
@@ -1566,15 +1574,15 @@ export class SoftBody {
                                         if (distSq < eatingRadiusSq) {
                                             particle.isEaten = true;
                                             particle.life = 0; 
-                                            
+
                                             let energyGain = ENERGY_PER_PARTICLE;
-                                            if (nutrientField && fluidField) { // fluidFieldRef is fluidField in this context
+                                            if (this.nutrientField && fluidField) { // fluidFieldRef is fluidField in this context
                                                 const particleGx = Math.floor(particle.pos.x / fluidField.scaleX);
                                                 const particleGy = Math.floor(particle.pos.y / fluidField.scaleY);
                                                 const nutrientIdxAtParticle = fluidField.IX(particleGx, particleGy);
-                                                const baseNutrientValueAtParticle = nutrientField[nutrientIdxAtParticle] !== undefined ? nutrientField[nutrientIdxAtParticle] : 1.0;
-                                                const effectiveNutrientAtParticle = baseNutrientValueAtParticle * globalNutrientMultiplier;
-                                                energyGain *= Math.max(MIN_NUTRIENT_VALUE, effectiveNutrientAtParticle);
+                                                const baseNutrientValueAtParticle = this.nutrientField[nutrientIdxAtParticle] !== undefined ? this.nutrientField[nutrientIdxAtParticle] : 1.0;
+                                                const effectiveNutrientAtParticle = baseNutrientValueAtParticle * config.globalNutrientMultiplier;
+                                                energyGain *= Math.max(config.MIN_NUTRIENT_VALUE, effectiveNutrientAtParticle);
                                             }
                                             this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyGain); // Use currentMaxEnergy
                                             this.energyGainedFromEating += energyGain;
@@ -1590,8 +1598,8 @@ export class SoftBody {
         if (this.isUnstable) return; 
 
         // Final Instability Checks: Springs and Span
-        const localMaxSpringStretchFactor = MAX_SPRING_STRETCH_FACTOR;
-        const localMaxSpanPerPointFactor = MAX_SPAN_PER_POINT_FACTOR;
+        const localMaxSpringStretchFactor = config.MAX_SPRING_STRETCH_FACTOR;
+        const localMaxSpanPerPointFactor = config.MAX_SPAN_PER_POINT_FACTOR;
 
         for (const spring of this.springs) {
             // const currentLength = spring.p1.pos.sub(spring.p2.pos).mag();
@@ -1617,11 +1625,11 @@ export class SoftBody {
         this.ticksSinceBirth++;
 
         // Check for max age
-        if (this.ticksSinceBirth > MAX_CREATURE_AGE_TICKS) {
+        if (this.ticksSinceBirth > config.MAX_CREATURE_AGE_TICKS) {
             this.isUnstable = true;
             return; // Creature dies of old age
         }
-        
+
         if (this.ticksSinceBirth > this.effectiveReproductionCooldown) { // Use effective cooldown
             this.canReproduce = true;
         }
@@ -1630,7 +1638,7 @@ export class SoftBody {
     getAverageStiffness() {
         if (this.springs.length === 0) return 0;
         const nonRigidSprings = this.springs.filter(s => !s.isRigid);
-        if (nonRigidSprings.length === 0) return RIGID_SPRING_STIFFNESS;
+        if (nonRigidSprings.length === 0) return config.RIGID_SPRING_STIFFNESS;
         const totalStiffness = nonRigidSprings.reduce((sum, spring) => sum + spring.stiffness, 0);
         return totalStiffness / nonRigidSprings.length;
     }
@@ -1714,7 +1722,11 @@ export class SoftBody {
                 // Create the potential child. Its blueprintRadius will be calculated in its constructor.
                 // We will assign a proper ID only if placement is successful.
                 let potentialChild = new SoftBody(-1, spawnX, spawnY, this); // Use -1 or a temporary ID marker
-                
+                potentialChild.setNutrientField(this.nutrientField);
+                potentialChild.setLightField(this.lightField);
+                potentialChild.setParticles(this.particles);
+                potentialChild.setSpatialGrid(this.spatialGrid);
+
                 if (potentialChild.massPoints.length === 0 || potentialChild.blueprintRadius === 0) continue; 
 
                 let isSpotClear = true;
@@ -1900,7 +1912,7 @@ export class SoftBody {
             nd.biasesH = initializeVector(nd.hiddenLayerSize);
             // console.log(`Body ${this.id} brain: Initialized weightsIH/biasesH. Inputs: ${nd.inputVectorSize}, Hidden: ${nd.hiddenLayerSize}`);
         }
-        
+
         if (!nd.weightsHO || nd.weightsHO.length !== nd.outputVectorSize || (nd.weightsHO.length > 0 && nd.weightsHO[0].length !== nd.hiddenLayerSize) ) {
             nd.weightsHO = initializeMatrix(nd.outputVectorSize, nd.hiddenLayerSize);
             nd.biasesO = initializeVector(nd.outputVectorSize);
@@ -1960,7 +1972,7 @@ export class SoftBody {
         let stdDevDiscountedReward = 0;
         for (const r of discountedRewards) stdDevDiscountedReward += (r - meanDiscountedReward) ** 2;
         stdDevDiscountedReward = Math.sqrt(stdDevDiscountedReward / discountedRewards.length);
-        
+
         const normalizedDiscountedRewards = discountedRewards.map(
             r => (r - meanDiscountedReward) / (stdDevDiscountedReward + 1e-6) // Add epsilon for stability
         );
@@ -1974,7 +1986,7 @@ export class SoftBody {
         const gradBiasesO_acc = initializeVector(nd.outputVectorSize, 0);
         const gradWeightsIH_acc = initializeMatrix(nd.hiddenLayerSize, nd.inputVectorSize, 0);
         const gradBiasesH_acc = initializeVector(nd.hiddenLayerSize, 0);
-        
+
 
         // Iterate through each trajectory/experience in the batch
         for (let t = 0; t < nd.experienceBuffer.length; t++) {
@@ -1987,7 +1999,7 @@ export class SoftBody {
             const hiddenLayerInputs_t = multiplyMatrixVector(nd.weightsIH, state_t);
             const hiddenLayerBiasedInputs_t = addVectors(hiddenLayerInputs_t, nd.biasesH);
             const hiddenActivations_t = hiddenLayerBiasedInputs_t.map(val => Math.tanh(val));
-            
+
             // Gradients for Output Layer (weightsHO, biasesO)
             let currentActionDetailIdx = 0;
             for (let i = 0; i < nd.outputVectorSize / 2; i++) { // Iterate through 6 logical actions
@@ -1995,7 +2007,7 @@ export class SoftBody {
                 const stdDevOutputIdx = i * 2 + 1;
 
                 const ad = actionDetails_t[currentActionDetailIdx]; // Access detail for the current logical action
-                
+
                 if (!ad) { 
                     // This implies that actionDetails_t (from experience buffer) is shorter 
                     // than what outputVectorSize/2 expects. This could happen if not all 
@@ -2011,7 +2023,7 @@ export class SoftBody {
                 const { sampledAction, mean, stdDev } = ad;
                 const grad_logProb_d_mean = (sampledAction - mean) / (stdDev * stdDev + 1e-9); 
                 const grad_logProb_d_stdDev_output = (((sampledAction - mean) ** 2) - (stdDev * stdDev)) / (stdDev * stdDev * stdDev + 1e-9);
-                
+
                 // Error for the mean output neuron
                 const error_mean = G_t_normalized * grad_logProb_d_mean;
                 // Error for the stdDev output neuron (raw output from NN, before exp())
@@ -2129,7 +2141,7 @@ export class SoftBody {
                 }
             }
         }
-        
+
         // Post-process to remove duplicate or fully contained sub-segments if desired, but for now, allow overlaps.
         // Ensure segments are unique point sequences if multiple paths lead to same point sequence.
         const uniqueSegments = [];

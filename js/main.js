@@ -6,7 +6,17 @@ import './classes/Brain.js';
 import './classes/SoftBody.js';
 import './classes/FluidField.js';
 import './classes/Particle.js';
-import { initializeSpatialGrid, initializePopulation, updatePhysics, initFluidSimulation, initParticles, initNutrientMap, initLightMap, initViscosityMap } from './simulation.js';
+import {
+    initializeSpatialGrid,
+    initializePopulation,
+    updatePhysics,
+    initFluidSimulation,
+    initParticles,
+    initNutrientMap,
+    initLightMap,
+    initViscosityMap,
+    draw
+} from './simulation.js';
 import { 
     canvas, webgpuCanvas, worldWidthInput, worldHeightInput,
     updateInstabilityIndicator, initializeAllSliderDisplays, updatePopulationCount, updateStatsPanel, updateInfoPanel

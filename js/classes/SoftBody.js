@@ -4,7 +4,7 @@ import { NodeType, RLRewardStrategy, RLAlgorithmType, EyeTargetType, MovementTyp
 import {MassPoint} from "./MassPoint.js";
 import {Spring} from "./Spring.js";
 import {Brain} from "./Brain.js";
-import {fluidField, mutationStats, softBodyPopulation} from "../simulation.js";
+import {fluidField, mutationStats, nextSoftBodyId, softBodyPopulation} from "../simulation.js";
 
 // --- SoftBody Class ---
 export class SoftBody {

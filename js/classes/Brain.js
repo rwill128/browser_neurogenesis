@@ -499,7 +499,7 @@ export class Brain {
                     break;
                 case RLRewardStrategy.REPRODUCTION_EVENT:
                     if (softBody.justReproduced) {
-                        reward = REPRODUCTION_REWARD_VALUE;
+                        reward = config.REPRODUCTION_REWARD_VALUE;
                         softBody.justReproduced = false;
                     } else {
                         reward = 0;

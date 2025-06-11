@@ -610,6 +610,11 @@ document.addEventListener('keydown', (e) => {
             }
             break;
     }
+
+    // After handling panning keys, synchronize config so helpers using config.* stay accurate
+    config.viewOffsetX = viewOffsetX;
+    config.viewOffsetY = viewOffsetY;
+    config.viewZoom = viewZoom;
 });
 
 
@@ -1340,6 +1345,7 @@ canvas.addEventListener('mousemove', (e) => {
         config.viewOffsetX = config.panInitialViewOffsetX - panDeltaX_world;
         config.viewOffsetY = config.panInitialViewOffsetY - panDeltaY_world;
 
+        // Clamp to world bounds
         const effectiveViewportWidth = canvas.clientWidth / config.viewZoom; // This is viewport width in world units
         const effectiveViewportHeight = canvas.clientHeight / config.viewZoom; // This is viewport height in world units
         // Correct maxPan calculations for clamping viewOffset
@@ -1348,6 +1354,10 @@ canvas.addEventListener('mousemove', (e) => {
 
         config.viewOffsetX = Math.max(0, Math.min(config.viewOffsetX, maxPanX));
         config.viewOffsetY = Math.max(0, Math.min(config.viewOffsetY, maxPanY));
+
+        // Synchronize exported globals so the renderer uses the newest camera values
+        viewOffsetX = config.viewOffsetX;
+        viewOffsetY = config.viewOffsetY;
         return;
     }
 
@@ -1575,6 +1585,11 @@ canvas.addEventListener('wheel', (e) => {
     const maxPanY = Math.max(0, config.WORLD_HEIGHT - (cssClientHeight / bitmapDisplayScale / viewZoom));
     viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
+
+    // Keep config in sync with updated globals (many helper functions rely on the config copy).
+    config.viewZoom = viewZoom;
+    config.viewOffsetX = viewOffsetX;
+    config.viewOffsetY = viewOffsetY;
 });
 
 eyeDetectionRadiusSlider.oninput = function () {
@@ -1742,6 +1757,11 @@ function focusOnCreature(creature) {
     const maxPanY = Math.max(0, config.WORLD_HEIGHT - effectiveViewportHeight);
     viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
+
+    // Synchronize to config for helper consistency
+    config.viewZoom = viewZoom;
+    config.viewOffsetX = viewOffsetX;
+    config.viewOffsetY = viewOffsetY;
 
     config.selectedInspectBody = creature;
     config.selectedInspectPoint = creature.massPoints[0];

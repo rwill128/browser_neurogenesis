@@ -258,8 +258,8 @@ export class SoftBody {
 
             // 2. Body Scale Mutation (if offspring)
             const parentBodyForMutation = isBlueprint ? null : creationData;
-            if (parentBodyForMutation && Math.random() < config.config.BODY_SCALE_MUTATION_CHANCE) {
-                const scaleFactor = 1.0 + (Math.random() - 0.5) * 2 * config.config.BODY_SCALE_MUTATION_MAGNITUDE;
+            if (parentBodyForMutation && Math.random() < config.BODY_SCALE_MUTATION_CHANCE) {
+                const scaleFactor = 1.0 + (Math.random() - 0.5) * 2 * config.BODY_SCALE_MUTATION_MAGNITUDE;
                 if (scaleFactor > 0.1 && Math.abs(scaleFactor - 1.0) > 0.001) { // Check if it actually scaled
                     this.springs.forEach(spring => {
                         spring.restLength *= scaleFactor;
@@ -405,7 +405,7 @@ export class SoftBody {
                 }
 
                 // Mutate canBeGrabber gene
-                if (Math.random() < config.config.GRABBER_GENE_MUTATION_CHANCE) {
+                if (Math.random() < config.GRABBER_GENE_MUTATION_CHANCE) {
                     bp.canBeGrabber = !bp.canBeGrabber;
                     mutationStats.grabberGeneChange++;
                 }
@@ -492,7 +492,7 @@ export class SoftBody {
                     relX: newRelX, relY: newRelY, radius: newRadius, mass: newMass,
                     nodeType: newNodeType, movementType: newMovementType,
                     dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
-                    canBeGrabber: Math.random() < config.config.GRABBER_GENE_MUTATION_CHANCE,
+                    canBeGrabber: Math.random() < config.GRABBER_GENE_MUTATION_CHANCE,
                     neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MAX - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null,
                     eyeTargetType: newNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined,
                     maxEffectiveJetVelocity: this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4)
@@ -510,7 +510,7 @@ export class SoftBody {
                     const connectToBpIndex = shuffledExistingBpIndices[k];
                     const connectToBp = this.blueprintPoints[connectToBpIndex];
                     const dist = Math.sqrt((newBp.relX - connectToBp.relX)**2 + (newBp.relY - connectToBp.relY)**2);
-                    let newRestLength = dist * (1 + (Math.random() - 0.5) * 2 * config.config.NEW_SPRING_REST_LENGTH_VARIATION);
+                    let newRestLength = dist * (1 + (Math.random() - 0.5) * 2 * config.NEW_SPRING_REST_LENGTH_VARIATION);
                     newRestLength = Math.max(1, newRestLength);
                     const becomeRigid = Math.random() < config.CHANCE_FOR_RIGID_SPRING;
                     const newStiffness = 500 + Math.random() * 2500;
@@ -804,7 +804,7 @@ export class SoftBody {
                 if (chosenNodeType === NodeType.SWIMMER) {
                     chosenMovementType = MovementType.NEUTRAL;
                 }
-                const canBeGrabberInitial = Math.random() < config.config.GRABBER_GENE_MUTATION_CHANCE;
+                const canBeGrabberInitial = Math.random() < config.GRABBER_GENE_MUTATION_CHANCE;
                 const neuronDataBp = chosenNodeType === NodeType.NEURON ? {
                     hiddenLayerSize: config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MIN - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))
                 } : null;

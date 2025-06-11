@@ -1,10 +1,10 @@
 import config from './config.js';
-import { SoftBody } from './classes/SoftBody.js';
-import { Particle } from './classes/Particle.js';
-import { FluidField } from './classes/FluidField.js';
-import { GPUFluidField } from './gpuFluidField.js';
-import { isWebGpuSupported } from './gpuUtils.js';
-import { perlin } from './utils.js';
+import {SoftBody} from './classes/SoftBody.js';
+import {Particle} from './classes/Particle.js';
+import {FluidField} from './classes/FluidField.js';
+import {GPUFluidField} from './gpuFluidField.js';
+import {isWebGpuSupported} from './gpuUtils.js';
+import {perlin} from './utils.js';
 import {
     canvas,
     ctx, updateInfoPanel,
@@ -64,9 +64,9 @@ let mutationStats = { // New: For tracking mutation occurrences
     springAddition: 0,
     springRestLength: 0,
     springRigidityFlip: 0,
-    pointAddActual: 0,      
+    pointAddActual: 0,
     springSubdivision: 0,
-    segmentDuplication: 0, 
+    segmentDuplication: 0,
     symmetricBodyDuplication: 0,
     bodyScale: 0,
     rewardStrategyChange: 0, // New stat for reward strategy mutations
@@ -148,7 +148,7 @@ function initializePopulation() {
 
 
 async function initFluidSimulation(targetCanvas) {
-    const dt_simulation = 1/60; // Assuming fixed timestep for simulation physics if needed separately
+    const dt_simulation = 1 / 60; // Assuming fixed timestep for simulation physics if needed separately
     const scaleX = config.WORLD_WIDTH / config.FLUID_GRID_SIZE_CONTROL;
     const scaleY = config.WORLD_HEIGHT / config.FLUID_GRID_SIZE_CONTROL;
 
@@ -162,14 +162,14 @@ async function initFluidSimulation(targetCanvas) {
             fluidField.setViscosityField(viscosityField);
         } else {
             fluidField = new GPUFluidField(targetCanvas, config.FLUID_GRID_SIZE_CONTROL, config.FLUID_DIFFUSION, config.FLUID_VISCOSITY, dt_simulation, scaleX, scaleY);
-            await fluidField._initPromise; 
+            await fluidField._initPromise;
 
             // console.log("GPUFluidField instance created and awaited in simulation.js.");
 
             // Check if GPUFluidField successfully initialized in WebGPU mode (fluidField.device would be set)
             // or if it fell back to WebGL (fluidField.gl would be set and fluidField.device would be null)
             // or if both failed (gpuEnabled would be false).
-            if (!fluidField.gpuEnabled || (!fluidField.device && !fluidField.gl)) { 
+            if (!fluidField.gpuEnabled || (!fluidField.device && !fluidField.gl)) {
                 console.warn("Fallback to CPU: GPUFluidField initialization failed (neither WebGPU nor WebGL succeeded), or gpuEnabled is false.");
                 fluidField = new FluidField(config.FLUID_GRID_SIZE_CONTROL, config.FLUID_DIFFUSION, config.FLUID_VISCOSITY, dt_simulation, scaleX, scaleY);
                 fluidField.setViscosityField(viscosityField);
@@ -191,7 +191,7 @@ async function initFluidSimulation(targetCanvas) {
             offscreenFluidCanvas = document.createElement('canvas');
             offscreenFluidCanvas.width = Math.round(config.FLUID_GRID_SIZE_CONTROL);
             offscreenFluidCanvas.height = Math.round(config.FLUID_GRID_SIZE_CONTROL);
-            offscreenFluidCtx = offscreenFluidCanvas.getContext('2d', { willReadFrequently: true });
+            offscreenFluidCtx = offscreenFluidCanvas.getContext('2d', {willReadFrequently: true});
             console.log("Offscreen canvas for CPU fluid rendering initialized or resized.");
         }
     } else if (fluidField instanceof GPUFluidField && fluidField.gpuEnabled) {
@@ -203,7 +203,7 @@ async function initFluidSimulation(targetCanvas) {
     }
 
     fluidField.useWrapping = config.IS_WORLD_WRAPPING;
-    fluidField.maxVelComponent = config.MAX_FLUID_VELOCITY_COMPONENT; 
+    fluidField.maxVelComponent = config.MAX_FLUID_VELOCITY_COMPONENT;
     config.velocityEmitters = []; // Clear any existing emitters when re-initializing
 }
 
@@ -216,8 +216,8 @@ function applyVelocityEmitters() {
     if (!fluidField || config.EMITTER_STRENGTH <= 0) return;
     for (const emitter of config.velocityEmitters) {
         fluidField.addVelocity(emitter.gridX, emitter.gridY,
-                               emitter.forceX * config.EMITTER_STRENGTH,
-                               emitter.forceY * config.EMITTER_STRENGTH);
+            emitter.forceX * config.EMITTER_STRENGTH,
+            emitter.forceY * config.EMITTER_STRENGTH);
     }
 }
 
@@ -238,7 +238,7 @@ function updatePhysics(dt) {
         let particlesToSpawnToFloor = config.PARTICLE_POPULATION_FLOOR - particles.length;
         for (let i = 0; i < particlesToSpawnToFloor; i++) {
             if (particles.length < config.PARTICLE_POPULATION_CEILING) { // Double check ceiling
-                 particles.push(new Particle(Math.random() * config.WORLD_WIDTH, Math.random() * config.WORLD_HEIGHT, fluidField));
+                particles.push(new Particle(Math.random() * config.WORLD_WIDTH, Math.random() * config.WORLD_HEIGHT, fluidField));
             } else {
                 break;
             }
@@ -258,7 +258,7 @@ function updatePhysics(dt) {
         const point = config.selectedSoftBodyPoint.point;
         const displacementX = point.pos.x - point.prevPos.x;
         const displacementY = point.pos.y - point.prevPos.y;
-        const movementMagnitudeSq = displacementX*displacementX + displacementY*displacementY;
+        const movementMagnitudeSq = displacementX * displacementX + displacementY * displacementY;
         const movementThresholdSq = 0.01 * 0.01;
 
         if (movementMagnitudeSq > movementThresholdSq) {
@@ -266,8 +266,8 @@ function updatePhysics(dt) {
             const fluidGridY = Math.floor(point.pos.y / fluidField.scaleY);
 
             fluidField.addVelocity(fluidGridX, fluidGridY,
-                                   displacementX * config.SOFT_BODY_PUSH_STRENGTH / fluidField.scaleX, // Scale to grid velocity
-                                   displacementY * config.SOFT_BODY_PUSH_STRENGTH / fluidField.scaleY);
+                displacementX * config.SOFT_BODY_PUSH_STRENGTH / fluidField.scaleX, // Scale to grid velocity
+                displacementY * config.SOFT_BODY_PUSH_STRENGTH / fluidField.scaleY);
             fluidField.addDensity(fluidGridX, fluidGridY, 60, 60, 80, 15);
         }
     }
@@ -288,10 +288,10 @@ function updatePhysics(dt) {
             body.updateSelf(dt, fluidField);
             if (body.isUnstable) {
                 currentAnyUnstable = true;
-            } else if (body.creatureEnergy >= body.reproductionEnergyThreshold && 
-                       body.canReproduce && 
-                       canCreaturesReproduceGlobally &&
-                       body.failedReproductionCooldown <= 0) {
+            } else if (body.creatureEnergy >= body.reproductionEnergyThreshold &&
+                body.canReproduce &&
+                canCreaturesReproduceGlobally &&
+                body.failedReproductionCooldown <= 0) {
                 newOffspring.push(...body.reproduce());
             }
         }
@@ -303,12 +303,12 @@ function updatePhysics(dt) {
         particles[i].update(dt);
         if (particles[i].life <= 0 && !particles[i].isEaten) {
             particles.splice(i, 1);
-        } else if (particles[i].isEaten && particles[i].life <=0) {
-            particles.splice(i,1);
+        } else if (particles[i].isEaten && particles[i].life <= 0) {
+            particles.splice(i, 1);
         }
     }
 
-    if(currentAnyUnstable && !config.isAnySoftBodyUnstable) {
+    if (currentAnyUnstable && !config.isAnySoftBodyUnstable) {
         config.isAnySoftBodyUnstable = true;
     } else if (!currentAnyUnstable && config.isAnySoftBodyUnstable && !softBodyPopulation.some(b => b.isUnstable)) {
         config.isAnySoftBodyUnstable = false;
@@ -345,21 +345,21 @@ function updatePhysics(dt) {
     // Creature population floor maintenance
     const neededToMaintainFloor = config.CREATURE_POPULATION_FLOOR - softBodyPopulation.length;
     if (neededToMaintainFloor > 0) {
-         for (let i = 0; i < neededToMaintainFloor; i++) {
-             if (softBodyPopulation.length < config.CREATURE_POPULATION_CEILING) { // Also respect ceiling when topping up
-                 const margin = 50;
-                 const randX = margin + Math.random() * (config.WORLD_WIDTH - margin * 2);
-                 const randY = margin + Math.random() * (config.WORLD_HEIGHT - margin * 2);
-                 const softBody = new SoftBody(nextSoftBodyId++, randX, randY, null);
-                 softBody.setNutrientField(nutrientField);
-                 softBody.setLightField(lightField);
-                 softBody.setParticles(particles);
-                 softBody.setSpatialGrid(spatialGrid);
-                 softBodyPopulation.push(softBody);
-             } else {
-                 break; // Stop if ceiling is reached during floor maintenance
-             }
-         }
+        for (let i = 0; i < neededToMaintainFloor; i++) {
+            if (softBodyPopulation.length < config.CREATURE_POPULATION_CEILING) { // Also respect ceiling when topping up
+                const margin = 50;
+                const randX = margin + Math.random() * (config.WORLD_WIDTH - margin * 2);
+                const randY = margin + Math.random() * (config.WORLD_HEIGHT - margin * 2);
+                const softBody = new SoftBody(nextSoftBodyId++, randX, randY, null);
+                softBody.setNutrientField(nutrientField);
+                softBody.setLightField(lightField);
+                softBody.setParticles(particles);
+                softBody.setSpatialGrid(spatialGrid);
+                softBodyPopulation.push(softBody);
+            } else {
+                break; // Stop if ceiling is reached during floor maintenance
+            }
+        }
     }
 
     updatePopulationCount();
@@ -440,14 +440,14 @@ export function draw() {
     }
 
     if (fluidField && config.velocityEmitters.length > 0) {
-         for (const emitter of config.velocityEmitters) {
+        for (const emitter of config.velocityEmitters) {
             const startX = (emitter.gridX + 0.5) * fluidField.scaleX;
             const startY = (emitter.gridY + 0.5) * fluidField.scaleY;
 
-            const forceMagnitude = Math.sqrt(emitter.forceX**2 + emitter.forceY**2);
+            const forceMagnitude = Math.sqrt(emitter.forceX ** 2 + emitter.forceY ** 2);
             const displayLength = 20 * config.EMITTER_STRENGTH;
-            const endX = startX + (emitter.forceX / (forceMagnitude || 1)) * displayLength ;
-            const endY = startY + (emitter.forceY / (forceMagnitude || 1)) * displayLength ;
+            const endX = startX + (emitter.forceX / (forceMagnitude || 1)) * displayLength;
+            const endY = startY + (emitter.forceY / (forceMagnitude || 1)) * displayLength;
 
 
             ctx.beginPath();
@@ -459,7 +459,7 @@ export function draw() {
 
             const angle = Math.atan2(endY - startY, endX - startX);
             const arrowSize = 8 / viewZoom;
-            if (Math.abs(endX-startX) > 0.01 || Math.abs(endY-startY) > 0.01) {
+            if (Math.abs(endX - startX) > 0.01 || Math.abs(endY - startY) > 0.01) {
                 ctx.lineTo(endX - arrowSize * Math.cos(angle - Math.PI / 6), endY - arrowSize * Math.sin(angle - Math.PI / 6));
                 ctx.moveTo(endX, endY);
                 ctx.lineTo(endX - arrowSize * Math.cos(angle + Math.PI / 6), endY - arrowSize * Math.sin(angle + Math.PI / 6));
@@ -504,7 +504,7 @@ function drawFluidVelocities(ctx, fluidData, viewportCanvasWidth, viewportCanvas
     if (N > 0 && fluidData.Vx.length > 0 && (startCol <= endCol && startRow <= endRow)) {
         let sampleIndices = [];
         // Ensure we only sample valid indices within the visible range if possible
-        for(let k=0; k < Math.min(5, (endCol-startCol+1)*(endRow-startRow+1)); k++) { 
+        for (let k = 0; k < Math.min(5, (endCol - startCol + 1) * (endRow - startRow + 1)); k++) {
             const randCol = startCol + Math.floor(Math.random() * (endCol - startCol + 1));
             const randRow = startRow + Math.floor(Math.random() * (endRow - startRow + 1));
             sampleIndices.push(fluidData.IX(randCol, randRow));
@@ -519,10 +519,10 @@ function drawFluidVelocities(ctx, fluidData, viewportCanvasWidth, viewportCanvas
     }
 
     const arrowLengthScale = 0.8 * Math.min(worldCellWidth, worldCellHeight); // Adjusted for better visuals
-    const maxVelocityDisplay = 5; 
+    const maxVelocityDisplay = 5;
 
     ctx.strokeStyle = 'rgba(200, 200, 255, 0.6)';
-    ctx.lineWidth = Math.max(0.5, 1.0 / currentZoom); 
+    ctx.lineWidth = Math.max(0.5, 1.0 / currentZoom);
 
     for (let j = startRow; j <= endRow; j++) {
         for (let i = startCol; i <= endCol; i++) {
@@ -542,7 +542,7 @@ function drawFluidVelocities(ctx, fluidData, viewportCanvasWidth, viewportCanvas
             const endXWorld = startXWorld + vx * arrowLengthScale;
             const endYWorld = startYWorld + vy * arrowLengthScale;
 
-            if (Math.abs(startXWorld - endXWorld) < 0.1 && Math.abs(startYWorld - endYWorld) < 0.1) continue; 
+            if (Math.abs(startXWorld - endXWorld) < 0.1 && Math.abs(startYWorld - endYWorld) < 0.1) continue;
 
             ctx.beginPath();
             ctx.moveTo(startXWorld, startYWorld); // Draw using world coordinates
@@ -550,11 +550,11 @@ function drawFluidVelocities(ctx, fluidData, viewportCanvasWidth, viewportCanvas
             ctx.stroke();
 
             const angle = Math.atan2(endYWorld - startYWorld, endXWorld - startXWorld);
-            const baseArrowHeadSize = 4; 
-            const arrowHeadScreenMinSize = 1.5; 
-            const arrowHeadScreenMaxSize = 8;   
+            const baseArrowHeadSize = 4;
+            const arrowHeadScreenMinSize = 1.5;
+            const arrowHeadScreenMaxSize = 8;
             let arrowHeadSize = baseArrowHeadSize / currentZoom;
-            arrowHeadSize = Math.max(arrowHeadScreenMinSize, Math.min(arrowHeadSize, arrowHeadScreenMaxSize)); 
+            arrowHeadSize = Math.max(arrowHeadScreenMinSize, Math.min(arrowHeadSize, arrowHeadScreenMaxSize));
 
             ctx.beginPath();
             ctx.moveTo(endXWorld, endYWorld);
@@ -599,10 +599,10 @@ function initLightMap() {
     }
     lightField = new Float32Array(size * size);
     const noiseScale = 0.05; // Adjust for patchiness; smaller = larger patches
-    const noiseOffsetX = Math.random() * 1000; 
+    const noiseOffsetX = Math.random() * 1000;
     const noiseOffsetY = Math.random() * 1000;
 
-    for (let y_coord = 0; y_coord < size; y_coord++) { 
+    for (let y_coord = 0; y_coord < size; y_coord++) {
         for (let x = 0; x < size; x++) {
             let noiseValue = perlin.noise(x * noiseScale + noiseOffsetX, y_coord * noiseScale + noiseOffsetY);
             noiseValue = (noiseValue + 1) / 2; // Map to 0-1 range
@@ -635,4 +635,24 @@ function initViscosityMap() {
     console.log(`Viscosity map initialized to ${size}x${size} with Perlin noise pattern.`);
 }
 
-export { initializeSpatialGrid, initializePopulation, updatePhysics, initFluidSimulation, initParticles, initNutrientMap, mutationStats, initLightMap, initViscosityMap, nutrientField, lightField, viscosityField, softBodyPopulation, fluidField, nextSoftBodyId, particles, spatialGrid };
+export {
+    initializeSpatialGrid,
+    initializePopulation,
+    updatePhysics,
+    initFluidSimulation,
+    initParticles,
+    initNutrientMap,
+    mutationStats,
+    initLightMap,
+    initViscosityMap,
+    nutrientField,
+    lightField,
+    viscosityField,
+    softBodyPopulation,
+    fluidField,
+    nextSoftBodyId,
+    globalEnergyCosts,
+    globalEnergyGains,
+    particles,
+    spatialGrid
+};

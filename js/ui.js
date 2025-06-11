@@ -1,5 +1,18 @@
 import config from './config.js';
-import { initializeSpatialGrid, initializePopulation, initFluidSimulation, initNutrientMap, initLightMap, initViscosityMap, initParticles, softBodyPopulation, particles, fluidField, spatialGrid } from './simulation.js';
+import {
+    initializeSpatialGrid,
+    initializePopulation,
+    initFluidSimulation,
+    initNutrientMap,
+    initLightMap,
+    initViscosityMap,
+    initParticles,
+    softBodyPopulation,
+    particles,
+    fluidField,
+    spatialGrid,
+    mutationStats, globalEnergyGains, globalEnergyCosts
+} from './simulation.js';
 import { perlin, getNodeTypeString, getRewardStrategyString, getEyeTargetTypeString, getMovementTypeString, sigmoid } from './utils.js';
 import {NodeType} from "./classes/constants.js";
 
@@ -866,7 +879,7 @@ jetMaxVelocityGeneSlider.oninput = function() {
 
 resetButton.onclick = function () {
     initializePopulation();
-    isAnySoftBodyUnstable = false;
+    config.isAnySoftBodyUnstable = false;
     updateInstabilityIndicator();
     // Reset mutation stats
     for (const key in mutationStats) {

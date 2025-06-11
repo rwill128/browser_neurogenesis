@@ -6,53 +6,63 @@
 
   <!-- ─── LIBRARIES ──────────────────────────────────────────────────────────── -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.21.0/dist/tf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-vis@1.5.1/dist/tfjs-vis.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-vis@1.7.1/dist/tfjs-vis.umd.min.js"></script>
 
   <!-- ─── STYLES ────────────────────────────────────────────────────────────── -->
   <style>
-    body { font-family: sans-serif; margin: 1.2rem; line-height: 1.4; }
-    textarea { width: 100%; }
-    button   { margin-right: .4rem; padding: .5rem 1rem; }
-    #tokenViz { margin-top: 1rem; font-family: monospace; }
-    .token {
-      display: inline-block;
-      padding: 4px 6px;
-      margin: 1px;
-      border-radius: 4px;
-      color: #000;
-      transition: background-color .2s;
-    }
+    body { font-family: sans-serif; margin: 1.2rem; line-height: 1.4; max-width: 900px; }
+    textarea, input[type=text] { width: 100%; box-sizing: border-box; }
+    button { margin: .4rem .6rem .4rem 0; padding: .5rem 1rem; }
+    #tokenViz   { margin-top: 1rem; font-family: monospace; }
+    .token      { display:inline-block; padding:4px 6px; margin:1px; border-radius:4px; color:#000; }
+    #genOutput  { margin-top: .8rem; white-space: pre-wrap; background:#f7f7f7; padding:.6rem; border-radius:4px; min-height:3rem; }
+    #status     { display:inline-block; min-width:6rem; }
   </style>
 </head>
 
 <body>
 <h2>Tiny Transformer Playground</h2>
 
-<label for="inputText"><strong>Training corpus (plain text, ≤ 1 kB):</strong></label><br>
+<!-- ─── TRAINING CORPUS ──────────────────────────────────────────────────────── -->
+<label><strong>Training corpus (plain text, ≤ 1 kB):</strong></label><br>
 <textarea id="inputText" rows="4">
 hello world! this is a tiny transformer demo.
 have fun teaching it character-level next-token prediction!
 </textarea><br>
 
-<button id="initBtn">① Initialise / Reset Model</button>
+<!-- ─── TRAINING CONTROLS ────────────────────────────────────────────────────── -->
+<button id="initBtn">① Reset Model</button>
 <button id="trainStepBtn" disabled>② Train 1 Step</button>
 <button id="trainEpochBtn" disabled>③ Train N Steps</button>
 <input id="numSteps" type="number" value="200" min="1" style="width:6rem">
 <label for="numSteps">steps</label>
+<span id="status"></span>
 
-<div id="lossVis"></div>
+<div id="lossVis" style="margin-top:1rem;"></div>
 <div id="tokenViz">(Start training to see attention weights)</div>
+
+<!-- ─── GENERATION CONTROLS ──────────────────────────────────────────────────── -->
+<hr>
+<h3>Generate text</h3>
+<label for="promptInput">Prompt:</label>
+<input id="promptInput" type="text" value="hello ">
+<label for="genLen">Length:</label>
+<input id="genLen" type="number" min="1" value="100" style="width:6rem">
+<button id="genBtn" disabled>Generate</button>
+
+<div id="genOutput"></div>
 
 <!-- ─── SCRIPT ──────────────────────────────────────────────────────────────── -->
 <script>
 (async () => {
-  /* ─────────────────────────── CONSTANTS ─────────────────────────── */
+  /* ───────── CONSTANTS ───────── */
   const MAX_SEQ_LEN   = 32;
   const D_MODEL       = 32;
   const LEARNING_RATE = 1e-1;
   const OPTIMIZER     = tf.train.adam(LEARNING_RATE);
+  const TEMPERATURE   = 1.0;
 
-  /* ─────────────────────────── TOKENISER ─────────────────────────── */
+  /* ───────── TOKENISER ───────── */
   const CHARS = Array.from(new Set(
     Array(128).fill(0).map((_, i) => String.fromCharCode(i))
       .filter(c => c >= ' ' && c <= '~')
@@ -65,11 +75,11 @@ have fun teaching it character-level next-token prediction!
 
   function textToTensor(text) {
     const ids = [...text].slice(0, MAX_SEQ_LEN).map(ch => stoi[ch] ?? stoi['?']);
-    while (ids.length < MAX_SEQ_LEN) ids.push(stoi[PAD]);
+    while (ids.length < MAX_SEQ_LEN) ids.unshift(stoi[PAD]);   // left-pad
     return tf.tensor1d(ids, 'int32');
   }
 
-  /* ─────────────────────────── MODEL ─────────────────────────── */
+  /* ───────── MODEL ───────── */
   class TinyTransformer {
     constructor() {
       this.embed = tf.variable(tf.randomNormal([VOCAB_SIZE, D_MODEL]).mul(0.1));
@@ -80,15 +90,15 @@ have fun teaching it character-level next-token prediction!
     forward(x) {
       return tf.tidy(() => {
         const [batch, seqLen] = x.shape;
-        const emb = tf.gather(this.embed, x);                   // [b,s,d]
+        const emb = tf.gather(this.embed, x);                          // [b,s,d]
         const q   = emb.slice([0, seqLen - 1, 0], [batch, 1, D_MODEL]); // [b,1,d]
-        const k   = emb;                                        // [b,s,d]
+        const k   = emb;                                               // [b,s,d]
         const scores = tf.matMul(q, k, false, true)
-                        .div(Math.sqrt(D_MODEL));               // [b,1,s]
-        const attn = tf.softmax(scores, -1);                    // [b,1,s]
-        const context = tf.matMul(attn, k).reshape([batch, D_MODEL]); // [b,d]
+                        .div(Math.sqrt(D_MODEL));                      // [b,1,s]
+        const attn = tf.softmax(scores, -1);                           // [b,1,s]
+        const context = tf.matMul(attn, k).reshape([batch, D_MODEL]);  // [b,d]
         const logits = tf.add(tf.matMul(context, this.outW), this.outB); // [b,V]
-        return { logits, attn: attn.reshape([batch, seqLen]) }; // attn → [b,s]
+        return { logits, attn: attn.reshape([batch, seqLen]) };
       });
     }
 
@@ -102,30 +112,38 @@ have fun teaching it character-level next-token prediction!
       lossValue.dispose();
       return out[0];
     }
+
+    sampleNext(contextTensor, temperature = 1.0) {
+      return tf.tidy(() => {
+        const { logits } = this.forward(contextTensor.expandDims(0));
+        const scaled = logits.div(temperature);
+        const probs  = tf.softmax(scaled).flatten();
+        const nextId = tf.multinomial(probs, 1, null, true).arraySync()[0];
+        logits.dispose(); scaled.dispose(); probs.dispose();
+        return nextId;
+      });
+    }
   }
 
-  /* ─────────────────────────── DATA ─────────────────────────── */
+  /* ───────── DATA ───────── */
   function* makeCharDataset(text) {
     const clean = [...text].filter(ch => ch >= ' ' && ch <= '~');
     for (let i = 1; i < clean.length; ++i) {
       const window = clean.slice(Math.max(0, i - (MAX_SEQ_LEN - 1)), i);
-      yield {
-        inputTensor: textToTensor(window.join('')),
-        targetId: stoi[clean[i]]
-      };
+      yield { inputTensor: textToTensor(window.join('')), targetId: stoi[clean[i]] };
     }
   }
 
-  /* ─────────────────────────── VISUALS ─────────────────────────── */
-  const lossContainer = document.getElementById('lossVis');
-  const tokenDiv      = document.getElementById('tokenViz');
-  let lossValues = [];
+  /* ───────── VISUALS ───────── */
+  const lossDiv   = document.getElementById('lossVis');
+  const tokenDiv  = document.getElementById('tokenViz');
+  let   lossValues = [];
 
   function renderChart() {
     tfvis.render.linechart(
-      { name: 'Training Loss', tab: 'Charts' },
+      lossDiv,
       { values: [lossValues], series: ['loss'] },
-      { xLabel: 'step', yLabel: 'loss', width: 400, height: 300 }
+      { width: 500, height: 300, yLabel: 'Cross-entropy', xLabel: 'Step' }
     );
   }
 
@@ -142,72 +160,95 @@ have fun teaching it character-level next-token prediction!
     });
   }
 
-  /* ─────────────────────────── UI SETUP ─────────────────────────── */
+  /* ───────── UI ELEMENTS ───────── */
   const initBtn       = document.getElementById('initBtn');
   const stepBtn       = document.getElementById('trainStepBtn');
   const epochBtn      = document.getElementById('trainEpochBtn');
   const numStepsInput = document.getElementById('numSteps');
+  const statusSpan    = document.getElementById('status');
   const textArea      = document.getElementById('inputText');
+  const genBtn        = document.getElementById('genBtn');
+  const genLenInput   = document.getElementById('genLen');
+  const promptInput   = document.getElementById('promptInput');
+  const genOutputDiv  = document.getElementById('genOutput');
 
+  /* ───────── STATE ───────── */
   let model, dataset, dataIter;
 
+  /* ───────── FUNCTIONS ───────── */
   function reset() {
     model    = new TinyTransformer();
     dataset  = Array.from(makeCharDataset(textArea.value));
     dataIter = 0;
     lossValues = [];
-    lossContainer.innerHTML = '';          // clear old chart
+    lossDiv.innerHTML = '';
     tokenDiv.textContent = '(Start training to see attention weights)';
-    stepBtn.disabled = epochBtn.disabled = false;
+    genOutputDiv.textContent = '';
+    statusSpan.textContent = '';
+    stepBtn.disabled = epochBtn.disabled = genBtn.disabled = false;
   }
 
   async function trainOne() {
+    if (dataIter >= dataset.length) dataIter = 0;
     const sample = dataset[dataIter++];
-    if (!sample) { dataIter = 0; return null; }   // loop dataset
-
     const loss = await model.trainStep(sample.inputTensor, sample.targetId);
 
-    /* ––– Attention visualisation – keep tensors alive until finished ––– */
-    const forwardOut = model.forward(sample.inputTensor.expandDims(0));
-    const attnArr = forwardOut.attn.dataSync();          // make copy while alive
-    const tokens  = sample.inputTensor.arraySync().map(i => itos[i]);
+    const { attn } = model.forward(sample.inputTensor.expandDims(0));
+    const attnArr  = attn.dataSync();
+    const tokens   = sample.inputTensor.arraySync().map(i => itos[i]);
     renderAttention(tokens, attnArr);
-
-    forwardOut.attn.dispose();
-    forwardOut.logits.dispose();
-    sample.inputTensor.dispose();
-
+    attn.dispose();                            // ← no manual dispose of input tensor
     return loss;
   }
 
+  function generateText(prompt, length) {
+    let context = [...prompt].map(ch => stoi[ch] ?? stoi['?']);
+    let output  = prompt;
+    for (let i = 0; i < length; ++i) {
+      const ctxIds = context.slice(-MAX_SEQ_LEN);
+      while (ctxIds.length < MAX_SEQ_LEN) ctxIds.unshift(stoi[PAD]);
+      const ctxTensor = tf.tensor1d(ctxIds, 'int32');
+      const nextId = model.sampleNext(ctxTensor, TEMPERATURE);
+      ctxTensor.dispose();
+      const nextChar = itos[nextId] || '?';
+      output += nextChar;
+      context.push(nextId);
+    }
+    return output;
+  }
+
+  /* ───────── BUTTON HANDLERS ───────── */
   initBtn.onclick = reset;
 
   stepBtn.onclick = async () => {
     const loss = await trainOne();
-    if (loss != null) {
-      lossValues.push({ x: lossValues.length, y: loss });
-      renderChart();
-    }
+    lossValues.push({ x: lossValues.length, y: loss });
+    renderChart();
   };
 
   epochBtn.onclick = async () => {
     const N = parseInt(numStepsInput.value);
     stepBtn.disabled = epochBtn.disabled = true;
-    for (let i = 0; i < N; i++) {
+    statusSpan.textContent = '(0 / ' + N + ')';
+
+    for (let i = 0; i < N; ++i) {
       const loss = await trainOne();
-      if (loss != null) {
-        lossValues.push({ x: lossValues.length, y: loss });
-        if (i % 10 === 0) {   // update chart occasionally
-          renderChart();
-          await tf.nextFrame();  // let the UI breathe
-        }
-      }
+      lossValues.push({ x: lossValues.length, y: loss });
+      if (i % 10 === 0) { renderChart(); await tf.nextFrame(); }
+      if (i % 20 === 0) statusSpan.textContent = `(${i + 1} / ${N})`;
     }
-    renderChart();                // final refresh
+    renderChart();
+    statusSpan.textContent = '';
     stepBtn.disabled = epochBtn.disabled = false;
   };
 
-  /* ─── auto-init on load ─── */
+  genBtn.onclick = () => {
+    const prompt = promptInput.value || ' ';
+    const len    = parseInt(genLenInput.value);
+    genOutputDiv.textContent = generateText(prompt, len);
+  };
+
+  /* ─── AUTO-INIT ─── */
   reset();
 })();
 </script>

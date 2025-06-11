@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Tiny Transformer Playground</title>
+
+  <!-- ─── LIBRARIES ──────────────────────────────────────────────────────────── -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.21.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-vis@1.5.1/dist/tfjs-vis.umd.min.js"></script>
+
+  <!-- ─── STYLES ────────────────────────────────────────────────────────────── -->
+  <style>
+    body { font-family: sans-serif; margin: 1.2rem; line-height: 1.4; }
+    textarea { width: 100%; }
+    button   { margin-right: .4rem; padding: .5rem 1rem; }
+    #tokenViz { margin-top: 1rem; font-family: monospace; }
+    .token {
+      display: inline-block;
+      padding: 4px 6px;
+      margin: 1px;
+      border-radius: 4px;
+      color: #000;
+      transition: background-color .2s;
+    }
+  </style>
+</head>
+
+<body>
+<h2>Tiny Transformer Playground</h2>
+
+<label for="inputText"><strong>Training corpus (plain text, ≤ 1 kB):</strong></label><br>
+<textarea id="inputText" rows="4">
+hello world! this is a tiny transformer demo.
+have fun teaching it character-level next-token prediction!
+</textarea><br>
+
+<button id="initBtn">① Initialise / Reset Model</button>
+<button id="trainStepBtn" disabled>② Train 1 Step</button>
+<button id="trainEpochBtn" disabled>③ Train N Steps</button>
+<input id="numSteps" type="number" value="200" min="1" style="width:6rem">
+<label for="numSteps">steps</label>
+
+<div id="lossVis"></div>
+<div id="tokenViz">(Start training to see attention weights)</div>
+
+<!-- ─── SCRIPT ──────────────────────────────────────────────────────────────── -->
+<script>
+(async () => {
+  /* ─────────────────────────── CONSTANTS ─────────────────────────── */
+  const MAX_SEQ_LEN   = 32;
+  const D_MODEL       = 32;
+  const LEARNING_RATE = 1e-1;
+  const OPTIMIZER     = tf.train.adam(LEARNING_RATE);
+
+  /* ─────────────────────────── TOKENISER ─────────────────────────── */
+  const CHARS = Array.from(new Set(
+    Array(128).fill(0).map((_, i) => String.fromCharCode(i))
+      .filter(c => c >= ' ' && c <= '~')
+  ));
+  const PAD = '_';
+  if (!CHARS.includes(PAD)) CHARS.push(PAD);
+  const stoi = Object.fromEntries(CHARS.map((c, i) => [c, i]));
+  const itos = CHARS;
+  const VOCAB_SIZE = CHARS.length;
+
+  function textToTensor(text) {
+    const ids = [...text].slice(0, MAX_SEQ_LEN).map(ch => stoi[ch] ?? stoi['?']);
+    while (ids.length < MAX_SEQ_LEN) ids.push(stoi[PAD]);
+    return tf.tensor1d(ids, 'int32');
+  }
+
+  /* ─────────────────────────── MODEL ─────────────────────────── */
+  class TinyTransformer {
+    constructor() {
+      this.embed = tf.variable(tf.randomNormal([VOCAB_SIZE, D_MODEL]).mul(0.1));
+      this.outW  = tf.variable(tf.randomNormal([D_MODEL, VOCAB_SIZE]).mul(0.1));
+      this.outB  = tf.variable(tf.zeros([VOCAB_SIZE]));
+    }
+
+    forward(x) {
+      return tf.tidy(() => {
+        const [batch, seqLen] = x.shape;
+        const emb = tf.gather(this.embed, x);                   // [b,s,d]
+        const q   = emb.slice([0, seqLen - 1, 0], [batch, 1, D_MODEL]); // [b,1,d]
+        const k   = emb;                                        // [b,s,d]
+        const scores = tf.matMul(q, k, false, true)
+                        .div(Math.sqrt(D_MODEL));               // [b,1,s]
+        const attn = tf.softmax(scores, -1);                    // [b,1,s]
+        const context = tf.matMul(attn, k).reshape([batch, D_MODEL]); // [b,d]
+        const logits = tf.add(tf.matMul(context, this.outW), this.outB); // [b,V]
+        return { logits, attn: attn.reshape([batch, seqLen]) }; // attn → [b,s]
+      });
+    }
+
+    async trainStep(input, targetId) {
+      const lossValue = OPTIMIZER.minimize(() => {
+        const { logits } = this.forward(input.expandDims(0));
+        return tf.losses.softmaxCrossEntropy(
+          tf.oneHot(tf.tensor1d([targetId], 'int32'), VOCAB_SIZE), logits);
+      }, true, [this.embed, this.outW, this.outB]);
+      const out = await lossValue.data();
+      lossValue.dispose();
+      return out[0];
+    }
+  }
+
+  /* ─────────────────────────── DATA ─────────────────────────── */
+  function* makeCharDataset(text) {
+    const clean = [...text].filter(ch => ch >= ' ' && ch <= '~');
+    for (let i = 1; i < clean.length; ++i) {
+      const window = clean.slice(Math.max(0, i - (MAX_SEQ_LEN - 1)), i);
+      yield {
+        inputTensor: textToTensor(window.join('')),
+        targetId: stoi[clean[i]]
+      };
+    }
+  }
+
+  /* ─────────────────────────── VISUALS ─────────────────────────── */
+  const lossContainer = document.getElementById('lossVis');
+  const tokenDiv      = document.getElementById('tokenViz');
+  let lossValues = [];
+
+  function renderChart() {
+    tfvis.render.linechart(
+      { name: 'Training Loss', tab: 'Charts' },
+      { values: [lossValues], series: ['loss'] },
+      { xLabel: 'step', yLabel: 'loss', width: 400, height: 300 }
+    );
+  }
+
+  function renderAttention(tokens, attnWeights) {
+    tokenDiv.innerHTML = '';
+    const max = Math.max(...attnWeights);
+    tokens.forEach((t, i) => {
+      const w = max ? attnWeights[i] / max : 0;
+      const span = document.createElement('span');
+      span.textContent = t;
+      span.className = 'token';
+      span.style.backgroundColor = `rgba(255,165,0,${w})`;
+      tokenDiv.appendChild(span);
+    });
+  }
+
+  /* ─────────────────────────── UI SETUP ─────────────────────────── */
+  const initBtn       = document.getElementById('initBtn');
+  const stepBtn       = document.getElementById('trainStepBtn');
+  const epochBtn      = document.getElementById('trainEpochBtn');
+  const numStepsInput = document.getElementById('numSteps');
+  const textArea      = document.getElementById('inputText');
+
+  let model, dataset, dataIter;
+
+  function reset() {
+    model    = new TinyTransformer();
+    dataset  = Array.from(makeCharDataset(textArea.value));
+    dataIter = 0;
+    lossValues = [];
+    lossContainer.innerHTML = '';          // clear old chart
+    tokenDiv.textContent = '(Start training to see attention weights)';
+    stepBtn.disabled = epochBtn.disabled = false;
+  }
+
+  async function trainOne() {
+    const sample = dataset[dataIter++];
+    if (!sample) { dataIter = 0; return null; }   // loop dataset
+
+    const loss = await model.trainStep(sample.inputTensor, sample.targetId);
+
+    /* ––– Attention visualisation – keep tensors alive until finished ––– */
+    const forwardOut = model.forward(sample.inputTensor.expandDims(0));
+    const attnArr = forwardOut.attn.dataSync();          // make copy while alive
+    const tokens  = sample.inputTensor.arraySync().map(i => itos[i]);
+    renderAttention(tokens, attnArr);
+
+    forwardOut.attn.dispose();
+    forwardOut.logits.dispose();
+    sample.inputTensor.dispose();
+
+    return loss;
+  }
+
+  initBtn.onclick = reset;
+
+  stepBtn.onclick = async () => {
+    const loss = await trainOne();
+    if (loss != null) {
+      lossValues.push({ x: lossValues.length, y: loss });
+      renderChart();
+    }
+  };
+
+  epochBtn.onclick = async () => {
+    const N = parseInt(numStepsInput.value);
+    stepBtn.disabled = epochBtn.disabled = true;
+    for (let i = 0; i < N; i++) {
+      const loss = await trainOne();
+      if (loss != null) {
+        lossValues.push({ x: lossValues.length, y: loss });
+        if (i % 10 === 0) {   // update chart occasionally
+          renderChart();
+          await tf.nextFrame();  // let the UI breathe
+        }
+      }
+    }
+    renderChart();                // final refresh
+    stepBtn.disabled = epochBtn.disabled = false;
+  };
+
+  /* ─── auto-init on load ─── */
+  reset();
+})();
+</script>
+</body>
+</html>

@@ -15,6 +15,7 @@ import {
 } from './simulation.js';
 import { perlin, getNodeTypeString, getRewardStrategyString, getEyeTargetTypeString, getMovementTypeString, sigmoid } from './utils.js';
 import {NodeType} from "./classes/constants.js";
+import viewport from './viewport.js';
 
 // --- DOM Element Selections ---
 const canvas = document.getElementById('simulationCanvas');
@@ -1957,12 +1958,13 @@ function placeImportedCreature(worldX, worldY) {
     }
 }
 
-let viewZoom = 1.0;
-let viewOffsetX = 0.0;
-let viewOffsetY = 0.0;
+// Replace old exported globals with references to the viewport.
+let viewZoom = viewport.zoom;
+let viewOffsetX = viewport.offsetX;
+let viewOffsetY = viewport.offsetY;
 
 export { 
-    canvas, webgpuCanvas, ctx, viewZoom, viewOffsetX, viewOffsetY, 
+    canvas, webgpuCanvas, ctx, viewport as camera,
     worldWidthInput, worldHeightInput, 
     updateInstabilityIndicator, updatePopulationCount, updateStatsPanel, 
     updateInfoPanel, copyInfoToClipboard, toggleInfoPanel, toggleStatsPanel, 

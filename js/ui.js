@@ -1,6 +1,7 @@
 import config from './config.js';
 import { initializeSpatialGrid, initializePopulation, initFluidSimulation, initNutrientMap, initLightMap, initViscosityMap, initParticles, softBodyPopulation, particles, fluidField, spatialGrid } from './simulation.js';
 import { perlin, getNodeTypeString, getRewardStrategyString, getEyeTargetTypeString, getMovementTypeString, sigmoid } from './utils.js';
+import {NodeType} from "./classes/constants.js";
 
 // --- DOM Element Selections ---
 const canvas = document.getElementById('simulationCanvas');
@@ -384,10 +385,10 @@ function updateInfoPanel() {
             content += `<p><strong>Radius:</strong> ${point.radius.toFixed(2)}</p>`;
             content += `<p><strong>World Pos:</strong> X: ${point.pos.x.toFixed(2)}, Y: ${point.pos.y.toFixed(2)}</p>`;
             content += `<p><strong>Can Be Grabber:</strong> ${point.canBeGrabber}</p>`;
-            if (point.nodeType === config.NodeType.EMITTER) {
+            if (point.nodeType === NodeType.EMITTER) {
                 content += `<p><strong>Dye Color:</strong> R:${point.dyeColor[0].toFixed(0)} G:${point.dyeColor[1].toFixed(0)} B:${point.dyeColor[2].toFixed(0)}</p>`;
             }
-            if (point.nodeType === config.NodeType.JET) {
+            if (point.nodeType === NodeType.JET) {
                 content += `<p><strong>Max Effective Velocity:</strong> ${point.maxEffectiveJetVelocity.toFixed(2)}</p>`;
             }
             if (point.isGrabbing) {
@@ -396,7 +397,7 @@ function updateInfoPanel() {
                 content += `<p><strong>State:</strong> Normal</p>`;
             }
 
-            if (point.nodeType === config.NodeType.EYE) {
+            if (point.nodeType === NodeType.EYE) {
                 content += `<h6>Eye Sensor Data:</h6>`;
                 content += `<p><strong>Target Type:</strong> ${getEyeTargetTypeString(point.eyeTargetType)}</p>`;
                 content += `<p><strong>Sees Target:</strong> ${point.seesTarget}</p>`;
@@ -406,7 +407,7 @@ function updateInfoPanel() {
                 }
             }
 
-            if (point.nodeType === config.NodeType.NEURON && point.neuronData) {
+            if (point.nodeType === NodeType.NEURON && point.neuronData) {
                 if (typeof point.neuronData.hiddenLayerSize === 'undefined') {
                     const bodyIdForLog = config.selectedInspectBody ? config.selectedInspectBody.id : 'UnknownBody';
                     console.warn(`Neuron in Body ${bodyIdForLog}, Point Index ${index}, has neuronData, but hiddenLayerSize is UNDEFINED. neuronData:`, JSON.parse(JSON.stringify(point.neuronData)));

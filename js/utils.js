@@ -1,4 +1,6 @@
 // --- Neural Network Math Helpers ---
+import {MovementType, NodeType, RLRewardStrategy} from "./classes/constants.js";
+
 function sigmoid(x) {
     return 1 / (1 + Math.exp(-x));
 }

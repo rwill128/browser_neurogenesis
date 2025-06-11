@@ -1,5 +1,5 @@
 import config from '../config.js';
-import { Vec2 } from "../utils.js";
+import {Vec2} from "../utils.js";
 import {EyeTargetType, MovementType, NodeType} from "./constants.js";
 
 // --- MassPoint Class (Soft Body with Verlet Integration) ---
@@ -14,7 +14,7 @@ export class MassPoint {
         this.color = color;
         this.nodeType = NodeType.EATER; // Default to a base type, will be set in createShape
         this.movementType = MovementType.NEUTRAL; // Default movement type
-        this.dyeColor = [0,0,0]; // Still needed for Emitter type
+        this.dyeColor = [0, 0, 0]; // Still needed for Emitter type
         this.neuronData = null;
         this.currentExertionLevel = 0; // New: For dynamic energy costs
         this.isGrabbing = false; // New: For NN-controlled grabbing state
@@ -26,9 +26,12 @@ export class MassPoint {
         this.nearestTargetDirection = 0; // Renamed from nearestParticleDirection
         this.maxEffectiveJetVelocity = 0; // New: For JET type
         this.sensedFluidVelocity = new Vec2(); // For JET and SWIMMER
-        this.jetData = { currentMagnitude: 0, currentAngle: 0 }; // For JET type
+        this.jetData = {currentMagnitude: 0, currentAngle: 0}; // For JET type
     }
-    applyForce(f) { this.force.addInPlace(f); } // Use addInPlace
+
+    applyForce(f) {
+        this.force.addInPlace(f);
+    } // Use addInPlace
 
     get isFixed() { // Getter for convenience, based on movementType OR if grabbing
         return this.movementType === MovementType.FIXED || this.isGrabbing;
@@ -96,8 +99,8 @@ export class MassPoint {
         } else if (this.nodeType === NodeType.PREDATOR) {
             mainColor = 'rgba(255, 50, 50, 0.9)';
         } else if (this.nodeType === NodeType.SWIMMER) {
-             mainColor = 'rgba(0,200,255,0.9)'; // Bright blue for Swimmer
-        } else if (this.nodeType === NodeType.PHOTOSYNTHETIC) { 
+            mainColor = 'rgba(0,200,255,0.9)'; // Bright blue for Swimmer
+        } else if (this.nodeType === NodeType.PHOTOSYNTHETIC) {
             mainColor = 'rgba(60, 179, 113, 0.9)'; // MediumSeaGreen for photosynthesis
         } else if (this.nodeType === NodeType.EMITTER) {
             mainColor = 'rgba(0,255,100,0.9)';

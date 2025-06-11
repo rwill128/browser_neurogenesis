@@ -159,7 +159,8 @@ have fun teaching it character-level next-token prediction!
                         attns.push(a.reshape([batch, s]));
                         ctxs.push(tf.matMul(a, k).reshape([batch, HEAD_DIM]));
                     });
-                    const context = tf.concat(ctxs, 1), attnAvg = tf.addN(attns).div(HEADS);
+                    const context = tf.concat(ctxs, 1)
+                    const attnAvg = tf.keep(tf.addN(attns).div(HEADS));
 
                     const hidden = tf.relu(tf.matMul(context, this.ff1));
                     const logits = tf.add(tf.matMul(tf.matMul(hidden, this.ff2), this.outW), this.outB);

@@ -4,7 +4,7 @@ import { NodeType, RLRewardStrategy, RLAlgorithmType, EyeTargetType, MovementTyp
 import {MassPoint} from "./MassPoint.js";
 import {Spring} from "./Spring.js";
 import {Brain} from "./Brain.js";
-import {fluidField} from "../simulation.js";
+import {fluidField, softBodyPopulation} from "../simulation.js";
 
 // --- SoftBody Class ---
 export class SoftBody {
@@ -1687,9 +1687,9 @@ export class SoftBody {
             return []; // On cooldown from a previous failed attempt
         }
 
-        if (this.isUnstable || !this.canReproduce || !canCreaturesReproduceGlobally) return []; // Check global flag
+        if (this.isUnstable || !this.canReproduce || !config.canCreaturesReproduceGlobally) return []; // Check global flag
 
-        const energyForOneOffspring = this.currentMaxEnergy * OFFSPRING_INITIAL_ENERGY_SHARE; // Use currentMaxEnergy for cost basis
+        const energyForOneOffspring = this.currentMaxEnergy * config.OFFSPRING_INITIAL_ENERGY_SHARE; // Use currentMaxEnergy for cost basis
         let hadEnoughEnergyForAttempt = this.creatureEnergy >= energyForOneOffspring;
 
         let successfullyPlacedOffspring = 0;
@@ -1710,7 +1710,7 @@ export class SoftBody {
             if (this.creatureEnergy < energyForOneOffspring) break; // Not enough energy for this one
 
             let placedThisOffspring = false;
-            for (let attempt = 0; attempt < OFFSPRING_PLACEMENT_ATTEMPTS; attempt++) {
+            for (let attempt = 0; attempt < config.OFFSPRING_PLACEMENT_ATTEMPTS; attempt++) {
                 const angle = Math.random() * Math.PI * 2;
                 const radiusOffset = this.offspringSpawnRadius * (0.5 + Math.random() * 0.5); // offspringSpawnRadius is a gene
                 const offsetX = Math.cos(angle) * radiusOffset;
@@ -1737,7 +1737,7 @@ export class SoftBody {
                     // const otherBodyCenter = otherBody.getAveragePosition(); // Use cached center
                     const distSq = (spawnX - otherBodyInfo.center.x)**2 + (spawnY - otherBodyInfo.center.y)**2;
                     // Use the sum of blueprint radii plus a clearance value for the check
-                    const combinedRadii = potentialChild.blueprintRadius + otherBodyInfo.radius + OFFSPRING_PLACEMENT_CLEARANCE_RADIUS;
+                    const combinedRadii = potentialChild.blueprintRadius + otherBodyInfo.radius + config.OFFSPRING_PLACEMENT_CLEARANCE_RADIUS;
                     if (distSq < combinedRadii * combinedRadii) {
                         isSpotClear = false; 
                         break;
@@ -1748,7 +1748,7 @@ export class SoftBody {
                     for (const newBorn of offspring) { // offspring contains fully created children
                         const newBornCenter = newBorn.getAveragePosition();
                         const distSq = (spawnX - newBornCenter.x)**2 + (spawnY - newBornCenter.y)**2;
-                        const combinedRadii = potentialChild.blueprintRadius + newBorn.blueprintRadius + OFFSPRING_PLACEMENT_CLEARANCE_RADIUS;
+                        const combinedRadii = potentialChild.blueprintRadius + newBorn.blueprintRadius + config.OFFSPRING_PLACEMENT_CLEARANCE_RADIUS;
                         if (distSq < combinedRadii * combinedRadii) {
                             isSpotClear = false; 
                             break;

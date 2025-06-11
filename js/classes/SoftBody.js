@@ -1765,7 +1765,7 @@ export class SoftBody {
                     // offspring.push(finalChild);
 
                     // Optimization: tempChild becomes the finalChild
-                    potentialChild.id = nextSoftBodyId++; // Assign final ID and increment global counter
+                    potentialChild.id = this.id + successfullyPlacedOffspring; // Assign final ID and increment global counter
                     potentialChild.creatureEnergy = energyForOneOffspring;
                     offspring.push(potentialChild);
 
@@ -1780,14 +1780,14 @@ export class SoftBody {
         }
 
         if (successfullyPlacedOffspring > 0) {
-            this.creatureEnergy *= (1 - REPRODUCTION_ADDITIONAL_COST_FACTOR);
+            this.creatureEnergy *= (1 - config.REPRODUCTION_ADDITIONAL_COST_FACTOR);
             if(this.creatureEnergy < 0) this.creatureEnergy = 0;
             this.ticksSinceBirth = 0;
             this.canReproduce = false;
             this.justReproduced = true; // Set the flag here
         } else if (hadEnoughEnergyForAttempt && successfullyPlacedOffspring === 0) {
             // If had enough energy but couldn't place any offspring (e.g., due to space)
-            this.failedReproductionCooldown = FAILED_REPRODUCTION_COOLDOWN_TICKS;
+            this.failedReproductionCooldown = config.FAILED_REPRODUCTION_COOLDOWN_TICKS;
         }
         return offspring;
     }
@@ -1807,7 +1807,7 @@ export class SoftBody {
     }
 
     getAveragePosition() {
-        if (this.massPoints.length === 0) return new Vec2(WORLD_WIDTH/2, WORLD_HEIGHT/2);
+        if (this.massPoints.length === 0) return new Vec2(config.WORLD_WIDTH/2, config.WORLD_HEIGHT/2);
         let sumX = 0, sumY = 0;
         this.massPoints.forEach(p => { sumX += p.pos.x; sumY += p.pos.y; });
         return new Vec2(sumX / this.massPoints.length, sumY / this.massPoints.length);

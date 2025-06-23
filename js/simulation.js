@@ -12,6 +12,7 @@ import {
     updatePopulationCount
 } from "./ui.js";
 import camera from './viewport.js';
+import { drawNutrientMap, drawLightMap, drawViscosityMap } from './environment.js';
 
 let offscreenFluidCanvas, offscreenFluidCtx;
 let spatialGrid;

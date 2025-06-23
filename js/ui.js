@@ -629,6 +629,11 @@ document.addEventListener('keydown', (e) => {
     config.viewOffsetX = viewOffsetX;
     config.viewOffsetY = viewOffsetY;
     config.viewZoom = viewZoom;
+
+    // After handling panning keys and updating config, sync viewport object
+    viewport.zoom = viewZoom;
+    viewport.offsetX = viewOffsetX;
+    viewport.offsetY = viewOffsetY;
 });
 
 
@@ -1158,6 +1163,16 @@ viewEntireSimButton.onclick = function () {
     const maxPanY = Math.max(0, config.WORLD_HEIGHT - effectiveViewportHeight);
     viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
+
+    // Keep viewport (camera) in sync
+    viewport.zoom = viewZoom;
+    viewport.offsetX = viewOffsetX;
+    viewport.offsetY = viewOffsetY;
+
+    // Also update config copies for global reference
+    config.viewZoom = viewZoom;
+    config.viewOffsetX = viewOffsetX;
+    config.viewOffsetY = viewOffsetY;
 }
 
 function copyInfoToClipboard() {
@@ -1372,6 +1387,8 @@ canvas.addEventListener('mousemove', (e) => {
         // Synchronize exported globals so the renderer uses the newest camera values
         viewOffsetX = config.viewOffsetX;
         viewOffsetY = config.viewOffsetY;
+        viewport.offsetX = viewOffsetX;
+        viewport.offsetY = viewOffsetY;
         return;
     }
 
@@ -1604,6 +1621,11 @@ canvas.addEventListener('wheel', (e) => {
     config.viewZoom = viewZoom;
     config.viewOffsetX = viewOffsetX;
     config.viewOffsetY = viewOffsetY;
+
+    // Sync viewport object too so renderer uses latest camera values
+    viewport.zoom = viewZoom;
+    viewport.offsetX = viewOffsetX;
+    viewport.offsetY = viewOffsetY;
 });
 
 eyeDetectionRadiusSlider.oninput = function () {
@@ -1781,6 +1803,11 @@ function focusOnCreature(creature) {
     config.selectedInspectPoint = creature.massPoints[0];
     config.selectedInspectPointIndex = 0;
     updateInfoPanel();
+
+    // Sync viewport camera
+    viewport.zoom = viewZoom;
+    viewport.offsetX = viewOffsetX;
+    viewport.offsetY = viewOffsetY;
 }
 
 function handleNodeTypeLabelClick(nodeTypeName) {
@@ -1962,6 +1989,11 @@ function placeImportedCreature(worldX, worldY) {
 let viewZoom = viewport.zoom;
 let viewOffsetX = viewport.offsetX;
 let viewOffsetY = viewport.offsetY;
+
+// Ensure config has corresponding initial values
+config.viewZoom = viewZoom;
+config.viewOffsetX = viewOffsetX;
+config.viewOffsetY = viewOffsetY;
 
 export { 
     canvas, webgpuCanvas, ctx, viewport as camera,

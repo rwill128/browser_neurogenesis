@@ -7,7 +7,7 @@ function paintNutrientBrush(worldX, worldY) {
     const N = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     const gridX = Math.floor(worldX / fluidField.scaleX);
     const gridY = Math.floor(worldY / fluidField.scaleY);
-    const brushRadius = Math.floor(NUTRIENT_BRUSH_SIZE / 2);
+    const brushRadius = Math.floor(config.NUTRIENT_BRUSH_SIZE / 2);
 
     for (let offsetY = -brushRadius; offsetY <= brushRadius; offsetY++) {
         for (let offsetX = -brushRadius; offsetX <= brushRadius; offsetX++) {
@@ -22,10 +22,10 @@ function paintNutrientBrush(worldX, worldY) {
             if (currentPaintX >= 0 && currentPaintX < N && currentPaintY >= 0 && currentPaintY < N) {
                 const idx = fluidField.IX(currentPaintX, currentPaintY);
                 const currentValue = nutrientField[idx];
-                const targetValue = NUTRIENT_BRUSH_VALUE;
+                const targetValue = config.NUTRIENT_BRUSH_VALUE;
                 
-                let newValue = currentValue + (targetValue - currentValue) * NUTRIENT_BRUSH_STRENGTH;
-                newValue = Math.max(MIN_NUTRIENT_VALUE, Math.min(newValue, MAX_NUTRIENT_VALUE)); // Clamp
+                let newValue = currentValue + (targetValue - currentValue) * config.NUTRIENT_BRUSH_STRENGTH;
+                newValue = Math.max(config.MIN_NUTRIENT_VALUE, Math.min(newValue, config.MAX_NUTRIENT_VALUE)); // Clamp
                 nutrientField[idx] = newValue;
             }
         }
@@ -38,7 +38,7 @@ function paintLightBrush(worldX, worldY) {
     const N = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     const gridX = Math.floor(worldX / fluidField.scaleX);
     const gridY = Math.floor(worldY / fluidField.scaleY);
-    const brushRadius = Math.floor(LIGHT_BRUSH_SIZE / 2);
+    const brushRadius = Math.floor(config.LIGHT_BRUSH_SIZE / 2);
 
     for (let offsetY = -brushRadius; offsetY <= brushRadius; offsetY++) {
         for (let offsetX = -brushRadius; offsetX <= brushRadius; offsetX++) {
@@ -48,10 +48,10 @@ function paintLightBrush(worldX, worldY) {
             if (currentPaintX >= 0 && currentPaintX < N && currentPaintY >= 0 && currentPaintY < N) {
                 const idx = fluidField.IX(currentPaintX, currentPaintY);
                 const currentValue = lightField[idx];
-                const targetValue = LIGHT_BRUSH_VALUE;
+                const targetValue = config.LIGHT_BRUSH_VALUE;
                 
-                let newValue = currentValue + (targetValue - currentValue) * LIGHT_BRUSH_STRENGTH;
-                newValue = Math.max(MIN_LIGHT_VALUE, Math.min(newValue, MAX_LIGHT_VALUE));
+                let newValue = currentValue + (targetValue - currentValue) * config.LIGHT_BRUSH_STRENGTH;
+                newValue = Math.max(config.MIN_LIGHT_VALUE, Math.min(newValue, config.MAX_LIGHT_VALUE));
                 lightField[idx] = newValue;
             }
         }
@@ -63,7 +63,7 @@ function paintViscosityBrush(worldX, worldY) {
     const N = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     const gridX = Math.floor(worldX / fluidField.scaleX);
     const gridY = Math.floor(worldY / fluidField.scaleY);
-    const brushRadius = Math.floor(VISCOSITY_BRUSH_SIZE / 2);
+    const brushRadius = Math.floor(config.VISCOSITY_BRUSH_SIZE / 2);
 
     for (let offsetY = -brushRadius; offsetY <= brushRadius; offsetY++) {
         for (let offsetX = -brushRadius; offsetX <= brushRadius; offsetX++) {
@@ -72,9 +72,9 @@ function paintViscosityBrush(worldX, worldY) {
             if (currentPaintX >= 0 && currentPaintX < N && currentPaintY >= 0 && currentPaintY < N) {
                 const idx = fluidField.IX(currentPaintX, currentPaintY);
                 const currentValue = viscosityField[idx];
-                const targetValue = VISCOSITY_BRUSH_VALUE;
-                let newValue = currentValue + (targetValue - currentValue) * VISCOSITY_BRUSH_STRENGTH;
-                newValue = Math.max(MIN_VISCOSITY_MULTIPLIER, Math.min(newValue, MAX_VISCOSITY_MULTIPLIER));
+                const targetValue = config.VISCOSITY_BRUSH_VALUE;
+                let newValue = currentValue + (targetValue - currentValue) * config.VISCOSITY_BRUSH_STRENGTH;
+                newValue = Math.max(config.MIN_VISCOSITY_MULTIPLIER, Math.min(newValue, config.MAX_VISCOSITY_MULTIPLIER));
                 viscosityField[idx] = newValue;
             }
         }
@@ -88,8 +88,8 @@ function drawNutrientMap(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight,
     const N = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     if (N <= 0) return;
 
-    const worldCellWidth = WORLD_WIDTH / N;
-    const worldCellHeight = WORLD_HEIGHT / N;
+    const worldCellWidth = config.WORLD_WIDTH / N;
+    const worldCellHeight = config.WORLD_HEIGHT / N;
 
     const viewLeftWorld = viewOffsetXWorld;
     const viewTopWorld = viewOffsetYWorld;
@@ -136,8 +136,8 @@ function drawLightMap(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight, vi
     const N = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     if (N <= 0) return;
 
-    const worldCellWidth = WORLD_WIDTH / N;
-    const worldCellHeight = WORLD_HEIGHT / N;
+    const worldCellWidth = config.WORLD_WIDTH / N;
+    const worldCellHeight = config.WORLD_HEIGHT / N;
 
     const viewLeftWorld = viewOffsetXWorld;
     const viewTopWorld = viewOffsetYWorld;
@@ -171,8 +171,8 @@ function drawViscosityMap(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight
     if (!config.SHOW_VISCOSITY_MAP || !viscosityField || !fluidField) return;
     const N = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     if (N <= 0) return;
-    const worldCellWidth = WORLD_WIDTH / N;
-    const worldCellHeight = WORLD_HEIGHT / N;
+    const worldCellWidth = config.WORLD_WIDTH / N;
+    const worldCellHeight = config.WORLD_HEIGHT / N;
 
     const viewLeftWorld = viewOffsetXWorld;
     const viewTopWorld = viewOffsetYWorld;
@@ -210,4 +210,13 @@ function drawViscosityMap(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight
             }
         }
     }
-} 
+}
+
+export {
+    drawNutrientMap,
+    drawLightMap,
+    drawViscosityMap,
+    paintNutrientBrush,
+    paintLightBrush,
+    paintViscosityBrush
+}; 

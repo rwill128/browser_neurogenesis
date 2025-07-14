@@ -570,22 +570,18 @@ function updateMouse(e) {
 }
 
 function getMouseWorldCoordinates(displayMouseX, displayMouseY) {
-    const bitmapInternalWidth = canvas.width;
-    const bitmapInternalHeight = canvas.height;
-    const cssClientWidth = canvas.clientWidth;
-    const cssClientHeight = canvas.clientHeight;
-    const bitmapDisplayScale = Math.min(cssClientWidth / bitmapInternalWidth, cssClientHeight / bitmapInternalHeight);
-    const displayedBitmapWidthInCss = bitmapInternalWidth * bitmapDisplayScale;
-    const displayedBitmapHeightInCss = bitmapInternalHeight * bitmapDisplayScale;
-    const letterboxOffsetXcss = (cssClientWidth - displayedBitmapWidthInCss) / 2;
-    const letterboxOffsetYcss = (cssClientHeight - displayedBitmapHeightInCss) / 2;
-    const mouseOnScaledBitmapX = displayMouseX - letterboxOffsetXcss;
-    const mouseOnScaledBitmapY = displayMouseY - letterboxOffsetYcss;
-    const mouseOnUnscaledBitmapX = mouseOnScaledBitmapX / bitmapDisplayScale;
-    const mouseOnUnscaledBitmapY = mouseOnScaledBitmapY / bitmapDisplayScale;
-    const worldX = (mouseOnUnscaledBitmapX / config.viewZoom) + config.viewOffsetX;
-    const worldY = (mouseOnUnscaledBitmapY / config.viewZoom) + config.viewOffsetY;
-    return {x: worldX, y: worldY};
+    // Size that the world currently covers on-screen (may leave black bars on one axis)
+    const worldDisplayWidth  = config.WORLD_WIDTH  * config.viewZoom;
+    const worldDisplayHeight = config.WORLD_HEIGHT * config.viewZoom;
+
+    // Black-bar margins (letterboxing) in CSS pixels
+    const marginX = (canvas.clientWidth  - worldDisplayWidth)  * 0.5;
+    const marginY = (canvas.clientHeight - worldDisplayHeight) * 0.5;
+
+    // Convert display pixel to world coordinate, accounting for margins and zoom
+    const worldX = ((displayMouseX - marginX) / config.viewZoom) + config.viewOffsetX;
+    const worldY = ((displayMouseY - marginY) / config.viewZoom) + config.viewOffsetY;
+    return { x: worldX, y: worldY };
 }
 
 // --- Event Listeners ---
@@ -1007,8 +1003,9 @@ importConfigButton.onclick = () => importConfigFile.click();
 importConfigFile.onchange = (event) => config.handleImportConfig(event, canvas, webgpuCanvas);
 closeInfoPanelButton.onclick = () => {
     infoPanel.classList.remove('open');
-    selectedInspectBody = null;
-    selectedInspectPoint = null;
+    config.selectedInspectBody = null;
+    config.selectedInspectPoint = null;
+    config.selectedInspectPointIndex = null;
 }
 
 showNutrientMapToggle.onchange = function () {
@@ -1164,6 +1161,9 @@ viewEntireSimButton.onclick = function () {
     viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
 
+    // Re-apply refined clamping / centering
+    clampViewOffsets();
+
     // Keep viewport (camera) in sync
     viewport.zoom = viewZoom;
     viewport.offsetX = viewOffsetX;
@@ -1176,7 +1176,7 @@ viewEntireSimButton.onclick = function () {
 }
 
 function copyInfoToClipboard() {
-    if (!selectedInspectBody) {
+    if (!config.selectedInspectBody) {
         showMessageModal("No creature selected to copy info from.");
         return;
     }
@@ -1219,8 +1219,9 @@ copyInfoPanelButton.onclick = copyInfoToClipboard;
 function toggleInfoPanel() {
     infoPanel.classList.toggle('open');
     if (!infoPanel.classList.contains('open')) {
-        selectedInspectBody = null;
-        selectedInspectPoint = null;
+        config.selectedInspectBody = null;
+        config.selectedInspectPoint = null;
+        config.selectedInspectPointIndex = null;
     }
 }
 
@@ -1364,25 +1365,28 @@ canvas.addEventListener('mousemove', (e) => {
         const displayDx = currentDisplayMouseX - config.panStartMouseDisplayX;
         const displayDy = currentDisplayMouseY - config.panStartMouseDisplayY;
 
-        // Scale factor of the internal bitmap to its displayed size on the CSS canvas
-        const bitmapDisplayScale = Math.min(canvas.clientWidth / canvas.width, canvas.clientHeight / canvas.height);
-
-        // How much the world should shift, based on mouse movement on the displayed bitmap, scaled by current zoom
-        const panDeltaX_world = displayDx / (bitmapDisplayScale * config.viewZoom);
-        const panDeltaY_world = displayDy / (bitmapDisplayScale * config.viewZoom);
+        // World shift per display pixel is simply 1/viewZoom (letterbox cancels because both points move within same bar)
+        const panDeltaX_world = displayDx / config.viewZoom;
+        const panDeltaY_world = displayDy / config.viewZoom;
 
         config.viewOffsetX = config.panInitialViewOffsetX - panDeltaX_world;
         config.viewOffsetY = config.panInitialViewOffsetY - panDeltaY_world;
+
+        // Keep offsets valid / centred
+        clampViewOffsets();
 
         // Clamp to world bounds
         const effectiveViewportWidth = canvas.clientWidth / config.viewZoom; // This is viewport width in world units
         const effectiveViewportHeight = canvas.clientHeight / config.viewZoom; // This is viewport height in world units
         // Correct maxPan calculations for clamping viewOffset
-        const maxPanX = Math.max(0, config.WORLD_WIDTH - (canvas.clientWidth / bitmapDisplayScale / config.viewZoom));
-        const maxPanY = Math.max(0, config.WORLD_HEIGHT - (canvas.clientHeight / bitmapDisplayScale / config.viewZoom));
+        const maxPanX = Math.max(0, config.WORLD_WIDTH - (canvas.clientWidth / config.viewZoom));
+        const maxPanY = Math.max(0, config.WORLD_HEIGHT - (canvas.clientHeight / config.viewZoom));
 
         config.viewOffsetX = Math.max(0, Math.min(config.viewOffsetX, maxPanX));
         config.viewOffsetY = Math.max(0, Math.min(config.viewOffsetY, maxPanY));
+
+        // Re-apply centering clamp now that the old bounds logic has finished
+        clampViewOffsets();
 
         // Synchronize exported globals so the renderer uses the newest camera values
         viewOffsetX = config.viewOffsetX;
@@ -1565,67 +1569,54 @@ canvas.addEventListener('contextmenu', (e) => {
 
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
+    
     const rect = canvas.getBoundingClientRect();
-    const displayMouseX = e.clientX - rect.left;
-    const displayMouseY = e.clientY - rect.top;
+    const displayX = e.clientX - rect.left;   // pixel inside visible canvas
+    const displayY = e.clientY - rect.top;
 
-    // Get world coordinates of the mouse pointer BEFORE the zoom operation
-    const worldMouseBeforeZoom = getMouseWorldCoordinates(displayMouseX, displayMouseY);
+    // World position under cursor BEFORE zoom
+    const worldXBefore = viewOffsetX + (displayX / viewZoom);
+    const worldYBefore = viewOffsetY + (displayY / viewZoom);
 
-    const scroll = e.deltaY < 0 ? 1 : -1;
-    const oldZoom = viewZoom;
-    let newZoom = viewZoom * Math.pow(1 + config.ZOOM_SENSITIVITY * 10, scroll);
+    // Determine zoom direction
+    const scrollDir = e.deltaY < 0 ? 1 : -1;
+    let newZoom = viewZoom * Math.pow(1 + config.ZOOM_SENSITIVITY * 10, scrollDir);
 
-    const minZoomToSeeAllX = canvas.clientWidth / config.WORLD_WIDTH;
-    const minZoomToSeeAllY = canvas.clientHeight / config.WORLD_HEIGHT;
-    let dynamicMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
-    if (config.WORLD_WIDTH <= canvas.clientWidth && config.WORLD_HEIGHT <= canvas.clientHeight) {
-        dynamicMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
-    } else {
-        dynamicMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
-    }
-    dynamicMinZoom = Math.max(0.01, dynamicMinZoom);
+    // Clamp zoom
+    const minZoomToFitX = canvas.clientWidth  / config.WORLD_WIDTH;
+    const minZoomToFitY = canvas.clientHeight / config.WORLD_HEIGHT;
+    const minAllowedZoom = Math.max(0.01, Math.min(minZoomToFitX, minZoomToFitY));
+    newZoom = Math.max(minAllowedZoom, Math.min(newZoom, config.MAX_ZOOM));
 
-    viewZoom = Math.max(dynamicMinZoom, Math.min(newZoom, config.MAX_ZOOM));
+    // Update zoom & offsets
+    viewZoom = newZoom;
 
-    // After zoom, the same mouse display position will point to a different world coordinate.
-    // We want the world point that was under the mouse before zoom to still be under the mouse.
-    // world_mouse = (display_mouse_on_unscaled_bitmap / new_view_zoom) + new_view_offset_x
-    // new_view_offset_x = world_mouse - (display_mouse_on_unscaled_bitmap / new_view_zoom)
+    viewOffsetX = worldXBefore - (displayX / viewZoom);
+    viewOffsetY = worldYBefore - (displayY / viewZoom);
 
-    // To get display_mouse_on_unscaled_bitmap:
-    const bitmapInternalWidth = canvas.width;
-    const bitmapInternalHeight = canvas.height;
-    const cssClientWidth = canvas.clientWidth;
-    const cssClientHeight = canvas.clientHeight;
-    const bitmapDisplayScale = Math.min(cssClientWidth / bitmapInternalWidth, cssClientHeight / bitmapInternalHeight);
-    const displayedBitmapWidthInCss = bitmapInternalWidth * bitmapDisplayScale;
-    const displayedBitmapHeightInCss = bitmapInternalHeight * bitmapDisplayScale;
-    const letterboxOffsetXcss = (cssClientWidth - displayedBitmapWidthInCss) / 2;
-    const letterboxOffsetYcss = (cssClientHeight - displayedBitmapHeightInCss) / 2;
-    const mouseOnScaledBitmapX = displayMouseX - letterboxOffsetXcss;
-    const mouseOnScaledBitmapY = displayMouseY - letterboxOffsetYcss;
-    const mouseOnUnscaledBitmapX = mouseOnScaledBitmapX / bitmapDisplayScale;
-    const mouseOnUnscaledBitmapY = mouseOnScaledBitmapY / bitmapDisplayScale;
-
-    viewOffsetX = worldMouseBeforeZoom.x - (mouseOnUnscaledBitmapX / viewZoom);
-    viewOffsetY = worldMouseBeforeZoom.y - (mouseOnUnscaledBitmapY / viewZoom);
-
-    // Clamp offsets
-    const maxPanX = Math.max(0, config.WORLD_WIDTH - (cssClientWidth / bitmapDisplayScale / viewZoom));
-    const maxPanY = Math.max(0, config.WORLD_HEIGHT - (cssClientHeight / bitmapDisplayScale / viewZoom));
+    // Clamp offsets so viewport stays inside world
+    const maxPanX = Math.max(0, config.WORLD_WIDTH  - canvas.clientWidth  / viewZoom);
+    const maxPanY = Math.max(0, config.WORLD_HEIGHT - canvas.clientHeight / viewZoom);
     viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
 
-    // Keep config in sync with updated globals (many helper functions rely on the config copy).
+    // Apply refined centring rules before syncing state objects
+    clampViewOffsets();
+
+    // Sync config & camera objects
     config.viewZoom = viewZoom;
     config.viewOffsetX = viewOffsetX;
     config.viewOffsetY = viewOffsetY;
 
-    // Sync viewport object too so renderer uses latest camera values
     viewport.zoom = viewZoom;
     viewport.offsetX = viewOffsetX;
     viewport.offsetY = viewOffsetY;
+
+    clampViewOffsets();
+
+    // Sync zoom on shared objects
+    config.viewZoom = viewZoom;
+    viewport.zoom = viewZoom;
 });
 
 eyeDetectionRadiusSlider.oninput = function () {
@@ -1794,6 +1785,9 @@ function focusOnCreature(creature) {
     viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
     viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
 
+    // Re-apply refined centring logic
+    clampViewOffsets();
+
     // Synchronize to config for helper consistency
     config.viewZoom = viewZoom;
     config.viewOffsetX = viewOffsetX;
@@ -1808,6 +1802,10 @@ function focusOnCreature(creature) {
     viewport.zoom = viewZoom;
     viewport.offsetX = viewOffsetX;
     viewport.offsetY = viewOffsetY;
+
+    clampViewOffsets();
+
+    config.viewZoom = viewZoom;
 }
 
 function handleNodeTypeLabelClick(nodeTypeName) {
@@ -1912,23 +1910,23 @@ importCreatureButton.onclick = () => importCreatureFile.click();
 importCreatureFile.onchange = handleImportCreature;
 
 function handleExportCreature() {
-    if (!selectedInspectBody) {
+    if (!config.selectedInspectBody) {
         showMessageModal("No creature selected to export.");
         return;
     }
 
-    const creatureBlueprint = selectedInspectBody.exportBlueprint();
+    const creatureBlueprint = config.selectedInspectBody.exportBlueprint();
     const jsonString = JSON.stringify(creatureBlueprint, null, 2);
     const blob = new Blob([jsonString], {type: "application/json"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `creature_${selectedInspectBody.id}_blueprint.json`;
+    a.download = `creature_${config.selectedInspectBody.id}_blueprint.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    console.log(`Exported blueprint for creature ${selectedInspectBody.id}.`);
+    console.log(`Exported blueprint for creature ${config.selectedInspectBody.id}.`);
 }
 
 function handleImportCreature(event) {
@@ -1995,6 +1993,39 @@ config.viewZoom = viewZoom;
 config.viewOffsetX = viewOffsetX;
 config.viewOffsetY = viewOffsetY;
 
+// Add just after the helper getMouseWorldCoordinates
+// Ensure viewOffsetX/Y remain in a valid range. If the viewport is larger than the world in either
+// dimension, we allow negative offsets so the world can be centred with letter-box margins.
+function clampViewOffsets() {
+    const viewportWorldW = canvas.clientWidth  / viewZoom;
+    const viewportWorldH = canvas.clientHeight / viewZoom;
+
+    const extraW = viewportWorldW - config.WORLD_WIDTH;
+    const extraH = viewportWorldH - config.WORLD_HEIGHT;
+
+    if (extraW > 0) {
+        // Viewport wider than world ‑ centre horizontally
+        viewOffsetX = -extraW * 0.5;
+    } else {
+        const maxPanX = config.WORLD_WIDTH - viewportWorldW;
+        viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
+    }
+
+    if (extraH > 0) {
+        // Viewport taller than world ‑ centre vertically
+        viewOffsetY = -extraH * 0.5;
+    } else {
+        const maxPanY = config.WORLD_HEIGHT - viewportWorldH;
+        viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
+    }
+
+    // keep config & camera objects aligned
+    config.viewOffsetX = viewOffsetX;
+    config.viewOffsetY = viewOffsetY;
+    viewport.offsetX = viewOffsetX;
+    viewport.offsetY = viewOffsetY;
+}
+
 export { 
     canvas, webgpuCanvas, ctx, viewport as camera,
     worldWidthInput, worldHeightInput, 
@@ -2003,5 +2034,5 @@ export {
     initializeAllSliderDisplays, handleExportConfig, handleImportConfig, applyImportedConfig,
     handleExportCreature, handleImportCreature, placeImportedCreature,
     updateMouse, getMouseWorldCoordinates,
-    mouse
+    mouse, clampViewOffsets
 };

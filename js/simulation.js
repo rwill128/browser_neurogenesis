@@ -11,7 +11,7 @@ import {
     updateInstabilityIndicator,
     updatePopulationCount
 } from "./ui.js";
-import camera from './viewport.js';
+import viewport from './viewport.js';
 import { drawNutrientMap, drawLightMap, drawViscosityMap } from './environment.js';
 
 let offscreenFluidCanvas, offscreenFluidCtx;
@@ -374,38 +374,38 @@ export function draw() {
 
     ctx.save();
 
-    ctx.scale(camera.zoom, camera.zoom);
-    ctx.translate(-camera.offsetX, -camera.offsetY);
+    ctx.scale(viewport.zoom, viewport.zoom);
+    ctx.translate(-viewport.offsetX, -viewport.offsetY);
 
     if (fluidField) {
         // Reverted: Direct blocky drawing
-        const viewportWorldWidth = canvas.width / camera.zoom;
-        const viewportWorldHeight = canvas.height / camera.zoom;
-        fluidField.draw(ctx, canvas.width, canvas.height, camera.offsetX, camera.offsetY, camera.zoom);
+        const viewportWorldWidth = canvas.width / viewport.zoom;
+        const viewportWorldHeight = canvas.height / viewport.zoom;
+        fluidField.draw(ctx, canvas.width, canvas.height, viewport.offsetX, viewport.offsetY, viewport.zoom);
     }
     if (config.SHOW_NUTRIENT_MAP && nutrientField && fluidField) {
-        drawNutrientMap(ctx, canvas.width, canvas.height, camera.offsetX, camera.offsetY, camera.zoom);
+        drawNutrientMap(ctx, canvas.width, canvas.height, viewport.offsetX, viewport.offsetY, viewport.zoom);
     }
     if (config.SHOW_LIGHT_MAP && lightField && fluidField) {
-        drawLightMap(ctx, canvas.width, canvas.height, camera.offsetX, camera.offsetY, camera.zoom);
+        drawLightMap(ctx, canvas.width, canvas.height, viewport.offsetX, viewport.offsetY, viewport.zoom);
     }
     if (config.SHOW_VISCOSITY_MAP && viscosityField && fluidField) {
-        drawViscosityMap(ctx, canvas.width, canvas.height, camera.offsetX, camera.offsetY, camera.zoom);
+        drawViscosityMap(ctx, canvas.width, canvas.height, viewport.offsetX, viewport.offsetY, viewport.zoom);
     }
 
     //console.log("[Debug] In draw() function, about to check SHOW_FLUID_VELOCITY. Value:", config.SHOW_FLUID_VELOCITY);
     if (config.SHOW_FLUID_VELOCITY && fluidField) {
-        drawFluidVelocities(ctx, fluidField, canvas.width, canvas.height, camera.offsetX, camera.offsetY, camera.zoom);
+        drawFluidVelocities(ctx, fluidField, canvas.width, canvas.height, viewport.offsetX, viewport.offsetY, viewport.zoom);
     }
 
     for (let particle of particles) {
         // Culling check (particles are small, so checking their center point + radius is good)
-        const viewRightWorld = camera.offsetX + canvas.width / camera.zoom;
-        const viewBottomWorld = camera.offsetY + canvas.height / camera.zoom;
+        const viewRightWorld = viewport.offsetX + canvas.width / viewport.zoom;
+        const viewBottomWorld = viewport.offsetY + canvas.height / viewport.zoom;
         const particleRadius = particle.size; // Assuming particle.size is its radius
 
-        if (particle.pos.x + particleRadius < camera.offsetX || particle.pos.x - particleRadius > viewRightWorld ||
-            particle.pos.y + particleRadius < camera.offsetY || particle.pos.y - particleRadius > viewBottomWorld) {
+        if (particle.pos.x + particleRadius < viewport.offsetX || particle.pos.x - particleRadius > viewRightWorld ||
+            particle.pos.y + particleRadius < viewport.offsetY || particle.pos.y - particleRadius > viewBottomWorld) {
             continue; // Skip drawing if particle is outside viewport
         }
         particle.draw(ctx);
@@ -413,11 +413,11 @@ export function draw() {
     for (let body of softBodyPopulation) {
         // Culling check for soft bodies
         const bbox = body.getBoundingBox(); // { minX, minY, maxX, maxY } in world coords
-        const viewRightWorld = camera.offsetX + canvas.width / camera.zoom;
-        const viewBottomWorld = camera.offsetY + canvas.height / camera.zoom;
+        const viewRightWorld = viewport.offsetX + canvas.width / viewport.zoom;
+        const viewBottomWorld = viewport.offsetY + canvas.height / viewport.zoom;
 
-        if (bbox.maxX < camera.offsetX || bbox.minX > viewRightWorld ||
-            bbox.maxY < camera.offsetY || bbox.minY > viewBottomWorld) {
+        if (bbox.maxX < viewport.offsetX || bbox.minX > viewRightWorld ||
+            bbox.maxY < viewport.offsetY || bbox.minY > viewBottomWorld) {
             continue; // Skip drawing if body is outside viewport
         }
         body.drawSelf(ctx);
@@ -428,10 +428,10 @@ export function draw() {
         ctx.moveTo(currentEmitterPreview.startX, currentEmitterPreview.startY);
         ctx.lineTo(currentEmitterPreview.endX, currentEmitterPreview.endY);
         ctx.strokeStyle = 'rgba(255, 255, 0, 0.7)';
-        ctx.lineWidth = 2 / camera.zoom;
+        ctx.lineWidth = 2 / viewport.zoom;
         ctx.stroke();
         const angle = Math.atan2(currentEmitterPreview.endY - currentEmitterPreview.startY, currentEmitterPreview.endX - currentEmitterPreview.startX);
-        const arrowSize = 10 / camera.zoom;
+        const arrowSize = 10 / viewport.zoom;
         ctx.lineTo(currentEmitterPreview.endX - arrowSize * Math.cos(angle - Math.PI / 6), currentEmitterPreview.endY - arrowSize * Math.sin(angle - Math.PI / 6));
         ctx.moveTo(currentEmitterPreview.endX, currentEmitterPreview.endY);
         ctx.lineTo(currentEmitterPreview.endX - arrowSize * Math.cos(angle + Math.PI / 6), currentEmitterPreview.endY - arrowSize * Math.sin(angle + Math.PI / 6));
@@ -453,11 +453,11 @@ export function draw() {
             ctx.moveTo(startX, startY);
             ctx.lineTo(endX, endY);
             ctx.strokeStyle = 'rgba(0, 200, 255, 0.5)';
-            ctx.lineWidth = (1 + Math.min(5, forceMagnitude * config.EMITTER_STRENGTH * 0.5)) / camera.zoom;
+            ctx.lineWidth = (1 + Math.min(5, forceMagnitude * config.EMITTER_STRENGTH * 0.5)) / viewport.zoom;
             ctx.stroke();
 
             const angle = Math.atan2(endY - startY, endX - startX);
-            const arrowSize = 8 / camera.zoom;
+            const arrowSize = 8 / viewport.zoom;
             if (Math.abs(endX - startX) > 0.01 || Math.abs(endY - startY) > 0.01) {
                 ctx.lineTo(endX - arrowSize * Math.cos(angle - Math.PI / 6), endY - arrowSize * Math.sin(angle - Math.PI / 6));
                 ctx.moveTo(endX, endY);

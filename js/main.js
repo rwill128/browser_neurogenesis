@@ -19,7 +19,8 @@ import {
 } from './simulation.js';
 import { 
     canvas, webgpuCanvas, worldWidthInput, worldHeightInput,
-    updateInstabilityIndicator, initializeAllSliderDisplays, updatePopulationCount, updateStatsPanel, updateInfoPanel
+    updateInstabilityIndicator, initializeAllSliderDisplays, updatePopulationCount, updateStatsPanel, updateInfoPanel,
+    clampViewOffsets
 } from './ui.js';
 
 let lastTime = 0;
@@ -34,8 +35,8 @@ let frameCountForAvg = 0;
 async function main() {
     config.WORLD_WIDTH = parseInt(worldWidthInput.value) || 8000;
     config.WORLD_HEIGHT = parseInt(worldHeightInput.value) || 6000;
-    canvas.width = 1920;
-    canvas.height = 1080;
+    // Initial resize
+    resizeCanvas();
 
     config.GRID_COLS = Math.ceil(config.WORLD_WIDTH / config.GRID_CELL_SIZE);
     config.GRID_ROWS = Math.ceil(config.WORLD_HEIGHT / config.GRID_CELL_SIZE);
@@ -55,6 +56,32 @@ async function main() {
     frameTimeDisplayElement = document.getElementById('frameTimeDisplay');
     animationFrameId = requestAnimationFrame(gameLoop);
 }
+
+function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+
+    webgpuCanvas.width = window.innerWidth * dpr;
+    webgpuCanvas.height = window.innerHeight * dpr;
+    webgpuCanvas.style.width = window.innerWidth + 'px';
+    webgpuCanvas.style.height = window.innerHeight + 'px';
+
+    clampViewOffsets();
+
+    // If using WebGPU, reconfigure the context with new size
+    if (config.USE_GPU_FLUID_SIMULATION && fluidField && fluidField.context) {
+        fluidField.context.configure({
+            device: fluidField.device,
+            format: navigator.gpu.getPreferredCanvasFormat(),
+            size: { width: webgpuCanvas.width, height: webgpuCanvas.height }
+        });
+    }
+}
+
+window.addEventListener('resize', resizeCanvas);
 
 function gameLoop(timestamp) {
     const loopStartTime = performance.now();

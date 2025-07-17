@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GPU Fluid Simulation for Evolution Simulator</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const gl = canvas.getContext('webgl2');
+        if (!gl) {
+            alert('WebGL2 not supported');
+        }
+
+        // Config
+        let gridWidth = 512;
+        let gridHeight = 512;
+        const omega = 1.0;
+        const force = 0.0001;
+
+        // Camera
+        let zoom = 1.0;
+        let panX = 0.0;
+        let panY = 0.0;
+        let mouseDown = false;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+
+        // Ping-pong
+        let currentSet = 0;
+        let textureSets = [ [], [] ];
+        let fbos = [ null, null ];
+
+        // Barrier
+        let barrierTexture;
+        let barrierData;
+
+        // D2Q9
+        const directions = [[0,0],[1,0],[0,1],[-1,0],[0,-1],[1,1],[-1,1],[-1,-1],[1,-1]];
+        const weights = [4/9,1/9,1/9,1/9,1/9,1/36,1/36,1/36,1/36];
+        const opposites = [0,3,4,1,2,7,8,5,6];
+
+        // Shaders
+        const vsQuad = `#version 300 es
+        in vec2 position;
+        void main() { gl_Position = vec4(position, 0.0, 1.0); }`;
+
+        const sharedFunctions = `
+        void getN(sampler2D tex0, sampler2D tex1, sampler2D tex2, vec2 uv, out highp float n[9]) {
+            highp vec3 t0 = texture(tex0, uv).rgb;
+            highp vec3 t1 = texture(tex1, uv).rgb;
+            highp vec3 t2 = texture(tex2, uv).rgb;
+            n[0] = t0.r; n[1] = t0.g; n[2] = t0.b;
+            n[3] = t1.r; n[4] = t1.g; n[5] = t1.b;
+            n[6] = t2.r; n[7] = t2.g; n[8] = t2.b;
+        }
+        highp float computeRho(highp float n[9]) {
+            highp float rho = 0.0;
+            for (int i = 0; i < 9; i++) rho += n[i];
+            return rho;
+        }
+        highp vec2 computeU(highp float n[9], highp float rho) {
+            highp vec2 u = vec2(0.0, 0.0);
+            u.x = (n[1] + n[5] + n[8] - n[3] - n[6] - n[7]) / rho;
+            u.y = (n[2] + n[5] + n[6] - n[4] - n[7] - n[8]) / rho;
+            return u;
+        }`;
+
+        const fsSimulation = `#version 300 es
+        precision highp float;
+        uniform sampler2D tex0;
+        uniform sampler2D tex1;
+        uniform sampler2D tex2;
+        uniform sampler2D barrier;
+        uniform vec2 res;
+        uniform float omega;
+        uniform float force;
+        out vec4 out0;
+        out vec4 out1;
+        out vec4 out2;
+        ${sharedFunctions}
+        highp vec2 getE(int i) {
+            if (i == 0) return vec2(0.0, 0.0);
+            if (i == 1) return vec2(1.0, 0.0);
+            if (i == 2) return vec2(0.0, 1.0);
+            if (i == 3) return vec2(-1.0, 0.0);
+            if (i == 4) return vec2(0.0, -1.0);
+            if (i == 5) return vec2(1.0, 1.0);
+            if (i == 6) return vec2(-1.0, 1.0);
+            if (i == 7) return vec2(-1.0, -1.0);
+            return vec2(1.0, -1.0);
+        }
+        highp float getW(int i) {
+            if (i == 0) return 4.0/9.0;
+            if (i >= 1 && i <= 4) return 1.0/9.0;
+            return 1.0/36.0;
+        }
+        int getOpp(int i) {
+            if (i == 0) return 0;
+            if (i == 1) return 3;
+            if (i == 2) return 4;
+            if (i == 3) return 1;
+            if (i == 4) return 2;
+            if (i == 5) return 7;
+            if (i == 6) return 8;
+            if (i == 7) return 5;
+            return 6;
+        }
+        highp float computeEq(highp float rho, highp vec2 u, int i) {
+            highp vec2 e = getE(i);
+            highp float w = getW(i);
+            highp float eu = dot(e, u);
+            return rho * w * (1.0 + 3.0 * eu + 4.5 * eu * eu - 1.5 * dot(u, u));
+        }
+        void setN(highp float n[9]) {
+            out0 = vec4(n[0], n[1], n[2], 0.0);
+            out1 = vec4(n[3], n[4], n[5], 0.0);
+            out2 = vec4(n[6], n[7], n[8], 0.0);
+        }
+        void main() {
+            highp vec2 uv = gl_FragCoord.xy / res;
+            if (texture(barrier, uv).r > 0.5) {
+                highp float zero[9] = float[9](0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0);
+                setN(zero);
+                return;
+            }
+            highp float n_streamed[9];
+            for (int i = 0; i < 9; i++) {
+                highp vec2 e = getE(i);
+                highp vec2 offset = vec2(e.x / res.x, e.y / res.y);
+                highp vec2 sampled_uv = fract(uv - offset);
+                highp float sampled_barrier = texture(barrier, sampled_uv).r;
+                if (sampled_barrier > 0.5) {
+                    highp float n_opp[9];
+                    getN(tex0, tex1, tex2, uv, n_opp);
+                    n_streamed[i] = n_opp[getOpp(i)];
+                } else {
+                    highp float n[9];
+                    getN(tex0, tex1, tex2, sampled_uv, n);
+                    n_streamed[i] = n[i];
+                }
+            }
+            highp float rho = computeRho(n_streamed);
+            highp vec2 u = computeU(n_streamed, rho);
+            u.x += force;
+            highp float n_new[9];
+            for (int i = 0; i < 9; i++) {
+                highp float neq = computeEq(rho, u, i);
+                n_new[i] = n_streamed[i] + omega * (neq - n_streamed[i]);
+            }
+            setN(n_new);
+        }`;
+
+        const fsRender = `#version 300 es
+        precision highp float;
+        uniform sampler2D tex0;
+        uniform sampler2D tex1;
+        uniform sampler2D tex2;
+        uniform vec2 canvasRes;
+        uniform float zoom;
+        uniform vec2 pan;
+        uniform vec2 res;
+        out vec4 fragColor;
+        ${sharedFunctions}
+        highp float computeCurl(highp vec2 uv, highp vec2 res) {
+            highp vec2 dx = vec2(1.0 / res.x, 0.0);
+            highp vec2 dy = vec2(0.0, 1.0 / res.y);
+            highp float n_c[9]; getN(tex0, tex1, tex2, uv, n_c); highp float rho_c = computeRho(n_c); highp vec2 u_c = computeU(n_c, rho_c);
+            highp float n_x[9]; getN(tex0, tex1, tex2, uv + dx, n_x); highp float rho_x = computeRho(n_x); highp vec2 u_x = computeU(n_x, rho_x);
+            highp float n_y[9]; getN(tex0, tex1, tex2, uv + dy, n_y); highp float rho_y = computeRho(n_y); highp vec2 u_y = computeU(n_y, rho_y);
+            return ((u_y.x - u_c.x) / dy.y) - ((u_x.y - u_c.y) / dx.x);
+        }
+        void main() {
+            highp vec2 uv = (gl_FragCoord.xy / canvasRes) / zoom + pan;
+            highp float n[9];
+            getN(tex0, tex1, tex2, uv, n);
+            highp float rho = computeRho(n);
+            highp vec2 u = computeU(n, rho);
+            highp float speed = length(u);
+            highp float curl = computeCurl(uv, res);
+            highp vec3 color = vec3(speed * 10.0, abs(curl) * 5.0, rho * 0.5);
+            fragColor = vec4(color, 1.0);
+        }`;
+
+        // Program creation
+        function createProgram(vsSource, fsSource) {
+            const program = gl.createProgram();
+            const vs = compileShader(gl.VERTEX_SHADER, vsSource);
+            const fs = compileShader(gl.FRAGMENT_SHADER, fsSource);
+            gl.attachShader(program, vs);
+            gl.attachShader(program, fs);
+            gl.linkProgram(program);
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error('Link failed:', gl.getProgramInfoLog(program));
+            }
+            return program;
+        }
+
+        function compileShader(type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('Compile failed:', gl.getShaderInfoLog(shader));
+            }
+            return shader;
+        }
+
+        let simProgram = createProgram(vsQuad, fsSimulation);
+        let renderProgram = createProgram(vsQuad, fsRender);
+
+        // Quad buffer
+        const quadBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+
+        // Create textures/FBOs
+        function createTextureSet() {
+            const tex = [];
+            for (let i = 0; i < 3; i++) {
+                tex[i] = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, tex[i]);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB32F, gridWidth, gridHeight, 0, gl.RGB, gl.FLOAT, null);
+            }
+            return tex;
+        }
+
+        function createFbos() {
+            for (let i = 0; i < 2; i++) {
+                fbos[i] = gl.createFramebuffer();
+                gl.bindFramebuffer(gl.FRAMEBUFFER, fbos[i]);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureSets[i][0], 0);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, textureSets[i][1], 0);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT2, gl.TEXTURE_2D, textureSets[i][2], 0);
+                gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1, gl.COLOR_ATTACHMENT2]);
+            }
+        }
+
+        function resizeGrid(newWidth, newHeight) {
+            gridWidth = newWidth;
+            gridHeight = newHeight;
+            textureSets[0] = createTextureSet();
+            textureSets[1] = createTextureSet();
+            createFbos();
+            // Recreate barrier
+            barrierTexture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, barrierTexture);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, gridWidth, gridHeight, 0, gl.RED, gl.UNSIGNED_BYTE, null);
+            barrierData = new Uint8Array(gridWidth * gridHeight);
+            const centerX = gridWidth / 2, centerY = gridHeight / 2, radius = Math.min(gridWidth, gridHeight) / 10;
+            for (let y = 0; y < gridHeight; y++) {
+                for (let x = 0; x < gridWidth; x++) {
+                    if (Math.sqrt((x - centerX)**2 + (y - centerY)**2) < radius) {
+                        barrierData[y * gridWidth + x] = 255;
+                    }
+                }
+            }
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, gridWidth, gridHeight, 0, gl.RED, gl.UNSIGNED_BYTE, barrierData);
+            initDensities(0);
+            initDensities(1);
+        }
+
+        textureSets[0] = createTextureSet();
+        textureSets[1] = createTextureSet();
+        createFbos();
+
+        // Barrier init (initial call)
+        barrierTexture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, barrierTexture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, gridWidth, gridHeight, 0, gl.RED, gl.UNSIGNED_BYTE, null);
+        barrierData = new Uint8Array(gridWidth * gridHeight);
+        const centerX_init = gridWidth / 2, centerY_init = gridHeight / 2, radius_init = Math.min(gridWidth, gridHeight) / 10;
+        for (let y = 0; y < gridHeight; y++) {
+            for (let x = 0; x < gridWidth; x++) {
+                if (Math.sqrt((x - centerX_init)**2 + (y - centerY_init)**2) < radius_init) {
+                    barrierData[y * gridWidth + x] = 255;
+                }
+            }
+        }
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, gridWidth, gridHeight, 0, gl.RED, gl.UNSIGNED_BYTE, barrierData);
+
+        // Init densities
+        function initDensities(setIndex) {
+            const numCells = gridWidth * gridHeight;
+            const data = new Float32Array(numCells * 9);
+            for (let cell = 0; cell < numCells; cell++) {
+                for (let d = 0; d < 9; d++) {
+                    data[cell * 9 + d] = weights[d] + Math.random() * 0.01;
+                }
+            }
+            for (let t = 0; t < 3; t++) {
+                gl.bindTexture(gl.TEXTURE_2D, textureSets[setIndex][t]);
+                gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gridWidth, gridHeight, gl.RGB, gl.FLOAT, data.subarray(t * numCells * 3, (t + 1) * numCells * 3));
+            }
+        }
+        initDensities(0);
+        initDensities(1);
+
+        // Resize canvas
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+        resize();
+        window.addEventListener('resize', resize);
+
+        // Input
+        canvas.addEventListener('mousedown', e => { mouseDown = true; lastMouseX = e.clientX; lastMouseY = e.clientY; });
+        canvas.addEventListener('mouseup', () => mouseDown = false);
+        canvas.addEventListener('mousemove', e => {
+            if (mouseDown) {
+                panX += (lastMouseX - e.clientX) / (canvas.width * zoom);
+                panY += (e.clientY - lastMouseY) / (canvas.height * zoom);
+                lastMouseX = e.clientX;
+                lastMouseY = e.clientY;
+            }
+        });
+        canvas.addEventListener('wheel', e => {
+            zoom *= Math.pow(1.001, -e.deltaY);
+            zoom = Math.max(0.1, Math.min(10, zoom));
+        });
+
+        let poiseuilleMode = false;
+        document.addEventListener('keydown', e => {
+            if (e.key === 'P') {
+                poiseuilleMode = !poiseuilleMode;
+                const data = new Uint8Array(gridWidth * gridHeight);
+                if (poiseuilleMode) {
+                    for (let x = 0; x < gridWidth; x++) {
+                        data[x] = 255; // bottom
+                        data[(gridHeight - 1) * gridWidth + x] = 255; // top
+                    }
+                } else {
+                    const centerX = gridWidth / 2, centerY = gridHeight / 2, radius = Math.min(gridWidth, gridHeight) / 10;
+                    for (let y = 0; y < gridHeight; y++) {
+                        for (let x = 0; x < gridWidth; x++) {
+                            if (Math.sqrt((x - centerX)**2 + (y - centerY)**2) < radius) {
+                                data[y * gridWidth + x] = 255;
+                            }
+                        }
+                    }
+                }
+                gl.bindTexture(gl.TEXTURE_2D, barrierTexture);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, gridWidth, gridHeight, 0, gl.RED, gl.UNSIGNED_BYTE, data);
+                initDensities(0);
+                initDensities(1);
+            } else if (e.key === 'T') {
+                runTests();
+            }
+        });
+
+        // Tests
+        function checkDensityConservation() {
+            let totalSum = 0.0;
+            const readSize = 32;
+            const pixels = new Float32Array(readSize * readSize * 4);
+            const fb = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+            for (let t = 0; t < 3; t++) {
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureSets[currentSet][t], 0);
+                gl.readPixels(0, 0, readSize, readSize, gl.RGBA, gl.FLOAT, pixels);
+                for (let i = 0; i < pixels.length; i += 4) {
+                    totalSum += pixels[i] + pixels[i+1] + pixels[i+2];
+                }
+            }
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            console.log('Density sum in small area:', totalSum);
+            const expected = readSize * readSize * weights.reduce((a, b) => a + b, 0);
+            return Math.abs(totalSum - expected) < 10; // Rough tolerance
+        }
+
+        function checkPoiseuille() {
+            if (!poiseuilleMode) return;
+            console.log('Poiseuille test: Check console for profile (stub; extend with readback if needed)');
+        }
+
+        function runTests() {
+            console.log('Running tests...');
+            const sizes = [256, 512, 1024, 2048];
+            sizes.forEach(size => {
+                resizeGrid(size, size);
+                const start = performance.now();
+                for (let i = 0; i < 100; i++) simulate();
+                const time = performance.now() - start;
+                console.log(`FPS: ${100000 / time} for ${size}x${size}`);
+            });
+            const conserved = checkDensityConservation();
+            console.log('Density conservation:', conserved ? 'PASS' : 'FAIL');
+            checkPoiseuille();
+            // Reset to original
+            resizeGrid(512, 512);
+        }
+
+        // Simulate
+        function simulate() {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbos[1 - currentSet]);
+            gl.viewport(0, 0, gridWidth, gridHeight);
+            gl.useProgram(simProgram);
+            const posLocSim = gl.getAttribLocation(simProgram, 'position');
+            if (posLocSim >= 0) {
+                gl.enableVertexAttribArray(posLocSim);
+                gl.vertexAttribPointer(posLocSim, 2, gl.FLOAT, false, 0, 0);
+            }
+            gl.uniform2f(gl.getUniformLocation(simProgram, 'res'), gridWidth, gridHeight);
+            gl.uniform1f(gl.getUniformLocation(simProgram, 'omega'), omega);
+            gl.uniform1f(gl.getUniformLocation(simProgram, 'force'), force);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, textureSets[currentSet][0]);
+            gl.uniform1i(gl.getUniformLocation(simProgram, 'tex0'), 0);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, textureSets[currentSet][1]);
+            gl.uniform1i(gl.getUniformLocation(simProgram, 'tex1'), 1);
+            gl.activeTexture(gl.TEXTURE2);
+            gl.bindTexture(gl.TEXTURE_2D, textureSets[currentSet][2]);
+            gl.uniform1i(gl.getUniformLocation(simProgram, 'tex2'), 2);
+            gl.activeTexture(gl.TEXTURE3);
+            gl.bindTexture(gl.TEXTURE_2D, barrierTexture);
+            gl.uniform1i(gl.getUniformLocation(simProgram, 'barrier'), 3);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            currentSet = 1 - currentSet;
+        }
+
+        // Render
+        function render() {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.useProgram(renderProgram);
+            const posLocRender = gl.getAttribLocation(renderProgram, 'position');
+            if (posLocRender >= 0) {
+                gl.enableVertexAttribArray(posLocRender);
+                gl.vertexAttribPointer(posLocRender, 2, gl.FLOAT, false, 0, 0);
+            }
+            gl.uniform2f(gl.getUniformLocation(renderProgram, 'canvasRes'), canvas.width, canvas.height);
+            gl.uniform1f(gl.getUniformLocation(renderProgram, 'zoom'), zoom);
+            gl.uniform2f(gl.getUniformLocation(renderProgram, 'pan'), panX, panY);
+            gl.uniform2f(gl.getUniformLocation(renderProgram, 'res'), gridWidth, gridHeight);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, textureSets[currentSet][0]);
+            gl.uniform1i(gl.getUniformLocation(renderProgram, 'tex0'), 0);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, textureSets[currentSet][1]);
+            gl.uniform1i(gl.getUniformLocation(renderProgram, 'tex1'), 1);
+            gl.activeTexture(gl.TEXTURE2);
+            gl.bindTexture(gl.TEXTURE_2D, textureSets[currentSet][2]);
+            gl.uniform1i(gl.getUniformLocation(renderProgram, 'tex2'), 2);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        }
+
+        // Loop
+        function loop() {
+            simulate();
+            render();
+            requestAnimationFrame(loop);
+        }
+        loop();
+    </script>
+</body>
+</html>

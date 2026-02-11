@@ -26,6 +26,9 @@ const BODY_EXCLUDE_KEYS = new Set([
   'lightField',
   'brain',
   'primaryEyePoint',
+  'blueprintPoints',
+  'blueprintSprings',
+  'blueprintRadius',
   '_tempVec1',
   '_tempVec2',
   '_tempDiffPos',
@@ -152,6 +155,110 @@ function serializeSpring(spring, pointsIndex) {
 }
 
 /**
+ * Build a shape blueprint from the current phenotype so save/load stays
+ * consistent even after runtime growth changed point/spring counts.
+ */
+function buildPhenotypeBlueprint(body, pointsIndex) {
+  const points = Array.isArray(body?.massPoints) ? body.massPoints : [];
+  const center = typeof body?.getAveragePosition === 'function'
+    ? body.getAveragePosition()
+    : { x: 0, y: 0 };
+
+  const blueprintPoints = points.map((p) => ({
+    relX: Number(p?.pos?.x || 0) - Number(center?.x || 0),
+    relY: Number(p?.pos?.y || 0) - Number(center?.y || 0),
+    radius: Number(p?.radius || 0),
+    mass: Number(p?.mass || 0),
+    nodeType: Number.isFinite(Number(p?.nodeType)) ? Number(p.nodeType) : 1,
+    movementType: Number.isFinite(Number(p?.movementType)) ? Number(p.movementType) : 2,
+    dyeColor: Array.isArray(p?.dyeColor) ? deepClone(p.dyeColor) : [200, 50, 50],
+    canBeGrabber: Boolean(p?.canBeGrabber),
+    eyeTargetType: Number.isFinite(Number(p?.eyeTargetType)) ? Number(p.eyeTargetType) : 0,
+    neuronDataBlueprint: p?.neuronData
+      ? { hiddenLayerSize: Number(p.neuronData.hiddenLayerSize) || null }
+      : null
+  }));
+
+  const blueprintSprings = (body?.springs || [])
+    .map((s) => ({
+      p1Index: pointsIndex.get(s.p1),
+      p2Index: pointsIndex.get(s.p2),
+      restLength: Number(s.restLength) || 0,
+      isRigid: Boolean(s.isRigid),
+      stiffness: Number(s.stiffness) || 0,
+      damping: Number(s.dampingFactor) || 0
+    }))
+    .filter((s) => Number.isInteger(s.p1Index) && Number.isInteger(s.p2Index) && s.p1Index !== s.p2Index);
+
+  const exported = typeof body?.exportBlueprint === 'function' ? deepClone(body.exportBlueprint()) : {};
+
+  return {
+    ...exported,
+    version: Number(exported?.version) || 2,
+    blueprintPoints,
+    blueprintSprings
+  };
+}
+
+/**
+ * Convert a snapshot payload back into a usable blueprint.
+ */
+function buildBlueprintFromBodySnapshot(bodySnapshot) {
+  const points = Array.isArray(bodySnapshot?.massPoints) ? bodySnapshot.massPoints : [];
+  const springs = Array.isArray(bodySnapshot?.springs) ? bodySnapshot.springs : [];
+
+  if (points.length === 0) {
+    return deepClone(bodySnapshot?.blueprint || null);
+  }
+
+  let sumX = 0;
+  let sumY = 0;
+  for (const p of points) {
+    sumX += Number(p?.pos?.x) || 0;
+    sumY += Number(p?.pos?.y) || 0;
+  }
+  const cx = sumX / points.length;
+  const cy = sumY / points.length;
+
+  const blueprintPoints = points.map((p) => {
+    const state = p?.state || {};
+    return {
+      relX: (Number(p?.pos?.x) || 0) - cx,
+      relY: (Number(p?.pos?.y) || 0) - cy,
+      radius: Number(state.radius || 0),
+      mass: Number(state.mass || 0),
+      nodeType: Number.isFinite(Number(state.nodeType)) ? Number(state.nodeType) : 1,
+      movementType: Number.isFinite(Number(state.movementType)) ? Number(state.movementType) : 2,
+      dyeColor: Array.isArray(state.dyeColor) ? deepClone(state.dyeColor) : [200, 50, 50],
+      canBeGrabber: Boolean(state.canBeGrabber),
+      eyeTargetType: Number.isFinite(Number(state.eyeTargetType)) ? Number(state.eyeTargetType) : 0,
+      neuronDataBlueprint: state?.neuronData
+        ? { hiddenLayerSize: Number(state.neuronData.hiddenLayerSize) || null }
+        : null
+    };
+  });
+
+  const blueprintSprings = springs
+    .map((s) => ({
+      p1Index: Number(s?.p1Index),
+      p2Index: Number(s?.p2Index),
+      restLength: Number(s?.restLength) || 0,
+      isRigid: Boolean(s?.isRigid),
+      stiffness: Number(s?.stiffness) || 0,
+      damping: Number(s?.dampingFactor) || 0
+    }))
+    .filter((s) => Number.isInteger(s.p1Index) && Number.isInteger(s.p2Index) && s.p1Index !== s.p2Index);
+
+  const blueprint = deepClone(bodySnapshot?.blueprint || {});
+  return {
+    ...blueprint,
+    version: Number(blueprint?.version) || 2,
+    blueprintPoints,
+    blueprintSprings
+  };
+}
+
+/**
  * Convert a SoftBody instance into a blueprint+state snapshot payload.
  */
 function serializeSoftBody(body) {
@@ -160,13 +267,7 @@ function serializeSoftBody(body) {
 
   return {
     id: body.id,
-    blueprint: typeof body.exportBlueprint === 'function'
-      ? deepClone(body.exportBlueprint())
-      : {
-          version: 1,
-          blueprintPoints: deepClone(body.blueprintPoints || []),
-          blueprintSprings: deepClone(body.blueprintSprings || [])
-        },
+    blueprint: buildPhenotypeBlueprint(body, pointsIndex),
     state: captureSerializableOwnProps(body, BODY_EXCLUDE_KEYS),
     primaryEyePointIndex: body.primaryEyePoint ? pointsIndex.get(body.primaryEyePoint) : -1,
     massPoints: body.massPoints.map(serializeMassPoint),
@@ -182,7 +283,9 @@ function restoreSoftBody(bodySnapshot, { SoftBodyClass, SpringClass, worldState 
   const initialX = Number(firstPoint?.pos?.x) || 0;
   const initialY = Number(firstPoint?.pos?.y) || 0;
 
-  const body = new SoftBodyClass(
+  const restorePointCount = (bodySnapshot.massPoints || []).length;
+
+  let body = new SoftBodyClass(
     Number(bodySnapshot.id) || 0,
     initialX,
     initialY,
@@ -190,14 +293,26 @@ function restoreSoftBody(bodySnapshot, { SoftBodyClass, SpringClass, worldState 
     Boolean(bodySnapshot.blueprint)
   );
 
+  // Legacy save compatibility: stale blueprint shapes may not match runtime points.
+  if (restorePointCount !== body.massPoints.length) {
+    const rebuiltBlueprint = buildBlueprintFromBodySnapshot(bodySnapshot);
+    body = new SoftBodyClass(
+      Number(bodySnapshot.id) || 0,
+      initialX,
+      initialY,
+      rebuiltBlueprint || null,
+      Boolean(rebuiltBlueprint)
+    );
+  }
+
   for (const [key, value] of Object.entries(bodySnapshot.state || {})) {
     body[key] = deepClone(value);
   }
 
-  if ((bodySnapshot.massPoints || []).length !== body.massPoints.length) {
+  if (restorePointCount !== body.massPoints.length) {
     throw new Error(
       `SoftBody ${bodySnapshot.id} restore failed: mass point count mismatch ` +
-      `(${body.massPoints.length} != ${(bodySnapshot.massPoints || []).length})`
+      `(${body.massPoints.length} != ${restorePointCount})`
     );
   }
 

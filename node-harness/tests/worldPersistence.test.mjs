@@ -52,19 +52,21 @@ class FakeSoftBody {
     this.blueprintPoints = blueprint?.blueprintPoints
       ? blueprint.blueprintPoints.map((p) => ({ ...p }))
       : [
-          { x: 0, y: 0, mass: 1, radius: 3, nodeType: 1 },
-          { x: 6, y: 0, mass: 1, radius: 4, nodeType: 2 }
+          { relX: 0, relY: 0, mass: 1, radius: 3, nodeType: 1 },
+          { relX: 6, relY: 0, mass: 1, radius: 4, nodeType: 2 }
         ];
 
     this.blueprintSprings = blueprint?.blueprintSprings
       ? blueprint.blueprintSprings.map((s) => ({ ...s }))
       : [
-          { a: 0, b: 1, restLength: 6, stiffness: 0.8, dampingFactor: 0.2, isRigid: false }
+          { p1Index: 0, p2Index: 1, restLength: 6, stiffness: 0.8, damping: 0.2, isRigid: false }
         ];
 
     this.massPoints = this.blueprintPoints.map((point) => {
-      const px = x + point.x;
-      const py = y + point.y;
+      const relX = Number(point.relX ?? point.x ?? 0);
+      const relY = Number(point.relY ?? point.y ?? 0);
+      const px = x + relX;
+      const py = y + relY;
       return {
         pos: { x: px, y: py },
         prevPos: { x: px, y: py },
@@ -78,14 +80,18 @@ class FakeSoftBody {
       };
     });
 
-    this.springs = this.blueprintSprings.map((spring) => new FakeSpring(
-      this.massPoints[spring.a],
-      this.massPoints[spring.b],
-      spring.stiffness,
-      spring.dampingFactor,
-      spring.restLength,
-      spring.isRigid
-    ));
+    this.springs = this.blueprintSprings.map((spring) => {
+      const p1Index = Number(spring.p1Index ?? spring.a ?? 0);
+      const p2Index = Number(spring.p2Index ?? spring.b ?? 0);
+      return new FakeSpring(
+        this.massPoints[p1Index],
+        this.massPoints[p2Index],
+        spring.stiffness,
+        Number(spring.damping ?? spring.dampingFactor ?? 0.2),
+        spring.restLength,
+        spring.isRigid
+      );
+    });
 
     this.primaryEyePoint = this.massPoints[1] || null;
   }
@@ -240,4 +246,49 @@ test('save/load world snapshot round-trips body, particles, and selection', () =
 
   const occupiedCells = worldReloaded.spatialGrid.filter((cell) => cell.length > 0).length;
   assert.ok(occupiedCells > 0);
+});
+
+test('loadWorldStateSnapshot tolerates stale blueprint point counts by rebuilding from snapshot points', () => {
+  const runtime = createRuntime();
+  const body = new FakeSoftBody(7, 40, 44);
+  const worldState = createWorldState(runtime, body);
+
+  const snapshot = saveWorldStateSnapshot({
+    worldState,
+    configOrViews: runtime,
+    meta: { source: 'stale-blueprint-test' }
+  });
+
+  // Simulate an older/bad save where blueprint shape no longer matches runtime point state.
+  snapshot.world.softBodies[0].blueprint.blueprintPoints = snapshot.world.softBodies[0].blueprint.blueprintPoints.slice(0, 1);
+  snapshot.world.softBodies[0].blueprint.blueprintSprings = [];
+
+  const runtimeReloaded = createRuntime();
+  const worldReloaded = {
+    nextSoftBodyId: 0,
+    nutrientField: new Float32Array(0),
+    lightField: new Float32Array(0),
+    viscosityField: new Float32Array(0),
+    mutationStats: {},
+    globalEnergyGains: {},
+    globalEnergyCosts: {},
+    fluidField: null,
+    particles: [],
+    softBodyPopulation: [],
+    spatialGrid: []
+  };
+
+  loadWorldStateSnapshot(snapshot, {
+    worldState: worldReloaded,
+    configOrViews: runtimeReloaded,
+    classes: {
+      SoftBodyClass: FakeSoftBody,
+      ParticleClass: FakeParticle,
+      SpringClass: FakeSpring,
+      FluidFieldClass: FakeFluidField
+    }
+  });
+
+  assert.equal(worldReloaded.softBodyPopulation.length, 1);
+  assert.equal(worldReloaded.softBodyPopulation[0].massPoints.length, snapshot.world.softBodies[0].massPoints.length);
 });

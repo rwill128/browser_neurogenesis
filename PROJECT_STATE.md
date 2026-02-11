@@ -129,3 +129,9 @@ For each scenario run:
 - Fixed runtime crash in `SoftBody.getAverageDamping()` (`RIGID_SPRING_DAMPING` reference): now uses `config.RIGID_SPRING_DAMPING`.
 - Hardened legacy SoftBody brain helper paths by replacing bare constants with `config.*` equivalents to prevent future ReferenceErrors.
 - Added regression test `SoftBody.getAverageDamping uses config rigid damping fallback for rigid-only springs`.
+- Fixed save/load restore mismatch for grown creatures (`mass point count mismatch`) by hardening world persistence:
+  - snapshots now serialize a phenotype-derived blueprint (point/spring topology from current runtime state)
+  - restore path now has compatibility fallback that rebuilds blueprint from saved mass-point snapshots when stale blueprint counts are detected.
+- Added new regression coverage:
+  - `node-harness/tests/saveLoadRuntime.test.mjs` (run live world for growth-active steps, save, then load)
+  - extended `worldPersistence.test.mjs` with stale-blueprint compatibility restore case.

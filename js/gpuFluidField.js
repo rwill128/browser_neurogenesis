@@ -166,6 +166,19 @@ export class GPUFluidField {
             void main() { gl_FragColor = texture2D(u_textureToDraw, v_texCoord); }
         `;
 
+        // Lightweight perf telemetry
+        this.perfStats = {
+            stepCount: 0,
+            stepAccumMs: 0,
+            stepMaxMs: 0,
+            drawCount: 0,
+            drawAccumMs: 0,
+            drawMaxMs: 0,
+            lastStepMs: 0,
+            lastDrawMs: 0,
+            lastReportTs: performance.now()
+        };
+
         // Store the promise for external awaiting if needed
         this._initPromise = this._asyncInit(canvas);
     }
@@ -483,6 +496,8 @@ export class GPUFluidField {
             return;
         }
 
+        const stepStartMs = performance.now();
+
         if (this.device) { // WebGPU Path
             // console.log("GPUFluidField.step() WebGPU path running...");
 
@@ -597,6 +612,7 @@ export class GPUFluidField {
             [this.textures.densityPing, this.textures.densityPong] = [this.textures.densityPong, this.textures.densityPing];
             // Now densityPing is the advected density for the current frame.
 
+            this._recordPerfSample('step', performance.now() - stepStartMs);
             return; // End of WebGPU path
         }
 
@@ -682,6 +698,8 @@ export class GPUFluidField {
         }, this.framebuffers.densityFbo);
         [this.textures.density, this.textures.densityPrev] = [this.textures.densityPrev, this.textures.density];
         [this.framebuffers.densityFbo, this.framebuffers.densityPrevFbo] = [this.framebuffers.densityPrevFbo, this.framebuffers.densityFbo];
+
+        this._recordPerfSample('step', performance.now() - stepStartMs);
     }
 
     addDensity(x, y, r, g, b, strength) {
@@ -808,6 +826,8 @@ export class GPUFluidField {
             return; 
         }
 
+        const drawStartMs = performance.now();
+
         if (this.device && this.context) { // WebGPU path
             // console.log("GPUFluidField.draw() WebGPU path");
             if (!this.programs.displayPipeline || !this.textures.densityPing || !this.sampler || !this.quadVertexBuffer) {
@@ -822,6 +842,7 @@ export class GPUFluidField {
                 { u_displayTexture: this.textures.densityPing }, // inputTexturesSpec
                 this.context // Special marker indicating to draw to the canvas context
             );
+            this._recordPerfSample('draw', performance.now() - drawStartMs);
 
         } else if (this.gl) { // Fallback to existing WebGL draw
             // ... (Existing WebGL draw logic remains unchanged)
@@ -860,6 +881,7 @@ export class GPUFluidField {
                  if(positionAttributeLocation === -1) console.error("a_position attribute not found in display shader (WebGL).");
                  if(!this.quadVertexBuffer) console.error("Quad vertex buffer not initialized for display (WebGL).");
             }
+            this._recordPerfSample('draw', performance.now() - drawStartMs);
         }
     }
 
@@ -981,6 +1003,37 @@ export class GPUFluidField {
         
         gl.bindTexture(target, null); // Unbind
         return texture;
+    }
+
+    _recordPerfSample(kind, ms) {
+        if (!this.perfStats) return;
+
+        if (kind === 'step') {
+            this.perfStats.lastStepMs = ms;
+            this.perfStats.stepCount += 1;
+            this.perfStats.stepAccumMs += ms;
+            this.perfStats.stepMaxMs = Math.max(this.perfStats.stepMaxMs, ms);
+        } else if (kind === 'draw') {
+            this.perfStats.lastDrawMs = ms;
+            this.perfStats.drawCount += 1;
+            this.perfStats.drawAccumMs += ms;
+            this.perfStats.drawMaxMs = Math.max(this.perfStats.drawMaxMs, ms);
+        }
+
+        const now = performance.now();
+        if (now - this.perfStats.lastReportTs >= 5000) {
+            const avgStep = this.perfStats.stepCount ? (this.perfStats.stepAccumMs / this.perfStats.stepCount) : 0;
+            const avgDraw = this.perfStats.drawCount ? (this.perfStats.drawAccumMs / this.perfStats.drawCount) : 0;
+            console.log(`[GPU PERF] avgStep=${avgStep.toFixed(2)}ms maxStep=${this.perfStats.stepMaxMs.toFixed(2)}ms avgDraw=${avgDraw.toFixed(2)}ms maxDraw=${this.perfStats.drawMaxMs.toFixed(2)}ms samples(step/draw)=${this.perfStats.stepCount}/${this.perfStats.drawCount}`);
+
+            this.perfStats.stepCount = 0;
+            this.perfStats.stepAccumMs = 0;
+            this.perfStats.stepMaxMs = 0;
+            this.perfStats.drawCount = 0;
+            this.perfStats.drawAccumMs = 0;
+            this.perfStats.drawMaxMs = 0;
+            this.perfStats.lastReportTs = now;
+        }
     }
 
     _runShaderPass(programNameOrInfo, inputTexturesSpec, outputTexture) {

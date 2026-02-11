@@ -31,6 +31,8 @@ const STATS_UPDATE_INTERVAL = 60;
 let frameTimeDisplayElement = null;
 let frameTimeAccumulator = 0;
 let frameCountForAvg = 0;
+let perfLogLastTs = 0;
+const PERF_LOG_INTERVAL_MS = 5000;
 
 async function main() {
     config.WORLD_WIDTH = parseInt(worldWidthInput.value) || 8000;
@@ -82,6 +84,24 @@ function resizeCanvas() {
 }
 
 window.addEventListener('resize', resizeCanvas);
+
+function maybeLogPerformance(nowTs, currentFrameDuration) {
+    if ((nowTs - perfLogLastTs) < PERF_LOG_INTERVAL_MS) return;
+
+    const approxFps = currentFrameDuration > 0 ? (1000 / currentFrameDuration) : 0;
+    const isGpu = (typeof fluidField !== 'undefined' && fluidField && fluidField.gpuEnabled);
+    const mode = isGpu ? 'GPU' : 'CPU';
+
+    let gpuPerfText = '';
+    if (isGpu && fluidField.perfStats) {
+        gpuPerfText = ` | gpuStepLast=${fluidField.perfStats.lastStepMs.toFixed(2)}ms gpuDrawLast=${fluidField.perfStats.lastDrawMs.toFixed(2)}ms`;
+    }
+
+    const pop = (typeof softBodyPopulation !== 'undefined' && softBodyPopulation) ? softBodyPopulation.length : -1;
+    const particleCount = (typeof particles !== 'undefined' && particles) ? particles.length : -1;
+    console.log(`[PERF] mode=${mode} frame=${currentFrameDuration.toFixed(2)}ms fps~${approxFps.toFixed(1)} pop=${pop} particles=${particleCount}${gpuPerfText}`);
+    perfLogLastTs = nowTs;
+}
 
 function gameLoop(timestamp) {
     const loopStartTime = performance.now();
@@ -136,6 +156,8 @@ function gameLoop(timestamp) {
     const currentFrameDuration = loopEndTime - loopStartTime;
     frameTimeAccumulator += currentFrameDuration;
     frameCountForAvg++;
+
+    maybeLogPerformance(loopEndTime, currentFrameDuration);
 
     animationFrameId = requestAnimationFrame(gameLoop);
 }

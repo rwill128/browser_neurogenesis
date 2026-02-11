@@ -24,6 +24,7 @@ import { drawNutrientMap, drawLightMap, drawViscosityMap } from './environment.j
 import { syncRuntimeState } from './engine/runtimeState.js';
 import { createWorldState } from './engine/worldState.mjs';
 import { runBrowserStepAdapter } from './engine/browserStepAdapter.mjs';
+import { createConfigViews } from './engine/configViews.mjs';
 
 let offscreenFluidCanvas, offscreenFluidCtx;
 let spatialGrid;
@@ -104,6 +105,7 @@ const simulationWorldState = createWorldState({
     globalEnergyGains,
     globalEnergyCosts
 });
+const simulationConfigViews = createConfigViews(config);
 
 function syncModuleBindingsFromWorldState() {
     spatialGrid = simulationWorldState.spatialGrid;
@@ -127,7 +129,7 @@ syncRuntimeState({
 syncModuleBindingsFromWorldState();
 
 function initializeSpatialGrid() {
-    initializeSharedSpatialGrid(simulationWorldState, config);
+    initializeSharedSpatialGrid(simulationWorldState, simulationConfigViews);
     syncModuleBindingsFromWorldState();
 }
 
@@ -135,6 +137,7 @@ function initializeSpatialGrid() {
 // --- Simulation Setup ---
 function initializePopulation() {
     initializeSharedPopulation(simulationWorldState, {
+        configViews: simulationConfigViews,
         config,
         SoftBodyClass: SoftBody,
         count: config.CREATURE_POPULATION_FLOOR,
@@ -215,6 +218,7 @@ async function initFluidSimulation(targetCanvas) {
 
 function initParticles() {
     initializeSharedParticles(simulationWorldState, {
+        configViews: simulationConfigViews,
         config,
         ParticleClass: null,
         count: 0,
@@ -237,6 +241,7 @@ function updatePhysics(dt) {
         config,
         stepWorld,
         stepOptions: {
+            configViews: simulationConfigViews,
             config,
             SoftBodyClass: SoftBody,
             ParticleClass: Particle,
@@ -460,6 +465,7 @@ function drawFluidVelocities(ctx, fluidData, viewportCanvasWidth, viewportCanvas
 function initNutrientMap() {
     const size = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     const field = initializeSharedNutrientMap(simulationWorldState, {
+        configViews: simulationConfigViews,
         config,
         size,
         rng: Math.random
@@ -475,6 +481,7 @@ function initNutrientMap() {
 function initLightMap() {
     const size = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     const field = initializeSharedLightMap(simulationWorldState, {
+        configViews: simulationConfigViews,
         config,
         size,
         rng: Math.random
@@ -490,6 +497,7 @@ function initLightMap() {
 function initViscosityMap() {
     const size = Math.round(config.FLUID_GRID_SIZE_CONTROL);
     const field = initializeSharedViscosityMap(simulationWorldState, {
+        configViews: simulationConfigViews,
         config,
         size,
         rng: Math.random

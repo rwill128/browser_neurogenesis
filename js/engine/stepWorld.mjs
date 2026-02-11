@@ -1,11 +1,13 @@
 import { withRandomSource } from './randomScope.mjs';
+import { resolveConfigViews } from './configViews.mjs';
 
 function randomInRange(rng, min, max) {
   return min + rng() * (max - min);
 }
 
-function updateSpatialGrid(state, config) {
+function updateSpatialGrid(state, config, constants) {
   const { spatialGrid, softBodyPopulation, particles } = state;
+  const gridCellSize = constants.GRID_CELL_SIZE ?? config.GRID_CELL_SIZE;
   if (!spatialGrid) return;
 
   for (let i = 0; i < spatialGrid.length; i++) {
@@ -16,8 +18,8 @@ function updateSpatialGrid(state, config) {
     if (body.isUnstable) continue;
     for (let i = 0; i < body.massPoints.length; i++) {
       const point = body.massPoints[i];
-      const gx = Math.floor(point.pos.x / config.GRID_CELL_SIZE);
-      const gy = Math.floor(point.pos.y / config.GRID_CELL_SIZE);
+      const gx = Math.floor(point.pos.x / gridCellSize);
+      const gy = Math.floor(point.pos.y / gridCellSize);
       const index = gx + gy * config.GRID_COLS;
       if (index >= 0 && index < spatialGrid.length) {
         spatialGrid[index].push({
@@ -32,8 +34,8 @@ function updateSpatialGrid(state, config) {
 
   for (const particle of particles) {
     if (particle.life <= 0) continue;
-    const gx = Math.floor(particle.pos.x / config.GRID_CELL_SIZE);
-    const gy = Math.floor(particle.pos.y / config.GRID_CELL_SIZE);
+    const gx = Math.floor(particle.pos.x / gridCellSize);
+    const gy = Math.floor(particle.pos.y / gridCellSize);
     const index = gx + gy * config.GRID_COLS;
     if (index >= 0 && index < spatialGrid.length) {
       spatialGrid[index].push({
@@ -144,6 +146,7 @@ function removeUnstableBodies(state) {
 export function stepWorld(state, dt, options = {}) {
   const {
     config,
+    configViews = null,
     rng = Math.random,
     SoftBodyClass = null,
     ParticleClass = null,
@@ -155,38 +158,39 @@ export function stepWorld(state, dt, options = {}) {
     creatureSpawnMargin = 50
   } = options;
 
-  if (!config) {
-    throw new Error('stepWorld requires options.config');
+  const { runtime: runtimeConfig, constants } = resolveConfigViews(configViews || config);
+  if (!runtimeConfig) {
+    throw new Error('stepWorld requires options.config or options.configViews');
   }
 
-  updateSpatialGrid(state, config);
+  updateSpatialGrid(state, runtimeConfig, constants);
 
   if (applyEmitters) {
-    applyVelocityEmitters(state, config);
+    applyVelocityEmitters(state, runtimeConfig);
   }
 
   if (ParticleClass && state.fluidField) {
-    if (maintainParticleFloor && state.particles.length < config.PARTICLE_POPULATION_FLOOR) {
-      let particlesToSpawnToFloor = config.PARTICLE_POPULATION_FLOOR - state.particles.length;
+    if (maintainParticleFloor && state.particles.length < runtimeConfig.PARTICLE_POPULATION_FLOOR) {
+      let particlesToSpawnToFloor = runtimeConfig.PARTICLE_POPULATION_FLOOR - state.particles.length;
       for (let i = 0; i < particlesToSpawnToFloor; i++) {
-        if (state.particles.length >= config.PARTICLE_POPULATION_CEILING) break;
-        spawnParticle(state, config, ParticleClass, rng);
+        if (state.particles.length >= runtimeConfig.PARTICLE_POPULATION_CEILING) break;
+        spawnParticle(state, runtimeConfig, ParticleClass, rng);
       }
-      config.particleEmissionDebt = 0;
+      runtimeConfig.particleEmissionDebt = 0;
     } else if (
-      state.particles.length < config.PARTICLE_POPULATION_CEILING &&
-      config.PARTICLES_PER_SECOND > 0
+      state.particles.length < runtimeConfig.PARTICLE_POPULATION_CEILING &&
+      runtimeConfig.PARTICLES_PER_SECOND > 0
     ) {
-      config.particleEmissionDebt += config.PARTICLES_PER_SECOND * dt;
-      while (config.particleEmissionDebt >= 1 && state.particles.length < config.PARTICLE_POPULATION_CEILING) {
-        spawnParticle(state, config, ParticleClass, rng);
-        config.particleEmissionDebt -= 1;
+      runtimeConfig.particleEmissionDebt += runtimeConfig.PARTICLES_PER_SECOND * dt;
+      while (runtimeConfig.particleEmissionDebt >= 1 && state.particles.length < runtimeConfig.PARTICLE_POPULATION_CEILING) {
+        spawnParticle(state, runtimeConfig, ParticleClass, rng);
+        runtimeConfig.particleEmissionDebt -= 1;
       }
     }
   }
 
   if (applySelectedPointPush) {
-    maybeApplySelectedPointFluidPush(state, config);
+    maybeApplySelectedPointFluidPush(state, runtimeConfig);
   }
 
   if (state.fluidField) {
@@ -194,7 +198,7 @@ export function stepWorld(state, dt, options = {}) {
     state.fluidField.step();
   }
 
-  const canCreaturesReproduceGlobally = allowReproduction && state.softBodyPopulation.length < config.CREATURE_POPULATION_CEILING;
+  const canCreaturesReproduceGlobally = allowReproduction && state.softBodyPopulation.length < runtimeConfig.CREATURE_POPULATION_CEILING;
   const newOffspring = [];
   let currentAnyUnstable = false;
 
@@ -226,20 +230,20 @@ export function stepWorld(state, dt, options = {}) {
 
   removeDeadParticles(state, dt, rng);
 
-  if (currentAnyUnstable && !config.isAnySoftBodyUnstable) {
-    config.isAnySoftBodyUnstable = true;
-  } else if (!currentAnyUnstable && config.isAnySoftBodyUnstable && !state.softBodyPopulation.some((b) => b.isUnstable)) {
-    config.isAnySoftBodyUnstable = false;
+  if (currentAnyUnstable && !runtimeConfig.isAnySoftBodyUnstable) {
+    runtimeConfig.isAnySoftBodyUnstable = true;
+  } else if (!currentAnyUnstable && runtimeConfig.isAnySoftBodyUnstable && !state.softBodyPopulation.some((b) => b.isUnstable)) {
+    runtimeConfig.isAnySoftBodyUnstable = false;
   }
 
   const removedCount = removeUnstableBodies(state);
 
   if (maintainCreatureFloor && SoftBodyClass) {
-    const neededToMaintainFloor = config.CREATURE_POPULATION_FLOOR - state.softBodyPopulation.length;
+    const neededToMaintainFloor = runtimeConfig.CREATURE_POPULATION_FLOOR - state.softBodyPopulation.length;
     if (neededToMaintainFloor > 0) {
       for (let i = 0; i < neededToMaintainFloor; i++) {
-        if (state.softBodyPopulation.length >= config.CREATURE_POPULATION_CEILING) break;
-        spawnCreature(state, config, SoftBodyClass, rng, creatureSpawnMargin);
+        if (state.softBodyPopulation.length >= runtimeConfig.CREATURE_POPULATION_CEILING) break;
+        spawnCreature(state, runtimeConfig, SoftBodyClass, rng, creatureSpawnMargin);
       }
     }
   }
@@ -254,6 +258,7 @@ export function stepWorld(state, dt, options = {}) {
   };
 }
 
-export function rebuildSpatialGrid(state, config) {
-  updateSpatialGrid(state, config);
+export function rebuildSpatialGrid(state, configOrViews) {
+  const { runtime, constants } = resolveConfigViews(configOrViews);
+  updateSpatialGrid(state, runtime, constants);
 }

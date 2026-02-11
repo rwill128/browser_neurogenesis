@@ -7,12 +7,14 @@ import { NodeType, MovementType, EyeTargetType } from '../js/classes/constants.j
 import { createSeededRandom } from './seededRandomScope.mjs';
 import { stepWorld } from '../js/engine/stepWorld.mjs';
 import { createWorldState } from '../js/engine/worldState.mjs';
+import { collectFluidSnapshot } from './fluidSnapshot.mjs';
 import {
   initializeSpatialGrid as initializeSharedSpatialGrid,
   initializeEnvironmentMaps as initializeSharedEnvironmentMaps,
   initializeParticles as initializeSharedParticles,
   initializePopulation as initializeSharedPopulation
 } from '../js/engine/initWorld.mjs';
+import { createConfigViews } from '../js/engine/configViews.mjs';
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
@@ -47,6 +49,7 @@ export class RealWorld {
     this.eventLog = [];
 
     this._applyScenarioConfig();
+    this.configViews = createConfigViews(config);
 
     this.worldState = createWorldState({
       spatialGrid: null,
@@ -57,7 +60,7 @@ export class RealWorld {
       viscosityField: null,
       nextSoftBodyId: 0
     });
-    initializeSharedSpatialGrid(this.worldState, config);
+    initializeSharedSpatialGrid(this.worldState, this.configViews);
 
     this.worldState.fluidField = new FluidField(
       config.FLUID_GRID_SIZE_CONTROL,
@@ -77,6 +80,7 @@ export class RealWorld {
     });
 
     initializeSharedEnvironmentMaps(this.worldState, {
+      configViews: this.configViews,
       config,
       size: Math.round(config.FLUID_GRID_SIZE_CONTROL),
       rng: this.rand
@@ -84,6 +88,7 @@ export class RealWorld {
     this.worldState.fluidField.setViscosityField(this.worldState.viscosityField);
 
     initializeSharedParticles(this.worldState, {
+      configViews: this.configViews,
       config,
       ParticleClass: Particle,
       count: scenario.particles,
@@ -91,6 +96,7 @@ export class RealWorld {
     });
 
     initializeSharedPopulation(this.worldState, {
+      configViews: this.configViews,
       config,
       SoftBodyClass: SoftBody,
       count: scenario.creatures,
@@ -126,6 +132,46 @@ export class RealWorld {
     config.GRID_ROWS = Math.ceil(config.WORLD_HEIGHT / config.GRID_CELL_SIZE);
   }
 
+  /**
+   * Inject a localized fluid burst (color + optional velocity) into the real fluid grid.
+   * Used for diagnostic scenarios where we need visible fluid behavior checks in video output.
+   */
+  _applyFluidBurst(ev) {
+    if (!this.fluidField) return;
+
+    const worldX = Number.isFinite(ev.worldX)
+      ? ev.worldX
+      : (Number.isFinite(ev.xNorm) ? ev.xNorm * config.WORLD_WIDTH : config.WORLD_WIDTH * 0.5);
+    const worldY = Number.isFinite(ev.worldY)
+      ? ev.worldY
+      : (Number.isFinite(ev.yNorm) ? ev.yNorm * config.WORLD_HEIGHT : config.WORLD_HEIGHT * 0.5);
+
+    const centerGX = Math.floor(worldX / this.fluidField.scaleX);
+    const centerGY = Math.floor(worldY / this.fluidField.scaleY);
+    const radiusCells = Math.max(0, Math.floor(ev.radiusCells ?? 2));
+    const r = Number.isFinite(ev.r) ? ev.r : 255;
+    const g = Number.isFinite(ev.g) ? ev.g : 255;
+    const b = Number.isFinite(ev.b) ? ev.b : 255;
+    const strength = Number.isFinite(ev.strength) ? ev.strength : 220;
+    const velX = Number.isFinite(ev.velX) ? ev.velX : 0;
+    const velY = Number.isFinite(ev.velY) ? ev.velY : 0;
+
+    for (let dy = -radiusCells; dy <= radiusCells; dy++) {
+      for (let dx = -radiusCells; dx <= radiusCells; dx++) {
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > radiusCells) continue;
+
+        const falloff = radiusCells <= 0 ? 1 : Math.max(0.15, 1 - (dist / (radiusCells + 1e-9)));
+        const gx = centerGX + dx;
+        const gy = centerGY + dy;
+        this.fluidField.addDensity(gx, gy, r, g, b, strength * falloff);
+        if (velX !== 0 || velY !== 0) {
+          this.fluidField.addVelocity(gx, gy, velX * falloff, velY * falloff);
+        }
+      }
+    }
+  }
+
   _applyEvents() {
     for (const ev of this.events) {
       if (ev.tick !== this.tick) continue;
@@ -148,6 +194,8 @@ export class RealWorld {
             }
           }
         }
+      } else if (ev.kind === 'fluidBurst') {
+        this._applyFluidBurst(ev);
       }
       this.eventLog.push({ tick: this.tick, ...ev });
     }
@@ -160,6 +208,7 @@ export class RealWorld {
     this._applyEvents();
 
     stepWorld(this.worldState, dt, {
+      configViews: this.configViews,
       config,
       rng: this.rand,
       SoftBodyClass: SoftBody,
@@ -210,6 +259,14 @@ export class RealWorld {
       };
     });
 
+    const fluid = collectFluidSnapshot({
+      fluidField: this.fluidField,
+      world: this.config.world,
+      minDye: 2,
+      minSpeed: 0.02,
+      maxCells: 1200
+    });
+
     return {
       tick: this.tick,
       time: Number(this.time.toFixed(3)),
@@ -220,6 +277,7 @@ export class RealWorld {
         liveCreatures: creatures.length,
         particles: this.particles.length
       },
+      fluid,
       creatures,
       sampleCreatures: creatures.slice(0, 5)
     };

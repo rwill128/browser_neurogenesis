@@ -1,5 +1,21 @@
 import { mulberry32 } from '../js/engine/random.mjs';
 
+function squareVertices(c) {
+  const half = c.size / 2;
+  const local = [
+    { x: -half, y: -half },
+    { x: half, y: -half },
+    { x: half, y: half },
+    { x: -half, y: half }
+  ];
+  const ca = Math.cos(c.angle);
+  const sa = Math.sin(c.angle);
+  return local.map(p => ({
+    x: c.x + (p.x * ca - p.y * sa),
+    y: c.y + (p.x * sa + p.y * ca)
+  }));
+}
+
 export class MiniWorld {
   constructor(config, seed = 42) {
     this.config = config;
@@ -19,6 +35,9 @@ export class MiniWorld {
         y: this.rand() * config.world.height,
         vx: (this.rand() - 0.5) * 6,
         vy: (this.rand() - 0.5) * 6,
+        angle: this.rand() * Math.PI * 2,
+        spin: (this.rand() - 0.5) * 1.5,
+        size: 6,
         energy: 80 + this.rand() * 40,
         unstable: false
       });
@@ -59,6 +78,8 @@ export class MiniWorld {
       c.vx *= 0.985;
       c.vy *= 0.985;
 
+      c.angle += c.spin * dt;
+
       c.x += c.vx * dt;
       c.y += c.vy * dt;
 
@@ -92,7 +113,8 @@ export class MiniWorld {
         id: c.id,
         energy: Number(c.energy.toFixed(2)),
         center: { x: Number(c.x.toFixed(2)), y: Number(c.y.toFixed(2)) },
-        vel: { x: Number(c.vx.toFixed(2)), y: Number(c.vy.toFixed(2)) }
+        vel: { x: Number(c.vx.toFixed(2)), y: Number(c.vy.toFixed(2)) },
+        vertices: squareVertices(c).map(v => ({ x: Number(v.x.toFixed(2)), y: Number(v.y.toFixed(2)) }))
       })),
       sampleCreatures: live.slice(0, 5).map(c => ({
         id: c.id,

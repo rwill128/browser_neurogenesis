@@ -98,6 +98,30 @@ export const scenarioDefs = {
       world: { width: 100, height: 100 }, creatures: 0, particles: 0, dt: 1/30, steps: 120,
       events: []
     }
+  },
+  micro_one_creature_100: {
+    name: 'micro_one_creature_100',
+    description: '100x100 with exactly 1 creature, no particles, no fluid forcing',
+    browserConfig: {
+      WORLD_WIDTH: 100,
+      WORLD_HEIGHT: 100,
+      CREATURE_POPULATION_FLOOR: 1,
+      CREATURE_POPULATION_CEILING: 1,
+      PARTICLE_POPULATION_FLOOR: 0,
+      PARTICLE_POPULATION_CEILING: 0,
+      PARTICLES_PER_SECOND: 0,
+      FLUID_GRID_SIZE_CONTROL: 32,
+      FLUID_DIFFUSION: 0,
+      FLUID_VISCOSITY: 0,
+      FLUID_FADE_RATE: 0,
+      EMITTER_STRENGTH: 0,
+      FLUID_CURRENT_STRENGTH_ON_BODY: 0,
+      AUTO_FOLLOW_CREATURE: true
+    },
+    nodeConfig: {
+      world: { width: 100, height: 100 }, creatures: 1, particles: 0, dt: 1/30, steps: 120,
+      events: []
+    }
   }
 };
 

@@ -38,13 +38,16 @@ const world = data.world || { width: 120, height: 80 };
 (data.timeline || []).forEach((snap, i) => {
   const buf = Buffer.alloc(w * h * 3, 0);
 
-  // background gradient
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const idx = (y * w + x) * 3;
-      buf[idx] = 10;
-      buf[idx + 1] = 12 + Math.floor((y / h) * 20);
-      buf[idx + 2] = 18 + Math.floor((x / w) * 15);
+  const isBlankScenario = (data.scenario || '').includes('blank');
+  if (!isBlankScenario) {
+    // background gradient
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * 3;
+        buf[idx] = 10;
+        buf[idx + 1] = 12 + Math.floor((y / h) * 20);
+        buf[idx + 2] = 18 + Math.floor((x / w) * 15);
+      }
     }
   }
 

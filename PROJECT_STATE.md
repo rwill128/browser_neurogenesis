@@ -69,3 +69,4 @@ For each scenario run:
 - Fixed runtime growth/brain integration bug from browser console (`NEURAL_INPUT_SIZE_BASE is not defined`) by routing `SoftBody.initializeBrain()` through `Brain.initialize()`.
 - Updated NN resize behavior in `js/classes/Brain.js` so topology changes preserve existing weights/biases where dimensions overlap, and random-initialize only newly added slices.
 - Added topology-change RL safety: experience buffer is flushed when NN input/output dimensions change due to growth, while overlapping NN weights are still preserved.
+- Added `node-harness/browserDefaultSoak.mjs` to reproduce browser-like failures headlessly using index-default startup conditions, with automatic crash snapshot/report output.

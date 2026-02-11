@@ -82,6 +82,23 @@ node node-harness/saveLoadRegression.mjs \
 This validates end-to-end `save -> load -> continue` determinism across both
 headless-real and browser-like-real runners.
 
+## 6) Browser-default soak runner (repro without a live browser)
+
+```bash
+node node-harness/browserDefaultSoak.mjs \
+  --seed 41 \
+  --steps 20000 \
+  --dt 0.01 \
+  --logEvery 500 \
+  --out /tmp/browser-default-soak
+```
+
+What it does:
+- applies index.html-like defaults (world/population/particle emission)
+- runs real shared-core stepping in node (with reproduction + floor maintenance)
+- catches crashes and writes both a crash report and full snapshot for replay
+- writes periodic checkpoints + final report even on successful runs
+
 ## Current status
 
 - ✅ Deterministic seeded runs

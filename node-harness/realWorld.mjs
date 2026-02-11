@@ -4,10 +4,28 @@ import { Particle } from '../js/classes/Particle.js';
 import { FluidField } from '../js/classes/FluidField.js';
 import { createEnvironmentFields } from '../js/engine/environmentFields.js';
 import { syncRuntimeState } from '../js/engine/runtimeState.js';
+import { NodeType, MovementType, EyeTargetType } from '../js/classes/constants.js';
 import { createSeededRandom, withRandom } from './seededRandomScope.mjs';
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
+}
+
+function invertEnum(obj) {
+  return Object.fromEntries(Object.entries(obj).map(([k, v]) => [v, k]));
+}
+
+const nodeTypeNameById = invertEnum(NodeType);
+const movementTypeNameById = invertEnum(MovementType);
+const eyeTargetTypeNameById = invertEnum(EyeTargetType);
+
+function summarizeNodeTypes(points) {
+  const counts = {};
+  for (const p of points) {
+    const key = nodeTypeNameById[p.nodeType] || `UNKNOWN_${p.nodeType}`;
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  return counts;
 }
 
 export class RealWorld {
@@ -169,9 +187,21 @@ export class RealWorld {
         id: b.id,
         energy: Number((b.creatureEnergy || 0).toFixed(2)),
         center: { x: Number(center.x.toFixed(2)), y: Number(center.y.toFixed(2)) },
-        vertices: b.massPoints.map((p) => ({
+        nodeTypeCounts: summarizeNodeTypes(b.massPoints),
+        vertices: b.massPoints.map((p, idx) => ({
+          index: idx,
           x: Number(clamp(p.pos.x, 0, config.WORLD_WIDTH).toFixed(2)),
-          y: Number(clamp(p.pos.y, 0, config.WORLD_HEIGHT).toFixed(2))
+          y: Number(clamp(p.pos.y, 0, config.WORLD_HEIGHT).toFixed(2)),
+          radius: Number((p.radius || 0).toFixed(2)),
+          mass: Number((p.mass || 0).toFixed(4)),
+          nodeType: p.nodeType,
+          nodeTypeName: nodeTypeNameById[p.nodeType] || null,
+          movementType: p.movementType,
+          movementTypeName: movementTypeNameById[p.movementType] || null,
+          eyeTargetType: p.eyeTargetType,
+          eyeTargetTypeName: eyeTargetTypeNameById[p.eyeTargetType] || null,
+          canBeGrabber: Boolean(p.canBeGrabber),
+          isDesignatedEye: Boolean(p.isDesignatedEye)
         }))
       };
     });

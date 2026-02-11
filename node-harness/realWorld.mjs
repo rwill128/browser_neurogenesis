@@ -7,6 +7,7 @@ import { syncRuntimeState } from '../js/engine/runtimeState.js';
 import { NodeType, MovementType, EyeTargetType } from '../js/classes/constants.js';
 import { createSeededRandom, withRandom } from './seededRandomScope.mjs';
 import { stepWorld } from '../js/engine/stepWorld.mjs';
+import { createWorldState } from '../js/engine/worldState.mjs';
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
@@ -41,14 +42,18 @@ export class RealWorld {
     this.eventLog = [];
 
     this._applyScenarioConfig();
-    this.spatialGrid = this._createSpatialGrid();
-    this.softBodyPopulation = [];
-    this.particles = [];
-    this.nutrientField = null;
-    this.lightField = null;
-    this.viscosityField = null;
 
-    this.fluidField = new FluidField(
+    this.worldState = createWorldState({
+      spatialGrid: this._createSpatialGrid(),
+      softBodyPopulation: [],
+      particles: [],
+      nutrientField: null,
+      lightField: null,
+      viscosityField: null,
+      nextSoftBodyId: 0
+    });
+
+    this.worldState.fluidField = new FluidField(
       config.FLUID_GRID_SIZE_CONTROL,
       config.FLUID_DIFFUSION,
       config.FLUID_VISCOSITY,
@@ -56,6 +61,8 @@ export class RealWorld {
       config.WORLD_WIDTH / config.FLUID_GRID_SIZE_CONTROL,
       config.WORLD_HEIGHT / config.FLUID_GRID_SIZE_CONTROL
     );
+
+    this._syncAliasesFromWorldState();
 
     syncRuntimeState({
       fluidField: this.fluidField,
@@ -66,27 +73,40 @@ export class RealWorld {
     withRandom(this.rand, () => {
       const fieldSize = Math.round(config.FLUID_GRID_SIZE_CONTROL);
       const envFields = createEnvironmentFields({ size: fieldSize, random: this.rand });
-      this.nutrientField = envFields.nutrientField;
-      this.lightField = envFields.lightField;
-      this.viscosityField = envFields.viscosityField;
-      this.fluidField.setViscosityField(this.viscosityField);
+      this.worldState.nutrientField = envFields.nutrientField;
+      this.worldState.lightField = envFields.lightField;
+      this.worldState.viscosityField = envFields.viscosityField;
+      this.worldState.fluidField.setViscosityField(this.worldState.viscosityField);
 
       for (let i = 0; i < scenario.particles; i++) {
-        this.particles.push(new Particle(this.rand() * config.WORLD_WIDTH, this.rand() * config.WORLD_HEIGHT, this.fluidField));
+        this.worldState.particles.push(new Particle(this.rand() * config.WORLD_WIDTH, this.rand() * config.WORLD_HEIGHT, this.worldState.fluidField));
       }
 
       for (let i = 0; i < scenario.creatures; i++) {
         const margin = 10;
         const x = margin + this.rand() * Math.max(1, (config.WORLD_WIDTH - margin * 2));
         const y = margin + this.rand() * Math.max(1, (config.WORLD_HEIGHT - margin * 2));
-        const body = new SoftBody(this.nextSoftBodyId++, x, y, null);
-        body.setNutrientField(this.nutrientField);
-        body.setLightField(this.lightField);
-        body.setParticles(this.particles);
-        body.setSpatialGrid(this.spatialGrid);
-        this.softBodyPopulation.push(body);
+        const body = new SoftBody(this.worldState.nextSoftBodyId++, x, y, null);
+        body.setNutrientField(this.worldState.nutrientField);
+        body.setLightField(this.worldState.lightField);
+        body.setParticles(this.worldState.particles);
+        body.setSpatialGrid(this.worldState.spatialGrid);
+        this.worldState.softBodyPopulation.push(body);
       }
     });
+
+    this._syncAliasesFromWorldState();
+  }
+
+  _syncAliasesFromWorldState() {
+    this.spatialGrid = this.worldState.spatialGrid;
+    this.softBodyPopulation = this.worldState.softBodyPopulation;
+    this.particles = this.worldState.particles;
+    this.nutrientField = this.worldState.nutrientField;
+    this.lightField = this.worldState.lightField;
+    this.viscosityField = this.worldState.viscosityField;
+    this.fluidField = this.worldState.fluidField;
+    this.nextSoftBodyId = this.worldState.nextSoftBodyId;
   }
 
   _applyScenarioConfig() {
@@ -108,33 +128,6 @@ export class RealWorld {
     const grid = new Array(total);
     for (let i = 0; i < total; i++) grid[i] = [];
     return grid;
-  }
-
-  _updateSpatialGrid() {
-    for (let i = 0; i < this.spatialGrid.length; i++) this.spatialGrid[i] = [];
-
-    for (const body of this.softBodyPopulation) {
-      if (body.isUnstable) continue;
-      for (let i = 0; i < body.massPoints.length; i++) {
-        const p = body.massPoints[i];
-        const gx = Math.floor(p.pos.x / config.GRID_CELL_SIZE);
-        const gy = Math.floor(p.pos.y / config.GRID_CELL_SIZE);
-        const idx = gx + gy * config.GRID_COLS;
-        if (idx >= 0 && idx < this.spatialGrid.length) {
-          this.spatialGrid[idx].push({ type: 'softbody_point', pointRef: p, bodyRef: body, originalIndex: i });
-        }
-      }
-    }
-
-    for (const particle of this.particles) {
-      if (particle.life <= 0) continue;
-      const gx = Math.floor(particle.pos.x / config.GRID_CELL_SIZE);
-      const gy = Math.floor(particle.pos.y / config.GRID_CELL_SIZE);
-      const idx = gx + gy * config.GRID_COLS;
-      if (idx >= 0 && idx < this.spatialGrid.length) {
-        this.spatialGrid[idx].push({ type: 'particle', particleRef: particle });
-      }
-    }
   }
 
   _applyEvents() {
@@ -163,32 +156,20 @@ export class RealWorld {
     withRandom(this.rand, () => {
       this._applyEvents();
 
-      stepWorld(
-        {
-          softBodyPopulation: this.softBodyPopulation,
-          particles: this.particles,
-          spatialGrid: this.spatialGrid,
-          fluidField: this.fluidField,
-          nutrientField: this.nutrientField,
-          lightField: this.lightField,
-          nextSoftBodyId: this.nextSoftBodyId,
-          globalEnergyGains: null,
-          globalEnergyCosts: null
-        },
-        dt,
-        {
-          config,
-          rng: this.rand,
-          SoftBodyClass: SoftBody,
-          ParticleClass: Particle,
-          allowReproduction: false,
-          maintainCreatureFloor: false,
-          maintainParticleFloor: false,
-          applyEmitters: false,
-          applySelectedPointPush: false
-        }
-      );
+      stepWorld(this.worldState, dt, {
+        config,
+        rng: this.rand,
+        SoftBodyClass: SoftBody,
+        ParticleClass: Particle,
+        allowReproduction: false,
+        maintainCreatureFloor: false,
+        maintainParticleFloor: false,
+        applyEmitters: false,
+        applySelectedPointPush: false
+      });
     });
+
+    this._syncAliasesFromWorldState();
   }
 
   snapshot() {

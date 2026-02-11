@@ -15,6 +15,7 @@ import {
 import viewport from './viewport.js';
 import { drawNutrientMap, drawLightMap, drawViscosityMap } from './environment.js';
 import { syncRuntimeState } from './engine/runtimeState.js';
+import { createWorldState } from './engine/worldState.mjs';
 
 let offscreenFluidCanvas, offscreenFluidCtx;
 let spatialGrid;
@@ -82,37 +83,69 @@ let mutationStats = { // New: For tracking mutation occurrences
     shapeAddition: 0
 };
 
-syncRuntimeState({
-    fluidField,
+const simulationWorldState = createWorldState({
+    spatialGrid,
     softBodyPopulation,
-    mutationStats
+    fluidField,
+    particles,
+    nextSoftBodyId,
+    nutrientField,
+    lightField,
+    viscosityField,
+    mutationStats,
+    globalEnergyGains,
+    globalEnergyCosts
 });
 
+function syncModuleBindingsFromWorldState() {
+    spatialGrid = simulationWorldState.spatialGrid;
+    softBodyPopulation = simulationWorldState.softBodyPopulation;
+    fluidField = simulationWorldState.fluidField;
+    particles = simulationWorldState.particles;
+    nextSoftBodyId = simulationWorldState.nextSoftBodyId;
+    nutrientField = simulationWorldState.nutrientField;
+    lightField = simulationWorldState.lightField;
+    viscosityField = simulationWorldState.viscosityField;
+    mutationStats = simulationWorldState.mutationStats;
+    globalEnergyGains = simulationWorldState.globalEnergyGains;
+    globalEnergyCosts = simulationWorldState.globalEnergyCosts;
+}
+
+syncRuntimeState({
+    fluidField: simulationWorldState.fluidField,
+    softBodyPopulation: simulationWorldState.softBodyPopulation,
+    mutationStats: simulationWorldState.mutationStats
+});
+syncModuleBindingsFromWorldState();
+
 function initializeSpatialGrid() {
-    spatialGrid = new Array(config.GRID_COLS * config.GRID_ROWS);
+    simulationWorldState.spatialGrid = new Array(config.GRID_COLS * config.GRID_ROWS);
     for (let i = 0; i < config.GRID_COLS * config.GRID_ROWS; i++) {
-        spatialGrid[i] = [];
+        simulationWorldState.spatialGrid[i] = [];
     }
+    syncModuleBindingsFromWorldState();
 }
 
 
 // --- Simulation Setup ---
 function initializePopulation() {
-    softBodyPopulation = [];
-    syncRuntimeState({ softBodyPopulation });
-    nextSoftBodyId = 0;
+    simulationWorldState.softBodyPopulation = [];
+    simulationWorldState.nextSoftBodyId = 0;
 
     for (let i = 0; i < config.CREATURE_POPULATION_FLOOR; i++) { // Use floor for initial pop
         const margin = 50;
         const randX = margin + Math.random() * (config.WORLD_WIDTH - margin * 2);
         const randY = margin + Math.random() * (config.WORLD_HEIGHT - margin * 2);
-        const softBody = new SoftBody(nextSoftBodyId++, randX, randY, null);
-        softBody.setNutrientField(nutrientField);
-        softBody.setLightField(lightField);
-        softBody.setParticles(particles);
-        softBody.setSpatialGrid(spatialGrid);
-        softBodyPopulation.push(softBody);
+        const softBody = new SoftBody(simulationWorldState.nextSoftBodyId++, randX, randY, null);
+        softBody.setNutrientField(simulationWorldState.nutrientField);
+        softBody.setLightField(simulationWorldState.lightField);
+        softBody.setParticles(simulationWorldState.particles);
+        softBody.setSpatialGrid(simulationWorldState.spatialGrid);
+        simulationWorldState.softBodyPopulation.push(softBody);
     }
+
+    syncModuleBindingsFromWorldState();
+    syncRuntimeState({ softBodyPopulation: simulationWorldState.softBodyPopulation });
     config.isAnySoftBodyUnstable = false; // Reset the flag
     console.log(`Initialized population with ${softBodyPopulation.length} creatures.`);
 }
@@ -176,12 +209,16 @@ async function initFluidSimulation(targetCanvas) {
     fluidField.useWrapping = config.IS_WORLD_WRAPPING;
     fluidField.maxVelComponent = config.MAX_FLUID_VELOCITY_COMPONENT;
     config.velocityEmitters = []; // Clear any existing emitters when re-initializing
-    syncRuntimeState({ fluidField });
+
+    simulationWorldState.fluidField = fluidField;
+    syncModuleBindingsFromWorldState();
+    syncRuntimeState({ fluidField: simulationWorldState.fluidField });
 }
 
 function initParticles() {
-    particles = [];
+    simulationWorldState.particles = [];
     config.particleEmissionDebt = 0;
+    syncModuleBindingsFromWorldState();
 }
 
 
@@ -255,19 +292,7 @@ function updatePhysics(dt) {
         return;
     }
 
-    const worldState = {
-        softBodyPopulation,
-        particles,
-        spatialGrid,
-        fluidField,
-        nutrientField,
-        lightField,
-        nextSoftBodyId,
-        globalEnergyGains,
-        globalEnergyCosts
-    };
-
-    stepWorld(worldState, dt, {
+    stepWorld(simulationWorldState, dt, {
         config,
         SoftBodyClass: SoftBody,
         ParticleClass: Particle,
@@ -280,7 +305,7 @@ function updatePhysics(dt) {
         creatureSpawnMargin: 50
     });
 
-    nextSoftBodyId = worldState.nextSoftBodyId;
+    syncModuleBindingsFromWorldState();
 
     updateInstabilityIndicator();
     updateAutoFollowCamera();
@@ -488,31 +513,34 @@ function drawFluidVelocities(ctx, fluidData, viewportCanvasWidth, viewportCanvas
 
 function initNutrientMap() {
     const size = Math.round(config.FLUID_GRID_SIZE_CONTROL);
-    nutrientField = createNutrientField(size);
-    if (nutrientField.length === 0) {
+    simulationWorldState.nutrientField = createNutrientField(size);
+    if (simulationWorldState.nutrientField.length === 0) {
         console.error("Invalid size for nutrient map:", size);
         return;
     }
+    syncModuleBindingsFromWorldState();
     console.log(`Nutrient map initialized to ${size}x${size} with Perlin noise pattern.`);
 }
 
 function initLightMap() {
     const size = Math.round(config.FLUID_GRID_SIZE_CONTROL);
-    lightField = createLightField(size);
-    if (lightField.length === 0) {
+    simulationWorldState.lightField = createLightField(size);
+    if (simulationWorldState.lightField.length === 0) {
         console.error("Invalid size for light map:", size);
         return;
     }
+    syncModuleBindingsFromWorldState();
     console.log(`Light map initialized to ${size}x${size} with Perlin noise pattern.`);
 }
 
 function initViscosityMap() {
     const size = Math.round(config.FLUID_GRID_SIZE_CONTROL);
-    viscosityField = createViscosityField(size);
-    if (viscosityField.length === 0) {
+    simulationWorldState.viscosityField = createViscosityField(size);
+    if (simulationWorldState.viscosityField.length === 0) {
         console.error("Invalid size for viscosity map:", size);
         return;
     }
+    syncModuleBindingsFromWorldState();
     console.log(`Viscosity map initialized to ${size}x${size} with Perlin noise pattern.`);
 }
 

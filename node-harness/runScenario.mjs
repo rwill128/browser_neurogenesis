@@ -15,7 +15,8 @@ const scenarioName = arg('scenario', 'micro_stability');
 const seed = Number(arg('seed', '42'));
 const stepsArg = arg('steps', null);
 const outDir = resolve(arg('out', './artifacts'));
-const engine = arg('engine', 'mini');
+const engine = arg('engine', 'real');
+const allowMini = arg('allowMini', null) !== null;
 
 const scenario = getScenario(scenarioName);
 const worldW = arg('worldW', null);
@@ -36,6 +37,11 @@ const runtimeScenario = {
 };
 
 const steps = stepsArg ? Number(stepsArg) : runtimeScenario.steps;
+
+if (engine !== 'real' && !allowMini) {
+  throw new Error(`Engine '${engine}' is blocked by default. Use --engine real (recommended) or pass --allowMini for explicit surrogate runs.`);
+}
+
 const WorldImpl = engine === 'real' ? RealWorld : MiniWorld;
 const world = new WorldImpl(runtimeScenario, seed);
 

@@ -287,9 +287,15 @@ function printHelp() {
 `);
 }
 
+const allowMiniCli = arg('allowMini', null) !== null;
+const requestedEngine = arg('engine', 'real');
+if (requestedEngine !== 'real' && !allowMiniCli) {
+  throw new Error(`Engine '${requestedEngine}' is blocked by default. Use --engine real or pass --allowMini for explicit surrogate runs.`);
+}
+
 const sim = new InteractiveSim({
   scenarioName: arg('scenario', 'micro_one_creature_100'),
-  engine: arg('engine', 'real'),
+  engine: requestedEngine,
   seed: Number(arg('seed', '42')),
   dt: toNumber(arg('dt', null), null),
   worldW: toNumber(arg('worldW', null), null),
@@ -374,6 +380,9 @@ rl.on('line', (line) => {
       } else if (key === 'engine') {
         const engine = (parts[1] || '').toLowerCase();
         if (!['mini', 'real'].includes(engine)) throw new Error('engine must be mini|real');
+        if (engine !== 'real' && !allowMiniCli) {
+          throw new Error('mini engine blocked by default; pass --allowMini if you explicitly want surrogate mode');
+        }
         sim.reconfigure({ engine });
       } else if (key === 'scenario') {
         const scenarioName = parts[1];

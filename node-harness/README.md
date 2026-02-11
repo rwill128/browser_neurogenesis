@@ -16,6 +16,8 @@ node node-harness/runScenario.mjs \
 
 Outputs JSON under `./artifacts`.
 
+> Safety default: surrogate mode (`mini`) is blocked unless explicitly enabled with `--allowMini`.
+
 ## 2) Render timeline JSON into frames/video
 
 ```bash

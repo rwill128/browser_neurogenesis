@@ -91,7 +91,8 @@ let mutationStats = { // New: For tracking mutation occurrences
     blueprintDyeColorChange: 0,
     blueprintCoordinateChange: 0,
     blueprintNeuronHiddenSizeChange: 0,
-    shapeAddition: 0
+    shapeAddition: 0,
+    growthGenomeMutations: 0
 };
 
 const simulationWorldState = createWorldState({

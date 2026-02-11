@@ -52,3 +52,16 @@ For each scenario run:
 - MP4 video artifact
 - concise findings: expected vs unexpected behavior
 - suggested parameter adjustments for improved equilibrium
+
+## Growth System (Phase 1 started)
+
+- Added first-pass **heritable growth genome** plumbing to `SoftBody`.
+- Added probabilistic per-tick growth pass (`_attemptGrowthStep`) with:
+  - weighted anchor-node type preference
+  - weighted added-node type preference
+  - weighted distance-band preference
+  - weighted edge-type preference (rigid vs soft)
+- Growth now adds nodes and connects each to the **closest pre-existing node**.
+- Growth cost now depends on number of nodes/edges and edge length, scaled by global config.
+- Added global growth controls in `js/config.js` (enable/cost/chance/cooldown/limits/mutation).
+- Added mutation tracking key: `growthGenomeMutations`.

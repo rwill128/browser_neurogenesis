@@ -6,6 +6,19 @@ import {Spring} from "./Spring.js";
 import {Brain} from "./Brain.js";
 import { runtimeState } from "../engine/runtimeState.js";
 
+const DEFAULT_GROWTH_NODE_TYPES = [
+    NodeType.PREDATOR,
+    NodeType.EATER,
+    NodeType.PHOTOSYNTHETIC,
+    NodeType.NEURON,
+    NodeType.EMITTER,
+    NodeType.SWIMMER,
+    NodeType.EYE,
+    NodeType.JET,
+    NodeType.ATTRACTOR,
+    NodeType.REPULSOR
+];
+
 // --- SoftBody Class ---
 export class SoftBody {
     constructor(id, initialX, initialY, creationData = null, isBlueprint = false) {
@@ -62,6 +75,12 @@ export class SoftBody {
         this.failedReproductionCooldown = 0; // New: Cooldown after a failed reproduction attempt
         this.energyGainedFromPhotosynthesisThisTick = 0; // New: Photosynthesis gain in the current tick
 
+        // Growth/development state (new): creatures can probabilistically add nodes over lifetime.
+        this.growthGenome = null;
+        this.growthCooldownRemaining = 0;
+        this.growthEventsCompleted = 0;
+        this.growthNodesAdded = 0;
+
         // Initialize heritable/mutable properties
         if (isBlueprint && creationData) {
             // --- CREATION FROM IMPORTED BLUEPRINT ---
@@ -85,6 +104,7 @@ export class SoftBody {
             this.defaultActivationPhaseOffset = blueprint.defaultActivationPhaseOffset;
             this.rlAlgorithmType = blueprint.rlAlgorithmType;
             this.rewardStrategy = blueprint.rewardStrategy;
+            this.growthGenome = this._sanitizeGrowthGenome(blueprint.growthGenome || this._createRandomGrowthGenome());
 
             // Directly use the blueprint's structure
             this.blueprintPoints = JSON.parse(JSON.stringify(blueprint.blueprintPoints));
@@ -193,6 +213,12 @@ export class SoftBody {
                     runtimeState.mutationStats.reproductionCooldownGene = (runtimeState.mutationStats.reproductionCooldownGene || 0) + 1;
                 }
 
+                const growthMutation = this._mutateGrowthGenomeFromParent(parentBody.growthGenome || null);
+                this.growthGenome = growthMutation.genome;
+                if (growthMutation.didMutate) {
+                    runtimeState.mutationStats.growthGenomeMutations = (runtimeState.mutationStats.growthGenomeMutations || 0) + 1;
+                }
+
             } else {
                 // Initial defaults for brand new creatures
                 this.stiffness = 500 + Math.random() * 2500;
@@ -224,6 +250,7 @@ export class SoftBody {
 
                 // Initialize reproductionCooldownGene for new creatures
                 this.reproductionCooldownGene = 100 + Math.floor(Math.random() * 4901); // Random between 100 and 5000
+                this.growthGenome = this._createRandomGrowthGenome();
             }
 
             // Clamp activation properties after they've been set/inherited/mutated
@@ -245,6 +272,7 @@ export class SoftBody {
             this.pointAddChance = Math.max(0, Math.min(0.5, this.pointAddChance));
             this.springConnectionRadius = Math.max(10, Math.min(this.springConnectionRadius, 100));
             this.jetMaxVelocityGene = Math.max(0.1, Math.min(this.jetMaxVelocityGene, 50.0));
+            this.growthGenome = this._sanitizeGrowthGenome(this.growthGenome || this._createRandomGrowthGenome());
 
             this.fluidEntrainment = config.BODY_FLUID_ENTRAINMENT_FACTOR;
             this.fluidCurrentStrength = config.FLUID_CURRENT_STRENGTH_ON_BODY;
@@ -302,6 +330,8 @@ export class SoftBody {
 
         }
 
+        this.growthGenome = this._sanitizeGrowthGenome(this.growthGenome || this._createRandomGrowthGenome());
+
         this.primaryEyePoint = null; // New: For the creature's main eye
         if (this.massPoints.length > 0) {
             // Attempt to find an existing EYE node to designate as primary
@@ -334,6 +364,434 @@ export class SoftBody {
                 this.currentMaxEnergy = 1;
             }
         }
+    }
+
+
+    /**
+     * Create a random heritable growth genome for new creatures.
+     *
+     * The genome controls growth probability, size, anchor preferences,
+     * node-type preferences, edge preferences, and target distance bands.
+     */
+    _createRandomGrowthGenome() {
+        const randomWeight = () => config.GROWTH_MIN_WEIGHT + Math.random();
+        const midStart = Math.max(config.GROWTH_DISTANCE_MIN + 1, config.GROWTH_DISTANCE_MID);
+        const maxDist = Math.max(midStart + 1, config.GROWTH_DISTANCE_MAX);
+        const farStart = Math.max(midStart + 1, Math.floor((midStart + maxDist) * 0.5));
+
+        return this._sanitizeGrowthGenome({
+            growthChancePerTick: config.GROWTH_BASE_CHANCE_MIN + Math.random() * Math.max(0.0001, (config.GROWTH_BASE_CHANCE_MAX - config.GROWTH_BASE_CHANCE_MIN)),
+            minEnergyRatioToGrow: config.GROWTH_MIN_ENERGY_RATIO_MIN + Math.random() * Math.max(0.0001, (config.GROWTH_MIN_ENERGY_RATIO_MAX - config.GROWTH_MIN_ENERGY_RATIO_MIN)),
+            growthCooldownTicks: Math.floor(config.GROWTH_COOLDOWN_MIN + Math.random() * Math.max(1, (config.GROWTH_COOLDOWN_MAX - config.GROWTH_COOLDOWN_MIN + 1))),
+            nodesPerGrowthWeights: [
+                { count: 1, weight: randomWeight() },
+                { count: 2, weight: randomWeight() },
+                { count: 3, weight: randomWeight() }
+            ],
+            newNodeTypeWeights: DEFAULT_GROWTH_NODE_TYPES.map((nodeType) => ({ nodeType, weight: randomWeight() })),
+            anchorNodeTypeWeights: DEFAULT_GROWTH_NODE_TYPES.map((nodeType) => ({ nodeType, weight: randomWeight() })),
+            distanceRangeWeights: [
+                { key: 'near', min: config.GROWTH_DISTANCE_MIN, max: midStart, weight: randomWeight() },
+                { key: 'mid', min: midStart, max: farStart, weight: randomWeight() },
+                { key: 'far', min: farStart, max: maxDist, weight: randomWeight() }
+            ],
+            edgeTypeWeights: [
+                { type: 'soft', weight: randomWeight() },
+                { type: 'rigid', weight: randomWeight() }
+            ],
+            edgeStiffnessScale: 0.6 + Math.random() * 1.2,
+            edgeDampingScale: 0.6 + Math.random() * 1.2
+        });
+    }
+
+    /**
+     * Normalize and clamp growth-gene values to safe runtime bounds.
+     */
+    _sanitizeGrowthGenome(genome) {
+        if (!genome || typeof genome !== 'object') {
+            // Avoid recursive call loops if fallback itself fails to return object.
+            const seeded = {
+                growthChancePerTick: config.GROWTH_BASE_CHANCE_MIN,
+                minEnergyRatioToGrow: config.GROWTH_MIN_ENERGY_RATIO_MIN,
+                growthCooldownTicks: config.GROWTH_COOLDOWN_MIN,
+                nodesPerGrowthWeights: [{ count: 1, weight: 1 }],
+                newNodeTypeWeights: DEFAULT_GROWTH_NODE_TYPES.map((nodeType) => ({ nodeType, weight: 1 })),
+                anchorNodeTypeWeights: DEFAULT_GROWTH_NODE_TYPES.map((nodeType) => ({ nodeType, weight: 1 })),
+                distanceRangeWeights: [{ key: 'near', min: config.GROWTH_DISTANCE_MIN, max: config.GROWTH_DISTANCE_MAX, weight: 1 }],
+                edgeTypeWeights: [{ type: 'soft', weight: 1 }],
+                edgeStiffnessScale: 1,
+                edgeDampingScale: 1
+            };
+            genome = seeded;
+        }
+
+        const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+        const normalizeWeights = (entries, mapFn) => {
+            const out = (entries || []).map(mapFn).filter(Boolean);
+            if (out.length === 0) return [];
+            let total = 0;
+            for (const e of out) {
+                e.weight = Math.max(config.GROWTH_MIN_WEIGHT, Number(e.weight) || config.GROWTH_MIN_WEIGHT);
+                total += e.weight;
+            }
+            if (total <= 0) {
+                const equal = 1 / out.length;
+                out.forEach((e) => { e.weight = equal; });
+                return out;
+            }
+            out.forEach((e) => { e.weight /= total; });
+            return out;
+        };
+
+        const sanitized = {
+            growthChancePerTick: clamp(Number(genome.growthChancePerTick) || config.GROWTH_BASE_CHANCE_MIN, config.GROWTH_BASE_CHANCE_MIN, config.GROWTH_BASE_CHANCE_MAX),
+            minEnergyRatioToGrow: clamp(Number(genome.minEnergyRatioToGrow) || config.GROWTH_MIN_ENERGY_RATIO_MIN, config.GROWTH_MIN_ENERGY_RATIO_MIN, config.GROWTH_MIN_ENERGY_RATIO_MAX),
+            growthCooldownTicks: Math.floor(clamp(Number(genome.growthCooldownTicks) || config.GROWTH_COOLDOWN_MIN, config.GROWTH_COOLDOWN_MIN, config.GROWTH_COOLDOWN_MAX)),
+            nodesPerGrowthWeights: normalizeWeights(genome.nodesPerGrowthWeights, (e) => {
+                const count = Math.max(1, Math.min(5, Math.floor(Number(e?.count) || 1)));
+                return { count, weight: Number(e?.weight) || 0 };
+            }),
+            newNodeTypeWeights: normalizeWeights(genome.newNodeTypeWeights, (e) => {
+                const nodeType = Math.floor(Number(e?.nodeType));
+                if (!Number.isInteger(nodeType)) return null;
+                return { nodeType, weight: Number(e?.weight) || 0 };
+            }),
+            anchorNodeTypeWeights: normalizeWeights(genome.anchorNodeTypeWeights, (e) => {
+                const nodeType = Math.floor(Number(e?.nodeType));
+                if (!Number.isInteger(nodeType)) return null;
+                return { nodeType, weight: Number(e?.weight) || 0 };
+            }),
+            distanceRangeWeights: normalizeWeights(genome.distanceRangeWeights, (e) => {
+                let min = Number(e?.min);
+                let max = Number(e?.max);
+                if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+                min = clamp(min, config.GROWTH_DISTANCE_MIN, config.GROWTH_DISTANCE_MAX);
+                max = clamp(max, config.GROWTH_DISTANCE_MIN, config.GROWTH_DISTANCE_MAX);
+                if (max <= min) max = Math.min(config.GROWTH_DISTANCE_MAX, min + 1);
+                return { key: e?.key || 'custom', min, max, weight: Number(e?.weight) || 0 };
+            }),
+            edgeTypeWeights: normalizeWeights(genome.edgeTypeWeights, (e) => {
+                const type = e?.type === 'rigid' ? 'rigid' : 'soft';
+                return { type, weight: Number(e?.weight) || 0 };
+            }),
+            edgeStiffnessScale: clamp(Number(genome.edgeStiffnessScale) || 1, 0.1, 5),
+            edgeDampingScale: clamp(Number(genome.edgeDampingScale) || 1, 0.1, 5)
+        };
+
+        if (sanitized.nodesPerGrowthWeights.length === 0) sanitized.nodesPerGrowthWeights = [{ count: 1, weight: 1 }];
+        if (sanitized.newNodeTypeWeights.length === 0) sanitized.newNodeTypeWeights = DEFAULT_GROWTH_NODE_TYPES.map((nodeType) => ({ nodeType, weight: 1 / DEFAULT_GROWTH_NODE_TYPES.length }));
+        if (sanitized.anchorNodeTypeWeights.length === 0) sanitized.anchorNodeTypeWeights = DEFAULT_GROWTH_NODE_TYPES.map((nodeType) => ({ nodeType, weight: 1 / DEFAULT_GROWTH_NODE_TYPES.length }));
+        if (sanitized.distanceRangeWeights.length === 0) sanitized.distanceRangeWeights = [{ key: 'near', min: config.GROWTH_DISTANCE_MIN, max: config.GROWTH_DISTANCE_MAX, weight: 1 }];
+        if (sanitized.edgeTypeWeights.length === 0) sanitized.edgeTypeWeights = [{ type: 'soft', weight: 1 }];
+
+        return sanitized;
+    }
+
+    /**
+     * Inherit growth genes from parent and mutate them probabilistically.
+     */
+    _mutateGrowthGenomeFromParent(parentGenome) {
+        if (!parentGenome || typeof parentGenome !== 'object') {
+            return { genome: this._createRandomGrowthGenome(), didMutate: false };
+        }
+
+        const genome = JSON.parse(JSON.stringify(this._sanitizeGrowthGenome(parentGenome)));
+        const mutationChance = Math.max(0, Math.min(1, config.GROWTH_GENE_MUTATION_CHANCE * config.GLOBAL_MUTATION_RATE_MODIFIER));
+        const mutationMagnitude = Math.max(0, config.GROWTH_GENE_MUTATION_MAGNITUDE * config.GLOBAL_MUTATION_RATE_MODIFIER);
+        let didMutate = false;
+
+        const mutateScalar = (key, lo, hi) => {
+            if (Math.random() >= mutationChance) return;
+            const old = Number(genome[key]) || lo;
+            const mutated = old * (1 + (Math.random() - 0.5) * 2 * mutationMagnitude);
+            genome[key] = Math.max(lo, Math.min(hi, mutated));
+            didMutate = didMutate || Math.abs(genome[key] - old) > 1e-6;
+        };
+
+        mutateScalar('growthChancePerTick', config.GROWTH_BASE_CHANCE_MIN, config.GROWTH_BASE_CHANCE_MAX);
+        mutateScalar('minEnergyRatioToGrow', config.GROWTH_MIN_ENERGY_RATIO_MIN, config.GROWTH_MIN_ENERGY_RATIO_MAX);
+        if (Math.random() < mutationChance) {
+            const delta = Math.round((Math.random() - 0.5) * 2 * mutationMagnitude * 20);
+            genome.growthCooldownTicks = Math.max(config.GROWTH_COOLDOWN_MIN, Math.min(config.GROWTH_COOLDOWN_MAX, Math.floor(genome.growthCooldownTicks + delta)));
+            didMutate = didMutate || delta !== 0;
+        }
+
+        mutateScalar('edgeStiffnessScale', 0.1, 5);
+        mutateScalar('edgeDampingScale', 0.1, 5);
+
+        const mutateWeights = (entries, onEntry = null) => {
+            for (const e of entries || []) {
+                if (Math.random() < mutationChance) {
+                    e.weight = Math.max(config.GROWTH_MIN_WEIGHT, e.weight * (1 + (Math.random() - 0.5) * 2 * mutationMagnitude));
+                    didMutate = true;
+                }
+                if (onEntry) onEntry(e);
+            }
+        };
+
+        mutateWeights(genome.nodesPerGrowthWeights);
+        mutateWeights(genome.newNodeTypeWeights);
+        mutateWeights(genome.anchorNodeTypeWeights);
+        mutateWeights(genome.edgeTypeWeights);
+        mutateWeights(genome.distanceRangeWeights, (entry) => {
+            if (Math.random() < mutationChance) {
+                const span = Math.max(1, entry.max - entry.min);
+                const shift = span * (Math.random() - 0.5) * mutationMagnitude;
+                entry.min = Math.max(config.GROWTH_DISTANCE_MIN, Math.min(config.GROWTH_DISTANCE_MAX - 1, entry.min + shift));
+                entry.max = Math.max(entry.min + 1, Math.min(config.GROWTH_DISTANCE_MAX, entry.max + shift));
+                didMutate = true;
+            }
+        });
+
+        return {
+            genome: this._sanitizeGrowthGenome(genome),
+            didMutate
+        };
+    }
+
+    /**
+     * Weighted random sampler for gene-defined categorical choices.
+     */
+    _sampleWeightedEntry(entries, fallback = null) {
+        if (!Array.isArray(entries) || entries.length === 0) return fallback;
+        let total = 0;
+        for (const e of entries) {
+            total += Math.max(0, Number(e.weight) || 0);
+        }
+        if (total <= 0) return entries[0] || fallback;
+
+        let r = Math.random() * total;
+        for (const e of entries) {
+            r -= Math.max(0, Number(e.weight) || 0);
+            if (r <= 0) return e;
+        }
+        return entries[entries.length - 1] || fallback;
+    }
+
+    /**
+     * Recompute cached node-type counters used by brain sizing and diagnostics.
+     */
+    _recountNodeTypeCaches() {
+        this.numEmitterNodes = 0;
+        this.numSwimmerNodes = 0;
+        this.numEaterNodes = 0;
+        this.numPredatorNodes = 0;
+        this.numEyeNodes = 0;
+        this.numJetNodes = 0;
+        this.numPotentialGrabberNodes = 0;
+        this.numAttractorNodes = 0;
+        this.numRepulsorNodes = 0;
+
+        this.primaryEyePoint = null;
+        for (const p of this.massPoints) {
+            p.isDesignatedEye = false;
+
+            if (p.nodeType === NodeType.EMITTER) this.numEmitterNodes++;
+            else if (p.nodeType === NodeType.SWIMMER) this.numSwimmerNodes++;
+            else if (p.nodeType === NodeType.EATER) this.numEaterNodes++;
+            else if (p.nodeType === NodeType.PREDATOR) this.numPredatorNodes++;
+            else if (p.nodeType === NodeType.EYE) {
+                this.numEyeNodes++;
+                if (!this.primaryEyePoint) this.primaryEyePoint = p;
+            }
+            else if (p.nodeType === NodeType.JET) this.numJetNodes++;
+            else if (p.nodeType === NodeType.ATTRACTOR) this.numAttractorNodes++;
+            else if (p.nodeType === NodeType.REPULSOR) this.numRepulsorNodes++;
+
+            if (p.canBeGrabber) this.numPotentialGrabberNodes++;
+        }
+
+        if (this.primaryEyePoint) {
+            this.primaryEyePoint.isDesignatedEye = true;
+        }
+    }
+
+    /**
+     * Keep blueprintRadius conservative when phenotype grows at runtime.
+     */
+    _updateBlueprintRadiusFromCurrentPhenotype() {
+        if (!this.massPoints || this.massPoints.length === 0) return;
+        const center = this.getAveragePosition();
+        let maxDistSq = 0;
+        for (const p of this.massPoints) {
+            const dx = p.pos.x - center.x;
+            const dy = p.pos.y - center.y;
+            const d = Math.sqrt(dx * dx + dy * dy) + (p.radius || 0);
+            const dSq = d * d;
+            if (dSq > maxDistSq) maxDistSq = dSq;
+        }
+        this.blueprintRadius = Math.max(this.blueprintRadius || 0, Math.sqrt(maxDistSq));
+    }
+
+    /**
+     * Growth pass: probabilistically add one or more nodes with heritable preferences.
+     */
+    _attemptGrowthStep(dt) {
+        if (!config.GROWTH_ENABLED || this.isUnstable || this.massPoints.length === 0) return false;
+        if (this.massPoints.length >= config.GROWTH_MAX_POINTS_PER_CREATURE) return false;
+
+        if (this.growthCooldownRemaining > 0) {
+            this.growthCooldownRemaining--;
+            return false;
+        }
+
+        const genome = this._sanitizeGrowthGenome(this.growthGenome || this._createRandomGrowthGenome());
+        this.growthGenome = genome;
+
+        const energyRatio = this.currentMaxEnergy > 0 ? this.creatureEnergy / this.currentMaxEnergy : 0;
+        if (energyRatio < genome.minEnergyRatioToGrow) return false;
+
+        const dtScale = Math.max(0.1, dt * 60);
+        const baseChance = Math.max(0, Math.min(1, genome.growthChancePerTick));
+        const growthChance = 1 - Math.pow(1 - baseChance, dtScale);
+        if (Math.random() >= growthChance) return false;
+
+        const nodesPlan = this._sampleWeightedEntry(genome.nodesPerGrowthWeights, { count: 1 });
+        const maxNodesByPlan = Math.max(1, Math.floor(nodesPlan?.count || 1));
+        const maxNodesByCapacity = Math.max(0, config.GROWTH_MAX_POINTS_PER_CREATURE - this.massPoints.length);
+        const targetNodeAdds = Math.min(maxNodesByPlan, maxNodesByCapacity);
+        if (targetNodeAdds <= 0) return false;
+
+        const preGrowthPoints = this.massPoints.slice();
+        const startPointCount = this.massPoints.length;
+        const startSpringCount = this.springs.length;
+        let totalEdgeLength = 0;
+        let nodesAdded = 0;
+
+        const movementChoices = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
+
+        for (let i = 0; i < targetNodeAdds; i++) {
+            let placed = false;
+
+            for (let attempt = 0; attempt < config.GROWTH_PLACEMENT_ATTEMPTS_PER_NODE; attempt++) {
+                const anchorType = this._sampleWeightedEntry(genome.anchorNodeTypeWeights, null)?.nodeType;
+                const typedAnchors = preGrowthPoints.filter((p) => p.nodeType === anchorType);
+                const anchorPool = typedAnchors.length > 0 ? typedAnchors : preGrowthPoints;
+                const anchor = anchorPool[Math.floor(Math.random() * anchorPool.length)];
+                if (!anchor) break;
+
+                const distanceBucket = this._sampleWeightedEntry(genome.distanceRangeWeights, null) || { min: config.GROWTH_DISTANCE_MIN, max: config.GROWTH_DISTANCE_MAX };
+                const distance = distanceBucket.min + Math.random() * Math.max(0.001, (distanceBucket.max - distanceBucket.min));
+                const angle = Math.random() * Math.PI * 2;
+
+                let x = anchor.pos.x + Math.cos(angle) * distance;
+                let y = anchor.pos.y + Math.sin(angle) * distance;
+
+                if (config.IS_WORLD_WRAPPING) {
+                    x = ((x % config.WORLD_WIDTH) + config.WORLD_WIDTH) % config.WORLD_WIDTH;
+                    y = ((y % config.WORLD_HEIGHT) + config.WORLD_HEIGHT) % config.WORLD_HEIGHT;
+                } else {
+                    if (x < 0 || x > config.WORLD_WIDTH || y < 0 || y > config.WORLD_HEIGHT) continue;
+                }
+
+                const nodeType = this._sampleWeightedEntry(genome.newNodeTypeWeights, null)?.nodeType;
+                if (nodeType === undefined || nodeType === null) continue;
+
+                const radius = Math.max(0.5, Math.min(anchor.radius * (0.75 + Math.random() * 0.6), anchor.radius * 1.5));
+                const mass = Math.max(0.1, Math.min(anchor.mass * (0.75 + Math.random() * 0.6), 1.5));
+
+                const minClearanceFactor = Math.max(1.0, config.GROWTH_MIN_POINT_CLEARANCE_FACTOR);
+                let collides = false;
+                for (const existing of this.massPoints) {
+                    const dx = x - existing.pos.x;
+                    const dy = y - existing.pos.y;
+                    const minDist = (radius + existing.radius) * minClearanceFactor;
+                    if (dx * dx + dy * dy < minDist * minDist) {
+                        collides = true;
+                        break;
+                    }
+                }
+                if (collides) continue;
+
+                const newPoint = new MassPoint(x, y, mass, radius);
+                newPoint.nodeType = nodeType;
+                newPoint.movementType = nodeType === NodeType.SWIMMER
+                    ? MovementType.NEUTRAL
+                    : movementChoices[Math.floor(Math.random() * movementChoices.length)];
+                newPoint.dyeColor = [
+                    Math.floor(Math.random() * 255),
+                    Math.floor(Math.random() * 255),
+                    Math.floor(Math.random() * 255)
+                ];
+                newPoint.canBeGrabber = Math.random() < 0.15;
+                newPoint.eyeTargetType = Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT;
+                newPoint.maxEffectiveJetVelocity = this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4);
+
+                if (nodeType === NodeType.NEURON) {
+                    newPoint.neuronData = {
+                        isBrain: false,
+                        hiddenLayerSize: config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * Math.max(1, (config.DEFAULT_HIDDEN_LAYER_SIZE_MAX - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1))),
+                        sensorPointIndex: -1,
+                        effectorPointIndex: -1
+                    };
+                } else {
+                    newPoint.neuronData = null;
+                }
+
+                let closest = null;
+                let closestDistSq = Infinity;
+                for (const p of preGrowthPoints) {
+                    const dx = newPoint.pos.x - p.pos.x;
+                    const dy = newPoint.pos.y - p.pos.y;
+                    const dSq = dx * dx + dy * dy;
+                    if (dSq < closestDistSq) {
+                        closestDistSq = dSq;
+                        closest = p;
+                    }
+                }
+                if (!closest || !Number.isFinite(closestDistSq) || closestDistSq <= 0) continue;
+
+                this.massPoints.push(newPoint);
+
+                const edgeType = this._sampleWeightedEntry(genome.edgeTypeWeights, { type: 'soft' })?.type || 'soft';
+                const restLength = Math.sqrt(closestDistSq);
+                const stiffness = Math.max(100, this.stiffness * genome.edgeStiffnessScale * (0.8 + Math.random() * 0.4));
+                const damping = Math.max(0.1, this.springDamping * genome.edgeDampingScale * (0.8 + Math.random() * 0.4));
+                const spring = new Spring(closest, newPoint, stiffness, damping, restLength, edgeType === 'rigid');
+                this.springs.push(spring);
+
+                totalEdgeLength += restLength;
+                nodesAdded++;
+                placed = true;
+                break;
+            }
+
+            if (!placed) {
+                // Continue attempting remaining nodes; partial growth is allowed if at least one node lands.
+                continue;
+            }
+        }
+
+        if (nodesAdded <= 0) {
+            return false;
+        }
+
+        const edgesAdded = this.springs.length - startSpringCount;
+        const growthCost = config.GROWTH_ENERGY_COST_SCALAR * (
+            nodesAdded * config.GROWTH_COST_PER_NODE +
+            edgesAdded * config.GROWTH_COST_PER_EDGE +
+            totalEdgeLength * config.GROWTH_COST_PER_EDGE_LENGTH
+        );
+
+        if (this.creatureEnergy < growthCost) {
+            // Roll back fully if growth budget was insufficient.
+            this.massPoints.length = startPointCount;
+            this.springs.length = startSpringCount;
+            return false;
+        }
+
+        this.creatureEnergy -= growthCost;
+        this.growthCooldownRemaining = Math.max(1, Math.floor(genome.growthCooldownTicks));
+        this.growthEventsCompleted += 1;
+        this.growthNodesAdded += nodesAdded;
+
+        this.calculateCurrentMaxEnergy();
+        this.effectiveReproductionCooldown = Math.floor(this.reproductionCooldownGene * (1 + (0.2 * Math.max(0, this.massPoints.length - 1))));
+        this._recountNodeTypeCaches();
+        this.initializeBrain();
+        this._updateBlueprintRadiusFromCurrentPhenotype();
+
+        return true;
     }
 
     createShape(startX, startY, parentBody = null) {
@@ -944,32 +1402,10 @@ export class SoftBody {
         // Recalculate things that depend on the final massPoints
         this.calculateCurrentMaxEnergy(); 
 
-        // Calculate and store node counts for brain initialization optimization
-        this.numEmitterNodes = 0; // Resetting here before counting
-        this.numSwimmerNodes = 0;
-        this.numEaterNodes = 0;
-        this.numPredatorNodes = 0;
-        this.numEyeNodes = 0;
-        this.numJetNodes = 0;
-        this.numPotentialGrabberNodes = 0;
-        this.numAttractorNodes = 0;
-        this.numRepulsorNodes = 0;
+        // Refresh cached counters/eye designation used by brain sizing and UI.
+        this._recountNodeTypeCaches();
 
-        for (const p of this.massPoints) { // Changed from forEach to for...of for clarity
-            if (p.nodeType === NodeType.EMITTER) this.numEmitterNodes++;
-            else if (p.nodeType === NodeType.SWIMMER) this.numSwimmerNodes++;
-            else if (p.nodeType === NodeType.EATER) this.numEaterNodes++;
-            else if (p.nodeType === NodeType.PREDATOR) this.numPredatorNodes++;
-            else if (p.nodeType === NodeType.EYE) this.numEyeNodes++;
-            else if (p.nodeType === NodeType.JET) this.numJetNodes++;
-            else if (p.nodeType === NodeType.ATTRACTOR) this.numAttractorNodes++;
-            else if (p.nodeType === NodeType.REPULSOR) this.numRepulsorNodes++;
-
-            if (p.canBeGrabber) this.numPotentialGrabberNodes++;
-        }
-
-        // Note: initializeBrain() and primaryEyePoint assignment will happen after createShape() finishes
-        // in the main constructor flow.
+        // Note: initializeBrain() can still be finalized by constructor flow after createShape().
     }
 
     // --- Main Update Method ---
@@ -993,7 +1429,10 @@ export class SoftBody {
         if (this.isUnstable) return; // Instability from physical updates
 
         this._finalizeUpdateAndCheckStability(dt); // dt might be needed for some interaction logic if it moves here
+        if (this.isUnstable) return;
 
+        // Developmental growth pass (new): may add genetically guided nodes/edges.
+        this._attemptGrowthStep(dt);
     }
 
     // --- Refactored Helper Methods (Shells) ---
@@ -2159,7 +2598,7 @@ export class SoftBody {
 
     exportBlueprint() {
         const blueprint = {
-            version: 1,
+            version: 2,
             stiffness: this.stiffness,
             springDamping: this.springDamping,
             motorImpulseInterval: this.motorImpulseInterval,
@@ -2179,6 +2618,7 @@ export class SoftBody {
             defaultActivationPhaseOffset: this.defaultActivationPhaseOffset,
             rlAlgorithmType: this.rlAlgorithmType,
             rewardStrategy: this.rewardStrategy,
+            growthGenome: this.growthGenome,
             blueprintPoints: this.blueprintPoints,
             blueprintSprings: this.blueprintSprings
         };

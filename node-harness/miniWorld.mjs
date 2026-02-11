@@ -9,6 +9,8 @@ export class MiniWorld {
     this.time = 0;
     this.creatures = [];
     this.particles = config.particles || 0;
+    this.events = Array.isArray(config.events) ? config.events.slice() : [];
+    this.eventLog = [];
 
     for (let i = 0; i < config.creatures; i++) {
       this.creatures.push({
@@ -23,9 +25,27 @@ export class MiniWorld {
     }
   }
 
+  applyEvents() {
+    for (const ev of this.events) {
+      if (ev.tick !== this.tick) continue;
+      if (ev.kind === 'energySpike') {
+        for (const c of this.creatures) if (!c.unstable) c.energy += (ev.amount || 5);
+      } else if (ev.kind === 'energyDrain') {
+        for (const c of this.creatures) if (!c.unstable) c.energy -= (ev.amount || 5);
+      } else if (ev.kind === 'velocityKick') {
+        for (const c of this.creatures) {
+          c.vx += (this.rand() - 0.5) * (ev.amount || 1);
+          c.vy += (this.rand() - 0.5) * (ev.amount || 1);
+        }
+      }
+      this.eventLog.push({ tick: this.tick, ...ev });
+    }
+  }
+
   step(dt) {
     this.tick += 1;
     this.time += dt;
+    this.applyEvents();
 
     for (const c of this.creatures) {
       if (c.unstable) continue;
@@ -62,6 +82,7 @@ export class MiniWorld {
       tick: this.tick,
       time: Number(this.time.toFixed(3)),
       seed: this.seed,
+      recentEvents: this.eventLog.slice(-5),
       populations: {
         creatures: this.creatures.length,
         liveCreatures: live.length,

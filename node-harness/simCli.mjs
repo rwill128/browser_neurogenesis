@@ -4,6 +4,8 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getScenario } from './scenarios.mjs';
 import { RealWorld } from './realWorld.mjs';
+import { collectFluidSnapshot } from './fluidSnapshot.mjs';
+import { querySnapshotRect, querySnapshotCreature } from '../js/engine/snapshot.mjs';
 
 function arg(name, fallback = null) {
   const idx = process.argv.indexOf(`--${name}`);
@@ -125,28 +127,6 @@ class InteractiveSim {
     return Boolean(this.timer);
   }
 
-  _particlesInRect(x0, y0, x1, y1) {
-    if (!Array.isArray(this.world.particles)) return null;
-
-    let count = 0;
-    const sample = [];
-    for (const p of this.world.particles) {
-      const pos = p?.pos;
-      if (!pos || p.life <= 0) continue;
-      if (pos.x >= x0 && pos.x <= x1 && pos.y >= y0 && pos.y <= y1) {
-        count += 1;
-        if (sample.length < 100) {
-          sample.push({
-            x: Number(pos.x.toFixed(2)),
-            y: Number(pos.y.toFixed(2)),
-            life: Number((p.life || 0).toFixed(3))
-          });
-        }
-      }
-    }
-    return { count, sample };
-  }
-
   snapshotFull() {
     return {
       generatedAt: nowIso(),
@@ -169,17 +149,9 @@ class InteractiveSim {
       throw new Error('rect requires numeric x y width height');
     }
 
-    const x1 = x0 + ww;
-    const y1 = y0 + hh;
     const snap = this.world.snapshot();
-    const creatures = (snap.creatures || []).filter((c) => {
-      if (Array.isArray(c.vertices) && c.vertices.length > 0) {
-        return c.vertices.some((v) => v.x >= x0 && v.x <= x1 && v.y >= y0 && v.y <= y1);
-      }
-      const cx = c.center?.x;
-      const cy = c.center?.y;
-      return Number.isFinite(cx) && Number.isFinite(cy) && cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1;
-    });
+    const rect = { x: x0, y: y0, width: ww, height: hh };
+    const result = querySnapshotRect({ snapshot: snap, rect, particles: this.world.particles });
 
     return {
       generatedAt: nowIso(),
@@ -187,10 +159,44 @@ class InteractiveSim {
       scenario: this.runtimeScenario.name,
       tick: snap.tick,
       running: this.isRunning(),
-      rect: { x: x0, y: y0, width: ww, height: hh },
-      populations: snap.populations,
-      creatures,
-      particles: this._particlesInRect(x0, y0, x1, y1)
+      ...result
+    };
+  }
+
+  /**
+   * Query fluid state for the entire world or a world-space rectangle.
+   */
+  snapshotFluid(x = null, y = null, w = null, h = null) {
+    const hasRect = [x, y, w, h].every((v) => v !== null && v !== undefined);
+    let rect = null;
+    if (hasRect) {
+      const rx = Number(x);
+      const ry = Number(y);
+      const rw = Number(w);
+      const rh = Number(h);
+      if (![rx, ry, rw, rh].every(Number.isFinite) || rw < 0 || rh < 0) {
+        throw new Error('snapshot fluid rect requires numeric x y width height');
+      }
+      rect = { x: rx, y: ry, width: rw, height: rh };
+    }
+
+    const fluid = collectFluidSnapshot({
+      fluidField: this.world.fluidField,
+      world: this.runtimeScenario.world,
+      rect,
+      minDye: 1,
+      minSpeed: 0.01,
+      maxCells: 1800
+    });
+
+    const snap = this.world.snapshot();
+    return {
+      generatedAt: nowIso(),
+      engine: this.engine,
+      scenario: this.runtimeScenario.name,
+      tick: snap.tick,
+      running: this.isRunning(),
+      fluid
     };
   }
 
@@ -201,7 +207,7 @@ class InteractiveSim {
     }
 
     const snap = this.world.snapshot();
-    const creature = (snap.creatures || []).find((c) => Number(c.id) === creatureId) || null;
+    const result = querySnapshotCreature({ snapshot: snap, creatureId });
 
     return {
       generatedAt: nowIso(),
@@ -209,9 +215,7 @@ class InteractiveSim {
       scenario: this.runtimeScenario.name,
       tick: snap.tick,
       running: this.isRunning(),
-      creatureId,
-      found: Boolean(creature),
-      creature
+      ...result
     };
   }
 
@@ -271,6 +275,7 @@ function printHelp() {
   snapshot full [--out path]
   snapshot rect <x> <y> <w> <h> [--out path]
   snapshot creature <id> [--out path]
+  snapshot fluid [x y w h] [--out path]
 
   set dt <value>
   set seed <int>
@@ -355,8 +360,16 @@ rl.on('line', (line) => {
       } else if (mode === 'creature') {
         if (!parts[1]) throw new Error('usage: snapshot creature <id> [--out path]');
         printJson(sim.snapshotCreature(parts[1]), outPath);
+      } else if (mode === 'fluid') {
+        if (parts.length === 1) {
+          printJson(sim.snapshotFluid(), outPath);
+        } else if (parts.length >= 5) {
+          printJson(sim.snapshotFluid(parts[1], parts[2], parts[3], parts[4]), outPath);
+        } else {
+          throw new Error('usage: snapshot fluid [x y w h] [--out path]');
+        }
       } else {
-        throw new Error('snapshot mode must be full|rect|creature');
+        throw new Error('snapshot mode must be full|rect|creature|fluid');
       }
     } else if (cmd === 'set') {
       const key = (parts[0] || '').toLowerCase();

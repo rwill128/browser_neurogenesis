@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
+import { selectRenderableCreatures } from '../js/engine/snapshot.mjs';
 
 function arg(name, fallback = null) {
   const idx = process.argv.indexOf(`--${name}`);
@@ -54,6 +55,9 @@ function worldToPixel(vx, vy, world) {
   };
 }
 
+/**
+ * Approximate browser node coloring for per-vertex rendering in Node artifacts.
+ */
 function nodeColor(vertex, fallbackEnergy = 0) {
   const byTypeName = {
     NEURON: [200, 100, 255],
@@ -75,6 +79,43 @@ function nodeColor(vertex, fallbackEnergy = 0) {
   return [Math.floor(255 - (e / 140) * 140), Math.floor(80 + (e / 140) * 170), 220];
 }
 
+/**
+ * Draw sparse fluid cells captured in snapshot data (if available).
+ */
+function drawFluidOverlay(buf, snap, world) {
+  const fluid = snap?.fluid;
+  if (!fluid || !Array.isArray(fluid.cells) || fluid.cells.length === 0) return;
+
+  const N = Number(fluid.gridSize || 0);
+  if (!Number.isFinite(N) || N <= 0) return;
+
+  const cellPxW = Math.max(1, Math.ceil(w / N));
+  const cellPxH = Math.max(1, Math.ceil(h / N));
+
+  for (const cell of fluid.cells) {
+    const gx = Number(cell.gx);
+    const gy = Number(cell.gy);
+    if (!Number.isFinite(gx) || !Number.isFinite(gy)) continue;
+
+    const px = Math.floor((gx / N) * w);
+    const py = Math.floor((gy / N) * h);
+    const r = clamp(cell.r || 0, 0, 255);
+    const g = clamp(cell.g || 0, 0, 255);
+    const b = clamp(cell.b || 0, 0, 255);
+    const alpha = clamp(((cell.dye || (r + g + b)) / (255 * 3)) * 0.95, 0.08, 0.95);
+
+    const blendedR = Math.floor(r * alpha);
+    const blendedG = Math.floor(g * alpha);
+    const blendedB = Math.floor(b * alpha);
+
+    for (let yy = 0; yy < cellPxH; yy++) {
+      for (let xx = 0; xx < cellPxW; xx++) {
+        setPixel(buf, px + xx, py + yy, blendedR, blendedG, blendedB);
+      }
+    }
+  }
+}
+
 const world = data.world || { width: 120, height: 80 };
 (data.timeline || []).forEach((snap, i) => {
   const buf = Buffer.alloc(w * h * 3, 0);
@@ -92,7 +133,9 @@ const world = data.world || { width: 120, height: 80 };
     }
   }
 
-  const creatures = (snap.creatures && snap.creatures.length) ? snap.creatures : (snap.sampleCreatures || []);
+  drawFluidOverlay(buf, snap, world);
+
+  const creatures = selectRenderableCreatures(snap);
   for (const c of creatures) {
     const verts = Array.isArray(c.vertices) ? c.vertices : [];
 

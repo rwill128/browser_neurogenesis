@@ -1,40 +1,22 @@
 import config from '../config.js';
 import { softBodyPopulation, particles, fluidField } from '../simulation.js';
+import { buildTelemetrySnapshot } from '../engine/snapshot.mjs';
 
 let tickCounter = 0;
 let pendingForcedSteps = 0;
 let lastCaptureTick = -1;
 const SNAPSHOT_INTERVAL_TICKS = 30;
 
-function creatureSummary(body) {
-  const center = body.getAveragePosition();
-  const bbox = body.getBoundingBox();
-  return {
-    id: body.id,
-    unstable: !!body.isUnstable,
-    points: body.massPoints.length,
-    energy: Number(body.creatureEnergy?.toFixed?.(2) || 0),
-    center: { x: Number(center.x.toFixed(1)), y: Number(center.y.toFixed(1)) },
-    size: { w: Number((bbox.maxX - bbox.minX).toFixed(1)), h: Number((bbox.maxY - bbox.minY).toFixed(1)) }
-  };
-}
-
 function buildSnapshot() {
-  const live = softBodyPopulation.filter(b => !b.isUnstable);
-  const selected = config.selectedInspectBody ? creatureSummary(config.selectedInspectBody) : null;
-  return {
+  return buildTelemetrySnapshot({
     tick: tickCounter,
     scenario: config.DEBUG_SCENARIO || 'baseline',
     seed: config.DEBUG_SEED ?? null,
-    mode: (fluidField && fluidField.gpuEnabled) ? 'GPU' : 'CPU',
-    populations: {
-      creatures: softBodyPopulation.length,
-      liveCreatures: live.length,
-      particles: particles.length
-    },
-    selected,
-    sampleCreatures: live.slice(0, 5).map(creatureSummary)
-  };
+    fluidField,
+    softBodyPopulation,
+    particles,
+    selectedBody: config.selectedInspectBody
+  });
 }
 
 export function initDebugRuntime() {

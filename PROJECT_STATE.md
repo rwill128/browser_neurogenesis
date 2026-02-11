@@ -123,3 +123,6 @@ For each scenario run:
   - replaced single mobile next button with bottom-centered Prev/Next pair
   - wired `mobilePrevCreatureButton` / `mobileNextCreatureButton` to creature cycling
   - refined mobile layout styles (control drawer width, compact top controls, reduced overlay clutter).
+- Adjusted mobile info-panel behavior per Rick feedback:
+  - selected-creature stats panel no longer auto-opens on mobile selection
+  - added explicit mobile `Info` toggle button next to Prev/Next creature controls.

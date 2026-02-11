@@ -119,8 +119,8 @@ canvas.emitter-edit-mode {
 }
 
 .ui-mobile-button {
-    padding: 10px 14px;
-    min-width: 110px;
+    padding: 10px 12px;
+    min-width: 88px;
     background-color: rgba(0, 123, 255, 0.95);
     color: white;
     border: none;

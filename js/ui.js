@@ -159,6 +159,7 @@ const importStateButton = document.getElementById('importStateButton');
 const importStateFile = document.getElementById('importStateFile');
 const mobilePrevCreatureButton = document.getElementById('mobilePrevCreatureButton');
 const mobileNextCreatureButton = document.getElementById('mobileNextCreatureButton');
+const mobileInfoToggleButton = document.getElementById('mobileInfoToggleButton');
 const importCreatureButton = document.getElementById('importCreatureButton');
 const importCreatureFile = document.getElementById('importCreatureFile');
 const creatureImportStatus = document.getElementById('creatureImportStatus');
@@ -404,6 +405,20 @@ function updatePopulationCount() {
     particleCountDisplay.textContent = `Particles: ${particles.length}`;
 }
 
+/**
+ * Mobile layout heuristic used for touch-first panel behavior.
+ */
+function isMobileLayout() {
+    return window.matchMedia('(max-width: 900px)').matches;
+}
+
+/**
+ * Toggle info panel visibility without altering selected creature state.
+ */
+function toggleInfoPanelVisibility() {
+    infoPanel.classList.toggle('open');
+}
+
 function updateInfoPanel() {
     if (config.selectedInspectBody && config.selectedInspectPoint) {
         document.getElementById('infoBodyId').textContent = config.selectedInspectBody.id;
@@ -563,7 +578,8 @@ function updateInfoPanel() {
             allPointsInfoContainer.appendChild(pointEntryDiv);
         });
 
-        if (!infoPanel.classList.contains('open')) {
+        // Desktop keeps auto-open behavior; mobile requires explicit user toggle.
+        if (!infoPanel.classList.contains('open') && !isMobileLayout()) {
             infoPanel.classList.add('open');
         }
     } else {
@@ -1314,6 +1330,9 @@ if (mobilePrevCreatureButton) {
 }
 if (mobileNextCreatureButton) {
     mobileNextCreatureButton.onclick = () => cycleSelectedCreature(1);
+}
+if (mobileInfoToggleButton) {
+    mobileInfoToggleButton.onclick = () => toggleInfoPanelVisibility();
 }
 
 closeInfoPanelButton.onclick = () => {

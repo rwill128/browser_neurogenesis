@@ -183,6 +183,9 @@ export class RealWorld {
   snapshot() {
     const creatures = this.softBodyPopulation.map((b) => {
       const center = b.getAveragePosition();
+      const pointIndex = new Map();
+      b.massPoints.forEach((p, idx) => pointIndex.set(p, idx));
+
       return {
         id: b.id,
         energy: Number((b.creatureEnergy || 0).toFixed(2)),
@@ -202,7 +205,14 @@ export class RealWorld {
           eyeTargetTypeName: eyeTargetTypeNameById[p.eyeTargetType] || null,
           canBeGrabber: Boolean(p.canBeGrabber),
           isDesignatedEye: Boolean(p.isDesignatedEye)
-        }))
+        })),
+        springs: b.springs
+          .map((s) => ({
+            a: pointIndex.get(s.p1),
+            b: pointIndex.get(s.p2),
+            isRigid: Boolean(s.isRigid)
+          }))
+          .filter((s) => Number.isInteger(s.a) && Number.isInteger(s.b) && s.a !== s.b)
       };
     });
 

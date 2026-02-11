@@ -609,8 +609,10 @@ function disableAutoFollowForManualControl() {
 }
 
 function applyManualZoom(displayX, displayY, direction) {
-    const worldXBefore = viewOffsetX + (displayX / viewZoom);
-    const worldYBefore = viewOffsetY + (displayY / viewZoom);
+    // Use the same world-coordinate mapping used by input handling (accounts for letterboxing).
+    const worldBefore = getMouseWorldCoordinates(displayX, displayY);
+    const worldXBefore = worldBefore.x;
+    const worldYBefore = worldBefore.y;
 
     let newZoom = viewZoom * Math.pow(1 + config.ZOOM_SENSITIVITY * 10, direction);
     const minZoomToFitX = canvas.clientWidth / config.WORLD_WIDTH;
@@ -619,8 +621,15 @@ function applyManualZoom(displayX, displayY, direction) {
     newZoom = Math.max(minAllowedZoom, Math.min(newZoom, config.MAX_ZOOM));
 
     viewZoom = newZoom;
-    viewOffsetX = worldXBefore - (displayX / viewZoom);
-    viewOffsetY = worldYBefore - (displayY / viewZoom);
+
+    // Inverse of getMouseWorldCoordinates at the new zoom (preserve world point under cursor).
+    const worldDisplayWidth = config.WORLD_WIDTH * viewZoom;
+    const worldDisplayHeight = config.WORLD_HEIGHT * viewZoom;
+    const marginX = (canvas.clientWidth - worldDisplayWidth) * 0.5;
+    const marginY = (canvas.clientHeight - worldDisplayHeight) * 0.5;
+
+    viewOffsetX = worldXBefore - ((displayX - marginX) / viewZoom);
+    viewOffsetY = worldYBefore - ((displayY - marginY) / viewZoom);
 
     clampViewOffsets();
 

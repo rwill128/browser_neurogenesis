@@ -47,6 +47,34 @@ function drawLine(buf, x0, y0, x1, y1, r, g, b) {
   }
 }
 
+function worldToPixel(vx, vy, world) {
+  return {
+    x: Math.floor((vx / world.width) * (w - 1)),
+    y: Math.floor((vy / world.height) * (h - 1))
+  };
+}
+
+function nodeColor(vertex, fallbackEnergy = 0) {
+  const byTypeName = {
+    NEURON: [200, 100, 255],
+    PREDATOR: [255, 50, 50],
+    SWIMMER: [0, 200, 255],
+    PHOTOSYNTHETIC: [60, 179, 113],
+    EMITTER: [0, 255, 100],
+    EATER: [255, 165, 0],
+    EYE: [180, 180, 250],
+    JET: [255, 255, 100],
+    ATTRACTOR: [255, 105, 180],
+    REPULSOR: [128, 0, 128]
+  };
+
+  const named = byTypeName[vertex?.nodeTypeName];
+  if (named) return named;
+
+  const e = clamp(fallbackEnergy || 0, 0, 140);
+  return [Math.floor(255 - (e / 140) * 140), Math.floor(80 + (e / 140) * 170), 220];
+}
+
 const world = data.world || { width: 120, height: 80 };
 (data.timeline || []).forEach((snap, i) => {
   const buf = Buffer.alloc(w * h * 3, 0);
@@ -66,37 +94,56 @@ const world = data.world || { width: 120, height: 80 };
 
   const creatures = (snap.creatures && snap.creatures.length) ? snap.creatures : (snap.sampleCreatures || []);
   for (const c of creatures) {
-    const e = clamp(c.energy || 0, 0, 140);
-    const red = Math.floor(255 - (e / 140) * 140);
-    const green = Math.floor(80 + (e / 140) * 170);
+    const verts = Array.isArray(c.vertices) ? c.vertices : [];
 
-    if (Array.isArray(c.vertices) && c.vertices.length >= 3) {
-      const pts = c.vertices.map(v => ({
-        x: Math.floor((v.x / world.width) * (w - 1)),
-        y: Math.floor((v.y / world.height) * (h - 1))
-      }));
+    // Preferred: draw actual spring connectivity when available (closer to browser look).
+    if (Array.isArray(c.springs) && c.springs.length > 0 && verts.length > 1) {
+      for (const s of c.springs) {
+        const va = verts[s.a];
+        const vb = verts[s.b];
+        if (!va || !vb) continue;
+        const a = worldToPixel(va.x, va.y, world);
+        const b = worldToPixel(vb.x, vb.y, world);
+        if (s.isRigid) {
+          drawLine(buf, a.x, a.y, b.x, b.y, 255, 235, 90);
+          drawLine(buf, a.x + 1, a.y, b.x + 1, b.y, 255, 235, 90);
+        } else {
+          drawLine(buf, a.x, a.y, b.x, b.y, 150, 150, 150);
+        }
+      }
+      for (const v of verts) {
+        const p = worldToPixel(v.x, v.y, world);
+        const [r, g, b] = nodeColor(v, c.energy || 0);
+        const rad = Math.max(1, Math.round((v.radius || 4) * 0.22));
+        drawCircle(buf, p.x, p.y, rad, r, g, b);
+      }
+      continue;
+    }
+
+    // Fallback: connect vertices in listed order.
+    if (verts.length >= 3) {
+      const pts = verts.map(v => worldToPixel(v.x, v.y, world));
       for (let i = 0; i < pts.length; i++) {
         const a = pts[i];
         const b = pts[(i + 1) % pts.length];
-        drawLine(buf, a.x, a.y, b.x, b.y, red, green, 220);
-        drawCircle(buf, a.x, a.y, 1, 240, 240, 255);
+        drawLine(buf, a.x, a.y, b.x, b.y, 130, 170, 220);
       }
-    } else if (Array.isArray(c.vertices) && c.vertices.length === 2) {
-      const a = {
-        x: Math.floor((c.vertices[0].x / world.width) * (w - 1)),
-        y: Math.floor((c.vertices[0].y / world.height) * (h - 1))
-      };
-      const b = {
-        x: Math.floor((c.vertices[1].x / world.width) * (w - 1)),
-        y: Math.floor((c.vertices[1].y / world.height) * (h - 1))
-      };
-      drawLine(buf, a.x, a.y, b.x, b.y, red, green, 220);
-      drawCircle(buf, a.x, a.y, 2, 240, 240, 255);
-      drawCircle(buf, b.x, b.y, 2, 240, 240, 255);
+      for (let i = 0; i < verts.length; i++) {
+        const [r, g, b] = nodeColor(verts[i], c.energy || 0);
+        drawCircle(buf, pts[i].x, pts[i].y, 2, r, g, b);
+      }
+    } else if (verts.length === 2) {
+      const a = worldToPixel(verts[0].x, verts[0].y, world);
+      const b = worldToPixel(verts[1].x, verts[1].y, world);
+      drawLine(buf, a.x, a.y, b.x, b.y, 130, 170, 220);
+      const ca = nodeColor(verts[0], c.energy || 0);
+      const cb = nodeColor(verts[1], c.energy || 0);
+      drawCircle(buf, a.x, a.y, 2, ca[0], ca[1], ca[2]);
+      drawCircle(buf, b.x, b.y, 2, cb[0], cb[1], cb[2]);
     } else {
-      const px = Math.floor((c.center.x / world.width) * (w - 1));
-      const py = Math.floor((c.center.y / world.height) * (h - 1));
-      drawCircle(buf, px, py, 6, red, green, 220);
+      const p = worldToPixel(c.center.x, c.center.y, world);
+      const [r, g, b] = nodeColor(null, c.energy || 0);
+      drawCircle(buf, p.x, p.y, 6, r, g, b);
     }
   }
 

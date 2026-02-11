@@ -52,6 +52,19 @@ Key commands:
 - `set creatures <n>`
 - `set particles <n>`
 
+## 4) Parity regression (browser-like vs headless real)
+
+```bash
+node node-harness/parityRegression.mjs \
+  --scenario micro_one_creature_100 \
+  --seed 23 \
+  --steps 120 \
+  --checkpointEvery 10
+```
+
+The script compares invariant checkpoints (population counts, structural counts, energy/fluid aggregates)
+across a browser-like shared-core runner and the existing headless real runner.
+
 ## Current status
 
 - ✅ Deterministic seeded runs

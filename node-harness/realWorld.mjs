@@ -1,6 +1,7 @@
 import config from '../js/config.js';
 import { SoftBody } from '../js/classes/SoftBody.js';
 import { Particle } from '../js/classes/Particle.js';
+import { Spring } from '../js/classes/Spring.js';
 import { FluidField } from '../js/classes/FluidField.js';
 import { syncRuntimeState } from '../js/engine/runtimeState.js';
 import { NodeType, MovementType, EyeTargetType } from '../js/classes/constants.js';
@@ -15,6 +16,7 @@ import {
   initializePopulation as initializeSharedPopulation
 } from '../js/engine/initWorld.mjs';
 import { createConfigViews } from '../js/engine/configViews.mjs';
+import { saveWorldStateSnapshot, loadWorldStateSnapshot } from '../js/engine/worldPersistence.mjs';
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
@@ -221,6 +223,47 @@ export class RealWorld {
     });
 
     this._syncAliasesFromWorldState();
+  }
+
+  saveStateSnapshot(meta = {}) {
+    return saveWorldStateSnapshot({
+      worldState: this.worldState,
+      configOrViews: this.configViews,
+      rng: this.rand,
+      meta: {
+        tick: this.tick,
+        time: this.time,
+        scenario: this.config?.name || null,
+        source: 'node-real',
+        ...meta
+      }
+    });
+  }
+
+  loadStateSnapshot(snapshot) {
+    const loadInfo = loadWorldStateSnapshot(snapshot, {
+      worldState: this.worldState,
+      configOrViews: this.configViews,
+      classes: {
+        SoftBodyClass: SoftBody,
+        ParticleClass: Particle,
+        SpringClass: Spring,
+        FluidFieldClass: FluidField
+      },
+      rng: this.rand
+    });
+
+    this.tick = Number(loadInfo?.meta?.tick) || 0;
+    this.time = Number(loadInfo?.meta?.time) || 0;
+    this._syncAliasesFromWorldState();
+
+    syncRuntimeState({
+      fluidField: this.fluidField,
+      softBodyPopulation: this.softBodyPopulation,
+      mutationStats: this.worldState.mutationStats || {}
+    });
+
+    return loadInfo;
   }
 
   snapshot() {

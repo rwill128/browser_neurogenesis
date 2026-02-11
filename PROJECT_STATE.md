@@ -86,3 +86,12 @@ For each scenario run:
 - Added reproduction-control unit tests:
   - `node-harness/tests/reproductionControls.test.mjs`
   - `node-harness/tests/softBodyReproductionControls.test.mjs`
+- Extended browser-default soak harness with:
+  - final-frame screenshot artifact output (PNG/PPM fallback)
+  - optional progress log file output (`--logFile`) for detached runs
+  - configurable runtime overrides via repeated `--set KEY=VALUE`
+  - node diversity + growth cohort telemetry in checkpoints/reports
+- Added unit-tested helper modules for metrics/overrides/snapshot shaping:
+  - `js/engine/ecologyMetrics.mjs`
+  - `js/engine/configOverride.mjs`
+  - `node-harness/soakSnapshot.mjs`

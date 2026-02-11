@@ -90,16 +90,33 @@ node node-harness/browserDefaultSoak.mjs \
   --steps 20000 \
   --dt 0.01 \
   --logEvery 500 \
+  --logFile /tmp/browser-default-soak/seed41.log \
+  --set GROWTH_ENERGY_COST_SCALAR=1.4 \
+  --set REPRO_RESOURCE_MIN_NUTRIENT=0.7 \
   --out /tmp/browser-default-soak
 ```
 
 What it does:
 - applies index.html-like defaults (world/population/particle emission)
+- allows ad-hoc config tuning via repeated `--set KEY=VALUE`
+- writes live progress to stdout and optional `--logFile`
 - runs real shared-core stepping in node (with reproduction + floor maintenance)
 - catches crashes and writes both a crash report and full snapshot for replay
 - writes periodic checkpoints + final report even on successful runs
+- renders a **last-frame screenshot artifact** (PNG when ffmpeg exists, otherwise PPM fallback)
 - includes growth/RL continuity telemetry in reports (`growthEvents`, `growthEnergySpent`, `rlTopologyResets`, etc.)
 - includes reproduction-control telemetry (`reproductionSuppressedByDensity`, `reproductionSuppressedByResources`, resource debits)
+- includes node diversity telemetry (`nodeTypeCounts`, richness, shannon entropy/evenness)
+
+Detached run pattern:
+```bash
+nohup node node-harness/browserDefaultSoak.mjs \
+  --seed 41 --steps 60000 --dt 0.01 \
+  --logEvery 1000 \
+  --logFile /tmp/browser-default-soak/seed41.log \
+  --out /tmp/browser-default-soak \
+  > /tmp/browser-default-soak/seed41.stdout 2>&1 &
+```
 
 ## 7) Unit tests (growth controls + topology-resize RL handling)
 

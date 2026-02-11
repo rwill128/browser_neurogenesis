@@ -9,14 +9,17 @@
  * - Run for a long time and persist crash snapshots/reports automatically.
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import config from '../js/config.js';
 import { SoftBody } from '../js/classes/SoftBody.js';
 import { Particle } from '../js/classes/Particle.js';
 import { Spring } from '../js/classes/Spring.js';
 import { FluidField } from '../js/classes/FluidField.js';
+import { NodeType } from '../js/classes/constants.js';
 import { stepWorld } from '../js/engine/stepWorld.mjs';
 import { createWorldState } from '../js/engine/worldState.mjs';
 import { createConfigViews } from '../js/engine/configViews.mjs';
@@ -28,12 +31,31 @@ import {
 } from '../js/engine/initWorld.mjs';
 import { saveWorldStateSnapshot } from '../js/engine/worldPersistence.mjs';
 import { syncRuntimeState } from '../js/engine/runtimeState.js';
+import {
+  aggregateNodeTypeCounts,
+  computeNodeDiversity,
+  summarizeGrowthCohorts
+} from '../js/engine/ecologyMetrics.mjs';
+import { applyConfigOverrides } from '../js/engine/configOverride.mjs';
 import { createSeededRandom } from './seededRandomScope.mjs';
+import { buildRenderableSoakSnapshot } from './soakSnapshot.mjs';
 
 function arg(name, fallback = null) {
   const idx = process.argv.indexOf(`--${name}`);
   if (idx === -1) return fallback;
   return process.argv[idx + 1] ?? fallback;
+}
+
+function argMany(name) {
+  const out = [];
+  const key = `--${name}`;
+  for (let i = 0; i < process.argv.length; i++) {
+    if (process.argv[i] === key && process.argv[i + 1] !== undefined) {
+      out.push(process.argv[i + 1]);
+      i += 1;
+    }
+  }
+  return out;
 }
 
 function toNumber(value, fallback) {
@@ -53,8 +75,28 @@ function nowStamp() {
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
+function invertEnum(obj) {
+  return Object.fromEntries(Object.entries(obj).map(([k, v]) => [v, k]));
+}
+
+const nodeTypeNameById = invertEnum(NodeType);
+const renderScriptPath = fileURLToPath(new URL('./renderTimelineFrames.mjs', import.meta.url));
+
+let activeLogFile = null;
+
 function safeWriteJson(filePath, data) {
   writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', 'utf8');
+}
+
+function logLine(message, { level = 'info' } = {}) {
+  const line = String(message);
+  if (level === 'warn') console.warn(line);
+  else if (level === 'error') console.error(line);
+  else console.log(line);
+
+  if (activeLogFile) {
+    appendFileSync(activeLogFile, `${line}\n`, 'utf8');
+  }
 }
 
 function buildMutationStatsShape() {
@@ -115,16 +157,21 @@ function applyBrowserDefaults(options) {
   config.canCreaturesReproduceGlobally = true;
   config.MAX_DELTA_TIME_MS = options.maxDeltaMs;
 
+  // Optional ad-hoc config overrides for tuning sweeps.
+  const overrideResult = applyConfigOverrides(config, options.configOverrides || []);
+
   config.GRID_COLS = Math.ceil(config.WORLD_WIDTH / config.GRID_CELL_SIZE);
   config.GRID_ROWS = Math.ceil(config.WORLD_HEIGHT / config.GRID_CELL_SIZE);
 
   // No UI-driven drag/emitter state in node harness.
   config.selectedSoftBodyPoint = null;
   config.velocityEmitters = [];
+
+  return overrideResult;
 }
 
 function createBrowserDefaultWorld(rng, options) {
-  applyBrowserDefaults(options);
+  const overrideResult = applyBrowserDefaults(options);
   const configViews = createConfigViews(config);
 
   const worldState = createWorldState({
@@ -186,7 +233,7 @@ function createBrowserDefaultWorld(rng, options) {
     mutationStats: worldState.mutationStats
   });
 
-  return { worldState, configViews };
+  return { worldState, configViews, overrideResult };
 }
 
 function summarize(worldState, tick, timeSec) {
@@ -234,6 +281,13 @@ function summarize(worldState, tick, timeSec) {
     reproductionResourceDebitApplied += Number(b.reproductionResourceDebitApplied || 0);
   }
 
+  const nodeTypeCounts = aggregateNodeTypeCounts(worldState.softBodyPopulation, nodeTypeNameById);
+  const nodeDiversity = computeNodeDiversity(nodeTypeCounts);
+  const growthCohorts = summarizeGrowthCohorts(worldState.softBodyPopulation, {
+    activeThreshold: 1,
+    highThreshold: 5
+  });
+
   return {
     tick,
     timeSec,
@@ -255,7 +309,66 @@ function summarize(worldState, tick, timeSec) {
     reproductionSuppressedByDensity,
     reproductionSuppressedByResources,
     reproductionSuppressedByFertilityRoll,
-    reproductionResourceDebitApplied
+    reproductionResourceDebitApplied,
+    growthCohorts,
+    nodeTypeCounts,
+    nodeDiversity
+  };
+}
+
+/**
+ * Render and persist a last-frame screenshot artifact from the final world state.
+ */
+function writeFinalFrameArtifacts({ worldState, tick, outDir, width, height }) {
+  const stamp = nowStamp();
+  const frameBase = `${stamp}-tick${tick}`;
+  const timelinePath = resolve(outDir, `${frameBase}-final-frame-timeline.json`);
+  const framesDir = resolve(outDir, `${frameBase}-frames`);
+
+  const snapshot = buildRenderableSoakSnapshot({
+    worldState,
+    worldWidth: config.WORLD_WIDTH,
+    worldHeight: config.WORLD_HEIGHT,
+    nodeTypeEnum: NodeType
+  });
+
+  const timelineData = {
+    scenario: 'browser_default_soak_final_frame',
+    world: snapshot.world,
+    timeline: [
+      {
+        tick,
+        populations: snapshot.populations,
+        creatures: snapshot.creatures
+      }
+    ]
+  };
+
+  safeWriteJson(timelinePath, timelineData);
+
+  execFileSync('node', [
+    renderScriptPath,
+    '--input', timelinePath,
+    '--out', framesDir,
+    '--width', String(width),
+    '--height', String(height)
+  ], { stdio: 'pipe' });
+
+  const ppmPath = resolve(framesDir, 'frame-00000.ppm');
+  const pngPath = resolve(outDir, `${frameBase}-final-frame.png`);
+
+  if (existsSync(ppmPath)) {
+    try {
+      execFileSync('ffmpeg', ['-y', '-i', ppmPath, '-frames:v', '1', pngPath], { stdio: 'ignore' });
+    } catch {
+      // ffmpeg may not be present; keep PPM as fallback.
+    }
+  }
+
+  return {
+    finalFrameTimelinePath: timelinePath,
+    finalFramePpmPath: existsSync(ppmPath) ? ppmPath : null,
+    finalFrameImagePath: existsSync(pngPath) ? pngPath : (existsSync(ppmPath) ? ppmPath : null)
   };
 }
 
@@ -286,6 +399,10 @@ const steps = Math.max(1, toInt(arg('steps', '20000'), 20000));
 const dt = toNumber(arg('dt', '0.01'), 0.01);
 const logEvery = Math.max(1, toInt(arg('logEvery', '500'), 500));
 const outDir = resolve(arg('out', '/tmp/browser-default-soak'));
+const logFileArg = arg('logFile', null);
+const finalFrameWidth = Math.max(64, toInt(arg('finalFrameWidth', '1280'), 1280));
+const finalFrameHeight = Math.max(64, toInt(arg('finalFrameHeight', '720'), 720));
+const emitFinalScreenshot = String(arg('emitFinalScreenshot', 'true')).toLowerCase() !== 'false';
 
 const options = {
   dt,
@@ -298,19 +415,36 @@ const options = {
   particleCeiling: toInt(arg('particleCeiling', String(config.PARTICLE_POPULATION_CEILING)), config.PARTICLE_POPULATION_CEILING),
   particlesPerSecond: toNumber(arg('particlesPerSecond', String(config.PARTICLES_PER_SECOND)), config.PARTICLES_PER_SECOND),
   initialCreatures: toInt(arg('initialCreatures', String(config.CREATURE_POPULATION_FLOOR)), config.CREATURE_POPULATION_FLOOR),
-  initialParticles: toInt(arg('initialParticles', '0'), 0)
+  initialParticles: toInt(arg('initialParticles', '0'), 0),
+  configOverrides: argMany('set'),
+  logFile: logFileArg ? resolve(logFileArg) : null,
+  finalFrameWidth,
+  finalFrameHeight,
+  emitFinalScreenshot
 };
 
 mkdirSync(outDir, { recursive: true });
 
+if (options.logFile) {
+  activeLogFile = options.logFile;
+  appendFileSync(activeLogFile, `\n--- browserDefaultSoak start ${new Date().toISOString()} ---\n`, 'utf8');
+}
+
 const rng = createSeededRandom(seed);
-const { worldState, configViews } = createBrowserDefaultWorld(rng, options);
+const { worldState, configViews, overrideResult } = createBrowserDefaultWorld(rng, options);
 
 const checkpoints = [];
 const startedAt = Date.now();
 
-console.log(`[SOAK] browser-default real-path start seed=${seed} steps=${steps} dt=${dt}`);
-console.log(`[SOAK] world=${options.worldWidth}x${options.worldHeight} creatures=${options.initialCreatures}/${options.creatureFloor}-${options.creatureCeiling} particles=${options.initialParticles} pps=${options.particlesPerSecond}`);
+logLine(`[SOAK] browser-default real-path start seed=${seed} steps=${steps} dt=${dt}`);
+logLine(`[SOAK] world=${config.WORLD_WIDTH}x${config.WORLD_HEIGHT} creatures=${options.initialCreatures}/${config.CREATURE_POPULATION_FLOOR}-${config.CREATURE_POPULATION_CEILING} particles=${options.initialParticles} pps=${config.PARTICLES_PER_SECOND}`);
+if (overrideResult?.applied?.length) {
+  const applied = overrideResult.applied.map((x) => `${x.key}=${x.value}`).join(', ');
+  logLine(`[SOAK] applied overrides: ${applied}`);
+}
+if (overrideResult?.unknown?.length) {
+  logLine(`[SOAK] unknown override keys ignored: ${overrideResult.unknown.join(', ')}`, { level: 'warn' });
+}
 
 let tick = 0;
 let crashed = null;
@@ -336,10 +470,11 @@ for (tick = 1; tick <= steps; tick++) {
     if (tick % logEvery === 0 || tick === 1) {
       const s = summarize(worldState, tick, tick * dt);
       checkpoints.push(s);
-      console.log(
+      logLine(
         `[SOAK] tick=${s.tick} creatures=${s.creatures} particles=${s.particles} ` +
         `totalPoints=${s.totalPoints} maxPts=${s.maxPointsPerCreature} ` +
-        `growthEvents=${s.growthEvents} rlTopologyResets=${s.rlTopologyResets} ` +
+        `growthEvents=${s.growthEvents} activeGrowers=${s.growthCohorts.activeGrowers} ` +
+        `nodeRichness=${s.nodeDiversity.richness} rlTopologyResets=${s.rlTopologyResets} ` +
         `reproSuppDensity=${s.reproductionSuppressedByDensity} reproSuppResource=${s.reproductionSuppressedByResources}`
       );
     }
@@ -358,7 +493,23 @@ for (tick = 1; tick <= steps; tick++) {
 }
 
 const finishedAt = Date.now();
-const finalSummary = summarize(worldState, Math.min(tick, steps), Math.min(tick, steps) * dt);
+const finalTick = Math.min(tick, steps);
+const finalSummary = summarize(worldState, finalTick, finalTick * dt);
+
+let finalFrameArtifacts = null;
+if (emitFinalScreenshot) {
+  try {
+    finalFrameArtifacts = writeFinalFrameArtifacts({
+      worldState,
+      tick: finalTick,
+      outDir,
+      width: options.finalFrameWidth,
+      height: options.finalFrameHeight
+    });
+  } catch (error) {
+    logLine(`[SOAK] final-frame render failed: ${error?.message || error}`, { level: 'warn' });
+  }
+}
 
 const report = {
   run: {
@@ -369,12 +520,18 @@ const report = {
     startedAt: new Date(startedAt).toISOString(),
     finishedAt: new Date(finishedAt).toISOString(),
     durationMs: finishedAt - startedAt,
-    options
+    options,
+    overrides: {
+      requested: options.configOverrides,
+      applied: overrideResult?.applied || [],
+      unknown: overrideResult?.unknown || []
+    }
   },
   status: crashed ? 'crashed' : 'ok',
   final: finalSummary,
   checkpoints,
-  crash: crashed
+  crash: crashed,
+  artifacts: finalFrameArtifacts
 };
 
 if (crashed) {
@@ -397,13 +554,19 @@ if (crashed) {
   safeWriteJson(crashReportPath, report);
   safeWriteJson(crashSnapshotPath, crashSnap);
 
-  console.error(`[SOAK] CRASH at tick=${crashed.tick}: ${crashed.error.message}`);
-  console.error(`[SOAK] wrote ${crashReportPath}`);
-  console.error(`[SOAK] wrote ${crashSnapshotPath}`);
+  logLine(`[SOAK] CRASH at tick=${crashed.tick}: ${crashed.error.message}`, { level: 'error' });
+  logLine(`[SOAK] wrote ${crashReportPath}`, { level: 'error' });
+  logLine(`[SOAK] wrote ${crashSnapshotPath}`, { level: 'error' });
+  if (report.artifacts?.finalFrameImagePath) {
+    logLine(`[SOAK] wrote final frame image ${report.artifacts.finalFrameImagePath}`, { level: 'error' });
+  }
   process.exit(1);
 }
 
 const okReportPath = resolve(outDir, `${nowStamp()}-seed${seed}-ok-report.json`);
 safeWriteJson(okReportPath, report);
-console.log(`[SOAK] completed ${steps} steps without crash.`);
-console.log(`[SOAK] wrote ${okReportPath}`);
+logLine(`[SOAK] completed ${steps} steps without crash.`);
+logLine(`[SOAK] wrote ${okReportPath}`);
+if (report.artifacts?.finalFrameImagePath) {
+  logLine(`[SOAK] wrote final frame image ${report.artifacts.finalFrameImagePath}`);
+}

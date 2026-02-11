@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { SoftBody } from '../../js/classes/SoftBody.js';
 import { Brain } from '../../js/classes/Brain.js';
 import { NodeType } from '../../js/classes/constants.js';
+import config from '../../js/config.js';
 
 test('SoftBody.initializeBrain delegates to existing brain instance', () => {
   const body = new SoftBody(1, 120, 140, null, false);
@@ -63,4 +64,15 @@ test('SoftBody._updateBlueprintRadiusFromCurrentPhenotype expands but does not s
   body._updateBlueprintRadiusFromCurrentPhenotype();
 
   assert.equal(body.blueprintRadius, grownRadius + 25);
+});
+
+test('SoftBody.getAverageDamping uses config rigid damping fallback for rigid-only springs', () => {
+  const body = new SoftBody(5, 160, 160, null, false);
+
+  body.springs = [
+    { isRigid: true, dampingFactor: 999 },
+    { isRigid: true, dampingFactor: 333 }
+  ];
+
+  assert.equal(body.getAverageDamping(), config.RIGID_SPRING_DAMPING);
 });

@@ -2136,7 +2136,7 @@ export class SoftBody {
     getAverageDamping() {
         if (this.springs.length === 0) return 0;
         const nonRigidSprings = this.springs.filter(s => !s.isRigid);
-        if (nonRigidSprings.length === 0) return RIGID_SPRING_DAMPING;
+        if (nonRigidSprings.length === 0) return config.RIGID_SPRING_DAMPING;
         const totalDamping = nonRigidSprings.reduce((sum, spring) => sum + spring.dampingFactor, 0);
         return totalDamping / nonRigidSprings.length;
     }
@@ -2483,20 +2483,20 @@ export class SoftBody {
         const numRepulsorPoints = this.numRepulsorNodes;
 
         // console.log(`Body ${this.id} _calculateBrainVectorSizes: Using Stored Counts: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${numPredatorPoints}, G:${numPotentialGrabberPoints}, Ey:${numEyeNodes}`);
-        nd.inputVectorSize = NEURAL_INPUT_SIZE_BASE +
-                             (numEyeNodes * NEURAL_INPUTS_PER_EYE) +
-                             (numSwimmerPoints * NEURAL_INPUTS_PER_FLUID_SENSOR) +
-                             (numJetNodes * NEURAL_INPUTS_PER_FLUID_SENSOR) +
-                             (this.springs.length * NEURAL_INPUTS_PER_SPRING_SENSOR);
+        nd.inputVectorSize = config.NEURAL_INPUT_SIZE_BASE +
+                             (numEyeNodes * config.NEURAL_INPUTS_PER_EYE) +
+                             (numSwimmerPoints * config.NEURAL_INPUTS_PER_FLUID_SENSOR) +
+                             (numJetNodes * config.NEURAL_INPUTS_PER_FLUID_SENSOR) +
+                             (this.springs.length * config.NEURAL_INPUTS_PER_SPRING_SENSOR);
         // console.log(`Body ${this.id} _calculateBrainVectorSizes: Counts (from stored) directly before sum: E:${numEmitterPoints}, S:${numSwimmerPoints}, Ea:${numEaterPoints}, P:${predatorPoints}, G:${numPotentialGrabberPoints}`);
-        nd.outputVectorSize = (numEmitterPoints * NEURAL_OUTPUTS_PER_EMITTER) +
-                              (numSwimmerPoints * NEURAL_OUTPUTS_PER_SWIMMER) +
-                              (numEaterPoints * NEURAL_OUTPUTS_PER_EATER) +
-                              (numPredatorPoints * NEURAL_OUTPUTS_PER_PREDATOR) +
-                              (numJetNodes * NEURAL_OUTPUTS_PER_JET) +
-                              (numPotentialGrabberPoints * NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) +
-                              (numAttractorPoints * NEURAL_OUTPUTS_PER_ATTRACTOR) +
-                              (numRepulsorPoints * NEURAL_OUTPUTS_PER_REPULSOR);
+        nd.outputVectorSize = (numEmitterPoints * config.NEURAL_OUTPUTS_PER_EMITTER) +
+                              (numSwimmerPoints * config.NEURAL_OUTPUTS_PER_SWIMMER) +
+                              (numEaterPoints * config.NEURAL_OUTPUTS_PER_EATER) +
+                              (numPredatorPoints * config.NEURAL_OUTPUTS_PER_PREDATOR) +
+                              (numJetNodes * config.NEURAL_OUTPUTS_PER_JET) +
+                              (numPotentialGrabberPoints * config.NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) +
+                              (numAttractorPoints * config.NEURAL_OUTPUTS_PER_ATTRACTOR) +
+                              (numRepulsorPoints * config.NEURAL_OUTPUTS_PER_REPULSOR);
         // console.log(`Body ${this.id} _calculateBrainVectorSizes: Calculated nd.outputVectorSize = ${nd.outputVectorSize}`);
     }
 
@@ -2567,7 +2567,7 @@ export class SoftBody {
         const actionDetailsBatch = nd.experienceBuffer.map(exp => exp.actionDetails); // Array of arrays of actionDetail objects
         const rewards = nd.experienceBuffer.map(exp => exp.reward);
 
-        const discountedRewards = this.calculateDiscountedRewards(rewards, DISCOUNT_FACTOR_GAMMA);
+        const discountedRewards = this.calculateDiscountedRewards(rewards, config.DISCOUNT_FACTOR_GAMMA);
 
         // Normalize discounted rewards (optional but good practice)
         let meanDiscountedReward = 0;
@@ -2681,15 +2681,15 @@ export class SoftBody {
         const batchSize = nd.experienceBuffer.length;
         for (let j = 0; j < nd.outputVectorSize; j++) {
             for (let k = 0; k < nd.hiddenLayerSize; k++) {
-                nd.weightsHO[j][k] += LEARNING_RATE * gradWeightsHO_acc[j][k] / batchSize;
+                nd.weightsHO[j][k] += config.LEARNING_RATE * gradWeightsHO_acc[j][k] / batchSize;
             }
-            nd.biasesO[j] += LEARNING_RATE * gradBiasesO_acc[j] / batchSize;
+            nd.biasesO[j] += config.LEARNING_RATE * gradBiasesO_acc[j] / batchSize;
         }
         for (let h = 0; h < nd.hiddenLayerSize; h++) {
             for (let i = 0; i < nd.inputVectorSize; i++) {
-                nd.weightsIH[h][i] += LEARNING_RATE * gradWeightsIH_acc[h][i] / batchSize;
+                nd.weightsIH[h][i] += config.LEARNING_RATE * gradWeightsIH_acc[h][i] / batchSize;
             }
-            nd.biasesH[h] += LEARNING_RATE * gradBiasesH_acc[h] / batchSize;
+            nd.biasesH[h] += config.LEARNING_RATE * gradBiasesH_acc[h] / batchSize;
         }
 
         nd.experienceBuffer = []; // Clear buffer after training

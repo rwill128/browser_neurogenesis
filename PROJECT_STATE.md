@@ -126,3 +126,6 @@ For each scenario run:
 - Adjusted mobile info-panel behavior per Rick feedback:
   - selected-creature stats panel no longer auto-opens on mobile selection
   - added explicit mobile `Info` toggle button next to Prev/Next creature controls.
+- Fixed runtime crash in `SoftBody.getAverageDamping()` (`RIGID_SPRING_DAMPING` reference): now uses `config.RIGID_SPRING_DAMPING`.
+- Hardened legacy SoftBody brain helper paths by replacing bare constants with `config.*` equivalents to prevent future ReferenceErrors.
+- Added regression test `SoftBody.getAverageDamping uses config rigid damping fallback for rigid-only springs`.

@@ -70,17 +70,29 @@ const world = data.world || { width: 120, height: 80 };
     const red = Math.floor(255 - (e / 140) * 140);
     const green = Math.floor(80 + (e / 140) * 170);
 
-    if (Array.isArray(c.vertices) && c.vertices.length === 4) {
+    if (Array.isArray(c.vertices) && c.vertices.length >= 3) {
       const pts = c.vertices.map(v => ({
         x: Math.floor((v.x / world.width) * (w - 1)),
         y: Math.floor((v.y / world.height) * (h - 1))
       }));
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < pts.length; i++) {
         const a = pts[i];
-        const b = pts[(i + 1) % 4];
+        const b = pts[(i + 1) % pts.length];
         drawLine(buf, a.x, a.y, b.x, b.y, red, green, 220);
-        drawCircle(buf, a.x, a.y, 2, 240, 240, 255);
+        drawCircle(buf, a.x, a.y, 1, 240, 240, 255);
       }
+    } else if (Array.isArray(c.vertices) && c.vertices.length === 2) {
+      const a = {
+        x: Math.floor((c.vertices[0].x / world.width) * (w - 1)),
+        y: Math.floor((c.vertices[0].y / world.height) * (h - 1))
+      };
+      const b = {
+        x: Math.floor((c.vertices[1].x / world.width) * (w - 1)),
+        y: Math.floor((c.vertices[1].y / world.height) * (h - 1))
+      };
+      drawLine(buf, a.x, a.y, b.x, b.y, red, green, 220);
+      drawCircle(buf, a.x, a.y, 2, 240, 240, 255);
+      drawCircle(buf, b.x, b.y, 2, 240, 240, 255);
     } else {
       const px = Math.floor((c.center.x / world.width) * (w - 1));
       const py = Math.floor((c.center.y / world.height) * (h - 1));

@@ -5,7 +5,14 @@ import { stepWorld } from './engine/stepWorld.mjs';
 import {FluidField} from './classes/FluidField.js';
 import {GPUFluidField} from './gpuFluidField.js';
 import {isWebGpuSupported} from './gpuUtils.js';
-import { createLightField, createNutrientField, createViscosityField } from './engine/environmentFields.js';
+import {
+    initializeSpatialGrid as initializeSharedSpatialGrid,
+    initializePopulation as initializeSharedPopulation,
+    initializeParticles as initializeSharedParticles,
+    initializeNutrientMap as initializeSharedNutrientMap,
+    initializeLightMap as initializeSharedLightMap,
+    initializeViscosityMap as initializeSharedViscosityMap
+} from './engine/initWorld.mjs';
 import {
     canvas,
     ctx, updateInfoPanel,
@@ -120,30 +127,20 @@ syncRuntimeState({
 syncModuleBindingsFromWorldState();
 
 function initializeSpatialGrid() {
-    simulationWorldState.spatialGrid = new Array(config.GRID_COLS * config.GRID_ROWS);
-    for (let i = 0; i < config.GRID_COLS * config.GRID_ROWS; i++) {
-        simulationWorldState.spatialGrid[i] = [];
-    }
+    initializeSharedSpatialGrid(simulationWorldState, config);
     syncModuleBindingsFromWorldState();
 }
 
 
 // --- Simulation Setup ---
 function initializePopulation() {
-    simulationWorldState.softBodyPopulation = [];
-    simulationWorldState.nextSoftBodyId = 0;
-
-    for (let i = 0; i < config.CREATURE_POPULATION_FLOOR; i++) { // Use floor for initial pop
-        const margin = 50;
-        const randX = margin + Math.random() * (config.WORLD_WIDTH - margin * 2);
-        const randY = margin + Math.random() * (config.WORLD_HEIGHT - margin * 2);
-        const softBody = new SoftBody(simulationWorldState.nextSoftBodyId++, randX, randY, null);
-        softBody.setNutrientField(simulationWorldState.nutrientField);
-        softBody.setLightField(simulationWorldState.lightField);
-        softBody.setParticles(simulationWorldState.particles);
-        softBody.setSpatialGrid(simulationWorldState.spatialGrid);
-        simulationWorldState.softBodyPopulation.push(softBody);
-    }
+    initializeSharedPopulation(simulationWorldState, {
+        config,
+        SoftBodyClass: SoftBody,
+        count: config.CREATURE_POPULATION_FLOOR,
+        spawnMargin: 50,
+        rng: Math.random
+    });
 
     syncModuleBindingsFromWorldState();
     syncRuntimeState({ softBodyPopulation: simulationWorldState.softBodyPopulation });
@@ -217,7 +214,12 @@ async function initFluidSimulation(targetCanvas) {
 }
 
 function initParticles() {
-    simulationWorldState.particles = [];
+    initializeSharedParticles(simulationWorldState, {
+        config,
+        ParticleClass: null,
+        count: 0,
+        rng: Math.random
+    });
     config.particleEmissionDebt = 0;
     syncModuleBindingsFromWorldState();
 }
@@ -457,8 +459,12 @@ function drawFluidVelocities(ctx, fluidData, viewportCanvasWidth, viewportCanvas
 
 function initNutrientMap() {
     const size = Math.round(config.FLUID_GRID_SIZE_CONTROL);
-    simulationWorldState.nutrientField = createNutrientField(size);
-    if (simulationWorldState.nutrientField.length === 0) {
+    const field = initializeSharedNutrientMap(simulationWorldState, {
+        config,
+        size,
+        rng: Math.random
+    });
+    if (field.length === 0) {
         console.error("Invalid size for nutrient map:", size);
         return;
     }
@@ -468,8 +474,12 @@ function initNutrientMap() {
 
 function initLightMap() {
     const size = Math.round(config.FLUID_GRID_SIZE_CONTROL);
-    simulationWorldState.lightField = createLightField(size);
-    if (simulationWorldState.lightField.length === 0) {
+    const field = initializeSharedLightMap(simulationWorldState, {
+        config,
+        size,
+        rng: Math.random
+    });
+    if (field.length === 0) {
         console.error("Invalid size for light map:", size);
         return;
     }
@@ -479,8 +489,12 @@ function initLightMap() {
 
 function initViscosityMap() {
     const size = Math.round(config.FLUID_GRID_SIZE_CONTROL);
-    simulationWorldState.viscosityField = createViscosityField(size);
-    if (simulationWorldState.viscosityField.length === 0) {
+    const field = initializeSharedViscosityMap(simulationWorldState, {
+        config,
+        size,
+        rng: Math.random
+    });
+    if (field.length === 0) {
         console.error("Invalid size for viscosity map:", size);
         return;
     }

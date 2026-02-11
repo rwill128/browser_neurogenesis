@@ -2,12 +2,17 @@ import config from '../js/config.js';
 import { SoftBody } from '../js/classes/SoftBody.js';
 import { Particle } from '../js/classes/Particle.js';
 import { FluidField } from '../js/classes/FluidField.js';
-import { createEnvironmentFields } from '../js/engine/environmentFields.js';
 import { syncRuntimeState } from '../js/engine/runtimeState.js';
 import { NodeType, MovementType, EyeTargetType } from '../js/classes/constants.js';
 import { createSeededRandom, withRandom } from './seededRandomScope.mjs';
 import { stepWorld } from '../js/engine/stepWorld.mjs';
 import { createWorldState } from '../js/engine/worldState.mjs';
+import {
+  initializeSpatialGrid as initializeSharedSpatialGrid,
+  initializeEnvironmentMaps as initializeSharedEnvironmentMaps,
+  initializeParticles as initializeSharedParticles,
+  initializePopulation as initializeSharedPopulation
+} from '../js/engine/initWorld.mjs';
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
@@ -44,7 +49,7 @@ export class RealWorld {
     this._applyScenarioConfig();
 
     this.worldState = createWorldState({
-      spatialGrid: this._createSpatialGrid(),
+      spatialGrid: null,
       softBodyPopulation: [],
       particles: [],
       nutrientField: null,
@@ -52,6 +57,7 @@ export class RealWorld {
       viscosityField: null,
       nextSoftBodyId: 0
     });
+    initializeSharedSpatialGrid(this.worldState, config);
 
     this.worldState.fluidField = new FluidField(
       config.FLUID_GRID_SIZE_CONTROL,
@@ -71,28 +77,27 @@ export class RealWorld {
     });
 
     withRandom(this.rand, () => {
-      const fieldSize = Math.round(config.FLUID_GRID_SIZE_CONTROL);
-      const envFields = createEnvironmentFields({ size: fieldSize, random: this.rand });
-      this.worldState.nutrientField = envFields.nutrientField;
-      this.worldState.lightField = envFields.lightField;
-      this.worldState.viscosityField = envFields.viscosityField;
+      initializeSharedEnvironmentMaps(this.worldState, {
+        config,
+        size: Math.round(config.FLUID_GRID_SIZE_CONTROL),
+        rng: this.rand
+      });
       this.worldState.fluidField.setViscosityField(this.worldState.viscosityField);
 
-      for (let i = 0; i < scenario.particles; i++) {
-        this.worldState.particles.push(new Particle(this.rand() * config.WORLD_WIDTH, this.rand() * config.WORLD_HEIGHT, this.worldState.fluidField));
-      }
+      initializeSharedParticles(this.worldState, {
+        config,
+        ParticleClass: Particle,
+        count: scenario.particles,
+        rng: this.rand
+      });
 
-      for (let i = 0; i < scenario.creatures; i++) {
-        const margin = 10;
-        const x = margin + this.rand() * Math.max(1, (config.WORLD_WIDTH - margin * 2));
-        const y = margin + this.rand() * Math.max(1, (config.WORLD_HEIGHT - margin * 2));
-        const body = new SoftBody(this.worldState.nextSoftBodyId++, x, y, null);
-        body.setNutrientField(this.worldState.nutrientField);
-        body.setLightField(this.worldState.lightField);
-        body.setParticles(this.worldState.particles);
-        body.setSpatialGrid(this.worldState.spatialGrid);
-        this.worldState.softBodyPopulation.push(body);
-      }
+      initializeSharedPopulation(this.worldState, {
+        config,
+        SoftBodyClass: SoftBody,
+        count: scenario.creatures,
+        spawnMargin: 10,
+        rng: this.rand
+      });
     });
 
     this._syncAliasesFromWorldState();
@@ -123,13 +128,6 @@ export class RealWorld {
     config.GRID_ROWS = Math.ceil(config.WORLD_HEIGHT / config.GRID_CELL_SIZE);
   }
 
-  _createSpatialGrid() {
-    const total = Math.max(1, config.GRID_COLS * config.GRID_ROWS);
-    const grid = new Array(total);
-    for (let i = 0; i < total; i++) grid[i] = [];
-    return grid;
-  }
-
   _applyEvents() {
     for (const ev of this.events) {
       if (ev.tick !== this.tick) continue;
@@ -140,8 +138,16 @@ export class RealWorld {
       } else if (ev.kind === 'velocityKick') {
         for (const b of this.softBodyPopulation) {
           for (const p of b.massPoints) {
-            p.vel.x += (this.rand() - 0.5) * (ev.amount || 1);
-            p.vel.y += (this.rand() - 0.5) * (ev.amount || 1);
+            const kickX = (this.rand() - 0.5) * (ev.amount || 1);
+            const kickY = (this.rand() - 0.5) * (ev.amount || 1);
+            if (p.vel && Number.isFinite(p.vel.x) && Number.isFinite(p.vel.y)) {
+              p.vel.x += kickX;
+              p.vel.y += kickY;
+            } else if (p.prevPos && p.pos) {
+              // Verlet bodies encode velocity as (pos - prevPos), so shift prevPos opposite the kick.
+              p.prevPos.x -= kickX;
+              p.prevPos.y -= kickY;
+            }
           }
         }
       }

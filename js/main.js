@@ -22,6 +22,8 @@ import {
     updateInstabilityIndicator, initializeAllSliderDisplays, updatePopulationCount, updateStatsPanel, updateInfoPanel,
     clampViewOffsets
 } from './ui.js';
+import { applyScenarioFromUrl } from './debug/scenarios.js';
+import { initDebugRuntime, shouldForceStep, consumeForcedStep, onSimulationTick } from './debug/telemetry.js';
 
 let lastTime = 0;
 let deltaTime = 0;
@@ -35,6 +37,12 @@ let perfLogLastTs = 0;
 const PERF_LOG_INTERVAL_MS = 5000;
 
 async function main() {
+    const scenarioInfo = applyScenarioFromUrl();
+    initDebugRuntime();
+    console.log(`[SCENARIO] Loaded: ${scenarioInfo.name} - ${scenarioInfo.description}`);
+
+    worldWidthInput.value = String(config.WORLD_WIDTH || parseInt(worldWidthInput.value) || 8000);
+    worldHeightInput.value = String(config.WORLD_HEIGHT || parseInt(worldHeightInput.value) || 6000);
     config.WORLD_WIDTH = parseInt(worldWidthInput.value) || 8000;
     config.WORLD_HEIGHT = parseInt(worldHeightInput.value) || 6000;
     // Initial resize
@@ -113,7 +121,9 @@ function gameLoop(timestamp) {
     const currentMaxDeltaTime = config.MAX_DELTA_TIME_MS / 1000.0;
     const effectiveDeltaTime = Math.min(deltaTime, currentMaxDeltaTime);
 
-    if (!config.IS_SIMULATION_PAUSED) {
+    const forcedStep = shouldForceStep();
+    if (!config.IS_SIMULATION_PAUSED || forcedStep) {
+        if (forcedStep) consumeForcedStep();
         config.totalSimulationTime += effectiveDeltaTime;
 
         if (config.nutrientCyclePeriodSeconds > 0) {
@@ -132,6 +142,7 @@ function gameLoop(timestamp) {
         currentLightMultiplierDisplay.textContent = config.globalLightMultiplier.toFixed(2);
 
         updatePhysics(effectiveDeltaTime);
+        onSimulationTick();
     }
 
     if (!config.IS_HEADLESS_MODE) {

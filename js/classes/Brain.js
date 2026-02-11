@@ -21,8 +21,13 @@ export class Brain {
 
         if (this.brainNode && this.brainNode.neuronData && this.brainNode.neuronData.isBrain) {
             this._calculateBrainVectorSizes();
-            this._initializeBrainWeightsAndBiases();
+            const topologyChanged = this._initializeBrainWeightsAndBiases();
             this._initializeBrainRLComponents();
+
+            // If topology changed, clear stale on-policy experience from old action/state shape.
+            if (topologyChanged) {
+                this._resetExperienceForTopologyChange();
+            }
         }
     }
 
@@ -95,6 +100,8 @@ export class Brain {
      *
      * Existing rows/cols keep their values; only newly introduced slices are
      * random-initialized. This supports topology growth without wiping policy.
+     *
+     * @returns {boolean} true when topology dimensions changed.
      */
     _initializeBrainWeightsAndBiases() {
         const nd = this.brainNode.neuronData;
@@ -102,11 +109,41 @@ export class Brain {
             nd.hiddenLayerSize = config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MAX - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1));
         }
 
+        const prevHidden = Array.isArray(nd.weightsIH) ? nd.weightsIH.length : 0;
+        const prevInput = (Array.isArray(nd.weightsIH) && nd.weightsIH.length > 0 && Array.isArray(nd.weightsIH[0])) ? nd.weightsIH[0].length : 0;
+        const prevOutput = Array.isArray(nd.weightsHO) ? nd.weightsHO.length : 0;
+
         nd.weightsIH = this._resizeMatrixPreserve(nd.weightsIH, nd.hiddenLayerSize, nd.inputVectorSize);
         nd.biasesH = this._resizeVectorPreserve(nd.biasesH, nd.hiddenLayerSize);
 
         nd.weightsHO = this._resizeMatrixPreserve(nd.weightsHO, nd.outputVectorSize, nd.hiddenLayerSize);
         nd.biasesO = this._resizeVectorPreserve(nd.biasesO, nd.outputVectorSize);
+
+        // Treat initial creation (all prev=0) as non-change for buffer-reset purposes.
+        if (prevHidden === 0 && prevInput === 0 && prevOutput === 0) {
+            return false;
+        }
+
+        return (
+            prevHidden !== nd.hiddenLayerSize ||
+            prevInput !== nd.inputVectorSize ||
+            prevOutput !== nd.outputVectorSize
+        );
+    }
+
+    /**
+     * Drop stale experience that was collected under an older topology.
+     */
+    _resetExperienceForTopologyChange() {
+        const nd = this.brainNode?.neuronData;
+        if (!nd) return;
+
+        nd.experienceBuffer = [];
+        nd.framesSinceLastTrain = 0;
+        nd.currentFrameInputVectorWithLabels = [];
+        nd.currentFrameActionDetails = [];
+        nd.previousEnergyForReward = this.softBody.creatureEnergy;
+        nd.previousEnergyChangeForNN = 0;
     }
 
     /**

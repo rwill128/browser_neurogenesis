@@ -9,6 +9,11 @@ import {
     computeGrowthPopulationThrottle,
     computeGrowthSizeCostMultiplier
 } from '../engine/growthControls.mjs';
+import {
+    computeDensityFertilityScale,
+    evaluateResourceCoupling,
+    applyReproductionResourceDebit
+} from '../engine/reproductionControls.mjs';
 
 const DEFAULT_GROWTH_NODE_TYPES = [
     NodeType.PREDATOR,
@@ -90,6 +95,12 @@ export class SoftBody {
         this.growthSuppressedByCooldown = 0;
         this.nnTopologyVersion = 0;
         this.rlBufferResetsDueToTopology = 0;
+
+        // Reproduction control telemetry (new): observability for density/resource coupling.
+        this.reproductionSuppressedByDensity = 0;
+        this.reproductionSuppressedByResources = 0;
+        this.reproductionSuppressedByFertilityRoll = 0;
+        this.reproductionResourceDebitApplied = 0;
 
         // Initialize heritable/mutable properties
         if (isBlueprint && creationData) {
@@ -2158,7 +2169,69 @@ export class SoftBody {
     getMinY() { return Math.min(...this.massPoints.map(p => p.pos.y - p.radius)); }
     getMaxY() { return Math.max(...this.massPoints.map(p => p.pos.y + p.radius)); }
 
+    /**
+     * Count nearby living creatures around a point for local density pressure.
+     */
+    _countNearbyCreatures(center, radius) {
+        const crowd = Array.isArray(runtimeState.softBodyPopulation) ? runtimeState.softBodyPopulation : [];
+        const r = Math.max(1, Number(radius) || 1);
+        const rSq = r * r;
+        let count = 0;
 
+        for (const other of crowd) {
+            if (!other || other === this || other.isUnstable) continue;
+            const otherCenter = other.getAveragePosition ? other.getAveragePosition() : null;
+            if (!otherCenter) continue;
+            const dx = otherCenter.x - center.x;
+            const dy = otherCenter.y - center.y;
+            if (dx * dx + dy * dy <= rSq) count++;
+        }
+        return count;
+    }
+
+    /**
+     * Sample local nutrient/light values at a world position.
+     */
+    _sampleReproductionResourcesAt(worldX, worldY) {
+        if (!runtimeState.fluidField) return null;
+        const fluid = runtimeState.fluidField;
+        const gx = Math.floor(worldX / fluid.scaleX);
+        const gy = Math.floor(worldY / fluid.scaleY);
+        const idx = fluid.IX(gx, gy);
+
+        const nutrient = this.nutrientField && idx >= 0 && idx < this.nutrientField.length
+            ? (this.nutrientField[idx] * config.globalNutrientMultiplier)
+            : null;
+        const light = this.lightField && idx >= 0 && idx < this.lightField.length
+            ? (this.lightField[idx] * config.globalLightMultiplier)
+            : null;
+
+        return { idx, nutrient, light };
+    }
+
+    /**
+     * Debit local nutrient/light resources when offspring are produced.
+     */
+    _applyReproductionResourceDebitAt(worldX, worldY) {
+        const sample = this._sampleReproductionResourcesAt(worldX, worldY);
+        if (!sample) return;
+
+        applyReproductionResourceDebit({
+            nutrientField: this.nutrientField,
+            lightField: this.lightField,
+            index: sample.idx,
+            nutrientDebit: config.REPRO_RESOURCE_NUTRIENT_DEBIT_PER_OFFSPRING,
+            lightDebit: config.REPRO_RESOURCE_LIGHT_DEBIT_PER_OFFSPRING,
+            nutrientMin: config.REPRO_RESOURCE_FIELD_MIN_CLAMP,
+            lightMin: config.REPRO_RESOURCE_FIELD_MIN_CLAMP
+        });
+
+        this.reproductionResourceDebitApplied += 1;
+    }
+
+    /**
+     * Attempt reproduction with density-dependent fertility and local resource coupling.
+     */
     reproduce() {
         if (this.failedReproductionCooldown > 0) {
             this.failedReproductionCooldown--;
@@ -2167,11 +2240,55 @@ export class SoftBody {
 
         if (this.isUnstable || !this.canReproduce || !config.canCreaturesReproduceGlobally) return []; // Check global flag
 
+        const parentAvgPos = this.getAveragePosition();
+        const nearbyCreatures = this._countNearbyCreatures(parentAvgPos, config.REPRO_LOCAL_DENSITY_RADIUS);
+        const densityScale = computeDensityFertilityScale({
+            population: Array.isArray(runtimeState.softBodyPopulation) ? runtimeState.softBodyPopulation.length : 0,
+            floor: config.CREATURE_POPULATION_FLOOR,
+            ceiling: config.CREATURE_POPULATION_CEILING,
+            globalSoftMultiplier: config.REPRO_FERTILITY_GLOBAL_SOFT_MULTIPLIER,
+            globalHardMultiplier: config.REPRO_FERTILITY_GLOBAL_HARD_MULTIPLIER,
+            globalMinScale: config.REPRO_FERTILITY_GLOBAL_MIN_SCALE,
+            localNeighbors: nearbyCreatures,
+            localSoftNeighbors: config.REPRO_FERTILITY_LOCAL_SOFT_NEIGHBORS,
+            localHardNeighbors: config.REPRO_FERTILITY_LOCAL_HARD_NEIGHBORS,
+            localMinScale: config.REPRO_FERTILITY_LOCAL_MIN_SCALE
+        });
+
+        let resourceFertilityScale = 1;
+        const resourceSample = this._sampleReproductionResourcesAt(parentAvgPos.x, parentAvgPos.y);
+        if (resourceSample && resourceSample.nutrient !== null && resourceSample.light !== null) {
+            const resourceCoupling = evaluateResourceCoupling({
+                nutrientValue: resourceSample.nutrient,
+                lightValue: resourceSample.light,
+                minNutrient: config.REPRO_RESOURCE_MIN_NUTRIENT,
+                minLight: config.REPRO_RESOURCE_MIN_LIGHT
+            });
+
+            if (!resourceCoupling.allow) {
+                this.reproductionSuppressedByResources += 1;
+                return [];
+            }
+
+            resourceFertilityScale = resourceCoupling.fertilityScale;
+        }
+
+        const fertilityScale = Math.max(
+            config.REPRO_MIN_FERTILITY_SCALE,
+            Math.max(0, Math.min(1, densityScale.scale * resourceFertilityScale))
+        );
+
+        if (Math.random() > fertilityScale) {
+            if (densityScale.scale < 1) this.reproductionSuppressedByDensity += 1;
+            this.reproductionSuppressedByFertilityRoll += 1;
+            return [];
+        }
+
         const energyForOneOffspring = this.currentMaxEnergy * config.OFFSPRING_INITIAL_ENERGY_SHARE; // Use currentMaxEnergy for cost basis
-        let hadEnoughEnergyForAttempt = this.creatureEnergy >= energyForOneOffspring;
+        const hadEnoughEnergyForAttempt = this.creatureEnergy >= energyForOneOffspring;
 
         let successfullyPlacedOffspring = 0;
-        let offspring = [];
+        const offspring = [];
 
         // Pre-calculate spatial info for existing bodies to optimize collision checks
         const existingBodiesSpatialInfo = [];
@@ -2194,30 +2311,27 @@ export class SoftBody {
                 const offsetX = Math.cos(angle) * radiusOffset;
                 const offsetY = Math.sin(angle) * radiusOffset;
 
-                const parentAvgPos = this.getAveragePosition();
-                let spawnX = parentAvgPos.x + offsetX;
-                let spawnY = parentAvgPos.y + offsetY;
+                const spawnX = parentAvgPos.x + offsetX;
+                const spawnY = parentAvgPos.y + offsetY;
 
                 // Create the potential child. Its blueprintRadius will be calculated in its constructor.
                 // We will assign a proper ID only if placement is successful.
-                let potentialChild = new SoftBody(-1, spawnX, spawnY, this); // Use -1 or a temporary ID marker
+                const potentialChild = new SoftBody(-1, spawnX, spawnY, this); // Use -1 or a temporary ID marker
                 potentialChild.setNutrientField(this.nutrientField);
                 potentialChild.setLightField(this.lightField);
                 potentialChild.setParticles(this.particles);
                 potentialChild.setSpatialGrid(this.spatialGrid);
 
-                if (potentialChild.massPoints.length === 0 || potentialChild.blueprintRadius === 0) continue; 
+                if (potentialChild.massPoints.length === 0 || potentialChild.blueprintRadius === 0) continue;
 
                 let isSpotClear = true;
                 // Check against existing population using blueprintRadius and cached positions
                 for (const otherBodyInfo of existingBodiesSpatialInfo) {
-                    // if (otherBody.isUnstable || otherBody === this) continue; // Already filtered
-                    // const otherBodyCenter = otherBody.getAveragePosition(); // Use cached center
                     const distSq = (spawnX - otherBodyInfo.center.x)**2 + (spawnY - otherBodyInfo.center.y)**2;
                     // Use the sum of blueprint radii plus a clearance value for the check
                     const combinedRadii = potentialChild.blueprintRadius + otherBodyInfo.radius + config.OFFSPRING_PLACEMENT_CLEARANCE_RADIUS;
                     if (distSq < combinedRadii * combinedRadii) {
-                        isSpotClear = false; 
+                        isSpotClear = false;
                         break;
                     }
                 }
@@ -2228,7 +2342,7 @@ export class SoftBody {
                         const distSq = (spawnX - newBornCenter.x)**2 + (spawnY - newBornCenter.y)**2;
                         const combinedRadii = potentialChild.blueprintRadius + newBorn.blueprintRadius + config.OFFSPRING_PLACEMENT_CLEARANCE_RADIUS;
                         if (distSq < combinedRadii * combinedRadii) {
-                            isSpotClear = false; 
+                            isSpotClear = false;
                             break;
                         }
                     }
@@ -2236,11 +2350,7 @@ export class SoftBody {
 
                 if (isSpotClear) {
                     this.creatureEnergy -= energyForOneOffspring;
-                    // Use the already constructed tempChild's points, but create a new SoftBody instance with proper ID and translated points.
-                    // const finalChild = new SoftBody(nextSoftBodyId++, spawnX, spawnY, this);
-
-                    // finalChild.creatureEnergy = energyForOneOffspring; // Set energy for the actual child
-                    // offspring.push(finalChild);
+                    this._applyReproductionResourceDebitAt(spawnX, spawnY);
 
                     // Optimization: tempChild becomes the finalChild
                     potentialChild.id = this.id + successfullyPlacedOffspring; // Assign final ID and increment global counter
@@ -2259,7 +2369,7 @@ export class SoftBody {
 
         if (successfullyPlacedOffspring > 0) {
             this.creatureEnergy *= (1 - config.REPRODUCTION_ADDITIONAL_COST_FACTOR);
-            if(this.creatureEnergy < 0) this.creatureEnergy = 0;
+            if (this.creatureEnergy < 0) this.creatureEnergy = 0;
             this.ticksSinceBirth = 0;
             this.canReproduce = false;
             this.justReproduced = true; // Set the flag here

@@ -99,6 +99,7 @@ What it does:
 - catches crashes and writes both a crash report and full snapshot for replay
 - writes periodic checkpoints + final report even on successful runs
 - includes growth/RL continuity telemetry in reports (`growthEvents`, `growthEnergySpent`, `rlTopologyResets`, etc.)
+- includes reproduction-control telemetry (`reproductionSuppressedByDensity`, `reproductionSuppressedByResources`, resource debits)
 
 ## 7) Unit tests (growth controls + topology-resize RL handling)
 

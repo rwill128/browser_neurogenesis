@@ -80,3 +80,9 @@ For each scenario run:
   - `node-harness/tests/growthControls.test.mjs`
   - `node-harness/tests/brainTopologyReset.test.mjs`
   - `node-harness/tests/softBodyGrowthGuardrails.test.mjs`
+- Added reproduction stabilization controls beyond hard cap:
+  - density-dependent fertility scaling (global + local crowding pressure)
+  - resource-coupled reproduction gating + local nutrient/light debit per offspring
+- Added reproduction-control unit tests:
+  - `node-harness/tests/reproductionControls.test.mjs`
+  - `node-harness/tests/softBodyReproductionControls.test.mjs`

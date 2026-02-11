@@ -205,6 +205,11 @@ function summarize(worldState, tick, timeSec) {
   let rlTopologyResets = 0;
   let topologyVersionTotal = 0;
 
+  let reproductionSuppressedByDensity = 0;
+  let reproductionSuppressedByResources = 0;
+  let reproductionSuppressedByFertilityRoll = 0;
+  let reproductionResourceDebitApplied = 0;
+
   for (const b of worldState.softBodyPopulation) {
     if (b.isUnstable) unstable++;
     const points = Array.isArray(b.massPoints) ? b.massPoints.length : 0;
@@ -222,6 +227,11 @@ function summarize(worldState, tick, timeSec) {
     growthSuppressedByCooldown += Number(b.growthSuppressedByCooldown || 0);
     rlTopologyResets += Number(b.rlBufferResetsDueToTopology || 0);
     topologyVersionTotal += Number(b.nnTopologyVersion || 0);
+
+    reproductionSuppressedByDensity += Number(b.reproductionSuppressedByDensity || 0);
+    reproductionSuppressedByResources += Number(b.reproductionSuppressedByResources || 0);
+    reproductionSuppressedByFertilityRoll += Number(b.reproductionSuppressedByFertilityRoll || 0);
+    reproductionResourceDebitApplied += Number(b.reproductionResourceDebitApplied || 0);
   }
 
   return {
@@ -241,7 +251,11 @@ function summarize(worldState, tick, timeSec) {
     growthSuppressedByEnergy,
     growthSuppressedByCooldown,
     rlTopologyResets,
-    topologyVersionTotal
+    topologyVersionTotal,
+    reproductionSuppressedByDensity,
+    reproductionSuppressedByResources,
+    reproductionSuppressedByFertilityRoll,
+    reproductionResourceDebitApplied
   };
 }
 
@@ -325,7 +339,8 @@ for (tick = 1; tick <= steps; tick++) {
       console.log(
         `[SOAK] tick=${s.tick} creatures=${s.creatures} particles=${s.particles} ` +
         `totalPoints=${s.totalPoints} maxPts=${s.maxPointsPerCreature} ` +
-        `growthEvents=${s.growthEvents} rlTopologyResets=${s.rlTopologyResets}`
+        `growthEvents=${s.growthEvents} rlTopologyResets=${s.rlTopologyResets} ` +
+        `reproSuppDensity=${s.reproductionSuppressedByDensity} reproSuppResource=${s.reproductionSuppressedByResources}`
       );
     }
   } catch (error) {

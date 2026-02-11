@@ -6,6 +6,7 @@ import { createEnvironmentFields } from '../js/engine/environmentFields.js';
 import { syncRuntimeState } from '../js/engine/runtimeState.js';
 import { NodeType, MovementType, EyeTargetType } from '../js/classes/constants.js';
 import { createSeededRandom, withRandom } from './seededRandomScope.mjs';
+import { stepWorld } from '../js/engine/stepWorld.mjs';
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
@@ -161,22 +162,32 @@ export class RealWorld {
 
     withRandom(this.rand, () => {
       this._applyEvents();
-      this._updateSpatialGrid();
 
-      this.fluidField.dt = dt;
-      this.fluidField.step();
-
-      for (let i = this.softBodyPopulation.length - 1; i >= 0; i--) {
-        const body = this.softBodyPopulation[i];
-        if (!body.isUnstable) body.updateSelf(dt, this.fluidField);
-        if (body.isUnstable) this.softBodyPopulation.splice(i, 1);
-      }
-
-      for (let i = this.particles.length - 1; i >= 0; i--) {
-        const p = this.particles[i];
-        p.update(dt);
-        if (p.life <= 0) this.particles.splice(i, 1);
-      }
+      stepWorld(
+        {
+          softBodyPopulation: this.softBodyPopulation,
+          particles: this.particles,
+          spatialGrid: this.spatialGrid,
+          fluidField: this.fluidField,
+          nutrientField: this.nutrientField,
+          lightField: this.lightField,
+          nextSoftBodyId: this.nextSoftBodyId,
+          globalEnergyGains: null,
+          globalEnergyCosts: null
+        },
+        dt,
+        {
+          config,
+          rng: this.rand,
+          SoftBodyClass: SoftBody,
+          ParticleClass: Particle,
+          allowReproduction: false,
+          maintainCreatureFloor: false,
+          maintainParticleFloor: false,
+          applyEmitters: false,
+          applySelectedPointPush: false
+        }
+      );
     });
   }
 

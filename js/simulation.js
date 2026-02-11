@@ -1,6 +1,7 @@
 import config from './config.js';
 import {SoftBody} from './classes/SoftBody.js';
 import {Particle} from './classes/Particle.js';
+import { stepWorld } from './engine/stepWorld.mjs';
 import {FluidField} from './classes/FluidField.js';
 import {GPUFluidField} from './gpuFluidField.js';
 import {isWebGpuSupported} from './gpuUtils.js';
@@ -94,43 +95,6 @@ function initializeSpatialGrid() {
     }
 }
 
-function updateSpatialGrid() {
-    if (!spatialGrid) return;
-    for (let i = 0; i < spatialGrid.length; i++) {
-        spatialGrid[i] = [];
-    }
-
-    for (const body of softBodyPopulation) {
-        if (body.isUnstable) continue;
-        for (let i_p = 0; i_p < body.massPoints.length; i_p++) {
-            const point = body.massPoints[i_p];
-            const gx = Math.floor(point.pos.x / config.GRID_CELL_SIZE);
-            const gy = Math.floor(point.pos.y / config.GRID_CELL_SIZE);
-            const index = gx + gy * config.GRID_COLS;
-            if (index >= 0 && index < spatialGrid.length) {
-                spatialGrid[index].push({
-                    type: 'softbody_point',
-                    pointRef: point,
-                    bodyRef: body,
-                    originalIndex: i_p
-                });
-            }
-        }
-    }
-
-    for (const particle of particles) {
-        if (particle.life <= 0) continue;
-        const gx = Math.floor(particle.pos.x / config.GRID_CELL_SIZE);
-        const gy = Math.floor(particle.pos.y / config.GRID_CELL_SIZE);
-        const index = gx + gy * config.GRID_COLS;
-        if (index >= 0 && index < spatialGrid.length) {
-            spatialGrid[index].push({
-                type: 'particle',
-                particleRef: particle
-            });
-        }
-    }
-}
 
 // --- Simulation Setup ---
 function initializePopulation() {
@@ -220,14 +184,6 @@ function initParticles() {
     config.particleEmissionDebt = 0;
 }
 
-function applyVelocityEmitters() {
-    if (!fluidField || config.EMITTER_STRENGTH <= 0) return;
-    for (const emitter of config.velocityEmitters) {
-        fluidField.addVelocity(emitter.gridX, emitter.gridY,
-            emitter.forceX * config.EMITTER_STRENGTH,
-            emitter.forceY * config.EMITTER_STRENGTH);
-    }
-}
 
 let followInfoRefreshCounter = 0;
 
@@ -296,149 +252,41 @@ function updateAutoFollowCamera() {
 // --- Physics Update ---
 function updatePhysics(dt) {
     if (config.IS_SIMULATION_PAUSED) {
-        // requestAnimationFrame(gameLoop); // gameLoop call handled in main.js
         return;
     }
 
-    updateSpatialGrid();
+    const worldState = {
+        softBodyPopulation,
+        particles,
+        spatialGrid,
+        fluidField,
+        nutrientField,
+        lightField,
+        nextSoftBodyId,
+        globalEnergyGains,
+        globalEnergyCosts
+    };
 
-    applyVelocityEmitters();
+    stepWorld(worldState, dt, {
+        config,
+        SoftBodyClass: SoftBody,
+        ParticleClass: Particle,
+        rng: Math.random,
+        allowReproduction: true,
+        maintainCreatureFloor: true,
+        maintainParticleFloor: true,
+        applyEmitters: true,
+        applySelectedPointPush: true,
+        creatureSpawnMargin: 50
+    });
 
-    // Particle Emission Logic with Floor and Ceiling
-    if (particles.length < config.PARTICLE_POPULATION_FLOOR) {
-        let particlesToSpawnToFloor = config.PARTICLE_POPULATION_FLOOR - particles.length;
-        for (let i = 0; i < particlesToSpawnToFloor; i++) {
-            if (particles.length < config.PARTICLE_POPULATION_CEILING) { // Double check ceiling
-                particles.push(new Particle(Math.random() * config.WORLD_WIDTH, Math.random() * config.WORLD_HEIGHT, fluidField));
-            } else {
-                break;
-            }
-        }
-        config.particleEmissionDebt = 0; // Reset debt as we've just topped up
-    } else if (particles.length < config.PARTICLE_POPULATION_CEILING && config.PARTICLES_PER_SECOND > 0 && fluidField) {
-        config.particleEmissionDebt += config.PARTICLES_PER_SECOND * dt;
-        while (config.particleEmissionDebt >= 1 && particles.length < config.PARTICLE_POPULATION_CEILING) {
-            particles.push(new Particle(Math.random() * config.WORLD_WIDTH, Math.random() * config.WORLD_HEIGHT, fluidField));
-            config.particleEmissionDebt -= 1;
-        }
-    } // If particles.length >= PARTICLE_POPULATION_CEILING, do nothing for rate-based emission
+    nextSoftBodyId = worldState.nextSoftBodyId;
 
-
-    if (config.selectedSoftBodyPoint && config.selectedSoftBodyPoint.point.isFixed && fluidField) {
-        const activeBody = config.selectedSoftBodyPoint.body;
-        const point = config.selectedSoftBodyPoint.point;
-        const displacementX = point.pos.x - point.prevPos.x;
-        const displacementY = point.pos.y - point.prevPos.y;
-        const movementMagnitudeSq = displacementX * displacementX + displacementY * displacementY;
-        const movementThresholdSq = 0.01 * 0.01;
-
-        if (movementMagnitudeSq > movementThresholdSq) {
-            const fluidGridX = Math.floor(point.pos.x / fluidField.scaleX);
-            const fluidGridY = Math.floor(point.pos.y / fluidField.scaleY);
-
-            fluidField.addVelocity(fluidGridX, fluidGridY,
-                displacementX * config.SOFT_BODY_PUSH_STRENGTH / fluidField.scaleX, // Scale to grid velocity
-                displacementY * config.SOFT_BODY_PUSH_STRENGTH / fluidField.scaleY);
-            fluidField.addDensity(fluidGridX, fluidGridY, 60, 60, 80, 15);
-        }
-    }
-
-    if (fluidField) {
-        fluidField.dt = dt;
-        fluidField.step();
-    }
-
-    let canCreaturesReproduceGlobally = softBodyPopulation.length < config.CREATURE_POPULATION_CEILING;
-
-    let currentAnyUnstable = false;
-    let newOffspring = [];
-
-    for (let i = softBodyPopulation.length - 1; i >= 0; i--) {
-        const body = softBodyPopulation[i];
-        if (!body.isUnstable) {
-            body.updateSelf(dt, fluidField);
-            if (body.isUnstable) {
-                currentAnyUnstable = true;
-            } else if (body.creatureEnergy >= body.reproductionEnergyThreshold &&
-                body.canReproduce &&
-                canCreaturesReproduceGlobally &&
-                body.failedReproductionCooldown <= 0) {
-                newOffspring.push(...body.reproduce());
-            }
-        }
-    }
-    softBodyPopulation.push(...newOffspring);
-
-    // Update and remove dead particles
-    for (let i = particles.length - 1; i >= 0; i--) {
-        particles[i].update(dt);
-        if (particles[i].life <= 0 && !particles[i].isEaten) {
-            particles.splice(i, 1);
-        } else if (particles[i].isEaten && particles[i].life <= 0) {
-            particles.splice(i, 1);
-        }
-    }
-
-    if (currentAnyUnstable && !config.isAnySoftBodyUnstable) {
-        config.isAnySoftBodyUnstable = true;
-    } else if (!currentAnyUnstable && config.isAnySoftBodyUnstable && !softBodyPopulation.some(b => b.isUnstable)) {
-        config.isAnySoftBodyUnstable = false;
-    }
     updateInstabilityIndicator();
-
-    let removedCount = 0;
-    for (let i = softBodyPopulation.length - 1; i >= 0; i--) {
-        if (softBodyPopulation[i].isUnstable) {
-            const body = softBodyPopulation[i];
-            globalEnergyGains.photosynthesis += body.energyGainedFromPhotosynthesis;
-            globalEnergyGains.eating += body.energyGainedFromEating;
-            globalEnergyGains.predation += body.energyGainedFromPredation;
-
-            // Accumulate global costs from the dying body
-            globalEnergyCosts.baseNodes += body.energyCostFromBaseNodes;
-            globalEnergyCosts.emitterNodes += body.energyCostFromEmitterNodes;
-            globalEnergyCosts.eaterNodes += body.energyCostFromEaterNodes;
-            globalEnergyCosts.predatorNodes += body.energyCostFromPredatorNodes;
-            globalEnergyCosts.neuronNodes += body.energyCostFromNeuronNodes;
-            globalEnergyCosts.swimmerNodes += body.energyCostFromSwimmerNodes;
-            globalEnergyCosts.photosyntheticNodes += body.energyCostFromPhotosyntheticNodes;
-            globalEnergyCosts.grabbingNodes += body.energyCostFromGrabbingNodes;
-            globalEnergyCosts.eyeNodes += body.energyCostFromEyeNodes;
-            globalEnergyCosts.jetNodes += body.energyCostFromJetNodes;
-            globalEnergyCosts.attractorNodes += body.energyCostFromAttractorNodes;
-            globalEnergyCosts.repulsorNodes += body.energyCostFromRepulsorNodes;
-
-            softBodyPopulation.splice(i, 1);
-            removedCount++;
-        }
-    }
-
-    // Creature population floor maintenance
-    const neededToMaintainFloor = config.CREATURE_POPULATION_FLOOR - softBodyPopulation.length;
-    if (neededToMaintainFloor > 0) {
-        for (let i = 0; i < neededToMaintainFloor; i++) {
-            if (softBodyPopulation.length < config.CREATURE_POPULATION_CEILING) { // Also respect ceiling when topping up
-                const margin = 50;
-                const randX = margin + Math.random() * (config.WORLD_WIDTH - margin * 2);
-                const randY = margin + Math.random() * (config.WORLD_HEIGHT - margin * 2);
-                const softBody = new SoftBody(nextSoftBodyId++, randX, randY, null);
-                softBody.setNutrientField(nutrientField);
-                softBody.setLightField(lightField);
-                softBody.setParticles(particles);
-                softBody.setSpatialGrid(spatialGrid);
-                softBodyPopulation.push(softBody);
-            } else {
-                break; // Stop if ceiling is reached during floor maintenance
-            }
-        }
-    }
-
     updateAutoFollowCamera();
     updatePopulationCount();
-
-    // draw(); // REMOVE draw() call from here
-    // requestAnimationFrame(gameLoop); // gameLoop call handled in main.js
 }
+
 
 // --- Drawing --- (draw() function is now standalone)
 export function draw() {

@@ -585,9 +585,25 @@ function getMouseWorldCoordinates(displayMouseX, displayMouseY) {
 }
 
 // --- Event Listeners ---
+function cycleSelectedCreature(direction = 1) {
+    const liveBodies = softBodyPopulation.filter(body => !body.isUnstable && body.massPoints && body.massPoints.length > 0);
+    if (liveBodies.length === 0) return;
+
+    let idx = liveBodies.findIndex(body => body === config.selectedInspectBody);
+    if (idx === -1) idx = 0;
+    idx = (idx + direction + liveBodies.length) % liveBodies.length;
+
+    const nextBody = liveBodies[idx];
+    config.selectedInspectBody = nextBody;
+    config.selectedInspectPointIndex = 0;
+    config.selectedInspectPoint = nextBody.massPoints[0] || null;
+
+    updateInfoPanel();
+}
+
 document.addEventListener('keydown', (e) => {
-    // Allow 'P' to toggle pause, and WASD for panning regardless of pause state.
-    if (e.key.toLowerCase() !== 'p' && e.key.toLowerCase() !== 'w' && e.key.toLowerCase() !== 'a' && e.key.toLowerCase() !== 's' && e.key.toLowerCase() !== 'd' && config.IS_SIMULATION_PAUSED) {
+    // Allow 'P', WASD and arrow keys regardless of pause state.
+    if (e.key.toLowerCase() !== 'p' && e.key.toLowerCase() !== 'w' && e.key.toLowerCase() !== 'a' && e.key.toLowerCase() !== 's' && e.key.toLowerCase() !== 'd' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && config.IS_SIMULATION_PAUSED) {
         return; // Only block other keys if paused
     }
 
@@ -619,6 +635,14 @@ document.addEventListener('keydown', (e) => {
                 requestAnimationFrame(gameLoop); // gameLoop is in main.js
             }
             break;
+    }
+
+    if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        cycleSelectedCreature(-1);
+    } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        cycleSelectedCreature(1);
     }
 
     // After handling panning keys, synchronize config so helpers using config.* stay accurate

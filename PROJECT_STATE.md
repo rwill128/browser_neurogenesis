@@ -65,3 +65,6 @@ For each scenario run:
 - Growth cost now depends on number of nodes/edges and edge length, scaled by global config.
 - Added global growth controls in `js/config.js` (enable/cost/chance/cooldown/limits/mutation).
 - Added mutation tracking key: `growthGenomeMutations`.
+
+- Fixed runtime growth/brain integration bug from browser console (`NEURAL_INPUT_SIZE_BASE is not defined`) by routing `SoftBody.initializeBrain()` through `Brain.initialize()`.
+- Updated NN resize behavior in `js/classes/Brain.js` so topology changes preserve existing weights/biases where dimensions overlap, and random-initialize only newly added slices.

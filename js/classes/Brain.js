@@ -90,21 +90,65 @@ export class Brain {
                               (numRepulsorPoints * config.NEURAL_OUTPUTS_PER_REPULSOR);
     }
 
+    /**
+     * Resize NN tensors while preserving overlapping learned parameters.
+     *
+     * Existing rows/cols keep their values; only newly introduced slices are
+     * random-initialized. This supports topology growth without wiping policy.
+     */
     _initializeBrainWeightsAndBiases() {
         const nd = this.brainNode.neuronData;
         if (typeof nd.hiddenLayerSize !== 'number' || nd.hiddenLayerSize < config.DEFAULT_HIDDEN_LAYER_SIZE_MIN || nd.hiddenLayerSize > config.DEFAULT_HIDDEN_LAYER_SIZE_MAX) {
-            nd.hiddenLayerSize = config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.config.DEFAULT_HIDDEN_LAYER_SIZE_MAX - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1));
+            nd.hiddenLayerSize = config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MAX - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1));
         }
 
-        if (!nd.weightsIH || nd.weightsIH.length !== nd.hiddenLayerSize || (nd.weightsIH.length > 0 && nd.weightsIH[0].length !== nd.inputVectorSize) ) {
-            nd.weightsIH = initializeMatrix(nd.hiddenLayerSize, nd.inputVectorSize);
-            nd.biasesH = initializeVector(nd.hiddenLayerSize);
+        nd.weightsIH = this._resizeMatrixPreserve(nd.weightsIH, nd.hiddenLayerSize, nd.inputVectorSize);
+        nd.biasesH = this._resizeVectorPreserve(nd.biasesH, nd.hiddenLayerSize);
+
+        nd.weightsHO = this._resizeMatrixPreserve(nd.weightsHO, nd.outputVectorSize, nd.hiddenLayerSize);
+        nd.biasesO = this._resizeVectorPreserve(nd.biasesO, nd.outputVectorSize);
+    }
+
+    /**
+     * Helper: resize matrix with value preservation on overlapping region.
+     */
+    _resizeMatrixPreserve(existingMatrix, targetRows, targetCols) {
+        const resized = initializeMatrix(targetRows, targetCols);
+        if (!Array.isArray(existingMatrix) || existingMatrix.length === 0) {
+            return resized;
         }
 
-        if (!nd.weightsHO || nd.weightsHO.length !== nd.outputVectorSize || (nd.weightsHO.length > 0 && nd.weightsHO[0].length !== nd.hiddenLayerSize) ) {
-            nd.weightsHO = initializeMatrix(nd.outputVectorSize, nd.hiddenLayerSize);
-            nd.biasesO = initializeVector(nd.outputVectorSize);
+        const rowsToCopy = Math.min(targetRows, existingMatrix.length);
+        for (let r = 0; r < rowsToCopy; r++) {
+            const oldRow = Array.isArray(existingMatrix[r]) ? existingMatrix[r] : [];
+            const colsToCopy = Math.min(targetCols, oldRow.length);
+            for (let c = 0; c < colsToCopy; c++) {
+                const oldVal = Number(oldRow[c]);
+                if (Number.isFinite(oldVal)) {
+                    resized[r][c] = oldVal;
+                }
+            }
         }
+        return resized;
+    }
+
+    /**
+     * Helper: resize vector with value preservation on overlapping prefix.
+     */
+    _resizeVectorPreserve(existingVector, targetSize) {
+        const resized = initializeVector(targetSize);
+        if (!Array.isArray(existingVector) || existingVector.length === 0) {
+            return resized;
+        }
+
+        const copy = Math.min(targetSize, existingVector.length);
+        for (let i = 0; i < copy; i++) {
+            const oldVal = Number(existingVector[i]);
+            if (Number.isFinite(oldVal)) {
+                resized[i] = oldVal;
+            }
+        }
+        return resized;
     }
 
     _initializeBrainRLComponents() {

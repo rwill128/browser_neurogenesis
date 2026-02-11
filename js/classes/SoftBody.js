@@ -2264,17 +2264,18 @@ export class SoftBody {
         return new Vec2(sumVelX / this.massPoints.length, sumVelY / this.massPoints.length);
     }
 
+    /**
+     * Re-initialize/resize the creature brain after topology changes.
+     *
+     * This delegates to the dedicated Brain class implementation, which can
+     * preserve existing weights where possible and only initialize new slices.
+     */
     initializeBrain() {
-        const brainNode = this._findOrCreateBrainNode();
-
-        if (brainNode && brainNode.neuronData && brainNode.neuronData.isBrain) {
-            this._calculateBrainVectorSizes(brainNode);
-            this._initializeBrainWeightsAndBiases(brainNode);
-            this._initializeBrainRLComponents(brainNode);
-        } else {
-            // No brain node found or brainNode.neuronData is missing somehow
-            // console.warn(`Body ${this.id} initializeBrain: No suitable brain node found or neuronData missing.`);
+        if (!this.brain) {
+            this.brain = new Brain(this);
+            return;
         }
+        this.brain.initialize();
     }
 
     _findOrCreateBrainNode() {

@@ -3,7 +3,6 @@ import readline from 'node:readline';
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getScenario } from './scenarios.mjs';
-import { MiniWorld } from './miniWorld.mjs';
 import { RealWorld } from './realWorld.mjs';
 
 function arg(name, fallback = null) {
@@ -27,8 +26,8 @@ function nowIso() {
 }
 
 class InteractiveSim {
-  constructor({ scenarioName, engine, seed, dt, worldW = null, worldH = null, creatures = null, particles = null }) {
-    this.engine = engine;
+  constructor({ scenarioName, seed, dt, worldW = null, worldH = null, creatures = null, particles = null }) {
+    this.engine = 'real';
     this.seed = seed;
     this.timer = null;
     this.rateHz = 12;
@@ -54,16 +53,14 @@ class InteractiveSim {
   }
 
   _createWorld() {
-    const WorldImpl = this.engine === 'real' ? RealWorld : MiniWorld;
-    return new WorldImpl(this.runtimeScenario, this.seed);
+    return new RealWorld(this.runtimeScenario, this.seed);
   }
 
-  reconfigure({ scenarioName, engine, seed, dt, worldW, worldH, creatures, particles } = {}) {
+  reconfigure({ scenarioName, seed, dt, worldW, worldH, creatures, particles } = {}) {
     if (scenarioName && scenarioName !== this.scenarioName) {
       this.scenarioName = scenarioName;
       this.baseScenario = getScenario(scenarioName);
     }
-    if (engine) this.engine = engine;
     if (Number.isFinite(seed)) this.seed = seed;
 
     this.runtimeScenario = this._makeRuntimeScenario({
@@ -277,7 +274,6 @@ function printHelp() {
 
   set dt <value>
   set seed <int>
-  set engine <mini|real>
   set scenario <name>
   set world <width> <height>
   set creatures <n>
@@ -287,15 +283,12 @@ function printHelp() {
 `);
 }
 
-const allowMiniCli = arg('allowMini', null) !== null;
-const requestedEngine = arg('engine', 'real');
-if (requestedEngine !== 'real' && !allowMiniCli) {
-  throw new Error(`Engine '${requestedEngine}' is blocked by default. Use --engine real or pass --allowMini for explicit surrogate runs.`);
+if (arg('engine', null) !== null || arg('allowMini', null) !== null) {
+  throw new Error('Engine selection is no longer supported. This CLI always uses the real simulation code path.');
 }
 
 const sim = new InteractiveSim({
   scenarioName: arg('scenario', 'micro_one_creature_100'),
-  engine: requestedEngine,
   seed: Number(arg('seed', '42')),
   dt: toNumber(arg('dt', null), null),
   worldW: toNumber(arg('worldW', null), null),
@@ -378,12 +371,7 @@ rl.on('line', (line) => {
         if (!Number.isFinite(seed)) throw new Error('seed must be numeric');
         sim.reconfigure({ seed });
       } else if (key === 'engine') {
-        const engine = (parts[1] || '').toLowerCase();
-        if (!['mini', 'real'].includes(engine)) throw new Error('engine must be mini|real');
-        if (engine !== 'real' && !allowMiniCli) {
-          throw new Error('mini engine blocked by default; pass --allowMini if you explicitly want surrogate mode');
-        }
-        sim.reconfigure({ engine });
+        throw new Error('engine is fixed to real and cannot be changed');
       } else if (key === 'scenario') {
         const scenarioName = parts[1];
         if (!scenarioName) throw new Error('usage: set scenario <name>');

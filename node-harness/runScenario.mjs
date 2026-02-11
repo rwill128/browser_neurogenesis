@@ -2,7 +2,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getScenario } from './scenarios.mjs';
-import { MiniWorld } from './miniWorld.mjs';
 import { RealWorld } from './realWorld.mjs';
 
 function arg(name, fallback = null) {
@@ -15,8 +14,10 @@ const scenarioName = arg('scenario', 'micro_stability');
 const seed = Number(arg('seed', '42'));
 const stepsArg = arg('steps', null);
 const outDir = resolve(arg('out', './artifacts'));
-const engine = arg('engine', 'real');
-const allowMini = arg('allowMini', null) !== null;
+
+if (arg('engine', null) !== null || arg('allowMini', null) !== null) {
+  throw new Error('Engine selection is no longer supported. This runner always uses the real simulation code path.');
+}
 
 const scenario = getScenario(scenarioName);
 const worldW = arg('worldW', null);
@@ -37,13 +38,7 @@ const runtimeScenario = {
 };
 
 const steps = stepsArg ? Number(stepsArg) : runtimeScenario.steps;
-
-if (engine !== 'real' && !allowMini) {
-  throw new Error(`Engine '${engine}' is blocked by default. Use --engine real (recommended) or pass --allowMini for explicit surrogate runs.`);
-}
-
-const WorldImpl = engine === 'real' ? RealWorld : MiniWorld;
-const world = new WorldImpl(runtimeScenario, seed);
+const world = new RealWorld(runtimeScenario, seed);
 
 const timeline = [];
 for (let i = 0; i < steps; i++) {
@@ -55,7 +50,7 @@ mkdirSync(outDir, { recursive: true });
 const outPath = resolve(outDir, `${scenario.name}-seed${seed}-steps${steps}.json`);
 const payload = {
   scenario: runtimeScenario.name,
-  engine,
+  engine: 'real',
   seed,
   steps,
   dt: runtimeScenario.dt,

@@ -7,7 +7,6 @@ Node tools for deterministic scenario runs, artifact rendering, and interactive 
 ```bash
 node node-harness/runScenario.mjs \
   --scenario micro_one_creature_100 \
-  --engine real \
   --seed 23 \
   --steps 180 \
   --dt 0.001 \
@@ -16,7 +15,7 @@ node node-harness/runScenario.mjs \
 
 Outputs JSON under `./artifacts`.
 
-> Safety default: surrogate mode (`mini`) is blocked unless explicitly enabled with `--allowMini`.
+> Engine selection is removed: this harness always runs the real simulation code path.
 
 ## 2) Render timeline JSON into frames/video
 
@@ -34,7 +33,7 @@ ffmpeg -y -framerate 12 \
 ## 3) Interactive CLI mode (step/play/rewind/query)
 
 ```bash
-node node-harness/simCli.mjs --engine real --scenario micro_one_creature_100 --seed 23 --dt 0.001
+node node-harness/simCli.mjs --scenario micro_one_creature_100 --seed 23 --dt 0.001
 ```
 
 Key commands:
@@ -47,7 +46,6 @@ Key commands:
 - `snapshot full [--out path]`
 - `snapshot rect <x> <y> <w> <h> [--out path]`
 - `snapshot creature <id> [--out path]`
-- `set engine <mini|real>`
 - `set scenario <name>`
 - `set dt <value>`
 - `set world <w> <h>`
@@ -58,6 +56,6 @@ Key commands:
 
 - ✅ Deterministic seeded runs
 - ✅ Timeline JSON + frame/video artifact pipeline
-- ✅ Real-engine path (`--engine real`) using real simulation classes
+- ✅ Always-real path using real simulation classes
 - ✅ Interactive CLI control/query loop
 - 🚧 Still in-progress toward full browser/headless parity

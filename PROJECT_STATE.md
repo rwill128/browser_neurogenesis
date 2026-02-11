@@ -112,3 +112,10 @@ For each scenario run:
   - discounted reward helper behavior
   - blueprint radius monotonic update behavior
 - Added docstrings/comments to complex Brain/SoftBody lifecycle helpers (`Brain._gatherBrainInputs`, action/train methods, and selected SoftBody geometry/RL helpers).
+- Added direct browser UI support for new growth/reproduction tuning knobs:
+  - new control panel section in `index.html` for growth and reproduction parameters
+  - slider + toggle wiring in `js/ui.js` (including guardrails for min/max coupled values)
+- Surfaced creature-level growth/reproduction telemetry in info panel:
+  - growth event counts/suppression reasons/energy spend
+  - topology/RL reset counters
+  - reproduction suppression + resource debit counters

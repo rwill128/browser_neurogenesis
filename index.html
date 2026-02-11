@@ -35,6 +35,17 @@
                     <p><strong>Energy from Photosynthesis:</strong> <span id="infoBodyEnergyPhoto">-</span></p>
                     <p><strong>Energy from Eating:</strong> <span id="infoBodyEnergyEat">-</span></p>
                     <p><strong>Energy from Predation:</strong> <span id="infoBodyEnergyPred">-</span></p>
+                    <p><strong>Growth Events:</strong> <span id="infoBodyGrowthEvents">-</span></p>
+                    <p><strong>Growth Energy Spent:</strong> <span id="infoBodyGrowthEnergySpent">-</span></p>
+                    <p><strong>Growth Suppressed (Energy):</strong> <span id="infoBodyGrowthSuppEnergy">-</span></p>
+                    <p><strong>Growth Suppressed (Cooldown):</strong> <span id="infoBodyGrowthSuppCooldown">-</span></p>
+                    <p><strong>Growth Suppressed (Population):</strong> <span id="infoBodyGrowthSuppPopulation">-</span></p>
+                    <p><strong>NN Topology Version:</strong> <span id="infoBodyNnTopologyVersion">-</span></p>
+                    <p><strong>RL Buffer Resets (Topology):</strong> <span id="infoBodyRlTopologyResets">-</span></p>
+                    <p><strong>Repro Suppressed (Density):</strong> <span id="infoBodyReproSuppDensity">-</span></p>
+                    <p><strong>Repro Suppressed (Resources):</strong> <span id="infoBodyReproSuppResources">-</span></p>
+                    <p><strong>Repro Suppressed (Fertility Roll):</strong> <span id="infoBodyReproSuppFertility">-</span></p>
+                    <p><strong>Repro Resource Debits:</strong> <span id="infoBodyReproResourceDebits">-</span></p>
                 </div>
                 <div class="info-section">
                     <h5>Energy Costs (Total)</h5>
@@ -142,6 +153,60 @@
                 <div class="indicator-label">Any Unstable: <span id="instabilityLight" class="indicator-light"></span></div>
                 <div id="populationCount">Population: 0</div>
                 <button id="resetButton">Reset Population</button>
+            </div>
+            <div class="control-group">
+                <h4>Growth + Reproduction</h4>
+                <label for="growthEnabledToggle" class="checkbox-label">Enable Growth:
+                    <input type="checkbox" id="growthEnabledToggle">
+                </label>
+
+                <label for="growthEnergyCostScalarSlider" class="slider-label">Growth Energy Cost Scalar:</label>
+                <span id="growthEnergyCostScalarValueSpan" class="slider-value">1.00</span>
+                <input type="range" id="growthEnergyCostScalarSlider" min="0.1" max="3.0" value="1.0" step="0.05">
+
+                <label for="growthBaseChanceMinSlider" class="slider-label">Growth Base Chance Min:</label>
+                <span id="growthBaseChanceMinValueSpan" class="slider-value">0.010</span>
+                <input type="range" id="growthBaseChanceMinSlider" min="0.0" max="0.2" value="0.01" step="0.001">
+
+                <label for="growthBaseChanceMaxSlider" class="slider-label">Growth Base Chance Max:</label>
+                <span id="growthBaseChanceMaxValueSpan" class="slider-value">0.060</span>
+                <input type="range" id="growthBaseChanceMaxSlider" min="0.0" max="0.3" value="0.06" step="0.001">
+
+                <label for="growthPopSoftLimitMultiplierSlider" class="slider-label">Growth Pop Soft Multiplier:</label>
+                <span id="growthPopSoftLimitMultiplierValueSpan" class="slider-value">2.00</span>
+                <input type="range" id="growthPopSoftLimitMultiplierSlider" min="1.0" max="8.0" value="2.0" step="0.1">
+
+                <label for="growthPopHardLimitMultiplierSlider" class="slider-label">Growth Pop Hard Multiplier:</label>
+                <span id="growthPopHardLimitMultiplierValueSpan" class="slider-value">4.00</span>
+                <input type="range" id="growthPopHardLimitMultiplierSlider" min="1.1" max="12.0" value="4.0" step="0.1">
+
+                <label for="growthSizeCostMaxMultiplierSlider" class="slider-label">Growth Size Cost Max Multiplier:</label>
+                <span id="growthSizeCostMaxMultiplierValueSpan" class="slider-value">4.00</span>
+                <input type="range" id="growthSizeCostMaxMultiplierSlider" min="1.0" max="12.0" value="4.0" step="0.1">
+
+                <label for="reproFertilityGlobalSoftMultiplierSlider" class="slider-label">Repro Global Soft Multiplier:</label>
+                <span id="reproFertilityGlobalSoftMultiplierValueSpan" class="slider-value">2.00</span>
+                <input type="range" id="reproFertilityGlobalSoftMultiplierSlider" min="1.0" max="8.0" value="2.0" step="0.1">
+
+                <label for="reproFertilityGlobalHardMultiplierSlider" class="slider-label">Repro Global Hard Multiplier:</label>
+                <span id="reproFertilityGlobalHardMultiplierValueSpan" class="slider-value">4.00</span>
+                <input type="range" id="reproFertilityGlobalHardMultiplierSlider" min="1.1" max="12.0" value="4.0" step="0.1">
+
+                <label for="reproResourceMinNutrientSlider" class="slider-label">Repro Min Nutrient:</label>
+                <span id="reproResourceMinNutrientValueSpan" class="slider-value">0.550</span>
+                <input type="range" id="reproResourceMinNutrientSlider" min="0.0" max="2.0" value="0.55" step="0.01">
+
+                <label for="reproResourceMinLightSlider" class="slider-label">Repro Min Light:</label>
+                <span id="reproResourceMinLightValueSpan" class="slider-value">0.350</span>
+                <input type="range" id="reproResourceMinLightSlider" min="0.0" max="2.0" value="0.35" step="0.01">
+
+                <label for="reproResourceNutrientDebitSlider" class="slider-label">Repro Nutrient Debit:</label>
+                <span id="reproResourceNutrientDebitValueSpan" class="slider-value">0.030</span>
+                <input type="range" id="reproResourceNutrientDebitSlider" min="0.0" max="0.5" value="0.03" step="0.005">
+
+                <label for="reproResourceLightDebitSlider" class="slider-label">Repro Light Debit:</label>
+                <span id="reproResourceLightDebitValueSpan" class="slider-value">0.015</span>
+                <input type="range" id="reproResourceLightDebitSlider" min="0.0" max="0.5" value="0.015" step="0.005">
             </div>
             <div class="control-group">
                 <h4>Energy Costs / Frame</h4>

@@ -72,6 +72,20 @@ const eyeDetectionRadiusSlider = document.getElementById('eyeDetectionRadiusSlid
 const neuronChanceSlider = document.getElementById('neuronChanceSlider');
 const jetMaxVelocityGeneSlider = document.getElementById('jetMaxVelocityGeneSlider');
 
+const growthEnabledToggle = document.getElementById('growthEnabledToggle');
+const growthEnergyCostScalarSlider = document.getElementById('growthEnergyCostScalarSlider');
+const growthBaseChanceMinSlider = document.getElementById('growthBaseChanceMinSlider');
+const growthBaseChanceMaxSlider = document.getElementById('growthBaseChanceMaxSlider');
+const growthPopSoftLimitMultiplierSlider = document.getElementById('growthPopSoftLimitMultiplierSlider');
+const growthPopHardLimitMultiplierSlider = document.getElementById('growthPopHardLimitMultiplierSlider');
+const growthSizeCostMaxMultiplierSlider = document.getElementById('growthSizeCostMaxMultiplierSlider');
+const reproFertilityGlobalSoftMultiplierSlider = document.getElementById('reproFertilityGlobalSoftMultiplierSlider');
+const reproFertilityGlobalHardMultiplierSlider = document.getElementById('reproFertilityGlobalHardMultiplierSlider');
+const reproResourceMinNutrientSlider = document.getElementById('reproResourceMinNutrientSlider');
+const reproResourceMinLightSlider = document.getElementById('reproResourceMinLightSlider');
+const reproResourceNutrientDebitSlider = document.getElementById('reproResourceNutrientDebitSlider');
+const reproResourceLightDebitSlider = document.getElementById('reproResourceLightDebitSlider');
+
 const instabilityLight = document.getElementById('instabilityLight');
 const populationCountDisplay = document.getElementById('populationCount');
 const resetButton = document.getElementById('resetButton');
@@ -96,6 +110,19 @@ const eyeNodeCostValueSpan = document.getElementById('eyeNodeCostValueSpan');
 const eyeDetectionRadiusValueSpan = document.getElementById('eyeDetectionRadiusValueSpan');
 const neuronChanceValueSpan = document.getElementById('neuronChanceValueSpan');
 const jetMaxVelocityGeneValueSpan = document.getElementById('jetMaxVelocityGeneValueSpan');
+
+const growthEnergyCostScalarValueSpan = document.getElementById('growthEnergyCostScalarValueSpan');
+const growthBaseChanceMinValueSpan = document.getElementById('growthBaseChanceMinValueSpan');
+const growthBaseChanceMaxValueSpan = document.getElementById('growthBaseChanceMaxValueSpan');
+const growthPopSoftLimitMultiplierValueSpan = document.getElementById('growthPopSoftLimitMultiplierValueSpan');
+const growthPopHardLimitMultiplierValueSpan = document.getElementById('growthPopHardLimitMultiplierValueSpan');
+const growthSizeCostMaxMultiplierValueSpan = document.getElementById('growthSizeCostMaxMultiplierValueSpan');
+const reproFertilityGlobalSoftMultiplierValueSpan = document.getElementById('reproFertilityGlobalSoftMultiplierValueSpan');
+const reproFertilityGlobalHardMultiplierValueSpan = document.getElementById('reproFertilityGlobalHardMultiplierValueSpan');
+const reproResourceMinNutrientValueSpan = document.getElementById('reproResourceMinNutrientValueSpan');
+const reproResourceMinLightValueSpan = document.getElementById('reproResourceMinLightValueSpan');
+const reproResourceNutrientDebitValueSpan = document.getElementById('reproResourceNutrientDebitValueSpan');
+const reproResourceLightDebitValueSpan = document.getElementById('reproResourceLightDebitValueSpan');
 
 const fluidGridSizeSlider = document.getElementById('fluidGridSize');
 const fluidGridSizeValueSpan = document.getElementById('fluidGridSizeValue');
@@ -206,21 +233,49 @@ function updateSliderDisplay(slider, span) {
 
     // Determine display format based on slider properties (e.g., step or id)
     const step = parseFloat(slider.step);
-    if (step === 0.0005 || slider.id === 'zoomSensitivitySlider' || slider.id === 'particleLifeDecay') {
+    const id = slider.id;
+
+    if (step === 0.0005 || id === 'zoomSensitivitySlider' || id === 'particleLifeDecay') {
         span.textContent = value.toFixed(4);
-    } else if (slider.id === 'bodyFluidEntrainment' || slider.id === 'fluidFade') { // fluidFadeSlider was fluidFadeValueSpan
+    } else if (
+        id === 'bodyFluidEntrainment' ||
+        id === 'fluidFade' ||
+        id === 'growthBaseChanceMinSlider' ||
+        id === 'growthBaseChanceMaxSlider' ||
+        id === 'reproResourceMinNutrientSlider' ||
+        id === 'reproResourceMinLightSlider' ||
+        id === 'reproResourceNutrientDebitSlider' ||
+        id === 'reproResourceLightDebitSlider'
+    ) {
         span.textContent = value.toFixed(3);
-    } else if (slider.id === 'globalMutationRate' || slider.id === 'bodyPushStrength' ||
-        slider.id === 'photosyntheticNodeCost' || slider.id === 'maxFluidVelocityComponentSlider' ||
-        slider.id === 'particleFluidInfluence' || slider.id === 'neuronChanceSlider') {
+    } else if (
+        id === 'globalMutationRate' ||
+        id === 'bodyPushStrength' ||
+        id === 'photosyntheticNodeCost' ||
+        id === 'maxFluidVelocityComponentSlider' ||
+        id === 'particleFluidInfluence' ||
+        id === 'neuronChanceSlider' ||
+        id === 'growthEnergyCostScalarSlider' ||
+        id === 'growthPopSoftLimitMultiplierSlider' ||
+        id === 'growthPopHardLimitMultiplierSlider' ||
+        id === 'growthSizeCostMaxMultiplierSlider' ||
+        id === 'reproFertilityGlobalSoftMultiplierSlider' ||
+        id === 'reproFertilityGlobalHardMultiplierSlider'
+    ) {
         span.textContent = value.toFixed(2);
-    } else if (slider.id === 'fluidCurrentStrength' || slider.id === 'bodyRepulsionStrength' ||
-        slider.id === 'bodyRepulsionRadiusFactor' || slider.id === 'baseNodeCost' ||
-        slider.id === 'emitterNodeCost' || slider.id === 'eaterNodeCost' ||
-        slider.id === 'predatorNodeCost' || slider.id === 'photosynthesisEfficiency' ||
-        slider.id === 'emitterStrength') {
+    } else if (
+        id === 'fluidCurrentStrength' ||
+        id === 'bodyRepulsionStrength' ||
+        id === 'bodyRepulsionRadiusFactor' ||
+        id === 'baseNodeCost' ||
+        id === 'emitterNodeCost' ||
+        id === 'eaterNodeCost' ||
+        id === 'predatorNodeCost' ||
+        id === 'photosynthesisEfficiency' ||
+        id === 'emitterStrength'
+    ) {
         span.textContent = value.toFixed(1);
-    } else if (slider.id === 'fluidDiffusion' || slider.id === 'fluidViscosity') {
+    } else if (id === 'fluidDiffusion' || id === 'fluidViscosity') {
         span.textContent = value.toExponential(1);
     } else { // Integer display for others (like population counts, cooldowns)
         span.textContent = Math.floor(value);
@@ -254,6 +309,20 @@ function initializeAllSliderDisplays() {
         [eyeDetectionRadiusSlider, "EYE_DETECTION_RADIUS", false, eyeDetectionRadiusValueSpan],
         [neuronChanceSlider, "NEURON_CHANCE", true, neuronChanceValueSpan],
         [jetMaxVelocityGeneSlider, "JET_MAX_VELOCITY_GENE_DEFAULT", true, jetMaxVelocityGeneValueSpan],
+
+        [growthEnergyCostScalarSlider, "GROWTH_ENERGY_COST_SCALAR", true, growthEnergyCostScalarValueSpan],
+        [growthBaseChanceMinSlider, "GROWTH_BASE_CHANCE_MIN", true, growthBaseChanceMinValueSpan],
+        [growthBaseChanceMaxSlider, "GROWTH_BASE_CHANCE_MAX", true, growthBaseChanceMaxValueSpan],
+        [growthPopSoftLimitMultiplierSlider, "GROWTH_POP_SOFT_LIMIT_MULTIPLIER", true, growthPopSoftLimitMultiplierValueSpan],
+        [growthPopHardLimitMultiplierSlider, "GROWTH_POP_HARD_LIMIT_MULTIPLIER", true, growthPopHardLimitMultiplierValueSpan],
+        [growthSizeCostMaxMultiplierSlider, "GROWTH_SIZE_COST_MAX_MULTIPLIER", true, growthSizeCostMaxMultiplierValueSpan],
+        [reproFertilityGlobalSoftMultiplierSlider, "REPRO_FERTILITY_GLOBAL_SOFT_MULTIPLIER", true, reproFertilityGlobalSoftMultiplierValueSpan],
+        [reproFertilityGlobalHardMultiplierSlider, "REPRO_FERTILITY_GLOBAL_HARD_MULTIPLIER", true, reproFertilityGlobalHardMultiplierValueSpan],
+        [reproResourceMinNutrientSlider, "REPRO_RESOURCE_MIN_NUTRIENT", true, reproResourceMinNutrientValueSpan],
+        [reproResourceMinLightSlider, "REPRO_RESOURCE_MIN_LIGHT", true, reproResourceMinLightValueSpan],
+        [reproResourceNutrientDebitSlider, "REPRO_RESOURCE_NUTRIENT_DEBIT_PER_OFFSPRING", true, reproResourceNutrientDebitValueSpan],
+        [reproResourceLightDebitSlider, "REPRO_RESOURCE_LIGHT_DEBIT_PER_OFFSPRING", true, reproResourceLightDebitValueSpan],
+
         [fluidGridSizeSlider, "FLUID_GRID_SIZE_CONTROL", false, fluidGridSizeValueSpan],
         [fluidDiffusionSlider, "FLUID_DIFFUSION", true, fluidDiffusionValueSpan],
         [fluidViscositySlider, "FLUID_VISCOSITY", true, fluidViscosityValueSpan],
@@ -307,6 +376,7 @@ function initializeAllSliderDisplays() {
     particleLifeDecayValueSpan.style.color = config.IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
     worldWrapToggle.checked = config.IS_WORLD_WRAPPING;
     emitterEditModeToggle.checked = config.IS_EMITTER_EDIT_MODE;
+    growthEnabledToggle.checked = config.GROWTH_ENABLED;
     infiniteParticleLifeToggle.checked = config.IS_PARTICLE_LIFE_INFINITE;
     canvas.classList.toggle('emitter-edit-mode', config.IS_EMITTER_EDIT_MODE);
 
@@ -356,6 +426,17 @@ function updateInfoPanel() {
         document.getElementById('infoBodyEnergyPhoto').textContent = config.selectedInspectBody.energyGainedFromPhotosynthesis.toFixed(2);
         document.getElementById('infoBodyEnergyEat').textContent = config.selectedInspectBody.energyGainedFromEating.toFixed(2);
         document.getElementById('infoBodyEnergyPred').textContent = config.selectedInspectBody.energyGainedFromPredation.toFixed(2);
+        document.getElementById('infoBodyGrowthEvents').textContent = config.selectedInspectBody.growthEventsCompleted || 0;
+        document.getElementById('infoBodyGrowthEnergySpent').textContent = (config.selectedInspectBody.totalGrowthEnergySpent || 0).toFixed(2);
+        document.getElementById('infoBodyGrowthSuppEnergy').textContent = config.selectedInspectBody.growthSuppressedByEnergy || 0;
+        document.getElementById('infoBodyGrowthSuppCooldown').textContent = config.selectedInspectBody.growthSuppressedByCooldown || 0;
+        document.getElementById('infoBodyGrowthSuppPopulation').textContent = config.selectedInspectBody.growthSuppressedByPopulation || 0;
+        document.getElementById('infoBodyNnTopologyVersion').textContent = config.selectedInspectBody.nnTopologyVersion || 0;
+        document.getElementById('infoBodyRlTopologyResets').textContent = config.selectedInspectBody.rlBufferResetsDueToTopology || 0;
+        document.getElementById('infoBodyReproSuppDensity').textContent = config.selectedInspectBody.reproductionSuppressedByDensity || 0;
+        document.getElementById('infoBodyReproSuppResources').textContent = config.selectedInspectBody.reproductionSuppressedByResources || 0;
+        document.getElementById('infoBodyReproSuppFertility').textContent = config.selectedInspectBody.reproductionSuppressedByFertilityRoll || 0;
+        document.getElementById('infoBodyReproResourceDebits').textContent = config.selectedInspectBody.reproductionResourceDebitApplied || 0;
 
         // Populate new energy cost fields
         document.getElementById('infoBodyCostBase').textContent = config.selectedInspectBody.energyCostFromBaseNodes.toFixed(2);
@@ -507,6 +588,17 @@ function updateInfoPanel() {
         document.getElementById('infoBodyEnergyPhoto').textContent = '-';
         document.getElementById('infoBodyEnergyEat').textContent = '-';
         document.getElementById('infoBodyEnergyPred').textContent = '-';
+        document.getElementById('infoBodyGrowthEvents').textContent = '-';
+        document.getElementById('infoBodyGrowthEnergySpent').textContent = '-';
+        document.getElementById('infoBodyGrowthSuppEnergy').textContent = '-';
+        document.getElementById('infoBodyGrowthSuppCooldown').textContent = '-';
+        document.getElementById('infoBodyGrowthSuppPopulation').textContent = '-';
+        document.getElementById('infoBodyNnTopologyVersion').textContent = '-';
+        document.getElementById('infoBodyRlTopologyResets').textContent = '-';
+        document.getElementById('infoBodyReproSuppDensity').textContent = '-';
+        document.getElementById('infoBodyReproSuppResources').textContent = '-';
+        document.getElementById('infoBodyReproSuppFertility').textContent = '-';
+        document.getElementById('infoBodyReproResourceDebits').textContent = '-';
 
         document.getElementById('infoBodyCostBase').textContent = '-';
         document.getElementById('infoBodyCostEmitter').textContent = '-';
@@ -975,6 +1067,106 @@ neuronChanceSlider.oninput = function() {
 jetMaxVelocityGeneSlider.oninput = function() {
     config.JET_MAX_VELOCITY_GENE_DEFAULT = parseFloat(this.value);
     updateSliderDisplay(this, jetMaxVelocityGeneValueSpan);
+}
+
+growthEnabledToggle.onchange = function () {
+    config.GROWTH_ENABLED = this.checked;
+}
+
+growthEnergyCostScalarSlider.oninput = function () {
+    config.GROWTH_ENERGY_COST_SCALAR = parseFloat(this.value);
+    updateSliderDisplay(this, growthEnergyCostScalarValueSpan);
+}
+
+growthBaseChanceMinSlider.oninput = function () {
+    const next = parseFloat(this.value);
+    config.GROWTH_BASE_CHANCE_MIN = next;
+    if (config.GROWTH_BASE_CHANCE_MAX < next) {
+        config.GROWTH_BASE_CHANCE_MAX = next;
+        growthBaseChanceMaxSlider.value = String(next);
+        updateSliderDisplay(growthBaseChanceMaxSlider, growthBaseChanceMaxValueSpan);
+    }
+    updateSliderDisplay(this, growthBaseChanceMinValueSpan);
+}
+
+growthBaseChanceMaxSlider.oninput = function () {
+    const next = parseFloat(this.value);
+    config.GROWTH_BASE_CHANCE_MAX = next;
+    if (config.GROWTH_BASE_CHANCE_MIN > next) {
+        config.GROWTH_BASE_CHANCE_MIN = next;
+        growthBaseChanceMinSlider.value = String(next);
+        updateSliderDisplay(growthBaseChanceMinSlider, growthBaseChanceMinValueSpan);
+    }
+    updateSliderDisplay(this, growthBaseChanceMaxValueSpan);
+}
+
+growthPopSoftLimitMultiplierSlider.oninput = function () {
+    const next = parseFloat(this.value);
+    config.GROWTH_POP_SOFT_LIMIT_MULTIPLIER = next;
+    if (config.GROWTH_POP_HARD_LIMIT_MULTIPLIER < next + 0.1) {
+        config.GROWTH_POP_HARD_LIMIT_MULTIPLIER = next + 0.1;
+        growthPopHardLimitMultiplierSlider.value = String(config.GROWTH_POP_HARD_LIMIT_MULTIPLIER);
+        updateSliderDisplay(growthPopHardLimitMultiplierSlider, growthPopHardLimitMultiplierValueSpan);
+    }
+    updateSliderDisplay(this, growthPopSoftLimitMultiplierValueSpan);
+}
+
+growthPopHardLimitMultiplierSlider.oninput = function () {
+    const next = parseFloat(this.value);
+    config.GROWTH_POP_HARD_LIMIT_MULTIPLIER = next;
+    if (config.GROWTH_POP_SOFT_LIMIT_MULTIPLIER > next - 0.1) {
+        config.GROWTH_POP_SOFT_LIMIT_MULTIPLIER = Math.max(1, next - 0.1);
+        growthPopSoftLimitMultiplierSlider.value = String(config.GROWTH_POP_SOFT_LIMIT_MULTIPLIER);
+        updateSliderDisplay(growthPopSoftLimitMultiplierSlider, growthPopSoftLimitMultiplierValueSpan);
+    }
+    updateSliderDisplay(this, growthPopHardLimitMultiplierValueSpan);
+}
+
+growthSizeCostMaxMultiplierSlider.oninput = function () {
+    config.GROWTH_SIZE_COST_MAX_MULTIPLIER = parseFloat(this.value);
+    updateSliderDisplay(this, growthSizeCostMaxMultiplierValueSpan);
+}
+
+reproFertilityGlobalSoftMultiplierSlider.oninput = function () {
+    const next = parseFloat(this.value);
+    config.REPRO_FERTILITY_GLOBAL_SOFT_MULTIPLIER = next;
+    if (config.REPRO_FERTILITY_GLOBAL_HARD_MULTIPLIER < next + 0.1) {
+        config.REPRO_FERTILITY_GLOBAL_HARD_MULTIPLIER = next + 0.1;
+        reproFertilityGlobalHardMultiplierSlider.value = String(config.REPRO_FERTILITY_GLOBAL_HARD_MULTIPLIER);
+        updateSliderDisplay(reproFertilityGlobalHardMultiplierSlider, reproFertilityGlobalHardMultiplierValueSpan);
+    }
+    updateSliderDisplay(this, reproFertilityGlobalSoftMultiplierValueSpan);
+}
+
+reproFertilityGlobalHardMultiplierSlider.oninput = function () {
+    const next = parseFloat(this.value);
+    config.REPRO_FERTILITY_GLOBAL_HARD_MULTIPLIER = next;
+    if (config.REPRO_FERTILITY_GLOBAL_SOFT_MULTIPLIER > next - 0.1) {
+        config.REPRO_FERTILITY_GLOBAL_SOFT_MULTIPLIER = Math.max(1, next - 0.1);
+        reproFertilityGlobalSoftMultiplierSlider.value = String(config.REPRO_FERTILITY_GLOBAL_SOFT_MULTIPLIER);
+        updateSliderDisplay(reproFertilityGlobalSoftMultiplierSlider, reproFertilityGlobalSoftMultiplierValueSpan);
+    }
+    updateSliderDisplay(this, reproFertilityGlobalHardMultiplierValueSpan);
+}
+
+reproResourceMinNutrientSlider.oninput = function () {
+    config.REPRO_RESOURCE_MIN_NUTRIENT = parseFloat(this.value);
+    updateSliderDisplay(this, reproResourceMinNutrientValueSpan);
+}
+
+reproResourceMinLightSlider.oninput = function () {
+    config.REPRO_RESOURCE_MIN_LIGHT = parseFloat(this.value);
+    updateSliderDisplay(this, reproResourceMinLightValueSpan);
+}
+
+reproResourceNutrientDebitSlider.oninput = function () {
+    config.REPRO_RESOURCE_NUTRIENT_DEBIT_PER_OFFSPRING = parseFloat(this.value);
+    updateSliderDisplay(this, reproResourceNutrientDebitValueSpan);
+}
+
+reproResourceLightDebitSlider.oninput = function () {
+    config.REPRO_RESOURCE_LIGHT_DEBIT_PER_OFFSPRING = parseFloat(this.value);
+    updateSliderDisplay(this, reproResourceLightDebitValueSpan);
 }
 
 

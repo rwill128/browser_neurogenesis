@@ -1,10 +1,23 @@
+/**
+ * Shared world-step pipeline used by both browser and node harnesses.
+ *
+ * This module centralizes population maintenance, reproduction, fluid stepping,
+ * and spatial-grid rebuilds so both runtimes execute the same simulation path.
+ */
+
 import { withRandomSource } from './randomScope.mjs';
 import { resolveConfigViews } from './configViews.mjs';
 
+/**
+ * Draw a deterministic random value from [min, max) using the provided RNG.
+ */
 function randomInRange(rng, min, max) {
   return min + rng() * (max - min);
 }
 
+/**
+ * Rebuild broad-phase occupancy for body points and particles.
+ */
 function updateSpatialGrid(state, config, constants) {
   const { spatialGrid, softBodyPopulation, particles } = state;
   const gridCellSize = constants.GRID_CELL_SIZE ?? config.GRID_CELL_SIZE;
@@ -46,6 +59,9 @@ function updateSpatialGrid(state, config, constants) {
   }
 }
 
+/**
+ * Inject user-driven velocity emitters into the fluid field.
+ */
 function applyVelocityEmitters(state, config) {
   if (!state.fluidField || config.EMITTER_STRENGTH <= 0) return;
   for (const emitter of config.velocityEmitters) {
@@ -58,6 +74,9 @@ function applyVelocityEmitters(state, config) {
   }
 }
 
+/**
+ * If a fixed point is being dragged, transfer displacement impulse into fluid.
+ */
 function maybeApplySelectedPointFluidPush(state, config) {
   if (!state.fluidField || !config.selectedSoftBodyPoint || !config.selectedSoftBodyPoint.point?.isFixed) return;
 
@@ -81,6 +100,9 @@ function maybeApplySelectedPointFluidPush(state, config) {
   }
 }
 
+/**
+ * Spawn one particle at a random world coordinate.
+ */
 function spawnParticle(state, config, ParticleClass, rng) {
   const x = rng() * config.WORLD_WIDTH;
   const y = rng() * config.WORLD_HEIGHT;
@@ -88,6 +110,9 @@ function spawnParticle(state, config, ParticleClass, rng) {
   state.particles.push(particle);
 }
 
+/**
+ * Spawn one creature while wiring world references needed by runtime systems.
+ */
 function spawnCreature(state, config, SoftBodyClass, rng, margin = 50) {
   const x = randomInRange(rng, margin, config.WORLD_WIDTH - margin);
   const y = randomInRange(rng, margin, config.WORLD_HEIGHT - margin);
@@ -100,6 +125,9 @@ function spawnCreature(state, config, SoftBodyClass, rng, margin = 50) {
   return body;
 }
 
+/**
+ * Fold per-creature energy accounting into global aggregates before removal.
+ */
 function accumulateRemovedBodyEnergy(state, body) {
   if (!state.globalEnergyGains || !state.globalEnergyCosts) return;
 
@@ -121,6 +149,9 @@ function accumulateRemovedBodyEnergy(state, body) {
   state.globalEnergyCosts.repulsorNodes += body.energyCostFromRepulsorNodes || 0;
 }
 
+/**
+ * Advance particles and cull expired entries.
+ */
 function removeDeadParticles(state, dt, rng) {
   for (let i = state.particles.length - 1; i >= 0; i--) {
     const particle = state.particles[i];
@@ -131,6 +162,9 @@ function removeDeadParticles(state, dt, rng) {
   }
 }
 
+/**
+ * Remove unstable bodies and return the number of removals for telemetry.
+ */
 function removeUnstableBodies(state) {
   let removedCount = 0;
   for (let i = state.softBodyPopulation.length - 1; i >= 0; i--) {
@@ -143,6 +177,14 @@ function removeUnstableBodies(state) {
   return removedCount;
 }
 
+/**
+ * Execute one simulation tick using the shared real-engine update path.
+ *
+ * @param {object} state - Mutable world state (bodies, particles, fields, grid).
+ * @param {number} dt - Delta time in seconds.
+ * @param {object} options - Runtime controls and injectable classes.
+ * @returns {{removedCount:number,currentAnyUnstable:boolean,populations:{creatures:number,particles:number}}}
+ */
 export function stepWorld(state, dt, options = {}) {
   const {
     config,
@@ -258,6 +300,9 @@ export function stepWorld(state, dt, options = {}) {
   };
 }
 
+/**
+ * Public helper to rebuild spatial occupancy after bulk state changes (e.g. load).
+ */
 export function rebuildSpatialGrid(state, configOrViews) {
   const { runtime, constants } = resolveConfigViews(configOrViews);
   updateSpatialGrid(state, runtime, constants);

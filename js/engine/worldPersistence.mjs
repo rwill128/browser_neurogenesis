@@ -1,3 +1,10 @@
+/**
+ * Runtime snapshot persistence for the shared real-engine world model.
+ *
+ * The browser and node harness both use this module for round-trippable save/load
+ * so topology, fluid state, particles, and selection context can be restored.
+ */
+
 import { resolveConfigViews } from './configViews.mjs';
 import { rebuildSpatialGrid } from './stepWorld.mjs';
 import { captureRngSnapshot, applyRngSnapshot } from './rngState.mjs';
@@ -31,6 +38,9 @@ const BODY_EXCLUDE_KEYS = new Set([
   '_tempTotalForceVec'
 ]);
 
+/**
+ * JSON-safe deep clone utility for serializable runtime state.
+ */
 function deepClone(value) {
   if (value === null || value === undefined) return value;
   if (typeof value !== 'object') return value;
@@ -48,6 +58,9 @@ function isSerializableValue(value) {
   return false;
 }
 
+/**
+ * Capture own enumerable properties that can safely survive JSON serialization.
+ */
 function captureSerializableOwnProps(source, excludeKeys = new Set()) {
   const out = {};
   for (const [key, value] of Object.entries(source || {})) {
@@ -138,6 +151,9 @@ function serializeSpring(spring, pointsIndex) {
   };
 }
 
+/**
+ * Convert a SoftBody instance into a blueprint+state snapshot payload.
+ */
 function serializeSoftBody(body) {
   const pointsIndex = new Map();
   body.massPoints.forEach((p, idx) => pointsIndex.set(p, idx));
@@ -158,6 +174,9 @@ function serializeSoftBody(body) {
   };
 }
 
+/**
+ * Rehydrate one SoftBody from snapshot data and reconnect world references.
+ */
 function restoreSoftBody(bodySnapshot, { SoftBodyClass, SpringClass, worldState }) {
   const firstPoint = bodySnapshot.massPoints?.[0];
   const initialX = Number(firstPoint?.pos?.x) || 0;
@@ -248,6 +267,9 @@ function restoreParticle(particleSnapshot, { ParticleClass, fluidField }) {
   return p;
 }
 
+/**
+ * Serialize CPU fluid field buffers for deterministic restore.
+ */
 function serializeFluidField(fluidField) {
   if (!fluidField) return null;
 
@@ -281,6 +303,9 @@ function serializeFluidField(fluidField) {
   };
 }
 
+/**
+ * Restore CPU fluid field buffers from persisted arrays.
+ */
 function restoreFluidField(fluidSnapshot, { FluidFieldClass }) {
   if (!fluidSnapshot) return null;
 
@@ -313,11 +338,17 @@ function restoreFluidField(fluidSnapshot, { FluidFieldClass }) {
   return fluidField;
 }
 
+/**
+ * Capture JSON-safe runtime config fields used by world state.
+ */
 export function captureConfigRuntimeSnapshot(configOrViews) {
   const { runtime } = resolveConfigViews(configOrViews);
   return captureSerializableOwnProps(runtime, CONFIG_EXCLUDE_KEYS);
 }
 
+/**
+ * Apply a previously captured runtime config snapshot to current config runtime.
+ */
 export function applyConfigRuntimeSnapshot(configOrViews, runtimeSnapshot = {}) {
   const { runtime } = resolveConfigViews(configOrViews);
   for (const [key, value] of Object.entries(runtimeSnapshot || {})) {
@@ -327,6 +358,9 @@ export function applyConfigRuntimeSnapshot(configOrViews, runtimeSnapshot = {}) 
   }
 }
 
+/**
+ * Build a complete world snapshot payload suitable for cross-runtime restore.
+ */
 export function saveWorldStateSnapshot({
   worldState,
   configOrViews,
@@ -367,6 +401,9 @@ export function saveWorldStateSnapshot({
   };
 }
 
+/**
+ * Restore a previously saved world snapshot into mutable world state/config.
+ */
 export function loadWorldStateSnapshot(snapshot, {
   worldState,
   configOrViews,

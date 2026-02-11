@@ -95,3 +95,8 @@ For each scenario run:
   - `js/engine/ecologyMetrics.mjs`
   - `js/engine/configOverride.mjs`
   - `node-harness/soakSnapshot.mjs`
+- Shifted test focus from long integration soaks to deeper unit coverage + docs for complex shared-core paths.
+- Added comprehensive unit tests for:
+  - `js/engine/stepWorld.mjs` (population floors, reproduction gating, unstable-removal energy accounting)
+  - `js/engine/worldPersistence.mjs` (config snapshot semantics, save/load round-trip with selection + spatial-grid rebuild)
+- Added explanatory docstrings across complex lifecycle functions in `stepWorld.mjs` and `worldPersistence.mjs`.

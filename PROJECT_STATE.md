@@ -119,3 +119,7 @@ For each scenario run:
   - growth event counts/suppression reasons/energy spend
   - topology/RL reset counters
   - reproduction suppression + resource debit counters
+- Added mobile-specific UI scheme improvements for creature navigation:
+  - replaced single mobile next button with bottom-centered Prev/Next pair
+  - wired `mobilePrevCreatureButton` / `mobileNextCreatureButton` to creature cycling
+  - refined mobile layout styles (control drawer width, compact top controls, reduced overlay clutter).

@@ -107,19 +107,26 @@ canvas.emitter-edit-mode {
     background-color: #0056b3;
 }
 
-/* Mobile-only creature cycling control used when keyboard arrows are unavailable. */
-.ui-mobile-button {
+/* Mobile creature navigation controls (Prev/Next) for touch-first usage. */
+.ui-mobile-nav {
     position: fixed;
-    right: 15px;
-    bottom: 20px;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    display: none;
+    gap: 10px;
+    z-index: 1004;
+}
+
+.ui-mobile-button {
     padding: 10px 14px;
+    min-width: 110px;
     background-color: rgba(0, 123, 255, 0.95);
     color: white;
     border: none;
-    border-radius: 8px;
+    border-radius: 10px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
-    z-index: 1003;
-    display: none;
+    font-weight: 600;
 }
 
 #toggleControlsButton {
@@ -555,13 +562,28 @@ body.css-screensaver-active #canvasContainer {
     color: #eee; /* Value color */
 }
 
-/* Mobile interaction policy: hide keyboard-oriented hint text and show tap-only creature cycle control. */
+/* Mobile interaction policy: simplify controls and show tap creature navigation. */
 @media (max-width: 900px) {
-    .ui-mobile-button {
-        display: block;
+    .ui-mobile-nav {
+        display: flex;
     }
 
     .viewport-instructions {
+        display: none;
+    }
+
+    #controls {
+        width: min(92vw, 360px);
+        right: calc(-1 * min(92vw, 360px) - 16px);
+    }
+
+    #toggleControlsButton,
+    #toggleStatsPanelButton {
+        top: 10px;
+        padding: 7px 10px;
+    }
+
+    #frameTimeDisplay {
         display: none;
     }
 }

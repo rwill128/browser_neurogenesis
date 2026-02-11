@@ -157,6 +157,7 @@ const importConfigButton = document.getElementById('importConfigButton');
 const exportStateButton = document.getElementById('exportStateButton');
 const importStateButton = document.getElementById('importStateButton');
 const importStateFile = document.getElementById('importStateFile');
+const mobilePrevCreatureButton = document.getElementById('mobilePrevCreatureButton');
 const mobileNextCreatureButton = document.getElementById('mobileNextCreatureButton');
 const importCreatureButton = document.getElementById('importCreatureButton');
 const importCreatureFile = document.getElementById('importCreatureFile');
@@ -1307,6 +1308,9 @@ if (importStateButton) {
 }
 if (importStateFile) {
     importStateFile.onchange = handleImportWorldState;
+}
+if (mobilePrevCreatureButton) {
+    mobilePrevCreatureButton.onclick = () => cycleSelectedCreature(-1);
 }
 if (mobileNextCreatureButton) {
     mobileNextCreatureButton.onclick = () => cycleSelectedCreature(1);

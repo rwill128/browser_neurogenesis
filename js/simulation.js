@@ -13,6 +13,7 @@ import {
 } from "./ui.js";
 import viewport from './viewport.js';
 import { drawNutrientMap, drawLightMap, drawViscosityMap } from './environment.js';
+import { syncRuntimeState } from './engine/runtimeState.js';
 
 let offscreenFluidCanvas, offscreenFluidCtx;
 let spatialGrid;
@@ -80,6 +81,12 @@ let mutationStats = { // New: For tracking mutation occurrences
     shapeAddition: 0
 };
 
+syncRuntimeState({
+    fluidField,
+    softBodyPopulation,
+    mutationStats
+});
+
 function initializeSpatialGrid() {
     spatialGrid = new Array(config.GRID_COLS * config.GRID_ROWS);
     for (let i = 0; i < config.GRID_COLS * config.GRID_ROWS; i++) {
@@ -128,6 +135,7 @@ function updateSpatialGrid() {
 // --- Simulation Setup ---
 function initializePopulation() {
     softBodyPopulation = [];
+    syncRuntimeState({ softBodyPopulation });
     nextSoftBodyId = 0;
 
     for (let i = 0; i < config.CREATURE_POPULATION_FLOOR; i++) { // Use floor for initial pop
@@ -204,6 +212,7 @@ async function initFluidSimulation(targetCanvas) {
     fluidField.useWrapping = config.IS_WORLD_WRAPPING;
     fluidField.maxVelComponent = config.MAX_FLUID_VELOCITY_COMPONENT;
     config.velocityEmitters = []; // Clear any existing emitters when re-initializing
+    syncRuntimeState({ fluidField });
 }
 
 function initParticles() {

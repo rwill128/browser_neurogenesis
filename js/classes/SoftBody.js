@@ -4,7 +4,7 @@ import { NodeType, RLRewardStrategy, RLAlgorithmType, EyeTargetType, MovementTyp
 import {MassPoint} from "./MassPoint.js";
 import {Spring} from "./Spring.js";
 import {Brain} from "./Brain.js";
-import {fluidField, mutationStats, nextSoftBodyId, softBodyPopulation} from "../simulation.js";
+import { runtimeState } from "../engine/runtimeState.js";
 
 // --- SoftBody Class ---
 export class SoftBody {
@@ -96,41 +96,41 @@ export class SoftBody {
             const parentBody = creationData; // In this case, creationData is the parentBody
             if (parentBody) {
                 this.stiffness = parentBody.stiffness * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.stiffness !== parentBody.stiffness) mutationStats.springStiffness++;
+                if (this.stiffness !== parentBody.stiffness) runtimeState.mutationStats.springStiffness++;
                 this.springDamping = parentBody.springDamping * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.springDamping !== parentBody.springDamping) mutationStats.springDamping++;
+                if (this.springDamping !== parentBody.springDamping) runtimeState.mutationStats.springDamping++;
 
                 let oldMotorInterval = parentBody.motorImpulseInterval;
                 this.motorImpulseInterval = parentBody.motorImpulseInterval * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
-                if (Math.floor(this.motorImpulseInterval) !== Math.floor(oldMotorInterval)) mutationStats.motorInterval++;
+                if (Math.floor(this.motorImpulseInterval) !== Math.floor(oldMotorInterval)) runtimeState.mutationStats.motorInterval++;
 
                 let oldMotorCap = parentBody.motorImpulseMagnitudeCap;
                 this.motorImpulseMagnitudeCap = parentBody.motorImpulseMagnitudeCap * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.motorImpulseMagnitudeCap !== oldMotorCap) mutationStats.motorCap++;
+                if (this.motorImpulseMagnitudeCap !== oldMotorCap) runtimeState.mutationStats.motorCap++;
 
                 let oldEmitterStrength = parentBody.emitterStrength;
                 this.emitterStrength = parentBody.emitterStrength * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.emitterStrength !== oldEmitterStrength) mutationStats.emitterStrength++;
+                if (this.emitterStrength !== oldEmitterStrength) runtimeState.mutationStats.emitterStrength++;
 
                 let oldJetMaxVel = parentBody.jetMaxVelocityGene;
                 this.jetMaxVelocityGene = parentBody.jetMaxVelocityGene * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.jetMaxVelocityGene !== oldJetMaxVel) mutationStats.jetMaxVelocityGene++;
+                if (this.jetMaxVelocityGene !== oldJetMaxVel) runtimeState.mutationStats.jetMaxVelocityGene++;
 
                 let offspringNumChange = (Math.random() < Math.max(0, Math.min(1, config.MUTATION_CHANCE_BOOL * config.GLOBAL_MUTATION_RATE_MODIFIER))) ? (Math.random() < 0.5 ? -1 : 1) : 0;
                 this.numOffspring = parentBody.numOffspring + offspringNumChange;
-                if (offspringNumChange !== 0) mutationStats.numOffspring++;
+                if (offspringNumChange !== 0) runtimeState.mutationStats.numOffspring++;
 
                 let oldOffspringSpawnRadius = parentBody.offspringSpawnRadius;
                 this.offspringSpawnRadius = parentBody.offspringSpawnRadius * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER * 0.5));
-                if (this.offspringSpawnRadius !== oldOffspringSpawnRadius) mutationStats.offspringSpawnRadius++;
+                if (this.offspringSpawnRadius !== oldOffspringSpawnRadius) runtimeState.mutationStats.offspringSpawnRadius++;
 
                 let oldPointAddChance = parentBody.pointAddChance;
                 this.pointAddChance = parentBody.pointAddChance * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER * 2));
-                if (this.pointAddChance !== oldPointAddChance) mutationStats.pointAddChanceGene++;
+                if (this.pointAddChance !== oldPointAddChance) runtimeState.mutationStats.pointAddChanceGene++;
 
                 let oldSpringConnectionRadius = parentBody.springConnectionRadius;
                 this.springConnectionRadius = parentBody.springConnectionRadius * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.springConnectionRadius !== oldSpringConnectionRadius) mutationStats.springConnectionRadiusGene++;
+                if (this.springConnectionRadius !== oldSpringConnectionRadius) runtimeState.mutationStats.springConnectionRadiusGene++;
 
                 if (parentBody.emitterDirection) {
                     const oldEmitterDirX = parentBody.emitterDirection.x;
@@ -138,11 +138,11 @@ export class SoftBody {
                     const cosA = Math.cos(angleMutation);
                     const sinA = Math.sin(angleMutation);
                     this.emitterDirection = new Vec2(parentBody.emitterDirection.x * cosA - parentBody.emitterDirection.y * sinA, parentBody.emitterDirection.x * sinA + parentBody.emitterDirection.y * cosA).normalize();
-                    if (this.emitterDirection.x !== oldEmitterDirX) mutationStats.emitterDirection++; // Simplified check
+                    if (this.emitterDirection.x !== oldEmitterDirX) runtimeState.mutationStats.emitterDirection++; // Simplified check
                 } else {
                     this.emitterDirection = new Vec2(Math.random()*2-1, Math.random()*2-1).normalize();
                     console.warn(`Parent body ${parentBody.id} was missing emitterDirection. Offspring ${this.id} gets random emitterDirection.`);
-                    mutationStats.emitterDirection++; // Count as a change if parent was missing it
+                    runtimeState.mutationStats.emitterDirection++; // Count as a change if parent was missing it
                 }
 
                 let oldReproThreshold = parentBody.reproductionEnergyThreshold;
@@ -166,13 +166,13 @@ export class SoftBody {
                     let newStrategy = strategies[Math.floor(Math.random() * strategies.length)];
                     if (newStrategy !== parentBody.rewardStrategy) {
                         this.rewardStrategy = newStrategy;
-                        mutationStats.rewardStrategyChange++;
+                        runtimeState.mutationStats.rewardStrategyChange++;
                     } else {
                         if (strategies.length > 1) {
                             let tempStrategies = strategies.filter(s => s !== parentBody.rewardStrategy);
                             if (tempStrategies.length > 0) {
                                 this.rewardStrategy = tempStrategies[Math.floor(Math.random() * tempStrategies.length)];
-                                mutationStats.rewardStrategyChange++; 
+                                runtimeState.mutationStats.rewardStrategyChange++; 
                             } else {
                                 this.rewardStrategy = parentBody.rewardStrategy;
                             }
@@ -190,7 +190,7 @@ export class SoftBody {
                 this.reproductionCooldownGene = parentBody.reproductionCooldownGene * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER * 0.2));
                 this.reproductionCooldownGene = Math.max(50, Math.min(Math.floor(this.reproductionCooldownGene), 20000)); // Clamp
                 if (this.reproductionCooldownGene !== parentBody.reproductionCooldownGene) {
-                    mutationStats.reproductionCooldownGene = (mutationStats.reproductionCooldownGene || 0) + 1;
+                    runtimeState.mutationStats.reproductionCooldownGene = (runtimeState.mutationStats.reproductionCooldownGene || 0) + 1;
                 }
 
             } else {
@@ -271,7 +271,7 @@ export class SoftBody {
                     });
                     this.offspringSpawnRadius *= scaleFactor;
                     this.offspringSpawnRadius = Math.max(10, this.offspringSpawnRadius); 
-                    mutationStats.bodyScale++;
+                    runtimeState.mutationStats.bodyScale++;
                 }
             }
 
@@ -297,7 +297,7 @@ export class SoftBody {
             this.reproductionEnergyThreshold = Math.max(this.currentMaxEnergy * 0.05, Math.min(this.reproductionEnergyThreshold, this.currentMaxEnergy));
             this.reproductionEnergyThreshold = Math.round(this.reproductionEnergyThreshold);
             if (parentBodyForMutation && this.reproductionEnergyThreshold !== oldReproThresholdForStat) { // Only count if from parent and changed
-                mutationStats.reproductionEnergyThreshold++;
+                runtimeState.mutationStats.reproductionEnergyThreshold++;
             }
 
         }
@@ -358,21 +358,21 @@ export class SoftBody {
                 // Mutate relative coordinates
                 if (Math.random() < (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER * 0.5)) {
                     bp.relX += (Math.random() - 0.5) * 2; // Smaller jitter for blueprint stability
-                    mutationStats.blueprintCoordinateChange = (mutationStats.blueprintCoordinateChange || 0) + 1;
+                    runtimeState.mutationStats.blueprintCoordinateChange = (runtimeState.mutationStats.blueprintCoordinateChange || 0) + 1;
                 }
                 if (Math.random() < (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER * 0.5)) {
                     bp.relY += (Math.random() - 0.5) * 2;
-                    mutationStats.blueprintCoordinateChange = (mutationStats.blueprintCoordinateChange || 0) + 1;
+                    runtimeState.mutationStats.blueprintCoordinateChange = (runtimeState.mutationStats.blueprintCoordinateChange || 0) + 1;
                 }
 
                 // Mutate mass & radius
                 if (Math.random() < (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                     bp.mass = Math.max(0.1, Math.min(bp.mass * (1 + (Math.random() - 0.5) * 0.4), 1.0));
-                    mutationStats.blueprintMassRadiusChange = (mutationStats.blueprintMassRadiusChange || 0) + 1;
+                    runtimeState.mutationStats.blueprintMassRadiusChange = (runtimeState.mutationStats.blueprintMassRadiusChange || 0) + 1;
                 }
                 if (Math.random() < (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                     bp.radius = Math.max(0.5, Math.min(bp.radius * (1 + (Math.random() - 0.5) * 0.4), baseRadius * 2.5)); // Max based on baseRadius
-                     mutationStats.blueprintMassRadiusChange = (mutationStats.blueprintMassRadiusChange || 0) + 1;
+                     runtimeState.mutationStats.blueprintMassRadiusChange = (runtimeState.mutationStats.blueprintMassRadiusChange || 0) + 1;
                 }
 
                 // Mutate nodeType
@@ -384,7 +384,7 @@ export class SoftBody {
                         const otherNodeTypes = availableFunctionalNodeTypes.filter(t => t !== NodeType.NEURON);
                         bp.nodeType = otherNodeTypes[Math.floor(Math.random() * otherNodeTypes.length)];
                     }
-                    if (bp.nodeType !== oldNodeType) mutationStats.nodeTypeChange++;
+                    if (bp.nodeType !== oldNodeType) runtimeState.mutationStats.nodeTypeChange++;
 
                     // If it becomes an EYE, initialize eyeTargetType randomly
                     if (bp.nodeType === NodeType.EYE && bp.eyeTargetType === undefined) {
@@ -397,7 +397,7 @@ export class SoftBody {
                     const oldMovementType = bp.movementType;
                     const availableMovementTypes = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
                     bp.movementType = availableMovementTypes[Math.floor(Math.random() * availableMovementTypes.length)];
-                    if (bp.movementType !== oldMovementType) mutationStats.movementTypeChange++;
+                    if (bp.movementType !== oldMovementType) runtimeState.mutationStats.movementTypeChange++;
                 }
                 // Ensure Swimmer nodes are always Neutral type
                 if (bp.nodeType === NodeType.SWIMMER) {
@@ -407,13 +407,13 @@ export class SoftBody {
                 // Mutate canBeGrabber gene
                 if (Math.random() < config.GRABBER_GENE_MUTATION_CHANCE) {
                     bp.canBeGrabber = !bp.canBeGrabber;
-                    mutationStats.grabberGeneChange++;
+                    runtimeState.mutationStats.grabberGeneChange++;
                 }
 
                 // Mutate dyeColor
                 if (Math.random() < (config.MUTATION_CHANCE_BOOL * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                     bp.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
-                    mutationStats.blueprintDyeColorChange = (mutationStats.blueprintDyeColorChange || 0) + 1;
+                    runtimeState.mutationStats.blueprintDyeColorChange = (runtimeState.mutationStats.blueprintDyeColorChange || 0) + 1;
                 }
 
                 // Mutate neuronDataBlueprint (specifically hiddenLayerSize if neuron)
@@ -424,7 +424,7 @@ export class SoftBody {
                     if (Math.random() < (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                         let newSize = bp.neuronDataBlueprint.hiddenLayerSize + Math.floor((Math.random() * 6) - 3); // Mutate by +/- up to 3
                         bp.neuronDataBlueprint.hiddenLayerSize = Math.max(config.DEFAULT_HIDDEN_LAYER_SIZE_MIN, Math.min(newSize, config.DEFAULT_HIDDEN_LAYER_SIZE_MAX));
-                        mutationStats.blueprintNeuronHiddenSizeChange = (mutationStats.blueprintNeuronHiddenSizeChange || 0) + 1;
+                        runtimeState.mutationStats.blueprintNeuronHiddenSizeChange = (runtimeState.mutationStats.blueprintNeuronHiddenSizeChange || 0) + 1;
                     }
                 } else {
                     bp.neuronDataBlueprint = null; // Crucial: ensure non-neurons have null neuronDataBlueprint
@@ -435,7 +435,7 @@ export class SoftBody {
                     const oldEyeTargetType = bp.eyeTargetType;
                     bp.eyeTargetType = (bp.eyeTargetType === EyeTargetType.PARTICLE) ? EyeTargetType.FOREIGN_BODY_POINT : EyeTargetType.PARTICLE;
                     if (bp.eyeTargetType !== oldEyeTargetType) {
-                        mutationStats.eyeTargetTypeChange = (mutationStats.eyeTargetTypeChange || 0) + 1;
+                        runtimeState.mutationStats.eyeTargetTypeChange = (runtimeState.mutationStats.eyeTargetTypeChange || 0) + 1;
                     }
                 }
             });
@@ -445,24 +445,24 @@ export class SoftBody {
                 if (Math.random() < (config.SPRING_PROP_MUTATION_MAGNITUDE * config.GLOBAL_MUTATION_RATE_MODIFIER)) { // Use magnitude as chance here
                     const oldRestLength = bs.restLength;
                     bs.restLength = Math.max(1, bs.restLength * (1 + (Math.random() - 0.5) * 2 * config.SPRING_PROP_MUTATION_MAGNITUDE));
-                    if (Math.abs(bs.restLength - oldRestLength) > 0.01) mutationStats.springRestLength++;
+                    if (Math.abs(bs.restLength - oldRestLength) > 0.01) runtimeState.mutationStats.springRestLength++;
                 }
                 if (Math.random() < (config.MUTATION_CHANCE_BOOL * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                     const oldRigid = bs.isRigid;
                     bs.isRigid = !bs.isRigid; // Simple flip for now
-                    if (bs.isRigid !== oldRigid) mutationStats.springRigidityFlip++;
+                    if (bs.isRigid !== oldRigid) runtimeState.mutationStats.springRigidityFlip++;
                 }
                  if (Math.random() < (config.SPRING_PROP_MUTATION_MAGNITUDE * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                     if (typeof bs.stiffness === 'undefined') bs.stiffness = this.stiffness;
                     const oldStiffness = bs.stiffness;
                     bs.stiffness = Math.max(100, Math.min(bs.stiffness * (1 + (Math.random() - 0.5) * 2 * config.SPRING_PROP_MUTATION_MAGNITUDE), 10000));
-                    if (Math.abs(bs.stiffness - oldStiffness) > 0.01) mutationStats.springStiffness++;
+                    if (Math.abs(bs.stiffness - oldStiffness) > 0.01) runtimeState.mutationStats.springStiffness++;
                 }
                 if (Math.random() < (config.SPRING_PROP_MUTATION_MAGNITUDE * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                     if (typeof bs.damping === 'undefined') bs.damping = this.springDamping;
                     const oldDamping = bs.damping;
                     bs.damping = Math.max(0.1, Math.min(bs.damping * (1 + (Math.random() - 0.5) * 2 * config.SPRING_PROP_MUTATION_MAGNITUDE), 50));
-                    if (Math.abs(bs.damping - oldDamping) > 0.01) mutationStats.springDamping++;
+                    if (Math.abs(bs.damping - oldDamping) > 0.01) runtimeState.mutationStats.springDamping++;
                 }
             });
 
@@ -499,7 +499,7 @@ export class SoftBody {
                 };
                 this.blueprintPoints.push(newBp);
                 const newPointIndex = this.blueprintPoints.length - 1;
-                mutationStats.pointAddActual++;
+                runtimeState.mutationStats.pointAddActual++;
 
                 // Connect new blueprint point with springs
                 const numSpringsToAddNewPoint = config.MIN_SPRINGS_PER_NEW_NODE + Math.floor(Math.random() * (config.MAX_SPRINGS_PER_NEW_NODE - config.MIN_SPRINGS_PER_NEW_NODE + 1));
@@ -526,7 +526,7 @@ export class SoftBody {
                 // For now, simple random deletion if enough springs exist
                 const springToDeleteIndex = Math.floor(Math.random() * this.blueprintSprings.length);
                 this.blueprintSprings.splice(springToDeleteIndex, 1);
-                mutationStats.springDeletion++;
+                runtimeState.mutationStats.springDeletion++;
             }
 
             // --- Spring Addition Mutation (Blueprint) ---
@@ -553,7 +553,7 @@ export class SoftBody {
                         const newStiffness = 500 + Math.random() * 2500;
                         const newDamping = 5 + Math.random() * 20;
                         this.blueprintSprings.push({ p1Index: idx1, p2Index: idx2, restLength: newRestLength, isRigid: becomeRigid, stiffness: newStiffness, damping: newDamping });
-                        mutationStats.springAddition++; 
+                        runtimeState.mutationStats.springAddition++; 
                         break;
                     }
                     attempts++;
@@ -598,8 +598,8 @@ export class SoftBody {
                     let restLength2 = Math.sqrt((midRelX - bp2.relX)**2 + (midRelY - bp2.relY)**2) * (1 + (Math.random() - 0.5) * 0.1);
                     this.blueprintSprings.push({ p1Index: newMidPointIndex, p2Index: originalBs.p2Index, restLength: Math.max(1, restLength2), isRigid: originalBs.isRigid, stiffness: originalBs.stiffness, damping: originalBs.damping });
 
-                    mutationStats.springSubdivision++; 
-                    mutationStats.pointAddActual++; 
+                    runtimeState.mutationStats.springSubdivision++; 
+                    runtimeState.mutationStats.pointAddActual++; 
             }
 
             // --- Body Scale Mutation (Blueprint) ---
@@ -616,7 +616,7 @@ export class SoftBody {
                     });
                     this.offspringSpawnRadius *= scaleFactor; // This is a creature property, not blueprint, but scale it too
                     this.offspringSpawnRadius = Math.max(10, this.offspringSpawnRadius); 
-                    mutationStats.bodyScale++;
+                    runtimeState.mutationStats.bodyScale++;
                 }
             }
             // TODO: Add blueprint versions of Segment Duplication, Symmetrical Duplication etc.
@@ -723,7 +723,7 @@ export class SoftBody {
                                     this.blueprintSprings.push({ p1Index: p1, p2Index: p2, restLength: info.len, isRigid: false, stiffness: this.stiffness, damping: this.springDamping });
                                 });
 
-                                mutationStats.shapeAddition++;
+                                runtimeState.mutationStats.shapeAddition++;
                             }
                         }
                     }
@@ -1577,10 +1577,10 @@ export class SoftBody {
                                             particle.life = 0; 
 
                                             let energyGain = config.ENERGY_PER_PARTICLE;
-                                            if (this.nutrientField && fluidField) { // fluidFieldRef is fluidField in this context
-                                                const particleGx = Math.floor(particle.pos.x / fluidField.scaleX);
-                                                const particleGy = Math.floor(particle.pos.y / fluidField.scaleY);
-                                                const nutrientIdxAtParticle = fluidField.IX(particleGx, particleGy);
+                                            if (this.nutrientField && runtimeState.fluidField) { // fluidFieldRef is runtimeState.fluidField in this context
+                                                const particleGx = Math.floor(particle.pos.x / runtimeState.fluidField.scaleX);
+                                                const particleGy = Math.floor(particle.pos.y / runtimeState.fluidField.scaleY);
+                                                const nutrientIdxAtParticle = runtimeState.fluidField.IX(particleGx, particleGy);
                                                 const baseNutrientValueAtParticle = this.nutrientField[nutrientIdxAtParticle] !== undefined ? this.nutrientField[nutrientIdxAtParticle] : 1.0;
                                                 const effectiveNutrientAtParticle = baseNutrientValueAtParticle * config.globalNutrientMultiplier;
                                                 energyGain *= Math.max(config.MIN_NUTRIENT_VALUE, effectiveNutrientAtParticle);
@@ -1697,7 +1697,7 @@ export class SoftBody {
 
         // Pre-calculate spatial info for existing bodies to optimize collision checks
         const existingBodiesSpatialInfo = [];
-        for (const body of softBodyPopulation) {
+        for (const body of runtimeState.softBodyPopulation) {
             if (body !== this && !body.isUnstable) { // Don't include self or unstable bodies
                 existingBodiesSpatialInfo.push({
                     center: body.getAveragePosition(),

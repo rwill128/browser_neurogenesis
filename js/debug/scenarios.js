@@ -44,10 +44,38 @@ export function getScenarioNameFromUrl() {
   return p.get('scenario') || p.get('mini') || 'baseline';
 }
 
+function mulberry32(seed) {
+  let t = seed >>> 0;
+  return function () {
+    t += 0x6D2B79F5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function applySeedFromUrl() {
+  const p = new URLSearchParams(window.location.search);
+  const raw = p.get('seed');
+  if (!raw) return null;
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return null;
+  const seed = parsed >>> 0;
+
+  if (!window.__originalMathRandom) {
+    window.__originalMathRandom = Math.random;
+  }
+  Math.random = mulberry32(seed);
+  config.DEBUG_SEED = seed;
+  return seed;
+}
+
 export function applyScenarioFromUrl() {
   const name = getScenarioNameFromUrl();
   const scenario = SCENARIOS[name] || SCENARIOS.baseline;
   scenario.apply();
+  const seed = applySeedFromUrl();
   config.DEBUG_SCENARIO = name;
-  return { name, description: scenario.description || '' };
+  return { name, description: scenario.description || '', seed };
 }

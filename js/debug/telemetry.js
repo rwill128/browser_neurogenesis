@@ -25,6 +25,7 @@ function buildSnapshot() {
   return {
     tick: tickCounter,
     scenario: config.DEBUG_SCENARIO || 'baseline',
+    seed: config.DEBUG_SEED ?? null,
     mode: (fluidField && fluidField.gpuEnabled) ? 'GPU' : 'CPU',
     populations: {
       creatures: softBodyPopulation.length,
@@ -67,6 +68,29 @@ export function initDebugRuntime() {
       },
       clearTimeline() {
         this.timeline.length = 0;
+      },
+      exportTimeline() {
+        return {
+          scenario: config.DEBUG_SCENARIO || 'baseline',
+          seed: config.DEBUG_SEED ?? null,
+          capturedAt: new Date().toISOString(),
+          samples: this.timeline
+        };
+      },
+      exportTimelineJson() {
+        return JSON.stringify(this.exportTimeline(), null, 2);
+      },
+      downloadTimeline(filename) {
+        const defaultName = `timeline-${config.DEBUG_SCENARIO || 'baseline'}-${Date.now()}.json`;
+        const blob = new Blob([this.exportTimelineJson()], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename || defaultName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
       }
     };
   }

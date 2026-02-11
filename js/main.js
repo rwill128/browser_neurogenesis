@@ -39,7 +39,7 @@ const PERF_LOG_INTERVAL_MS = 5000;
 async function main() {
     const scenarioInfo = applyScenarioFromUrl();
     initDebugRuntime();
-    console.log(`[SCENARIO] Loaded: ${scenarioInfo.name} - ${scenarioInfo.description}`);
+    console.log(`[SCENARIO] Loaded: ${scenarioInfo.name} - ${scenarioInfo.description}${scenarioInfo.seed !== null && scenarioInfo.seed !== undefined ? ` | seed=${scenarioInfo.seed}` : ''}`);
 
     worldWidthInput.value = String(config.WORLD_WIDTH || parseInt(worldWidthInput.value) || 8000);
     worldHeightInput.value = String(config.WORLD_HEIGHT || parseInt(worldHeightInput.value) || 6000);

@@ -601,10 +601,54 @@ function cycleSelectedCreature(direction = 1) {
     updateInfoPanel();
 }
 
+function disableAutoFollowForManualControl() {
+    if (config.AUTO_FOLLOW_CREATURE) {
+        config.AUTO_FOLLOW_CREATURE = false;
+        console.log('[CAMERA] Auto-follow disabled for manual control.');
+    }
+}
+
+function applyManualZoom(displayX, displayY, direction) {
+    const worldXBefore = viewOffsetX + (displayX / viewZoom);
+    const worldYBefore = viewOffsetY + (displayY / viewZoom);
+
+    let newZoom = viewZoom * Math.pow(1 + config.ZOOM_SENSITIVITY * 10, direction);
+    const minZoomToFitX = canvas.clientWidth / config.WORLD_WIDTH;
+    const minZoomToFitY = canvas.clientHeight / config.WORLD_HEIGHT;
+    const minAllowedZoom = Math.max(0.01, Math.min(minZoomToFitX, minZoomToFitY));
+    newZoom = Math.max(minAllowedZoom, Math.min(newZoom, config.MAX_ZOOM));
+
+    viewZoom = newZoom;
+    viewOffsetX = worldXBefore - (displayX / viewZoom);
+    viewOffsetY = worldYBefore - (displayY / viewZoom);
+
+    clampViewOffsets();
+
+    config.viewZoom = viewZoom;
+    config.viewOffsetX = viewOffsetX;
+    config.viewOffsetY = viewOffsetY;
+
+    viewport.zoom = viewZoom;
+    viewport.offsetX = viewOffsetX;
+    viewport.offsetY = viewOffsetY;
+}
+
 document.addEventListener('keydown', (e) => {
-    // Allow 'P', WASD and arrow keys regardless of pause state.
-    if (e.key.toLowerCase() !== 'p' && e.key.toLowerCase() !== 'w' && e.key.toLowerCase() !== 'a' && e.key.toLowerCase() !== 's' && e.key.toLowerCase() !== 'd' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && config.IS_SIMULATION_PAUSED) {
-        return; // Only block other keys if paused
+    // Allow key controls even while paused.
+    if (
+        e.key.toLowerCase() !== 'p' &&
+        e.key.toLowerCase() !== 'f' &&
+        e.key.toLowerCase() !== 'w' &&
+        e.key.toLowerCase() !== 'a' &&
+        e.key.toLowerCase() !== 's' &&
+        e.key.toLowerCase() !== 'd' &&
+        e.key !== 'ArrowLeft' &&
+        e.key !== 'ArrowRight' &&
+        e.key !== 'ArrowUp' &&
+        e.key !== 'ArrowDown' &&
+        config.IS_SIMULATION_PAUSED
+    ) {
+        return; // Only block unrelated keys if paused
     }
 
     const effectiveViewportWidth = canvas.clientWidth / config.viewZoom;
@@ -616,16 +660,24 @@ document.addEventListener('keydown', (e) => {
 
     switch (e.key.toLowerCase()) {
         case 'w':
+            disableAutoFollowForManualControl();
             viewOffsetY = Math.max(0, viewOffsetY - panSpeed);
             break;
         case 's':
+            disableAutoFollowForManualControl();
             viewOffsetY = Math.min(maxPanY, viewOffsetY + panSpeed);
             break;
         case 'a':
+            disableAutoFollowForManualControl();
             viewOffsetX = Math.max(0, viewOffsetX - panSpeed);
             break;
         case 'd':
+            disableAutoFollowForManualControl();
             viewOffsetX = Math.min(maxPanX, viewOffsetX + panSpeed);
+            break;
+        case 'f':
+            config.AUTO_FOLLOW_CREATURE = !config.AUTO_FOLLOW_CREATURE;
+            console.log(`[CAMERA] Auto-follow ${config.AUTO_FOLLOW_CREATURE ? 'enabled' : 'disabled'}.`);
             break;
         case 'p':
             config.IS_SIMULATION_PAUSED = !config.IS_SIMULATION_PAUSED;
@@ -643,6 +695,14 @@ document.addEventListener('keydown', (e) => {
     } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         cycleSelectedCreature(1);
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        disableAutoFollowForManualControl();
+        applyManualZoom(canvas.clientWidth / 2, canvas.clientHeight / 2, 1);
+    } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        disableAutoFollowForManualControl();
+        applyManualZoom(canvas.clientWidth / 2, canvas.clientHeight / 2, -1);
     }
 
     // After handling panning keys, synchronize config so helpers using config.* stay accurate
@@ -1374,6 +1434,7 @@ canvas.addEventListener('mousedown', (e) => {
             // We keep the info panel open by not clearing selectedInspectBody.
             // We only clear the point for dragging to prevent moving the old selection.
             config.selectedSoftBodyPoint = null;
+            disableAutoFollowForManualControl();
         }
         updateInfoPanel();
     }
@@ -1383,6 +1444,7 @@ canvas.addEventListener('mousemove', (e) => {
     updateMouse(e);
 
     if (config.isRightDragging) {
+        disableAutoFollowForManualControl();
         const currentDisplayMouseX = mouse.x;
         const currentDisplayMouseY = mouse.y;
 
@@ -1441,6 +1503,7 @@ canvas.addEventListener('mousemove', (e) => {
             point.pos.x = simMouseX;
             point.pos.y = simMouseY;
         } else if (fluidField) {
+            disableAutoFollowForManualControl();
             const fluidGridX = Math.floor(simMouseX / fluidField.scaleX);
             const fluidGridY = Math.floor(simMouseY / fluidField.scaleY);
             const r1 = Math.random() * 100 + 155;
@@ -1593,54 +1656,14 @@ canvas.addEventListener('contextmenu', (e) => {
 
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
-    
+
     const rect = canvas.getBoundingClientRect();
-    const displayX = e.clientX - rect.left;   // pixel inside visible canvas
+    const displayX = e.clientX - rect.left;
     const displayY = e.clientY - rect.top;
-
-    // World position under cursor BEFORE zoom
-    const worldXBefore = viewOffsetX + (displayX / viewZoom);
-    const worldYBefore = viewOffsetY + (displayY / viewZoom);
-
-    // Determine zoom direction
     const scrollDir = e.deltaY < 0 ? 1 : -1;
-    let newZoom = viewZoom * Math.pow(1 + config.ZOOM_SENSITIVITY * 10, scrollDir);
 
-    // Clamp zoom
-    const minZoomToFitX = canvas.clientWidth  / config.WORLD_WIDTH;
-    const minZoomToFitY = canvas.clientHeight / config.WORLD_HEIGHT;
-    const minAllowedZoom = Math.max(0.01, Math.min(minZoomToFitX, minZoomToFitY));
-    newZoom = Math.max(minAllowedZoom, Math.min(newZoom, config.MAX_ZOOM));
-
-    // Update zoom & offsets
-    viewZoom = newZoom;
-
-    viewOffsetX = worldXBefore - (displayX / viewZoom);
-    viewOffsetY = worldYBefore - (displayY / viewZoom);
-
-    // Clamp offsets so viewport stays inside world
-    const maxPanX = Math.max(0, config.WORLD_WIDTH  - canvas.clientWidth  / viewZoom);
-    const maxPanY = Math.max(0, config.WORLD_HEIGHT - canvas.clientHeight / viewZoom);
-    viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
-    viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
-
-    // Apply refined centring rules before syncing state objects
-    clampViewOffsets();
-
-    // Sync config & camera objects
-    config.viewZoom = viewZoom;
-    config.viewOffsetX = viewOffsetX;
-    config.viewOffsetY = viewOffsetY;
-
-    viewport.zoom = viewZoom;
-    viewport.offsetX = viewOffsetX;
-    viewport.offsetY = viewOffsetY;
-
-    clampViewOffsets();
-
-    // Sync zoom on shared objects
-    config.viewZoom = viewZoom;
-    viewport.zoom = viewZoom;
+    disableAutoFollowForManualControl();
+    applyManualZoom(displayX, displayY, scrollDir);
 });
 
 eyeDetectionRadiusSlider.oninput = function () {

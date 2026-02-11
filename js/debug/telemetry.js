@@ -37,23 +37,7 @@ function buildSnapshot() {
   };
 }
 
-function ensureDebugPanel() {
-  if (document.getElementById('simDebugPanel')) return;
-  const panel = document.createElement('div');
-  panel.id = 'simDebugPanel';
-  panel.style.cssText = 'position:fixed;right:8px;bottom:8px;z-index:99999;background:rgba(0,0,0,.75);color:#9ef;padding:8px 10px;border-radius:8px;font:12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;max-width:420px;max-height:42vh;overflow:auto;white-space:pre-wrap;';
-  panel.textContent = 'SimDebug booting...';
-  document.body.appendChild(panel);
-}
-
-function updatePanel(snapshot) {
-  const panel = document.getElementById('simDebugPanel');
-  if (!panel) return;
-  panel.textContent = JSON.stringify(snapshot, null, 2);
-}
-
 export function initDebugRuntime() {
-  ensureDebugPanel();
   if (!window.SimDebug) {
     window.SimDebug = {
       timeline: [],
@@ -63,7 +47,6 @@ export function initDebugRuntime() {
       captureNow() {
         const snap = buildSnapshot();
         this.timeline.push(snap);
-        updatePanel(snap);
         return snap;
       },
       clearTimeline() {
@@ -111,5 +94,4 @@ export function onSimulationTick() {
 
   const snap = buildSnapshot();
   if (window.SimDebug) window.SimDebug.timeline.push(snap);
-  updatePanel(snap);
 }

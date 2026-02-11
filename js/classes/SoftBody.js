@@ -2380,6 +2380,9 @@ export class SoftBody {
         return offspring;
     }
 
+    /**
+     * Compute axis-aligned bounds over all mass points (including radius).
+     */
     getBoundingBox() {
         if (this.massPoints.length === 0) {
             return { minX: 0, minY: 0, maxX: 0, maxY: 0, width: 0, height: 0 };
@@ -2394,6 +2397,9 @@ export class SoftBody {
         return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
     }
 
+    /**
+     * Return center-of-mass position approximation from current point locations.
+     */
     getAveragePosition() {
         if (this.massPoints.length === 0) return new Vec2(config.WORLD_WIDTH/2, config.WORLD_HEIGHT/2);
         let sumX = 0, sumY = 0;
@@ -2401,6 +2407,9 @@ export class SoftBody {
         return new Vec2(sumX / this.massPoints.length, sumY / this.massPoints.length);
     }
 
+    /**
+     * Return center-of-mass velocity approximation from Verlet positions.
+     */
     getAverageVelocity() {
         if (this.massPoints.length === 0) return new Vec2(0,0);
         let sumVelX = 0, sumVelY = 0;
@@ -2522,6 +2531,9 @@ export class SoftBody {
         nd.currentFrameActionDetails = []; // Already exists, just ensure it's initialized
     }
 
+    /**
+     * Compute trajectory reward-to-go for legacy in-class RL updater.
+     */
     calculateDiscountedRewards(rewards, gamma) {
         const discountedRewards = new Array(rewards.length);
         let runningAdd = 0;
@@ -2532,6 +2544,9 @@ export class SoftBody {
         return discountedRewards;
     }
 
+    /**
+     * Legacy policy-gradient updater retained for compatibility with older flows.
+     */
     updateBrainPolicy() {
         let brainNode = null;
         for (const point of this.massPoints) {

@@ -100,3 +100,15 @@ For each scenario run:
   - `js/engine/stepWorld.mjs` (population floors, reproduction gating, unstable-removal energy accounting)
   - `js/engine/worldPersistence.mjs` (config snapshot semantics, save/load round-trip with selection + spatial-grid rebuild)
 - Added explanatory docstrings across complex lifecycle functions in `stepWorld.mjs` and `worldPersistence.mjs`.
+- Began dedicated SoftBody + Brain hardening pass (unit tests + docstrings).
+- Added Brain-focused unit coverage in `node-harness/tests/brainCore.test.mjs`:
+  - brain-node selection precedence/fallback behavior
+  - vector-size calculation from topology counters
+  - fallback behavior when brain wiring is invalid
+  - training interval trigger behavior
+- Added SoftBody↔Brain bridge tests in `node-harness/tests/softBodyBrainBridge.test.mjs`:
+  - initializeBrain delegation to existing brain instance
+  - initializeBrain creation path when brain is missing
+  - discounted reward helper behavior
+  - blueprint radius monotonic update behavior
+- Added docstrings/comments to complex Brain/SoftBody lifecycle helpers (`Brain._gatherBrainInputs`, action/train methods, and selected SoftBody geometry/RL helpers).

@@ -226,6 +226,11 @@ export class Brain {
         this._triggerBrainPolicyUpdateIfNeeded();
     }
 
+    /**
+     * Build a fixed-width observation vector from body, fluid, resource, and sensor state.
+     *
+     * The ordering must remain stable because policy weights are topology-sensitive.
+     */
     _gatherBrainInputs(fluidFieldRef, nutrientField, lightField) {
         const nd = this.brainNode.neuronData;
         const softBody = this.softBody;
@@ -340,6 +345,9 @@ export class Brain {
         nd.rawOutputs = rawOutputs;
     }
 
+    /**
+     * Decode sampled policy actions and apply them to matching node effectors.
+     */
     _applyBrainActionsToPoints(dt) {
         const nd = this.brainNode.neuronData;
         const softBody = this.softBody;
@@ -560,6 +568,9 @@ export class Brain {
         });
     }
 
+    /**
+     * Append one on-policy transition into the rolling experience buffer.
+     */
     _updateBrainTrainingBuffer(inputVector) {
         const nd = this.brainNode.neuronData;
         const softBody = this.softBody;
@@ -673,6 +684,9 @@ export class Brain {
         nd.previousEnergyForReward = softBody.creatureEnergy;
     }
 
+    /**
+     * Train policy at configured frame cadence to amortize compute cost.
+     */
     _triggerBrainPolicyUpdateIfNeeded() {
         const nd = this.brainNode.neuronData;
         nd.framesSinceLastTrain++;
@@ -681,6 +695,9 @@ export class Brain {
         }
     }
 
+    /**
+     * Compute reward-to-go for each timestep in a trajectory.
+     */
     calculateDiscountedRewards(rewards, gamma) {
         const discountedRewards = new Array(rewards.length);
         let runningAdd = 0;
@@ -691,6 +708,9 @@ export class Brain {
         return discountedRewards;
     }
 
+    /**
+     * Run a policy-gradient style update from buffered on-policy experience.
+     */
     updateBrainPolicy() {
         if (!this.brainNode) return;
         const nd = this.brainNode.neuronData;

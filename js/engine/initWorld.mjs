@@ -1,4 +1,5 @@
 import { createEnvironmentFields, createLightField, createNutrientField, createViscosityField } from './environmentFields.js';
+import { withRandomSource } from './randomScope.mjs';
 
 function defaultRangeRandom(rng, min, max) {
   return min + rng() * (max - min);
@@ -35,7 +36,7 @@ export function initializePopulation(worldState, {
   for (let i = 0; i < count; i++) {
     const x = defaultRangeRandom(rng, spawnMargin, config.WORLD_WIDTH - spawnMargin);
     const y = defaultRangeRandom(rng, spawnMargin, config.WORLD_HEIGHT - spawnMargin);
-    const body = new SoftBodyClass(worldState.nextSoftBodyId++, x, y, null);
+    const body = withRandomSource(rng, () => new SoftBodyClass(worldState.nextSoftBodyId++, x, y, null));
     attachWorldRefsToBody(body, worldState);
     worldState.softBodyPopulation.push(body);
   }
@@ -54,10 +55,13 @@ export function initializeParticles(worldState, {
   if (ParticleClass && worldState.fluidField && count > 0) {
     for (let i = 0; i < count; i++) {
       worldState.particles.push(
-        new ParticleClass(
-          rng() * config.WORLD_WIDTH,
-          rng() * config.WORLD_HEIGHT,
-          worldState.fluidField
+        withRandomSource(
+          rng,
+          () => new ParticleClass(
+            rng() * config.WORLD_WIDTH,
+            rng() * config.WORLD_HEIGHT,
+            worldState.fluidField
+          )
         )
       );
     }

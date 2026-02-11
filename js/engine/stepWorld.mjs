@@ -1,3 +1,5 @@
+import { withRandomSource } from './randomScope.mjs';
+
 function randomInRange(rng, min, max) {
   return min + rng() * (max - min);
 }
@@ -80,13 +82,14 @@ function maybeApplySelectedPointFluidPush(state, config) {
 function spawnParticle(state, config, ParticleClass, rng) {
   const x = rng() * config.WORLD_WIDTH;
   const y = rng() * config.WORLD_HEIGHT;
-  state.particles.push(new ParticleClass(x, y, state.fluidField));
+  const particle = withRandomSource(rng, () => new ParticleClass(x, y, state.fluidField));
+  state.particles.push(particle);
 }
 
 function spawnCreature(state, config, SoftBodyClass, rng, margin = 50) {
   const x = randomInRange(rng, margin, config.WORLD_WIDTH - margin);
   const y = randomInRange(rng, margin, config.WORLD_HEIGHT - margin);
-  const body = new SoftBodyClass(state.nextSoftBodyId++, x, y, null);
+  const body = withRandomSource(rng, () => new SoftBodyClass(state.nextSoftBodyId++, x, y, null));
   body.setNutrientField(state.nutrientField);
   body.setLightField(state.lightField);
   body.setParticles(state.particles);
@@ -116,10 +119,10 @@ function accumulateRemovedBodyEnergy(state, body) {
   state.globalEnergyCosts.repulsorNodes += body.energyCostFromRepulsorNodes || 0;
 }
 
-function removeDeadParticles(state, dt) {
+function removeDeadParticles(state, dt, rng) {
   for (let i = state.particles.length - 1; i >= 0; i--) {
     const particle = state.particles[i];
-    particle.update(dt);
+    withRandomSource(rng, () => particle.update(dt));
     if (particle.life <= 0) {
       state.particles.splice(i, 1);
     }
@@ -199,7 +202,7 @@ export function stepWorld(state, dt, options = {}) {
     const body = state.softBodyPopulation[i];
     if (body.isUnstable) continue;
 
-    body.updateSelf(dt, state.fluidField);
+    withRandomSource(rng, () => body.updateSelf(dt, state.fluidField));
     if (body.isUnstable) {
       currentAnyUnstable = true;
       continue;
@@ -212,7 +215,7 @@ export function stepWorld(state, dt, options = {}) {
       canCreaturesReproduceGlobally &&
       body.failedReproductionCooldown <= 0
     ) {
-      const offspring = body.reproduce();
+      const offspring = withRandomSource(rng, () => body.reproduce());
       if (offspring && offspring.length) newOffspring.push(...offspring);
     }
   }
@@ -221,7 +224,7 @@ export function stepWorld(state, dt, options = {}) {
     state.softBodyPopulation.push(...newOffspring);
   }
 
-  removeDeadParticles(state, dt);
+  removeDeadParticles(state, dt, rng);
 
   if (currentAnyUnstable && !config.isAnySoftBodyUnstable) {
     config.isAnySoftBodyUnstable = true;

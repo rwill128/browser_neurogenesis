@@ -4,7 +4,7 @@ import { Particle } from '../js/classes/Particle.js';
 import { FluidField } from '../js/classes/FluidField.js';
 import { syncRuntimeState } from '../js/engine/runtimeState.js';
 import { NodeType, MovementType, EyeTargetType } from '../js/classes/constants.js';
-import { createSeededRandom, withRandom } from './seededRandomScope.mjs';
+import { createSeededRandom } from './seededRandomScope.mjs';
 import { stepWorld } from '../js/engine/stepWorld.mjs';
 import { createWorldState } from '../js/engine/worldState.mjs';
 import {
@@ -76,28 +76,26 @@ export class RealWorld {
       mutationStats: {}
     });
 
-    withRandom(this.rand, () => {
-      initializeSharedEnvironmentMaps(this.worldState, {
-        config,
-        size: Math.round(config.FLUID_GRID_SIZE_CONTROL),
-        rng: this.rand
-      });
-      this.worldState.fluidField.setViscosityField(this.worldState.viscosityField);
+    initializeSharedEnvironmentMaps(this.worldState, {
+      config,
+      size: Math.round(config.FLUID_GRID_SIZE_CONTROL),
+      rng: this.rand
+    });
+    this.worldState.fluidField.setViscosityField(this.worldState.viscosityField);
 
-      initializeSharedParticles(this.worldState, {
-        config,
-        ParticleClass: Particle,
-        count: scenario.particles,
-        rng: this.rand
-      });
+    initializeSharedParticles(this.worldState, {
+      config,
+      ParticleClass: Particle,
+      count: scenario.particles,
+      rng: this.rand
+    });
 
-      initializeSharedPopulation(this.worldState, {
-        config,
-        SoftBodyClass: SoftBody,
-        count: scenario.creatures,
-        spawnMargin: 10,
-        rng: this.rand
-      });
+    initializeSharedPopulation(this.worldState, {
+      config,
+      SoftBodyClass: SoftBody,
+      count: scenario.creatures,
+      spawnMargin: 10,
+      rng: this.rand
     });
 
     this._syncAliasesFromWorldState();
@@ -159,20 +157,18 @@ export class RealWorld {
     this.tick += 1;
     this.time += dt;
 
-    withRandom(this.rand, () => {
-      this._applyEvents();
+    this._applyEvents();
 
-      stepWorld(this.worldState, dt, {
-        config,
-        rng: this.rand,
-        SoftBodyClass: SoftBody,
-        ParticleClass: Particle,
-        allowReproduction: false,
-        maintainCreatureFloor: false,
-        maintainParticleFloor: false,
-        applyEmitters: false,
-        applySelectedPointPush: false
-      });
+    stepWorld(this.worldState, dt, {
+      config,
+      rng: this.rand,
+      SoftBodyClass: SoftBody,
+      ParticleClass: Particle,
+      allowReproduction: false,
+      maintainCreatureFloor: false,
+      maintainParticleFloor: false,
+      applyEmitters: false,
+      applySelectedPointPush: false
     });
 
     this._syncAliasesFromWorldState();

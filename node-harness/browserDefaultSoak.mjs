@@ -196,6 +196,15 @@ function summarize(worldState, tick, timeSec) {
   let totalEnergy = 0;
   let unstable = 0;
 
+  let growthEvents = 0;
+  let growthNodesAdded = 0;
+  let growthEnergySpent = 0;
+  let growthSuppressedByPopulation = 0;
+  let growthSuppressedByEnergy = 0;
+  let growthSuppressedByCooldown = 0;
+  let rlTopologyResets = 0;
+  let topologyVersionTotal = 0;
+
   for (const b of worldState.softBodyPopulation) {
     if (b.isUnstable) unstable++;
     const points = Array.isArray(b.massPoints) ? b.massPoints.length : 0;
@@ -204,6 +213,15 @@ function summarize(worldState, tick, timeSec) {
     totalSprings += springs;
     if (points > maxPoints) maxPoints = points;
     totalEnergy += Number(b.creatureEnergy || 0);
+
+    growthEvents += Number(b.growthEventsCompleted || 0);
+    growthNodesAdded += Number(b.growthNodesAdded || 0);
+    growthEnergySpent += Number(b.totalGrowthEnergySpent || 0);
+    growthSuppressedByPopulation += Number(b.growthSuppressedByPopulation || 0);
+    growthSuppressedByEnergy += Number(b.growthSuppressedByEnergy || 0);
+    growthSuppressedByCooldown += Number(b.growthSuppressedByCooldown || 0);
+    rlTopologyResets += Number(b.rlBufferResetsDueToTopology || 0);
+    topologyVersionTotal += Number(b.nnTopologyVersion || 0);
   }
 
   return {
@@ -215,7 +233,15 @@ function summarize(worldState, tick, timeSec) {
     totalPoints,
     maxPointsPerCreature: maxPoints,
     totalSprings,
-    totalEnergy
+    totalEnergy,
+    growthEvents,
+    growthNodesAdded,
+    growthEnergySpent,
+    growthSuppressedByPopulation,
+    growthSuppressedByEnergy,
+    growthSuppressedByCooldown,
+    rlTopologyResets,
+    topologyVersionTotal
   };
 }
 
@@ -296,7 +322,11 @@ for (tick = 1; tick <= steps; tick++) {
     if (tick % logEvery === 0 || tick === 1) {
       const s = summarize(worldState, tick, tick * dt);
       checkpoints.push(s);
-      console.log(`[SOAK] tick=${s.tick} creatures=${s.creatures} particles=${s.particles} totalPoints=${s.totalPoints} maxPts=${s.maxPointsPerCreature}`);
+      console.log(
+        `[SOAK] tick=${s.tick} creatures=${s.creatures} particles=${s.particles} ` +
+        `totalPoints=${s.totalPoints} maxPts=${s.maxPointsPerCreature} ` +
+        `growthEvents=${s.growthEvents} rlTopologyResets=${s.rlTopologyResets}`
+      );
     }
   } catch (error) {
     crashed = {

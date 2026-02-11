@@ -70,3 +70,13 @@ For each scenario run:
 - Updated NN resize behavior in `js/classes/Brain.js` so topology changes preserve existing weights/biases where dimensions overlap, and random-initialize only newly added slices.
 - Added topology-change RL safety: experience buffer is flushed when NN input/output dimensions change due to growth, while overlapping NN weights are still preserved.
 - Added `node-harness/browserDefaultSoak.mjs` to reproduce browser-like failures headlessly using index-default startup conditions, with automatic crash snapshot/report output.
+
+- Added growth guardrails + continuity telemetry pass:
+  - population-based growth throttle (`soft`/`hard` limits)
+  - size-based growth cost multiplier
+  - per-creature telemetry counters for growth suppression reasons and RL topology resets
+  - soak reports now include growth + RL continuity metrics at each checkpoint
+- Added unit tests for all touched tuning/continuity code:
+  - `node-harness/tests/growthControls.test.mjs`
+  - `node-harness/tests/brainTopologyReset.test.mjs`
+  - `node-harness/tests/softBodyGrowthGuardrails.test.mjs`

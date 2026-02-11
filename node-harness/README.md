@@ -98,6 +98,13 @@ What it does:
 - runs real shared-core stepping in node (with reproduction + floor maintenance)
 - catches crashes and writes both a crash report and full snapshot for replay
 - writes periodic checkpoints + final report even on successful runs
+- includes growth/RL continuity telemetry in reports (`growthEvents`, `growthEnergySpent`, `rlTopologyResets`, etc.)
+
+## 7) Unit tests (growth controls + topology-resize RL handling)
+
+```bash
+node --test node-harness/tests/*.test.mjs
+```
 
 ## Current status
 

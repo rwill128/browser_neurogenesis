@@ -5,6 +5,10 @@ import {MassPoint} from "./MassPoint.js";
 import {Spring} from "./Spring.js";
 import {Brain} from "./Brain.js";
 import { runtimeState } from "../engine/runtimeState.js";
+import {
+    computeGrowthPopulationThrottle,
+    computeGrowthSizeCostMultiplier
+} from '../engine/growthControls.mjs';
 
 const DEFAULT_GROWTH_NODE_TYPES = [
     NodeType.PREDATOR,
@@ -80,6 +84,12 @@ export class SoftBody {
         this.growthCooldownRemaining = 0;
         this.growthEventsCompleted = 0;
         this.growthNodesAdded = 0;
+        this.totalGrowthEnergySpent = 0;
+        this.growthSuppressedByPopulation = 0;
+        this.growthSuppressedByEnergy = 0;
+        this.growthSuppressedByCooldown = 0;
+        this.nnTopologyVersion = 0;
+        this.rlBufferResetsDueToTopology = 0;
 
         // Initialize heritable/mutable properties
         if (isBlueprint && creationData) {
@@ -632,6 +642,7 @@ export class SoftBody {
 
         if (this.growthCooldownRemaining > 0) {
             this.growthCooldownRemaining--;
+            this.growthSuppressedByCooldown += 1;
             return false;
         }
 
@@ -639,11 +650,31 @@ export class SoftBody {
         this.growthGenome = genome;
 
         const energyRatio = this.currentMaxEnergy > 0 ? this.creatureEnergy / this.currentMaxEnergy : 0;
-        if (energyRatio < genome.minEnergyRatioToGrow) return false;
+        if (energyRatio < genome.minEnergyRatioToGrow) {
+            this.growthSuppressedByEnergy += 1;
+            return false;
+        }
+
+        const population = Array.isArray(runtimeState.softBodyPopulation)
+            ? runtimeState.softBodyPopulation.length
+            : config.CREATURE_POPULATION_FLOOR;
+        const popThrottle = computeGrowthPopulationThrottle({
+            population,
+            floor: config.CREATURE_POPULATION_FLOOR,
+            ceiling: config.CREATURE_POPULATION_CEILING,
+            softLimitMultiplier: config.GROWTH_POP_SOFT_LIMIT_MULTIPLIER,
+            hardLimitMultiplier: config.GROWTH_POP_HARD_LIMIT_MULTIPLIER,
+            minThrottleScale: config.GROWTH_MIN_THROTTLE_SCALE
+        });
+
+        if (!popThrottle.allowGrowth) {
+            this.growthSuppressedByPopulation += 1;
+            return false;
+        }
 
         const dtScale = Math.max(0.1, dt * 60);
         const baseChance = Math.max(0, Math.min(1, genome.growthChancePerTick));
-        const growthChance = 1 - Math.pow(1 - baseChance, dtScale);
+        const growthChance = (1 - Math.pow(1 - baseChance, dtScale)) * popThrottle.scale;
         if (Math.random() >= growthChance) return false;
 
         const nodesPlan = this._sampleWeightedEntry(genome.nodesPerGrowthWeights, { count: 1 });
@@ -767,7 +798,13 @@ export class SoftBody {
         }
 
         const edgesAdded = this.springs.length - startSpringCount;
-        const growthCost = config.GROWTH_ENERGY_COST_SCALAR * (
+        const sizeCostMultiplier = computeGrowthSizeCostMultiplier({
+            currentPoints: this.massPoints.length,
+            maxPoints: config.GROWTH_MAX_POINTS_PER_CREATURE,
+            exponent: config.GROWTH_SIZE_COST_EXPONENT,
+            maxMultiplier: config.GROWTH_SIZE_COST_MAX_MULTIPLIER
+        });
+        const growthCost = config.GROWTH_ENERGY_COST_SCALAR * sizeCostMultiplier * (
             nodesAdded * config.GROWTH_COST_PER_NODE +
             edgesAdded * config.GROWTH_COST_PER_EDGE +
             totalEdgeLength * config.GROWTH_COST_PER_EDGE_LENGTH
@@ -777,10 +814,12 @@ export class SoftBody {
             // Roll back fully if growth budget was insufficient.
             this.massPoints.length = startPointCount;
             this.springs.length = startSpringCount;
+            this.growthSuppressedByEnergy += 1;
             return false;
         }
 
         this.creatureEnergy -= growthCost;
+        this.totalGrowthEnergySpent += growthCost;
         this.growthCooldownRemaining = Math.max(1, Math.floor(genome.growthCooldownTicks));
         this.growthEventsCompleted += 1;
         this.growthNodesAdded += nodesAdded;

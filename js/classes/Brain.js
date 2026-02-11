@@ -144,6 +144,10 @@ export class Brain {
         nd.currentFrameActionDetails = [];
         nd.previousEnergyForReward = this.softBody.creatureEnergy;
         nd.previousEnergyChangeForNN = 0;
+
+        // Continuity telemetry: track topology-driven RL resets per creature.
+        this.softBody.rlBufferResetsDueToTopology = (this.softBody.rlBufferResetsDueToTopology || 0) + 1;
+        this.softBody.nnTopologyVersion = (this.softBody.nnTopologyVersion || 0) + 1;
     }
 
     /**

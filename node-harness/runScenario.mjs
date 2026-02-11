@@ -16,8 +16,23 @@ const stepsArg = arg('steps', null);
 const outDir = resolve(arg('out', './artifacts'));
 
 const scenario = getScenario(scenarioName);
-const steps = stepsArg ? Number(stepsArg) : scenario.steps;
-const world = new MiniWorld(scenario, seed);
+const worldW = arg('worldW', null);
+const worldH = arg('worldH', null);
+const creaturesArg = arg('creatures', null);
+const particlesArg = arg('particles', null);
+
+const runtimeScenario = {
+  ...scenario,
+  world: {
+    width: worldW ? Number(worldW) : scenario.world.width,
+    height: worldH ? Number(worldH) : scenario.world.height
+  },
+  creatures: creaturesArg ? Number(creaturesArg) : scenario.creatures,
+  particles: particlesArg ? Number(particlesArg) : scenario.particles
+};
+
+const steps = stepsArg ? Number(stepsArg) : runtimeScenario.steps;
+const world = new MiniWorld(runtimeScenario, seed);
 
 const timeline = [];
 for (let i = 0; i < steps; i++) {
@@ -28,11 +43,13 @@ for (let i = 0; i < steps; i++) {
 mkdirSync(outDir, { recursive: true });
 const outPath = resolve(outDir, `${scenario.name}-seed${seed}-steps${steps}.json`);
 const payload = {
-  scenario: scenario.name,
+  scenario: runtimeScenario.name,
   seed,
   steps,
-  dt: scenario.dt,
-  world: scenario.world,
+  dt: runtimeScenario.dt,
+  world: runtimeScenario.world,
+  creatures: runtimeScenario.creatures,
+  particles: runtimeScenario.particles,
   generatedAt: new Date().toISOString(),
   timeline
 };

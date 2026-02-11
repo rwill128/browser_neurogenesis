@@ -52,6 +52,28 @@ export const scenarioDefs = {
         { tick: 140, kind: 'velocityKick', amount: 1.6 }
       ]
     }
+  },
+  micro_single_100: {
+    name: 'micro_single_100',
+    description: 'Tiny 100x100 world with one creature for render debugging',
+    browserConfig: {
+      WORLD_WIDTH: 100,
+      WORLD_HEIGHT: 100,
+      CREATURE_POPULATION_FLOOR: 1,
+      CREATURE_POPULATION_CEILING: 1,
+      PARTICLE_POPULATION_FLOOR: 40,
+      PARTICLE_POPULATION_CEILING: 120,
+      PARTICLES_PER_SECOND: 4,
+      FLUID_GRID_SIZE_CONTROL: 48,
+      AUTO_FOLLOW_CREATURE: true
+    },
+    nodeConfig: {
+      world: { width: 100, height: 100 }, creatures: 1, particles: 40, dt: 1/30, steps: 240,
+      events: [
+        { tick: 60, kind: 'velocityKick', amount: 0.4 },
+        { tick: 150, kind: 'energySpike', amount: 4 }
+      ]
+    }
   }
 };
 

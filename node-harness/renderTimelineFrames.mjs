@@ -48,13 +48,14 @@ const world = data.world || { width: 120, height: 80 };
     }
   }
 
-  for (const c of snap.sampleCreatures || []) {
+  const creatures = (snap.creatures && snap.creatures.length) ? snap.creatures : (snap.sampleCreatures || []);
+  for (const c of creatures) {
     const px = Math.floor((c.center.x / world.width) * (w - 1));
     const py = Math.floor((c.center.y / world.height) * (h - 1));
     const e = clamp(c.energy || 0, 0, 140);
     const red = Math.floor(255 - (e / 140) * 140);
     const green = Math.floor(80 + (e / 140) * 170);
-    drawCircle(buf, px, py, 5, red, green, 220);
+    drawCircle(buf, px, py, 6, red, green, 220);
   }
 
   const header = `P6\n${w} ${h}\n255\n`;

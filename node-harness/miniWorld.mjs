@@ -88,6 +88,12 @@ export class MiniWorld {
         liveCreatures: live.length,
         particles: this.particles
       },
+      creatures: live.map(c => ({
+        id: c.id,
+        energy: Number(c.energy.toFixed(2)),
+        center: { x: Number(c.x.toFixed(2)), y: Number(c.y.toFixed(2)) },
+        vel: { x: Number(c.vx.toFixed(2)), y: Number(c.vy.toFixed(2)) }
+      })),
       sampleCreatures: live.slice(0, 5).map(c => ({
         id: c.id,
         energy: Number(c.energy.toFixed(2)),

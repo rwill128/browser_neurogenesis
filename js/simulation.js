@@ -1,5 +1,6 @@
 import config from './config.js';
 import {SoftBody} from './classes/SoftBody.js';
+import {Spring} from './classes/Spring.js';
 import {Particle} from './classes/Particle.js';
 import { stepWorld } from './engine/stepWorld.mjs';
 import {FluidField} from './classes/FluidField.js';
@@ -25,6 +26,7 @@ import { syncRuntimeState } from './engine/runtimeState.js';
 import { createWorldState } from './engine/worldState.mjs';
 import { runBrowserStepAdapter } from './engine/browserStepAdapter.mjs';
 import { createConfigViews } from './engine/configViews.mjs';
+import { saveWorldStateSnapshot, loadWorldStateSnapshot } from './engine/worldPersistence.mjs';
 
 let offscreenFluidCanvas, offscreenFluidCtx;
 let spatialGrid;
@@ -510,6 +512,59 @@ function initViscosityMap() {
     console.log(`Viscosity map initialized to ${size}x${size} with Perlin noise pattern.`);
 }
 
+/**
+ * Capture a full real-path world snapshot.
+ *
+ * The payload is intentionally shared with node-harness so saves are portable
+ * across browser and node runtimes.
+ */
+function saveCurrentWorldSnapshot(meta = {}) {
+    return saveWorldStateSnapshot({
+        worldState: simulationWorldState,
+        configOrViews: simulationConfigViews,
+        rng: Math.random,
+        meta: {
+            source: 'browser-real',
+            totalSimulationTime: config.totalSimulationTime,
+            ...meta
+        }
+    });
+}
+
+/**
+ * Rehydrate the browser runtime from a previously saved world snapshot.
+ */
+function loadWorldFromSnapshot(snapshot) {
+    const loadInfo = loadWorldStateSnapshot(snapshot, {
+        worldState: simulationWorldState,
+        configOrViews: simulationConfigViews,
+        classes: {
+            SoftBodyClass: SoftBody,
+            ParticleClass: Particle,
+            SpringClass: Spring,
+            FluidFieldClass: FluidField
+        },
+        rng: Math.random
+    });
+
+    if (loadInfo?.meta && Number.isFinite(loadInfo.meta.totalSimulationTime)) {
+        config.totalSimulationTime = Number(loadInfo.meta.totalSimulationTime);
+    }
+
+    syncModuleBindingsFromWorldState();
+    syncRuntimeState({
+        fluidField: simulationWorldState.fluidField,
+        softBodyPopulation: simulationWorldState.softBodyPopulation,
+        mutationStats: simulationWorldState.mutationStats
+    });
+
+    updateInstabilityIndicator();
+    updatePopulationCount();
+    updateInfoPanel();
+
+    return loadInfo;
+}
+
 export {
     initializeSpatialGrid,
     initializePopulation,
@@ -529,5 +584,7 @@ export {
     globalEnergyCosts,
     globalEnergyGains,
     particles,
-    spatialGrid
+    spatialGrid,
+    saveCurrentWorldSnapshot,
+    loadWorldFromSnapshot
 };

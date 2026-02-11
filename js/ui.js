@@ -11,7 +11,9 @@ import {
     particles,
     fluidField,
     spatialGrid,
-    mutationStats, globalEnergyGains, globalEnergyCosts
+    mutationStats, globalEnergyGains, globalEnergyCosts,
+    saveCurrentWorldSnapshot,
+    loadWorldFromSnapshot
 } from './simulation.js';
 import { perlin, getNodeTypeString, getRewardStrategyString, getEyeTargetTypeString, getMovementTypeString, sigmoid } from './utils.js';
 import {NodeType} from "./classes/constants.js";
@@ -125,6 +127,10 @@ const particleCountDisplay = document.getElementById('particleCount');
 const exportConfigButton = document.getElementById('exportConfigButton');
 const importConfigFile = document.getElementById('importConfigFile');
 const importConfigButton = document.getElementById('importConfigButton');
+const exportStateButton = document.getElementById('exportStateButton');
+const importStateButton = document.getElementById('importStateButton');
+const importStateFile = document.getElementById('importStateFile');
+const mobileNextCreatureButton = document.getElementById('mobileNextCreatureButton');
 const importCreatureButton = document.getElementById('importCreatureButton');
 const importCreatureFile = document.getElementById('importCreatureFile');
 const creatureImportStatus = document.getElementById('creatureImportStatus');
@@ -1093,7 +1099,27 @@ resetParticlesButton.onclick = function () {
 
 exportConfigButton.onclick = handleExportConfig;
 importConfigButton.onclick = () => importConfigFile.click();
-importConfigFile.onchange = (event) => config.handleImportConfig(event, canvas, webgpuCanvas);
+/**
+ * Route config-file imports through the local UI handler.
+ *
+ * Note: this intentionally avoids dispatching through config.js,
+ * which does not own the file-reader/import orchestration.
+ */
+importConfigFile.onchange = handleImportConfig;
+
+if (exportStateButton) {
+    exportStateButton.onclick = handleExportWorldState;
+}
+if (importStateButton) {
+    importStateButton.onclick = () => importStateFile?.click();
+}
+if (importStateFile) {
+    importStateFile.onchange = handleImportWorldState;
+}
+if (mobileNextCreatureButton) {
+    mobileNextCreatureButton.onclick = () => cycleSelectedCreature(1);
+}
+
 closeInfoPanelButton.onclick = () => {
     infoPanel.classList.remove('open');
     config.selectedInspectBody = null;
@@ -1343,6 +1369,26 @@ if (useGpuFluidToggle) { // Check if the element exists before assigning onchang
 } else {
     console.error("useGpuFluidToggle element not found!");
 }
+
+/**
+ * Disable mobile touch gestures on the simulation canvas.
+ *
+ * Rationale: on phones/tablets, browser pan/zoom gestures can lock rendering/input.
+ * We force explicit button-based mobile controls instead.
+ */
+canvas.style.touchAction = 'none';
+const blockCanvasTouchGestures = (e) => {
+    if (e.cancelable) {
+        e.preventDefault();
+    }
+};
+canvas.addEventListener('touchstart', blockCanvasTouchGestures, { passive: false });
+canvas.addEventListener('touchmove', blockCanvasTouchGestures, { passive: false });
+canvas.addEventListener('touchend', blockCanvasTouchGestures, { passive: false });
+canvas.addEventListener('touchcancel', blockCanvasTouchGestures, { passive: false });
+canvas.addEventListener('gesturestart', blockCanvasTouchGestures, { passive: false });
+canvas.addEventListener('gesturechange', blockCanvasTouchGestures, { passive: false });
+canvas.addEventListener('gestureend', blockCanvasTouchGestures, { passive: false });
 
 canvas.addEventListener('mousedown', (e) => {
     updateMouse(e);
@@ -1889,6 +1935,57 @@ function handleNodeTypeLabelClick(nodeTypeName) {
         console.log(`No creatures found with node type ${getNodeTypeString(nodeType)}`);
         cyclingNodeType = null;
     }
+}
+
+/**
+ * Download a serialized world snapshot JSON file.
+ */
+function handleExportWorldState() {
+    try {
+        const snapshot = saveCurrentWorldSnapshot({
+            trigger: 'browser-ui'
+        });
+        const jsonString = JSON.stringify(snapshot, null, 2);
+        const blob = new Blob([jsonString], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const now = new Date();
+        const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+        a.download = `sim_state_${stamp}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        console.log('World state exported.');
+    } catch (error) {
+        console.error('Failed to export world state snapshot:', error);
+        showMessageModal(`Failed to export world state: ${error.message}`);
+    }
+}
+
+/**
+ * Load a full world snapshot from disk and rehydrate runtime state.
+ */
+function handleImportWorldState(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const snapshot = JSON.parse(e.target.result);
+            const loadInfo = loadWorldFromSnapshot(snapshot);
+            console.log('World state imported successfully.', loadInfo || {});
+            showMessageModal('World state loaded successfully.');
+        } catch (error) {
+            console.error('Error parsing/importing world state snapshot:', error);
+            showMessageModal(`Failed to import world state: ${error.message}`);
+        }
+    };
+
+    reader.readAsText(file);
+    if (importStateFile) importStateFile.value = '';
 }
 
 function handleExportConfig() {

@@ -46,6 +46,9 @@ Key commands:
 - `snapshot full [--out path]`
 - `snapshot rect <x> <y> <w> <h> [--out path]`
 - `snapshot creature <id> [--out path]`
+- `snapshot fluid [x y w h] [--out path]`
+- `save <path>`
+- `load <path>`
 - `set scenario <name>`
 - `set dt <value>`
 - `set world <w> <h>`
@@ -65,10 +68,25 @@ node node-harness/parityRegression.mjs \
 The script compares invariant checkpoints (population counts, structural counts, energy/fluid aggregates)
 across a browser-like shared-core runner and the existing headless real runner.
 
+## 5) Save/load regression (headless + browser-like real paths)
+
+```bash
+node node-harness/saveLoadRegression.mjs \
+  --scenario micro_one_creature_100 \
+  --seed 23 \
+  --beforeSteps 30 \
+  --afterSteps 60 \
+  --runtime both
+```
+
+This validates end-to-end `save -> load -> continue` determinism across both
+headless-real and browser-like-real runners.
+
 ## Current status
 
 - ✅ Deterministic seeded runs
 - ✅ Timeline JSON + frame/video artifact pipeline
 - ✅ Always-real path using real simulation classes
 - ✅ Interactive CLI control/query loop
+- ✅ Cross-runtime save/load state snapshots (real engine path)
 - 🚧 Still in-progress toward full browser/headless parity

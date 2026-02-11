@@ -1,5 +1,11 @@
 import config from '../config.js';
-import { softBodyPopulation, particles, fluidField } from '../simulation.js';
+import {
+  softBodyPopulation,
+  particles,
+  fluidField,
+  saveCurrentWorldSnapshot,
+  loadWorldFromSnapshot
+} from '../simulation.js';
 import { buildTelemetrySnapshot } from '../engine/snapshot.mjs';
 
 let tickCounter = 0;
@@ -30,6 +36,40 @@ export function initDebugRuntime() {
         const snap = buildSnapshot();
         this.timeline.push(snap);
         return snap;
+      },
+      getTick() {
+        return tickCounter;
+      },
+      saveWorldState() {
+        return saveCurrentWorldSnapshot({
+          tick: tickCounter,
+          scenario: config.DEBUG_SCENARIO || 'baseline',
+          seed: config.DEBUG_SEED ?? null
+        });
+      },
+      saveWorldStateJson() {
+        return JSON.stringify(this.saveWorldState(), null, 2);
+      },
+      async loadWorldState(snapshotOrJson) {
+        const snapshot = typeof snapshotOrJson === 'string' ? JSON.parse(snapshotOrJson) : snapshotOrJson;
+        const loadInfo = loadWorldFromSnapshot(snapshot);
+        if (loadInfo?.meta && Number.isFinite(loadInfo.meta.tick)) {
+          tickCounter = Math.max(0, Math.floor(loadInfo.meta.tick));
+          lastCaptureTick = tickCounter;
+        }
+        return loadInfo;
+      },
+      downloadWorldState(filename) {
+        const defaultName = `world-${config.DEBUG_SCENARIO || 'baseline'}-${Date.now()}.json`;
+        const blob = new Blob([this.saveWorldStateJson()], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename || defaultName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
       },
       clearTimeline() {
         this.timeline.length = 0;

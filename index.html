@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>2D Soft Body Evolution - Robust External Slider Config</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
@@ -66,6 +66,7 @@
         <button id="toggleControlsButton" class="ui-button-top-right">Controls</button>
         <button id="screensaverButton" class="ui-button-top-left">Enter Screensaver</button>
         <button id="viewEntireSimButton" class="ui-button-top-left">View Entire Sim</button>
+        <button id="mobileNextCreatureButton" class="ui-mobile-button">Next Creature</button>
         <div id="frameTimeDisplay" class="ui-info-top-left">Frame Time: - ms</div>
 
         <div id="controls">
@@ -266,6 +267,12 @@
                 <button id="exportConfigButton">Export Config</button>
                 <input type="file" id="importConfigFile" accept=".json" style="display: none;">
                 <button id="importConfigButton">Import Config</button>
+            </div>
+            <div class="control-group">
+                <h4>World Save / Load</h4>
+                <button id="exportStateButton">Export World State</button>
+                <input type="file" id="importStateFile" accept=".json" style="display: none;">
+                <button id="importStateButton">Import World State</button>
             </div>
             <div class="control-group">
                 <h4>Creature Import/Export</h4>

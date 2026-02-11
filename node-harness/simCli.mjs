@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import readline from 'node:readline';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getScenario } from './scenarios.mjs';
 import { RealWorld } from './realWorld.mjs';
@@ -79,6 +79,17 @@ class InteractiveSim {
   reset() {
     this.pause();
     this.world = this._createWorld();
+  }
+
+  saveState() {
+    return this.world.saveStateSnapshot({
+      scenario: this.runtimeScenario.name
+    });
+  }
+
+  loadState(snapshot) {
+    this.pause();
+    return this.world.loadStateSnapshot(snapshot);
   }
 
   step(steps = 1) {
@@ -276,6 +287,8 @@ function printHelp() {
   snapshot rect <x> <y> <w> <h> [--out path]
   snapshot creature <id> [--out path]
   snapshot fluid [x y w h] [--out path]
+  save <path>           # write full world state snapshot JSON
+  load <path>           # load snapshot JSON and continue from restored state
 
   set dt <value>
   set seed <int>
@@ -345,6 +358,17 @@ rl.on('line', (line) => {
       printJson(sim.pause());
     } else if (cmd === 'reset') {
       sim.reset();
+      printJson(sim.status());
+    } else if (cmd === 'save') {
+      if (!parts[0]) throw new Error('usage: save <path>');
+      const abs = resolve(parts[0]);
+      writeFileSync(abs, JSON.stringify(sim.saveState(), null, 2) + '\n', 'utf8');
+      console.log(`Wrote ${abs}`);
+    } else if (cmd === 'load') {
+      if (!parts[0]) throw new Error('usage: load <path>');
+      const abs = resolve(parts[0]);
+      const snapshot = JSON.parse(readFileSync(abs, 'utf8'));
+      sim.loadState(snapshot);
       printJson(sim.status());
     } else if (cmd === 'snapshot') {
       const parsed = parseOutArg(parts);

@@ -71,6 +71,7 @@ canvas {
     max-height: 100%;
     object-fit: contain;
     cursor: default;
+    touch-action: none;
 }
 canvas.emitter-edit-mode {
     cursor: crosshair;
@@ -104,6 +105,21 @@ canvas.emitter-edit-mode {
 }
 .ui-button-top-left:hover {
     background-color: #0056b3;
+}
+
+/* Mobile-only creature cycling control used when keyboard arrows are unavailable. */
+.ui-mobile-button {
+    position: fixed;
+    right: 15px;
+    bottom: 20px;
+    padding: 10px 14px;
+    background-color: rgba(0, 123, 255, 0.95);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+    z-index: 1003;
+    display: none;
 }
 
 #toggleControlsButton {
@@ -537,4 +553,15 @@ body.css-screensaver-active #canvasContainer {
 #nodeTypeStats p span.stat-value,
 #mutationTypeStats p span.stat-value {
     color: #eee; /* Value color */
-} 
+}
+
+/* Mobile interaction policy: hide keyboard-oriented hint text and show tap-only creature cycle control. */
+@media (max-width: 900px) {
+    .ui-mobile-button {
+        display: block;
+    }
+
+    .viewport-instructions {
+        display: none;
+    }
+}

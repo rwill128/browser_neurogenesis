@@ -393,6 +393,13 @@ export class RealWorld {
           reproductionEnergyThreshold: round(b.reproductionEnergyThreshold, 4),
           currentMaxEnergy: round(b.currentMaxEnergy, 4),
           ticksSinceBirth: Number.isFinite(Number(b.ticksSinceBirth)) ? Number(b.ticksSinceBirth) : null,
+          absoluteAgeTicks: Number.isFinite(Number(b.absoluteAgeTicks)) ? Number(b.absoluteAgeTicks) : null,
+          birthOrigin: b.birthOrigin || 'unknown',
+          parentBodyId: Number.isFinite(Number(b.parentBodyId)) ? Number(b.parentBodyId) : null,
+          lineageRootId: Number.isFinite(Number(b.lineageRootId)) ? Number(b.lineageRootId) : null,
+          generation: Number.isFinite(Number(b.generation)) ? Number(b.generation) : null,
+          reproductionEventsCompleted: Number.isFinite(Number(b.reproductionEventsCompleted)) ? Number(b.reproductionEventsCompleted) : 0,
+          ticksSinceLastReproduction: Number.isFinite(Number(b.ticksSinceLastReproduction)) ? Number(b.ticksSinceLastReproduction) : null,
           canReproduce: Boolean(b.canReproduce),
           rewardStrategy: b.rewardStrategy ?? null,
           dyePreferredHue: round(b.dyePreferredHue, 5),
@@ -529,6 +536,8 @@ export class RealWorld {
         totalUnknownRemoved: Number(instabilityTelemetry.totalUnknownRemoved) || 0,
         removedByReason: instabilityTelemetry.removedByReason || {},
         removedByPhysicsKind: instabilityTelemetry.removedByPhysicsKind || {},
+        removedByBirthOrigin: instabilityTelemetry.removedByBirthOrigin || {},
+        removedByLifecycleStage: instabilityTelemetry.removedByLifecycleStage || {},
         recentDeaths: Array.isArray(instabilityTelemetry.recentDeaths)
           ? instabilityTelemetry.recentDeaths.slice(-20)
           : [],

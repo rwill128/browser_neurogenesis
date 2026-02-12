@@ -44,6 +44,13 @@ export function initializePopulation(worldState, {
     const x = defaultRangeRandom(rng, spawnMargin, runtimeConfig.WORLD_WIDTH - spawnMargin);
     const y = defaultRangeRandom(rng, spawnMargin, runtimeConfig.WORLD_HEIGHT - spawnMargin);
     const body = withRandomSource(rng, () => new SoftBodyClass(worldState.nextSoftBodyId++, x, y, null));
+    body.birthOrigin = 'initial_population';
+    body.parentBodyId = null;
+    body.generation = 0;
+    body.lineageRootId = body.id;
+    body.absoluteAgeTicks = 0;
+    body.reproductionEventsCompleted = 0;
+    body.ticksSinceLastReproduction = null;
     attachWorldRefsToBody(body, worldState);
 
     // Newborn spawn safety: fit inside world and clamp spring aggressiveness for tiny worlds.

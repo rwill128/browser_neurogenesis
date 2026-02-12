@@ -417,6 +417,13 @@ test('stepWorld captures detailed instability telemetry for removed bodies', () 
     { relX: 1, relY: 0, radius: 1, mass: 1, nodeType: 1, movementType: 2 }
   ];
   unstable.blueprintSprings = [{ p1Index: 0, p2Index: 1, restLength: 1, isRigid: false, stiffness: 200, damping: 1 }];
+  unstable.birthOrigin = 'reproduction_offspring';
+  unstable.parentBodyId = 42;
+  unstable.lineageRootId = 4;
+  unstable.generation = 3;
+  unstable.reproductionEventsCompleted = 2;
+  unstable.ticksSinceLastReproduction = 7;
+  unstable.absoluteAgeTicks = 120;
 
   const state = createWorldState({ runtime, softBodies: [unstable], particles: [] });
 
@@ -433,6 +440,11 @@ test('stepWorld captures detailed instability telemetry for removed bodies', () 
   assert.equal(result.removedBodies[0].unstableReason, 'physics_spring_overstretch');
   assert.equal(result.removedBodies[0].physicsStabilityDeath, true);
   assert.equal(result.removedBodies[0].unstablePhysicsKind, 'geometric_explosion');
+  assert.equal(result.removedBodies[0].birthOrigin, 'reproduction_offspring');
+  assert.equal(result.removedBodies[0].lifecycleStage, 'post_reproduction_parent');
+  assert.equal(result.removedBodies[0].isPostReproductionParent, true);
+  assert.equal(result.removedBodies[0].ticksSinceLastReproduction, 7);
+  assert.equal(result.removedBodies[0].absoluteAgeTicks, 120);
   assert.ok(result.removedBodies[0].physiology);
   assert.ok(result.removedBodies[0].hereditaryBlueprint);
 
@@ -441,8 +453,46 @@ test('stepWorld captures detailed instability telemetry for removed bodies', () 
   assert.equal(telemetry.totalPhysicsRemoved, 1);
   assert.equal(telemetry.removedByReason.physics_spring_overstretch, 1);
   assert.equal(telemetry.removedByPhysicsKind.geometric_explosion, 1);
+  assert.equal(telemetry.removedByBirthOrigin.reproduction_offspring, 1);
+  assert.equal(telemetry.removedByLifecycleStage.post_reproduction_parent, 1);
   assert.equal(Array.isArray(telemetry.recentDeaths), true);
   assert.equal(telemetry.recentDeaths.length, 1);
+});
+
+test('stepWorld separates instability removals by lifecycle stage and birth origin', () => {
+  const runtime = createRuntimeConfig({ isAnySoftBodyUnstable: true });
+
+  const floorSpawned = new FakeSoftBody(150, 20, 20);
+  floorSpawned.isUnstable = true;
+  floorSpawned.unstableReason = 'physics_invalid_motion';
+  floorSpawned.birthOrigin = 'floor_spawn';
+  floorSpawned.reproductionEventsCompleted = 0;
+
+  const postReproductionParent = new FakeSoftBody(151, 24, 20);
+  postReproductionParent.isUnstable = true;
+  postReproductionParent.unstableReason = 'energy_depleted';
+  postReproductionParent.birthOrigin = 'initial_population';
+  postReproductionParent.reproductionEventsCompleted = 1;
+  postReproductionParent.ticksSinceLastReproduction = 3;
+
+  const state = createWorldState({ runtime, softBodies: [floorSpawned, postReproductionParent], particles: [] });
+
+  const result = stepWorld(state, 0.01, {
+    config: runtime,
+    allowReproduction: false,
+    maintainCreatureFloor: false,
+    maintainParticleFloor: false,
+    captureInstabilityTelemetry: true
+  });
+
+  assert.equal(result.removedCount, 2);
+  assert.equal(state.instabilityTelemetry.removedByBirthOrigin.floor_spawn, 1);
+  assert.equal(state.instabilityTelemetry.removedByLifecycleStage.floor_spawn, 1);
+  assert.equal(state.instabilityTelemetry.removedByLifecycleStage.post_reproduction_parent, 1);
+
+  const lifecycleStages = new Set(result.removedBodies.map((e) => e.lifecycleStage));
+  assert.equal(lifecycleStages.has('floor_spawn'), true);
+  assert.equal(lifecycleStages.has('post_reproduction_parent'), true);
 });
 
 test('stepWorld separates invalid-motion vs nan/non-finite reasons and samples diagnostics', () => {

@@ -330,6 +330,21 @@ function restoreSoftBody(bodySnapshot, { SoftBodyClass, SpringClass, worldState 
     body[key] = deepClone(value);
   }
 
+  const hasStoredBirthOrigin = Object.prototype.hasOwnProperty.call(bodySnapshot.state || {}, 'birthOrigin');
+  if (!hasStoredBirthOrigin || !body.birthOrigin || body.birthOrigin === 'unknown' || body.birthOrigin === 'imported_blueprint') {
+    body.birthOrigin = 'restored_checkpoint';
+  }
+  body.parentBodyId = Number.isFinite(Number(body.parentBodyId)) ? Number(body.parentBodyId) : null;
+  body.generation = Number.isFinite(Number(body.generation)) ? Math.max(0, Math.floor(Number(body.generation))) : 0;
+  body.lineageRootId = Number.isFinite(Number(body.lineageRootId)) ? Number(body.lineageRootId) : body.id;
+  body.absoluteAgeTicks = Number.isFinite(Number(body.absoluteAgeTicks)) ? Math.max(0, Math.floor(Number(body.absoluteAgeTicks))) : 0;
+  body.reproductionEventsCompleted = Number.isFinite(Number(body.reproductionEventsCompleted))
+    ? Math.max(0, Math.floor(Number(body.reproductionEventsCompleted)))
+    : 0;
+  body.ticksSinceLastReproduction = Number.isFinite(Number(body.ticksSinceLastReproduction))
+    ? Math.max(0, Math.floor(Number(body.ticksSinceLastReproduction)))
+    : null;
+
   if (restorePointCount !== body.massPoints.length) {
     throw new Error(
       `SoftBody ${bodySnapshot.id} restore failed: mass point count mismatch ` +

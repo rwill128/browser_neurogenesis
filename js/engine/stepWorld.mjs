@@ -45,6 +45,50 @@ function countNodeTypes(points) {
   return out;
 }
 
+function normalizeBirthOrigin(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return 'unknown';
+  if (raw === 'floor' || raw === 'floorfill' || raw === 'floor_fill' || raw === 'floor_spawn') return 'floor_spawn';
+  if (raw === 'reproduction' || raw === 'offspring' || raw === 'reproduction_offspring') return 'reproduction_offspring';
+  if (raw === 'initial' || raw === 'initial_population' || raw === 'seed_population') return 'initial_population';
+  if (raw === 'restored' || raw === 'restore' || raw === 'restored_checkpoint' || raw === 'imported_blueprint') return 'restored_checkpoint';
+  return raw;
+}
+
+function summarizeLifecycleForRemoval(body) {
+  const birthOrigin = normalizeBirthOrigin(body?.birthOrigin);
+  const reproductionEventsCompleted = Math.max(0, Math.floor(Number(body?.reproductionEventsCompleted) || 0));
+  const ticksSinceLastReproduction = Number.isFinite(Number(body?.ticksSinceLastReproduction))
+    ? Math.max(0, Math.floor(Number(body.ticksSinceLastReproduction)))
+    : null;
+  const absoluteAgeTicks = Number.isFinite(Number(body?.absoluteAgeTicks))
+    ? Math.max(0, Math.floor(Number(body.absoluteAgeTicks)))
+    : null;
+  const parentBodyId = Number.isFinite(Number(body?.parentBodyId)) ? Number(body.parentBodyId) : null;
+  const lineageRootId = Number.isFinite(Number(body?.lineageRootId)) ? Number(body.lineageRootId) : null;
+  const generation = Number.isFinite(Number(body?.generation)) ? Math.max(0, Math.floor(Number(body.generation))) : null;
+
+  const isPostReproductionParent = reproductionEventsCompleted > 0;
+  let lifecycleStage = 'unknown';
+  if (isPostReproductionParent) lifecycleStage = 'post_reproduction_parent';
+  else if (birthOrigin === 'floor_spawn') lifecycleStage = 'floor_spawn';
+  else if (birthOrigin === 'reproduction_offspring') lifecycleStage = 'reproduction_offspring';
+  else if (birthOrigin === 'initial_population') lifecycleStage = 'initial_population';
+  else if (birthOrigin === 'restored_checkpoint') lifecycleStage = 'restored_checkpoint';
+
+  return {
+    birthOrigin,
+    lifecycleStage,
+    isPostReproductionParent,
+    reproductionEventsCompleted,
+    ticksSinceLastReproduction,
+    absoluteAgeTicks,
+    parentBodyId,
+    lineageRootId,
+    generation
+  };
+}
+
 function ensureInstabilityTelemetryState(state, maxRecentDeaths = 1000) {
   if (!state.instabilityTelemetry || typeof state.instabilityTelemetry !== 'object') {
     state.instabilityTelemetry = {
@@ -54,6 +98,8 @@ function ensureInstabilityTelemetryState(state, maxRecentDeaths = 1000) {
       totalUnknownRemoved: 0,
       removedByReason: {},
       removedByPhysicsKind: {},
+      removedByBirthOrigin: {},
+      removedByLifecycleStage: {},
       recentDeaths: [],
       maxRecentDeaths,
       lastDeathSeq: 0,
@@ -69,6 +115,8 @@ function ensureInstabilityTelemetryState(state, maxRecentDeaths = 1000) {
   t.totalUnknownRemoved = Number(t.totalUnknownRemoved) || 0;
   t.removedByReason = t.removedByReason && typeof t.removedByReason === 'object' ? t.removedByReason : {};
   t.removedByPhysicsKind = t.removedByPhysicsKind && typeof t.removedByPhysicsKind === 'object' ? t.removedByPhysicsKind : {};
+  t.removedByBirthOrigin = t.removedByBirthOrigin && typeof t.removedByBirthOrigin === 'object' ? t.removedByBirthOrigin : {};
+  t.removedByLifecycleStage = t.removedByLifecycleStage && typeof t.removedByLifecycleStage === 'object' ? t.removedByLifecycleStage : {};
   t.recentDeaths = Array.isArray(t.recentDeaths) ? t.recentDeaths : [];
   t.sampledDiagnostics = Array.isArray(t.sampledDiagnostics) ? t.sampledDiagnostics : [];
   t.lastDeathSeq = Number(t.lastDeathSeq) || 0;
@@ -258,6 +306,7 @@ function summarizeDecisionState(body) {
 function buildInstabilityRemovalEvent(state, body) {
   const reason = String(body?.unstableReason || 'unknown');
   const classification = classifyInstabilityReason(reason);
+  const lifecycle = summarizeLifecycleForRemoval(body);
   const telemetry = ensureInstabilityTelemetryState(state);
   const deathSeq = (telemetry.lastDeathSeq || 0) + 1;
   telemetry.lastDeathSeq = deathSeq;
@@ -272,6 +321,15 @@ function buildInstabilityRemovalEvent(state, body) {
     unstablePhysicsKind: classification.unstablePhysicsKind,
     physicsStabilityDeath: classification.unstableClass === 'physics',
     ticksSinceBirth: Number.isFinite(Number(body?.ticksSinceBirth)) ? Number(body.ticksSinceBirth) : null,
+    birthOrigin: lifecycle.birthOrigin,
+    lifecycleStage: lifecycle.lifecycleStage,
+    isPostReproductionParent: lifecycle.isPostReproductionParent,
+    reproductionEventsCompleted: lifecycle.reproductionEventsCompleted,
+    ticksSinceLastReproduction: lifecycle.ticksSinceLastReproduction,
+    absoluteAgeTicks: lifecycle.absoluteAgeTicks,
+    parentBodyId: lifecycle.parentBodyId,
+    lineageRootId: lifecycle.lineageRootId,
+    generation: lifecycle.generation,
     creatureEnergy: round(body?.creatureEnergy, 6),
     currentMaxEnergy: round(body?.currentMaxEnergy, 6),
     hereditaryBlueprint: summarizeHereditaryBlueprint(body),
@@ -383,6 +441,15 @@ function spawnCreature(state, config, SoftBodyClass, rng, dt, margin = 50) {
   const x = randomInRange(rng, margin, config.WORLD_WIDTH - margin);
   const y = randomInRange(rng, margin, config.WORLD_HEIGHT - margin);
   const body = withRandomSource(rng, () => new SoftBodyClass(state.nextSoftBodyId++, x, y, null));
+  body.birthOrigin = 'floor_spawn';
+  body.parentBodyId = null;
+  body.generation = Number.isFinite(Number(body.generation)) ? Math.max(0, Math.floor(Number(body.generation))) : 0;
+  body.lineageRootId = Number.isFinite(Number(body.lineageRootId)) ? Number(body.lineageRootId) : body.id;
+  body.absoluteAgeTicks = 0;
+  body.reproductionEventsCompleted = Number.isFinite(Number(body.reproductionEventsCompleted))
+    ? Math.max(0, Math.floor(Number(body.reproductionEventsCompleted)))
+    : 0;
+  body.ticksSinceLastReproduction = null;
   body.setNutrientField(state.nutrientField);
   body.setLightField(state.lightField);
   body.setParticles(state.particles);
@@ -604,6 +671,8 @@ function removeUnstableBodies(state, {
       if (removalEvent.unstablePhysicsKind) {
         telemetry.removedByPhysicsKind[removalEvent.unstablePhysicsKind] = (telemetry.removedByPhysicsKind[removalEvent.unstablePhysicsKind] || 0) + 1;
       }
+      telemetry.removedByBirthOrigin[removalEvent.birthOrigin] = (telemetry.removedByBirthOrigin[removalEvent.birthOrigin] || 0) + 1;
+      telemetry.removedByLifecycleStage[removalEvent.lifecycleStage] = (telemetry.removedByLifecycleStage[removalEvent.lifecycleStage] || 0) + 1;
       telemetry.recentDeaths.push(removalEvent);
       if (telemetry.recentDeaths.length > telemetry.maxRecentDeaths) {
         telemetry.recentDeaths.splice(0, telemetry.recentDeaths.length - telemetry.maxRecentDeaths);

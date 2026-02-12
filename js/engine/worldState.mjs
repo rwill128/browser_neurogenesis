@@ -14,6 +14,8 @@ function createDefaultInstabilityTelemetry() {
     totalUnknownRemoved: 0,
     removedByReason: {},
     removedByPhysicsKind: {},
+    removedByBirthOrigin: {},
+    removedByLifecycleStage: {},
     // Recent detailed removal records (including physiology + hereditary blueprint snapshots).
     recentDeaths: [],
     maxRecentDeaths: 1000,

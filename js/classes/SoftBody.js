@@ -81,9 +81,18 @@ export class SoftBody {
         this.unstableReason = null;
         this.unstableReasonDetails = null;
         this.ticksSinceBirth = 0;
+        this.absoluteAgeTicks = 0;
         this.canReproduce = false;
         this.shapeType = creationData ? creationData.shapeType : Math.floor(Math.random() * 3);
         this.justReproduced = false; // New: Flag for reproduction reward
+
+        // Lifecycle provenance metadata for instability diagnostics.
+        this.birthOrigin = 'unknown';
+        this.parentBodyId = null;
+        this.lineageRootId = Number.isFinite(Number(id)) ? Number(id) : null;
+        this.generation = 0;
+        this.reproductionEventsCompleted = 0;
+        this.ticksSinceLastReproduction = null;
 
         this.energyGainedFromPhotosynthesis = 0;
         this.energyGainedFromEating = 0;
@@ -169,6 +178,12 @@ export class SoftBody {
         if (isBlueprint && creationData) {
             // --- CREATION FROM IMPORTED BLUEPRINT ---
             const blueprint = creationData;
+            this.birthOrigin = 'imported_blueprint';
+            this.parentBodyId = null;
+            this.lineageRootId = Number.isFinite(Number(this.id)) ? Number(this.id) : null;
+            this.generation = 0;
+            this.reproductionEventsCompleted = 0;
+            this.ticksSinceLastReproduction = null;
             this.stiffness = blueprint.stiffness;
             this.springDamping = blueprint.springDamping;
             this.motorImpulseInterval = blueprint.motorImpulseInterval;
@@ -218,6 +233,15 @@ export class SoftBody {
             // --- CREATION FROM PARENT (REPRODUCTION) OR FROM SCRATCH ---
             const parentBody = creationData; // In this case, creationData is the parentBody
             if (parentBody) {
+                this.birthOrigin = 'reproduction_offspring';
+                this.parentBodyId = Number.isFinite(Number(parentBody.id)) ? Number(parentBody.id) : null;
+                this.lineageRootId = Number.isFinite(Number(parentBody.lineageRootId))
+                    ? Number(parentBody.lineageRootId)
+                    : (Number.isFinite(Number(parentBody.id)) ? Number(parentBody.id) : this.lineageRootId);
+                this.generation = Math.max(0, Math.floor(Number(parentBody.generation) || 0) + 1);
+                this.reproductionEventsCompleted = 0;
+                this.ticksSinceLastReproduction = null;
+
                 this.stiffness = parentBody.stiffness * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
                 if (this.stiffness !== parentBody.stiffness) runtimeState.mutationStats.springStiffness++;
                 this.springDamping = parentBody.springDamping * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
@@ -3352,6 +3376,10 @@ export class SoftBody {
         }
 
         this.ticksSinceBirth++;
+        this.absoluteAgeTicks = Math.max(0, Math.floor(Number(this.absoluteAgeTicks) || 0) + 1);
+        if (Number.isFinite(Number(this.ticksSinceLastReproduction))) {
+            this.ticksSinceLastReproduction = Math.max(0, Math.floor(Number(this.ticksSinceLastReproduction) + 1));
+        }
 
         // Check for max age
         if (this.ticksSinceBirth > config.MAX_CREATURE_AGE_TICKS) {
@@ -3612,6 +3640,15 @@ export class SoftBody {
 
                     // Optimization: tempChild becomes the finalChild
                     potentialChild.id = this.id + successfullyPlacedOffspring; // Assign final ID and increment global counter
+                    potentialChild.birthOrigin = 'reproduction_offspring';
+                    potentialChild.parentBodyId = Number.isFinite(Number(this.id)) ? Number(this.id) : null;
+                    potentialChild.lineageRootId = Number.isFinite(Number(this.lineageRootId))
+                        ? Number(this.lineageRootId)
+                        : (Number.isFinite(Number(this.id)) ? Number(this.id) : null);
+                    potentialChild.generation = Math.max(0, Math.floor(Number(this.generation) || 0) + 1);
+                    potentialChild.absoluteAgeTicks = 0;
+                    potentialChild.reproductionEventsCompleted = 0;
+                    potentialChild.ticksSinceLastReproduction = null;
                     potentialChild.creatureEnergy = energyForOneOffspring;
                     offspring.push(potentialChild);
 
@@ -3629,6 +3666,8 @@ export class SoftBody {
             this.creatureEnergy *= (1 - config.REPRODUCTION_ADDITIONAL_COST_FACTOR);
             if (this.creatureEnergy < 0) this.creatureEnergy = 0;
             this.ticksSinceBirth = 0;
+            this.reproductionEventsCompleted = Math.max(0, Math.floor(Number(this.reproductionEventsCompleted) || 0) + 1);
+            this.ticksSinceLastReproduction = 0;
             this.canReproduce = false;
             this.justReproduced = true; // Set the flag here
         } else if (hadEnoughEnergyForAttempt && successfullyPlacedOffspring === 0) {

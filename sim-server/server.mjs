@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 
 /**
- * Minimal authoritative simulation server.
+ * Authoritative simulation server.
  *
  * - Runs the real engine in Node (RealWorld + stepWorld).
- * - Exposes HTTP JSON endpoints for status/snapshot/control.
+ * - Fastify HTTP API for status/snapshots/controls.
+ * - WebSocket stream for snapshots + status.
  * - Serves a simple browser client from ./public.
- *
- * No external deps (Node http).
  */
 
-import http from 'node:http';
-import { readFileSync, existsSync, statSync } from 'node:fs';
-import { extname, join, resolve } from 'node:path';
+import Fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
+import fastifyWebsocket from '@fastify/websocket';
+
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { getScenario } from '../node-harness/scenarios.mjs';
@@ -31,37 +32,6 @@ function parseNum(raw, fallback = null) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function json(res, status, payload) {
-  const body = JSON.stringify(payload, null, 2);
-  res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store'
-  });
-  res.end(body);
-}
-
-function text(res, status, body, contentType = 'text/plain; charset=utf-8') {
-  res.writeHead(status, { 'content-type': contentType, 'cache-control': 'no-store' });
-  res.end(body);
-}
-
-function readJsonBody(req) {
-  return new Promise((resolvePromise, rejectPromise) => {
-    const chunks = [];
-    req.on('data', (c) => chunks.push(c));
-    req.on('end', () => {
-      if (!chunks.length) return resolvePromise(null);
-      try {
-        const raw = Buffer.concat(chunks).toString('utf8');
-        resolvePromise(JSON.parse(raw));
-      } catch (err) {
-        rejectPromise(err);
-      }
-    });
-    req.on('error', rejectPromise);
-  });
-}
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = resolve(__filename, '..');
 const publicDir = resolve(__dirname, 'public');
@@ -76,18 +46,10 @@ let paused = false;
 let dt = 1 / 60;
 
 let world = null;
-let lastStepAt = Date.now();
 let lastStepWallMs = 0;
 let stepsThisSecond = 0;
 let stepsPerSecond = 0;
 let lastStepsPerSecondAt = Date.now();
-
-let cached = {
-  status: { at: 0, value: null },
-  lite: { at: 0, value: null },
-  render: { at: 0, value: null },
-  full: { at: 0, value: null }
-};
 
 function resetWorld(nextScenarioName, nextSeed) {
   scenarioName = nextScenarioName;
@@ -97,13 +59,6 @@ function resetWorld(nextScenarioName, nextSeed) {
   dt = Number(scenario.dt) || (1 / 60);
 
   world = new RealWorld(scenario, seed);
-
-  cached = {
-    status: { at: 0, value: null },
-    lite: { at: 0, value: null },
-    render: { at: 0, value: null },
-    full: { at: 0, value: null }
-  };
 }
 
 resetWorld(scenarioName, seed);
@@ -124,133 +79,42 @@ function computeStatus() {
   };
 }
 
-function getCached(key, ttlMs, computeFn) {
-  const now = Date.now();
-  const entry = cached[key];
-  if (entry && entry.value && (now - entry.at) < ttlMs) return entry.value;
-  const value = computeFn();
-  cached[key] = { at: now, value };
-  return value;
-}
-
 function computeSnapshot(mode) {
   const snap = world.snapshot();
+  const worldDims = world?.config?.world || null;
+
   if (mode === 'lite') {
     return {
       tick: snap.tick,
       time: snap.time,
       seed: snap.seed,
+      world: worldDims,
       populations: snap.populations,
       instabilityTelemetry: snap.instabilityTelemetry,
       mutationStats: snap.mutationStats,
       sampleCreatures: snap.sampleCreatures
     };
   }
+
   if (mode === 'render') {
     return {
       tick: snap.tick,
       time: snap.time,
       seed: snap.seed,
+      world: worldDims,
       populations: snap.populations,
       fluid: snap.fluid,
       creatures: snap.creatures
     };
   }
-  return snap;
+
+  return {
+    ...snap,
+    world: worldDims
+  };
 }
 
-function mimeTypeFor(path) {
-  const ext = extname(path).toLowerCase();
-  if (ext === '.html') return 'text/html; charset=utf-8';
-  if (ext === '.js' || ext === '.mjs') return 'text/javascript; charset=utf-8';
-  if (ext === '.css') return 'text/css; charset=utf-8';
-  if (ext === '.json') return 'application/json; charset=utf-8';
-  if (ext === '.png') return 'image/png';
-  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
-  if (ext === '.svg') return 'image/svg+xml; charset=utf-8';
-  return 'application/octet-stream';
-}
-
-function serveStatic(req, res) {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  let rel = decodeURIComponent(url.pathname);
-  if (rel === '/') rel = '/index.html';
-
-  // basic traversal guard
-  if (rel.includes('..')) {
-    return text(res, 400, 'Bad path');
-  }
-
-  const filePath = resolve(publicDir, '.' + rel);
-  if (!filePath.startsWith(publicDir)) {
-    return text(res, 400, 'Bad path');
-  }
-
-  if (!existsSync(filePath) || !statSync(filePath).isFile()) {
-    return text(res, 404, 'Not found');
-  }
-
-  const data = readFileSync(filePath);
-  res.writeHead(200, {
-    'content-type': mimeTypeFor(filePath),
-    'cache-control': 'no-store'
-  });
-  res.end(data);
-}
-
-const server = http.createServer(async (req, res) => {
-  try {
-    const url = new URL(req.url, `http://${req.headers.host}`);
-
-    // API
-    if (url.pathname === '/api/status' && req.method === 'GET') {
-      return json(res, 200, getCached('status', 150, computeStatus));
-    }
-
-    if (url.pathname === '/api/scenarios' && req.method === 'GET') {
-      const items = Object.keys(scenarioDefs).map((name) => ({
-        name,
-        description: scenarioDefs[name]?.description || ''
-      }));
-      return json(res, 200, { ok: true, scenarios: items });
-    }
-
-    if (url.pathname === '/api/snapshot' && req.method === 'GET') {
-      const mode = url.searchParams.get('mode') || 'render';
-      const ttl = mode === 'render' ? 120 : 300;
-      const key = (mode === 'lite' || mode === 'render') ? mode : 'full';
-      return json(res, 200, getCached(key, ttl, () => computeSnapshot(mode)));
-    }
-
-    if (url.pathname === '/api/control/pause' && req.method === 'POST') {
-      paused = true;
-      return json(res, 200, { ok: true, paused });
-    }
-
-    if (url.pathname === '/api/control/resume' && req.method === 'POST') {
-      paused = false;
-      return json(res, 200, { ok: true, paused });
-    }
-
-    if (url.pathname === '/api/control/setScenario' && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      const nextScenario = String(body?.name || '').trim();
-      const nextSeed = (Number.isFinite(Number(body?.seed)) ? Number(body.seed) : seed) >>> 0;
-      if (!nextScenario || !(nextScenario in scenarioDefs)) {
-        return json(res, 400, { ok: false, error: `Unknown scenario: ${nextScenario}` });
-      }
-      resetWorld(nextScenario, nextSeed);
-      return json(res, 200, { ok: true, scenario: scenarioName, seed, dt });
-    }
-
-    // Static
-    return serveStatic(req, res);
-  } catch (err) {
-    return json(res, 500, { ok: false, error: String(err?.message || err) });
-  }
-});
-
-// Simulation loop: catch up using an accumulator so dt can be small (e.g. 1/120).
+// Simulation loop (fixed dt with accumulator)
 const LOOP_WALL_MS = 10;
 let accumulatorMs = 0;
 let loopLastAt = Date.now();
@@ -279,7 +143,6 @@ setInterval(() => {
     stepsThisSecond += 1;
   }
   lastStepWallMs = Date.now() - t0;
-  lastStepAt = now;
 
   if (now - lastStepsPerSecondAt >= 1000) {
     stepsPerSecond = stepsThisSecond;
@@ -288,8 +151,87 @@ setInterval(() => {
   }
 }, LOOP_WALL_MS);
 
-server.listen(port, () => {
-  // eslint-disable-next-line no-console
-  console.log(`[sim-server] listening on http://localhost:${port}`);
-  console.log(`[sim-server] scenario=${scenarioName} seed=${seed} dt=${dt}`);
+const app = Fastify({
+  logger: false
 });
+
+await app.register(fastifyWebsocket);
+await app.register(fastifyStatic, {
+  root: publicDir,
+  prefix: '/',
+  decorateReply: false
+});
+
+// API
+app.get('/api/status', async () => computeStatus());
+
+app.get('/api/scenarios', async () => {
+  const items = Object.keys(scenarioDefs).map((name) => ({
+    name,
+    description: scenarioDefs[name]?.description || ''
+  }));
+  return { ok: true, scenarios: items };
+});
+
+app.get('/api/snapshot', async (req) => {
+  const mode = (req.query?.mode || 'render');
+  return computeSnapshot(mode);
+});
+
+app.post('/api/control/pause', async () => {
+  paused = true;
+  return { ok: true, paused };
+});
+
+app.post('/api/control/resume', async () => {
+  paused = false;
+  return { ok: true, paused };
+});
+
+app.post('/api/control/setScenario', async (req, reply) => {
+  const nextScenario = String(req.body?.name || '').trim();
+  const nextSeed = (Number.isFinite(Number(req.body?.seed)) ? Number(req.body.seed) : seed) >>> 0;
+
+  if (!nextScenario || !(nextScenario in scenarioDefs)) {
+    reply.code(400);
+    return { ok: false, error: `Unknown scenario: ${nextScenario}` };
+  }
+
+  resetWorld(nextScenario, nextSeed);
+  return { ok: true, scenario: scenarioName, seed, dt };
+});
+
+// WebSocket stream
+app.get('/ws', { websocket: true }, (socket, req) => {
+  const url = new URL(req.url, 'http://localhost');
+  const mode = url.searchParams.get('mode') || 'render';
+  const hzRaw = Number(url.searchParams.get('hz') || 10);
+  const hz = Number.isFinite(hzRaw) ? Math.max(1, Math.min(60, Math.floor(hzRaw))) : 10;
+  const intervalMs = Math.max(16, Math.floor(1000 / hz));
+
+  const send = (payload) => {
+    try {
+      socket.send(JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+  };
+
+  send({ kind: 'status', data: computeStatus() });
+  send({ kind: 'snapshot', data: computeSnapshot(mode) });
+
+  const timer = setInterval(() => {
+    send({ kind: 'status', data: computeStatus() });
+    send({ kind: 'snapshot', data: computeSnapshot(mode) });
+  }, intervalMs);
+
+  socket.on('close', () => {
+    clearInterval(timer);
+  });
+});
+
+await app.listen({ port, host: '0.0.0.0' });
+// eslint-disable-next-line no-console
+console.log(`[sim-server] listening on http://localhost:${port}`);
+// eslint-disable-next-line no-console
+console.log(`[sim-server] scenario=${scenarioName} seed=${seed} dt=${dt}`);

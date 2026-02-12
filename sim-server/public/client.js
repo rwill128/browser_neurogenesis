@@ -42,24 +42,11 @@ function fmt(n, digits = 3) {
 }
 
 function drawSnapshot(snap) {
-  const w = snap?.world?.width ?? null;
-  const h = snap?.world?.height ?? null;
-
-  // snapshot currently doesn’t include world dims directly; infer from creature bounds if needed.
-  // For now, assume node micro worlds and draw in a normalized fit based on max coordinates.
-  let worldW = 0;
-  let worldH = 0;
-  for (const c of snap.creatures || []) {
-    for (const v of c.vertices || []) {
-      worldW = Math.max(worldW, v.x || 0);
-      worldH = Math.max(worldH, v.y || 0);
-    }
-  }
-  worldW = Math.max(worldW, 1);
-  worldH = Math.max(worldH, 1);
-
   const rect = canvas.getBoundingClientRect();
   const pad = 12;
+
+  const worldW = Number(snap?.world?.width) || 1;
+  const worldH = Number(snap?.world?.height) || 1;
   const scale = Math.min((rect.width - pad * 2) / worldW, (rect.height - pad * 2) / worldH);
 
   ctx.clearRect(0, 0, rect.width, rect.height);
@@ -84,8 +71,7 @@ function drawSnapshot(snap) {
     const verts = c.vertices || [];
     const springs = c.springs || [];
 
-    // springs
-    ctx.strokeStyle = 'rgba(220,220,240,0.25)';
+    ctx.strokeStyle = 'rgba(220,220,240,0.22)';
     ctx.beginPath();
     for (const s of springs) {
       const a = verts[s.a];
@@ -96,7 +82,6 @@ function drawSnapshot(snap) {
     }
     ctx.stroke();
 
-    // points
     for (const v of verts) {
       const r = Math.max(1.0, (v.radius || 2) * scale);
       ctx.fillStyle = 'rgba(255,255,255,0.6)';
@@ -118,26 +103,48 @@ async function refreshScenarios() {
   }
 }
 
-async function loop() {
-  try {
-    const status = await apiGet('/api/status');
-    statusEl.textContent = `scenario=${status.scenario} seed=${status.seed} tick=${status.tick} t=${fmt(status.time, 2)} dt=${fmt(status.dt, 5)} paused=${status.paused} sps=${status.stepsPerSecond} stepWallMs=${status.lastStepWallMs}`;
+function connectStream({ mode = 'render', hz = 10 } = {}) {
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${proto}://${window.location.host}/ws?mode=${encodeURIComponent(mode)}&hz=${encodeURIComponent(hz)}`;
+  const ws = new WebSocket(url);
 
-    const snap = await apiGet('/api/snapshot?mode=render');
-    telemetryEl.textContent = JSON.stringify({
-      tick: snap.tick,
-      time: snap.time,
-      populations: snap.populations,
-      creatures: (snap.creatures || []).length,
-      fluidCells: snap.fluid?.cells?.length ?? 0
-    }, null, 2);
+  ws.addEventListener('open', () => {
+    statusEl.textContent = 'stream connected…';
+  });
 
-    drawSnapshot(snap);
-  } catch (err) {
-    statusEl.textContent = `error: ${String(err?.message || err)}`;
-  } finally {
-    setTimeout(loop, 200);
-  }
+  ws.addEventListener('message', (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.kind === 'status') {
+        const s = msg.data;
+        statusEl.textContent = `scenario=${s.scenario} seed=${s.seed} tick=${s.tick} t=${fmt(s.time, 2)} dt=${fmt(s.dt, 5)} paused=${s.paused} sps=${s.stepsPerSecond} stepWallMs=${s.lastStepWallMs}`;
+      } else if (msg.kind === 'snapshot') {
+        const snap = msg.data;
+        telemetryEl.textContent = JSON.stringify({
+          tick: snap.tick,
+          time: snap.time,
+          populations: snap.populations,
+          creatures: (snap.creatures || []).length,
+          fluidCells: snap.fluid?.cells?.length ?? 0
+        }, null, 2);
+        drawSnapshot(snap);
+      }
+    } catch (err) {
+      // ignore malformed
+    }
+  });
+
+  ws.addEventListener('close', () => {
+    statusEl.textContent = 'stream disconnected (retrying in 1s)…';
+    setTimeout(() => connectStream({ mode, hz }), 1000);
+  });
+
+  ws.addEventListener('error', () => {
+    // close triggers retry
+    try { ws.close(); } catch {}
+  });
+
+  return ws;
 }
 
 setScenarioBtn.addEventListener('click', async () => {
@@ -155,4 +162,4 @@ resumeBtn.addEventListener('click', async () => {
 });
 
 await refreshScenarios();
-loop();
+connectStream({ mode: 'render', hz: 10 });

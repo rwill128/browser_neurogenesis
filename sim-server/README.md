@@ -1,17 +1,25 @@
 # sim-server
 
-Minimal authoritative simulation server (no external deps).
+Authoritative simulation server + browser client.
+
+## Install
+
+```bash
+cd sim-server
+npm install
+```
 
 ## Run
 
 ```bash
-node sim-server/server.mjs --port 8787 --scenario micro_repro_sustain --seed 23
+node server.mjs --port 8787 --scenario micro_repro_sustain --seed 23
 ```
 
 Open:
-- http://localhost:8787/ (client)
+- http://localhost:8787/
 
-API:
+## API
+
 - `GET /api/status`
 - `GET /api/scenarios`
 - `GET /api/snapshot?mode=lite|render|full`
@@ -19,8 +27,14 @@ API:
 - `POST /api/control/resume`
 - `POST /api/control/setScenario` body: `{ "name": "micro_repro_sustain", "seed": 23 }`
 
+## WebSocket
+
+- `WS /ws?mode=render&hz=10`
+  - sends messages:
+    - `{ kind: "status", data: <status> }`
+    - `{ kind: "snapshot", data: <snapshot> }`
+
 ## Notes
 
 - Server runs the real engine via `node-harness/realWorld.mjs` + shared `stepWorld`.
-- Client is intentionally dumb: polling + canvas render.
-- This is the first step toward multi-world sharding + websocket delta streaming.
+- Current scope is **single-world**; next is multi-world/shards + auth/rate limiting.

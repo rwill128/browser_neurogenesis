@@ -1,0 +1,16 @@
+{
+  "name": "bn-sim-server",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Authoritative simulation server for browser_neurogenesis",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs --port 8787 --scenario micro_repro_sustain --seed 23"
+  },
+  "dependencies": {
+    "@fastify/static": "^9.0.0",
+    "@fastify/websocket": "^11.2.0",
+    "fastify": "^5.7.4"
+  }
+}

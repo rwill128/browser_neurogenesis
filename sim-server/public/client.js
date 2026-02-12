@@ -49,6 +49,25 @@ function fmt(n, digits = 3) {
   return x.toFixed(digits);
 }
 
+const NODE_TYPE_COLORS = {
+  PREDATOR: '#ff4d4d',
+  EATER: '#ff9f1c',
+  PHOTOSYNTHETIC: '#7CFF6B',
+  NEURON: '#b48bff',
+  EMITTER: '#4dd6ff',
+  SWIMMER: '#4d7cff',
+  EYE: '#ffffff',
+  JET: '#00e5ff',
+  ATTRACTOR: '#ffd24d',
+  REPULSOR: '#ff4de1'
+};
+
+function colorForVertex(v) {
+  const name = v?.nodeTypeName || null;
+  if (name && NODE_TYPE_COLORS[name]) return NODE_TYPE_COLORS[name];
+  return 'rgba(255,255,255,0.75)';
+}
+
 function drawSnapshot(snap) {
   const rect = canvas.getBoundingClientRect();
   const pad = 12;
@@ -59,6 +78,12 @@ function drawSnapshot(snap) {
 
   ctx.clearRect(0, 0, rect.width, rect.height);
 
+  // world bounds
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pad, pad, worldW * scale, worldH * scale);
+
+  // Fluid (sparse cell list)
   const fluid = snap.fluid;
   if (fluid && Array.isArray(fluid.cells) && Number.isFinite(fluid.cellSize) && fluid.cellSize > 0) {
     const cs = fluid.cellSize;
@@ -66,20 +91,22 @@ function drawSnapshot(snap) {
       const gx = cell.gx;
       const gy = cell.gy;
       const rgb = cell.rgb || [80, 80, 110];
-      const alpha = Math.max(0.08, Math.min(0.5, (cell.density || 0) / 255));
+      const alpha = Math.max(0.06, Math.min(0.45, (cell.density || 0) / 255));
       ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
       ctx.fillRect(pad + gx * cs * scale, pad + gy * cs * scale, cs * scale, cs * scale);
     }
   }
 
-  ctx.lineWidth = 1;
   for (const c of snap.creatures || []) {
     const verts = c.vertices || [];
     const springs = c.springs || [];
 
-    ctx.strokeStyle = 'rgba(220,220,240,0.22)';
+    // non-rigid springs
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(220,220,240,0.18)';
     ctx.beginPath();
     for (const s of springs) {
+      if (s.isRigid) continue;
       const a = verts[s.a];
       const b = verts[s.b];
       if (!a || !b) continue;
@@ -88,12 +115,35 @@ function drawSnapshot(snap) {
     }
     ctx.stroke();
 
+    // rigid springs
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(255, 230, 90, 0.40)';
+    ctx.beginPath();
+    for (const s of springs) {
+      if (!s.isRigid) continue;
+      const a = verts[s.a];
+      const b = verts[s.b];
+      if (!a || !b) continue;
+      ctx.moveTo(pad + a.x * scale, pad + a.y * scale);
+      ctx.lineTo(pad + b.x * scale, pad + b.y * scale);
+    }
+    ctx.stroke();
+
+    // points
     for (const v of verts) {
       const r = Math.max(1.0, (v.radius || 2) * scale);
-      ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      ctx.fillStyle = colorForVertex(v);
       ctx.beginPath();
       ctx.arc(pad + v.x * scale, pad + v.y * scale, Math.min(r, 6), 0, Math.PI * 2);
       ctx.fill();
+
+      if (v.isDesignatedEye) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(pad + v.x * scale, pad + v.y * scale, Math.min(r + 2, 8), 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
   }
 }

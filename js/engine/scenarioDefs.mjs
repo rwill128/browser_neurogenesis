@@ -16,8 +16,7 @@ export const scenarioDefs = {
       PARTICLE_POPULATION_FLOOR: 0,
       PARTICLE_POPULATION_CEILING: 0,
       PARTICLES_PER_SECOND: 0,
-      SWIMMER_NODE_ENERGY_COST: 0.12,
-      JET_NODE_ENERGY_COST: 0.2,
+      EATER_NODE_ENERGY_COST: 0.25,
       FLUID_GRID_SIZE_CONTROL: 128,
       AUTO_FOLLOW_CREATURE: true
     },
@@ -34,8 +33,7 @@ export const scenarioDefs = {
       steps: 0,
       events: [],
       configOverrides: {
-        SWIMMER_NODE_ENERGY_COST: 0.12,
-        JET_NODE_ENERGY_COST: 0.2
+        EATER_NODE_ENERGY_COST: 0.25
       },
       stepBehavior: {
         allowReproduction: true,

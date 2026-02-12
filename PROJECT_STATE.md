@@ -178,3 +178,17 @@ For each scenario run:
   - added camera-focused tests:
     - `node-harness/tests/cameraMath.test.mjs`
     - `node-harness/tests/browserStepAdapter.test.mjs`.
+- First instability-stabilization pass after browser drawing fix:
+  - added world/dt-aware newborn stabilization module: `js/engine/newbornStability.mjs`.
+  - spawn-time fit correction now runs for initialized populations, floor-spawned creatures, and reproduction offspring:
+    - translates/scales newborn phenotype to fit current world bounds,
+    - resets forced-correction implicit velocity,
+    - scales spring rest lengths when downscaling is required.
+  - added tiny-world newborn spring clamp logic (rigid + non-rigid stiffness/damping caps) with new config knobs in `js/config.js`.
+  - step telemetry now classifies physics removals by subtype (`boundary_exit`, `numeric_or_nan`, `geometric_explosion`, `other_physics`) via `unstablePhysicsKind` and `instabilityTelemetry.removedByPhysicsKind`.
+  - propagated telemetry defaults through world state/persistence and soak summary output.
+  - added tests:
+    - `node-harness/tests/newbornStability.test.mjs`
+    - expanded `node-harness/tests/stepWorld.test.mjs`
+    - expanded `node-harness/tests/worldPersistence.test.mjs`.
+  - validation rerun (5 micro scenarios × 5 seeds): numeric/NaN instability dropped sharply (48 → 9); deaths are now mostly boundary exits (`boundary_exit`).

@@ -263,6 +263,44 @@ test('stepWorld decrements reproduction cooldown during gated attempts', () => {
   assert.equal(result.reproductionTelemetry.successfulBirths, 0);
 });
 
+test('stepWorld clamps per-parent births to remaining creature ceiling slots', () => {
+  const runtime = createRuntimeConfig({
+    CREATURE_POPULATION_FLOOR: 0,
+    CREATURE_POPULATION_CEILING: 2
+  });
+
+  class MultiBirthBody extends FakeSoftBody {
+    constructor(id, x, y) {
+      super(id, x, y);
+      this.canReproduce = true;
+    }
+
+    reproduce({ maxOffspring = null } = {}) {
+      this.reproduceCalls += 1;
+      const n = Number.isFinite(Number(maxOffspring)) ? Math.max(0, Math.floor(Number(maxOffspring))) : 3;
+      return Array.from({ length: n }, (_, idx) => new FakeSoftBody(200 + idx, 60 + idx, 60 + idx));
+    }
+  }
+
+  const parent = new MultiBirthBody(1, 20, 20);
+  parent.creatureEnergy = 100;
+  parent.reproductionEnergyThreshold = 5;
+
+  const state = createWorldState({ runtime, softBodies: [parent], particles: [] });
+
+  const result = stepWorld(state, 0.02, {
+    config: runtime,
+    rng: () => 0.25,
+    allowReproduction: true,
+    maintainCreatureFloor: false,
+    maintainParticleFloor: false
+  });
+
+  assert.equal(parent.reproduceCalls, 1);
+  assert.equal(result.spawnTelemetry.reproductionBirths, 1);
+  assert.equal(result.populations.creatures, 2);
+});
+
 test('stepWorld reports per-step reproduction suppression reasons and successful births', () => {
   const runtime = createRuntimeConfig({
     CREATURE_POPULATION_FLOOR: 0,

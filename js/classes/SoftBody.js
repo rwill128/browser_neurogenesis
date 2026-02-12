@@ -297,8 +297,14 @@ export class SoftBody {
                 const strategies = Object.values(RLRewardStrategy);
                 this.rewardStrategy = strategies[Math.floor(Math.random() * strategies.length)];
 
-                // Initialize reproductionCooldownGene for new creatures
-                this.reproductionCooldownGene = 100 + Math.floor(Math.random() * 4901); // Random between 100 and 5000
+                // Initialize reproductionCooldownGene for new creatures (configurable range).
+                const reproCooldownMin = Number.isFinite(Number(config.INITIAL_REPRODUCTION_COOLDOWN_GENE_MIN))
+                    ? Math.max(1, Math.floor(Number(config.INITIAL_REPRODUCTION_COOLDOWN_GENE_MIN)))
+                    : 100;
+                const reproCooldownMax = Number.isFinite(Number(config.INITIAL_REPRODUCTION_COOLDOWN_GENE_MAX))
+                    ? Math.max(reproCooldownMin, Math.floor(Number(config.INITIAL_REPRODUCTION_COOLDOWN_GENE_MAX)))
+                    : 5000;
+                this.reproductionCooldownGene = reproCooldownMin + Math.floor(Math.random() * (reproCooldownMax - reproCooldownMin + 1));
                 this.growthGenome = this._createRandomGrowthGenome();
             }
 
@@ -2587,33 +2593,42 @@ export class SoftBody {
                 return;
             }
 
-            if (point.pos.x < 0 || point.pos.x > config.WORLD_WIDTH || point.pos.y < 0 || point.pos.y > config.WORLD_HEIGHT) {
-                this._markUnstable('physics_out_of_bounds');
-                return;
-            }
-
             const implicitVelX = point.pos.x - point.prevPos.x;
             const implicitVelY = point.pos.y - point.prevPos.y;
 
-            if (config.IS_WORLD_WRAPPING) {
-                if (point.pos.x < 0) { point.pos.x += config.WORLD_WIDTH; point.prevPos.x += config.WORLD_WIDTH; }
-                else if (point.pos.x > config.WORLD_WIDTH) { point.pos.x -= config.WORLD_WIDTH; point.prevPos.x -= config.WORLD_WIDTH; }
-                if (point.pos.y < 0) { point.pos.y += config.WORLD_HEIGHT; point.prevPos.y += config.WORLD_HEIGHT; }
-                else if (point.pos.y > config.WORLD_HEIGHT) { point.pos.y -= config.WORLD_HEIGHT; point.prevPos.y -= config.WORLD_HEIGHT; }
-            } else {
-                if (point.pos.x - point.radius < 0) {
-                    point.pos.x = point.radius;
-                    point.prevPos.x = point.pos.x - implicitVelX * restitution;
-                } else if (point.pos.x + point.radius > config.WORLD_WIDTH) {
-                    point.pos.x = config.WORLD_WIDTH - point.radius;
-                    point.prevPos.x = point.pos.x - implicitVelX * restitution;
+            const outOfBounds = (
+                point.pos.x < 0 ||
+                point.pos.x > config.WORLD_WIDTH ||
+                point.pos.y < 0 ||
+                point.pos.y > config.WORLD_HEIGHT
+            );
+
+            if (outOfBounds) {
+                if (config.IS_WORLD_WRAPPING) {
+                    if (point.pos.x < 0) { point.pos.x += config.WORLD_WIDTH; point.prevPos.x += config.WORLD_WIDTH; }
+                    else if (point.pos.x > config.WORLD_WIDTH) { point.pos.x -= config.WORLD_WIDTH; point.prevPos.x -= config.WORLD_WIDTH; }
+                    if (point.pos.y < 0) { point.pos.y += config.WORLD_HEIGHT; point.prevPos.y += config.WORLD_HEIGHT; }
+                    else if (point.pos.y > config.WORLD_HEIGHT) { point.pos.y -= config.WORLD_HEIGHT; point.prevPos.y -= config.WORLD_HEIGHT; }
+                } else {
+                    if (point.pos.x - point.radius < 0) {
+                        point.pos.x = point.radius;
+                        point.prevPos.x = point.pos.x - implicitVelX * restitution;
+                    } else if (point.pos.x + point.radius > config.WORLD_WIDTH) {
+                        point.pos.x = config.WORLD_WIDTH - point.radius;
+                        point.prevPos.x = point.pos.x - implicitVelX * restitution;
+                    }
+                    if (point.pos.y - point.radius < 0) {
+                        point.pos.y = point.radius;
+                        point.prevPos.y = point.pos.y - implicitVelY * restitution;
+                    } else if (point.pos.y + point.radius > config.WORLD_HEIGHT) {
+                        point.pos.y = config.WORLD_HEIGHT - point.radius;
+                        point.prevPos.y = point.pos.y - implicitVelY * restitution;
+                    }
                 }
-                if (point.pos.y - point.radius < 0) {
-                    point.pos.y = point.radius;
-                    point.prevPos.y = point.pos.y - implicitVelY * restitution;
-                } else if (point.pos.y + point.radius > config.WORLD_HEIGHT) {
-                    point.pos.y = config.WORLD_HEIGHT - point.radius;
-                    point.prevPos.y = point.pos.y - implicitVelY * restitution;
+
+                if (config.KILL_ON_OUT_OF_BOUNDS) {
+                    this._markUnstable('physics_out_of_bounds');
+                    return;
                 }
             }
         }
@@ -2954,7 +2969,7 @@ export class SoftBody {
     /**
      * Attempt reproduction with density-dependent fertility and local resource coupling.
      */
-    reproduce() {
+    reproduce({ maxOffspring = null } = {}) {
         if (this.failedReproductionCooldown > 0) {
             this.failedReproductionCooldown--;
             return []; // On cooldown from a previous failed attempt
@@ -3023,7 +3038,10 @@ export class SoftBody {
             }
         }
 
-        for (let i = 0; i < this.numOffspring; i++) {
+        const maxOffspringInt = Number.isFinite(Number(maxOffspring)) ? Math.max(0, Math.floor(Number(maxOffspring))) : null;
+        const targetOffspring = (maxOffspringInt === null) ? this.numOffspring : Math.min(this.numOffspring, maxOffspringInt);
+
+        for (let i = 0; i < targetOffspring; i++) {
             if (this.creatureEnergy < energyForOneOffspring) break; // Not enough energy for this one
 
             let placedThisOffspring = false;

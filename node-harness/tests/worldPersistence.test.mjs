@@ -156,6 +156,7 @@ function createWorldState(runtime, body) {
       totalNonPhysicsRemoved: 2,
       totalUnknownRemoved: 0,
       removedByReason: { physics_spring_overstretch: 7, age_limit: 2 },
+      removedByPhysicsKind: { geometric_explosion: 7 },
       recentDeaths: [{ deathSeq: 1, bodyId: 999, unstableReason: 'physics_spring_overstretch' }],
       maxRecentDeaths: 1000,
       lastDeathSeq: 1
@@ -263,6 +264,7 @@ test('save/load world snapshot round-trips body, particles, and selection', () =
   assert.equal(worldReloaded.simulationStep, 123);
   assert.equal(worldReloaded.instabilityTelemetry.totalPhysicsRemoved, 7);
   assert.equal(worldReloaded.instabilityTelemetry.removedByReason.physics_spring_overstretch, 7);
+  assert.equal(worldReloaded.instabilityTelemetry.removedByPhysicsKind.geometric_explosion, 7);
 
   const occupiedCells = worldReloaded.spatialGrid.filter((cell) => cell.length > 0).length;
   assert.ok(occupiedCells > 0);

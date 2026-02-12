@@ -510,7 +510,8 @@ export function stepWorld(state, dt, options = {}) {
     state.fluidField.step();
   }
 
-  const canCreaturesReproduceGlobally = allowReproduction && state.softBodyPopulation.length < runtimeConfig.CREATURE_POPULATION_CEILING;
+  const creatureCeiling = runtimeConfig.CREATURE_POPULATION_CEILING;
+  const canCreaturesReproduceGlobally = allowReproduction && state.softBodyPopulation.length < creatureCeiling;
   const newOffspring = [];
   let reproductionBirths = 0;
   let floorSpawns = 0;
@@ -549,7 +550,8 @@ export function stepWorld(state, dt, options = {}) {
       continue;
     }
 
-    if (!canCreaturesReproduceGlobally) {
+    const remainingCreatureSlots = creatureCeiling - (state.softBodyPopulation.length + newOffspring.length);
+    if (!canCreaturesReproduceGlobally || remainingCreatureSlots <= 0) {
       reproductionTelemetry.suppressedByGlobalCeiling += 1;
       continue;
     }
@@ -570,7 +572,7 @@ export function stepWorld(state, dt, options = {}) {
     const fertilityBefore = Number(body.reproductionSuppressedByFertilityRoll) || 0;
 
     reproductionTelemetry.attemptedParents += 1;
-    const offspring = withRandomSource(rng, () => body.reproduce());
+    const offspring = withRandomSource(rng, () => body.reproduce({ maxOffspring: remainingCreatureSlots }));
 
     const densityDelta = Math.max(0, (Number(body.reproductionSuppressedByDensity) || 0) - densityBefore);
     const resourcesDelta = Math.max(0, (Number(body.reproductionSuppressedByResources) || 0) - resourcesBefore);

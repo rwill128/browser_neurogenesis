@@ -1,6 +1,7 @@
 import { createEnvironmentFields, createLightField, createNutrientField, createViscosityField } from './environmentFields.js';
 import { withRandomSource } from './randomScope.mjs';
 import { resolveConfigViews } from './configViews.mjs';
+import { stabilizeNewbornBody } from './newbornStability.mjs';
 
 function defaultRangeRandom(rng, min, max) {
   return min + rng() * (max - min);
@@ -29,6 +30,8 @@ export function initializePopulation(worldState, {
   SoftBodyClass,
   count = (configViews?.runtime || config).CREATURE_POPULATION_FLOOR,
   spawnMargin = 50,
+  newbornDt = 1 / 30,
+  newbornFitPadding = 0.5,
   rng = Math.random
 } = {}) {
   const { runtime: runtimeConfig } = resolveConfigViews(configViews || config);
@@ -42,6 +45,15 @@ export function initializePopulation(worldState, {
     const y = defaultRangeRandom(rng, spawnMargin, runtimeConfig.WORLD_HEIGHT - spawnMargin);
     const body = withRandomSource(rng, () => new SoftBodyClass(worldState.nextSoftBodyId++, x, y, null));
     attachWorldRefsToBody(body, worldState);
+
+    // Newborn spawn safety: fit inside world and clamp spring aggressiveness for tiny worlds.
+    stabilizeNewbornBody(body, {
+      config: runtimeConfig,
+      dt: newbornDt,
+      fitPadding: newbornFitPadding
+    });
+    body.__newbornStabilityApplied = true;
+
     worldState.softBodyPopulation.push(body);
   }
 

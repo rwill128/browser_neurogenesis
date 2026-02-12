@@ -118,7 +118,7 @@ export class RealWorld {
       config,
       SoftBodyClass: SoftBody,
       count: scenario.creatures,
-      spawnMargin: 10,
+      spawnMargin: this.stepBehavior.creatureSpawnMargin,
       newbornDt: scenario.dt,
       rng: this.rand
     });
@@ -166,6 +166,15 @@ export class RealWorld {
     config.PARTICLES_PER_SECOND = Number.isFinite(Number(this.config.particlesPerSecond))
       ? Number(this.config.particlesPerSecond)
       : 0;
+
+    const overrides = this.config?.configOverrides;
+    if (overrides && typeof overrides === 'object' && !Array.isArray(overrides)) {
+      for (const [key, value] of Object.entries(overrides)) {
+        if (Object.prototype.hasOwnProperty.call(config, key)) {
+          config[key] = value;
+        }
+      }
+    }
 
     config.GRID_COLS = Math.ceil(config.WORLD_WIDTH / config.GRID_CELL_SIZE);
     config.GRID_ROWS = Math.ceil(config.WORLD_HEIGHT / config.GRID_CELL_SIZE);

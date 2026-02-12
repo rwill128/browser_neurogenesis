@@ -17,6 +17,9 @@ const config = {
     MAX_PIXELS_PER_FRAME_DISPLACEMENT: 300,
     MAX_SPRING_STRETCH_FACTOR: 20.0,
     MAX_SPAN_PER_POINT_FACTOR: 300, // GRID_CELL_SIZE * 3
+
+    // Instability policy: when false, boundary crossings are resolved via clamp/wrap instead of instant death.
+    KILL_ON_OUT_OF_BOUNDS: true,
     DYE_PULL_RATE: 0.05,
 
     // Rigid Spring Properties (New)
@@ -158,6 +161,10 @@ const config = {
 
     // Cooldown for failed reproduction attempts
     FAILED_REPRODUCTION_COOLDOWN_TICKS: 100,
+
+    // Initial reproduction cooldown gene range for newly generated creatures.
+    INITIAL_REPRODUCTION_COOLDOWN_GENE_MIN: 100,
+    INITIAL_REPRODUCTION_COOLDOWN_GENE_MAX: 5000,
 
     // Reproduction control (new): density-weighted fertility + local resource coupling.
     REPRO_FERTILITY_GLOBAL_SOFT_MULTIPLIER: 2.0,

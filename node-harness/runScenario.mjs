@@ -70,6 +70,7 @@ const particleCeiling = Math.max(
   )
 );
 
+const scenarioStepBehavior = scenario.stepBehavior || {};
 const runtimeScenario = {
   ...scenario,
   world: {
@@ -84,15 +85,18 @@ const runtimeScenario = {
     ? particlesPerSecondArg
     : (Number.isFinite(Number(scenario.particlesPerSecond)) ? Number(scenario.particlesPerSecond) : 0),
   dt: Number.isFinite(dtArg) ? dtArg : scenario.dt,
+  configOverrides: scenario.configOverrides && typeof scenario.configOverrides === 'object'
+    ? { ...scenario.configOverrides }
+    : null,
   stepBehavior: {
-    allowReproduction: parseBoolArg('allowReproduction', true),
-    maintainCreatureFloor: parseBoolArg('maintainCreatureFloor', true),
-    maintainParticleFloor: parseBoolArg('maintainParticleFloor', true),
-    applyEmitters: parseBoolArg('applyEmitters', true),
-    applySelectedPointPush: parseBoolArg('applySelectedPointPush', false),
-    captureInstabilityTelemetry: parseBoolArg('captureInstabilityTelemetry', true),
-    maxRecentInstabilityDeaths: parseNum(arg('maxRecentInstabilityDeaths', null), 5000),
-    creatureSpawnMargin: parseNum(arg('creatureSpawnMargin', null), 50)
+    allowReproduction: parseBoolArg('allowReproduction', scenarioStepBehavior.allowReproduction ?? true),
+    maintainCreatureFloor: parseBoolArg('maintainCreatureFloor', scenarioStepBehavior.maintainCreatureFloor ?? true),
+    maintainParticleFloor: parseBoolArg('maintainParticleFloor', scenarioStepBehavior.maintainParticleFloor ?? true),
+    applyEmitters: parseBoolArg('applyEmitters', scenarioStepBehavior.applyEmitters ?? true),
+    applySelectedPointPush: parseBoolArg('applySelectedPointPush', scenarioStepBehavior.applySelectedPointPush ?? false),
+    captureInstabilityTelemetry: parseBoolArg('captureInstabilityTelemetry', scenarioStepBehavior.captureInstabilityTelemetry ?? true),
+    maxRecentInstabilityDeaths: parseNum(arg('maxRecentInstabilityDeaths', null), Number.isFinite(Number(scenarioStepBehavior.maxRecentInstabilityDeaths)) ? Number(scenarioStepBehavior.maxRecentInstabilityDeaths) : 5000),
+    creatureSpawnMargin: parseNum(arg('creatureSpawnMargin', null), Number.isFinite(Number(scenarioStepBehavior.creatureSpawnMargin)) ? Number(scenarioStepBehavior.creatureSpawnMargin) : 50)
   }
 };
 
@@ -158,6 +162,7 @@ const payload = {
   particleCeiling: runtimeScenario.particleCeiling,
   particlesPerSecond: runtimeScenario.particlesPerSecond,
   stepBehavior: runtimeScenario.stepBehavior,
+  configOverrides: runtimeScenario.configOverrides,
   generatedAt: new Date().toISOString(),
   instabilityTelemetry: world.worldState.instabilityTelemetry || {},
   spawnTelemetry: {

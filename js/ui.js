@@ -570,6 +570,10 @@ function updateInfoPanel() {
             content += `<p><strong>Radius:</strong> ${point.radius.toFixed(2)}</p>`;
             content += `<p><strong>World Pos:</strong> X: ${point.pos.x.toFixed(2)}, Y: ${point.pos.y.toFixed(2)}</p>`;
             content += `<p><strong>Can Be Grabber:</strong> ${point.canBeGrabber}</p>`;
+            if (point.nodeType === NodeType.PREDATOR) {
+                const predatorRadiusGene = Number.isFinite(Number(point.predatorRadiusGene)) ? Number(point.predatorRadiusGene) : Number(config.PREDATOR_RADIUS_GENE_MIN || 0.2);
+                content += `<p><strong>Predator Radius Gene:</strong> ${predatorRadiusGene.toFixed(3)}</p>`;
+            }
             if (point.nodeType === NodeType.EMITTER) {
                 content += `<p><strong>Dye Color:</strong> R:${point.dyeColor[0].toFixed(0)} G:${point.dyeColor[1].toFixed(0)} B:${point.dyeColor[2].toFixed(0)}</p>`;
             }

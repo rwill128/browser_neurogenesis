@@ -94,6 +94,10 @@ test('predator nodes sap nearby foreign body energy and gain predation energy', 
     GRID_ROWS: config.GRID_ROWS,
     PREDATION_RADIUS_MULTIPLIER_BASE: config.PREDATION_RADIUS_MULTIPLIER_BASE,
     PREDATION_RADIUS_MULTIPLIER_MAX_BONUS: config.PREDATION_RADIUS_MULTIPLIER_MAX_BONUS,
+    PREDATOR_RADIUS_GENE_MIN: config.PREDATOR_RADIUS_GENE_MIN,
+    PREDATOR_RADIUS_GENE_MAX: config.PREDATOR_RADIUS_GENE_MAX,
+    PREDATOR_SELF_DAMAGE_BASE: config.PREDATOR_SELF_DAMAGE_BASE,
+    PREDATOR_SELF_DAMAGE_MAX_BONUS: config.PREDATOR_SELF_DAMAGE_MAX_BONUS,
     ENERGY_SAPPED_PER_PREDATION_BASE: config.ENERGY_SAPPED_PER_PREDATION_BASE,
     ENERGY_SAPPED_PER_PREDATION_MAX_BONUS: config.ENERGY_SAPPED_PER_PREDATION_MAX_BONUS,
     DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED
@@ -110,6 +114,10 @@ test('predator nodes sap nearby foreign body energy and gain predation energy', 
     config.GRID_ROWS = 8;
     config.PREDATION_RADIUS_MULTIPLIER_BASE = 1.0;
     config.PREDATION_RADIUS_MULTIPLIER_MAX_BONUS = 0;
+    config.PREDATOR_RADIUS_GENE_MIN = 0.2;
+    config.PREDATOR_RADIUS_GENE_MAX = 8.0;
+    config.PREDATOR_SELF_DAMAGE_BASE = 0;
+    config.PREDATOR_SELF_DAMAGE_MAX_BONUS = 0;
     config.ENERGY_SAPPED_PER_PREDATION_BASE = 12;
     config.ENERGY_SAPPED_PER_PREDATION_MAX_BONUS = 0;
     config.DYE_ECOLOGY_ENABLED = false;
@@ -122,6 +130,7 @@ test('predator nodes sap nearby foreign body energy and gain predation energy', 
     predatorPoint.nodeType = NodeType.PREDATOR;
     predatorPoint.currentExertionLevel = 1;
     predatorPoint.radius = 10;
+    predatorPoint.predatorRadiusGene = 1.0;
     predatorPoint.isGrabbing = false;
     predatorPoint.movementType = MovementType.NEUTRAL;
     predatorPoint.pos.x = 60;
@@ -194,6 +203,79 @@ function createMockFluidField(size = 16) {
   };
 }
 
+test('predator self-damages when its own nodes are inside active predation radius', () => {
+  const cfgBackup = {
+    GRID_CELL_SIZE: config.GRID_CELL_SIZE,
+    GRID_COLS: config.GRID_COLS,
+    GRID_ROWS: config.GRID_ROWS,
+    PREDATOR_SELF_DAMAGE_BASE: config.PREDATOR_SELF_DAMAGE_BASE,
+    PREDATOR_SELF_DAMAGE_MAX_BONUS: config.PREDATOR_SELF_DAMAGE_MAX_BONUS,
+    PREDATOR_SELF_DAMAGE_MAX_OVERLAPS_PER_TICK: config.PREDATOR_SELF_DAMAGE_MAX_OVERLAPS_PER_TICK,
+    PREDATOR_RADIUS_GENE_MIN: config.PREDATOR_RADIUS_GENE_MIN,
+    PREDATOR_RADIUS_GENE_MAX: config.PREDATOR_RADIUS_GENE_MAX,
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED
+  };
+  const runtimeBackup = {
+    softBodyPopulation: runtimeState.softBodyPopulation
+  };
+
+  try {
+    config.GRID_CELL_SIZE = 20;
+    config.GRID_COLS = 8;
+    config.GRID_ROWS = 8;
+    config.PREDATOR_RADIUS_GENE_MIN = 0.2;
+    config.PREDATOR_RADIUS_GENE_MAX = 8.0;
+    config.PREDATOR_SELF_DAMAGE_BASE = 5;
+    config.PREDATOR_SELF_DAMAGE_MAX_BONUS = 0;
+    config.PREDATOR_SELF_DAMAGE_MAX_OVERLAPS_PER_TICK = 4;
+    config.DYE_ECOLOGY_ENABLED = false;
+
+    const body = new SoftBody(251, 60, 60, null, false);
+    const predator = body.massPoints[0];
+    const neighbor = new SoftBody(252, 62, 60, null, false).massPoints[0];
+
+    predator.nodeType = NodeType.PREDATOR;
+    predator.currentExertionLevel = 1;
+    predator.radius = 10;
+    predator.predatorRadiusGene = 1.0;
+    predator.movementType = MovementType.NEUTRAL;
+    predator.isGrabbing = false;
+    predator.pos.x = 60;
+    predator.pos.y = 60;
+    predator.prevPos.x = 60;
+    predator.prevPos.y = 60;
+
+    neighbor.nodeType = NodeType.EATER;
+    neighbor.radius = 6;
+    neighbor.movementType = MovementType.NEUTRAL;
+    neighbor.isGrabbing = false;
+    neighbor.pos.x = 64;
+    neighbor.pos.y = 60;
+    neighbor.prevPos.x = 64;
+    neighbor.prevPos.y = 60;
+
+    body.massPoints = [predator, neighbor];
+    body.springs = [];
+    body.currentMaxEnergy = 500;
+    body.creatureEnergy = 100;
+
+    const grid = makeGrid(config.GRID_COLS, config.GRID_ROWS);
+    const idx = gridIndex(predator.pos.x, predator.pos.y, config.GRID_CELL_SIZE, config.GRID_COLS, config.GRID_ROWS);
+    grid[idx].push({ type: 'softbody_point', pointRef: predator, bodyRef: body });
+    grid[idx].push({ type: 'softbody_point', pointRef: neighbor, bodyRef: body });
+    body.setSpatialGrid(grid);
+
+    runtimeState.softBodyPopulation = [body];
+
+    body._finalizeUpdateAndCheckStability(1 / 60);
+
+    assert.equal(body.creatureEnergy, 95);
+  } finally {
+    Object.assign(config, cfgBackup);
+    runtimeState.softBodyPopulation = runtimeBackup.softBodyPopulation;
+  }
+});
+
 test('different predator nodes can each sap the same prey body once per tick', () => {
   const cfgBackup = {
     GRID_CELL_SIZE: config.GRID_CELL_SIZE,
@@ -201,6 +283,10 @@ test('different predator nodes can each sap the same prey body once per tick', (
     GRID_ROWS: config.GRID_ROWS,
     PREDATION_RADIUS_MULTIPLIER_BASE: config.PREDATION_RADIUS_MULTIPLIER_BASE,
     PREDATION_RADIUS_MULTIPLIER_MAX_BONUS: config.PREDATION_RADIUS_MULTIPLIER_MAX_BONUS,
+    PREDATOR_RADIUS_GENE_MIN: config.PREDATOR_RADIUS_GENE_MIN,
+    PREDATOR_RADIUS_GENE_MAX: config.PREDATOR_RADIUS_GENE_MAX,
+    PREDATOR_SELF_DAMAGE_BASE: config.PREDATOR_SELF_DAMAGE_BASE,
+    PREDATOR_SELF_DAMAGE_MAX_BONUS: config.PREDATOR_SELF_DAMAGE_MAX_BONUS,
     ENERGY_SAPPED_PER_PREDATION_BASE: config.ENERGY_SAPPED_PER_PREDATION_BASE,
     ENERGY_SAPPED_PER_PREDATION_MAX_BONUS: config.ENERGY_SAPPED_PER_PREDATION_MAX_BONUS,
     DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED
@@ -215,6 +301,10 @@ test('different predator nodes can each sap the same prey body once per tick', (
     config.GRID_ROWS = 8;
     config.PREDATION_RADIUS_MULTIPLIER_BASE = 1.0;
     config.PREDATION_RADIUS_MULTIPLIER_MAX_BONUS = 0;
+    config.PREDATOR_RADIUS_GENE_MIN = 0.2;
+    config.PREDATOR_RADIUS_GENE_MAX = 8.0;
+    config.PREDATOR_SELF_DAMAGE_BASE = 0;
+    config.PREDATOR_SELF_DAMAGE_MAX_BONUS = 0;
     config.ENERGY_SAPPED_PER_PREDATION_BASE = 10;
     config.ENERGY_SAPPED_PER_PREDATION_MAX_BONUS = 0;
     config.DYE_ECOLOGY_ENABLED = false;
@@ -232,6 +322,8 @@ test('different predator nodes can each sap the same prey body once per tick', (
     pB.isGrabbing = false;
     pA.radius = 10;
     pB.radius = 10;
+    pA.predatorRadiusGene = 1.0;
+    pB.predatorRadiusGene = 1.0;
     pA.pos.x = 60;
     pA.pos.y = 60;
     pA.prevPos.x = 60;
@@ -462,6 +554,10 @@ test('predator does not sap prey outside predation radius', () => {
     GRID_ROWS: config.GRID_ROWS,
     PREDATION_RADIUS_MULTIPLIER_BASE: config.PREDATION_RADIUS_MULTIPLIER_BASE,
     PREDATION_RADIUS_MULTIPLIER_MAX_BONUS: config.PREDATION_RADIUS_MULTIPLIER_MAX_BONUS,
+    PREDATOR_RADIUS_GENE_MIN: config.PREDATOR_RADIUS_GENE_MIN,
+    PREDATOR_RADIUS_GENE_MAX: config.PREDATOR_RADIUS_GENE_MAX,
+    PREDATOR_SELF_DAMAGE_BASE: config.PREDATOR_SELF_DAMAGE_BASE,
+    PREDATOR_SELF_DAMAGE_MAX_BONUS: config.PREDATOR_SELF_DAMAGE_MAX_BONUS,
     ENERGY_SAPPED_PER_PREDATION_BASE: config.ENERGY_SAPPED_PER_PREDATION_BASE,
     ENERGY_SAPPED_PER_PREDATION_MAX_BONUS: config.ENERGY_SAPPED_PER_PREDATION_MAX_BONUS,
     DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED
@@ -473,6 +569,10 @@ test('predator does not sap prey outside predation radius', () => {
     config.GRID_ROWS = 8;
     config.PREDATION_RADIUS_MULTIPLIER_BASE = 1.0;
     config.PREDATION_RADIUS_MULTIPLIER_MAX_BONUS = 0;
+    config.PREDATOR_RADIUS_GENE_MIN = 0.2;
+    config.PREDATOR_RADIUS_GENE_MAX = 8.0;
+    config.PREDATOR_SELF_DAMAGE_BASE = 0;
+    config.PREDATOR_SELF_DAMAGE_MAX_BONUS = 0;
     config.ENERGY_SAPPED_PER_PREDATION_BASE = 10;
     config.ENERGY_SAPPED_PER_PREDATION_MAX_BONUS = 0;
     config.DYE_ECOLOGY_ENABLED = false;
@@ -482,6 +582,7 @@ test('predator does not sap prey outside predation radius', () => {
     predPoint.nodeType = NodeType.PREDATOR;
     predPoint.currentExertionLevel = 1;
     predPoint.radius = 6;
+    predPoint.predatorRadiusGene = 1.0;
     predPoint.movementType = MovementType.NEUTRAL;
     predPoint.isGrabbing = false;
 

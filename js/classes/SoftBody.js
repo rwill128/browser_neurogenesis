@@ -73,7 +73,7 @@ export class SoftBody {
         this.spatialGrid = null;
 
         // Genetic blueprint
-        this.blueprintPoints = []; // Array of { relX, relY, radius, mass, nodeType, movementType, dyeColor, canBeGrabber, neuronDataBlueprint, activationIntervalGene }
+        this.blueprintPoints = []; // Array of { relX, relY, radius, mass, nodeType, movementType, dyeColor, canBeGrabber, neuronDataBlueprint, activationIntervalGene, predatorRadiusGene }
         this.blueprintSprings = []; // Array of { p1Index, p2Index, restLength, isRigid, activationIntervalGene } (indices refer to blueprintPoints)
 
         this.isUnstable = false;
@@ -202,6 +202,9 @@ export class SoftBody {
             this.blueprintPoints.forEach((bp) => {
                 bp.activationIntervalGene = this._sanitizeActivationIntervalGene(
                     bp.activationIntervalGene ?? this._randomActivationIntervalGene()
+                );
+                bp.predatorRadiusGene = this._sanitizePredatorRadiusGene(
+                    bp.predatorRadiusGene ?? this._randomPredatorRadiusGene()
                 );
             });
             this.blueprintSprings.forEach((bs) => {
@@ -502,6 +505,44 @@ export class SoftBody {
         return { gene: mutated, didMutate: mutated !== gene };
     }
 
+    _sanitizePredatorRadiusGene(value) {
+        const min = Math.max(0.05, Number(config.PREDATOR_RADIUS_GENE_MIN) || 0.2);
+        const max = Math.max(min, Number(config.PREDATOR_RADIUS_GENE_MAX) || min);
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return min;
+        return Math.max(min, Math.min(max, parsed));
+    }
+
+    _randomPredatorRadiusGene() {
+        const min = Math.max(0.05, Number(config.PREDATOR_RADIUS_GENE_MIN) || 0.2);
+        const max = Math.max(min, Number(config.PREDATOR_RADIUS_GENE_MAX) || min);
+        return min + Math.random() * (max - min);
+    }
+
+    _mutatePredatorRadiusGene(parentGene) {
+        const gene = this._sanitizePredatorRadiusGene(parentGene);
+        const chance = Math.max(0, Math.min(1, Number(config.PREDATOR_RADIUS_GENE_MUTATION_CHANCE) || 0));
+        if (Math.random() >= chance) {
+            return { gene, didMutate: false };
+        }
+
+        const magnitude = Math.max(0, Number(config.PREDATOR_RADIUS_GENE_MUTATION_MAGNITUDE) || 0);
+        const jitter = (Math.random() - 0.5) * 2 * magnitude;
+        const mutated = this._sanitizePredatorRadiusGene(gene * (1 + jitter));
+        return { gene: mutated, didMutate: Math.abs(mutated - gene) > 1e-6 };
+    }
+
+    _computePredatorRadiusMultiplier(point) {
+        const gene = this._sanitizePredatorRadiusGene(point?.predatorRadiusGene ?? this._randomPredatorRadiusGene());
+        return gene;
+    }
+
+    _computePredatorRadius(point) {
+        const exertion = Math.max(0, Math.min(1, Number(point?.currentExertionLevel) || 0));
+        const multiplier = this._computePredatorRadiusMultiplier(point);
+        return Math.max(0, Number(point?.radius) || 0) * multiplier * exertion;
+    }
+
     _createRandomDyeAffinityMap() {
         const out = {};
         for (const key of DYE_AFFINITY_KEYS) {
@@ -744,6 +785,11 @@ export class SoftBody {
                 point.activationIntervalGene = this._randomActivationIntervalGene();
             }
             point.activationIntervalGene = this._sanitizeActivationIntervalGene(point.activationIntervalGene);
+
+            if (!Number.isFinite(point.predatorRadiusGene)) {
+                point.predatorRadiusGene = this._randomPredatorRadiusGene();
+            }
+            point.predatorRadiusGene = this._sanitizePredatorRadiusGene(point.predatorRadiusGene);
 
             if (!point.actuationCooldownByChannel || typeof point.actuationCooldownByChannel !== 'object') {
                 point.actuationCooldownByChannel = {};
@@ -1056,6 +1102,7 @@ export class SoftBody {
                 canBeGrabber: Boolean(rawPoint.canBeGrabber),
                 neuronDataBlueprint,
                 activationIntervalGene: this._sanitizeActivationIntervalGene(rawPoint.activationIntervalGene ?? this._randomActivationIntervalGene()),
+                predatorRadiusGene: this._sanitizePredatorRadiusGene(rawPoint.predatorRadiusGene ?? this._randomPredatorRadiusGene()),
                 eyeTargetType: nodeType === NodeType.EYE
                     ? (Number(rawPoint.eyeTargetType) === EyeTargetType.FOREIGN_BODY_POINT
                         ? EyeTargetType.FOREIGN_BODY_POINT
@@ -1409,6 +1456,7 @@ export class SoftBody {
                     }
                     : null,
                 activationIntervalGene: this._sanitizeActivationIntervalGene(src.activationIntervalGene ?? this._randomActivationIntervalGene()),
+                predatorRadiusGene: this._sanitizePredatorRadiusGene(src.predatorRadiusGene ?? this._randomPredatorRadiusGene()),
                 eyeTargetType: nodeType === NodeType.EYE
                     ? (Number(src.eyeTargetType) === EyeTargetType.FOREIGN_BODY_POINT
                         ? EyeTargetType.FOREIGN_BODY_POINT
@@ -1696,6 +1744,10 @@ export class SoftBody {
                     intervalJitter
                 );
                 newPoint.activationIntervalGene = inheritedNodeInterval;
+                const parentPredatorRadiusGene = this._sanitizePredatorRadiusGene(anchor.predatorRadiusGene ?? this._randomPredatorRadiusGene());
+                newPoint.predatorRadiusGene = this._sanitizePredatorRadiusGene(
+                    parentPredatorRadiusGene * (0.9 + Math.random() * 0.2)
+                );
                 newPoint.actuationCooldownByChannel = { node: 0, grabber: 0, default_pattern: 0 };
                 newPoint.swimmerActuation = { magnitude: 0, angle: 0 };
                 newPoint.eyeTargetType = Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT;
@@ -1819,6 +1871,9 @@ export class SoftBody {
                 bp.activationIntervalGene = this._sanitizeActivationIntervalGene(
                     bp.activationIntervalGene ?? this._randomActivationIntervalGene()
                 );
+                bp.predatorRadiusGene = this._sanitizePredatorRadiusGene(
+                    bp.predatorRadiusGene ?? this._randomPredatorRadiusGene()
+                );
 
                 // Mutate relative coordinates
                 if (Math.random() < (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER * 0.5)) {
@@ -1879,6 +1934,12 @@ export class SoftBody {
                 bp.activationIntervalGene = intervalMutation.gene;
                 if (intervalMutation.didMutate) {
                     runtimeState.mutationStats.activationIntervalGene = (runtimeState.mutationStats.activationIntervalGene || 0) + 1;
+                }
+
+                const predatorRadiusMutation = this._mutatePredatorRadiusGene(bp.predatorRadiusGene);
+                bp.predatorRadiusGene = predatorRadiusMutation.gene;
+                if (predatorRadiusMutation.didMutate) {
+                    runtimeState.mutationStats.predatorRadiusGene = (runtimeState.mutationStats.predatorRadiusGene || 0) + 1;
                 }
 
                 // Mutate dyeColor
@@ -1975,6 +2036,7 @@ export class SoftBody {
                     canBeGrabber: Math.random() < config.GRABBER_GENE_MUTATION_CHANCE,
                     neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MAX - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null,
                     activationIntervalGene: this._randomActivationIntervalGene(),
+                    predatorRadiusGene: this._randomPredatorRadiusGene(),
                     eyeTargetType: newNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined,
                     maxEffectiveJetVelocity: this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4)
                 };
@@ -2066,6 +2128,7 @@ export class SoftBody {
                         canBeGrabber: Math.random() < config.GRABBER_GENE_MUTATION_CHANCE,
                         neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MIN - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null,
                         activationIntervalGene: this._randomActivationIntervalGene(),
+                        predatorRadiusGene: this._randomPredatorRadiusGene(),
                         eyeTargetType: newNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined,
                         maxEffectiveJetVelocity: this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4)
                     };
@@ -2196,6 +2259,7 @@ export class SoftBody {
                                         nodeType: P1_bp.nodeType, movementType: P1_bp.movementType,
                                         dyeColor: P1_bp.dyeColor, canBeGrabber: P1_bp.canBeGrabber,
                                         activationIntervalGene: this._sanitizeActivationIntervalGene(P1_bp.activationIntervalGene ?? this._randomActivationIntervalGene()),
+                                        predatorRadiusGene: this._sanitizePredatorRadiusGene(P1_bp.predatorRadiusGene ?? this._randomPredatorRadiusGene()),
                                         neuronDataBlueprint: null
                                     });
                                 });
@@ -2323,6 +2387,7 @@ export class SoftBody {
                     canBeGrabber: canBeGrabberInitial,
                     neuronDataBlueprint: neuronDataBp,
                     activationIntervalGene: this._randomActivationIntervalGene(),
+                    predatorRadiusGene: this._randomPredatorRadiusGene(),
                     eyeTargetType: chosenNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined,
                     maxEffectiveJetVelocity: this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4)
                 });
@@ -2411,6 +2476,9 @@ export class SoftBody {
             newPoint.canBeGrabber = bp.canBeGrabber;
             newPoint.activationIntervalGene = this._sanitizeActivationIntervalGene(
                 bp.activationIntervalGene ?? this._randomActivationIntervalGene()
+            );
+            newPoint.predatorRadiusGene = this._sanitizePredatorRadiusGene(
+                bp.predatorRadiusGene ?? this._randomPredatorRadiusGene()
             );
             newPoint.actuationCooldownByChannel = { node: 0, grabber: 0, default_pattern: 0 };
             newPoint.swimmerActuation = { magnitude: 0, angle: 0 };
@@ -3146,9 +3214,9 @@ export class SoftBody {
                                     }
 
                                     if (p1.nodeType === NodeType.PREDATOR) {
-                                        const p1Exertion = p1.currentExertionLevel || 0;
-                                        const effectivePredationRadiusMultiplier = config.PREDATION_RADIUS_MULTIPLIER_BASE + (config.PREDATION_RADIUS_MULTIPLIER_MAX_BONUS * p1Exertion);
-                                        const predationRadius = p1.radius * effectivePredationRadiusMultiplier;
+                                        const p1Exertion = Math.max(0, Math.min(1, Number(p1.currentExertionLevel) || 0));
+                                        const predationRadius = this._computePredatorRadius(p1);
+                                        if (predationRadius <= 0) continue;
 
                                         if (distSq < predationRadius * predationRadius) {
                                             // Allow multi-node predation pressure: each predator node may sap a given prey once per tick.
@@ -3167,6 +3235,36 @@ export class SoftBody {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            if (p1.nodeType === NodeType.PREDATOR) {
+                const predationRadius = this._computePredatorRadius(p1);
+                if (predationRadius > 0) {
+                    const predationRadiusSq = predationRadius * predationRadius;
+                    let selfOverlaps = 0;
+                    for (let selfIdx = 0; selfIdx < this.massPoints.length; selfIdx++) {
+                        if (selfIdx === i_p1) continue;
+                        const selfPoint = this.massPoints[selfIdx];
+                        if (!selfPoint) continue;
+
+                        tempDiffVec.copyFrom(p1.pos).subInPlace(selfPoint.pos);
+                        if (tempDiffVec.magSq() < predationRadiusSq) {
+                            selfOverlaps += 1;
+                        }
+                    }
+
+                    if (selfOverlaps > 0) {
+                        const exertion = Math.max(0, Math.min(1, Number(p1.currentExertionLevel) || 0));
+                        const maxOverlaps = Math.max(1, Math.floor(Number(config.PREDATOR_SELF_DAMAGE_MAX_OVERLAPS_PER_TICK) || 1));
+                        const overlapFactor = Math.min(selfOverlaps, maxOverlaps);
+                        const damagePerOverlap = (Number(config.PREDATOR_SELF_DAMAGE_BASE) || 0)
+                            + ((Number(config.PREDATOR_SELF_DAMAGE_MAX_BONUS) || 0) * exertion);
+                        const totalSelfDamage = Math.min(this.creatureEnergy, damagePerOverlap * overlapFactor);
+                        if (totalSelfDamage > 0) {
+                            this.creatureEnergy -= totalSelfDamage;
                         }
                     }
                 }

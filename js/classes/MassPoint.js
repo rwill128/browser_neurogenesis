@@ -17,6 +17,7 @@ export class MassPoint {
         this.dyeColor = [0, 0, 0]; // Still needed for Emitter type
         this.neuronData = null;
         this.currentExertionLevel = 0; // New: For dynamic energy costs
+        this.predatorRadiusGene = Number(config.PREDATOR_RADIUS_GENE_MIN) || 0.2;
         this.isGrabbing = false; // New: For NN-controlled grabbing state
         this.isDesignatedEye = false; // New: To identify the creature's primary eye point
         this.canBeGrabber = false; // New: Gene, false by default
@@ -69,9 +70,13 @@ export class MassPoint {
             ctx.fill();
         }
         if (this.nodeType === NodeType.PREDATOR) {
-            const effectivePredationRadiusMultiplier = config.PREDATION_RADIUS_MULTIPLIER_BASE + (config.PREDATION_RADIUS_MULTIPLIER_MAX_BONUS * exertion);
+            const minGene = Math.max(0.05, Number(config.PREDATOR_RADIUS_GENE_MIN) || 0.2);
+            const maxGene = Math.max(minGene, Number(config.PREDATOR_RADIUS_GENE_MAX) || minGene);
+            const rawGene = Number(this.predatorRadiusGene);
+            const gene = Number.isFinite(rawGene) ? Math.max(minGene, Math.min(maxGene, rawGene)) : minGene;
+            const predationRadius = this.radius * gene * Math.max(0, Math.min(1, exertion));
             ctx.beginPath();
-            ctx.arc(this.pos.x, this.pos.y, this.radius * effectivePredationRadiusMultiplier, 0, Math.PI * 2);
+            ctx.arc(this.pos.x, this.pos.y, predationRadius, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(255, 50, 50, ${0.15 + exertion * 0.2})`; // Increased base opacity
             ctx.fill();
         }

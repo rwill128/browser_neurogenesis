@@ -180,7 +180,8 @@ function buildPhenotypeBlueprint(body, pointsIndex) {
     neuronDataBlueprint: p?.neuronData
       ? { hiddenLayerSize: Number(p.neuronData.hiddenLayerSize) || null }
       : null,
-    activationIntervalGene: Number.isFinite(Number(p?.activationIntervalGene)) ? Number(p.activationIntervalGene) : null
+    activationIntervalGene: Number.isFinite(Number(p?.activationIntervalGene)) ? Number(p.activationIntervalGene) : null,
+    predatorRadiusGene: Number.isFinite(Number(p?.predatorRadiusGene)) ? Number(p.predatorRadiusGene) : null
   }));
 
   const blueprintSprings = (body?.springs || [])
@@ -240,7 +241,8 @@ function buildBlueprintFromBodySnapshot(bodySnapshot) {
       neuronDataBlueprint: state?.neuronData
         ? { hiddenLayerSize: Number(state.neuronData.hiddenLayerSize) || null }
         : null,
-      activationIntervalGene: Number.isFinite(Number(state?.activationIntervalGene)) ? Number(state.activationIntervalGene) : null
+      activationIntervalGene: Number.isFinite(Number(state?.activationIntervalGene)) ? Number(state.activationIntervalGene) : null,
+      predatorRadiusGene: Number.isFinite(Number(state?.predatorRadiusGene)) ? Number(state.predatorRadiusGene) : null
     };
   });
 

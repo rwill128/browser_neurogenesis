@@ -350,8 +350,23 @@ export class SoftBody {
 
             } else {
                 // Initial defaults for brand new creatures
-                this.stiffness = 500 + Math.random() * 2500;
-                this.springDamping = 5 + Math.random() * 20;
+                const edgeStiffnessMin = Number.isFinite(Number(config.NEW_EDGE_STIFFNESS_MIN)) ? Number(config.NEW_EDGE_STIFFNESS_MIN) : 500;
+                const edgeStiffnessMax = Number.isFinite(Number(config.NEW_EDGE_STIFFNESS_MAX))
+                    ? Math.max(edgeStiffnessMin, Number(config.NEW_EDGE_STIFFNESS_MAX))
+                    : 3000;
+                const edgeDampingMin = Number.isFinite(Number(config.NEW_EDGE_DAMPING_MIN)) ? Number(config.NEW_EDGE_DAMPING_MIN) : 5;
+                const edgeDampingMax = Number.isFinite(Number(config.NEW_EDGE_DAMPING_MAX))
+                    ? Math.max(edgeDampingMin, Number(config.NEW_EDGE_DAMPING_MAX))
+                    : 25;
+                const connectionRadiusMin = Number.isFinite(Number(config.INITIAL_SPRING_CONNECTION_RADIUS_MIN))
+                    ? Number(config.INITIAL_SPRING_CONNECTION_RADIUS_MIN)
+                    : 40;
+                const connectionRadiusMax = Number.isFinite(Number(config.INITIAL_SPRING_CONNECTION_RADIUS_MAX))
+                    ? Math.max(connectionRadiusMin, Number(config.INITIAL_SPRING_CONNECTION_RADIUS_MAX))
+                    : 80;
+
+                this.stiffness = edgeStiffnessMin + Math.random() * (edgeStiffnessMax - edgeStiffnessMin);
+                this.springDamping = edgeDampingMin + Math.random() * (edgeDampingMax - edgeDampingMin);
                 this.motorImpulseInterval = 30 + Math.floor(Math.random() * 90);
                 this.motorImpulseMagnitudeCap = 0.5 + Math.random() * 2.0;
                 this.emitterStrength = 0.2 + Math.random() * 1.0;
@@ -359,7 +374,7 @@ export class SoftBody {
                 this.numOffspring = 1 + Math.floor(Math.random() * 3);
                 this.offspringSpawnRadius = 50 + Math.random() * 50;
                 this.pointAddChance = 0.02 + Math.random() * 0.06;
-                this.springConnectionRadius = 40 + Math.random() * 40;
+                this.springConnectionRadius = connectionRadiusMin + Math.random() * (connectionRadiusMax - connectionRadiusMin);
                 this.jetMaxVelocityGene = config.JET_MAX_VELOCITY_GENE_DEFAULT * (0.8 + Math.random() * 0.4);
                 this.reproductionEnergyThreshold = config.BASE_MAX_CREATURE_ENERGY; // Will be refined based on actual max energy
 
@@ -406,7 +421,13 @@ export class SoftBody {
             this.numOffspring = Math.max(1, Math.min(this.numOffspring, 5));
             this.offspringSpawnRadius = Math.max(20, Math.min(this.offspringSpawnRadius, 150));
             this.pointAddChance = Math.max(0, Math.min(0.5, this.pointAddChance));
-            this.springConnectionRadius = Math.max(10, Math.min(this.springConnectionRadius, 100));
+            const springConnectionRadiusMin = Number.isFinite(Number(config.SPRING_CONNECTION_RADIUS_MIN))
+                ? Number(config.SPRING_CONNECTION_RADIUS_MIN)
+                : 10;
+            const springConnectionRadiusMax = Number.isFinite(Number(config.SPRING_CONNECTION_RADIUS_MAX))
+                ? Math.max(springConnectionRadiusMin, Number(config.SPRING_CONNECTION_RADIUS_MAX))
+                : 100;
+            this.springConnectionRadius = Math.max(springConnectionRadiusMin, Math.min(this.springConnectionRadius, springConnectionRadiusMax));
             this.jetMaxVelocityGene = Math.max(0.1, Math.min(this.jetMaxVelocityGene, 50.0));
             this.growthGenome = this._sanitizeGrowthGenome(this.growthGenome || this._createRandomGrowthGenome());
             this._sanitizeDyeEcologyGenes();
@@ -1882,6 +1903,35 @@ export class SoftBody {
         const availableFunctionalNodeTypes = [NodeType.PREDATOR, NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.NEURON, NodeType.EMITTER, NodeType.SWIMMER, NodeType.EYE, NodeType.JET, NodeType.ATTRACTOR, NodeType.REPULSOR];
         const dyeColorChoices = [config.DYE_COLORS.RED, config.DYE_COLORS.GREEN, config.DYE_COLORS.BLUE];
 
+        const edgeStiffnessMin = Number.isFinite(Number(config.NEW_EDGE_STIFFNESS_MIN)) ? Number(config.NEW_EDGE_STIFFNESS_MIN) : 500;
+        const edgeStiffnessMax = Number.isFinite(Number(config.NEW_EDGE_STIFFNESS_MAX))
+            ? Math.max(edgeStiffnessMin, Number(config.NEW_EDGE_STIFFNESS_MAX))
+            : 3000;
+        const edgeDampingMin = Number.isFinite(Number(config.NEW_EDGE_DAMPING_MIN)) ? Number(config.NEW_EDGE_DAMPING_MIN) : 5;
+        const edgeDampingMax = Number.isFinite(Number(config.NEW_EDGE_DAMPING_MAX))
+            ? Math.max(edgeDampingMin, Number(config.NEW_EDGE_DAMPING_MAX))
+            : 25;
+        const edgeRestLengthVariation = Math.max(0, Number(config.NEW_SPRING_REST_LENGTH_VARIATION) || 0);
+        const edgeRestLengthBias = Number.isFinite(Number(config.NEW_SPRING_REST_LENGTH_BIAS))
+            ? Math.max(0.2, Number(config.NEW_SPRING_REST_LENGTH_BIAS))
+            : 1;
+        const edgeRestLengthMax = Number.isFinite(Number(config.NEW_SPRING_REST_LENGTH_MAX))
+            ? Math.max(1, Number(config.NEW_SPRING_REST_LENGTH_MAX))
+            : Infinity;
+
+        const drawRandomEdgeStiffness = (scale = 1) => {
+            const s = Math.max(0.1, Number(scale) || 1);
+            return (edgeStiffnessMin + Math.random() * (edgeStiffnessMax - edgeStiffnessMin)) * s;
+        };
+        const drawRandomEdgeDamping = () => edgeDampingMin + Math.random() * (edgeDampingMax - edgeDampingMin);
+        const resolveEdgeRestLength = (geometricDistance, jitterScale = 1) => {
+            const dist = Number(geometricDistance);
+            if (!Number.isFinite(dist) || dist <= 0) return 1;
+            const jitter = 1 + (Math.random() - 0.5) * 2 * edgeRestLengthVariation * Math.max(0, Number(jitterScale) || 0);
+            const biased = dist * edgeRestLengthBias * jitter;
+            return Math.max(1, Math.min(edgeRestLengthMax, biased));
+        };
+
         if (parentBody) {
             // --- Reproduction: Inherit and Mutate Blueprint ---
 
@@ -2077,11 +2127,10 @@ export class SoftBody {
                     const connectToBpIndex = shuffledExistingBpIndices[k];
                     const connectToBp = this.blueprintPoints[connectToBpIndex];
                     const dist = Math.sqrt((newBp.relX - connectToBp.relX)**2 + (newBp.relY - connectToBp.relY)**2);
-                    let newRestLength = dist * (1 + (Math.random() - 0.5) * 2 * config.NEW_SPRING_REST_LENGTH_VARIATION);
-                    newRestLength = Math.max(1, newRestLength);
+                    const newRestLength = resolveEdgeRestLength(dist, 1);
                     const becomeRigid = Math.random() < config.CHANCE_FOR_RIGID_SPRING;
-                    const newStiffness = 500 + Math.random() * 2500;
-                    const newDamping = 5 + Math.random() * 20;
+                    const newStiffness = drawRandomEdgeStiffness();
+                    const newDamping = drawRandomEdgeDamping();
                     this.blueprintSprings.push({ p1Index: newPointIndex, p2Index: connectToBpIndex, restLength: newRestLength, isRigid: becomeRigid, stiffness: newStiffness, damping: newDamping, activationIntervalGene: this._randomActivationIntervalGene() });
                 }
             }
@@ -2114,11 +2163,10 @@ export class SoftBody {
                     );
                     if (!alreadyConnected) {
                         const dist = Math.sqrt((pA_bp.relX - pB_bp.relX)**2 + (pA_bp.relY - pB_bp.relY)**2);
-                        let newRestLength = dist * (1 + (Math.random() - 0.5) * 2 * config.NEW_SPRING_REST_LENGTH_VARIATION);
-                        newRestLength = Math.max(1, newRestLength);
+                        const newRestLength = resolveEdgeRestLength(dist, 1);
                         const becomeRigid = Math.random() < config.CHANCE_FOR_RIGID_SPRING;
-                        const newStiffness = 500 + Math.random() * 2500;
-                        const newDamping = 5 + Math.random() * 20;
+                        const newStiffness = drawRandomEdgeStiffness();
+                        const newDamping = drawRandomEdgeDamping();
                         this.blueprintSprings.push({ p1Index: idx1, p2Index: idx2, restLength: newRestLength, isRigid: becomeRigid, stiffness: newStiffness, damping: newDamping, activationIntervalGene: this._randomActivationIntervalGene() });
                         runtimeState.mutationStats.springAddition++; 
                         break;
@@ -2331,7 +2379,13 @@ export class SoftBody {
             let initialTempSprings = [];  // Temporary Spring objects
 
             // Create initial geometric shape (grid, line, or star) using startX, startY as a reference origin for now
-            const basePointDist = 5 + Math.random() * 3; 
+            const pointDistanceMin = Number.isFinite(Number(config.INITIAL_BODY_POINT_DISTANCE_MIN))
+                ? Number(config.INITIAL_BODY_POINT_DISTANCE_MIN)
+                : 5;
+            const pointDistanceMax = Number.isFinite(Number(config.INITIAL_BODY_POINT_DISTANCE_MAX))
+                ? Math.max(pointDistanceMin, Number(config.INITIAL_BODY_POINT_DISTANCE_MAX))
+                : 8;
+            const basePointDist = pointDistanceMin + Math.random() * (pointDistanceMax - pointDistanceMin);
             if (this.shapeType === 0) { // Grid
                 const numPointsX = 3; const numPointsY = 3; let gridPoints = [];
                 for (let i = 0; i < numPointsY; i++) { gridPoints[i] = []; for (let j = 0; j < numPointsX; j++) {
@@ -2339,11 +2393,11 @@ export class SoftBody {
                     const point = new MassPoint(j * basePointDist, i * basePointDist, 0.3 + Math.random() * 0.4, baseRadius);
                     initialTempMassPoints.push(point); gridPoints[i][j] = point;
                 }}
-                for (let i=0; i<numPointsY; i++) for (let j=0; j<numPointsX-1; j++) initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
-                for (let j=0; j<numPointsX; j++) for (let i=0; i<numPointsY-1; i++) initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
+                for (let i=0; i<numPointsY; i++) for (let j=0; j<numPointsX-1; j++) initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i][j+1], drawRandomEdgeStiffness(), drawRandomEdgeDamping(), null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
+                for (let j=0; j<numPointsX; j++) for (let i=0; i<numPointsY-1; i++) initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i+1][j], drawRandomEdgeStiffness(), drawRandomEdgeDamping(), null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
                 for (let i=0; i<numPointsY-1; i++) for (let j=0; j<numPointsX-1; j++) {
-                    initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], (500 + Math.random() * 2500)*0.7, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
-                    initialTempSprings.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], (500 + Math.random() * 2500)*0.7, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
+                    initialTempSprings.push(new Spring(gridPoints[i][j], gridPoints[i+1][j+1], drawRandomEdgeStiffness(0.85), drawRandomEdgeDamping(), null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
+                    initialTempSprings.push(new Spring(gridPoints[i+1][j], gridPoints[i][j+1], drawRandomEdgeStiffness(0.85), drawRandomEdgeDamping(), null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
                 }
             } else if (this.shapeType === 1) { // Line
                 const numLinePoints = Math.floor(3 + Math.random() * 3); const isHorizontal = Math.random() < 0.5; let linePoints = [];
@@ -2353,8 +2407,8 @@ export class SoftBody {
                     const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
                     initialTempMassPoints.push(point); linePoints.push(point);
                 }
-                for (let i=0; i<numLinePoints-1; i++) initialTempSprings.push(new Spring(linePoints[i], linePoints[i+1], 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
-                if (numLinePoints > 2) initialTempSprings.push(new Spring(linePoints[0], linePoints[numLinePoints-1], (500 + Math.random() * 2500)*0.5, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
+                for (let i=0; i<numLinePoints-1; i++) initialTempSprings.push(new Spring(linePoints[i], linePoints[i+1], drawRandomEdgeStiffness(), drawRandomEdgeDamping(), null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
+                if (numLinePoints > 2) initialTempSprings.push(new Spring(linePoints[0], linePoints[numLinePoints-1], drawRandomEdgeStiffness(0.75), drawRandomEdgeDamping(), null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
             } else { // Star
                 const numOuterPoints = Math.floor(4 + Math.random()*3);
                 const centralPoint = new MassPoint(0, 0, (0.3+Math.random()*0.4)*1.5, baseRadius*1.2); // Center at (0,0) for now
@@ -2366,10 +2420,10 @@ export class SoftBody {
                     const y = Math.sin(angle)*circleRadius;
                     const point = new MassPoint(x,y, 0.3+Math.random()*0.4, baseRadius);
                     initialTempMassPoints.push(point);
-                    initialTempSprings.push(new Spring(centralPoint, point, 500 + Math.random() * 2500, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
-                    if (i>0) initialTempSprings.push(new Spring(initialTempMassPoints[initialTempMassPoints.length-2], point, (500 + Math.random() * 2500)*0.8, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
+                    initialTempSprings.push(new Spring(centralPoint, point, drawRandomEdgeStiffness(), drawRandomEdgeDamping(), null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
+                    if (i>0) initialTempSprings.push(new Spring(initialTempMassPoints[initialTempMassPoints.length-2], point, drawRandomEdgeStiffness(0.9), drawRandomEdgeDamping(), null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
                 }
-                if (numOuterPoints > 1) initialTempSprings.push(new Spring(initialTempMassPoints[1], initialTempMassPoints[initialTempMassPoints.length-1], (500 + Math.random() * 2500)*0.8, 5 + Math.random() * 20, null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
+                if (numOuterPoints > 1) initialTempSprings.push(new Spring(initialTempMassPoints[1], initialTempMassPoints[initialTempMassPoints.length-1], drawRandomEdgeStiffness(0.9), drawRandomEdgeDamping(), null, Math.random() < config.CHANCE_FOR_RIGID_SPRING));
             }
 
             // Calculate centroid of these initial temporary points (which were created around a local 0,0)
@@ -2425,7 +2479,7 @@ export class SoftBody {
                     this.blueprintSprings.push({
                         p1Index: p1Index,
                         p2Index: p2Index,
-                        restLength: s_temp.restLength, // This was calculated by Spring constructor from initial geometry
+                        restLength: resolveEdgeRestLength(s_temp.restLength, 0.5),
                         isRigid: s_temp.isRigid,
                         stiffness: s_temp.stiffness,
                         damping: s_temp.dampingFactor,

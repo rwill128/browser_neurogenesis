@@ -1198,6 +1198,10 @@ export class SoftBody {
         const springs = Array.isArray(this.blueprintSprings) ? this.blueprintSprings : [];
         if (points.length === 0 || springs.length === 0) return;
 
+        const forceRigid = config.PHOTOSYNTH_FORCE_RIGID_CONNECTED_SPRINGS === true;
+        const neutralizeNeighbors = config.PHOTOSYNTH_NEUTRALIZE_NON_PHOTOSYNTH_NEIGHBORS === true;
+        if (!forceRigid && !neutralizeNeighbors) return;
+
         const adjacency = Array.from({ length: points.length }, () => new Set());
 
         for (const spring of springs) {
@@ -1211,17 +1215,19 @@ export class SoftBody {
 
             const aPhoto = points[a]?.nodeType === NodeType.PHOTOSYNTHETIC;
             const bPhoto = points[b]?.nodeType === NodeType.PHOTOSYNTHETIC;
-            if (aPhoto || bPhoto) spring.isRigid = true;
+            if (forceRigid && (aPhoto || bPhoto)) spring.isRigid = true;
         }
 
-        for (let i = 0; i < points.length; i++) {
-            const p = points[i];
-            if (!p || p.nodeType !== NodeType.PHOTOSYNTHETIC) continue;
-            for (const nIdx of adjacency[i]) {
-                const n = points[nIdx];
-                if (!n) continue;
-                if (n.nodeType !== NodeType.PHOTOSYNTHETIC) {
-                    n.movementType = MovementType.NEUTRAL;
+        if (neutralizeNeighbors) {
+            for (let i = 0; i < points.length; i++) {
+                const p = points[i];
+                if (!p || p.nodeType !== NodeType.PHOTOSYNTHETIC) continue;
+                for (const nIdx of adjacency[i]) {
+                    const n = points[nIdx];
+                    if (!n) continue;
+                    if (n.nodeType !== NodeType.PHOTOSYNTHETIC) {
+                        n.movementType = MovementType.NEUTRAL;
+                    }
                 }
             }
         }
@@ -1231,6 +1237,10 @@ export class SoftBody {
         const points = Array.isArray(this.massPoints) ? this.massPoints : [];
         const springs = Array.isArray(this.springs) ? this.springs : [];
         if (points.length === 0 || springs.length === 0) return;
+
+        const forceRigid = config.PHOTOSYNTH_FORCE_RIGID_CONNECTED_SPRINGS === true;
+        const neutralizeNeighbors = config.PHOTOSYNTH_NEUTRALIZE_NON_PHOTOSYNTH_NEIGHBORS === true;
+        if (!forceRigid && !neutralizeNeighbors) return;
 
         const pointIndex = new Map();
         points.forEach((p, idx) => pointIndex.set(p, idx));
@@ -1246,21 +1256,23 @@ export class SoftBody {
 
             const aPhoto = points[a]?.nodeType === NodeType.PHOTOSYNTHETIC;
             const bPhoto = points[b]?.nodeType === NodeType.PHOTOSYNTHETIC;
-            if (aPhoto || bPhoto) {
+            if (forceRigid && (aPhoto || bPhoto)) {
                 spring.isRigid = true;
                 spring.stiffness = config.RIGID_SPRING_STIFFNESS;
                 spring.dampingFactor = config.RIGID_SPRING_DAMPING;
             }
         }
 
-        for (let i = 0; i < points.length; i++) {
-            const p = points[i];
-            if (!p || p.nodeType !== NodeType.PHOTOSYNTHETIC) continue;
-            for (const nIdx of adjacency[i]) {
-                const n = points[nIdx];
-                if (!n) continue;
-                if (n.nodeType !== NodeType.PHOTOSYNTHETIC) {
-                    n.movementType = MovementType.NEUTRAL;
+        if (neutralizeNeighbors) {
+            for (let i = 0; i < points.length; i++) {
+                const p = points[i];
+                if (!p || p.nodeType !== NodeType.PHOTOSYNTHETIC) continue;
+                for (const nIdx of adjacency[i]) {
+                    const n = points[nIdx];
+                    if (!n) continue;
+                    if (n.nodeType !== NodeType.PHOTOSYNTHETIC) {
+                        n.movementType = MovementType.NEUTRAL;
+                    }
                 }
             }
         }

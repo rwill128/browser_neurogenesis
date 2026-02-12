@@ -18,3 +18,8 @@ test('initial triangulated primitive defaults are enabled and weighted', () => {
   assert.ok(Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_DIAMOND) > 0);
   assert.ok(Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_HEXAGON) > 0);
 });
+
+test('photosynth topology hard constraints are relaxed by default', () => {
+  assert.equal(config.PHOTOSYNTH_FORCE_RIGID_CONNECTED_SPRINGS, false);
+  assert.equal(config.PHOTOSYNTH_NEUTRALIZE_NON_PHOTOSYNTH_NEIGHBORS, false);
+});

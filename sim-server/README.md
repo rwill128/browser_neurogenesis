@@ -20,21 +20,38 @@ Open:
 
 ## API
 
-- `GET /api/status`
+### Scenarios
+
 - `GET /api/scenarios`
+
+### Worlds (multi-world)
+
+- `GET /api/worlds` → list worlds + status
+- `POST /api/worlds` body `{ "scenario": "micro_repro_sustain", "seed": 23, "id": "optional" }` → create world
+- `DELETE /api/worlds/:id` → delete world (default `w0` protected)
+- `GET /api/worlds/:id/status`
+- `GET /api/worlds/:id/snapshot?mode=lite|render|full`
+- `POST /api/worlds/:id/control/pause`
+- `POST /api/worlds/:id/control/resume`
+- `POST /api/worlds/:id/control/setScenario` body `{ "name": "micro_predation", "seed": 23 }` (resets that world)
+
+### Legacy aliases (operate on default world `w0`)
+
+- `GET /api/status`
 - `GET /api/snapshot?mode=lite|render|full`
 - `POST /api/control/pause`
 - `POST /api/control/resume`
-- `POST /api/control/setScenario` body: `{ "name": "micro_repro_sustain", "seed": 23 }`
+- `POST /api/control/setScenario`
 
 ## WebSocket
 
-- `WS /ws?mode=render&hz=10`
+- `WS /ws?world=w0&mode=render&hz=10`
   - sends messages:
-    - `{ kind: "status", data: <status> }`
-    - `{ kind: "snapshot", data: <snapshot> }`
+    - `{ kind: "status", data: <worldStatus> }`
+    - `{ kind: "snapshot", data: <worldSnapshot> }`
 
 ## Notes
 
 - Server runs the real engine via `node-harness/realWorld.mjs` + shared `stepWorld`.
-- Current scope is **single-world**; next is multi-world/shards + auth/rate limiting.
+- Current scope is **single-process multi-world** (good for a handful of long-running experiments).
+- Next steps for remote hosting: auth token + rate limiting + persistence (periodic checkpoints to disk).

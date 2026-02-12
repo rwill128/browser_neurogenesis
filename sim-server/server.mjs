@@ -33,6 +33,18 @@ function parseNum(raw, fallback = null) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function parseBool(raw, fallback = false) {
+  if (raw === null || raw === undefined || raw === '') return fallback;
+  const s = String(raw).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(s)) return true;
+  if (['0', 'false', 'no', 'off'].includes(s)) return false;
+  return fallback;
+}
+
+function hasFlag(name) {
+  return process.argv.includes(`--${name}`);
+}
+
 function makeId(prefix = 'w') {
   const rand = Math.random().toString(16).slice(2, 10);
   return `${prefix}_${rand}`;
@@ -114,6 +126,14 @@ const stmtGetCheckpoint = db.prepare(`
   WHERE id = ?
 `);
 
+const stmtGetLatestCheckpointForWorld = db.prepare(`
+  SELECT id, worldId, createdAt, label, scenario, seed, tick, time, bytes, payloadGzip
+  FROM checkpoints
+  WHERE worldId = ?
+  ORDER BY createdAt DESC
+  LIMIT 1
+`);
+
 const stmtPruneCheckpoints = db.prepare(`
   DELETE FROM checkpoints
   WHERE id IN (
@@ -131,6 +151,9 @@ const maxWorlds = Math.floor(parseNum(arg('maxWorlds', null), 8));
 
 const checkpointEverySec = Math.floor(parseNum(arg('checkpointEverySec', null), 60));
 const checkpointKeep = Math.floor(parseNum(arg('checkpointKeep', null), 50));
+const restoreLatest = hasFlag('restoreLatest')
+  ? parseBool(arg('restoreLatest', 'true'), true)
+  : false;
 
 const DEFAULT_WORLD_ID = 'w0';
 
@@ -305,8 +328,63 @@ async function checkpointWorld(worldId, { label = null } = {}) {
   };
 }
 
+async function restoreLatestCheckpointForWorld(worldId) {
+  const row = stmtGetLatestCheckpointForWorld.get(worldId);
+  if (!row) {
+    return {
+      ok: true,
+      worldId,
+      restored: false,
+      reason: 'no_checkpoint_found'
+    };
+  }
+
+  const snapshot = decodeCheckpoint(row.payloadGzip);
+  const load = await getWorldOrThrow(worldId).rpc('loadCheckpoint', { snapshot });
+
+  return {
+    ok: true,
+    worldId,
+    restored: true,
+    checkpointId: Number(row.id) || null,
+    scenario: String(row.scenario || ''),
+    seed: Number(row.seed) || 0,
+    tick: Number(row.tick) || 0,
+    time: Number(row.time) || 0,
+    createdAt: String(row.createdAt || ''),
+    bytes: Number(row.bytes) || 0,
+    load
+  };
+}
+
 // Bootstrap default world.
 await createWorld({ id: DEFAULT_WORLD_ID, scenario: initialScenarioName, seed: initialSeed });
+
+let startupRestore = {
+  enabled: restoreLatest,
+  attempted: false,
+  restored: false,
+  reason: 'disabled'
+};
+
+if (restoreLatest) {
+  startupRestore.attempted = true;
+  try {
+    startupRestore = {
+      enabled: true,
+      attempted: true,
+      ...(await restoreLatestCheckpointForWorld(DEFAULT_WORLD_ID))
+    };
+  } catch (err) {
+    startupRestore = {
+      enabled: true,
+      attempted: true,
+      restored: false,
+      reason: 'restore_error',
+      error: String(err?.message || err)
+    };
+  }
+}
 
 const app = Fastify({ logger: false });
 await app.register(fastifyWebsocket);
@@ -569,6 +647,10 @@ console.log(`[sim-server] listening on http://localhost:${port}`);
 // eslint-disable-next-line no-console
 console.log(`[sim-server] defaultWorld=${DEFAULT_WORLD_ID} scenario=${initialScenarioName} seed=${initialSeed} maxWorlds=${maxWorlds}`);
 console.log(`[sim-server] db=${dbPath} driver=${dbDriver} checkpointEverySec=${checkpointEverySec} checkpointKeep=${checkpointKeep}`);
+console.log(`[sim-server] restoreLatest=${restoreLatest}`);
+if (restoreLatest) {
+  console.log(`[sim-server] startupRestore=${JSON.stringify(startupRestore)}`);
+}
 
 // Auto-checkpoint loop
 if (checkpointEverySec > 0) {

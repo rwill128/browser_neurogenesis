@@ -17,8 +17,13 @@ node server.mjs --port 8787 \
   --seed 23 \
   --maxWorlds 8 \
   --checkpointEverySec 60 \
-  --checkpointKeep 50
+  --checkpointKeep 50 \
+  --restoreLatest true
 ```
+
+`--restoreLatest` is optional (default `false`):
+- `false` (default) → fresh world start on boot
+- `true` → after creating `w0`, load latest checkpoint for `w0` if one exists
 
 Open:
 - http://localhost:8787/

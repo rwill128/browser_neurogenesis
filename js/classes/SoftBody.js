@@ -1098,6 +1098,80 @@ export class SoftBody {
 
         this.blueprintPoints = sanitizedPoints;
         this.blueprintSprings = sanitizedSprings;
+        this._enforcePhotosyntheticBlueprintConstraints();
+    }
+
+    _enforcePhotosyntheticBlueprintConstraints() {
+        const points = Array.isArray(this.blueprintPoints) ? this.blueprintPoints : [];
+        const springs = Array.isArray(this.blueprintSprings) ? this.blueprintSprings : [];
+        if (points.length === 0 || springs.length === 0) return;
+
+        const adjacency = Array.from({ length: points.length }, () => new Set());
+
+        for (const spring of springs) {
+            const a = Math.floor(Number(spring?.p1Index));
+            const b = Math.floor(Number(spring?.p2Index));
+            if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
+            if (a < 0 || b < 0 || a >= points.length || b >= points.length) continue;
+
+            adjacency[a].add(b);
+            adjacency[b].add(a);
+
+            const aPhoto = points[a]?.nodeType === NodeType.PHOTOSYNTHETIC;
+            const bPhoto = points[b]?.nodeType === NodeType.PHOTOSYNTHETIC;
+            if (aPhoto || bPhoto) spring.isRigid = true;
+        }
+
+        for (let i = 0; i < points.length; i++) {
+            const p = points[i];
+            if (!p || p.nodeType !== NodeType.PHOTOSYNTHETIC) continue;
+            for (const nIdx of adjacency[i]) {
+                const n = points[nIdx];
+                if (!n) continue;
+                if (n.nodeType !== NodeType.PHOTOSYNTHETIC) {
+                    n.movementType = MovementType.NEUTRAL;
+                }
+            }
+        }
+    }
+
+    _enforcePhotosyntheticPhenotypeConstraints() {
+        const points = Array.isArray(this.massPoints) ? this.massPoints : [];
+        const springs = Array.isArray(this.springs) ? this.springs : [];
+        if (points.length === 0 || springs.length === 0) return;
+
+        const pointIndex = new Map();
+        points.forEach((p, idx) => pointIndex.set(p, idx));
+        const adjacency = Array.from({ length: points.length }, () => new Set());
+
+        for (const spring of springs) {
+            const a = pointIndex.get(spring?.p1);
+            const b = pointIndex.get(spring?.p2);
+            if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
+
+            adjacency[a].add(b);
+            adjacency[b].add(a);
+
+            const aPhoto = points[a]?.nodeType === NodeType.PHOTOSYNTHETIC;
+            const bPhoto = points[b]?.nodeType === NodeType.PHOTOSYNTHETIC;
+            if (aPhoto || bPhoto) {
+                spring.isRigid = true;
+                spring.stiffness = config.RIGID_SPRING_STIFFNESS;
+                spring.dampingFactor = config.RIGID_SPRING_DAMPING;
+            }
+        }
+
+        for (let i = 0; i < points.length; i++) {
+            const p = points[i];
+            if (!p || p.nodeType !== NodeType.PHOTOSYNTHETIC) continue;
+            for (const nIdx of adjacency[i]) {
+                const n = points[nIdx];
+                if (!n) continue;
+                if (n.nodeType !== NodeType.PHOTOSYNTHETIC) {
+                    n.movementType = MovementType.NEUTRAL;
+                }
+            }
+        }
     }
 
     _buildBlueprintAdjacency() {
@@ -1712,6 +1786,7 @@ export class SoftBody {
         this.growthEventsCompleted += 1;
         this.growthNodesAdded += nodesAdded;
 
+        this._enforcePhotosyntheticPhenotypeConstraints();
         this.calculateCurrentMaxEnergy();
         this.effectiveReproductionCooldown = Math.floor(this.reproductionCooldownGene * (1 + (0.2 * Math.max(0, this.massPoints.length - 1))));
         this._recountNodeTypeCaches();
@@ -2293,6 +2368,7 @@ export class SoftBody {
                 }
             }
         });
+        this._enforcePhotosyntheticBlueprintConstraints();
         this._calculateBlueprintRadius(); // Calculate after all blueprint points are finalized
     }
 
@@ -2381,6 +2457,8 @@ export class SoftBody {
             }
         }
 
+        this._enforcePhotosyntheticPhenotypeConstraints();
+
         // Recalculate things that depend on the final massPoints
         this.calculateCurrentMaxEnergy(); 
 
@@ -2394,6 +2472,7 @@ export class SoftBody {
     updateSelf(dt, fluidFieldRef) {
         if (this.isUnstable) return;
 
+        this._enforcePhotosyntheticPhenotypeConstraints();
         this._prepareActuationStateForTick();
 
         let brainNode = this.massPoints.find(p => p.neuronData && p.neuronData.isBrain);

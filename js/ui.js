@@ -708,6 +708,15 @@ function getMouseWorldCoordinates(displayMouseX, displayMouseY) {
     });
 }
 
+/**
+ * Resolve a safe max zoom even if imported config is missing/invalid for MAX_ZOOM.
+ */
+function getSafeMaxZoom() {
+    const maxZoom = Number(config.MAX_ZOOM);
+    if (Number.isFinite(maxZoom) && maxZoom > 0) return maxZoom;
+    return 8.0;
+}
+
 // --- Event Listeners ---
 function cycleSelectedCreature(direction = 1) {
     const liveBodies = softBodyPopulation.filter(body => !body.isUnstable && body.massPoints && body.massPoints.length > 0);
@@ -747,7 +756,7 @@ function applyManualZoom(displayX, displayY, direction) {
     const minZoomToFitX = canvas.clientWidth / config.WORLD_WIDTH;
     const minZoomToFitY = canvas.clientHeight / config.WORLD_HEIGHT;
     const minAllowedZoom = Math.max(0.01, Math.min(minZoomToFitX, minZoomToFitY));
-    newZoom = Math.max(minAllowedZoom, Math.min(newZoom, config.MAX_ZOOM));
+    newZoom = Math.max(minAllowedZoom, Math.min(newZoom, getSafeMaxZoom()));
 
     viewZoom = newZoom;
 
@@ -1496,7 +1505,7 @@ viewEntireSimButton.onclick = function () {
         viewportWidth: canvas.clientWidth,
         viewportHeight: canvas.clientHeight,
         minZoom: 0.01,
-        maxZoom: config.MAX_ZOOM
+        maxZoom: getSafeMaxZoom()
     });
 
     viewZoom = fitted.zoom;
@@ -2081,7 +2090,7 @@ function focusOnCreature(creature) {
     const smallerViewportDim = Math.min(canvas.clientWidth, canvas.clientHeight);
     const targetZoom = smallerViewportDim / (creatureRadius * 2 * 3);
 
-    viewZoom = Math.min(config.MAX_ZOOM, Math.max(0.2, targetZoom));
+    viewZoom = Math.min(getSafeMaxZoom(), Math.max(0.2, targetZoom));
 
     const centered = centerCameraOnPoint({
         worldX: creatureCenter.x,
@@ -2369,6 +2378,13 @@ function clampViewOffsets({ syncFromRuntime = false } = {}) {
         viewOffsetY = config.viewOffsetY;
     }
 
+    // Self-heal invalid camera state (e.g., bad imported config or stale NaN state).
+    if (!Number.isFinite(viewZoom) || viewZoom <= 0) {
+        viewZoom = Math.max(0.01, Math.min(1.0, getSafeMaxZoom()));
+    }
+    if (!Number.isFinite(viewOffsetX)) viewOffsetX = 0;
+    if (!Number.isFinite(viewOffsetY)) viewOffsetY = 0;
+
     const clamped = clampCameraOffsets({
         offsetX: viewOffsetX,
         offsetY: viewOffsetY,
@@ -2383,8 +2399,10 @@ function clampViewOffsets({ syncFromRuntime = false } = {}) {
     viewOffsetY = clamped.offsetY;
 
     // keep config & camera objects aligned
+    config.viewZoom = viewZoom;
     config.viewOffsetX = viewOffsetX;
     config.viewOffsetY = viewOffsetY;
+    viewport.zoom = viewZoom;
     viewport.offsetX = viewOffsetX;
     viewport.offsetY = viewOffsetY;
 }

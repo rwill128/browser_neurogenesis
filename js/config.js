@@ -6,6 +6,7 @@ const config = {
     VIEW_PAN_SPEED: 80,
     ZOOM_SENSITIVITY: 0.02,
     MIN_ZOOM: 0.1,
+    MAX_ZOOM: 8.0,
     isRightDragging: false,
 
     // Spatial Grid for optimization
@@ -19,9 +20,21 @@ const config = {
     DYE_PULL_RATE: 0.05,
 
     // Rigid Spring Properties (New)
-    RIGID_SPRING_STIFFNESS: 500000, 
-    RIGID_SPRING_DAMPING: 150,    
+    RIGID_SPRING_STIFFNESS: 500000,
+    RIGID_SPRING_DAMPING: 150,
     CHANCE_FOR_RIGID_SPRING: 0.5,
+
+    // Newborn spawn stabilization (new): world/dt-aware spring clamps for tiny worlds.
+    NEWBORN_STIFFNESS_CLAMP_ENABLED: true,
+    NEWBORN_STIFFNESS_WORLD_REF_DIM: 1200,
+    NEWBORN_STIFFNESS_DT_REF: 1 / 30,
+    NEWBORN_STIFFNESS_DT_EXPONENT: 2.0,
+    NEWBORN_RIGID_STIFFNESS_WORLD_EXPONENT: 2.0,
+    NEWBORN_NON_RIGID_STIFFNESS_WORLD_EXPONENT: 1.0,
+    NEWBORN_RIGID_STIFFNESS_MIN_SCALE: 0.005,
+    NEWBORN_NON_RIGID_STIFFNESS_MIN_SCALE: 0.05,
+    NEWBORN_NON_RIGID_STIFFNESS_BASE_CAP: 10000,
+    NEWBORN_NON_RIGID_DAMPING_BASE_CAP: 80,
 
     // Spring Mutation Constants (New)
     SPRING_DELETION_CHANCE: 0.02,

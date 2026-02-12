@@ -760,6 +760,425 @@ export class SoftBody {
         return entries[entries.length - 1] || fallback;
     }
 
+    _bumpMutationStat(key, amount = 1) {
+        if (!runtimeState.mutationStats || typeof runtimeState.mutationStats !== 'object') return;
+        runtimeState.mutationStats[key] = (runtimeState.mutationStats[key] || 0) + amount;
+    }
+
+    _cloneBlueprintSnapshot(points = this.blueprintPoints, springs = this.blueprintSprings) {
+        return {
+            points: JSON.parse(JSON.stringify(Array.isArray(points) ? points : [])),
+            springs: JSON.parse(JSON.stringify(Array.isArray(springs) ? springs : []))
+        };
+    }
+
+    _sanitizeBlueprintDataInPlace() {
+        const sanitizedPoints = [];
+        for (const rawPoint of this.blueprintPoints || []) {
+            if (!rawPoint || typeof rawPoint !== 'object') continue;
+
+            const nodeType = Number.isFinite(Number(rawPoint.nodeType))
+                ? Math.max(NodeType.PREDATOR, Math.min(NodeType.REPULSOR, Math.floor(Number(rawPoint.nodeType))))
+                : NodeType.EATER;
+
+            let movementType = Number.isFinite(Number(rawPoint.movementType))
+                ? Math.max(MovementType.FIXED, Math.min(MovementType.NEUTRAL, Math.floor(Number(rawPoint.movementType))))
+                : MovementType.NEUTRAL;
+            if (nodeType === NodeType.SWIMMER) movementType = MovementType.NEUTRAL;
+
+            const dyeColor = Array.isArray(rawPoint.dyeColor) && rawPoint.dyeColor.length >= 3
+                ? rawPoint.dyeColor.slice(0, 3).map((v) => Math.max(0, Math.min(255, Math.floor(Number(v) || 0))))
+                : [200, 50, 50];
+
+            const isNeuron = nodeType === NodeType.NEURON;
+            let neuronDataBlueprint = null;
+            if (isNeuron) {
+                const hiddenLayerSize = Number(rawPoint?.neuronDataBlueprint?.hiddenLayerSize);
+                neuronDataBlueprint = {
+                    hiddenLayerSize: Math.max(
+                        config.DEFAULT_HIDDEN_LAYER_SIZE_MIN,
+                        Math.min(
+                            config.DEFAULT_HIDDEN_LAYER_SIZE_MAX,
+                            Number.isFinite(hiddenLayerSize) ? Math.floor(hiddenLayerSize) : config.DEFAULT_HIDDEN_LAYER_SIZE_MIN
+                        )
+                    )
+                };
+            }
+
+            sanitizedPoints.push({
+                relX: Number(rawPoint.relX) || 0,
+                relY: Number(rawPoint.relY) || 0,
+                radius: Math.max(0.5, Math.min(12, Number(rawPoint.radius) || 1)),
+                mass: Math.max(0.1, Math.min(2.5, Number(rawPoint.mass) || 0.5)),
+                nodeType,
+                movementType,
+                dyeColor,
+                canBeGrabber: Boolean(rawPoint.canBeGrabber),
+                neuronDataBlueprint,
+                activationIntervalGene: this._sanitizeActivationIntervalGene(rawPoint.activationIntervalGene ?? this._randomActivationIntervalGene()),
+                eyeTargetType: nodeType === NodeType.EYE
+                    ? (Number(rawPoint.eyeTargetType) === EyeTargetType.FOREIGN_BODY_POINT
+                        ? EyeTargetType.FOREIGN_BODY_POINT
+                        : EyeTargetType.PARTICLE)
+                    : undefined
+            });
+        }
+
+        const sanitizedSprings = [];
+        const pointCount = sanitizedPoints.length;
+        const seenEdgeKeys = new Set();
+
+        for (const rawSpring of this.blueprintSprings || []) {
+            const p1Index = Math.floor(Number(rawSpring?.p1Index));
+            const p2Index = Math.floor(Number(rawSpring?.p2Index));
+            if (!Number.isInteger(p1Index) || !Number.isInteger(p2Index)) continue;
+            if (p1Index < 0 || p2Index < 0 || p1Index >= pointCount || p2Index >= pointCount) continue;
+            if (p1Index === p2Index) continue;
+
+            const edgeKey = p1Index < p2Index ? `${p1Index}:${p2Index}` : `${p2Index}:${p1Index}`;
+            if (seenEdgeKeys.has(edgeKey)) continue;
+            seenEdgeKeys.add(edgeKey);
+
+            const p1 = sanitizedPoints[p1Index];
+            const p2 = sanitizedPoints[p2Index];
+            const dx = p1.relX - p2.relX;
+            const dy = p1.relY - p2.relY;
+            const geometricLength = Math.sqrt(dx * dx + dy * dy);
+
+            sanitizedSprings.push({
+                p1Index,
+                p2Index,
+                restLength: Math.max(1, Number(rawSpring?.restLength) || geometricLength || 1),
+                isRigid: Boolean(rawSpring?.isRigid),
+                stiffness: Math.max(100, Math.min(10000, Number(rawSpring?.stiffness) || this.stiffness)),
+                damping: Math.max(0.1, Math.min(50, Number(rawSpring?.damping) || this.springDamping)),
+                activationIntervalGene: this._sanitizeActivationIntervalGene(rawSpring?.activationIntervalGene ?? this._randomActivationIntervalGene())
+            });
+        }
+
+        this.blueprintPoints = sanitizedPoints;
+        this.blueprintSprings = sanitizedSprings;
+    }
+
+    _buildBlueprintAdjacency() {
+        const adjacency = Array.from({ length: this.blueprintPoints.length }, () => []);
+        for (const spring of this.blueprintSprings) {
+            if (!spring) continue;
+            const a = Math.floor(Number(spring.p1Index));
+            const b = Math.floor(Number(spring.p2Index));
+            if (!Number.isInteger(a) || !Number.isInteger(b)) continue;
+            if (a < 0 || b < 0 || a >= adjacency.length || b >= adjacency.length || a === b) continue;
+            adjacency[a].push(b);
+            adjacency[b].push(a);
+        }
+        return adjacency;
+    }
+
+    _countConnectedBlueprintPoints() {
+        if (!Array.isArray(this.blueprintPoints) || this.blueprintPoints.length === 0) return 0;
+        const adjacency = this._buildBlueprintAdjacency();
+        const visited = new Set();
+        const stack = [0];
+        visited.add(0);
+
+        while (stack.length) {
+            const current = stack.pop();
+            for (const next of adjacency[current] || []) {
+                if (visited.has(next)) continue;
+                visited.add(next);
+                stack.push(next);
+            }
+        }
+
+        return visited.size;
+    }
+
+    _evaluateBlueprintViability() {
+        const points = this.blueprintPoints || [];
+        const springs = this.blueprintSprings || [];
+
+        const reasons = {
+            structure: false,
+            diversity: false,
+            harvest: false,
+            actuator: false
+        };
+
+        const pointCount = points.length;
+        const minPoints = Math.max(1, Math.floor(Number(config.OFFSPRING_MIN_BLUEPRINT_POINTS) || 1));
+        const springRatio = Math.max(0, Number(config.OFFSPRING_MIN_SPRING_TO_POINT_RATIO) || 0);
+        const minSprings = Math.max(Math.max(0, pointCount - 1), Math.floor(pointCount * springRatio));
+
+        if (pointCount < minPoints || springs.length < minSprings) {
+            reasons.structure = true;
+        }
+
+        if (!reasons.structure) {
+            const connectedCount = this._countConnectedBlueprintPoints();
+            if (connectedCount < pointCount) reasons.structure = true;
+        }
+
+        this._calculateBlueprintRadius();
+        const maxWorldDim = Math.max(1, Math.max(config.WORLD_WIDTH, config.WORLD_HEIGHT));
+        const maxRadiusFraction = Math.max(0.05, Math.min(1, Number(config.OFFSPRING_MAX_BLUEPRINT_RADIUS_WORLD_FRACTION) || 0.45));
+        const maxRadius = maxWorldDim * maxRadiusFraction;
+        if (!Number.isFinite(this.blueprintRadius) || this.blueprintRadius <= 0 || this.blueprintRadius > maxRadius) {
+            reasons.structure = true;
+        }
+
+        const nodeTypeSet = new Set(points.map((p) => p?.nodeType));
+        const minDiversity = Math.max(1, Math.floor(Number(config.OFFSPRING_MIN_NODE_TYPE_DIVERSITY) || 1));
+        if (nodeTypeSet.size < minDiversity) {
+            reasons.diversity = true;
+        }
+
+        const harvestTypes = new Set([NodeType.EATER, NodeType.PHOTOSYNTHETIC, NodeType.PREDATOR]);
+        const actuatorTypes = new Set([NodeType.SWIMMER, NodeType.EMITTER, NodeType.JET, NodeType.ATTRACTOR, NodeType.REPULSOR]);
+
+        const hasHarvestNode = points.some((p) => harvestTypes.has(p?.nodeType));
+        const hasActuatorNode = points.some((p) => actuatorTypes.has(p?.nodeType));
+
+        if (config.OFFSPRING_REQUIRE_HARVESTER_NODE && !hasHarvestNode) reasons.harvest = true;
+        if (config.OFFSPRING_REQUIRE_ACTUATOR_NODE && !hasActuatorNode) reasons.actuator = true;
+
+        return {
+            ok: !reasons.structure && !reasons.diversity && !reasons.harvest && !reasons.actuator,
+            reasons
+        };
+    }
+
+    _sampleConnectedDonorModuleIndices(donor) {
+        const donorPoints = Array.isArray(donor?.blueprintPoints) ? donor.blueprintPoints : [];
+        const donorSprings = Array.isArray(donor?.blueprintSprings) ? donor.blueprintSprings : [];
+        if (donorPoints.length < 2) return [];
+
+        const minTake = Math.max(1, Math.floor(Number(config.HGT_GRAFT_MIN_POINTS) || 2));
+        const maxTake = Math.max(minTake, Math.floor(Number(config.HGT_GRAFT_MAX_POINTS) || minTake));
+        const target = Math.min(donorPoints.length, minTake + Math.floor(Math.random() * (maxTake - minTake + 1)));
+
+        const adjacency = Array.from({ length: donorPoints.length }, () => []);
+        for (const spring of donorSprings) {
+            const a = Math.floor(Number(spring?.p1Index));
+            const b = Math.floor(Number(spring?.p2Index));
+            if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
+            if (a < 0 || b < 0 || a >= donorPoints.length || b >= donorPoints.length) continue;
+            adjacency[a].push(b);
+            adjacency[b].push(a);
+        }
+
+        const seed = Math.floor(Math.random() * donorPoints.length);
+        const visited = new Set([seed]);
+        const queue = [seed];
+
+        while (queue.length > 0 && visited.size < target) {
+            const current = queue.shift();
+            const neighbors = [...(adjacency[current] || [])];
+            for (let i = neighbors.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [neighbors[i], neighbors[j]] = [neighbors[j], neighbors[i]];
+            }
+            for (const next of neighbors) {
+                if (visited.has(next)) continue;
+                visited.add(next);
+                queue.push(next);
+                if (visited.size >= target) break;
+            }
+        }
+
+        return [...visited];
+    }
+
+    _attemptDonorModuleGraftMutation(parentBody) {
+        this._bumpMutationStat('hgtDonorGraftAttempt');
+
+        const population = Array.isArray(runtimeState.softBodyPopulation) ? runtimeState.softBodyPopulation : [];
+        const parentCenter = parentBody?.getAveragePosition ? parentBody.getAveragePosition() : this.getAveragePosition();
+        const donorSearchRadius = Math.max(0, Number(config.HGT_GRAFT_DONOR_SEARCH_RADIUS) || 0);
+
+        const donorCandidates = population.filter((candidate) => {
+            if (!candidate || candidate === parentBody || candidate === this || candidate.isUnstable) return false;
+            if (!Array.isArray(candidate.blueprintPoints) || candidate.blueprintPoints.length < 2) return false;
+            if (!Array.isArray(candidate.blueprintSprings) || candidate.blueprintSprings.length < 1) return false;
+            if (donorSearchRadius <= 0 || !parentCenter || typeof candidate.getAveragePosition !== 'function') return true;
+            const c = candidate.getAveragePosition();
+            const dx = c.x - parentCenter.x;
+            const dy = c.y - parentCenter.y;
+            return (dx * dx + dy * dy) <= donorSearchRadius * donorSearchRadius;
+        });
+
+        if (donorCandidates.length === 0) {
+            this._bumpMutationStat('hgtDonorGraftRejectedNoDonor');
+            return false;
+        }
+
+        const donor = donorCandidates[Math.floor(Math.random() * donorCandidates.length)];
+        const donorIndices = this._sampleConnectedDonorModuleIndices(donor);
+        if (donorIndices.length < Math.max(1, Math.floor(Number(config.HGT_GRAFT_MIN_POINTS) || 2))) {
+            this._bumpMutationStat('hgtDonorGraftRejectedInvalid');
+            return false;
+        }
+
+        const maxTotalPoints = Math.max(1, Math.floor(Number(config.HGT_GRAFT_MAX_TOTAL_POINTS) || config.GROWTH_MAX_POINTS_PER_CREATURE));
+        if (this.blueprintPoints.length + donorIndices.length > maxTotalPoints) {
+            this._bumpMutationStat('hgtDonorGraftRejectedCapacity');
+            return false;
+        }
+
+        const startPointCount = this.blueprintPoints.length;
+        const startSpringCount = this.blueprintSprings.length;
+
+        const mapOldToNew = new Map();
+        const modulePoints = donorIndices.map((idx) => donor.blueprintPoints[idx]).filter(Boolean);
+        if (modulePoints.length < 2) {
+            this._bumpMutationStat('hgtDonorGraftRejectedInvalid');
+            return false;
+        }
+
+        const moduleCentroid = modulePoints.reduce((acc, p) => {
+            acc.x += Number(p.relX) || 0;
+            acc.y += Number(p.relY) || 0;
+            return acc;
+        }, { x: 0, y: 0 });
+        moduleCentroid.x /= modulePoints.length;
+        moduleCentroid.y /= modulePoints.length;
+
+        const anchorIndex = this.blueprintPoints.length > 0
+            ? Math.floor(Math.random() * this.blueprintPoints.length)
+            : -1;
+        const anchorPoint = anchorIndex >= 0 ? this.blueprintPoints[anchorIndex] : null;
+
+        let moduleRadius = 1;
+        for (const p of modulePoints) {
+            const dx = (Number(p.relX) || 0) - moduleCentroid.x;
+            const dy = (Number(p.relY) || 0) - moduleCentroid.y;
+            moduleRadius = Math.max(moduleRadius, Math.sqrt(dx * dx + dy * dy) + Math.max(0.5, Number(p.radius) || 0));
+        }
+
+        const angle = Math.random() * Math.PI * 2;
+        const anchorX = anchorPoint ? Number(anchorPoint.relX) || 0 : 0;
+        const anchorY = anchorPoint ? Number(anchorPoint.relY) || 0 : 0;
+        const anchorRadius = anchorPoint ? Math.max(0.5, Number(anchorPoint.radius) || 0.5) : 0.5;
+        const placementDistance = anchorRadius + moduleRadius + 2 + Math.random() * 6;
+        const tx = anchorX + Math.cos(angle) * placementDistance - moduleCentroid.x;
+        const ty = anchorY + Math.sin(angle) * placementDistance - moduleCentroid.y;
+
+        for (const oldIndex of donorIndices) {
+            const src = donor.blueprintPoints[oldIndex];
+            if (!src) continue;
+
+            const nodeType = Number.isFinite(Number(src.nodeType))
+                ? Math.max(NodeType.PREDATOR, Math.min(NodeType.REPULSOR, Math.floor(Number(src.nodeType))))
+                : NodeType.EATER;
+            let movementType = Number.isFinite(Number(src.movementType))
+                ? Math.max(MovementType.FIXED, Math.min(MovementType.NEUTRAL, Math.floor(Number(src.movementType))))
+                : MovementType.NEUTRAL;
+            if (nodeType === NodeType.SWIMMER) movementType = MovementType.NEUTRAL;
+
+            const point = {
+                relX: (Number(src.relX) || 0) + tx,
+                relY: (Number(src.relY) || 0) + ty,
+                radius: Math.max(0.5, Math.min(12, Number(src.radius) || 1)),
+                mass: Math.max(0.1, Math.min(2.5, Number(src.mass) || 0.5)),
+                nodeType,
+                movementType,
+                dyeColor: Array.isArray(src.dyeColor) ? src.dyeColor.slice(0, 3) : [200, 50, 50],
+                canBeGrabber: Boolean(src.canBeGrabber),
+                neuronDataBlueprint: nodeType === NodeType.NEURON
+                    ? {
+                        hiddenLayerSize: Math.max(
+                            config.DEFAULT_HIDDEN_LAYER_SIZE_MIN,
+                            Math.min(
+                                config.DEFAULT_HIDDEN_LAYER_SIZE_MAX,
+                                Number(src?.neuronDataBlueprint?.hiddenLayerSize) || config.DEFAULT_HIDDEN_LAYER_SIZE_MIN
+                            )
+                        )
+                    }
+                    : null,
+                activationIntervalGene: this._sanitizeActivationIntervalGene(src.activationIntervalGene ?? this._randomActivationIntervalGene()),
+                eyeTargetType: nodeType === NodeType.EYE
+                    ? (Number(src.eyeTargetType) === EyeTargetType.FOREIGN_BODY_POINT
+                        ? EyeTargetType.FOREIGN_BODY_POINT
+                        : EyeTargetType.PARTICLE)
+                    : undefined
+            };
+
+            const newIndex = this.blueprintPoints.length;
+            this.blueprintPoints.push(point);
+            mapOldToNew.set(oldIndex, newIndex);
+        }
+
+        let addedSprings = 0;
+
+        for (const donorSpring of donor.blueprintSprings || []) {
+            const a = Math.floor(Number(donorSpring?.p1Index));
+            const b = Math.floor(Number(donorSpring?.p2Index));
+            if (!mapOldToNew.has(a) || !mapOldToNew.has(b)) continue;
+
+            const p1Index = mapOldToNew.get(a);
+            const p2Index = mapOldToNew.get(b);
+            if (p1Index === p2Index) continue;
+
+            this.blueprintSprings.push({
+                p1Index,
+                p2Index,
+                restLength: Math.max(1, Number(donorSpring?.restLength) || 1),
+                isRigid: Boolean(donorSpring?.isRigid),
+                stiffness: Math.max(100, Math.min(10000, Number(donorSpring?.stiffness) || this.stiffness)),
+                damping: Math.max(0.1, Math.min(50, Number(donorSpring?.damping) || this.springDamping)),
+                activationIntervalGene: this._sanitizeActivationIntervalGene(donorSpring?.activationIntervalGene ?? this._randomActivationIntervalGene())
+            });
+            addedSprings += 1;
+        }
+
+        const attachmentTargetCount = Math.max(1, Math.floor(Number(config.HGT_GRAFT_ATTACHMENT_SPRINGS) || 1));
+        const preGraftIndices = Array.from({ length: startPointCount }, (_, i) => i);
+        const graftIndices = Array.from(mapOldToNew.values());
+
+        const usedAttachmentPairs = new Set();
+        for (let i = 0; i < attachmentTargetCount && preGraftIndices.length > 0 && graftIndices.length > 0; i++) {
+            const baseIdx = preGraftIndices[Math.floor(Math.random() * preGraftIndices.length)];
+            const graftIdx = graftIndices[Math.floor(Math.random() * graftIndices.length)];
+            if (baseIdx === graftIdx) continue;
+
+            const edgeKey = baseIdx < graftIdx ? `${baseIdx}:${graftIdx}` : `${graftIdx}:${baseIdx}`;
+            if (usedAttachmentPairs.has(edgeKey)) continue;
+            usedAttachmentPairs.add(edgeKey);
+
+            const pA = this.blueprintPoints[baseIdx];
+            const pB = this.blueprintPoints[graftIdx];
+            if (!pA || !pB) continue;
+            const dx = (Number(pA.relX) || 0) - (Number(pB.relX) || 0);
+            const dy = (Number(pA.relY) || 0) - (Number(pB.relY) || 0);
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            const pAGene = this._sanitizeActivationIntervalGene(pA.activationIntervalGene ?? this._randomActivationIntervalGene());
+            const pBGene = this._sanitizeActivationIntervalGene(pB.activationIntervalGene ?? this._randomActivationIntervalGene());
+
+            this.blueprintSprings.push({
+                p1Index: baseIdx,
+                p2Index: graftIdx,
+                restLength: Math.max(1, dist || 1),
+                isRigid: Math.random() < (config.CHANCE_FOR_RIGID_SPRING * 0.5),
+                stiffness: this.stiffness,
+                damping: this.springDamping,
+                activationIntervalGene: this._sanitizeActivationIntervalGene((pAGene + pBGene) * 0.5)
+            });
+            addedSprings += 1;
+        }
+
+        if (addedSprings <= 0) {
+            this.blueprintPoints.length = startPointCount;
+            this.blueprintSprings.length = startSpringCount;
+            this._bumpMutationStat('hgtDonorGraftRejectedInvalid');
+            return false;
+        }
+
+        this._bumpMutationStat('hgtDonorGraftApplied');
+        this._bumpMutationStat('pointAddActual', this.blueprintPoints.length - startPointCount);
+        this._bumpMutationStat('springAddition', this.blueprintSprings.length - startSpringCount);
+        return true;
+    }
+
     /**
      * Recompute cached node-type counters used by brain sizing and diagnostics.
      */
@@ -1073,6 +1492,7 @@ export class SoftBody {
             // 1. Deep copy blueprint from parent
             this.blueprintPoints = JSON.parse(JSON.stringify(parentBody.blueprintPoints));
             this.blueprintSprings = JSON.parse(JSON.stringify(parentBody.blueprintSprings));
+            const parentBlueprintSnapshot = this._cloneBlueprintSnapshot(this.blueprintPoints, this.blueprintSprings);
 
             // 2. Mutate blueprint points (coordinates, types, properties)
             this.blueprintPoints.forEach(bp => {
@@ -1474,7 +1894,27 @@ export class SoftBody {
             }
             // TODO: Add blueprint versions of Segment Duplication, Symmetrical Duplication etc.
 
-            // Step 5: Instantiate Phenotype from the mutated blueprint
+            // Optional HGT-like donor graft: pull a connected module from a nearby donor blueprint.
+            if (Math.random() < Math.max(0, Math.min(1, Number(config.HGT_GRAFT_MUTATION_CHANCE) || 0))) {
+                this._attemptDonorModuleGraftMutation(parentBody);
+            }
+
+            // Finalize and validate mutated blueprint before instantiation.
+            this._sanitizeBlueprintDataInPlace();
+            const viability = this._evaluateBlueprintViability();
+            if (!viability.ok) {
+                if (viability.reasons.structure) this._bumpMutationStat('offspringViabilityRejectedStructure');
+                if (viability.reasons.diversity) this._bumpMutationStat('offspringViabilityRejectedDiversity');
+                if (viability.reasons.harvest) this._bumpMutationStat('offspringViabilityRejectedHarvest');
+                if (viability.reasons.actuator) this._bumpMutationStat('offspringViabilityRejectedActuator');
+
+                this.blueprintPoints = JSON.parse(JSON.stringify(parentBlueprintSnapshot.points));
+                this.blueprintSprings = JSON.parse(JSON.stringify(parentBlueprintSnapshot.springs));
+                this._sanitizeBlueprintDataInPlace();
+                this._bumpMutationStat('offspringViabilityFallbackToParent');
+            }
+
+            // Step 5: Instantiate Phenotype from the finalized blueprint
             this._instantiatePhenotypeFromBlueprint(startX, startY);
 
         } else { 
@@ -2605,6 +3045,15 @@ export class SoftBody {
                 potentialChild.setSpatialGrid(this.spatialGrid);
 
                 if (potentialChild.massPoints.length === 0 || potentialChild.blueprintRadius === 0) continue;
+
+                const childViability = potentialChild._evaluateBlueprintViability();
+                if (!childViability.ok) {
+                    if (childViability.reasons.structure) this._bumpMutationStat('offspringViabilityRejectedStructure');
+                    if (childViability.reasons.diversity) this._bumpMutationStat('offspringViabilityRejectedDiversity');
+                    if (childViability.reasons.harvest) this._bumpMutationStat('offspringViabilityRejectedHarvest');
+                    if (childViability.reasons.actuator) this._bumpMutationStat('offspringViabilityRejectedActuator');
+                    continue;
+                }
 
                 let isSpotClear = true;
                 // Check against existing population using blueprintRadius and cached positions

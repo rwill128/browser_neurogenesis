@@ -135,6 +135,22 @@ const config = {
     MUTATION_CHANCE_NODE_TYPE: 0.1,
     MUTATION_CHANCE_REASSIGN_NEURON_LINK: 0.02,
     ADD_POINT_MUTATION_CHANCE: 0.03,
+
+    // Offspring viability guardrails (new): reject/fallback severely non-functional mutated blueprints.
+    OFFSPRING_MIN_BLUEPRINT_POINTS: 3,
+    OFFSPRING_MIN_NODE_TYPE_DIVERSITY: 2,
+    OFFSPRING_MIN_SPRING_TO_POINT_RATIO: 1.0,
+    OFFSPRING_REQUIRE_HARVESTER_NODE: true,
+    OFFSPRING_REQUIRE_ACTUATOR_NODE: true,
+    OFFSPRING_MAX_BLUEPRINT_RADIUS_WORLD_FRACTION: 0.45,
+
+    // Donor-module graft (HGT-like) mutation (new): copy connected donor module into offspring blueprint.
+    HGT_GRAFT_MUTATION_CHANCE: 0.04,
+    HGT_GRAFT_DONOR_SEARCH_RADIUS: 1200,
+    HGT_GRAFT_MIN_POINTS: 2,
+    HGT_GRAFT_MAX_POINTS: 6,
+    HGT_GRAFT_MAX_TOTAL_POINTS: 96,
+    HGT_GRAFT_ATTACHMENT_SPRINGS: 2,
     NEW_POINT_OFFSET_RADIUS: 15,
     isAnySoftBodyUnstable: false,
     RED_DYE_POISON_STRENGTH: 0.5,

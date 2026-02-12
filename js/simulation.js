@@ -95,7 +95,17 @@ let mutationStats = { // New: For tracking mutation occurrences
     shapeAddition: 0,
     growthGenomeMutations: 0,
     activationIntervalGene: 0,
-    edgeActivationIntervalGene: 0
+    edgeActivationIntervalGene: 0,
+    offspringViabilityRejectedStructure: 0,
+    offspringViabilityRejectedDiversity: 0,
+    offspringViabilityRejectedHarvest: 0,
+    offspringViabilityRejectedActuator: 0,
+    offspringViabilityFallbackToParent: 0,
+    hgtDonorGraftAttempt: 0,
+    hgtDonorGraftApplied: 0,
+    hgtDonorGraftRejectedNoDonor: 0,
+    hgtDonorGraftRejectedCapacity: 0,
+    hgtDonorGraftRejectedInvalid: 0
 };
 
 const simulationWorldState = createWorldState({

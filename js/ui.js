@@ -139,7 +139,8 @@ const fluidFadeSlider = document.getElementById('fluidFade');
 const clearFluidButton = document.getElementById('clearFluidButton');
 const fluidDiffusionValueSpan = document.getElementById('fluidDiffusionValue');
 const fluidViscosityValueSpan = document.getElementById('fluidViscosityValue');
-const fluidFadeValueSpan = document.getElementById('fluidFadeValue');
+// Keep this ID aligned with index.html (#fluidFadeValueSpan) so the live value updates correctly.
+const fluidFadeValueSpan = document.getElementById('fluidFadeValueSpan');
 const maxFluidVelocityComponentSlider = document.getElementById('maxFluidVelocityComponentSlider');
 const maxFluidVelocityComponentValueSpan = document.getElementById('maxFluidVelocityComponentValueSpan');
 

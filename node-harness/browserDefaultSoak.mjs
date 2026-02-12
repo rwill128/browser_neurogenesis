@@ -133,7 +133,9 @@ function buildMutationStatsShape() {
     blueprintCoordinateChange: 0,
     blueprintNeuronHiddenSizeChange: 0,
     shapeAddition: 0,
-    growthGenomeMutations: 0
+    growthGenomeMutations: 0,
+    activationIntervalGene: 0,
+    edgeActivationIntervalGene: 0
   };
 }
 
@@ -224,6 +226,7 @@ function createBrowserDefaultWorld(rng, options) {
     SoftBodyClass: SoftBody,
     count: options.initialCreatures,
     spawnMargin: 50,
+    newbornDt: options.dt,
     rng
   });
 
@@ -261,8 +264,16 @@ function summarize(worldState, tick, timeSec) {
   let reproductionSuppressedByFertilityRoll = 0;
   let reproductionResourceDebitApplied = 0;
 
+  let actuationEvaluations = 0;
+  let actuationSkips = 0;
+  let actuationIntervalSamples = 0;
+  let actuationIntervalTotal = 0;
+  let actuationEnergyCostUpkeep = 0;
+  let actuationEnergyCostEvents = 0;
+
   const instability = worldState.instabilityTelemetry || {};
   const instabilityRemovedByReason = instability.removedByReason || {};
+  const instabilityRemovedByPhysicsKind = instability.removedByPhysicsKind || {};
 
   for (const b of worldState.softBodyPopulation) {
     if (b.isUnstable) unstable++;
@@ -290,6 +301,13 @@ function summarize(worldState, tick, timeSec) {
     reproductionSuppressedByResources += Number(b.reproductionSuppressedByResources || 0);
     reproductionSuppressedByFertilityRoll += Number(b.reproductionSuppressedByFertilityRoll || 0);
     reproductionResourceDebitApplied += Number(b.reproductionResourceDebitApplied || 0);
+
+    actuationEvaluations += Number(b.actuationEvaluations || 0);
+    actuationSkips += Number(b.actuationSkips || 0);
+    actuationIntervalSamples += Number(b.actuationIntervalSamples || 0);
+    actuationIntervalTotal += Number(b.actuationIntervalTotal || 0);
+    actuationEnergyCostUpkeep += Number(b.energyCostFromActuationUpkeep || 0);
+    actuationEnergyCostEvents += Number(b.energyCostFromActuationEvents || 0);
   }
 
   const nodeTypeCounts = aggregateNodeTypeCounts(worldState.softBodyPopulation, nodeTypeNameById);
@@ -325,11 +343,17 @@ function summarize(worldState, tick, timeSec) {
     reproductionSuppressedByResources,
     reproductionSuppressedByFertilityRoll,
     reproductionResourceDebitApplied,
+    actuationEvaluations,
+    actuationSkips,
+    actuationAvgEffectiveInterval: actuationIntervalSamples > 0 ? (actuationIntervalTotal / actuationIntervalSamples) : 0,
+    actuationEnergyCostUpkeep,
+    actuationEnergyCostEvents,
     instabilityRemovedTotal: Number(instability.totalRemoved) || 0,
     instabilityRemovedPhysics: Number(instability.totalPhysicsRemoved) || 0,
     instabilityRemovedNonPhysics: Number(instability.totalNonPhysicsRemoved) || 0,
     instabilityRemovedUnknown: Number(instability.totalUnknownRemoved) || 0,
     instabilityRemovedByReason,
+    instabilityRemovedByPhysicsKind,
     growthCohorts,
     nodeTypeCounts,
     nodeDiversity

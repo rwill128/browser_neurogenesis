@@ -40,8 +40,8 @@ export class SoftBody {
         this.spatialGrid = null;
 
         // Genetic blueprint
-        this.blueprintPoints = []; // Array of { relX, relY, radius, mass, nodeType, movementType, dyeColor, canBeGrabber, neuronDataBlueprint }
-        this.blueprintSprings = []; // Array of { p1Index, p2Index, restLength, isRigid } (indices refer to blueprintPoints)
+        this.blueprintPoints = []; // Array of { relX, relY, radius, mass, nodeType, movementType, dyeColor, canBeGrabber, neuronDataBlueprint, activationIntervalGene }
+        this.blueprintSprings = []; // Array of { p1Index, p2Index, restLength, isRigid, activationIntervalGene } (indices refer to blueprintPoints)
 
         this.isUnstable = false;
         // First fatal condition assigned during lifetime (used by instability telemetry).
@@ -110,6 +110,16 @@ export class SoftBody {
         this.reproductionSuppressedByFertilityRoll = 0;
         this.reproductionResourceDebitApplied = 0;
 
+        // Actuation telemetry (new): evaluative throttling observability.
+        this.actuationEvaluations = 0;
+        this.actuationSkips = 0;
+        this.actuationEvaluationsByNodeType = {};
+        this.actuationSkipsByNodeType = {};
+        this.actuationIntervalSamples = 0;
+        this.actuationIntervalTotal = 0;
+        this.energyCostFromActuationUpkeep = 0;
+        this.energyCostFromActuationEvents = 0;
+
         // Initialize heritable/mutable properties
         if (isBlueprint && creationData) {
             // --- CREATION FROM IMPORTED BLUEPRINT ---
@@ -138,6 +148,16 @@ export class SoftBody {
             // Directly use the blueprint's structure
             this.blueprintPoints = JSON.parse(JSON.stringify(blueprint.blueprintPoints));
             this.blueprintSprings = JSON.parse(JSON.stringify(blueprint.blueprintSprings));
+            this.blueprintPoints.forEach((bp) => {
+                bp.activationIntervalGene = this._sanitizeActivationIntervalGene(
+                    bp.activationIntervalGene ?? this._randomActivationIntervalGene()
+                );
+            });
+            this.blueprintSprings.forEach((bs) => {
+                bs.activationIntervalGene = this._sanitizeActivationIntervalGene(
+                    bs.activationIntervalGene ?? this._randomActivationIntervalGene()
+                );
+            });
             this._instantiatePhenotypeFromBlueprint(initialX, initialY);
 
         } else {
@@ -395,6 +415,137 @@ export class SoftBody {
         }
     }
 
+    _sanitizeActivationIntervalGene(value) {
+        const min = Math.max(1, Math.floor(config.ACTUATION_INTERVAL_GENE_MIN || 1));
+        const max = Math.max(min, Math.floor(config.ACTUATION_INTERVAL_GENE_MAX || min));
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return min;
+        return Math.max(min, Math.min(max, Math.round(parsed)));
+    }
+
+    _randomActivationIntervalGene() {
+        const min = Math.max(1, Math.floor(config.ACTUATION_INTERVAL_GENE_MIN || 1));
+        const max = Math.max(min, Math.floor(config.ACTUATION_INTERVAL_GENE_MAX || min));
+        return min + Math.floor(Math.random() * (max - min + 1));
+    }
+
+    _mutateActivationIntervalGene(parentGene) {
+        const gene = this._sanitizeActivationIntervalGene(parentGene);
+        if (Math.random() >= Math.max(0, Math.min(1, Number(config.ACTUATION_INTERVAL_GENE_MUTATION_CHANCE) || 0))) {
+            return { gene, didMutate: false };
+        }
+
+        const step = Math.max(1, Math.floor(Number(config.ACTUATION_INTERVAL_GENE_MUTATION_STEP) || 1));
+        const direction = Math.random() < 0.5 ? -1 : 1;
+        const mutated = this._sanitizeActivationIntervalGene(gene + (direction * step));
+        return { gene: mutated, didMutate: mutated !== gene };
+    }
+
+    _resolveActuationCooldownMultiplier(point, channel = 'node') {
+        if (channel === 'grabber') {
+            return Math.max(0.05, Number(config.ACTUATION_COOLDOWN_MULTIPLIER_GRABBER) || 1);
+        }
+        if (channel === 'default_pattern') {
+            return Math.max(0.05, Number(config.ACTUATION_COOLDOWN_MULTIPLIER_DEFAULT_PATTERN) || 1);
+        }
+
+        switch (point?.nodeType) {
+            case NodeType.EMITTER:
+                return Math.max(0.05, Number(config.ACTUATION_COOLDOWN_MULTIPLIER_EMITTER) || 1);
+            case NodeType.SWIMMER:
+                return Math.max(0.05, Number(config.ACTUATION_COOLDOWN_MULTIPLIER_SWIMMER) || 1);
+            case NodeType.EATER:
+                return Math.max(0.05, Number(config.ACTUATION_COOLDOWN_MULTIPLIER_EATER) || 1);
+            case NodeType.PREDATOR:
+                return Math.max(0.05, Number(config.ACTUATION_COOLDOWN_MULTIPLIER_PREDATOR) || 1);
+            case NodeType.JET:
+                return Math.max(0.05, Number(config.ACTUATION_COOLDOWN_MULTIPLIER_JET) || 1);
+            case NodeType.ATTRACTOR:
+                return Math.max(0.05, Number(config.ACTUATION_COOLDOWN_MULTIPLIER_ATTRACTOR) || 1);
+            case NodeType.REPULSOR:
+                return Math.max(0.05, Number(config.ACTUATION_COOLDOWN_MULTIPLIER_REPULSOR) || 1);
+            default:
+                return Math.max(0.05, Number(config.ACTUATION_COOLDOWN_MULTIPLIER_DEFAULT) || 1);
+        }
+    }
+
+    _computeEffectiveActuationInterval(point, channel = 'node') {
+        const baseGene = this._sanitizeActivationIntervalGene(point?.activationIntervalGene);
+        const multiplier = this._resolveActuationCooldownMultiplier(point, channel);
+        const scaled = this._sanitizeActivationIntervalGene(baseGene * multiplier);
+        return Math.max(1, scaled);
+    }
+
+    _getActuationTelemetryKey(point, channel = 'node') {
+        if (channel === 'grabber') return 'grabber';
+        if (channel === 'default_pattern') return 'default_pattern';
+        return `node_${Number.isFinite(Number(point?.nodeType)) ? Number(point.nodeType) : -1}`;
+    }
+
+    _recordActuationDecision(point, channel, evaluated, effectiveInterval) {
+        const key = this._getActuationTelemetryKey(point, channel);
+
+        this.actuationIntervalSamples += 1;
+        this.actuationIntervalTotal += effectiveInterval;
+
+        if (evaluated) {
+            this.actuationEvaluations += 1;
+            this.actuationEvaluationsByNodeType[key] = (this.actuationEvaluationsByNodeType[key] || 0) + 1;
+        } else {
+            this.actuationSkips += 1;
+            this.actuationSkipsByNodeType[key] = (this.actuationSkipsByNodeType[key] || 0) + 1;
+        }
+    }
+
+    _prepareActuationStateForTick() {
+        for (const point of this.massPoints) {
+            point.__actuationEvaluatedThisTick = false;
+            if (!Number.isFinite(point.activationIntervalGene)) {
+                point.activationIntervalGene = this._randomActivationIntervalGene();
+            }
+            point.activationIntervalGene = this._sanitizeActivationIntervalGene(point.activationIntervalGene);
+
+            if (!point.actuationCooldownByChannel || typeof point.actuationCooldownByChannel !== 'object') {
+                point.actuationCooldownByChannel = {};
+            }
+            // Legacy compatibility: migrate single cooldown into node channel once.
+            if (
+                Number.isFinite(point.actuationCooldownRemaining) &&
+                !Number.isFinite(point.actuationCooldownByChannel.node)
+            ) {
+                point.actuationCooldownByChannel.node = Number(point.actuationCooldownRemaining);
+            }
+
+            if (!point.swimmerActuation) {
+                point.swimmerActuation = { magnitude: 0, angle: 0 };
+            }
+        }
+    }
+
+    _shouldEvaluatePointActuation(point, channel = 'node') {
+        const effectiveInterval = this._computeEffectiveActuationInterval(point, channel);
+        const key = String(channel || 'node');
+
+        if (!point.actuationCooldownByChannel || typeof point.actuationCooldownByChannel !== 'object') {
+            point.actuationCooldownByChannel = {};
+        }
+
+        if (!Number.isFinite(point.actuationCooldownByChannel[key])) {
+            point.actuationCooldownByChannel[key] = 0;
+        }
+
+        if (point.actuationCooldownByChannel[key] <= 0) {
+            point.actuationCooldownByChannel[key] = Math.max(0, effectiveInterval - 1);
+            point.__actuationEvaluatedThisTick = true;
+            this._recordActuationDecision(point, channel, true, effectiveInterval);
+            return true;
+        }
+
+        point.actuationCooldownByChannel[key] -= 1;
+        this._recordActuationDecision(point, channel, false, effectiveInterval);
+        return false;
+    }
+
 
     /**
      * Create a random heritable growth genome for new creatures.
@@ -429,7 +580,10 @@ export class SoftBody {
                 { type: 'rigid', weight: randomWeight() }
             ],
             edgeStiffnessScale: 0.6 + Math.random() * 1.2,
-            edgeDampingScale: 0.6 + Math.random() * 1.2
+            edgeDampingScale: 0.6 + Math.random() * 1.2,
+            nodeActivationIntervalBias: (Math.random() - 0.5) * 2,
+            edgeActivationIntervalBias: (Math.random() - 0.5) * 2,
+            activationIntervalJitter: Math.random() * 1.5
         });
     }
 
@@ -449,7 +603,10 @@ export class SoftBody {
                 distanceRangeWeights: [{ key: 'near', min: config.GROWTH_DISTANCE_MIN, max: config.GROWTH_DISTANCE_MAX, weight: 1 }],
                 edgeTypeWeights: [{ type: 'soft', weight: 1 }],
                 edgeStiffnessScale: 1,
-                edgeDampingScale: 1
+                edgeDampingScale: 1,
+                nodeActivationIntervalBias: 0,
+                edgeActivationIntervalBias: 0,
+                activationIntervalJitter: 0.5
             };
             genome = seeded;
         }
@@ -504,7 +661,10 @@ export class SoftBody {
                 return { type, weight: Number(e?.weight) || 0 };
             }),
             edgeStiffnessScale: clamp(Number(genome.edgeStiffnessScale) || 1, 0.1, 5),
-            edgeDampingScale: clamp(Number(genome.edgeDampingScale) || 1, 0.1, 5)
+            edgeDampingScale: clamp(Number(genome.edgeDampingScale) || 1, 0.1, 5),
+            nodeActivationIntervalBias: clamp(Number(genome.nodeActivationIntervalBias) || 0, -3, 3),
+            edgeActivationIntervalBias: clamp(Number(genome.edgeActivationIntervalBias) || 0, -3, 3),
+            activationIntervalJitter: clamp(Number(genome.activationIntervalJitter) || 0.5, 0, 3)
         };
 
         if (sanitized.nodesPerGrowthWeights.length === 0) sanitized.nodesPerGrowthWeights = [{ count: 1, weight: 1 }];
@@ -547,6 +707,9 @@ export class SoftBody {
 
         mutateScalar('edgeStiffnessScale', 0.1, 5);
         mutateScalar('edgeDampingScale', 0.1, 5);
+        mutateScalar('nodeActivationIntervalBias', -3, 3);
+        mutateScalar('edgeActivationIntervalBias', -3, 3);
+        mutateScalar('activationIntervalJitter', 0, 3);
 
         const mutateWeights = (entries, onEntry = null) => {
             for (const e of entries || []) {
@@ -785,6 +948,18 @@ export class SoftBody {
                     Math.floor(Math.random() * 255)
                 ];
                 newPoint.canBeGrabber = Math.random() < 0.15;
+
+                // Growth-genome driven actuation interval inheritance:
+                // anchor gene + heritable bias + jitter.
+                const intervalJitter = (Math.random() - 0.5) * 2 * (genome.activationIntervalJitter || 0);
+                const inheritedNodeInterval = this._sanitizeActivationIntervalGene(
+                    (anchor.activationIntervalGene ?? this._randomActivationIntervalGene()) +
+                    (genome.nodeActivationIntervalBias || 0) +
+                    intervalJitter
+                );
+                newPoint.activationIntervalGene = inheritedNodeInterval;
+                newPoint.actuationCooldownByChannel = { node: 0, grabber: 0, default_pattern: 0 };
+                newPoint.swimmerActuation = { magnitude: 0, angle: 0 };
                 newPoint.eyeTargetType = Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT;
                 newPoint.maxEffectiveJetVelocity = this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4);
 
@@ -819,6 +994,14 @@ export class SoftBody {
                 const stiffness = Math.max(100, this.stiffness * genome.edgeStiffnessScale * (0.8 + Math.random() * 0.4));
                 const damping = Math.max(0.1, this.springDamping * genome.edgeDampingScale * (0.8 + Math.random() * 0.4));
                 const spring = new Spring(closest, newPoint, stiffness, damping, restLength, edgeType === 'rigid');
+                const parentIntervalA = closest.activationIntervalGene ?? this._randomActivationIntervalGene();
+                const parentIntervalB = newPoint.activationIntervalGene ?? this._randomActivationIntervalGene();
+                const edgeIntervalBase = (parentIntervalA + parentIntervalB) * 0.5;
+                const edgeIntervalJitter = (Math.random() - 0.5) * 2 * (genome.activationIntervalJitter || 0);
+                spring.activationIntervalGene = this._sanitizeActivationIntervalGene(
+                    edgeIntervalBase + (genome.edgeActivationIntervalBias || 0) + edgeIntervalJitter
+                );
+                spring.actuationCooldownByChannel = { edge: 0 };
                 this.springs.push(spring);
 
                 totalEdgeLength += restLength;
@@ -893,6 +1076,10 @@ export class SoftBody {
 
             // 2. Mutate blueprint points (coordinates, types, properties)
             this.blueprintPoints.forEach(bp => {
+                bp.activationIntervalGene = this._sanitizeActivationIntervalGene(
+                    bp.activationIntervalGene ?? this._randomActivationIntervalGene()
+                );
+
                 // Mutate relative coordinates
                 if (Math.random() < (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER * 0.5)) {
                     bp.relX += (Math.random() - 0.5) * 2; // Smaller jitter for blueprint stability
@@ -948,6 +1135,12 @@ export class SoftBody {
                     runtimeState.mutationStats.grabberGeneChange++;
                 }
 
+                const intervalMutation = this._mutateActivationIntervalGene(bp.activationIntervalGene);
+                bp.activationIntervalGene = intervalMutation.gene;
+                if (intervalMutation.didMutate) {
+                    runtimeState.mutationStats.activationIntervalGene = (runtimeState.mutationStats.activationIntervalGene || 0) + 1;
+                }
+
                 // Mutate dyeColor
                 if (Math.random() < (config.MUTATION_CHANCE_BOOL * config.GLOBAL_MUTATION_RATE_MODIFIER)) {
                     bp.dyeColor = dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)];
@@ -980,6 +1173,15 @@ export class SoftBody {
 
             // 3. Mutate blueprint springs (restLength, isRigid)
             this.blueprintSprings.forEach(bs => {
+                bs.activationIntervalGene = this._sanitizeActivationIntervalGene(
+                    bs.activationIntervalGene ?? this._randomActivationIntervalGene()
+                );
+                const edgeIntervalMutation = this._mutateActivationIntervalGene(bs.activationIntervalGene);
+                bs.activationIntervalGene = edgeIntervalMutation.gene;
+                if (edgeIntervalMutation.didMutate) {
+                    runtimeState.mutationStats.edgeActivationIntervalGene = (runtimeState.mutationStats.edgeActivationIntervalGene || 0) + 1;
+                }
+
                 if (Math.random() < (config.SPRING_PROP_MUTATION_MAGNITUDE * config.GLOBAL_MUTATION_RATE_MODIFIER)) { // Use magnitude as chance here
                     const oldRestLength = bs.restLength;
                     bs.restLength = Math.max(1, bs.restLength * (1 + (Math.random() - 0.5) * 2 * config.SPRING_PROP_MUTATION_MAGNITUDE));
@@ -1032,6 +1234,7 @@ export class SoftBody {
                     dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
                     canBeGrabber: Math.random() < config.GRABBER_GENE_MUTATION_CHANCE,
                     neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MAX - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null,
+                    activationIntervalGene: this._randomActivationIntervalGene(),
                     eyeTargetType: newNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined,
                     maxEffectiveJetVelocity: this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4)
                 };
@@ -1053,7 +1256,7 @@ export class SoftBody {
                     const becomeRigid = Math.random() < config.CHANCE_FOR_RIGID_SPRING;
                     const newStiffness = 500 + Math.random() * 2500;
                     const newDamping = 5 + Math.random() * 20;
-                    this.blueprintSprings.push({ p1Index: newPointIndex, p2Index: connectToBpIndex, restLength: newRestLength, isRigid: becomeRigid, stiffness: newStiffness, damping: newDamping });
+                    this.blueprintSprings.push({ p1Index: newPointIndex, p2Index: connectToBpIndex, restLength: newRestLength, isRigid: becomeRigid, stiffness: newStiffness, damping: newDamping, activationIntervalGene: this._randomActivationIntervalGene() });
                 }
             }
 
@@ -1090,7 +1293,7 @@ export class SoftBody {
                         const becomeRigid = Math.random() < config.CHANCE_FOR_RIGID_SPRING;
                         const newStiffness = 500 + Math.random() * 2500;
                         const newDamping = 5 + Math.random() * 20;
-                        this.blueprintSprings.push({ p1Index: idx1, p2Index: idx2, restLength: newRestLength, isRigid: becomeRigid, stiffness: newStiffness, damping: newDamping });
+                        this.blueprintSprings.push({ p1Index: idx1, p2Index: idx2, restLength: newRestLength, isRigid: becomeRigid, stiffness: newStiffness, damping: newDamping, activationIntervalGene: this._randomActivationIntervalGene() });
                         runtimeState.mutationStats.springAddition++; 
                         break;
                     }
@@ -1122,6 +1325,7 @@ export class SoftBody {
                         dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
                         canBeGrabber: Math.random() < config.GRABBER_GENE_MUTATION_CHANCE,
                         neuronDataBlueprint: newNodeType === NodeType.NEURON ? { hiddenLayerSize: config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + Math.floor(Math.random() * (config.DEFAULT_HIDDEN_LAYER_SIZE_MIN - config.DEFAULT_HIDDEN_LAYER_SIZE_MIN + 1)) } : null,
+                        activationIntervalGene: this._randomActivationIntervalGene(),
                         eyeTargetType: newNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined,
                         maxEffectiveJetVelocity: this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4)
                     };
@@ -1131,10 +1335,10 @@ export class SoftBody {
                     this.blueprintSprings.splice(springToSubdivideIndex, 1); // Remove original spring
 
                     let restLength1 = Math.sqrt((bp1.relX - midRelX)**2 + (bp1.relY - midRelY)**2) * (1 + (Math.random() - 0.5) * 0.1);
-                    this.blueprintSprings.push({ p1Index: originalBs.p1Index, p2Index: newMidPointIndex, restLength: Math.max(1, restLength1), isRigid: originalBs.isRigid, stiffness: originalBs.stiffness, damping: originalBs.damping });
+                    this.blueprintSprings.push({ p1Index: originalBs.p1Index, p2Index: newMidPointIndex, restLength: Math.max(1, restLength1), isRigid: originalBs.isRigid, stiffness: originalBs.stiffness, damping: originalBs.damping, activationIntervalGene: this._sanitizeActivationIntervalGene(originalBs.activationIntervalGene ?? this._randomActivationIntervalGene()) });
 
                     let restLength2 = Math.sqrt((midRelX - bp2.relX)**2 + (midRelY - bp2.relY)**2) * (1 + (Math.random() - 0.5) * 0.1);
-                    this.blueprintSprings.push({ p1Index: newMidPointIndex, p2Index: originalBs.p2Index, restLength: Math.max(1, restLength2), isRigid: originalBs.isRigid, stiffness: originalBs.stiffness, damping: originalBs.damping });
+                    this.blueprintSprings.push({ p1Index: newMidPointIndex, p2Index: originalBs.p2Index, restLength: Math.max(1, restLength2), isRigid: originalBs.isRigid, stiffness: originalBs.stiffness, damping: originalBs.damping, activationIntervalGene: this._sanitizeActivationIntervalGene(originalBs.activationIntervalGene ?? this._randomActivationIntervalGene()) });
 
                     runtimeState.mutationStats.springSubdivision++; 
                     runtimeState.mutationStats.pointAddActual++; 
@@ -1251,6 +1455,7 @@ export class SoftBody {
                                         mass: (P1_bp.mass + P2_bp.mass) / 2,
                                         nodeType: P1_bp.nodeType, movementType: P1_bp.movementType,
                                         dyeColor: P1_bp.dyeColor, canBeGrabber: P1_bp.canBeGrabber,
+                                        activationIntervalGene: this._sanitizeActivationIntervalGene(P1_bp.activationIntervalGene ?? this._randomActivationIntervalGene()),
                                         neuronDataBlueprint: null
                                     });
                                 });
@@ -1258,7 +1463,7 @@ export class SoftBody {
                                 newSpringsInfo.forEach(info => {
                                     const p1 = info.from !== undefined ? info.from : firstNewPointIndex + info.new1;
                                     const p2 = info.to !== undefined ? info.to : firstNewPointIndex + info.toNew;
-                                    this.blueprintSprings.push({ p1Index: p1, p2Index: p2, restLength: info.len, isRigid: false, stiffness: this.stiffness, damping: this.springDamping });
+                                    this.blueprintSprings.push({ p1Index: p1, p2Index: p2, restLength: info.len, isRigid: false, stiffness: this.stiffness, damping: this.springDamping, activationIntervalGene: this._randomActivationIntervalGene() });
                                 });
 
                                 runtimeState.mutationStats.shapeAddition++;
@@ -1357,6 +1562,7 @@ export class SoftBody {
                     dyeColor: dyeColorChoices[Math.floor(Math.random() * dyeColorChoices.length)],
                     canBeGrabber: canBeGrabberInitial,
                     neuronDataBlueprint: neuronDataBp,
+                    activationIntervalGene: this._randomActivationIntervalGene(),
                     eyeTargetType: chosenNodeType === NodeType.EYE ? (Math.random() < 0.5 ? EyeTargetType.PARTICLE : EyeTargetType.FOREIGN_BODY_POINT) : undefined,
                     maxEffectiveJetVelocity: this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4)
                 });
@@ -1373,7 +1579,8 @@ export class SoftBody {
                         restLength: s_temp.restLength, // This was calculated by Spring constructor from initial geometry
                         isRigid: s_temp.isRigid,
                         stiffness: s_temp.stiffness,
-                        damping: s_temp.dampingFactor
+                        damping: s_temp.dampingFactor,
+                        activationIntervalGene: this._randomActivationIntervalGene()
                     });
                 }
             });
@@ -1441,6 +1648,11 @@ export class SoftBody {
             newPoint.movementType = bp.movementType;
             newPoint.dyeColor = [...bp.dyeColor]; // Ensure deep copy for array
             newPoint.canBeGrabber = bp.canBeGrabber;
+            newPoint.activationIntervalGene = this._sanitizeActivationIntervalGene(
+                bp.activationIntervalGene ?? this._randomActivationIntervalGene()
+            );
+            newPoint.actuationCooldownByChannel = { node: 0, grabber: 0, default_pattern: 0 };
+            newPoint.swimmerActuation = { magnitude: 0, angle: 0 };
             newPoint.eyeTargetType = bp.eyeTargetType === undefined ? EyeTargetType.PARTICLE : bp.eyeTargetType;
             newPoint.maxEffectiveJetVelocity = this.jetMaxVelocityGene * (0.8 + Math.random() * 0.4);
 
@@ -1473,7 +1685,12 @@ export class SoftBody {
 
                 // Use the creature's overall stiffness and damping
                 // The blueprint spring carries restLength and isRigid
-                this.springs.push(new Spring(p1, p2, springStiffness, springDamping, bs.restLength, bs.isRigid));
+                const spring = new Spring(p1, p2, springStiffness, springDamping, bs.restLength, bs.isRigid);
+                spring.activationIntervalGene = this._sanitizeActivationIntervalGene(
+                    bs.activationIntervalGene ?? this._randomActivationIntervalGene()
+                );
+                spring.actuationCooldownByChannel = { edge: 0 };
+                this.springs.push(spring);
             } else {
                 console.warn(`Body ${this.id}: Invalid spring blueprint indices ${bs.p1Index}, ${bs.p2Index} for ${this.massPoints.length} points.`);
             }
@@ -1492,9 +1709,15 @@ export class SoftBody {
     updateSelf(dt, fluidFieldRef) {
         if (this.isUnstable) return;
 
-        this._updateSensoryInputsAndDefaultActivations(fluidFieldRef, this.nutrientField, this.lightField); // Removed particles argument
+        this._prepareActuationStateForTick();
 
         let brainNode = this.massPoints.find(p => p.neuronData && p.neuronData.isBrain);
+        this._updateSensoryInputsAndDefaultActivations(
+            fluidFieldRef,
+            this.nutrientField,
+            this.lightField,
+            { applyDefaultActivations: !brainNode }
+        ); // Removed particles argument
 
         if (brainNode) {
             this._processBrain(brainNode, dt, fluidFieldRef, this.nutrientField, this.lightField); // Removed particles argument
@@ -1516,8 +1739,10 @@ export class SoftBody {
     }
 
     // --- Refactored Helper Methods (Shells) ---
-    _updateSensoryInputsAndDefaultActivations(fluidFieldRef, nutrientField, lightField) { // Removed particles argument
-        this._applyDefaultActivationPatterns();
+    _updateSensoryInputsAndDefaultActivations(fluidFieldRef, nutrientField, lightField, { applyDefaultActivations = true } = {}) { // Removed particles argument
+        if (applyDefaultActivations) {
+            this._applyDefaultActivationPatterns();
+        }
         this._updateEyeNodes(); // Removed particles argument
         this._updateJetAndSwimmerFluidSensor(fluidFieldRef);
     }
@@ -1540,15 +1765,15 @@ export class SoftBody {
 
     _applyDefaultActivationPatterns() {
         this.massPoints.forEach(point => {
-            // If the point is an EATER or PREDATOR, its exertion is controlled by the brain or defaults to 0.
-            // No default pattern-based exertion for these types.
+            // If the point is an EATER or PREDATOR, default-pattern fallback keeps exertion at zero.
             if (point.nodeType === NodeType.EATER || point.nodeType === NodeType.PREDATOR) {
-                // If not controlled by a brain, their exertion will naturally be 0 from initialization or previous brain step.
-                // If a brain *is* controlling it, the brain's output will override this later in _applyBrainActionsToPoints.
-                // For clarity, we can ensure it's 0 here if no brain is influencing it yet for this frame.
-                // However, the main logic for brain control is separate. This ensures no *default pattern* applies.
-                point.currentExertionLevel = 0; 
-                return; // Skip pattern-based activation for these types
+                point.currentExertionLevel = 0;
+                return;
+            }
+
+            // Throttle default-pattern actuation updates with heritable interval genes.
+            if (!this._shouldEvaluatePointActuation(point, 'default_pattern')) {
+                return;
             }
 
             let baseActivation = 0;
@@ -1722,60 +1947,79 @@ export class SoftBody {
             currentFrameEnergyCost += baseNodeCostThisFrame;
             this.energyCostFromBaseNodes += baseNodeCostThisFrame * dt;
 
-            const exertion = point.currentExertionLevel || 0; 
+            const exertion = point.currentExertionLevel || 0;
             const exertionSq = exertion * exertion; // Calculate once if used multiple times
+            const wasActuationEvaluated = point.__actuationEvaluatedThisTick === true;
+            const upkeepFraction = Math.max(0, Math.min(1, Number(config.ACTUATION_UPKEEP_COST_FRACTION) || 0));
+            const activationMultiplier = Math.max(0, Number(config.ACTUATION_ACTIVATION_COST_MULTIPLIER) || 0);
+
+            const splitActuationCost = (baseCost) => {
+                const upkeepCost = baseCost * upkeepFraction;
+                const activationCost = wasActuationEvaluated ? (baseCost * activationMultiplier) : 0;
+                this.energyCostFromActuationUpkeep += upkeepCost * dt;
+                this.energyCostFromActuationEvents += activationCost * dt;
+                return upkeepCost + activationCost;
+            };
 
             // NodeType specific costs
             switch (point.nodeType) {
-                case NodeType.EMITTER:
-                    const emitterCostThisFrame = config.EMITTER_NODE_ENERGY_COST * exertionSq * costMultiplier;
-                currentFrameEnergyCost += emitterCostThisFrame;
-                this.energyCostFromEmitterNodes += emitterCostThisFrame * dt;
+                case NodeType.EMITTER: {
+                    const emitterCostThisFrame = splitActuationCost(config.EMITTER_NODE_ENERGY_COST * exertionSq * costMultiplier);
+                    currentFrameEnergyCost += emitterCostThisFrame;
+                    this.energyCostFromEmitterNodes += emitterCostThisFrame * dt;
                     break;
-                case NodeType.SWIMMER:
-                    const swimmerCostThisFrame = config.SWIMMER_NODE_ENERGY_COST * exertionSq * costMultiplier;
-                currentFrameEnergyCost += swimmerCostThisFrame;
-                this.energyCostFromSwimmerNodes += swimmerCostThisFrame * dt;
+                }
+                case NodeType.SWIMMER: {
+                    const swimmerCostThisFrame = splitActuationCost(config.SWIMMER_NODE_ENERGY_COST * exertionSq * costMultiplier);
+                    currentFrameEnergyCost += swimmerCostThisFrame;
+                    this.energyCostFromSwimmerNodes += swimmerCostThisFrame * dt;
                     break;
-                case NodeType.JET:
-                    const jetCostThisFrame = config.JET_NODE_ENERGY_COST * exertionSq * costMultiplier;
+                }
+                case NodeType.JET: {
+                    const jetCostThisFrame = splitActuationCost(config.JET_NODE_ENERGY_COST * exertionSq * costMultiplier);
                     currentFrameEnergyCost += jetCostThisFrame;
                     this.energyCostFromJetNodes += jetCostThisFrame * dt;
                     break;
-                case NodeType.EATER:
-                    const eaterCostThisFrame = config.EATER_NODE_ENERGY_COST * exertionSq * costMultiplier;
-                currentFrameEnergyCost += eaterCostThisFrame;
-                this.energyCostFromEaterNodes += eaterCostThisFrame * dt;
+                }
+                case NodeType.EATER: {
+                    const eaterCostThisFrame = splitActuationCost(config.EATER_NODE_ENERGY_COST * exertionSq * costMultiplier);
+                    currentFrameEnergyCost += eaterCostThisFrame;
+                    this.energyCostFromEaterNodes += eaterCostThisFrame * dt;
                     break;
-                case NodeType.PREDATOR:
-                    const predatorCostThisFrame = config.PREDATOR_NODE_ENERGY_COST * exertionSq * costMultiplier;
-                currentFrameEnergyCost += predatorCostThisFrame;
-                this.energyCostFromPredatorNodes += predatorCostThisFrame * dt;
+                }
+                case NodeType.PREDATOR: {
+                    const predatorCostThisFrame = splitActuationCost(config.PREDATOR_NODE_ENERGY_COST * exertionSq * costMultiplier);
+                    currentFrameEnergyCost += predatorCostThisFrame;
+                    this.energyCostFromPredatorNodes += predatorCostThisFrame * dt;
                     break;
-                case NodeType.PHOTOSYNTHETIC:
-                const photosyntheticCostThisFrame = config.PHOTOSYNTHETIC_NODE_ENERGY_COST * costMultiplier;
-                currentFrameEnergyCost += photosyntheticCostThisFrame;
-                this.energyCostFromPhotosyntheticNodes += photosyntheticCostThisFrame * dt;
+                }
+                case NodeType.PHOTOSYNTHETIC: {
+                    const photosyntheticCostThisFrame = config.PHOTOSYNTHETIC_NODE_ENERGY_COST * costMultiplier;
+                    currentFrameEnergyCost += photosyntheticCostThisFrame;
+                    this.energyCostFromPhotosyntheticNodes += photosyntheticCostThisFrame * dt;
 
                     if (hasLightField && hasFluidField && mapIdx !== -1) { // mapIdx would have been calculated if hasFluidField
                         const baseLightValue = this.lightField[mapIdx] !== undefined ? this.lightField[mapIdx] : 0.0;
-                    const effectiveLightValue = baseLightValue * config.globalLightMultiplier; 
-                    const energyGainThisPoint = effectiveLightValue * config.PHOTOSYNTHESIS_EFFICIENCY * (point.radius / 5) * dt;
+                        const effectiveLightValue = baseLightValue * config.globalLightMultiplier;
+                        const energyGainThisPoint = effectiveLightValue * config.PHOTOSYNTHESIS_EFFICIENCY * (point.radius / 5) * dt;
                         currentFrameEnergyGain += energyGainThisPoint;
-                    this.energyGainedFromPhotosynthesis += energyGainThisPoint; // Lifetime total
-                    this.energyGainedFromPhotosynthesisThisTick += energyGainThisPoint; // Current tick total
-                }
+                        this.energyGainedFromPhotosynthesis += energyGainThisPoint; // Lifetime total
+                        this.energyGainedFromPhotosynthesisThisTick += energyGainThisPoint; // Current tick total
+                    }
                     break;
-                case NodeType.ATTRACTOR:
-                    const attractorCostThisFrame = config.ATTRACTOR_NODE_ENERGY_COST * costMultiplier;
+                }
+                case NodeType.ATTRACTOR: {
+                    const attractorCostThisFrame = splitActuationCost(config.ATTRACTOR_NODE_ENERGY_COST * exertionSq * costMultiplier);
                     currentFrameEnergyCost += attractorCostThisFrame;
                     this.energyCostFromAttractorNodes += attractorCostThisFrame * dt;
                     break;
-                case NodeType.REPULSOR:
-                    const repulsorCostThisFrame = config.REPULSOR_NODE_ENERGY_COST * costMultiplier;
+                }
+                case NodeType.REPULSOR: {
+                    const repulsorCostThisFrame = splitActuationCost(config.REPULSOR_NODE_ENERGY_COST * exertionSq * costMultiplier);
                     currentFrameEnergyCost += repulsorCostThisFrame;
                     this.energyCostFromRepulsorNodes += repulsorCostThisFrame * dt;
                     break;
+                }
                 // Note: Neuron, Grabbing, Eye costs are handled by separate 'if' statements below
                 // as they can co-exist or have different conditions than the primary functional type.
             }
@@ -1794,9 +2038,9 @@ export class SoftBody {
             }
 
             // Grabbing cost (independent of NodeType, depends on isGrabbing state)
-            if (point.isGrabbing) { 
-                const grabbingCostThisFrame = config.GRABBING_NODE_ENERGY_COST * costMultiplier;
-                currentFrameEnergyCost += grabbingCostThisFrame; 
+            if (point.isGrabbing) {
+                const grabbingCostThisFrame = splitActuationCost(config.GRABBING_NODE_ENERGY_COST * costMultiplier);
+                currentFrameEnergyCost += grabbingCostThisFrame;
                 this.energyCostFromGrabbingNodes += grabbingCostThisFrame * dt;
             }
 
@@ -1857,6 +2101,14 @@ export class SoftBody {
                             const appliedForceY = finalMagnitude * Math.sin(angle);
                             fluidFieldRef.addVelocity(fluidGridX, fluidGridY, appliedForceX, appliedForceY);
                         }
+                    }
+                }
+
+                if (point.nodeType === NodeType.SWIMMER && !point.isFixed) {
+                    const magnitude = Math.max(0, Number(point.swimmerActuation?.magnitude) || 0);
+                    const angle = Number(point.swimmerActuation?.angle) || 0;
+                    if (magnitude > 0.0001) {
+                        point.applyForce(new Vec2(Math.cos(angle) * (magnitude / dt), Math.sin(angle) * (magnitude / dt)));
                     }
                 }
 

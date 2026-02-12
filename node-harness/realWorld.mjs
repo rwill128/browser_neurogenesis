@@ -103,6 +103,7 @@ export class RealWorld {
       SoftBodyClass: SoftBody,
       count: scenario.creatures,
       spawnMargin: 10,
+      newbornDt: scenario.dt,
       rng: this.rand
     });
 
@@ -275,11 +276,23 @@ export class RealWorld {
       const pointIndex = new Map();
       b.massPoints.forEach((p, idx) => pointIndex.set(p, idx));
 
+      const intervalSamples = Number(b.actuationIntervalSamples || 0);
+      const intervalTotal = Number(b.actuationIntervalTotal || 0);
+
       return {
         id: b.id,
         energy: Number((b.creatureEnergy || 0).toFixed(2)),
         center: { x: Number(center.x.toFixed(2)), y: Number(center.y.toFixed(2)) },
         nodeTypeCounts: summarizeNodeTypes(b.massPoints),
+        actuationTelemetry: {
+          evaluations: Number(b.actuationEvaluations || 0),
+          skips: Number(b.actuationSkips || 0),
+          evaluationsByNodeType: b.actuationEvaluationsByNodeType || {},
+          skipsByNodeType: b.actuationSkipsByNodeType || {},
+          avgEffectiveInterval: intervalSamples > 0 ? Number((intervalTotal / intervalSamples).toFixed(3)) : 0,
+          energyCostUpkeep: Number((b.energyCostFromActuationUpkeep || 0).toFixed(3)),
+          energyCostEvents: Number((b.energyCostFromActuationEvents || 0).toFixed(3))
+        },
         vertices: b.massPoints.map((p, idx) => ({
           index: idx,
           x: Number(clamp(p.pos.x, 0, config.WORLD_WIDTH).toFixed(2)),

@@ -93,7 +93,9 @@ let mutationStats = { // New: For tracking mutation occurrences
     blueprintCoordinateChange: 0,
     blueprintNeuronHiddenSizeChange: 0,
     shapeAddition: 0,
-    growthGenomeMutations: 0
+    growthGenomeMutations: 0,
+    activationIntervalGene: 0,
+    edgeActivationIntervalGene: 0
 };
 
 const simulationWorldState = createWorldState({
@@ -146,6 +148,8 @@ function initializePopulation() {
         SoftBodyClass: SoftBody,
         count: config.CREATURE_POPULATION_FLOOR,
         spawnMargin: 50,
+        // Use a browser runtime dt hint so newborn spring caps align with live stepping cadence.
+        newbornDt: Math.max(1 / 120, (Number(config.MAX_DELTA_TIME_MS) || 16.7) / 1000),
         rng: Math.random
     });
 

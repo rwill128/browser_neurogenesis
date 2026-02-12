@@ -150,7 +150,8 @@ function serializeSpring(spring, pointsIndex) {
     restLength: Number(spring.restLength) || 0,
     stiffness: Number(spring.stiffness) || 0,
     dampingFactor: Number(spring.dampingFactor) || 0,
-    isRigid: Boolean(spring.isRigid)
+    isRigid: Boolean(spring.isRigid),
+    activationIntervalGene: Number.isFinite(Number(spring.activationIntervalGene)) ? Number(spring.activationIntervalGene) : null
   };
 }
 
@@ -178,7 +179,8 @@ function buildPhenotypeBlueprint(body, pointsIndex) {
     eyeTargetType: Number.isFinite(Number(p?.eyeTargetType)) ? Number(p.eyeTargetType) : 0,
     neuronDataBlueprint: p?.neuronData
       ? { hiddenLayerSize: Number(p.neuronData.hiddenLayerSize) || null }
-      : null
+      : null,
+    activationIntervalGene: Number.isFinite(Number(p?.activationIntervalGene)) ? Number(p.activationIntervalGene) : null
   }));
 
   const blueprintSprings = (body?.springs || [])
@@ -188,7 +190,8 @@ function buildPhenotypeBlueprint(body, pointsIndex) {
       restLength: Number(s.restLength) || 0,
       isRigid: Boolean(s.isRigid),
       stiffness: Number(s.stiffness) || 0,
-      damping: Number(s.dampingFactor) || 0
+      damping: Number(s.dampingFactor) || 0,
+      activationIntervalGene: Number.isFinite(Number(s.activationIntervalGene)) ? Number(s.activationIntervalGene) : null
     }))
     .filter((s) => Number.isInteger(s.p1Index) && Number.isInteger(s.p2Index) && s.p1Index !== s.p2Index);
 
@@ -236,7 +239,8 @@ function buildBlueprintFromBodySnapshot(bodySnapshot) {
       eyeTargetType: Number.isFinite(Number(state.eyeTargetType)) ? Number(state.eyeTargetType) : 0,
       neuronDataBlueprint: state?.neuronData
         ? { hiddenLayerSize: Number(state.neuronData.hiddenLayerSize) || null }
-        : null
+        : null,
+      activationIntervalGene: Number.isFinite(Number(state?.activationIntervalGene)) ? Number(state.activationIntervalGene) : null
     };
   });
 
@@ -247,7 +251,8 @@ function buildBlueprintFromBodySnapshot(bodySnapshot) {
       restLength: Number(s?.restLength) || 0,
       isRigid: Boolean(s?.isRigid),
       stiffness: Number(s?.stiffness) || 0,
-      damping: Number(s?.dampingFactor) || 0
+      damping: Number(s?.dampingFactor) || 0,
+      activationIntervalGene: Number.isFinite(Number(s?.activationIntervalGene)) ? Number(s.activationIntervalGene) : null
     }))
     .filter((s) => Number.isInteger(s.p1Index) && Number.isInteger(s.p2Index) && s.p1Index !== s.p2Index);
 
@@ -353,6 +358,10 @@ function restoreSoftBody(bodySnapshot, { SoftBodyClass, SpringClass, worldState 
       spring.stiffness = Number(springSnapshot.stiffness) || spring.stiffness;
       spring.dampingFactor = Number(springSnapshot.dampingFactor) || spring.dampingFactor;
     }
+
+    spring.activationIntervalGene = Number.isFinite(Number(springSnapshot.activationIntervalGene))
+      ? Number(springSnapshot.activationIntervalGene)
+      : spring.activationIntervalGene;
 
     body.springs.push(spring);
   }
@@ -600,6 +609,7 @@ export function loadWorldStateSnapshot(snapshot, {
     totalNonPhysicsRemoved: 0,
     totalUnknownRemoved: 0,
     removedByReason: {},
+    removedByPhysicsKind: {},
     recentDeaths: [],
     maxRecentDeaths: 1000,
     lastDeathSeq: 0

@@ -6,7 +6,7 @@ import {
     initializeVector,
     logPdfGaussian,
     multiplyMatrixVector,
-    sampleGaussian, sigmoid, Vec2
+    sampleGaussian, sigmoid
 } from "../utils.js";
 
 export class Brain {
@@ -395,24 +395,31 @@ export class Brain {
             return { detail: { mean, stdDev, sampledAction: sampledActionValue, logProb }, value: sampledActionValue };
         }
 
+        const shouldEvaluateActuation = (point, channel = 'node') => {
+            if (typeof softBody._shouldEvaluatePointActuation !== 'function') return true;
+            return softBody._shouldEvaluatePointActuation(point, channel);
+        };
+
         softBody.massPoints.forEach((point, pointIndex) => {
             if (point.nodeType === NodeType.EMITTER) {
                 const outputStartRawIdx = currentRawOutputIndex;
                 if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_EMITTER) {
-                    const detailsForThisEmitter = [];
-                    let localPairIdx = 0;
-                    for (let i = 0; i < 3; i++) {
-                        const res = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                        const channel = ['Red', 'Green', 'Blue'][i];
-                        res.detail.label = `Emitter @P${pointIndex} ${channel}`;
-                        detailsForThisEmitter.push(res.detail);
-                        point.dyeColor[i] = sigmoid(res.value) * 255;
+                    if (shouldEvaluateActuation(point, 'node')) {
+                        const detailsForThisEmitter = [];
+                        let localPairIdx = 0;
+                        for (let i = 0; i < 3; i++) {
+                            const res = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                            const channel = ['Red', 'Green', 'Blue'][i];
+                            res.detail.label = `Emitter @P${pointIndex} ${channel}`;
+                            detailsForThisEmitter.push(res.detail);
+                            point.dyeColor[i] = sigmoid(res.value) * 255;
+                        }
+                        const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                        exertionRes.detail.label = `Emitter @P${pointIndex} Exertion`;
+                        detailsForThisEmitter.push(exertionRes.detail);
+                        point.currentExertionLevel = sigmoid(exertionRes.value);
+                        nd.currentFrameActionDetails.push(...detailsForThisEmitter);
                     }
-                    const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                    exertionRes.detail.label = `Emitter @P${pointIndex} Exertion`;
-                    detailsForThisEmitter.push(exertionRes.detail);
-                    point.currentExertionLevel = sigmoid(exertionRes.value);
-                    nd.currentFrameActionDetails.push(...detailsForThisEmitter);
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_EMITTER;
                 } else {
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_EMITTER;
@@ -424,27 +431,27 @@ export class Brain {
             if (point.nodeType === NodeType.SWIMMER) {
                 const outputStartRawIdx = currentRawOutputIndex;
                 if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_SWIMMER) {
-                    const detailsForThisSwimmer = [];
-                    let localPairIdx = 0;
+                    if (shouldEvaluateActuation(point, 'node')) {
+                        const detailsForThisSwimmer = [];
+                        let localPairIdx = 0;
 
-                    const magnitudeResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                    magnitudeResult.detail.label = `Swimmer @P${pointIndex} Magnitude`;
-                    detailsForThisSwimmer.push(magnitudeResult.detail);
-                    const rawMagnitude = magnitudeResult.value;
+                        const magnitudeResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                        magnitudeResult.detail.label = `Swimmer @P${pointIndex} Magnitude`;
+                        detailsForThisSwimmer.push(magnitudeResult.detail);
+                        const rawMagnitude = magnitudeResult.value;
 
-                    const directionResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                    directionResult.detail.label = `Swimmer @P${pointIndex} Direction`;
-                    detailsForThisSwimmer.push(directionResult.detail);
-                    const angle = directionResult.value;
+                        const directionResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                        directionResult.detail.label = `Swimmer @P${pointIndex} Direction`;
+                        detailsForThisSwimmer.push(directionResult.detail);
+                        const angle = directionResult.value;
 
-                    point.currentExertionLevel = sigmoid(rawMagnitude);
+                        point.currentExertionLevel = sigmoid(rawMagnitude);
+                        if (!point.swimmerActuation) point.swimmerActuation = { magnitude: 0, angle: 0 };
+                        point.swimmerActuation.magnitude = point.currentExertionLevel * config.MAX_SWIMMER_OUTPUT_MAGNITUDE;
+                        point.swimmerActuation.angle = angle;
 
-                    const finalMagnitude = point.currentExertionLevel * config.MAX_SWIMMER_OUTPUT_MAGNITUDE;
-                    const appliedForceX = finalMagnitude * Math.cos(angle);
-                    const appliedForceY = finalMagnitude * Math.sin(angle);
-
-                    point.applyForce(new Vec2(appliedForceX / dt, appliedForceY / dt));
-                    nd.currentFrameActionDetails.push(...detailsForThisSwimmer);
+                        nd.currentFrameActionDetails.push(...detailsForThisSwimmer);
+                    }
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_SWIMMER;
                 } else {
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_SWIMMER;
@@ -456,12 +463,14 @@ export class Brain {
             if (point.nodeType === NodeType.EATER) {
                 const outputStartRawIdx = currentRawOutputIndex;
                 if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_EATER) {
-                    const details = [];
-                    const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
-                    exertionRes.detail.label = `Eater @P${pointIndex} Exertion`;
-                    details.push(exertionRes.detail);
-                    point.currentExertionLevel = sigmoid(exertionRes.value);
-                    nd.currentFrameActionDetails.push(...details);
+                    if (shouldEvaluateActuation(point, 'node')) {
+                        const details = [];
+                        const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
+                        exertionRes.detail.label = `Eater @P${pointIndex} Exertion`;
+                        details.push(exertionRes.detail);
+                        point.currentExertionLevel = sigmoid(exertionRes.value);
+                        nd.currentFrameActionDetails.push(...details);
+                    }
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_EATER;
                 } else {
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_EATER;
@@ -473,12 +482,14 @@ export class Brain {
             if (point.nodeType === NodeType.PREDATOR) {
                 const outputStartRawIdx = currentRawOutputIndex;
                 if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_PREDATOR) {
-                    const details = [];
-                    const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
-                    exertionRes.detail.label = `Predator @P${pointIndex} Exertion`;
-                    details.push(exertionRes.detail);
-                    point.currentExertionLevel = sigmoid(exertionRes.value);
-                    nd.currentFrameActionDetails.push(...details);
+                    if (shouldEvaluateActuation(point, 'node')) {
+                        const details = [];
+                        const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
+                        exertionRes.detail.label = `Predator @P${pointIndex} Exertion`;
+                        details.push(exertionRes.detail);
+                        point.currentExertionLevel = sigmoid(exertionRes.value);
+                        nd.currentFrameActionDetails.push(...details);
+                    }
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_PREDATOR;
                 } else {
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_PREDATOR;
@@ -490,24 +501,26 @@ export class Brain {
             if (point.nodeType === NodeType.JET) {
                 const outputStartRawIdx = currentRawOutputIndex;
                 if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_JET) {
-                    const detailsForThisJet = [];
-                    let localPairIdx = 0;
+                    if (shouldEvaluateActuation(point, 'node')) {
+                        const detailsForThisJet = [];
+                        let localPairIdx = 0;
 
-                    const magnitudeResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                    magnitudeResult.detail.label = `Jet @P${pointIndex} Magnitude`;
-                    detailsForThisJet.push(magnitudeResult.detail);
-                    const rawMagnitude = magnitudeResult.value;
+                        const magnitudeResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                        magnitudeResult.detail.label = `Jet @P${pointIndex} Magnitude`;
+                        detailsForThisJet.push(magnitudeResult.detail);
+                        const rawMagnitude = magnitudeResult.value;
 
-                    const directionResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
-                    directionResult.detail.label = `Jet @P${pointIndex} Direction`;
-                    detailsForThisJet.push(directionResult.detail);
-                    const angle = directionResult.value;
+                        const directionResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx + localPairIdx++], nd.rawOutputs[outputStartRawIdx + localPairIdx++]);
+                        directionResult.detail.label = `Jet @P${pointIndex} Direction`;
+                        detailsForThisJet.push(directionResult.detail);
+                        const angle = directionResult.value;
 
-                    point.currentExertionLevel = sigmoid(rawMagnitude);
-                    point.jetData.currentMagnitude = point.currentExertionLevel * config.MAX_JET_OUTPUT_MAGNITUDE;
-                    point.jetData.currentAngle = angle;
+                        point.currentExertionLevel = sigmoid(rawMagnitude);
+                        point.jetData.currentMagnitude = point.currentExertionLevel * config.MAX_JET_OUTPUT_MAGNITUDE;
+                        point.jetData.currentAngle = angle;
 
-                    nd.currentFrameActionDetails.push(...detailsForThisJet);
+                        nd.currentFrameActionDetails.push(...detailsForThisJet);
+                    }
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_JET;
                 } else {
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_JET;
@@ -519,12 +532,14 @@ export class Brain {
             if (point.nodeType === NodeType.ATTRACTOR) {
                 const outputStartRawIdx = currentRawOutputIndex;
                 if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_ATTRACTOR) {
-                    const details = [];
-                    const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
-                    exertionRes.detail.label = `Attractor @P${pointIndex} Exertion`;
-                    details.push(exertionRes.detail);
-                    point.currentExertionLevel = sigmoid(exertionRes.value);
-                    nd.currentFrameActionDetails.push(...details);
+                    if (shouldEvaluateActuation(point, 'node')) {
+                        const details = [];
+                        const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
+                        exertionRes.detail.label = `Attractor @P${pointIndex} Exertion`;
+                        details.push(exertionRes.detail);
+                        point.currentExertionLevel = sigmoid(exertionRes.value);
+                        nd.currentFrameActionDetails.push(...details);
+                    }
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_ATTRACTOR;
                 } else {
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_ATTRACTOR;
@@ -536,12 +551,14 @@ export class Brain {
             if (point.nodeType === NodeType.REPULSOR) {
                 const outputStartRawIdx = currentRawOutputIndex;
                 if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_REPULSOR) {
-                    const details = [];
-                    const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
-                    exertionRes.detail.label = `Repulsor @P${pointIndex} Exertion`;
-                    details.push(exertionRes.detail);
-                    point.currentExertionLevel = sigmoid(exertionRes.value);
-                    nd.currentFrameActionDetails.push(...details);
+                    if (shouldEvaluateActuation(point, 'node')) {
+                        const details = [];
+                        const exertionRes = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
+                        exertionRes.detail.label = `Repulsor @P${pointIndex} Exertion`;
+                        details.push(exertionRes.detail);
+                        point.currentExertionLevel = sigmoid(exertionRes.value);
+                        nd.currentFrameActionDetails.push(...details);
+                    }
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_REPULSOR;
                 } else {
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_REPULSOR;
@@ -553,13 +570,15 @@ export class Brain {
             if (point.canBeGrabber) {
                 const outputStartRawIdx = currentRawOutputIndex;
                 if (nd.rawOutputs && nd.rawOutputs.length >= outputStartRawIdx + config.NEURAL_OUTPUTS_PER_GRABBER_TOGGLE) {
-                    const detailsForThisGrab = [];
-                    const grabToggleResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
-                    grabToggleResult.detail.label = `Grabber @P${pointIndex} Toggle`;
-                    detailsForThisGrab.push(grabToggleResult.detail);
-                    point.isGrabbing = sigmoid(grabToggleResult.value) > 0.5;
+                    if (shouldEvaluateActuation(point, 'grabber')) {
+                        const detailsForThisGrab = [];
+                        const grabToggleResult = sampleAndLogAction(nd.rawOutputs[outputStartRawIdx], nd.rawOutputs[outputStartRawIdx + 1]);
+                        grabToggleResult.detail.label = `Grabber @P${pointIndex} Toggle`;
+                        detailsForThisGrab.push(grabToggleResult.detail);
+                        point.isGrabbing = sigmoid(grabToggleResult.value) > 0.5;
 
-                    nd.currentFrameActionDetails.push(...detailsForThisGrab);
+                        nd.currentFrameActionDetails.push(...detailsForThisGrab);
+                    }
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;
                 } else {
                     currentRawOutputIndex += config.NEURAL_OUTPUTS_PER_GRABBER_TOGGLE;

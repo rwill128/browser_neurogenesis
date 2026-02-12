@@ -11,3 +11,10 @@ test('camera config includes a finite MAX_ZOOM guard rail', () => {
 test('particle life decay is editable by default (not forced infinite)', () => {
   assert.equal(config.IS_PARTICLE_LIFE_INFINITE, false);
 });
+
+test('initial triangulated primitive defaults are enabled and weighted', () => {
+  assert.equal(config.INITIAL_TRIANGULATED_PRIMITIVES_ENABLED, true);
+  assert.ok(Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_TRIANGLE) > 0);
+  assert.ok(Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_DIAMOND) > 0);
+  assert.ok(Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_HEXAGON) > 0);
+});

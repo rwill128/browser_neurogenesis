@@ -2378,7 +2378,7 @@ export class SoftBody {
             let initialTempMassPoints = []; // Temporary MassPoint objects to get initial geometry
             let initialTempSprings = [];  // Temporary Spring objects
 
-            // Create initial geometric shape (grid, line, or star) using startX, startY as a reference origin for now
+            // Create initial geometric shape using stable triangle-mesh primitives when enabled.
             const pointDistanceMin = Number.isFinite(Number(config.INITIAL_BODY_POINT_DISTANCE_MIN))
                 ? Number(config.INITIAL_BODY_POINT_DISTANCE_MIN)
                 : 5;
@@ -2386,7 +2386,114 @@ export class SoftBody {
                 ? Math.max(pointDistanceMin, Number(config.INITIAL_BODY_POINT_DISTANCE_MAX))
                 : 8;
             const basePointDist = pointDistanceMin + Math.random() * (pointDistanceMax - pointDistanceMin);
-            if (this.shapeType === 0) { // Grid
+            const useTriangulatedPrimitives = config.INITIAL_TRIANGULATED_PRIMITIVES_ENABLED !== false;
+            let initialPrimitiveUsesUniformEdges = false;
+
+            const selectWeightedTemplate = (templates) => {
+                let total = 0;
+                for (const t of templates) total += Math.max(0, Number(t.weight) || 0);
+                if (!(total > 0)) return templates[0];
+                let r = Math.random() * total;
+                for (const t of templates) {
+                    r -= Math.max(0, Number(t.weight) || 0);
+                    if (r <= 0) return t;
+                }
+                return templates[templates.length - 1];
+            };
+
+            const buildTriangulatedPrimitive = () => {
+                const SQRT3_OVER_2 = Math.sqrt(3) / 2;
+                const templates = [
+                    {
+                        name: 'triangle',
+                        weight: Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_TRIANGLE) || 1,
+                        points: [
+                            { x: 0, y: 0 },
+                            { x: 1, y: 0 },
+                            { x: 0.5, y: SQRT3_OVER_2 }
+                        ],
+                        triangles: [[0, 1, 2]]
+                    },
+                    {
+                        name: 'diamond',
+                        weight: Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_DIAMOND) || 1,
+                        points: [
+                            { x: 0, y: 0 },
+                            { x: 1, y: 0 },
+                            { x: 0.5, y: SQRT3_OVER_2 },
+                            { x: 1.5, y: SQRT3_OVER_2 }
+                        ],
+                        triangles: [[0, 1, 2], [1, 3, 2]]
+                    },
+                    {
+                        name: 'hexagon',
+                        weight: Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_HEXAGON) || 1,
+                        points: [
+                            { x: 0, y: 0 },
+                            { x: 1, y: 0 },
+                            { x: 0.5, y: SQRT3_OVER_2 },
+                            { x: -0.5, y: SQRT3_OVER_2 },
+                            { x: -1, y: 0 },
+                            { x: -0.5, y: -SQRT3_OVER_2 },
+                            { x: 0.5, y: -SQRT3_OVER_2 }
+                        ],
+                        triangles: [[0, 1, 2], [0, 2, 3], [0, 3, 4], [0, 4, 5], [0, 5, 6], [0, 6, 1]]
+                    }
+                ];
+
+                const selected = selectWeightedTemplate(templates);
+                const rigidChance = Math.max(0, Math.min(1, Number(config.INITIAL_TRI_MESH_EDGE_RIGID_CHANCE) || 0));
+                const sharedEdgeStiffness = drawRandomEdgeStiffness(1.1);
+                const sharedEdgeDamping = drawRandomEdgeDamping();
+
+                for (const p of selected.points) {
+                    initialTempMassPoints.push(new MassPoint(
+                        p.x * basePointDist,
+                        p.y * basePointDist,
+                        0.3 + Math.random() * 0.4,
+                        baseRadius
+                    ));
+                }
+
+                const edgeSet = new Set();
+                const addEdge = (a, b) => {
+                    const i = Math.min(a, b);
+                    const j = Math.max(a, b);
+                    edgeSet.add(`${i}:${j}`);
+                };
+
+                for (const tri of selected.triangles) {
+                    if (!Array.isArray(tri) || tri.length !== 3) continue;
+                    addEdge(tri[0], tri[1]);
+                    addEdge(tri[1], tri[2]);
+                    addEdge(tri[2], tri[0]);
+                }
+
+                for (const key of edgeSet) {
+                    const [aRaw, bRaw] = key.split(':');
+                    const a = Number(aRaw);
+                    const b = Number(bRaw);
+                    const p1 = initialTempMassPoints[a];
+                    const p2 = initialTempMassPoints[b];
+                    if (!p1 || !p2 || p1 === p2) continue;
+
+                    initialTempSprings.push(new Spring(
+                        p1,
+                        p2,
+                        sharedEdgeStiffness,
+                        sharedEdgeDamping,
+                        basePointDist,
+                        Math.random() < rigidChance
+                    ));
+                }
+
+                this.shapeType = 3;
+                initialPrimitiveUsesUniformEdges = true;
+            };
+
+            if (useTriangulatedPrimitives) {
+                buildTriangulatedPrimitive();
+            } else if (this.shapeType === 0) { // Grid
                 const numPointsX = 3; const numPointsY = 3; let gridPoints = [];
                 for (let i = 0; i < numPointsY; i++) { gridPoints[i] = []; for (let j = 0; j < numPointsX; j++) {
                     // Position points relative to an arbitrary origin (0,0) for now, will adjust with centroid
@@ -2479,7 +2586,9 @@ export class SoftBody {
                     this.blueprintSprings.push({
                         p1Index: p1Index,
                         p2Index: p2Index,
-                        restLength: resolveEdgeRestLength(s_temp.restLength, 0.5),
+                        restLength: initialPrimitiveUsesUniformEdges
+                            ? Math.max(1, Number(s_temp.restLength) || basePointDist)
+                            : resolveEdgeRestLength(s_temp.restLength, 0.5),
                         isRigid: s_temp.isRigid,
                         stiffness: s_temp.stiffness,
                         damping: s_temp.dampingFactor,

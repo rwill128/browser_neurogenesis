@@ -85,6 +85,14 @@ const config = {
     SPRING_CONNECTION_RADIUS_MIN: 10,
     SPRING_CONNECTION_RADIUS_MAX: 90,
 
+    // Stable initial body primitives (new): build first-gen creatures as triangle meshes
+    // with shared edges and uniform edge lengths.
+    INITIAL_TRIANGULATED_PRIMITIVES_ENABLED: true,
+    INITIAL_TRI_MESH_EDGE_RIGID_CHANCE: 0.0,
+    INITIAL_TRI_TEMPLATE_WEIGHT_TRIANGLE: 0.25,
+    INITIAL_TRI_TEMPLATE_WEIGHT_DIAMOND: 0.35,
+    INITIAL_TRI_TEMPLATE_WEIGHT_HEXAGON: 0.4,
+
     // Body Scale Mutation Constants (New)
     BODY_SCALE_MUTATION_CHANCE: 0.03,
     BODY_SCALE_MUTATION_MAGNITUDE: 0.1,

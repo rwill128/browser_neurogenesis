@@ -50,6 +50,22 @@ export class RealWorld {
     this.events = Array.isArray(scenario.events) ? scenario.events.slice() : [];
     this.eventLog = [];
 
+    const stepBehavior = scenario.stepBehavior || {};
+    this.stepBehavior = {
+      allowReproduction: Boolean(stepBehavior.allowReproduction),
+      maintainCreatureFloor: Boolean(stepBehavior.maintainCreatureFloor),
+      maintainParticleFloor: Boolean(stepBehavior.maintainParticleFloor),
+      applyEmitters: Boolean(stepBehavior.applyEmitters),
+      applySelectedPointPush: Boolean(stepBehavior.applySelectedPointPush),
+      captureInstabilityTelemetry: stepBehavior.captureInstabilityTelemetry !== false,
+      maxRecentInstabilityDeaths: Number.isFinite(Number(stepBehavior.maxRecentInstabilityDeaths))
+        ? Number(stepBehavior.maxRecentInstabilityDeaths)
+        : 5000,
+      creatureSpawnMargin: Number.isFinite(Number(stepBehavior.creatureSpawnMargin))
+        ? Number(stepBehavior.creatureSpawnMargin)
+        : 10
+    };
+
     this._applyScenarioConfig();
     this.configViews = createConfigViews(config);
 
@@ -126,11 +142,31 @@ export class RealWorld {
     config.USE_GPU_FLUID_SIMULATION = false;
     config.WORLD_WIDTH = this.config.world.width;
     config.WORLD_HEIGHT = this.config.world.height;
-    config.CREATURE_POPULATION_FLOOR = this.config.creatures;
-    config.CREATURE_POPULATION_CEILING = this.config.creatures;
-    config.PARTICLE_POPULATION_FLOOR = this.config.particles;
-    config.PARTICLE_POPULATION_CEILING = this.config.particles;
-    config.PARTICLES_PER_SECOND = 0;
+
+    const creatureFloor = Number.isFinite(Number(this.config.creatureFloor))
+      ? Math.max(0, Math.floor(Number(this.config.creatureFloor)))
+      : Math.max(0, Math.floor(Number(this.config.creatures) || 0));
+    const creatureCeiling = Number.isFinite(Number(this.config.creatureCeiling))
+      ? Math.max(creatureFloor, Math.floor(Number(this.config.creatureCeiling)))
+      : creatureFloor;
+
+    const particleFloor = Number.isFinite(Number(this.config.particleFloor))
+      ? Math.max(0, Math.floor(Number(this.config.particleFloor)))
+      : Math.max(0, Math.floor(Number(this.config.particles) || 0));
+    const particleCeiling = Number.isFinite(Number(this.config.particleCeiling))
+      ? Math.max(particleFloor, Math.floor(Number(this.config.particleCeiling)))
+      : particleFloor;
+
+    config.CREATURE_POPULATION_FLOOR = creatureFloor;
+    config.CREATURE_POPULATION_CEILING = creatureCeiling;
+    config.PARTICLE_POPULATION_FLOOR = particleFloor;
+    config.PARTICLE_POPULATION_CEILING = particleCeiling;
+
+    // Let caller choose emission profile; default remains deterministic/no-emission.
+    config.PARTICLES_PER_SECOND = Number.isFinite(Number(this.config.particlesPerSecond))
+      ? Number(this.config.particlesPerSecond)
+      : 0;
+
     config.GRID_COLS = Math.ceil(config.WORLD_WIDTH / config.GRID_CELL_SIZE);
     config.GRID_ROWS = Math.ceil(config.WORLD_HEIGHT / config.GRID_CELL_SIZE);
   }
@@ -216,13 +252,14 @@ export class RealWorld {
       rng: this.rand,
       SoftBodyClass: SoftBody,
       ParticleClass: Particle,
-      allowReproduction: false,
-      maintainCreatureFloor: false,
-      maintainParticleFloor: false,
-      applyEmitters: false,
-      applySelectedPointPush: false,
-      captureInstabilityTelemetry: true,
-      maxRecentInstabilityDeaths: 5000
+      allowReproduction: this.stepBehavior.allowReproduction,
+      maintainCreatureFloor: this.stepBehavior.maintainCreatureFloor,
+      maintainParticleFloor: this.stepBehavior.maintainParticleFloor,
+      applyEmitters: this.stepBehavior.applyEmitters,
+      applySelectedPointPush: this.stepBehavior.applySelectedPointPush,
+      captureInstabilityTelemetry: this.stepBehavior.captureInstabilityTelemetry,
+      maxRecentInstabilityDeaths: this.stepBehavior.maxRecentInstabilityDeaths,
+      creatureSpawnMargin: this.stepBehavior.creatureSpawnMargin
     });
 
     this._syncAliasesFromWorldState();
@@ -348,6 +385,7 @@ export class RealWorld {
           ? instabilityTelemetry.recentDeaths.slice(-20)
           : []
       },
+      mutationStats: this.worldState?.mutationStats || {},
       fluid,
       creatures,
       sampleCreatures: creatures.slice(0, 5)

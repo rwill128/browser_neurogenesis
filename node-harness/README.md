@@ -17,6 +17,24 @@ Outputs JSON under `./artifacts`.
 Also writes instability-death JSONL (`*-instability-deaths.jsonl`) with one record per removed unstable body,
 including current physiology + hereditary blueprint snapshots for offline parameter mining.
 
+Default stepping is now **browser-like for ecology telemetry**:
+- reproduction enabled,
+- creature/particle floor maintenance enabled,
+- emitters enabled.
+
+Use overrides when you need strict no-replenish runs:
+```bash
+node node-harness/runScenario.mjs \
+  --scenario micro_stability \
+  --allowReproduction false \
+  --maintainCreatureFloor false \
+  --maintainParticleFloor false \
+  --applyEmitters false
+```
+
+You can also explicitly control floor/ceiling for reproduction headroom:
+`--creatureFloor`, `--creatureCeiling`, `--particleFloor`, `--particleCeiling`.
+
 > Engine selection is removed: this harness always runs the real simulation code path.
 
 ## 2) Render timeline JSON into frames/video

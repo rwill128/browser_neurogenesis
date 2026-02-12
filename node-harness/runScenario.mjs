@@ -10,6 +10,21 @@ function arg(name, fallback = null) {
   return process.argv[idx + 1] ?? fallback;
 }
 
+function parseBoolArg(name, fallback) {
+  const raw = arg(name, null);
+  if (raw === null || raw === undefined) return fallback;
+  const v = String(raw).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y', 'on'].includes(v)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(v)) return false;
+  throw new Error(`Invalid boolean for --${name}: ${raw}`);
+}
+
+function parseNum(raw, fallback = null) {
+  if (raw === null || raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 const scenarioName = arg('scenario', 'micro_stability');
 const seed = Number(arg('seed', '42'));
 const stepsArg = arg('steps', null);
@@ -20,21 +35,65 @@ if (arg('engine', null) !== null || arg('allowMini', null) !== null) {
 }
 
 const scenario = getScenario(scenarioName);
-const worldW = arg('worldW', null);
-const worldH = arg('worldH', null);
-const creaturesArg = arg('creatures', null);
-const particlesArg = arg('particles', null);
-const dtArg = arg('dt', null);
+const worldW = parseNum(arg('worldW', null), null);
+const worldH = parseNum(arg('worldH', null), null);
+const creaturesArg = parseNum(arg('creatures', null), null);
+const creatureFloorArg = parseNum(arg('creatureFloor', null), null);
+const creatureCeilingArg = parseNum(arg('creatureCeiling', null), null);
+const particlesArg = parseNum(arg('particles', null), null);
+const particleFloorArg = parseNum(arg('particleFloor', null), null);
+const particleCeilingArg = parseNum(arg('particleCeiling', null), null);
+const particlesPerSecondArg = parseNum(arg('particlesPerSecond', null), null);
+const dtArg = parseNum(arg('dt', null), null);
+
+const creatureFloor = Math.max(0, Math.floor(
+  creatureFloorArg ?? creaturesArg ?? scenario.creatureFloor ?? scenario.creatures ?? 0
+));
+const creatureCeiling = Math.max(
+  creatureFloor,
+  Math.floor(
+    creatureCeilingArg ??
+    scenario.creatureCeiling ??
+    (creatureFloor > 0 ? Math.max(creatureFloor + 1, Math.ceil(creatureFloor * 2)) : 0)
+  )
+);
+
+const particleFloor = Math.max(0, Math.floor(
+  particleFloorArg ?? particlesArg ?? scenario.particleFloor ?? scenario.particles ?? 0
+));
+const particleCeiling = Math.max(
+  particleFloor,
+  Math.floor(
+    particleCeilingArg ??
+    scenario.particleCeiling ??
+    (particleFloor > 0 ? Math.max(particleFloor + 1, Math.ceil(particleFloor * 2)) : 0)
+  )
+);
 
 const runtimeScenario = {
   ...scenario,
   world: {
-    width: worldW ? Number(worldW) : scenario.world.width,
-    height: worldH ? Number(worldH) : scenario.world.height
+    width: Number.isFinite(worldW) ? worldW : scenario.world.width,
+    height: Number.isFinite(worldH) ? worldH : scenario.world.height
   },
-  creatures: creaturesArg ? Number(creaturesArg) : scenario.creatures,
-  particles: particlesArg ? Number(particlesArg) : scenario.particles,
-  dt: dtArg ? Number(dtArg) : scenario.dt
+  creatureFloor,
+  creatureCeiling,
+  particleFloor,
+  particleCeiling,
+  particlesPerSecond: Number.isFinite(particlesPerSecondArg)
+    ? particlesPerSecondArg
+    : (Number.isFinite(Number(scenario.particlesPerSecond)) ? Number(scenario.particlesPerSecond) : 0),
+  dt: Number.isFinite(dtArg) ? dtArg : scenario.dt,
+  stepBehavior: {
+    allowReproduction: parseBoolArg('allowReproduction', true),
+    maintainCreatureFloor: parseBoolArg('maintainCreatureFloor', true),
+    maintainParticleFloor: parseBoolArg('maintainParticleFloor', true),
+    applyEmitters: parseBoolArg('applyEmitters', true),
+    applySelectedPointPush: parseBoolArg('applySelectedPointPush', false),
+    captureInstabilityTelemetry: parseBoolArg('captureInstabilityTelemetry', true),
+    maxRecentInstabilityDeaths: parseNum(arg('maxRecentInstabilityDeaths', null), 5000),
+    creatureSpawnMargin: parseNum(arg('creatureSpawnMargin', null), 50)
+  }
 };
 
 const steps = stepsArg ? Number(stepsArg) : runtimeScenario.steps;
@@ -66,8 +125,14 @@ const payload = {
   steps,
   dt: runtimeScenario.dt,
   world: runtimeScenario.world,
-  creatures: runtimeScenario.creatures,
-  particles: runtimeScenario.particles,
+  creatures: runtimeScenario.creatureFloor,
+  particles: runtimeScenario.particleFloor,
+  creatureFloor: runtimeScenario.creatureFloor,
+  creatureCeiling: runtimeScenario.creatureCeiling,
+  particleFloor: runtimeScenario.particleFloor,
+  particleCeiling: runtimeScenario.particleCeiling,
+  particlesPerSecond: runtimeScenario.particlesPerSecond,
+  stepBehavior: runtimeScenario.stepBehavior,
   generatedAt: new Date().toISOString(),
   instabilityTelemetry: world.worldState.instabilityTelemetry || {},
   artifacts: {

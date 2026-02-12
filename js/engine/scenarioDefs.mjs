@@ -22,7 +22,7 @@ export const scenarioDefs = {
       AUTO_FOLLOW_CREATURE: true
     },
     nodeConfig: {
-      world: { width: 120, height: 80 }, creatures: 8, particles: 200, dt: 1/30, steps: 300,
+      world: { width: 120, height: 80 }, creatures: 8, creatureCeiling: 16, particles: 200, particleCeiling: 400, dt: 1/30, steps: 300,
       events: [
         { tick: 60, kind: 'energySpike', amount: 8 },
         { tick: 120, kind: 'velocityKick', amount: 1.2 }
@@ -46,7 +46,7 @@ export const scenarioDefs = {
       AUTO_FOLLOW_CREATURE: true
     },
     nodeConfig: {
-      world: { width: 100, height: 70 }, creatures: 12, particles: 260, dt: 1/30, steps: 300,
+      world: { width: 100, height: 70 }, creatures: 12, creatureCeiling: 24, particles: 260, particleCeiling: 520, dt: 1/30, steps: 300,
       events: [
         { tick: 80, kind: 'energyDrain', amount: 12 },
         { tick: 140, kind: 'velocityKick', amount: 1.6 }
@@ -68,7 +68,7 @@ export const scenarioDefs = {
       AUTO_FOLLOW_CREATURE: true
     },
     nodeConfig: {
-      world: { width: 100, height: 100 }, creatures: 1, particles: 40, dt: 1/30, steps: 240,
+      world: { width: 100, height: 100 }, creatures: 1, creatureCeiling: 1, particles: 40, particleCeiling: 80, dt: 1/30, steps: 240,
       events: [
         { tick: 60, kind: 'velocityKick', amount: 0.4 },
         { tick: 150, kind: 'energySpike', amount: 4 }
@@ -95,7 +95,7 @@ export const scenarioDefs = {
       AUTO_FOLLOW_CREATURE: false
     },
     nodeConfig: {
-      world: { width: 100, height: 100 }, creatures: 0, particles: 0, dt: 1/30, steps: 120,
+      world: { width: 100, height: 100 }, creatures: 0, creatureCeiling: 0, particles: 0, particleCeiling: 0, dt: 1/30, steps: 120,
       events: []
     }
   },
@@ -119,7 +119,7 @@ export const scenarioDefs = {
       AUTO_FOLLOW_CREATURE: true
     },
     nodeConfig: {
-      world: { width: 100, height: 100 }, creatures: 1, particles: 0, dt: 1/30, steps: 120,
+      world: { width: 100, height: 100 }, creatures: 1, creatureCeiling: 1, particles: 0, particleCeiling: 0, dt: 1/30, steps: 120,
       events: []
     }
   }

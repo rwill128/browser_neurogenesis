@@ -1293,7 +1293,16 @@ fluidViscositySlider.oninput = function () {
     if (fluidField) fluidField.viscosity = config.FLUID_VISCOSITY;
 }
 fluidFadeSlider.oninput = function () {
-    config.FLUID_FADE_RATE = parseFloat(this.value);
+    // Mobile sliders can be finicky at the minimum edge; snap near-zero to exactly zero.
+    const raw = parseFloat(this.value);
+    const step = parseFloat(this.step || '0.001');
+    const snapped = raw <= (step * 0.5) ? 0 : raw;
+
+    if (snapped === 0) {
+        this.value = '0';
+    }
+
+    config.FLUID_FADE_RATE = snapped;
     updateSliderDisplay(this, fluidFadeValueSpan);
 }
 maxFluidVelocityComponentSlider.oninput = function () {

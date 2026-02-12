@@ -1736,6 +1736,7 @@ export class SoftBody {
         let nodesAdded = 0;
 
         const movementChoices = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
+        const useTriangulatedGrowth = config.GROWTH_TRIANGULATED_PRIMITIVES_ENABLED !== false;
 
         for (let i = 0; i < targetNodeAdds; i++) {
             let placed = false;
@@ -1747,12 +1748,57 @@ export class SoftBody {
                 const anchor = anchorPool[Math.floor(Math.random() * anchorPool.length)];
                 if (!anchor) break;
 
-                const distanceBucket = this._sampleWeightedEntry(genome.distanceRangeWeights, null) || { min: config.GROWTH_DISTANCE_MIN, max: config.GROWTH_DISTANCE_MAX };
-                const distance = distanceBucket.min + Math.random() * Math.max(0.001, (distanceBucket.max - distanceBucket.min));
-                const angle = Math.random() * Math.PI * 2;
+                const distanceBucket = this._sampleWeightedEntry(genome.distanceRangeWeights, null)
+                    || { min: config.GROWTH_DISTANCE_MIN, max: config.GROWTH_DISTANCE_MAX };
 
-                let x = anchor.pos.x + Math.cos(angle) * distance;
-                let y = anchor.pos.y + Math.sin(angle) * distance;
+                let x = 0;
+                let y = 0;
+                let triangleAnchor = null;
+                let triangleEdgeRestLength = null;
+
+                if (useTriangulatedGrowth) {
+                    const edgeNeighbors = [];
+                    for (const spring of this.springs) {
+                        if (!spring) continue;
+                        if (spring.p1 === anchor && preGrowthPoints.includes(spring.p2)) edgeNeighbors.push(spring.p2);
+                        else if (spring.p2 === anchor && preGrowthPoints.includes(spring.p1)) edgeNeighbors.push(spring.p1);
+                    }
+
+                    const minEdgeLen = Math.max(0.001, Number(distanceBucket.min) || 0.001);
+                    const maxEdgeLen = Math.max(minEdgeLen, Number(distanceBucket.max) || minEdgeLen);
+                    const candidateNeighbors = [];
+                    for (const neighbor of edgeNeighbors) {
+                        const dx = neighbor.pos.x - anchor.pos.x;
+                        const dy = neighbor.pos.y - anchor.pos.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist >= minEdgeLen && dist <= maxEdgeLen) {
+                            candidateNeighbors.push({ neighbor, dx, dy, dist });
+                        }
+                    }
+
+                    if (candidateNeighbors.length === 0) continue;
+
+                    const selectedNeighbor = candidateNeighbors[Math.floor(Math.random() * candidateNeighbors.length)];
+                    triangleAnchor = selectedNeighbor.neighbor;
+                    const baseLen = selectedNeighbor.dist;
+                    if (!Number.isFinite(baseLen) || baseLen <= 0.0001) continue;
+
+                    const midX = (anchor.pos.x + triangleAnchor.pos.x) * 0.5;
+                    const midY = (anchor.pos.y + triangleAnchor.pos.y) * 0.5;
+                    const invLen = 1 / baseLen;
+                    const nx = -selectedNeighbor.dy * invLen;
+                    const ny = selectedNeighbor.dx * invLen;
+                    const height = (Math.sqrt(3) * 0.5) * baseLen;
+                    const sideSign = Math.random() < 0.5 ? 1 : -1;
+                    x = midX + nx * height * sideSign;
+                    y = midY + ny * height * sideSign;
+                    triangleEdgeRestLength = baseLen;
+                } else {
+                    const distance = distanceBucket.min + Math.random() * Math.max(0.001, (distanceBucket.max - distanceBucket.min));
+                    const angle = Math.random() * Math.PI * 2;
+                    x = anchor.pos.x + Math.cos(angle) * distance;
+                    y = anchor.pos.y + Math.sin(angle) * distance;
+                }
 
                 if (config.IS_WORLD_WRAPPING) {
                     x = ((x % config.WORLD_WIDTH) + config.WORLD_WIDTH) % config.WORLD_WIDTH;
@@ -1821,37 +1867,63 @@ export class SoftBody {
                     newPoint.neuronData = null;
                 }
 
-                let closest = null;
-                let closestDistSq = Infinity;
-                for (const p of preGrowthPoints) {
-                    const dx = newPoint.pos.x - p.pos.x;
-                    const dy = newPoint.pos.y - p.pos.y;
-                    const dSq = dx * dx + dy * dy;
-                    if (dSq < closestDistSq) {
-                        closestDistSq = dSq;
-                        closest = p;
+                let springAnchors = [];
+                let targetRestLength = 0;
+
+                if (useTriangulatedGrowth && triangleAnchor) {
+                    const baseDx = anchor.pos.x - triangleAnchor.pos.x;
+                    const baseDy = anchor.pos.y - triangleAnchor.pos.y;
+                    const baseLen = Number.isFinite(Number(triangleEdgeRestLength))
+                        ? Number(triangleEdgeRestLength)
+                        : Math.sqrt(baseDx * baseDx + baseDy * baseDy);
+                    if (!Number.isFinite(baseLen) || baseLen <= 0.0001) continue;
+                    springAnchors = [anchor, triangleAnchor];
+                    targetRestLength = baseLen;
+                } else {
+                    let closest = null;
+                    let closestDistSq = Infinity;
+                    for (const p of preGrowthPoints) {
+                        const dx = newPoint.pos.x - p.pos.x;
+                        const dy = newPoint.pos.y - p.pos.y;
+                        const dSq = dx * dx + dy * dy;
+                        if (dSq < closestDistSq) {
+                            closestDistSq = dSq;
+                            closest = p;
+                        }
                     }
+                    if (!closest || !Number.isFinite(closestDistSq) || closestDistSq <= 0) continue;
+                    springAnchors = [closest];
+                    targetRestLength = Math.sqrt(closestDistSq);
                 }
-                if (!closest || !Number.isFinite(closestDistSq) || closestDistSq <= 0) continue;
 
                 this.massPoints.push(newPoint);
 
                 const edgeType = this._sampleWeightedEntry(genome.edgeTypeWeights, { type: 'soft' })?.type || 'soft';
-                const restLength = Math.sqrt(closestDistSq);
                 const stiffness = Math.max(100, this.stiffness * genome.edgeStiffnessScale * (0.8 + Math.random() * 0.4));
                 const damping = Math.max(0.1, this.springDamping * genome.edgeDampingScale * (0.8 + Math.random() * 0.4));
-                const spring = new Spring(closest, newPoint, stiffness, damping, restLength, edgeType === 'rigid');
-                const parentIntervalA = closest.activationIntervalGene ?? this._randomActivationIntervalGene();
-                const parentIntervalB = newPoint.activationIntervalGene ?? this._randomActivationIntervalGene();
-                const edgeIntervalBase = (parentIntervalA + parentIntervalB) * 0.5;
-                const edgeIntervalJitter = (Math.random() - 0.5) * 2 * (genome.activationIntervalJitter || 0);
-                spring.activationIntervalGene = this._sanitizeActivationIntervalGene(
-                    edgeIntervalBase + (genome.edgeActivationIntervalBias || 0) + edgeIntervalJitter
-                );
-                spring.actuationCooldownByChannel = { edge: 0 };
-                this.springs.push(spring);
 
-                totalEdgeLength += restLength;
+                let edgeLengthThisPlacement = 0;
+                for (const springAnchor of springAnchors) {
+                    if (!springAnchor || springAnchor === newPoint) continue;
+                    const spring = new Spring(springAnchor, newPoint, stiffness, damping, targetRestLength, edgeType === 'rigid');
+                    const parentIntervalA = springAnchor.activationIntervalGene ?? this._randomActivationIntervalGene();
+                    const parentIntervalB = newPoint.activationIntervalGene ?? this._randomActivationIntervalGene();
+                    const edgeIntervalBase = (parentIntervalA + parentIntervalB) * 0.5;
+                    const edgeIntervalJitter = (Math.random() - 0.5) * 2 * (genome.activationIntervalJitter || 0);
+                    spring.activationIntervalGene = this._sanitizeActivationIntervalGene(
+                        edgeIntervalBase + (genome.edgeActivationIntervalBias || 0) + edgeIntervalJitter
+                    );
+                    spring.actuationCooldownByChannel = { edge: 0 };
+                    this.springs.push(spring);
+                    edgeLengthThisPlacement += targetRestLength;
+                }
+
+                if (edgeLengthThisPlacement <= 0) {
+                    this.massPoints.pop();
+                    continue;
+                }
+
+                totalEdgeLength += edgeLengthThisPlacement;
                 nodesAdded++;
                 placed = true;
                 break;

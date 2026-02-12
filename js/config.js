@@ -139,6 +139,8 @@ const config = {
 
     // Growth/development controls (new): enables time-step body growth when energy+space permit.
     GROWTH_ENABLED: true,
+    // Growth topology mode: attach growth nodes as triangles over existing edges.
+    GROWTH_TRIANGULATED_PRIMITIVES_ENABLED: true,
     GROWTH_ENERGY_COST_SCALAR: 1.0,
     GROWTH_COST_PER_NODE: 6.0,
     GROWTH_COST_PER_EDGE: 2.0,

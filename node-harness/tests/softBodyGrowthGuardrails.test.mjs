@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 
 import config from '../../js/config.js';
 import { SoftBody } from '../../js/classes/SoftBody.js';
+import { Spring } from '../../js/classes/Spring.js';
+import { NodeType, MovementType } from '../../js/classes/constants.js';
 import { runtimeState } from '../../js/engine/runtimeState.js';
 
 function withMockedRandom(value, fn) {
@@ -225,5 +227,91 @@ test('dye mismatch can reduce growth chance and increment dye suppression teleme
     Object.assign(config, cfgBackup);
     runtimeState.softBodyPopulation = runtimeBackup.softBodyPopulation;
     runtimeState.fluidField = runtimeBackup.fluidField;
+  }
+});
+
+test('triangulated growth attaches a new node to both endpoints of an existing edge', () => {
+  const cfgBackup = {
+    GROWTH_ENABLED: config.GROWTH_ENABLED,
+    GROWTH_TRIANGULATED_PRIMITIVES_ENABLED: config.GROWTH_TRIANGULATED_PRIMITIVES_ENABLED,
+    GROWTH_BASE_CHANCE_MIN: config.GROWTH_BASE_CHANCE_MIN,
+    GROWTH_BASE_CHANCE_MAX: config.GROWTH_BASE_CHANCE_MAX,
+    GROWTH_MIN_ENERGY_RATIO_MIN: config.GROWTH_MIN_ENERGY_RATIO_MIN,
+    GROWTH_MIN_ENERGY_RATIO_MAX: config.GROWTH_MIN_ENERGY_RATIO_MAX,
+    GROWTH_PLACEMENT_ATTEMPTS_PER_NODE: config.GROWTH_PLACEMENT_ATTEMPTS_PER_NODE,
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED
+  };
+  const runtimeBackup = {
+    softBodyPopulation: runtimeState.softBodyPopulation
+  };
+
+  try {
+    config.GROWTH_ENABLED = true;
+    config.GROWTH_TRIANGULATED_PRIMITIVES_ENABLED = true;
+    config.GROWTH_BASE_CHANCE_MIN = 1;
+    config.GROWTH_BASE_CHANCE_MAX = 1;
+    config.GROWTH_MIN_ENERGY_RATIO_MIN = 0;
+    config.GROWTH_MIN_ENERGY_RATIO_MAX = 0;
+    config.GROWTH_PLACEMENT_ATTEMPTS_PER_NODE = Math.max(12, Number(config.GROWTH_PLACEMENT_ATTEMPTS_PER_NODE) || 12);
+    config.DYE_ECOLOGY_ENABLED = false;
+
+    const body = new SoftBody(77, 300, 240, null, false);
+    const a = body.massPoints[0];
+    const b = new SoftBody(78, 310, 240, null, false).massPoints[0];
+
+    a.nodeType = NodeType.SWIMMER;
+    b.nodeType = NodeType.SWIMMER;
+    a.movementType = MovementType.NEUTRAL;
+    b.movementType = MovementType.NEUTRAL;
+    a.radius = 1.2;
+    b.radius = 1.2;
+    a.pos.x = 300; a.pos.y = 240; a.prevPos.x = 300; a.prevPos.y = 240;
+    b.pos.x = 310; b.pos.y = 240; b.prevPos.x = 310; b.prevPos.y = 240;
+
+    body.massPoints = [a, b];
+    body.springs = [new Spring(a, b, 500, 5, 10, false)];
+    body.creatureEnergy = body.currentMaxEnergy;
+    body.growthCooldownRemaining = 0;
+    body.growthGenome = {
+      growthChancePerTick: 1,
+      minEnergyRatioToGrow: 0,
+      growthCooldownTicks: 1,
+      nodesPerGrowthWeights: [{ count: 1, weight: 1 }],
+      newNodeTypeWeights: [{ nodeType: NodeType.SWIMMER, weight: 1 }],
+      anchorNodeTypeWeights: [{ nodeType: NodeType.SWIMMER, weight: 1 }],
+      distanceRangeWeights: [{ key: 'near', min: 1, max: 100, weight: 1 }],
+      edgeTypeWeights: [{ type: 'soft', weight: 1 }],
+      edgeStiffnessScale: 1,
+      edgeDampingScale: 1,
+      nodeActivationIntervalBias: 0,
+      edgeActivationIntervalBias: 0,
+      activationIntervalJitter: 0
+    };
+
+    const prePoints = body.massPoints.slice();
+    const prePointCount = prePoints.length;
+    const preSpringCount = body.springs.length;
+    runtimeState.softBodyPopulation = [body];
+
+    const didGrow = withMockedRandom(0, () => body._attemptGrowthStep(1 / 60));
+    assert.equal(didGrow, true);
+    assert.equal(body.massPoints.length, prePointCount + 1);
+
+    const newPoint = body.massPoints[body.massPoints.length - 1];
+    const newPointSprings = body.springs.filter((s) => s.p1 === newPoint || s.p2 === newPoint);
+    assert.equal(newPointSprings.length, 2);
+
+    const anchorPoints = newPointSprings.map((s) => (s.p1 === newPoint ? s.p2 : s.p1));
+    assert.equal(anchorPoints.includes(a), true);
+    assert.equal(anchorPoints.includes(b), true);
+
+    const r0 = Number(newPointSprings[0].restLength);
+    const r1 = Number(newPointSprings[1].restLength);
+    assert.ok(Number.isFinite(r0) && Number.isFinite(r1));
+    assert.ok(Math.abs(r0 - r1) < 1e-6);
+    assert.equal(body.springs.length, preSpringCount + 2);
+  } finally {
+    Object.assign(config, cfgBackup);
+    runtimeState.softBodyPopulation = runtimeBackup.softBodyPopulation;
   }
 });

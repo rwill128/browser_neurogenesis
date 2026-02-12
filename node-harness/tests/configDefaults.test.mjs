@@ -23,3 +23,7 @@ test('photosynth topology hard constraints are relaxed by default', () => {
   assert.equal(config.PHOTOSYNTH_FORCE_RIGID_CONNECTED_SPRINGS, false);
   assert.equal(config.PHOTOSYNTH_NEUTRALIZE_NON_PHOTOSYNTH_NEIGHBORS, false);
 });
+
+test('growth triangulated primitive mode is enabled by default', () => {
+  assert.equal(config.GROWTH_TRIANGULATED_PRIMITIVES_ENABLED, true);
+});

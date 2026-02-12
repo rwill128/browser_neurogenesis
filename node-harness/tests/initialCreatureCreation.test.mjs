@@ -33,6 +33,12 @@ function classifyTriTemplate(body) {
   return 'unknown';
 }
 
+const TEMPLATE_TRIANGLES = {
+  triangle: [[0, 1, 2]],
+  diamond: [[0, 1, 2], [1, 3, 2]],
+  hexagon: [[0, 1, 2], [0, 2, 3], [0, 3, 4], [0, 4, 5], [0, 5, 6], [0, 6, 1]]
+};
+
 function assertSharedEdgePrimitiveInvariants(body) {
   assert.equal(body.shapeType, 3);
   assert.ok(body.blueprintSprings.length > 0);
@@ -53,6 +59,29 @@ function assertSharedEdgePrimitiveInvariants(body) {
   }
 
   assert.equal(edgeKeys.size, body.blueprintSprings.length);
+}
+
+function assertTriangleEdgeBudget(body, kind) {
+  const triangles = TEMPLATE_TRIANGLES[kind] || [];
+  assert.ok(triangles.length > 0, `missing triangle template for ${kind}`);
+
+  const edgeRest = new Map();
+  for (const s of body.blueprintSprings) {
+    const key = `${Math.min(s.p1Index, s.p2Index)}:${Math.max(s.p1Index, s.p2Index)}`;
+    edgeRest.set(key, Number(s.restLength));
+  }
+
+  for (const [a, b, c] of triangles) {
+    const ab = edgeRest.get(`${Math.min(a, b)}:${Math.max(a, b)}`);
+    const bc = edgeRest.get(`${Math.min(b, c)}:${Math.max(b, c)}`);
+    const ca = edgeRest.get(`${Math.min(c, a)}:${Math.max(c, a)}`);
+    assert.ok(Number.isFinite(ab) && Number.isFinite(bc) && Number.isFinite(ca));
+
+    // Triangle inequality: two edges must cover the third edge.
+    assert.ok(ab + bc + 1e-9 >= ca);
+    assert.ok(ab + ca + 1e-9 >= bc);
+    assert.ok(bc + ca + 1e-9 >= ab);
+  }
 }
 
 test('initial creature creation uses stable shared-edge triangle primitives and preserves diversity', () => {
@@ -98,10 +127,12 @@ test('initial creature creation uses stable shared-edge triangle primitives and 
       },
       () => {
         const body = new SoftBody(10_000 + tc.points, 150, 180, null, false);
-        assert.equal(classifyTriTemplate(body), tc.name);
+        const kind = classifyTriTemplate(body);
+        assert.equal(kind, tc.name);
         assert.equal(body.blueprintPoints.length, tc.points);
         assert.equal(body.blueprintSprings.length, tc.springs);
         assertSharedEdgePrimitiveInvariants(body);
+        assertTriangleEdgeBudget(body, kind);
       }
     );
   }
@@ -123,6 +154,7 @@ test('initial creature creation uses stable shared-edge triangle primitives and 
         const kind = classifyTriTemplate(body);
         counts[kind] = (counts[kind] || 0) + 1;
         assertSharedEdgePrimitiveInvariants(body);
+        if (kind !== 'unknown') assertTriangleEdgeBudget(body, kind);
       }
 
       assert.equal(counts.unknown, 0);

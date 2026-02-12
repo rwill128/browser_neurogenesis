@@ -305,10 +305,16 @@ test('triangulated growth attaches a new node to both endpoints of an existing e
     assert.equal(anchorPoints.includes(a), true);
     assert.equal(anchorPoints.includes(b), true);
 
+    const sharedSpring = body.springs.find(
+      (s) => (s.p1 === a && s.p2 === b) || (s.p1 === b && s.p2 === a)
+    );
+    assert.ok(sharedSpring);
+
     const r0 = Number(newPointSprings[0].restLength);
     const r1 = Number(newPointSprings[1].restLength);
     assert.ok(Number.isFinite(r0) && Number.isFinite(r1));
     assert.ok(Math.abs(r0 - r1) < 1e-6);
+    assert.ok((r0 + r1) + 1e-9 >= Number(sharedSpring.restLength));
     assert.equal(body.springs.length, preSpringCount + 2);
   } finally {
     Object.assign(config, cfgBackup);

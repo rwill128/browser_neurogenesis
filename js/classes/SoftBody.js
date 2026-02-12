@@ -1760,19 +1760,37 @@ export class SoftBody {
                     const edgeNeighbors = [];
                     for (const spring of this.springs) {
                         if (!spring) continue;
-                        if (spring.p1 === anchor && preGrowthPoints.includes(spring.p2)) edgeNeighbors.push(spring.p2);
-                        else if (spring.p2 === anchor && preGrowthPoints.includes(spring.p1)) edgeNeighbors.push(spring.p1);
+                        if (spring.p1 === anchor && preGrowthPoints.includes(spring.p2)) {
+                            edgeNeighbors.push({
+                                neighbor: spring.p2,
+                                sharedSpringRestLength: Number(spring.restLength)
+                            });
+                        } else if (spring.p2 === anchor && preGrowthPoints.includes(spring.p1)) {
+                            edgeNeighbors.push({
+                                neighbor: spring.p1,
+                                sharedSpringRestLength: Number(spring.restLength)
+                            });
+                        }
                     }
 
                     const minEdgeLen = Math.max(0.001, Number(distanceBucket.min) || 0.001);
                     const maxEdgeLen = Math.max(minEdgeLen, Number(distanceBucket.max) || minEdgeLen);
                     const candidateNeighbors = [];
-                    for (const neighbor of edgeNeighbors) {
+                    for (const entry of edgeNeighbors) {
+                        const neighbor = entry.neighbor;
                         const dx = neighbor.pos.x - anchor.pos.x;
                         const dy = neighbor.pos.y - anchor.pos.y;
                         const dist = Math.sqrt(dx * dx + dy * dy);
                         if (dist >= minEdgeLen && dist <= maxEdgeLen) {
-                            candidateNeighbors.push({ neighbor, dx, dy, dist });
+                            candidateNeighbors.push({
+                                neighbor,
+                                dx,
+                                dy,
+                                dist,
+                                sharedSpringRestLength: Number.isFinite(Number(entry.sharedSpringRestLength))
+                                    ? Number(entry.sharedSpringRestLength)
+                                    : dist
+                            });
                         }
                     }
 
@@ -1783,16 +1801,22 @@ export class SoftBody {
                     const baseLen = selectedNeighbor.dist;
                     if (!Number.isFinite(baseLen) || baseLen <= 0.0001) continue;
 
+                    const sharedEdgeRestLength = Math.max(0.0001, Number(selectedNeighbor.sharedSpringRestLength) || baseLen);
+                    const requiredSideLength = Math.max(baseLen * 0.5, sharedEdgeRestLength * 0.5);
+                    const sideLength = Math.max(baseLen, requiredSideLength);
+
                     const midX = (anchor.pos.x + triangleAnchor.pos.x) * 0.5;
                     const midY = (anchor.pos.y + triangleAnchor.pos.y) * 0.5;
                     const invLen = 1 / baseLen;
                     const nx = -selectedNeighbor.dy * invLen;
                     const ny = selectedNeighbor.dx * invLen;
-                    const height = (Math.sqrt(3) * 0.5) * baseLen;
+                    const heightSq = Math.max(0, (sideLength * sideLength) - ((baseLen * baseLen) * 0.25));
+                    const height = Math.sqrt(heightSq);
+                    if (!Number.isFinite(height) || height <= 0.0001) continue;
                     const sideSign = Math.random() < 0.5 ? 1 : -1;
                     x = midX + nx * height * sideSign;
                     y = midY + ny * height * sideSign;
-                    triangleEdgeRestLength = baseLen;
+                    triangleEdgeRestLength = sideLength;
                 } else {
                     const distance = distanceBucket.min + Math.random() * Math.max(0.001, (distanceBucket.max - distanceBucket.min));
                     const angle = Math.random() * Math.PI * 2;

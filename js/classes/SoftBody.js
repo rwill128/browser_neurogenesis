@@ -3296,6 +3296,56 @@ export class SoftBody {
             spring.applyForce();
         }
 
+        if (config.INTRA_BODY_REPULSION_ENABLED !== false && this.massPoints.length > 1) {
+            const repulsionStrength = Math.max(0, Number(config.INTRA_BODY_REPULSION_STRENGTH) || 0);
+            const repulsionRadiusFactor = Math.max(0, Number(config.INTRA_BODY_REPULSION_RADIUS_FACTOR) || 0);
+            const skipConnected = config.INTRA_BODY_REPULSION_SKIP_CONNECTED !== false;
+
+            if (repulsionStrength > 0 && repulsionRadiusFactor > 0) {
+                const connectedPairs = new Set();
+                if (skipConnected) {
+                    const pointToIndex = new Map();
+                    for (let i = 0; i < this.massPoints.length; i++) {
+                        pointToIndex.set(this.massPoints[i], i);
+                    }
+                    for (const spring of this.springs) {
+                        const a = pointToIndex.get(spring?.p1);
+                        const b = pointToIndex.get(spring?.p2);
+                        if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
+                        connectedPairs.add(`${Math.min(a, b)}:${Math.max(a, b)}`);
+                    }
+                }
+
+                for (let i = 0; i < this.massPoints.length; i++) {
+                    const p1 = this.massPoints[i];
+                    for (let j = i + 1; j < this.massPoints.length; j++) {
+                        if (skipConnected && connectedPairs.has(`${i}:${j}`)) continue;
+
+                        const p2 = this.massPoints[j];
+                        if (!p1 || !p2 || (p1.isFixed && p2.isFixed)) continue;
+
+                        const dx = p1.pos.x - p2.pos.x;
+                        const dy = p1.pos.y - p2.pos.y;
+                        const distSq = dx * dx + dy * dy;
+                        const interactionRadius = (p1.radius + p2.radius) * repulsionRadiusFactor;
+                        const interactionRadiusSq = interactionRadius * interactionRadius;
+
+                        if (distSq >= interactionRadiusSq || distSq <= 1e-8) continue;
+
+                        const dist = Math.sqrt(distSq);
+                        const overlap = interactionRadius - dist;
+                        const forceMag = repulsionStrength * overlap * 0.5;
+                        const invDist = 1 / dist;
+                        const fx = dx * invDist * forceMag;
+                        const fy = dy * invDist * forceMag;
+
+                        if (!p1.isFixed) p1.applyForce(new Vec2(fx, fy));
+                        if (!p2.isFixed) p2.applyForce(new Vec2(-fx, -fy));
+                    }
+                }
+            }
+        }
+
         for (let point of this.massPoints) {
             point.update(dt);
         }

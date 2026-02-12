@@ -27,3 +27,10 @@ test('photosynth topology hard constraints are relaxed by default', () => {
 test('growth triangulated primitive mode is enabled by default', () => {
   assert.equal(config.GROWTH_TRIANGULATED_PRIMITIVES_ENABLED, true);
 });
+
+test('intra-body repulsion is enabled with slight default strength', () => {
+  assert.equal(config.INTRA_BODY_REPULSION_ENABLED, true);
+  assert.ok(Number(config.INTRA_BODY_REPULSION_STRENGTH) > 0);
+  assert.ok(Number(config.INTRA_BODY_REPULSION_RADIUS_FACTOR) > 0);
+  assert.equal(config.INTRA_BODY_REPULSION_SKIP_CONNECTED, true);
+});

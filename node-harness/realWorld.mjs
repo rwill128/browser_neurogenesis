@@ -46,6 +46,26 @@ function summarizeNodeTypes(points) {
   return counts;
 }
 
+function summarizePopulationNodeTypes(softBodies) {
+  const counts = {};
+  let totalNodes = 0;
+
+  for (const body of softBodies || []) {
+    for (const p of body?.massPoints || []) {
+      const key = nodeTypeNameById[p.nodeType] || `UNKNOWN_${p.nodeType}`;
+      counts[key] = (counts[key] || 0) + 1;
+      totalNodes += 1;
+    }
+  }
+
+  const ratios = {};
+  for (const [k, v] of Object.entries(counts)) {
+    ratios[k] = totalNodes > 0 ? round(v / totalNodes, 6) : 0;
+  }
+
+  return { counts, ratios, totalNodes };
+}
+
 export class RealWorld {
   constructor(scenario, seed = 42) {
     this.config = scenario;
@@ -469,6 +489,7 @@ export class RealWorld {
     });
 
     const instabilityTelemetry = this.worldState.instabilityTelemetry || {};
+    const nodeTypeSummary = summarizePopulationNodeTypes(this.softBodyPopulation);
 
     return {
       tick: this.tick,
@@ -482,8 +503,14 @@ export class RealWorld {
       },
       worldStats: {
         globalEnergyGains: this.worldState?.globalEnergyGains || {},
-        globalEnergyCosts: this.worldState?.globalEnergyCosts || {}
+        globalEnergyCosts: this.worldState?.globalEnergyCosts || {},
+        nodeTypeCounts: nodeTypeSummary.counts,
+        nodeTypeRatios: nodeTypeSummary.ratios,
+        totalNodes: nodeTypeSummary.totalNodes
       },
+      nodeTypeCounts: nodeTypeSummary.counts,
+      nodeTypeRatios: nodeTypeSummary.ratios,
+      totalNodes: nodeTypeSummary.totalNodes,
       instabilityTelemetry: {
         totalRemoved: Number(instabilityTelemetry.totalRemoved) || 0,
         totalPhysicsRemoved: Number(instabilityTelemetry.totalPhysicsRemoved) || 0,

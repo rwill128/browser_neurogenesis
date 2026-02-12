@@ -262,7 +262,8 @@ function resizeCanvas() {
     webgpuCanvas.style.width = window.innerWidth + 'px';
     webgpuCanvas.style.height = window.innerHeight + 'px';
 
-    clampViewOffsets();
+    // Resize may occur after auto-follow camera updates outside ui.js local camera cache.
+    clampViewOffsets({ syncFromRuntime: true });
 
     // If using WebGPU, reconfigure the context with new size.
     if (config.USE_GPU_FLUID_SIMULATION && fluidField && fluidField.context) {

@@ -1,7 +1,7 @@
 /**
  * Convert a display-space pointer position (CSS pixels) into world coordinates.
  *
- * This mapping is the canonical browser-camera transform used by the renderer:
+ * Canonical camera transform:
  *   screen = (world - viewOffset) * viewZoom
  * therefore:
  *   world = (screen / viewZoom) + viewOffset
@@ -14,6 +14,16 @@ export function displayToWorld({ displayX, displayY, viewZoom, viewOffsetX, view
 }
 
 /**
+ * Convert a world position into display-space (CSS pixels).
+ */
+export function worldToDisplay({ worldX, worldY, viewZoom, viewOffsetX, viewOffsetY }) {
+  return {
+    x: (worldX - viewOffsetX) * viewZoom,
+    y: (worldY - viewOffsetY) * viewZoom
+  };
+}
+
+/**
  * Solve camera offsets so a chosen world point remains under the same display pixel
  * after a zoom change.
  */
@@ -21,6 +31,113 @@ export function solveViewOffsetForAnchor({ displayX, displayY, worldX, worldY, v
   return {
     offsetX: worldX - (displayX / viewZoom),
     offsetY: worldY - (displayY / viewZoom)
+  };
+}
+
+/**
+ * Clamp/center camera offsets against world bounds.
+ *
+ * If the viewport is larger than the world in an axis, offsets become negative so
+ * the world is centred in that axis.
+ */
+export function clampCameraOffsets({
+  offsetX,
+  offsetY,
+  viewZoom,
+  worldWidth,
+  worldHeight,
+  viewportWidth,
+  viewportHeight
+}) {
+  const viewportWorldW = viewportWidth / viewZoom;
+  const viewportWorldH = viewportHeight / viewZoom;
+
+  const extraW = viewportWorldW - worldWidth;
+  const extraH = viewportWorldH - worldHeight;
+
+  let nextOffsetX;
+  let nextOffsetY;
+
+  if (extraW > 0) {
+    nextOffsetX = -extraW * 0.5;
+  } else {
+    const maxPanX = worldWidth - viewportWorldW;
+    nextOffsetX = Math.max(0, Math.min(offsetX, maxPanX));
+  }
+
+  if (extraH > 0) {
+    nextOffsetY = -extraH * 0.5;
+  } else {
+    const maxPanY = worldHeight - viewportWorldH;
+    nextOffsetY = Math.max(0, Math.min(offsetY, maxPanY));
+  }
+
+  return {
+    offsetX: nextOffsetX,
+    offsetY: nextOffsetY
+  };
+}
+
+/**
+ * Compute zoom that fits the entire world inside the viewport.
+ */
+export function computeZoomToFitWorld({ worldWidth, worldHeight, viewportWidth, viewportHeight, minZoom = 0.01, maxZoom = Infinity }) {
+  const fitZoom = Math.min(viewportWidth / worldWidth, viewportHeight / worldHeight);
+  return Math.max(minZoom, Math.min(maxZoom, fitZoom));
+}
+
+/**
+ * Center the camera on a world-space focus point for the given zoom.
+ */
+export function centerCameraOnPoint({ worldX, worldY, viewZoom, viewportWidth, viewportHeight }) {
+  return {
+    offsetX: worldX - (viewportWidth / viewZoom / 2),
+    offsetY: worldY - (viewportHeight / viewZoom / 2)
+  };
+}
+
+/**
+ * Produce a camera state that shows the full world while preserving bounds logic.
+ */
+export function buildFitWorldCamera({
+  worldWidth,
+  worldHeight,
+  viewportWidth,
+  viewportHeight,
+  minZoom = 0.01,
+  maxZoom = Infinity
+}) {
+  const zoom = computeZoomToFitWorld({
+    worldWidth,
+    worldHeight,
+    viewportWidth,
+    viewportHeight,
+    minZoom,
+    maxZoom
+  });
+
+  const centered = centerCameraOnPoint({
+    worldX: worldWidth / 2,
+    worldY: worldHeight / 2,
+    viewZoom: zoom,
+    viewportWidth,
+    viewportHeight
+  });
+
+  const clamped = clampCameraOffsets({
+    offsetX: centered.offsetX,
+    offsetY: centered.offsetY,
+    viewZoom: zoom,
+    worldWidth,
+    worldHeight,
+    viewportWidth,
+    viewportHeight
+  });
+
+  return {
+    zoom,
+    offsetX: clamped.offsetX,
+    offsetY: clamped.offsetY
   };
 }
 

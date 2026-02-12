@@ -170,3 +170,11 @@ For each scenario run:
 - Added direct return path to launcher after simulation start:
   - new fixed **Scenario Library** button (`#openScenarioLibraryButton`) in top-left HUD
   - clicking clears startup URL params and reloads to the launcher overlay so users can switch scenarios/modes quickly.
+- Camera/render architecture cleanup (mobile tiny-world scaling correctness + shared transform path):
+  - introduced `js/engine/cameraMath.mjs` as canonical camera math layer (world↔display mapping, fit-world zoom, offset clamping/centering).
+  - browser draw path now applies DPR-aware transform while keeping camera math in CSS-pixel space.
+  - unified camera consumers (manual zoom, `View Entire Sim`, auto-follow, creature focus, resize clamp) to shared camera math helpers.
+  - removed duplicate/contradictory legacy clamping blocks in UI pan flow.
+  - added camera-focused tests:
+    - `node-harness/tests/cameraMath.test.mjs`
+    - `node-harness/tests/browserStepAdapter.test.mjs`.

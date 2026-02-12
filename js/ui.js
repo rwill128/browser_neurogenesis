@@ -18,7 +18,13 @@ import {
 import { perlin, getNodeTypeString, getRewardStrategyString, getEyeTargetTypeString, getMovementTypeString, sigmoid } from './utils.js';
 import {NodeType} from "./classes/constants.js";
 import viewport from './viewport.js';
-import { displayToWorld, solveViewOffsetForAnchor } from './engine/cameraMath.mjs';
+import {
+    displayToWorld,
+    solveViewOffsetForAnchor,
+    clampCameraOffsets,
+    buildFitWorldCamera,
+    centerCameraOnPoint
+} from './engine/cameraMath.mjs';
 
 // --- DOM Element Selections ---
 const canvas = document.getElementById('simulationCanvas');
@@ -726,6 +732,11 @@ function disableAutoFollowForManualControl() {
 }
 
 function applyManualZoom(displayX, displayY, direction) {
+    // Sync local camera cache before computing deltas.
+    viewZoom = config.viewZoom;
+    viewOffsetX = config.viewOffsetX;
+    viewOffsetY = config.viewOffsetY;
+
     // Use the same world-coordinate mapping used by input handling.
     const worldBefore = getMouseWorldCoordinates(displayX, displayY);
     const worldXBefore = worldBefore.x;
@@ -779,29 +790,34 @@ document.addEventListener('keydown', (e) => {
         return; // Only block unrelated keys if paused
     }
 
-    const effectiveViewportWidth = canvas.clientWidth / config.viewZoom;
-    const effectiveViewportHeight = canvas.clientHeight / config.viewZoom;
-    const maxPanX = Math.max(0, config.WORLD_WIDTH - effectiveViewportWidth);
-    const maxPanY = Math.max(0, config.WORLD_HEIGHT - effectiveViewportHeight);
+    // Sync local camera cache in case auto-follow updated viewport this frame.
+    viewZoom = config.viewZoom;
+    viewOffsetX = config.viewOffsetX;
+    viewOffsetY = config.viewOffsetY;
+
     const panSpeed = config.VIEW_PAN_SPEED / viewZoom;
 
 
     switch (e.key.toLowerCase()) {
         case 'w':
             disableAutoFollowForManualControl();
-            viewOffsetY = Math.max(0, viewOffsetY - panSpeed);
+            viewOffsetY -= panSpeed;
+            clampViewOffsets();
             break;
         case 's':
             disableAutoFollowForManualControl();
-            viewOffsetY = Math.min(maxPanY, viewOffsetY + panSpeed);
+            viewOffsetY += panSpeed;
+            clampViewOffsets();
             break;
         case 'a':
             disableAutoFollowForManualControl();
-            viewOffsetX = Math.max(0, viewOffsetX - panSpeed);
+            viewOffsetX -= panSpeed;
+            clampViewOffsets();
             break;
         case 'd':
             disableAutoFollowForManualControl();
-            viewOffsetX = Math.min(maxPanX, viewOffsetX + panSpeed);
+            viewOffsetX += panSpeed;
+            clampViewOffsets();
             break;
         case 'f':
             config.AUTO_FOLLOW_CREATURE = !config.AUTO_FOLLOW_CREATURE;
@@ -1464,53 +1480,27 @@ lightCyclePeriodSlider.oninput = function () {
 };
 
 viewEntireSimButton.onclick = function () {
-    const targetZoomX = canvas.clientWidth / config.WORLD_WIDTH;
-    const targetZoomY = canvas.clientHeight / config.WORLD_HEIGHT;
-    viewZoom = Math.min(targetZoomX, targetZoomY); // Zoom to fit entire world
-    viewZoom = Math.min(viewZoom, config.MAX_ZOOM); // Respect MAX_ZOOM
-    // Ensure MIN_ZOOM calculation from wheel event is considered if it was more restrictive
-    const minZoomToSeeAllX = canvas.clientWidth / config.WORLD_WIDTH;
-    const minZoomToSeeAllY = canvas.clientHeight / config.WORLD_HEIGHT;
-    let currentMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
-    currentMinZoom = Math.min(1.0, currentMinZoom);
-    if (config.WORLD_WIDTH <= canvas.clientWidth && config.WORLD_HEIGHT <= canvas.clientHeight) {
-        currentMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
-    } else {
-        currentMinZoom = Math.min(minZoomToSeeAllX, minZoomToSeeAllY);
-    }
-    currentMinZoom = Math.max(0.01, currentMinZoom);
-    viewZoom = Math.max(viewZoom, currentMinZoom); // Ensure we don't zoom out beyond what MIN_ZOOM allows
+    const fitted = buildFitWorldCamera({
+        worldWidth: config.WORLD_WIDTH,
+        worldHeight: config.WORLD_HEIGHT,
+        viewportWidth: canvas.clientWidth,
+        viewportHeight: canvas.clientHeight,
+        minZoom: 0.01,
+        maxZoom: config.MAX_ZOOM
+    });
 
-    // Center the view
-    // Calculate the dimensions of the world as they would appear on screen at the new zoom level
-    const worldDisplayWidth = config.WORLD_WIDTH * viewZoom;
-    const worldDisplayHeight = config.WORLD_HEIGHT * viewZoom;
+    viewZoom = fitted.zoom;
+    viewOffsetX = fitted.offsetX;
+    viewOffsetY = fitted.offsetY;
 
-    // Calculate required offset to center this displayed world within the canvas
-    // This calculation needs to be in world coordinates for viewOffsetX/Y
-    viewOffsetX = (config.WORLD_WIDTH / 2) - (canvas.clientWidth / viewZoom / 2);
-    viewOffsetY = (config.WORLD_HEIGHT / 2) - (canvas.clientHeight / viewZoom / 2);
-
-    // Clamp offsets to prevent viewing outside world boundaries
-    const effectiveViewportWidth = canvas.clientWidth / viewZoom;
-    const effectiveViewportHeight = canvas.clientHeight / viewZoom;
-    const maxPanX = Math.max(0, config.WORLD_WIDTH - effectiveViewportWidth);
-    const maxPanY = Math.max(0, config.WORLD_HEIGHT - effectiveViewportHeight);
-    viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
-    viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
-
-    // Re-apply refined clamping / centering
-    clampViewOffsets();
-
-    // Keep viewport (camera) in sync
-    viewport.zoom = viewZoom;
-    viewport.offsetX = viewOffsetX;
-    viewport.offsetY = viewOffsetY;
-
-    // Also update config copies for global reference
+    // Keep config and viewport camera state synchronized.
     config.viewZoom = viewZoom;
     config.viewOffsetX = viewOffsetX;
     config.viewOffsetY = viewOffsetY;
+
+    viewport.zoom = viewZoom;
+    viewport.offsetX = viewOffsetX;
+    viewport.offsetY = viewOffsetY;
 }
 
 function copyInfoToClipboard() {
@@ -1732,23 +1722,10 @@ canvas.addEventListener('mousemove', (e) => {
         config.viewOffsetX = config.panInitialViewOffsetX - panDeltaX_world;
         config.viewOffsetY = config.panInitialViewOffsetY - panDeltaY_world;
 
-        // Keep offsets valid / centred
+        // Keep offsets valid / centred.
         clampViewOffsets();
 
-        // Clamp to world bounds
-        const effectiveViewportWidth = canvas.clientWidth / config.viewZoom; // This is viewport width in world units
-        const effectiveViewportHeight = canvas.clientHeight / config.viewZoom; // This is viewport height in world units
-        // Correct maxPan calculations for clamping viewOffset
-        const maxPanX = Math.max(0, config.WORLD_WIDTH - (canvas.clientWidth / config.viewZoom));
-        const maxPanY = Math.max(0, config.WORLD_HEIGHT - (canvas.clientHeight / config.viewZoom));
-
-        config.viewOffsetX = Math.max(0, Math.min(config.viewOffsetX, maxPanX));
-        config.viewOffsetY = Math.max(0, Math.min(config.viewOffsetY, maxPanY));
-
-        // Re-apply centering clamp now that the old bounds logic has finished
-        clampViewOffsets();
-
-        // Synchronize exported globals so the renderer uses the newest camera values
+        // Synchronize exported globals so the renderer uses the newest camera values.
         viewOffsetX = config.viewOffsetX;
         viewOffsetY = config.viewOffsetY;
         viewport.offsetX = viewOffsetX;
@@ -2092,22 +2069,29 @@ function focusOnCreature(creature) {
     const creatureRadius = creature.blueprintRadius || creature.getBoundingBox().width / 2;
 
     const smallerViewportDim = Math.min(canvas.clientWidth, canvas.clientHeight);
-    const targetZoom = smallerViewportDim / (creatureRadius * 2 * 3); 
+    const targetZoom = smallerViewportDim / (creatureRadius * 2 * 3);
 
-    viewZoom = Math.min(config.MAX_ZOOM, Math.max(0.2, targetZoom)); 
+    viewZoom = Math.min(config.MAX_ZOOM, Math.max(0.2, targetZoom));
 
-    viewOffsetX = creatureCenter.x - (canvas.clientWidth / viewZoom / 2);
-    viewOffsetY = creatureCenter.y - (canvas.clientHeight / viewZoom / 2);
+    const centered = centerCameraOnPoint({
+        worldX: creatureCenter.x,
+        worldY: creatureCenter.y,
+        viewZoom,
+        viewportWidth: canvas.clientWidth,
+        viewportHeight: canvas.clientHeight
+    });
+    const clamped = clampCameraOffsets({
+        offsetX: centered.offsetX,
+        offsetY: centered.offsetY,
+        viewZoom,
+        worldWidth: config.WORLD_WIDTH,
+        worldHeight: config.WORLD_HEIGHT,
+        viewportWidth: canvas.clientWidth,
+        viewportHeight: canvas.clientHeight
+    });
 
-    const effectiveViewportWidth = canvas.clientWidth / viewZoom;
-    const effectiveViewportHeight = canvas.clientHeight / viewZoom;
-    const maxPanX = Math.max(0, config.WORLD_WIDTH - effectiveViewportWidth);
-    const maxPanY = Math.max(0, config.WORLD_HEIGHT - effectiveViewportHeight);
-    viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
-    viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
-
-    // Re-apply refined centring logic
-    clampViewOffsets();
+    viewOffsetX = clamped.offsetX;
+    viewOffsetY = clamped.offsetY;
 
     // Synchronize to config for helper consistency
     config.viewZoom = viewZoom;
@@ -2368,28 +2352,25 @@ config.viewOffsetY = viewOffsetY;
 // Add just after the helper getMouseWorldCoordinates
 // Ensure viewOffsetX/Y remain in a valid range. If the viewport is larger than the world in either
 // dimension, we allow negative offsets so the world can be centred with letter-box margins.
-function clampViewOffsets() {
-    const viewportWorldW = canvas.clientWidth  / viewZoom;
-    const viewportWorldH = canvas.clientHeight / viewZoom;
-
-    const extraW = viewportWorldW - config.WORLD_WIDTH;
-    const extraH = viewportWorldH - config.WORLD_HEIGHT;
-
-    if (extraW > 0) {
-        // Viewport wider than world ‑ centre horizontally
-        viewOffsetX = -extraW * 0.5;
-    } else {
-        const maxPanX = config.WORLD_WIDTH - viewportWorldW;
-        viewOffsetX = Math.max(0, Math.min(viewOffsetX, maxPanX));
+function clampViewOffsets({ syncFromRuntime = false } = {}) {
+    if (syncFromRuntime) {
+        viewZoom = config.viewZoom;
+        viewOffsetX = config.viewOffsetX;
+        viewOffsetY = config.viewOffsetY;
     }
 
-    if (extraH > 0) {
-        // Viewport taller than world ‑ centre vertically
-        viewOffsetY = -extraH * 0.5;
-    } else {
-        const maxPanY = config.WORLD_HEIGHT - viewportWorldH;
-        viewOffsetY = Math.max(0, Math.min(viewOffsetY, maxPanY));
-    }
+    const clamped = clampCameraOffsets({
+        offsetX: viewOffsetX,
+        offsetY: viewOffsetY,
+        viewZoom,
+        worldWidth: config.WORLD_WIDTH,
+        worldHeight: config.WORLD_HEIGHT,
+        viewportWidth: canvas.clientWidth,
+        viewportHeight: canvas.clientHeight
+    });
+
+    viewOffsetX = clamped.offsetX;
+    viewOffsetY = clamped.offsetY;
 
     // keep config & camera objects aligned
     config.viewOffsetX = viewOffsetX;

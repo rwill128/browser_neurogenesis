@@ -1,3 +1,8 @@
+import {
+  centerCameraOnPoint,
+  clampCameraOffsets
+} from './cameraMath.mjs';
+
 let followInfoRefreshCounter = 0;
 
 function getValidFollowTarget(worldState, config) {
@@ -19,6 +24,12 @@ function getValidFollowTarget(worldState, config) {
   return null;
 }
 
+/**
+ * Keep browser camera locked on a valid creature target.
+ *
+ * Camera bounds/centering are delegated to shared camera math so follow mode and
+ * manual UI controls use identical world/screen rules.
+ */
 function updateAutoFollowCamera({ worldState, config, canvas, viewport, updateInfoPanel }) {
   if (!config.AUTO_FOLLOW_CREATURE) return;
 
@@ -48,19 +59,30 @@ function updateAutoFollowCamera({ worldState, config, canvas, viewport, updateIn
     Math.max(config.AUTO_FOLLOW_ZOOM_MIN, Math.min(canvas.clientWidth, canvas.clientHeight) / (bodySize * 6))
   );
 
+  const centered = centerCameraOnPoint({
+    worldX: center.x,
+    worldY: center.y,
+    viewZoom: desiredZoom,
+    viewportWidth: canvas.clientWidth,
+    viewportHeight: canvas.clientHeight
+  });
+
+  const clamped = clampCameraOffsets({
+    offsetX: centered.offsetX,
+    offsetY: centered.offsetY,
+    viewZoom: desiredZoom,
+    worldWidth: config.WORLD_WIDTH,
+    worldHeight: config.WORLD_HEIGHT,
+    viewportWidth: canvas.clientWidth,
+    viewportHeight: canvas.clientHeight
+  });
+
   viewport.zoom = desiredZoom;
   config.viewZoom = desiredZoom;
-
-  viewport.offsetX = center.x - (canvas.clientWidth / viewport.zoom / 2);
-  viewport.offsetY = center.y - (canvas.clientHeight / viewport.zoom / 2);
-
-  const maxPanX = Math.max(0, config.WORLD_WIDTH - (canvas.clientWidth / viewport.zoom));
-  const maxPanY = Math.max(0, config.WORLD_HEIGHT - (canvas.clientHeight / viewport.zoom));
-  viewport.offsetX = Math.max(0, Math.min(viewport.offsetX, maxPanX));
-  viewport.offsetY = Math.max(0, Math.min(viewport.offsetY, maxPanY));
-
-  config.viewOffsetX = viewport.offsetX;
-  config.viewOffsetY = viewport.offsetY;
+  viewport.offsetX = clamped.offsetX;
+  viewport.offsetY = clamped.offsetY;
+  config.viewOffsetX = clamped.offsetX;
+  config.viewOffsetY = clamped.offsetY;
 
   followInfoRefreshCounter++;
   if (followInfoRefreshCounter >= 20) {

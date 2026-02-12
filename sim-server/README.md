@@ -53,5 +53,5 @@ Open:
 ## Notes
 
 - Server runs the real engine via `node-harness/realWorld.mjs` + shared `stepWorld`.
-- Current scope is **single-process multi-world** (good for a handful of long-running experiments).
+- Worlds run in **worker threads** to isolate the module-level config singleton (`js/config.js`).
 - Next steps for remote hosting: auth token + rate limiting + persistence (periodic checkpoints to disk).

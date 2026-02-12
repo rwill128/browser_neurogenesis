@@ -16,6 +16,9 @@ import fastifyWebsocket from '@fastify/websocket';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
+import { mkdirSync } from 'node:fs';
+import { gzipSync, gunzipSync } from 'node:zlib';
+import { DatabaseSync } from 'node:sqlite';
 
 import { scenarioDefs } from '../js/engine/scenarioDefs.mjs';
 
@@ -39,12 +42,66 @@ function makeId(prefix = 'w') {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = resolve(__filename, '..');
 const publicDir = resolve(__dirname, 'public');
+const dataDir = resolve(__dirname, 'data');
+const dbPath = resolve(dataDir, 'sim.sqlite');
 const workerUrl = new URL('./worldWorker.mjs', import.meta.url);
+
+mkdirSync(dataDir, { recursive: true });
+
+const db = new DatabaseSync(dbPath);
+db.exec(`
+  PRAGMA journal_mode = WAL;
+  CREATE TABLE IF NOT EXISTS checkpoints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    worldId TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    label TEXT,
+    scenario TEXT,
+    seed INTEGER,
+    tick INTEGER,
+    time REAL,
+    bytes INTEGER,
+    payloadGzip BLOB NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_checkpoints_world_created ON checkpoints(worldId, createdAt DESC);
+`);
+
+const stmtInsertCheckpoint = db.prepare(`
+  INSERT INTO checkpoints (worldId, createdAt, label, scenario, seed, tick, time, bytes, payloadGzip)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+const stmtListCheckpoints = db.prepare(`
+  SELECT id, worldId, createdAt, label, scenario, seed, tick, time, bytes
+  FROM checkpoints
+  WHERE worldId = ?
+  ORDER BY createdAt DESC
+  LIMIT ?
+`);
+
+const stmtGetCheckpoint = db.prepare(`
+  SELECT id, worldId, createdAt, label, scenario, seed, tick, time, bytes, payloadGzip
+  FROM checkpoints
+  WHERE id = ?
+`);
+
+const stmtPruneCheckpoints = db.prepare(`
+  DELETE FROM checkpoints
+  WHERE id IN (
+    SELECT id FROM checkpoints
+    WHERE worldId = ?
+    ORDER BY createdAt DESC
+    LIMIT -1 OFFSET ?
+  )
+`);
 
 const port = Math.floor(parseNum(arg('port', null), 8787));
 const initialScenarioName = arg('scenario', 'micro_repro_sustain');
 const initialSeed = (parseNum(arg('seed', null), 23) >>> 0);
 const maxWorlds = Math.floor(parseNum(arg('maxWorlds', null), 8));
+
+const checkpointEverySec = Math.floor(parseNum(arg('checkpointEverySec', null), 60));
+const checkpointKeep = Math.floor(parseNum(arg('checkpointKeep', null), 50));
 
 const DEFAULT_WORLD_ID = 'w0';
 
@@ -157,6 +214,65 @@ function getWorldOrThrow(id) {
   const handle = worlds.get(key);
   if (!handle) throw new Error(`Unknown world: ${key}`);
   return handle;
+}
+
+function encodeCheckpoint(snapshot) {
+  const json = JSON.stringify(snapshot);
+  const gz = gzipSync(Buffer.from(json, 'utf8'));
+  return { jsonBytes: Buffer.byteLength(json, 'utf8'), gz };
+}
+
+function decodeCheckpoint(gzBuffer) {
+  const json = gunzipSync(gzBuffer).toString('utf8');
+  return JSON.parse(json);
+}
+
+async function checkpointWorld(worldId, { label = null } = {}) {
+  const handle = getWorldOrThrow(worldId);
+  const status = await handle.rpc('getStatus');
+  const createdAt = new Date().toISOString();
+
+  const snapshot = await handle.rpc('saveCheckpoint', {
+    meta: {
+      worldId,
+      label,
+      createdAt,
+      scenario: status?.scenario,
+      seed: status?.seed
+    }
+  });
+
+  const encoded = encodeCheckpoint(snapshot);
+
+  stmtInsertCheckpoint.run(
+    worldId,
+    createdAt,
+    label,
+    String(status?.scenario || ''),
+    Number(status?.seed) || 0,
+    Number(status?.tick) || 0,
+    Number(status?.time) || 0,
+    encoded.gz.length,
+    encoded.gz
+  );
+
+  if (Number.isFinite(checkpointKeep) && checkpointKeep > 0) {
+    stmtPruneCheckpoints.run(worldId, checkpointKeep);
+  }
+
+  const row = db.prepare('SELECT last_insert_rowid() AS id').get();
+  return {
+    ok: true,
+    id: Number(row?.id) || null,
+    worldId,
+    createdAt,
+    label,
+    scenario: status?.scenario,
+    seed: status?.seed,
+    tick: status?.tick,
+    time: status?.time,
+    bytes: encoded.gz.length
+  };
 }
 
 // Bootstrap default world.
@@ -274,6 +390,62 @@ app.post('/api/worlds/:id/control/configOverrides', async (req, reply) => {
   }
 });
 
+// Persistence
+app.post('/api/worlds/:id/checkpoints', async (req, reply) => {
+  try {
+    const label = req.body?.label ? String(req.body.label) : null;
+    return await checkpointWorld(req.params.id, { label });
+  } catch (err) {
+    reply.code(400);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+app.get('/api/worlds/:id/checkpoints', async (req, reply) => {
+  try {
+    const worldId = String(req.params.id);
+    // verify world exists
+    getWorldOrThrow(worldId);
+
+    const limitRaw = Number(req.query?.limit ?? 20);
+    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(200, Math.floor(limitRaw))) : 20;
+
+    const rows = stmtListCheckpoints.all(worldId, limit);
+    return { ok: true, worldId, checkpoints: rows };
+  } catch (err) {
+    reply.code(400);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+app.post('/api/worlds/:id/restore', async (req, reply) => {
+  try {
+    const worldId = String(req.params.id);
+    const checkpointId = Number(req.body?.checkpointId);
+    if (!Number.isFinite(checkpointId)) {
+      reply.code(400);
+      return { ok: false, error: 'checkpointId must be a number' };
+    }
+
+    const row = stmtGetCheckpoint.get(checkpointId);
+    if (!row) {
+      reply.code(404);
+      return { ok: false, error: `checkpoint not found: ${checkpointId}` };
+    }
+    if (String(row.worldId) !== worldId) {
+      reply.code(400);
+      return { ok: false, error: `checkpoint ${checkpointId} belongs to world ${row.worldId}, not ${worldId}` };
+    }
+
+    const snapshot = decodeCheckpoint(row.payloadGzip);
+    const out = await getWorldOrThrow(worldId).rpc('loadCheckpoint', { snapshot });
+    return { ok: true, restored: true, checkpointId, worldId, load: out };
+  } catch (err) {
+    reply.code(400);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 // Legacy aliases (operate on default world w0)
 app.get('/api/status', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('getStatus'));
 app.get('/api/snapshot', async (req) => {
@@ -354,3 +526,15 @@ await app.listen({ port, host: '0.0.0.0' });
 console.log(`[sim-server] listening on http://localhost:${port}`);
 // eslint-disable-next-line no-console
 console.log(`[sim-server] defaultWorld=${DEFAULT_WORLD_ID} scenario=${initialScenarioName} seed=${initialSeed} maxWorlds=${maxWorlds}`);
+console.log(`[sim-server] db=${dbPath} checkpointEverySec=${checkpointEverySec} checkpointKeep=${checkpointKeep}`);
+
+// Auto-checkpoint loop
+if (checkpointEverySec > 0) {
+  setInterval(() => {
+    for (const worldId of worlds.keys()) {
+      checkpointWorld(worldId, { label: 'auto' }).catch(() => {
+        // best-effort; keep server running
+      });
+    }
+  }, checkpointEverySec * 1000);
+}

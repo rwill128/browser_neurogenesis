@@ -2,3 +2,6 @@
 artifacts/
 node_modules/
 sim-server/node_modules/
+sim-server/data/
+*.sqlite
+*.sqlite3

@@ -12,7 +12,12 @@ npm install
 ## Run
 
 ```bash
-node server.mjs --port 8787 --scenario micro_repro_sustain --seed 23
+node server.mjs --port 8787 \
+  --scenario micro_repro_sustain \
+  --seed 23 \
+  --maxWorlds 8 \
+  --checkpointEverySec 60 \
+  --checkpointKeep 50
 ```
 
 Open:
@@ -34,6 +39,13 @@ Open:
 - `POST /api/worlds/:id/control/pause`
 - `POST /api/worlds/:id/control/resume`
 - `POST /api/worlds/:id/control/setScenario` body `{ "name": "micro_predation", "seed": 23 }` (resets that world)
+- `POST /api/worlds/:id/control/configOverrides` body `{ "overrides": { "PHOTOSYNTHESIS_EFFICIENCY": 160 } }`
+
+### Persistence (SQLite)
+
+- `POST /api/worlds/:id/checkpoints` body `{ "label": "optional" }` → create checkpoint
+- `GET /api/worlds/:id/checkpoints?limit=20` → list checkpoints
+- `POST /api/worlds/:id/restore` body `{ "checkpointId": 123 }` → restore checkpoint into the world
 
 ### Legacy aliases (operate on default world `w0`)
 

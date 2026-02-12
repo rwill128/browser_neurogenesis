@@ -236,6 +236,30 @@ parentPort.on('message', (msg) => {
         return reply(requestId, { ok: true, result: out });
       }
 
+      if (method === 'saveCheckpoint') {
+        if (!world || typeof world.saveStateSnapshot !== 'function') {
+          return reply(requestId, { ok: false, error: 'world does not support saveStateSnapshot' });
+        }
+        const meta = args?.meta && typeof args.meta === 'object' ? args.meta : {};
+        const snapshot = world.saveStateSnapshot({
+          ...meta,
+          source: 'sim-server'
+        });
+        return reply(requestId, { ok: true, result: snapshot });
+      }
+
+      if (method === 'loadCheckpoint') {
+        if (!world || typeof world.loadStateSnapshot !== 'function') {
+          return reply(requestId, { ok: false, error: 'world does not support loadStateSnapshot' });
+        }
+        const snapshot = args?.snapshot;
+        if (!snapshot || typeof snapshot !== 'object') {
+          return reply(requestId, { ok: false, error: 'snapshot must be an object' });
+        }
+        const loadInfo = world.loadStateSnapshot(snapshot);
+        return reply(requestId, { ok: true, result: { loaded: true, loadInfo } });
+      }
+
       return reply(requestId, { ok: false, error: `Unknown method: ${method}` });
     }
   } catch (err) {

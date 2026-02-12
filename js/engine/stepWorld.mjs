@@ -398,6 +398,105 @@ function applyVelocityEmitters(state, config) {
   }
 }
 
+function hueToRgb255(h) {
+  const hue = ((Number(h) % 1) + 1) % 1;
+  const i = Math.floor(hue * 6);
+  const f = hue * 6 - i;
+  const q = 1 - f;
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  switch (i % 6) {
+    case 0: r = 1; g = f; b = 0; break;
+    case 1: r = q; g = 1; b = 0; break;
+    case 2: r = 0; g = 1; b = f; break;
+    case 3: r = 0; g = q; b = 1; break;
+    case 4: r = f; g = 0; b = 1; break;
+    case 5: r = 1; g = 0; b = q; break;
+    default: r = 1; g = 1; b = 1; break;
+  }
+
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+
+function ensureLandscapeDyeEmitters(state, config, rng) {
+  if (!state.fluidField) {
+    state.landscapeDyeEmitters = [];
+    return state.landscapeDyeEmitters;
+  }
+
+  const enabled = config.LANDSCAPE_DYE_EMITTERS_ENABLED === true;
+  const count = Math.max(0, Math.floor(Number(config.LANDSCAPE_DYE_EMITTER_COUNT) || 0));
+  if (!enabled || count <= 0) {
+    state.landscapeDyeEmitters = [];
+    return state.landscapeDyeEmitters;
+  }
+
+  if (Array.isArray(state.landscapeDyeEmitters) && state.landscapeDyeEmitters.length === count) {
+    return state.landscapeDyeEmitters;
+  }
+
+  const strengthMin = Math.max(0, Number(config.LANDSCAPE_DYE_EMITTER_STRENGTH_MIN) || 0);
+  const strengthMax = Math.max(strengthMin, Number(config.LANDSCAPE_DYE_EMITTER_STRENGTH_MAX) || strengthMin);
+  const pulseMin = Math.max(0, Number(config.LANDSCAPE_DYE_EMITTER_PULSE_HZ_MIN) || 0);
+  const pulseMax = Math.max(pulseMin, Number(config.LANDSCAPE_DYE_EMITTER_PULSE_HZ_MAX) || pulseMin);
+
+  state.landscapeDyeEmitters = Array.from({ length: count }, () => {
+    const hue = rng();
+    const [r, g, b] = hueToRgb255(hue);
+    return {
+      x: randomInRange(rng, 0, config.WORLD_WIDTH),
+      y: randomInRange(rng, 0, config.WORLD_HEIGHT),
+      r,
+      g,
+      b,
+      baseStrength: randomInRange(rng, strengthMin, strengthMax),
+      pulseHz: randomInRange(rng, pulseMin, pulseMax),
+      phase: randomInRange(rng, 0, Math.PI * 2)
+    };
+  });
+
+  return state.landscapeDyeEmitters;
+}
+
+function applyLandscapeDyeEmitters(state, config, dt, rng) {
+  if (!state.fluidField) return;
+
+  const emitters = ensureLandscapeDyeEmitters(state, config, rng);
+  if (!emitters.length) return;
+
+  const radiusCells = Math.max(0, Math.floor(Number(config.LANDSCAPE_DYE_EMITTER_RADIUS_CELLS) || 0));
+  const t = (Number(state.simulationStep) || 0) * Math.max(0, Number(dt) || 0.01);
+
+  for (const emitter of emitters) {
+    if (!emitter) continue;
+    const gx = Math.floor(Number(emitter.x) / state.fluidField.scaleX);
+    const gy = Math.floor(Number(emitter.y) / state.fluidField.scaleY);
+
+    const pulseHz = Math.max(0, Number(emitter.pulseHz) || 0);
+    const phase = Number(emitter.phase) || 0;
+    const pulse = 0.5 + 0.5 * Math.sin((Math.PI * 2 * pulseHz * t) + phase);
+    const strength = Math.max(0, Number(emitter.baseStrength) || 0) * (0.45 + 0.55 * pulse);
+
+    if (radiusCells <= 0) {
+      state.fluidField.addDensity(gx, gy, emitter.r, emitter.g, emitter.b, strength);
+      continue;
+    }
+
+    for (let dy = -radiusCells; dy <= radiusCells; dy++) {
+      for (let dx = -radiusCells; dx <= radiusCells; dx++) {
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > radiusCells) continue;
+
+        const falloff = Math.max(0.2, 1 - (dist / (radiusCells + 1e-9)));
+        state.fluidField.addDensity(gx + dx, gy + dy, emitter.r, emitter.g, emitter.b, strength * falloff);
+      }
+    }
+  }
+}
+
 /**
  * If a fixed point is being dragged, transfer displacement impulse into fluid.
  */
@@ -776,6 +875,8 @@ export function stepWorld(state, dt, options = {}) {
   if (applySelectedPointPush) {
     maybeApplySelectedPointFluidPush(state, runtimeConfig);
   }
+
+  applyLandscapeDyeEmitters(state, runtimeConfig, dt, rng);
 
   if (state.fluidField) {
     state.fluidField.dt = dt;

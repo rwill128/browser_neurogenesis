@@ -17,6 +17,12 @@ export const scenarioDefs = {
       PARTICLE_POPULATION_CEILING: 0,
       PARTICLES_PER_SECOND: 0,
       EATER_NODE_ENERGY_COST: 0.25,
+      FLUID_FADE_RATE: 0.003,
+      LANDSCAPE_DYE_EMITTERS_ENABLED: true,
+      LANDSCAPE_DYE_EMITTER_COUNT: 42,
+      LANDSCAPE_DYE_EMITTER_STRENGTH_MIN: 10,
+      LANDSCAPE_DYE_EMITTER_STRENGTH_MAX: 24,
+      LANDSCAPE_DYE_EMITTER_RADIUS_CELLS: 1,
       FLUID_GRID_SIZE_CONTROL: 128,
       AUTO_FOLLOW_CREATURE: true
     },
@@ -33,7 +39,13 @@ export const scenarioDefs = {
       steps: 0,
       events: [],
       configOverrides: {
-        EATER_NODE_ENERGY_COST: 0.25
+        EATER_NODE_ENERGY_COST: 0.25,
+        FLUID_FADE_RATE: 0.003,
+        LANDSCAPE_DYE_EMITTERS_ENABLED: true,
+        LANDSCAPE_DYE_EMITTER_COUNT: 42,
+        LANDSCAPE_DYE_EMITTER_STRENGTH_MIN: 10,
+        LANDSCAPE_DYE_EMITTER_STRENGTH_MAX: 24,
+        LANDSCAPE_DYE_EMITTER_RADIUS_CELLS: 1
       },
       stepBehavior: {
         allowReproduction: true,

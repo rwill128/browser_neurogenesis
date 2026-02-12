@@ -34,3 +34,11 @@ test('intra-body repulsion is enabled with slight default strength', () => {
   assert.ok(Number(config.INTRA_BODY_REPULSION_RADIUS_FACTOR) > 0);
   assert.equal(config.INTRA_BODY_REPULSION_SKIP_CONNECTED, true);
 });
+
+test('landscape dye emitter defaults are available and disabled by default', () => {
+  assert.equal(config.LANDSCAPE_DYE_EMITTERS_ENABLED, false);
+  assert.equal(Number(config.LANDSCAPE_DYE_EMITTER_COUNT), 0);
+  assert.ok(Number(config.LANDSCAPE_DYE_EMITTER_STRENGTH_MIN) >= 0);
+  assert.ok(Number(config.LANDSCAPE_DYE_EMITTER_STRENGTH_MAX) >= Number(config.LANDSCAPE_DYE_EMITTER_STRENGTH_MIN));
+  assert.ok(Number(config.FLUID_FADE_RATE) > 0);
+});

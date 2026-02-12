@@ -110,6 +110,13 @@ function createRuntimeConfig(overrides = {}) {
     CREATURE_POPULATION_CEILING: 100,
     velocityEmitters: [],
     EMITTER_STRENGTH: 1,
+    LANDSCAPE_DYE_EMITTERS_ENABLED: false,
+    LANDSCAPE_DYE_EMITTER_COUNT: 0,
+    LANDSCAPE_DYE_EMITTER_STRENGTH_MIN: 8,
+    LANDSCAPE_DYE_EMITTER_STRENGTH_MAX: 18,
+    LANDSCAPE_DYE_EMITTER_RADIUS_CELLS: 0,
+    LANDSCAPE_DYE_EMITTER_PULSE_HZ_MIN: 0.02,
+    LANDSCAPE_DYE_EMITTER_PULSE_HZ_MAX: 0.09,
     selectedSoftBodyPoint: null,
     SOFT_BODY_PUSH_STRENGTH: 1,
     isAnySoftBodyUnstable: false,
@@ -180,6 +187,37 @@ test('stepWorld maintains creature/particle floors and wires spawned creatures',
     assert.equal(body.particles, state.particles);
     assert.equal(body.spatialGrid, state.spatialGrid);
   }
+});
+
+test('stepWorld injects landscape dye emitters into fluid when enabled', () => {
+  const runtime = createRuntimeConfig({
+    LANDSCAPE_DYE_EMITTERS_ENABLED: true,
+    LANDSCAPE_DYE_EMITTER_COUNT: 3,
+    LANDSCAPE_DYE_EMITTER_STRENGTH_MIN: 4,
+    LANDSCAPE_DYE_EMITTER_STRENGTH_MAX: 4,
+    LANDSCAPE_DYE_EMITTER_RADIUS_CELLS: 0
+  });
+
+  const fluidField = new FakeFluidField();
+  const state = createWorldState({
+    runtime,
+    softBodies: [],
+    particles: [],
+    fluidField
+  });
+
+  stepWorld(state, 0.01, {
+    config: runtime,
+    rng: () => 0.25,
+    maintainCreatureFloor: false,
+    maintainParticleFloor: false,
+    applyEmitters: false,
+    applySelectedPointPush: false
+  });
+
+  assert.equal(Array.isArray(state.landscapeDyeEmitters), true);
+  assert.equal(state.landscapeDyeEmitters.length, 3);
+  assert.equal(fluidField.densityCalls, 3);
 });
 
 test('stepWorld allows reproduction only when enabled and globally allowed', () => {

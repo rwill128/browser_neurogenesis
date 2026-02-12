@@ -68,6 +68,14 @@ function zoomAround(cam, sx, sy, zoomFactor) {
   cam.offsetY = sy - before.y * cam.zoom;
 }
 
+function eventToCanvasXY(ev) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: ev.clientX - rect.left,
+    y: ev.clientY - rect.top
+  };
+}
+
 function resizeCanvas() {
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
@@ -126,6 +134,9 @@ function colorForVertex(v) {
   return 'rgba(255,255,255,0.75)';
 }
 
+const selectionByWorld = new Map();
+const followByWorld = new Map();
+
 function drawSnapshot(snap) {
   const rect = canvas.getBoundingClientRect();
 
@@ -140,6 +151,18 @@ function drawSnapshot(snap) {
     fitCameraToWorld(worldId, worldW, worldH);
   }
 
+  // follow camera (center selected creature)
+  const followId = followByWorld.get(worldId) || null;
+  if (followId !== null) {
+    const target = (snap.creatures || []).find((c) => c && String(c.id) === String(followId));
+    if (target?.center) {
+      const cx = Number(target.center.x) || 0;
+      const cy = Number(target.center.y) || 0;
+      cam.offsetX = (rect.width / 2) - cx * cam.zoom;
+      cam.offsetY = (rect.height / 2) - cy * cam.zoom;
+    }
+  }
+
   ctx.clearRect(0, 0, rect.width, rect.height);
 
   // world bounds
@@ -150,32 +173,46 @@ function drawSnapshot(snap) {
   const worldToScreenX = (x) => cam.offsetX + x * cam.zoom;
   const worldToScreenY = (y) => cam.offsetY + y * cam.zoom;
 
-  // Fluid (sparse cell list)
+  // Fluid (sparse cell list) — NOTE: server snapshot uses worldCell.width/height (not cellSize)
   const fluid = snap.fluid;
-  if (fluid && Array.isArray(fluid.cells) && Number.isFinite(fluid.cellSize) && fluid.cellSize > 0) {
-    const cs = fluid.cellSize;
+  const cellW = Number(fluid?.worldCell?.width) || 0;
+  const cellH = Number(fluid?.worldCell?.height) || 0;
+  if (fluid && Array.isArray(fluid.cells) && cellW > 0 && cellH > 0) {
     for (const cell of fluid.cells) {
-      const gx = cell.gx;
-      const gy = cell.gy;
-      const rgb = cell.rgb || [80, 80, 110];
-      const alpha = Math.max(0.06, Math.min(0.45, (cell.density || 0) / 255));
-      ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
+      const r = Number(cell.r) || 0;
+      const g = Number(cell.g) || 0;
+      const b = Number(cell.b) || 0;
+      const dye = Number(cell.dye) || (r + g + b);
+      const speed = Number(cell.speed) || 0;
+
+      // Prefer dye color; fall back to speed when dye is low.
+      const alpha = Math.max(0.03, Math.min(0.35, (dye / 255) * 0.35 + Math.min(0.15, speed * 0.04)));
+      ctx.fillStyle = `rgba(${Math.min(255, r)},${Math.min(255, g)},${Math.min(255, b)},${alpha})`;
+
+      const x = Number(cell.x);
+      const y = Number(cell.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
       ctx.fillRect(
-        worldToScreenX(gx * cs),
-        worldToScreenY(gy * cs),
-        cs * cam.zoom,
-        cs * cam.zoom
+        worldToScreenX(x - cellW * 0.5),
+        worldToScreenY(y - cellH * 0.5),
+        cellW * cam.zoom,
+        cellH * cam.zoom
       );
     }
   }
+
+  const selectedId = selectionByWorld.get(worldId) || null;
 
   for (const c of snap.creatures || []) {
     const verts = c.vertices || [];
     const springs = c.springs || [];
 
+    const isSelected = selectedId !== null && String(c.id) === String(selectedId);
+
     // non-rigid springs
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(220,220,240,0.18)';
+    ctx.lineWidth = isSelected ? 1.5 : 1;
+    ctx.strokeStyle = isSelected ? 'rgba(220,220,240,0.35)' : 'rgba(220,220,240,0.18)';
     ctx.beginPath();
     for (const s of springs) {
       if (s.isRigid) continue;
@@ -188,8 +225,8 @@ function drawSnapshot(snap) {
     ctx.stroke();
 
     // rigid springs
-    ctx.lineWidth = 1.5;
-    ctx.strokeStyle = 'rgba(255, 230, 90, 0.40)';
+    ctx.lineWidth = isSelected ? 2.0 : 1.5;
+    ctx.strokeStyle = isSelected ? 'rgba(255, 230, 90, 0.65)' : 'rgba(255, 230, 90, 0.40)';
     ctx.beginPath();
     for (const s of springs) {
       if (!s.isRigid) continue;
@@ -217,7 +254,43 @@ function drawSnapshot(snap) {
         ctx.stroke();
       }
     }
+
+    if (isSelected && c.center) {
+      ctx.fillStyle = 'rgba(255,255,255,0.65)';
+      ctx.beginPath();
+      ctx.arc(worldToScreenX(c.center.x), worldToScreenY(c.center.y), 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
+
+  // telemetry panel: world + fluid + selected creature
+  const selected = selectedId !== null
+    ? (snap.creatures || []).find((c) => c && String(c.id) === String(selectedId))
+    : null;
+
+  telemetryEl.textContent = JSON.stringify({
+    world: worldId,
+    scenario: snap.scenario,
+    tick: snap.tick,
+    time: snap.time,
+    populations: snap.populations,
+    camera: { zoom: cam.zoom, offsetX: cam.offsetX, offsetY: cam.offsetY },
+    fluid: fluid ? {
+      gridSize: fluid.gridSize,
+      activeCells: fluid.activeCells,
+      scannedCells: fluid.scannedCells,
+      maxDye: fluid.maxDye,
+      maxSpeed: fluid.maxSpeed
+    } : null,
+    selectedCreature: selected ? {
+      id: selected.id,
+      energy: selected.energy,
+      center: selected.center,
+      nodeTypeCounts: selected.nodeTypeCounts,
+      actuationTelemetry: selected.actuationTelemetry
+    } : null,
+    following: followId
+  }, null, 2);
 }
 
 async function refreshScenarios() {
@@ -281,15 +354,6 @@ function connectStream({ worldId, mode = 'render', hz = 10 } = {}) {
         statusEl.textContent = `world=${s.id} scenario=${s.scenario} seed=${s.seed} tick=${s.tick} t=${fmt(s.time, 2)} dt=${fmt(s.dt, 5)} paused=${s.paused} sps=${s.stepsPerSecond} stepWallMs=${s.lastStepWallMs}${zoomLabel}`;
       } else if (msg.kind === 'snapshot') {
         const snap = msg.data;
-        telemetryEl.textContent = JSON.stringify({
-          world: snap.id,
-          scenario: snap.scenario,
-          tick: snap.tick,
-          time: snap.time,
-          populations: snap.populations,
-          creatures: (snap.creatures || []).length,
-          fluidCells: snap.fluid?.cells?.length ?? 0
-        }, null, 2);
         drawSnapshot(snap);
       }
     } catch {
@@ -350,39 +414,110 @@ fitBtn.addEventListener('click', async () => {
   fitCameraToWorld(currentWorldId, cam.worldW || 1, cam.worldH || 1);
 });
 
+// Follow selected creature
+window.addEventListener('keydown', (ev) => {
+  if (!currentWorldId) return;
+  if (ev.key.toLowerCase() === 'f') {
+    const sel = selectionByWorld.get(currentWorldId);
+    if (sel !== undefined && sel !== null) {
+      const isFollowing = String(followByWorld.get(currentWorldId) || '') === String(sel);
+      if (isFollowing) followByWorld.delete(currentWorldId);
+      else followByWorld.set(currentWorldId, sel);
+    }
+  }
+  if (ev.key === 'Escape') {
+    selectionByWorld.delete(currentWorldId);
+    followByWorld.delete(currentWorldId);
+  }
+});
+
 // Pan + zoom controls
 let isDragging = false;
 let lastDragX = 0;
 let lastDragY = 0;
 
+let dragMovedPx = 0;
+
 canvas.addEventListener('pointerdown', (ev) => {
   if (ev.button !== 0) return;
   if (!currentWorldId) return;
+
+  const p = eventToCanvasXY(ev);
   isDragging = true;
-  lastDragX = ev.clientX;
-  lastDragY = ev.clientY;
+  dragMovedPx = 0;
+  lastDragX = p.x;
+  lastDragY = p.y;
   canvas.setPointerCapture(ev.pointerId);
 });
 
 canvas.addEventListener('pointermove', (ev) => {
   if (!isDragging) return;
   if (!currentWorldId) return;
+
+  const p = eventToCanvasXY(ev);
   const cam = getCamera(currentWorldId);
-  const dx = ev.clientX - lastDragX;
-  const dy = ev.clientY - lastDragY;
+  const dx = p.x - lastDragX;
+  const dy = p.y - lastDragY;
+  dragMovedPx += Math.sqrt(dx * dx + dy * dy);
+
   cam.offsetX += dx;
   cam.offsetY += dy;
-  lastDragX = ev.clientX;
-  lastDragY = ev.clientY;
+
+  lastDragX = p.x;
+  lastDragY = p.y;
 });
 
-function endDrag(ev) {
+async function maybeSelectCreatureAt(ev) {
+  if (!currentWorldId) return;
+  if (dragMovedPx > 4) return; // treat as pan, not click
+
+  // Query a lite snapshot for selection without stopping the stream.
+  // (Could also cache the last render snapshot; keep it simple for now.)
+  const snap = await apiGet(`/api/worlds/${encodeURIComponent(currentWorldId)}/snapshot?mode=render`);
+  const cam = getCamera(currentWorldId);
+
+  const p = eventToCanvasXY(ev);
+  const w = screenToWorld(cam, p.x, p.y);
+
+  let best = null;
+  let bestD2 = Infinity;
+
+  for (const c of snap.creatures || []) {
+    if (!c?.center) continue;
+    const dx = (Number(c.center.x) || 0) - w.x;
+    const dy = (Number(c.center.y) || 0) - w.y;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = c;
+    }
+  }
+
+  // 120 world units default pick radius (scaled a bit by zoom)
+  const pickRadius = 120;
+  if (best && bestD2 <= pickRadius * pickRadius) {
+    selectionByWorld.set(currentWorldId, best.id);
+  } else {
+    selectionByWorld.delete(currentWorldId);
+    followByWorld.delete(currentWorldId);
+  }
+}
+
+async function endDrag(ev) {
   if (!isDragging) return;
   isDragging = false;
+
   try { canvas.releasePointerCapture(ev.pointerId); } catch {}
+
+  // click selects
+  try {
+    await maybeSelectCreatureAt(ev);
+  } catch {
+    // ignore
+  }
 }
-canvas.addEventListener('pointerup', endDrag);
-canvas.addEventListener('pointercancel', endDrag);
+canvas.addEventListener('pointerup', (ev) => { endDrag(ev); });
+canvas.addEventListener('pointercancel', (ev) => { endDrag(ev); });
 
 canvas.addEventListener('dblclick', () => {
   if (!currentWorldId) return;
@@ -395,10 +530,11 @@ canvas.addEventListener('wheel', (ev) => {
   ev.preventDefault();
 
   const cam = getCamera(currentWorldId);
+  const p = eventToCanvasXY(ev);
 
   // wheel delta is in screen pixels; use exponential scaling for smoothness.
   const zoomFactor = Math.exp(-ev.deltaY * 0.0015);
-  zoomAround(cam, ev.clientX, ev.clientY, zoomFactor);
+  zoomAround(cam, p.x, p.y, zoomFactor);
 }, { passive: false });
 
 await refreshScenarios();

@@ -445,6 +445,58 @@ test('stepWorld captures detailed instability telemetry for removed bodies', () 
   assert.equal(telemetry.recentDeaths.length, 1);
 });
 
+test('stepWorld separates invalid-motion vs nan/non-finite reasons and samples diagnostics', () => {
+  const runtime = createRuntimeConfig({ isAnySoftBodyUnstable: true });
+
+  const badMotion = new FakeSoftBody(201, 30, 30);
+  badMotion.isUnstable = true;
+  badMotion.unstableReason = 'physics_invalid_motion';
+  badMotion.unstableReasonDetails = { pointIndex: 0, displacementSq: 999 };
+
+  const badNaN = new FakeSoftBody(202, 32, 30);
+  badNaN.isUnstable = true;
+  badNaN.unstableReason = 'physics_nan_position';
+  badNaN.unstableReasonDetails = { pointIndex: 0, pos: { x: NaN, y: 1 } };
+
+  const badInfinite = new FakeSoftBody(203, 34, 30);
+  badInfinite.isUnstable = true;
+  badInfinite.unstableReason = 'physics_non_finite_position';
+  badInfinite.unstableReasonDetails = { pointIndex: 0, pos: { x: Infinity, y: 1 } };
+
+  const state = createWorldState({ runtime, softBodies: [badMotion, badNaN, badInfinite], particles: [] });
+
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  let result;
+  try {
+    result = stepWorld(state, 0.01, {
+      config: runtime,
+      allowReproduction: false,
+      maintainCreatureFloor: false,
+      maintainParticleFloor: false,
+      captureInstabilityTelemetry: true,
+      instabilityDiagnosticEveryN: 1
+    });
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(result.removedCount, 3);
+  assert.equal(state.instabilityTelemetry.removedByReason.physics_invalid_motion, 1);
+  assert.equal(state.instabilityTelemetry.removedByReason.physics_nan_position, 1);
+  assert.equal(state.instabilityTelemetry.removedByReason.physics_non_finite_position, 1);
+
+  assert.equal(state.instabilityTelemetry.removedByPhysicsKind.invalid_motion, 1);
+  assert.equal(state.instabilityTelemetry.removedByPhysicsKind.non_finite_numeric, 2);
+
+  assert.equal(Array.isArray(state.instabilityTelemetry.sampledDiagnostics), true);
+  assert.equal(state.instabilityTelemetry.sampledDiagnostics.length >= 3, true);
+  const reasons = state.instabilityTelemetry.sampledDiagnostics.map((s) => s?.event?.unstableReason);
+  assert.equal(reasons.includes('physics_invalid_motion'), true);
+  assert.equal(reasons.includes('physics_nan_position'), true);
+  assert.equal(reasons.includes('physics_non_finite_position'), true);
+});
+
 test('stepWorld floor-spawn applies newborn fit + spring clamping', () => {
   class SpawnedBody {
     constructor(id, x, y) {

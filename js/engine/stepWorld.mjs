@@ -52,7 +52,9 @@ function ensureInstabilityTelemetryState(state, maxRecentDeaths = 1000) {
       removedByPhysicsKind: {},
       recentDeaths: [],
       maxRecentDeaths,
-      lastDeathSeq: 0
+      lastDeathSeq: 0,
+      sampledDiagnostics: [],
+      maxSampledDiagnostics: 50
     };
   }
 
@@ -64,8 +66,10 @@ function ensureInstabilityTelemetryState(state, maxRecentDeaths = 1000) {
   t.removedByReason = t.removedByReason && typeof t.removedByReason === 'object' ? t.removedByReason : {};
   t.removedByPhysicsKind = t.removedByPhysicsKind && typeof t.removedByPhysicsKind === 'object' ? t.removedByPhysicsKind : {};
   t.recentDeaths = Array.isArray(t.recentDeaths) ? t.recentDeaths : [];
+  t.sampledDiagnostics = Array.isArray(t.sampledDiagnostics) ? t.sampledDiagnostics : [];
   t.lastDeathSeq = Number(t.lastDeathSeq) || 0;
   t.maxRecentDeaths = Math.max(10, Math.floor(Number(t.maxRecentDeaths) || maxRecentDeaths));
+  t.maxSampledDiagnostics = Math.max(5, Math.floor(Number(t.maxSampledDiagnostics) || 50));
   return t;
 }
 
@@ -74,8 +78,15 @@ function classifyInstabilityReason(reason) {
   if (r === 'physics_out_of_bounds') {
     return { unstableClass: 'physics', unstablePhysicsKind: 'boundary_exit' };
   }
+  // Backward-compat legacy bucket.
   if (r === 'physics_invalid_motion_or_nan') {
     return { unstableClass: 'physics', unstablePhysicsKind: 'numeric_or_nan' };
+  }
+  if (r === 'physics_invalid_motion') {
+    return { unstableClass: 'physics', unstablePhysicsKind: 'invalid_motion' };
+  }
+  if (r === 'physics_nan_position' || r === 'physics_non_finite_position') {
+    return { unstableClass: 'physics', unstablePhysicsKind: 'non_finite_numeric' };
   }
   if (r === 'physics_spring_overstretch' || r === 'physics_span_exceeded') {
     return { unstableClass: 'physics', unstablePhysicsKind: 'geometric_explosion' };
@@ -208,6 +219,38 @@ function summarizeHeritableParameters(body) {
   };
 }
 
+function summarizeDecisionState(body) {
+  const brainNode = body?.brain?.brainNode || null;
+  const nd = brainNode?.neuronData || null;
+
+  const inputLabeled = Array.isArray(nd?.currentFrameInputVectorWithLabels)
+    ? nd.currentFrameInputVectorWithLabels.slice(0, 24).map((e) => ({
+        label: String(e?.label || ''),
+        value: round(e?.value, 6)
+      }))
+    : [];
+
+  const rawOutputs = Array.isArray(nd?.rawOutputs)
+    ? nd.rawOutputs.slice(0, 24).map((v) => round(v, 6))
+    : [];
+
+  return {
+    hasBrainNode: Boolean(brainNode),
+    brainPointIndex: Array.isArray(body?.massPoints) ? body.massPoints.indexOf(brainNode) : -1,
+    rewardStrategy: Number.isFinite(Number(body?.rewardStrategy)) ? Number(body.rewardStrategy) : null,
+    rlAlgorithmType: Number.isFinite(Number(body?.rlAlgorithmType)) ? Number(body.rlAlgorithmType) : null,
+    inputVectorSize: Number.isFinite(Number(nd?.inputVectorSize)) ? Number(nd.inputVectorSize) : null,
+    outputVectorSize: Number.isFinite(Number(nd?.outputVectorSize)) ? Number(nd.outputVectorSize) : null,
+    hiddenLayerSize: Number.isFinite(Number(nd?.hiddenLayerSize)) ? Number(nd.hiddenLayerSize) : null,
+    sampledInputs: inputLabeled,
+    sampledRawOutputs: rawOutputs,
+    ticksSinceBirth: Number.isFinite(Number(body?.ticksSinceBirth)) ? Number(body.ticksSinceBirth) : null,
+    canReproduce: Boolean(body?.canReproduce),
+    creatureEnergy: round(body?.creatureEnergy, 6),
+    currentMaxEnergy: round(body?.currentMaxEnergy, 6)
+  };
+}
+
 function buildInstabilityRemovalEvent(state, body) {
   const reason = String(body?.unstableReason || 'unknown');
   const classification = classifyInstabilityReason(reason);
@@ -220,6 +263,7 @@ function buildInstabilityRemovalEvent(state, body) {
     simulationStep: Number(state.simulationStep) || 0,
     bodyId: Number.isFinite(Number(body?.id)) ? Number(body.id) : null,
     unstableReason: reason,
+    unstableReasonDetails: deepClone(body?.unstableReasonDetails || null),
     unstableClass: classification.unstableClass,
     unstablePhysicsKind: classification.unstablePhysicsKind,
     physicsStabilityDeath: classification.unstableClass === 'physics',
@@ -228,7 +272,8 @@ function buildInstabilityRemovalEvent(state, body) {
     currentMaxEnergy: round(body?.currentMaxEnergy, 6),
     hereditaryBlueprint: summarizeHereditaryBlueprint(body),
     physiology: summarizePhenotype(body),
-    heritableParameters: summarizeHeritableParameters(body)
+    heritableParameters: summarizeHeritableParameters(body),
+    decisionSnapshot: summarizeDecisionState(body)
   };
 }
 
@@ -387,10 +432,49 @@ function removeDeadParticles(state, dt, rng) {
   }
 }
 
+function maybeLogInstabilityDiagnostic(telemetry, removalEvent, {
+  diagnosticEveryN = 100,
+  diagnosticReasons = null
+} = {}) {
+  const everyN = Math.max(1, Math.floor(Number(diagnosticEveryN) || 100));
+  const reason = String(removalEvent?.unstableReason || 'unknown');
+
+  const watched = Array.isArray(diagnosticReasons) && diagnosticReasons.length > 0
+    ? new Set(diagnosticReasons.map((r) => String(r)))
+    : new Set(['physics_invalid_motion', 'physics_nan_position', 'physics_non_finite_position', 'physics_invalid_motion_or_nan']);
+
+  if (!watched.has(reason)) return;
+
+  const reasonCount = Number(telemetry?.removedByReason?.[reason]) || 0;
+  if (reasonCount <= 0 || (reasonCount % everyN) !== 0) return;
+
+  const sample = {
+    sampledAt: new Date().toISOString(),
+    reasonCountForReason: reasonCount,
+    event: removalEvent
+  };
+
+  telemetry.sampledDiagnostics.push(sample);
+  if (telemetry.sampledDiagnostics.length > telemetry.maxSampledDiagnostics) {
+    telemetry.sampledDiagnostics.splice(0, telemetry.sampledDiagnostics.length - telemetry.maxSampledDiagnostics);
+  }
+
+  try {
+    console.warn(`[instability-diagnostic] ${JSON.stringify(sample)}`);
+  } catch {
+    console.warn('[instability-diagnostic] (json serialization failed)');
+  }
+}
+
 /**
  * Remove unstable bodies and capture rich removal telemetry for diagnostics.
  */
-function removeUnstableBodies(state, { captureInstabilityTelemetry = true, maxRecentDeaths = 1000 } = {}) {
+function removeUnstableBodies(state, {
+  captureInstabilityTelemetry = true,
+  maxRecentDeaths = 1000,
+  diagnosticEveryN = 100,
+  diagnosticReasons = null
+} = {}) {
   let removedCount = 0;
   const removedBodies = [];
   const telemetry = ensureInstabilityTelemetryState(state, maxRecentDeaths);
@@ -415,6 +499,11 @@ function removeUnstableBodies(state, { captureInstabilityTelemetry = true, maxRe
       if (telemetry.recentDeaths.length > telemetry.maxRecentDeaths) {
         telemetry.recentDeaths.splice(0, telemetry.recentDeaths.length - telemetry.maxRecentDeaths);
       }
+
+      maybeLogInstabilityDiagnostic(telemetry, removalEvent, {
+        diagnosticEveryN,
+        diagnosticReasons
+      });
     }
 
     removedBodies.push(removalEvent);
@@ -448,7 +537,9 @@ export function stepWorld(state, dt, options = {}) {
     applySelectedPointPush = true,
     creatureSpawnMargin = 50,
     captureInstabilityTelemetry = true,
-    maxRecentInstabilityDeaths = 1000
+    maxRecentInstabilityDeaths = 1000,
+    instabilityDiagnosticEveryN = null,
+    instabilityDiagnosticReasons = null
   } = options;
 
   const { runtime: runtimeConfig, constants } = resolveConfigViews(configViews || config);
@@ -632,7 +723,9 @@ export function stepWorld(state, dt, options = {}) {
 
   const removal = removeUnstableBodies(state, {
     captureInstabilityTelemetry,
-    maxRecentDeaths: maxRecentInstabilityDeaths
+    maxRecentDeaths: maxRecentInstabilityDeaths,
+    diagnosticEveryN: instabilityDiagnosticEveryN ?? runtimeConfig.INSTABILITY_DIAGNOSTIC_EVERY_N ?? 100,
+    diagnosticReasons: instabilityDiagnosticReasons ?? runtimeConfig.INSTABILITY_DIAGNOSTIC_REASONS ?? null
   });
   const removedCount = removal.removedCount;
   const removedBodies = removal.removedBodies;

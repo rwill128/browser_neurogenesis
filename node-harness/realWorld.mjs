@@ -493,6 +493,9 @@ export class RealWorld {
         removedByPhysicsKind: instabilityTelemetry.removedByPhysicsKind || {},
         recentDeaths: Array.isArray(instabilityTelemetry.recentDeaths)
           ? instabilityTelemetry.recentDeaths.slice(-20)
+          : [],
+        sampledDiagnostics: Array.isArray(instabilityTelemetry.sampledDiagnostics)
+          ? instabilityTelemetry.sampledDiagnostics.slice(-10)
           : []
       },
       mutationStats: this.worldState?.mutationStats || {},

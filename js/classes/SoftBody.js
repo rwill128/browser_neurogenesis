@@ -2932,12 +2932,56 @@ export class SoftBody {
         }
 
         const MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ = (config.MAX_PIXELS_PER_FRAME_DISPLACEMENT) ** 2;
-        for (let point of this.massPoints) {
+        for (let i = 0; i < this.massPoints.length; i++) {
+            const point = this.massPoints[i];
             if (point.isFixed) continue;
 
-            const displacementSq = (point.pos.x - point.prevPos.x) ** 2 + (point.pos.y - point.prevPos.y) ** 2;
-            if (displacementSq > MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ || isNaN(point.pos.x) || isNaN(point.pos.y) || !isFinite(point.pos.x) || !isFinite(point.pos.y)) {
-                this._markUnstable('physics_invalid_motion_or_nan');
+            const displacementX = point.pos.x - point.prevPos.x;
+            const displacementY = point.pos.y - point.prevPos.y;
+            const displacementSq = displacementX ** 2 + displacementY ** 2;
+
+            const posXNaN = Number.isNaN(point.pos.x);
+            const posYNaN = Number.isNaN(point.pos.y);
+            const posXFinite = Number.isFinite(point.pos.x);
+            const posYFinite = Number.isFinite(point.pos.y);
+
+            if (displacementSq > MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ) {
+                this._markUnstable('physics_invalid_motion', {
+                    pointIndex: i,
+                    displacementX,
+                    displacementY,
+                    displacementSq,
+                    displacementLimitSq: MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ,
+                    pos: { x: point.pos.x, y: point.pos.y },
+                    prevPos: { x: point.prevPos.x, y: point.prevPos.y },
+                    nodeType: point.nodeType,
+                    movementType: point.movementType,
+                    ticksSinceBirth: this.ticksSinceBirth
+                });
+                return;
+            }
+
+            if (posXNaN || posYNaN) {
+                this._markUnstable('physics_nan_position', {
+                    pointIndex: i,
+                    pos: { x: point.pos.x, y: point.pos.y },
+                    prevPos: { x: point.prevPos.x, y: point.prevPos.y },
+                    nodeType: point.nodeType,
+                    movementType: point.movementType,
+                    ticksSinceBirth: this.ticksSinceBirth
+                });
+                return;
+            }
+
+            if (!posXFinite || !posYFinite) {
+                this._markUnstable('physics_non_finite_position', {
+                    pointIndex: i,
+                    pos: { x: point.pos.x, y: point.pos.y },
+                    prevPos: { x: point.prevPos.x, y: point.prevPos.y },
+                    nodeType: point.nodeType,
+                    movementType: point.movementType,
+                    ticksSinceBirth: this.ticksSinceBirth
+                });
                 return;
             }
 

@@ -20,6 +20,9 @@ const config = {
 
     // Instability policy: when false, boundary crossings are resolved via clamp/wrap instead of instant death.
     KILL_ON_OUT_OF_BOUNDS: true,
+    // Sample high-fidelity instability diagnostics to logs every N removals (per reason).
+    INSTABILITY_DIAGNOSTIC_EVERY_N: 100,
+    INSTABILITY_DIAGNOSTIC_REASONS: ['physics_invalid_motion', 'physics_nan_position', 'physics_non_finite_position'],
     DYE_PULL_RATE: 0.05,
 
     // Dye ecology (new): heritable color receptors + soft gating/buffs by local fluid dye niche.

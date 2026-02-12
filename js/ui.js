@@ -718,7 +718,7 @@ function getSafeMaxZoom() {
 }
 
 // --- Event Listeners ---
-function cycleSelectedCreature(direction = 1) {
+function cycleSelectedCreature(direction = 1, { relockFollow = true } = {}) {
     const liveBodies = softBodyPopulation.filter(body => !body.isUnstable && body.massPoints && body.massPoints.length > 0);
     if (liveBodies.length === 0) return;
 
@@ -727,10 +727,18 @@ function cycleSelectedCreature(direction = 1) {
     idx = (idx + direction + liveBodies.length) % liveBodies.length;
 
     const nextBody = liveBodies[idx];
+
+    // Arrow/mobile creature cycling is intended as a follow-navigation control.
+    // Re-lock follow after manual pan/zoom and jump camera immediately to the new target.
+    if (relockFollow) {
+        config.AUTO_FOLLOW_CREATURE = true;
+        focusOnCreature(nextBody);
+        return;
+    }
+
     config.selectedInspectBody = nextBody;
     config.selectedInspectPointIndex = 0;
     config.selectedInspectPoint = nextBody.massPoints[0] || null;
-
     updateInfoPanel();
 }
 

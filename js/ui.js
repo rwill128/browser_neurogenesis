@@ -292,9 +292,8 @@ function updateSliderDisplay(slider, span) {
     }
 }
 
-function initializeAllSliderDisplays() {
-    // Array of [sliderElement, jsVariableString, needsFloatConversion]
-    const allSliders = [
+function getAllSliderBindings() {
+    return [
         [zoomSensitivitySlider, "ZOOM_SENSITIVITY", true, zoomSensitivityValueSpan],
         [creaturePopulationFloorSlider, "CREATURE_POPULATION_FLOOR", false, creaturePopulationFloorValueSpan],
         [creaturePopulationCeilingSlider, "CREATURE_POPULATION_CEILING", false, creaturePopulationCeilingValueSpan],
@@ -336,7 +335,7 @@ function initializeAllSliderDisplays() {
         [fluidGridSizeSlider, "FLUID_GRID_SIZE_CONTROL", false, fluidGridSizeValueSpan],
         [fluidDiffusionSlider, "FLUID_DIFFUSION", true, fluidDiffusionValueSpan],
         [fluidViscositySlider, "FLUID_VISCOSITY", true, fluidViscosityValueSpan],
-        [fluidFadeSlider, "FLUID_FADE_RATE", true, fluidFadeValueSpan], // Corrected from fluidFadeValueSpan
+        [fluidFadeSlider, "FLUID_FADE_RATE", true, fluidFadeValueSpan],
         [maxTimestepSlider, "MAX_DELTA_TIME_MS", false, maxTimestepValueSpan],
         [maxFluidVelocityComponentSlider, "MAX_FLUID_VELOCITY_COMPONENT", true, maxFluidVelocityComponentValueSpan],
         [particlePopulationFloorSlider, "PARTICLE_POPULATION_FLOOR", false, particlePopulationFloorValueSpan],
@@ -345,32 +344,89 @@ function initializeAllSliderDisplays() {
         [particleFluidInfluenceSlider, "PARTICLE_FLUID_INFLUENCE", true, particleFluidInfluenceValueSpan],
         [particleLifeDecaySlider, "PARTICLE_BASE_LIFE_DECAY", true, particleLifeDecayValueSpan],
         [emitterStrengthSlider, "EMITTER_STRENGTH", true, emitterStrengthValueSpan],
-        // Nutrient map sliders
+
         [nutrientBrushValueSlider, "NUTRIENT_BRUSH_VALUE", true, nutrientBrushValueSpan],
         [nutrientBrushSizeSlider, "NUTRIENT_BRUSH_SIZE", false, nutrientBrushSizeSpan],
         [nutrientBrushStrengthSlider, "NUTRIENT_BRUSH_STRENGTH", true, nutrientBrushStrengthSpan],
         [nutrientCyclePeriodSlider, "nutrientCyclePeriodSeconds", false, nutrientCyclePeriodSpan],
         [nutrientCycleBaseAmplitudeSlider, "nutrientCycleBaseAmplitude", true, nutrientCycleBaseAmplitudeSpan],
         [nutrientCycleWaveAmplitudeSlider, "nutrientCycleWaveAmplitude", true, nutrientCycleWaveAmplitudeSpan],
-        // Light map sliders
+
         [lightBrushValueSlider, "LIGHT_BRUSH_VALUE", true, lightBrushValueSpan],
         [lightBrushSizeSlider, "LIGHT_BRUSH_SIZE", false, lightBrushSizeSpan],
         [lightBrushStrengthSlider, "LIGHT_BRUSH_STRENGTH", true, lightBrushStrengthSpan],
         [lightCyclePeriodSlider, "lightCyclePeriodSeconds", false, lightCyclePeriodSpan],
-        // Viscosity map sliders
+
         [viscosityBrushValueSlider, "VISCOSITY_BRUSH_VALUE", true, viscosityBrushValueSpan],
         [viscosityBrushSizeSlider, "VISCOSITY_BRUSH_SIZE", false, viscosityBrushSizeSpan],
         [viscosityBrushStrengthSlider, "VISCOSITY_BRUSH_STRENGTH", true, viscosityBrushStrengthSpan]
     ];
+}
+
+function randomizeSliderValue(sliderElement, isFloat, rng = Math.random) {
+    if (!sliderElement) return null;
+
+    const min = Number(sliderElement.min);
+    const max = Number(sliderElement.max);
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+
+    const lo = Math.min(min, max);
+    const hi = Math.max(min, max);
+    const step = Number(sliderElement.step);
+
+    let value = lo + rng() * (hi - lo);
+
+    if (Number.isFinite(step) && step > 0) {
+        const snappedSteps = Math.round((value - lo) / step);
+        value = lo + snappedSteps * step;
+    }
+
+    if (!isFloat) value = Math.round(value);
+
+    return Math.max(lo, Math.min(hi, value));
+}
+
+/**
+ * Randomize all slider-driven runtime controls using each slider's min/max range.
+ */
+function randomizeControlsPanelConfig(rng = Math.random) {
+    const allSliders = getAllSliderBindings();
+
+    allSliders.forEach(([sliderElement, jsVarName, isFloat]) => {
+        if (!sliderElement || typeof config[jsVarName] === 'undefined') return;
+        const randomized = randomizeSliderValue(sliderElement, isFloat, rng);
+        if (randomized !== null) {
+            config[jsVarName] = randomized;
+        }
+    });
+
+    // Keep coupled constraints valid.
+    config.CREATURE_POPULATION_CEILING = Math.max(config.CREATURE_POPULATION_FLOOR, config.CREATURE_POPULATION_CEILING);
+    config.PARTICLE_POPULATION_CEILING = Math.max(config.PARTICLE_POPULATION_FLOOR, config.PARTICLE_POPULATION_CEILING);
+    config.GROWTH_BASE_CHANCE_MAX = Math.max(config.GROWTH_BASE_CHANCE_MIN, config.GROWTH_BASE_CHANCE_MAX);
+    config.GROWTH_POP_HARD_LIMIT_MULTIPLIER = Math.max(config.GROWTH_POP_SOFT_LIMIT_MULTIPLIER, config.GROWTH_POP_HARD_LIMIT_MULTIPLIER);
+    config.REPRO_FERTILITY_GLOBAL_HARD_MULTIPLIER = Math.max(config.REPRO_FERTILITY_GLOBAL_SOFT_MULTIPLIER, config.REPRO_FERTILITY_GLOBAL_HARD_MULTIPLIER);
+
+    // Randomize key non-slider toggles as part of launch randomization.
+    config.IS_WORLD_WRAPPING = rng() < 0.5;
+    config.GROWTH_ENABLED = rng() < 0.85;
+
+    // Keep particle life decay slider usable by default in random worlds.
+    config.IS_PARTICLE_LIFE_INFINITE = false;
+}
+
+function initializeAllSliderDisplays() {
+    const allSliders = getAllSliderBindings();
 
     worldWidthInput.value = config.WORLD_WIDTH;
     worldHeightInput.value = config.WORLD_HEIGHT;
 
     allSliders.forEach(([sliderElement, jsVarName, isFloat, spanElement]) => {
         if (sliderElement && typeof config[jsVarName] !== 'undefined') {
-            // Set the JS global variable from the HTML slider's current value attribute
+            // Keep UI controls aligned with runtime config values (do not overwrite config from HTML defaults).
+            sliderElement.value = String(config[jsVarName]);
             config[jsVarName] = isFloat ? parseFloat(sliderElement.value) : parseInt(sliderElement.value);
-            // Then update the display span to match this initial value
+
             if (spanElement) {
                 updateSliderDisplay(sliderElement, spanElement);
             }
@@ -380,7 +436,7 @@ function initializeAllSliderDisplays() {
         }
     });
 
-    // Update checkbox states based on global JS variables (which have their defaults from config.js)
+    // Update checkbox states based on runtime config.
     particleLifeDecaySlider.disabled = config.IS_PARTICLE_LIFE_INFINITE;
     particleLifeDecayLabel.style.color = config.IS_PARTICLE_LIFE_INFINITE ? '#777' : '#ddd';
     particleLifeDecayValueSpan.style.color = config.IS_PARTICLE_LIFE_INFINITE ? '#777' : '#00aeff';
@@ -397,7 +453,7 @@ function initializeAllSliderDisplays() {
     showViscosityMapToggle.checked = config.SHOW_VISCOSITY_MAP;
     viscosityEditModeToggle.checked = config.IS_VISCOSITY_EDIT_MODE;
     showFluidVelocityToggle.checked = config.SHOW_FLUID_VELOCITY;
-    headlessModeToggle.checked = config.IS_HEADLESS_MODE; // Ensure headless toggle reflects JS var on init
+    headlessModeToggle.checked = config.IS_HEADLESS_MODE;
 }
 
 function updateInstabilityIndicator() {
@@ -2420,7 +2476,7 @@ export {
     worldWidthInput, worldHeightInput, 
     updateInstabilityIndicator, updatePopulationCount, updateStatsPanel, 
     updateInfoPanel, copyInfoToClipboard, toggleInfoPanel, toggleStatsPanel, 
-    initializeAllSliderDisplays, handleExportConfig, handleImportConfig, applyImportedConfig,
+    initializeAllSliderDisplays, randomizeControlsPanelConfig, handleExportConfig, handleImportConfig, applyImportedConfig,
     handleExportCreature, handleImportCreature, placeImportedCreature,
     updateMouse, getMouseWorldCoordinates,
     mouse, clampViewOffsets

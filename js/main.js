@@ -19,7 +19,8 @@ import {
 } from './simulation.js';
 import {
     canvas, webgpuCanvas, worldWidthInput, worldHeightInput,
-    updateInstabilityIndicator, initializeAllSliderDisplays, updatePopulationCount, updateStatsPanel, updateInfoPanel,
+    updateInstabilityIndicator, initializeAllSliderDisplays, randomizeControlsPanelConfig,
+    updatePopulationCount, updateStatsPanel, updateInfoPanel,
     clampViewOffsets
 } from './ui.js';
 import { applyScenarioFromUrl } from './debug/scenarios.js';
@@ -192,12 +193,19 @@ function applyLaunchSelection(selection) {
     if (selection.mode === 'random') {
         const preset = buildRandomWorldLaunchConfig();
         applyBrowserOverrides(preset.browserConfig);
+
+        // Expand random mode to all slider-bound controls from the UI panel.
+        randomizeControlsPanelConfig(Math.random);
+
         config.DEBUG_SCENARIO = preset.name;
         return {
             name: preset.name,
-            description: preset.description,
+            description: `${preset.description} (all control sliders randomized)` ,
             seed: null,
-            randomPreset: preset.browserConfig
+            randomPreset: {
+                ...preset.browserConfig,
+                __allSliderControlsRandomized: true
+            }
         };
     }
 

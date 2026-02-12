@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { mkdirSync } from 'node:fs';
 import { gzipSync, gunzipSync } from 'node:zlib';
-import { DatabaseSync } from 'node:sqlite';
+import Database from 'better-sqlite3';
 
 import { scenarioDefs } from '../js/engine/scenarioDefs.mjs';
 
@@ -48,7 +48,7 @@ const workerUrl = new URL('./worldWorker.mjs', import.meta.url);
 
 mkdirSync(dataDir, { recursive: true });
 
-const db = new DatabaseSync(dbPath);
+const db = new Database(dbPath);
 db.exec(`
   PRAGMA journal_mode = WAL;
   CREATE TABLE IF NOT EXISTS checkpoints (

@@ -66,4 +66,5 @@ Open:
 
 - Server runs the real engine via `node-harness/realWorld.mjs` + shared `stepWorld`.
 - Worlds run in **worker threads** to isolate the module-level config singleton (`js/config.js`).
-- Next steps for remote hosting: auth token + rate limiting + persistence (periodic checkpoints to disk).
+- Persistence uses SQLite via `better-sqlite3` (works on Node 22+, unlike `node:sqlite` which is not available on Node v22).
+- Next steps for remote hosting: auth token + rate limiting + metrics endpoints.

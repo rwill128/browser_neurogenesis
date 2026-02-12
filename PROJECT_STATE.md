@@ -147,3 +147,14 @@ For each scenario run:
   - `growthSuppressedByPlacement`
 - Surfaced new growth suppression counters in browser creature info panel and node soak summaries/log output.
 - Added unit coverage for new growth telemetry counters in `node-harness/tests/softBodyGrowthGuardrails.test.mjs`.
+- Added unstable-physics telemetry pipeline across shared runtime:
+  - `SoftBody` now tags first instability cause (`unstableReason`) with explicit categories (`physics_*`, energy, age).
+  - `stepWorld` now records rich per-death telemetry objects (reason class + current physiology + hereditary blueprint + heritable parameters), returns `removedBodies`, and aggregates totals in `worldState.instabilityTelemetry`.
+  - persistence now round-trips `simulationStep` + `instabilityTelemetry` in world snapshots.
+- Added automatic instability event dumping for micro-sim tooling:
+  - `node-harness/runScenario.mjs` writes `*-instability-deaths.jsonl` + logs `[UNSTABLE_DEATH]` lines.
+  - `node-harness/browserDefaultSoak.mjs` writes `*-instability-deaths.jsonl`, includes instability totals in summaries/reports, and logs each death payload.
+  - browser runtime now logs `[UNSTABLE_DEATH]` entries to console and keeps `window.__instabilityDeaths` in-memory for inspection.
+- Added/updated tests:
+  - `node-harness/tests/stepWorld.test.mjs` instability telemetry coverage
+  - `node-harness/tests/worldPersistence.test.mjs` simulationStep + instability telemetry round-trip coverage.

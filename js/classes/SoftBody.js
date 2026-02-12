@@ -44,6 +44,9 @@ export class SoftBody {
         this.blueprintSprings = []; // Array of { p1Index, p2Index, restLength, isRigid } (indices refer to blueprintPoints)
 
         this.isUnstable = false;
+        // First fatal condition assigned during lifetime (used by instability telemetry).
+        this.unstableReason = null;
+        this.unstableReasonDetails = null;
         this.ticksSinceBirth = 0;
         this.canReproduce = false;
         this.shapeType = creationData ? creationData.shapeType : Math.floor(Math.random() * 3);
@@ -630,6 +633,16 @@ export class SoftBody {
         if (this.primaryEyePoint) {
             this.primaryEyePoint.isDesignatedEye = true;
         }
+    }
+
+    /**
+     * Mark this body as unstable once, preserving first failure reason for telemetry.
+     */
+    _markUnstable(reason = 'unknown', details = null) {
+        if (this.isUnstable) return;
+        this.isUnstable = true;
+        this.unstableReason = reason;
+        this.unstableReasonDetails = details ? JSON.parse(JSON.stringify(details)) : null;
     }
 
     /**
@@ -1805,7 +1818,7 @@ export class SoftBody {
         this.creatureEnergy = Math.min(this.currentMaxEnergy, Math.max(0, this.creatureEnergy));
 
         if (this.creatureEnergy <= 0) {
-            this.isUnstable = true;
+            this._markUnstable('energy_depleted');
         }
     }
 
@@ -1878,12 +1891,12 @@ export class SoftBody {
 
             const displacementSq = (point.pos.x - point.prevPos.x) ** 2 + (point.pos.y - point.prevPos.y) ** 2;
             if (displacementSq > MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ || isNaN(point.pos.x) || isNaN(point.pos.y) || !isFinite(point.pos.x) || !isFinite(point.pos.y)) {
-                this.isUnstable = true;
+                this._markUnstable('physics_invalid_motion_or_nan');
                 return;
             }
 
             if (point.pos.x < 0 || point.pos.x > config.WORLD_WIDTH || point.pos.y < 0 || point.pos.y > config.WORLD_HEIGHT) {
-                this.isUnstable = true;
+                this._markUnstable('physics_out_of_bounds');
                 return;
             }
 
@@ -2113,7 +2126,7 @@ export class SoftBody {
             this._tempVec1.copyFrom(spring.p1.pos).subInPlace(spring.p2.pos);
             const currentLength = this._tempVec1.mag();
             if (currentLength > spring.restLength * localMaxSpringStretchFactor) {
-                this.isUnstable = true;
+                this._markUnstable('physics_spring_overstretch');
                 // console.warn(...)
                 return;
             }
@@ -2123,7 +2136,7 @@ export class SoftBody {
             const bbox = this.getBoundingBox();
             if (bbox.width > this.massPoints.length * localMaxSpanPerPointFactor ||
                 bbox.height > this.massPoints.length * localMaxSpanPerPointFactor) {
-                this.isUnstable = true;
+                this._markUnstable('physics_span_exceeded');
                 // console.warn(...)
                 return;
             }
@@ -2133,7 +2146,7 @@ export class SoftBody {
 
         // Check for max age
         if (this.ticksSinceBirth > config.MAX_CREATURE_AGE_TICKS) {
-            this.isUnstable = true;
+            this._markUnstable('age_limit');
             return; // Creature dies of old age
         }
 

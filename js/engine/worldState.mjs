@@ -6,6 +6,20 @@ function createDefaultEnergyGains() {
   };
 }
 
+function createDefaultInstabilityTelemetry() {
+  return {
+    totalRemoved: 0,
+    totalPhysicsRemoved: 0,
+    totalNonPhysicsRemoved: 0,
+    totalUnknownRemoved: 0,
+    removedByReason: {},
+    // Recent detailed removal records (including physiology + hereditary blueprint snapshots).
+    recentDeaths: [],
+    maxRecentDeaths: 1000,
+    lastDeathSeq: 0
+  };
+}
+
 function createDefaultEnergyCosts() {
   return {
     baseNodes: 0,
@@ -36,6 +50,8 @@ export function createWorldState(initial = {}) {
     mutationStats: {},
     globalEnergyGains: createDefaultEnergyGains(),
     globalEnergyCosts: createDefaultEnergyCosts(),
+    simulationStep: 0,
+    instabilityTelemetry: createDefaultInstabilityTelemetry(),
     ...initial
   };
 }

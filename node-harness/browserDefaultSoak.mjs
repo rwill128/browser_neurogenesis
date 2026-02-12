@@ -261,6 +261,9 @@ function summarize(worldState, tick, timeSec) {
   let reproductionSuppressedByFertilityRoll = 0;
   let reproductionResourceDebitApplied = 0;
 
+  const instability = worldState.instabilityTelemetry || {};
+  const instabilityRemovedByReason = instability.removedByReason || {};
+
   for (const b of worldState.softBodyPopulation) {
     if (b.isUnstable) unstable++;
     const points = Array.isArray(b.massPoints) ? b.massPoints.length : 0;
@@ -322,6 +325,11 @@ function summarize(worldState, tick, timeSec) {
     reproductionSuppressedByResources,
     reproductionSuppressedByFertilityRoll,
     reproductionResourceDebitApplied,
+    instabilityRemovedTotal: Number(instability.totalRemoved) || 0,
+    instabilityRemovedPhysics: Number(instability.totalPhysicsRemoved) || 0,
+    instabilityRemovedNonPhysics: Number(instability.totalNonPhysicsRemoved) || 0,
+    instabilityRemovedUnknown: Number(instability.totalUnknownRemoved) || 0,
+    instabilityRemovedByReason,
     growthCohorts,
     nodeTypeCounts,
     nodeDiversity
@@ -447,6 +455,9 @@ const { worldState, configViews, overrideResult } = createBrowserDefaultWorld(rn
 
 const checkpoints = [];
 const startedAt = Date.now();
+const runStamp = nowStamp();
+const instabilityDeathsPath = resolve(outDir, `${runStamp}-seed${seed}-instability-deaths.jsonl`);
+writeFileSync(instabilityDeathsPath, '', 'utf8');
 
 logLine(`[SOAK] browser-default real-path start seed=${seed} steps=${steps} dt=${dt}`);
 logLine(`[SOAK] world=${config.WORLD_WIDTH}x${config.WORLD_HEIGHT} creatures=${options.initialCreatures}/${config.CREATURE_POPULATION_FLOOR}-${config.CREATURE_POPULATION_CEILING} particles=${options.initialParticles} pps=${config.PARTICLES_PER_SECOND}`);
@@ -463,7 +474,7 @@ let crashed = null;
 
 for (tick = 1; tick <= steps; tick++) {
   try {
-    stepWorld(worldState, dt, {
+    const stepResult = stepWorld(worldState, dt, {
       configViews,
       config,
       rng,
@@ -474,8 +485,17 @@ for (tick = 1; tick <= steps; tick++) {
       maintainParticleFloor: true,
       applyEmitters: true,
       applySelectedPointPush: false,
-      creatureSpawnMargin: 50
+      creatureSpawnMargin: 50,
+      captureInstabilityTelemetry: true,
+      maxRecentInstabilityDeaths: 5000
     });
+
+    if (Array.isArray(stepResult?.removedBodies) && stepResult.removedBodies.length) {
+      for (const death of stepResult.removedBodies) {
+        appendFileSync(instabilityDeathsPath, JSON.stringify(death) + '\n', 'utf8');
+        logLine(`[UNSTABLE_DEATH] ${JSON.stringify(death)}`, { level: 'warn' });
+      }
+    }
 
     assertFiniteWorld(worldState);
 
@@ -487,6 +507,7 @@ for (tick = 1; tick <= steps; tick++) {
         `totalPoints=${s.totalPoints} maxPts=${s.maxPointsPerCreature} ` +
         `growthEvents=${s.growthEvents} activeGrowers=${s.growthCohorts.activeGrowers} ` +
         `growthSuppChance=${s.growthSuppressedByChanceRoll} growthSuppPlacement=${s.growthSuppressedByPlacement} ` +
+        `unstableRemoved=${s.instabilityRemovedTotal} unstablePhysics=${s.instabilityRemovedPhysics} ` +
         `nodeRichness=${s.nodeDiversity.richness} rlTopologyResets=${s.rlTopologyResets} ` +
         `reproSuppDensity=${s.reproductionSuppressedByDensity} reproSuppResource=${s.reproductionSuppressedByResources}`
       );
@@ -543,8 +564,12 @@ const report = {
   status: crashed ? 'crashed' : 'ok',
   final: finalSummary,
   checkpoints,
+  instabilityTelemetry: worldState.instabilityTelemetry || {},
   crash: crashed,
-  artifacts: finalFrameArtifacts
+  artifacts: {
+    ...(finalFrameArtifacts || {}),
+    instabilityDeathsPath
+  }
 };
 
 if (crashed) {
@@ -570,6 +595,7 @@ if (crashed) {
   logLine(`[SOAK] CRASH at tick=${crashed.tick}: ${crashed.error.message}`, { level: 'error' });
   logLine(`[SOAK] wrote ${crashReportPath}`, { level: 'error' });
   logLine(`[SOAK] wrote ${crashSnapshotPath}`, { level: 'error' });
+  logLine(`[SOAK] wrote instability deaths ${instabilityDeathsPath}`, { level: 'error' });
   if (report.artifacts?.finalFrameImagePath) {
     logLine(`[SOAK] wrote final frame image ${report.artifacts.finalFrameImagePath}`, { level: 'error' });
   }
@@ -580,6 +606,7 @@ const okReportPath = resolve(outDir, `${nowStamp()}-seed${seed}-ok-report.json`)
 safeWriteJson(okReportPath, report);
 logLine(`[SOAK] completed ${steps} steps without crash.`);
 logLine(`[SOAK] wrote ${okReportPath}`);
+logLine(`[SOAK] wrote instability deaths ${instabilityDeathsPath}`);
 if (report.artifacts?.finalFrameImagePath) {
   logLine(`[SOAK] wrote final frame image ${report.artifacts.finalFrameImagePath}`);
 }

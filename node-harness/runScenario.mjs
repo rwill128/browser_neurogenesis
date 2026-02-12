@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getScenario } from './scenarios.mjs';
 import { RealWorld } from './realWorld.mjs';
@@ -40,13 +40,24 @@ const runtimeScenario = {
 const steps = stepsArg ? Number(stepsArg) : runtimeScenario.steps;
 const world = new RealWorld(runtimeScenario, seed);
 
+mkdirSync(outDir, { recursive: true });
+const instabilityPath = resolve(outDir, `${scenario.name}-seed${seed}-steps${steps}-instability-deaths.jsonl`);
+writeFileSync(instabilityPath, '', 'utf8');
+
 const timeline = [];
 for (let i = 0; i < steps; i++) {
-  world.step(runtimeScenario.dt);
+  const stepResult = world.step(runtimeScenario.dt);
+
+  if (Array.isArray(stepResult?.removedBodies) && stepResult.removedBodies.length) {
+    for (const death of stepResult.removedBodies) {
+      appendFileSync(instabilityPath, JSON.stringify(death) + '\n', 'utf8');
+      console.warn(`[UNSTABLE_DEATH] ${JSON.stringify(death)}`);
+    }
+  }
+
   if (i % 10 === 0 || i === steps - 1) timeline.push(world.snapshot());
 }
 
-mkdirSync(outDir, { recursive: true });
 const outPath = resolve(outDir, `${scenario.name}-seed${seed}-steps${steps}.json`);
 const payload = {
   scenario: runtimeScenario.name,
@@ -58,7 +69,12 @@ const payload = {
   creatures: runtimeScenario.creatures,
   particles: runtimeScenario.particles,
   generatedAt: new Date().toISOString(),
+  instabilityTelemetry: world.worldState.instabilityTelemetry || {},
+  artifacts: {
+    instabilityDeathsPath: instabilityPath
+  },
   timeline
 };
 writeFileSync(outPath, JSON.stringify(payload, null, 2), 'utf8');
 console.log(`Wrote ${outPath}`);
+console.log(`Wrote ${instabilityPath}`);

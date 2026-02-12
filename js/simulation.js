@@ -231,6 +231,26 @@ function initParticles() {
     syncModuleBindingsFromWorldState();
 }
 
+/**
+ * Emit parse-friendly instability death lines to browser console for micro-run diagnostics.
+ */
+function logInstabilityDeathsToConsole(stepResult) {
+    const deaths = Array.isArray(stepResult?.removedBodies) ? stepResult.removedBodies : [];
+    if (!deaths.length) return;
+
+    if (typeof window !== 'undefined') {
+        if (!Array.isArray(window.__instabilityDeaths)) window.__instabilityDeaths = [];
+        window.__instabilityDeaths.push(...deaths);
+    }
+
+    for (const death of deaths) {
+        try {
+            console.warn(`[UNSTABLE_DEATH] ${JSON.stringify(death)}`);
+        } catch {
+            console.warn('[UNSTABLE_DEATH]', death);
+        }
+    }
+}
 
 // --- Physics Update ---
 function updatePhysics(dt) {
@@ -238,7 +258,7 @@ function updatePhysics(dt) {
         return;
     }
 
-    runBrowserStepAdapter({
+    const stepResult = runBrowserStepAdapter({
         worldState: simulationWorldState,
         dt,
         config,
@@ -254,7 +274,9 @@ function updatePhysics(dt) {
             maintainParticleFloor: true,
             applyEmitters: true,
             applySelectedPointPush: true,
-            creatureSpawnMargin: 50
+            creatureSpawnMargin: 50,
+            captureInstabilityTelemetry: true,
+            maxRecentInstabilityDeaths: 5000
         },
         viewport,
         canvas,
@@ -263,6 +285,7 @@ function updatePhysics(dt) {
         updatePopulationCount
     });
 
+    logInstabilityDeathsToConsole(stepResult);
     syncModuleBindingsFromWorldState();
 }
 

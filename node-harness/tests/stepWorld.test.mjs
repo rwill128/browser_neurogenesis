@@ -246,3 +246,39 @@ test('stepWorld removes unstable bodies and accumulates energy accounting', () =
   assert.equal(state.globalEnergyCosts.baseNodes, 4);
   assert.equal(state.globalEnergyCosts.repulsorNodes, 15);
 });
+
+test('stepWorld captures detailed instability telemetry for removed bodies', () => {
+  const runtime = createRuntimeConfig({ isAnySoftBodyUnstable: true });
+  const unstable = new FakeSoftBody(100, 40, 40);
+  unstable.isUnstable = true;
+  unstable.unstableReason = 'physics_spring_overstretch';
+  unstable.blueprintPoints = [
+    { relX: 0, relY: 0, radius: 1, mass: 1, nodeType: 1, movementType: 2 },
+    { relX: 1, relY: 0, radius: 1, mass: 1, nodeType: 1, movementType: 2 }
+  ];
+  unstable.blueprintSprings = [{ p1Index: 0, p2Index: 1, restLength: 1, isRigid: false, stiffness: 200, damping: 1 }];
+
+  const state = createWorldState({ runtime, softBodies: [unstable], particles: [] });
+
+  const result = stepWorld(state, 0.01, {
+    config: runtime,
+    allowReproduction: false,
+    maintainCreatureFloor: false,
+    maintainParticleFloor: false,
+    captureInstabilityTelemetry: true
+  });
+
+  assert.equal(result.removedCount, 1);
+  assert.equal(result.removedBodies.length, 1);
+  assert.equal(result.removedBodies[0].unstableReason, 'physics_spring_overstretch');
+  assert.equal(result.removedBodies[0].physicsStabilityDeath, true);
+  assert.ok(result.removedBodies[0].physiology);
+  assert.ok(result.removedBodies[0].hereditaryBlueprint);
+
+  const telemetry = state.instabilityTelemetry;
+  assert.equal(telemetry.totalRemoved, 1);
+  assert.equal(telemetry.totalPhysicsRemoved, 1);
+  assert.equal(telemetry.removedByReason.physics_spring_overstretch, 1);
+  assert.equal(Array.isArray(telemetry.recentDeaths), true);
+  assert.equal(telemetry.recentDeaths.length, 1);
+});

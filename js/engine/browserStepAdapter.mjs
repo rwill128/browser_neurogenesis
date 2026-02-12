@@ -81,9 +81,11 @@ export function runBrowserStepAdapter({
   updateInstabilityIndicator,
   updatePopulationCount
 }) {
-  stepWorld(worldState, dt, stepOptions);
+  const stepResult = stepWorld(worldState, dt, stepOptions);
 
   updateInstabilityIndicator();
   updateAutoFollowCamera({ worldState, config, canvas, viewport, updateInfoPanel });
   updatePopulationCount();
+
+  return stepResult;
 }

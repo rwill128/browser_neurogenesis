@@ -526,12 +526,14 @@ export function saveWorldStateSnapshot({
     },
     world: {
       nextSoftBodyId: Number(worldState.nextSoftBodyId) || 0,
+      simulationStep: Number(worldState.simulationStep) || 0,
       nutrientField: Array.from(worldState.nutrientField || []),
       lightField: Array.from(worldState.lightField || []),
       viscosityField: Array.from(worldState.viscosityField || []),
       mutationStats: deepClone(worldState.mutationStats || {}),
       globalEnergyGains: deepClone(worldState.globalEnergyGains || {}),
       globalEnergyCosts: deepClone(worldState.globalEnergyCosts || {}),
+      instabilityTelemetry: deepClone(worldState.instabilityTelemetry || {}),
       fluidField: serializeFluidField(worldState.fluidField),
       particles: (worldState.particles || []).map(serializeParticle),
       softBodies: (worldState.softBodyPopulation || []).map(serializeSoftBody)
@@ -588,9 +590,20 @@ export function loadWorldStateSnapshot(snapshot, {
   }
 
   worldState.nextSoftBodyId = Number(snapshot.world?.nextSoftBodyId) || worldState.softBodyPopulation.length;
+  worldState.simulationStep = Number(snapshot.world?.simulationStep) || worldState.simulationStep || 0;
   worldState.mutationStats = deepClone(snapshot.world?.mutationStats || worldState.mutationStats || {});
   worldState.globalEnergyGains = deepClone(snapshot.world?.globalEnergyGains || worldState.globalEnergyGains || {});
   worldState.globalEnergyCosts = deepClone(snapshot.world?.globalEnergyCosts || worldState.globalEnergyCosts || {});
+  worldState.instabilityTelemetry = deepClone(snapshot.world?.instabilityTelemetry || worldState.instabilityTelemetry || {
+    totalRemoved: 0,
+    totalPhysicsRemoved: 0,
+    totalNonPhysicsRemoved: 0,
+    totalUnknownRemoved: 0,
+    removedByReason: {},
+    recentDeaths: [],
+    maxRecentDeaths: 1000,
+    lastDeathSeq: 0
+  });
 
   const totalCells = Math.max(1, runtime.GRID_COLS * runtime.GRID_ROWS);
   worldState.spatialGrid = new Array(totalCells);

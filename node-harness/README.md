@@ -14,6 +14,8 @@ node node-harness/runScenario.mjs \
 ```
 
 Outputs JSON under `./artifacts`.
+Also writes instability-death JSONL (`*-instability-deaths.jsonl`) with one record per removed unstable body,
+including current physiology + hereditary blueprint snapshots for offline parameter mining.
 
 > Engine selection is removed: this harness always runs the real simulation code path.
 
@@ -107,6 +109,8 @@ What it does:
 - includes growth/RL continuity telemetry in reports (`growthEvents`, `growthEnergySpent`, `rlTopologyResets`, etc.)
 - includes reproduction-control telemetry (`reproductionSuppressedByDensity`, `reproductionSuppressedByResources`, resource debits)
 - includes node diversity telemetry (`nodeTypeCounts`, richness, shannon entropy/evenness)
+- streams instability-death JSONL records (`*-instability-deaths.jsonl`) with physics-vs-nonphysics reasons,
+  current physiology shape, hereditary blueprint, and heritable parameters
 
 Detached run pattern:
 ```bash

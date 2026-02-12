@@ -209,7 +209,7 @@ export class RealWorld {
 
     this._applyEvents();
 
-    stepWorld(this.worldState, dt, {
+    const stepResult = stepWorld(this.worldState, dt, {
       configViews: this.configViews,
       config,
       rng: this.rand,
@@ -219,10 +219,13 @@ export class RealWorld {
       maintainCreatureFloor: false,
       maintainParticleFloor: false,
       applyEmitters: false,
-      applySelectedPointPush: false
+      applySelectedPointPush: false,
+      captureInstabilityTelemetry: true,
+      maxRecentInstabilityDeaths: 5000
     });
 
     this._syncAliasesFromWorldState();
+    return stepResult;
   }
 
   saveStateSnapshot(meta = {}) {
@@ -310,6 +313,8 @@ export class RealWorld {
       maxCells: 1200
     });
 
+    const instabilityTelemetry = this.worldState.instabilityTelemetry || {};
+
     return {
       tick: this.tick,
       time: Number(this.time.toFixed(3)),
@@ -319,6 +324,16 @@ export class RealWorld {
         creatures: creatures.length,
         liveCreatures: creatures.length,
         particles: this.particles.length
+      },
+      instabilityTelemetry: {
+        totalRemoved: Number(instabilityTelemetry.totalRemoved) || 0,
+        totalPhysicsRemoved: Number(instabilityTelemetry.totalPhysicsRemoved) || 0,
+        totalNonPhysicsRemoved: Number(instabilityTelemetry.totalNonPhysicsRemoved) || 0,
+        totalUnknownRemoved: Number(instabilityTelemetry.totalUnknownRemoved) || 0,
+        removedByReason: instabilityTelemetry.removedByReason || {},
+        recentDeaths: Array.isArray(instabilityTelemetry.recentDeaths)
+          ? instabilityTelemetry.recentDeaths.slice(-20)
+          : []
       },
       fluid,
       creatures,

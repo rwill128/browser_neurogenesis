@@ -15,6 +15,206 @@ function randomInRange(rng, min, max) {
   return min + rng() * (max - min);
 }
 
+function round(value, digits = 4) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  const p = 10 ** digits;
+  return Math.round(n * p) / p;
+}
+
+function deepClone(value) {
+  if (value === null || value === undefined) return value;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return null;
+  }
+}
+
+function countNodeTypes(points) {
+  const out = {};
+  for (const p of points || []) {
+    const key = String(Number.isFinite(Number(p?.nodeType)) ? Number(p.nodeType) : -1);
+    out[key] = (out[key] || 0) + 1;
+  }
+  return out;
+}
+
+function ensureInstabilityTelemetryState(state, maxRecentDeaths = 1000) {
+  if (!state.instabilityTelemetry || typeof state.instabilityTelemetry !== 'object') {
+    state.instabilityTelemetry = {
+      totalRemoved: 0,
+      totalPhysicsRemoved: 0,
+      totalNonPhysicsRemoved: 0,
+      totalUnknownRemoved: 0,
+      removedByReason: {},
+      recentDeaths: [],
+      maxRecentDeaths,
+      lastDeathSeq: 0
+    };
+  }
+
+  const t = state.instabilityTelemetry;
+  t.totalRemoved = Number(t.totalRemoved) || 0;
+  t.totalPhysicsRemoved = Number(t.totalPhysicsRemoved) || 0;
+  t.totalNonPhysicsRemoved = Number(t.totalNonPhysicsRemoved) || 0;
+  t.totalUnknownRemoved = Number(t.totalUnknownRemoved) || 0;
+  t.removedByReason = t.removedByReason && typeof t.removedByReason === 'object' ? t.removedByReason : {};
+  t.recentDeaths = Array.isArray(t.recentDeaths) ? t.recentDeaths : [];
+  t.lastDeathSeq = Number(t.lastDeathSeq) || 0;
+  t.maxRecentDeaths = Math.max(10, Math.floor(Number(t.maxRecentDeaths) || maxRecentDeaths));
+  return t;
+}
+
+function classifyInstabilityReason(reason) {
+  const r = String(reason || 'unknown');
+  if (r.startsWith('physics_')) return 'physics';
+  if (r === 'unknown') return 'unknown';
+  return 'non_physics';
+}
+
+function summarizePhenotype(body) {
+  const massPoints = Array.isArray(body?.massPoints) ? body.massPoints : [];
+  const springs = Array.isArray(body?.springs) ? body.springs : [];
+  const pointIndex = new Map();
+  for (let i = 0; i < massPoints.length; i++) pointIndex.set(massPoints[i], i);
+
+  let center = { x: 0, y: 0 };
+  if (typeof body?.getAveragePosition === 'function') {
+    const c = body.getAveragePosition();
+    center = { x: Number(c?.x) || 0, y: Number(c?.y) || 0 };
+  } else if (massPoints.length > 0) {
+    let sx = 0;
+    let sy = 0;
+    for (const p of massPoints) {
+      sx += Number(p?.pos?.x) || 0;
+      sy += Number(p?.pos?.y) || 0;
+    }
+    center = { x: sx / massPoints.length, y: sy / massPoints.length };
+  }
+
+  let bbox = null;
+  if (typeof body?.getBoundingBox === 'function') {
+    const b = body.getBoundingBox();
+    if (b && Number.isFinite(b.minX) && Number.isFinite(b.maxX) && Number.isFinite(b.minY) && Number.isFinite(b.maxY)) {
+      bbox = {
+        minX: round(b.minX, 3),
+        minY: round(b.minY, 3),
+        maxX: round(b.maxX, 3),
+        maxY: round(b.maxY, 3),
+        width: round(b.maxX - b.minX, 3),
+        height: round(b.maxY - b.minY, 3)
+      };
+    }
+  }
+
+  return {
+    pointCount: massPoints.length,
+    springCount: springs.length,
+    nodeTypeCounts: countNodeTypes(massPoints),
+    avgStiffness: round(typeof body?.getAverageStiffness === 'function' ? body.getAverageStiffness() : 0, 5),
+    avgDamping: round(typeof body?.getAverageDamping === 'function' ? body.getAverageDamping() : 0, 5),
+    bbox,
+    points: massPoints.map((p) => ({
+      relX: round((Number(p?.pos?.x) || 0) - center.x, 3),
+      relY: round((Number(p?.pos?.y) || 0) - center.y, 3),
+      radius: round(p?.radius, 4),
+      mass: round(p?.mass, 5),
+      nodeType: Number.isFinite(Number(p?.nodeType)) ? Number(p.nodeType) : null,
+      movementType: Number.isFinite(Number(p?.movementType)) ? Number(p.movementType) : null,
+      canBeGrabber: Boolean(p?.canBeGrabber),
+      eyeTargetType: Number.isFinite(Number(p?.eyeTargetType)) ? Number(p.eyeTargetType) : null,
+      isDesignatedEye: Boolean(p?.isDesignatedEye)
+    })),
+    springs: springs
+      .map((s) => ({
+        p1Index: pointIndex.get(s?.p1),
+        p2Index: pointIndex.get(s?.p2),
+        restLength: round(s?.restLength, 5),
+        isRigid: Boolean(s?.isRigid),
+        stiffness: round(s?.stiffness, 5),
+        damping: round(s?.dampingFactor, 5)
+      }))
+      .filter((s) => Number.isInteger(s.p1Index) && Number.isInteger(s.p2Index) && s.p1Index !== s.p2Index)
+  };
+}
+
+function summarizeHereditaryBlueprint(body) {
+  const points = Array.isArray(body?.blueprintPoints) ? body.blueprintPoints : [];
+  const springs = Array.isArray(body?.blueprintSprings) ? body.blueprintSprings : [];
+
+  return {
+    pointCount: points.length,
+    springCount: springs.length,
+    nodeTypeCounts: countNodeTypes(points),
+    points: points.map((p) => ({
+      relX: round(p?.relX, 3),
+      relY: round(p?.relY, 3),
+      radius: round(p?.radius, 4),
+      mass: round(p?.mass, 5),
+      nodeType: Number.isFinite(Number(p?.nodeType)) ? Number(p.nodeType) : null,
+      movementType: Number.isFinite(Number(p?.movementType)) ? Number(p.movementType) : null,
+      canBeGrabber: Boolean(p?.canBeGrabber),
+      eyeTargetType: Number.isFinite(Number(p?.eyeTargetType)) ? Number(p.eyeTargetType) : null
+    })),
+    springs: springs
+      .map((s) => ({
+        p1Index: Number.isFinite(Number(s?.p1Index)) ? Number(s.p1Index) : null,
+        p2Index: Number.isFinite(Number(s?.p2Index)) ? Number(s.p2Index) : null,
+        restLength: round(s?.restLength, 5),
+        isRigid: Boolean(s?.isRigid),
+        stiffness: round(s?.stiffness, 5),
+        damping: round(s?.damping, 5)
+      }))
+      .filter((s) => Number.isInteger(s.p1Index) && Number.isInteger(s.p2Index) && s.p1Index !== s.p2Index)
+  };
+}
+
+function summarizeHeritableParameters(body) {
+  return {
+    stiffness: round(body?.stiffness, 5),
+    springDamping: round(body?.springDamping, 5),
+    motorImpulseInterval: round(body?.motorImpulseInterval, 5),
+    motorImpulseMagnitudeCap: round(body?.motorImpulseMagnitudeCap, 5),
+    emitterStrength: round(body?.emitterStrength, 5),
+    emitterDirection: {
+      x: round(body?.emitterDirection?.x, 5),
+      y: round(body?.emitterDirection?.y, 5)
+    },
+    numOffspring: Number.isFinite(Number(body?.numOffspring)) ? Number(body.numOffspring) : null,
+    offspringSpawnRadius: round(body?.offspringSpawnRadius, 5),
+    pointAddChance: round(body?.pointAddChance, 6),
+    springConnectionRadius: round(body?.springConnectionRadius, 5),
+    jetMaxVelocityGene: round(body?.jetMaxVelocityGene, 5),
+    reproductionEnergyThreshold: round(body?.reproductionEnergyThreshold, 5),
+    reproductionCooldownGene: round(body?.reproductionCooldownGene, 5),
+    growthGenome: deepClone(body?.growthGenome || null)
+  };
+}
+
+function buildInstabilityRemovalEvent(state, body) {
+  const reason = String(body?.unstableReason || 'unknown');
+  const instabilityClass = classifyInstabilityReason(reason);
+  const telemetry = ensureInstabilityTelemetryState(state);
+  const deathSeq = (telemetry.lastDeathSeq || 0) + 1;
+  telemetry.lastDeathSeq = deathSeq;
+
+  return {
+    deathSeq,
+    simulationStep: Number(state.simulationStep) || 0,
+    bodyId: Number.isFinite(Number(body?.id)) ? Number(body.id) : null,
+    unstableReason: reason,
+    unstableClass: instabilityClass,
+    physicsStabilityDeath: instabilityClass === 'physics',
+    ticksSinceBirth: Number.isFinite(Number(body?.ticksSinceBirth)) ? Number(body.ticksSinceBirth) : null,
+    creatureEnergy: round(body?.creatureEnergy, 6),
+    currentMaxEnergy: round(body?.currentMaxEnergy, 6),
+    hereditaryBlueprint: summarizeHereditaryBlueprint(body),
+    physiology: summarizePhenotype(body),
+    heritableParameters: summarizeHeritableParameters(body)
+  };
+}
+
 /**
  * Rebuild broad-phase occupancy for body points and particles.
  */
@@ -163,18 +363,39 @@ function removeDeadParticles(state, dt, rng) {
 }
 
 /**
- * Remove unstable bodies and return the number of removals for telemetry.
+ * Remove unstable bodies and capture rich removal telemetry for diagnostics.
  */
-function removeUnstableBodies(state) {
+function removeUnstableBodies(state, { captureInstabilityTelemetry = true, maxRecentDeaths = 1000 } = {}) {
   let removedCount = 0;
+  const removedBodies = [];
+  const telemetry = ensureInstabilityTelemetryState(state, maxRecentDeaths);
+
   for (let i = state.softBodyPopulation.length - 1; i >= 0; i--) {
     const body = state.softBodyPopulation[i];
     if (!body.isUnstable) continue;
+
+    const removalEvent = buildInstabilityRemovalEvent(state, body);
+
+    if (captureInstabilityTelemetry) {
+      telemetry.totalRemoved += 1;
+      if (removalEvent.unstableClass === 'physics') telemetry.totalPhysicsRemoved += 1;
+      else if (removalEvent.unstableClass === 'non_physics') telemetry.totalNonPhysicsRemoved += 1;
+      else telemetry.totalUnknownRemoved += 1;
+
+      telemetry.removedByReason[removalEvent.unstableReason] = (telemetry.removedByReason[removalEvent.unstableReason] || 0) + 1;
+      telemetry.recentDeaths.push(removalEvent);
+      if (telemetry.recentDeaths.length > telemetry.maxRecentDeaths) {
+        telemetry.recentDeaths.splice(0, telemetry.recentDeaths.length - telemetry.maxRecentDeaths);
+      }
+    }
+
+    removedBodies.push(removalEvent);
     accumulateRemovedBodyEnergy(state, body);
     state.softBodyPopulation.splice(i, 1);
     removedCount++;
   }
-  return removedCount;
+
+  return { removedCount, removedBodies };
 }
 
 /**
@@ -183,7 +404,7 @@ function removeUnstableBodies(state) {
  * @param {object} state - Mutable world state (bodies, particles, fields, grid).
  * @param {number} dt - Delta time in seconds.
  * @param {object} options - Runtime controls and injectable classes.
- * @returns {{removedCount:number,currentAnyUnstable:boolean,populations:{creatures:number,particles:number}}}
+ * @returns {{removedCount:number,removedBodies:object[],currentAnyUnstable:boolean,populations:{creatures:number,particles:number}}}
  */
 export function stepWorld(state, dt, options = {}) {
   const {
@@ -197,13 +418,18 @@ export function stepWorld(state, dt, options = {}) {
     maintainParticleFloor = true,
     applyEmitters = true,
     applySelectedPointPush = true,
-    creatureSpawnMargin = 50
+    creatureSpawnMargin = 50,
+    captureInstabilityTelemetry = true,
+    maxRecentInstabilityDeaths = 1000
   } = options;
 
   const { runtime: runtimeConfig, constants } = resolveConfigViews(configViews || config);
   if (!runtimeConfig) {
     throw new Error('stepWorld requires options.config or options.configViews');
   }
+
+  state.simulationStep = (Number(state.simulationStep) || 0) + 1;
+  ensureInstabilityTelemetryState(state, maxRecentInstabilityDeaths);
 
   updateSpatialGrid(state, runtimeConfig, constants);
 
@@ -278,7 +504,12 @@ export function stepWorld(state, dt, options = {}) {
     runtimeConfig.isAnySoftBodyUnstable = false;
   }
 
-  const removedCount = removeUnstableBodies(state);
+  const removal = removeUnstableBodies(state, {
+    captureInstabilityTelemetry,
+    maxRecentDeaths: maxRecentInstabilityDeaths
+  });
+  const removedCount = removal.removedCount;
+  const removedBodies = removal.removedBodies;
 
   if (maintainCreatureFloor && SoftBodyClass) {
     const neededToMaintainFloor = runtimeConfig.CREATURE_POPULATION_FLOOR - state.softBodyPopulation.length;
@@ -292,6 +523,7 @@ export function stepWorld(state, dt, options = {}) {
 
   return {
     removedCount,
+    removedBodies,
     currentAnyUnstable,
     populations: {
       creatures: state.softBodyPopulation.length,

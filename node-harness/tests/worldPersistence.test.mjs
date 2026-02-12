@@ -149,6 +149,17 @@ function createWorldState(runtime, body) {
     mutationStats: { branch: 1 },
     globalEnergyGains: { photosynthesis: 2 },
     globalEnergyCosts: { baseNodes: 3 },
+    simulationStep: 123,
+    instabilityTelemetry: {
+      totalRemoved: 9,
+      totalPhysicsRemoved: 7,
+      totalNonPhysicsRemoved: 2,
+      totalUnknownRemoved: 0,
+      removedByReason: { physics_spring_overstretch: 7, age_limit: 2 },
+      recentDeaths: [{ deathSeq: 1, bodyId: 999, unstableReason: 'physics_spring_overstretch' }],
+      maxRecentDeaths: 1000,
+      lastDeathSeq: 1
+    },
     fluidField: null,
     particles,
     softBodyPopulation: [body],
@@ -211,6 +222,8 @@ test('save/load world snapshot round-trips body, particles, and selection', () =
     mutationStats: {},
     globalEnergyGains: {},
     globalEnergyCosts: {},
+    simulationStep: 0,
+    instabilityTelemetry: {},
     fluidField: null,
     particles: [],
     softBodyPopulation: [],
@@ -247,6 +260,10 @@ test('save/load world snapshot round-trips body, particles, and selection', () =
   assert.equal(runtimeReloaded.selectedInspectPointIndex, 1);
   assert.equal(runtimeReloaded.selectedInspectPoint, runtimeReloaded.selectedInspectBody.massPoints[1]);
 
+  assert.equal(worldReloaded.simulationStep, 123);
+  assert.equal(worldReloaded.instabilityTelemetry.totalPhysicsRemoved, 7);
+  assert.equal(worldReloaded.instabilityTelemetry.removedByReason.physics_spring_overstretch, 7);
+
   const occupiedCells = worldReloaded.spatialGrid.filter((cell) => cell.length > 0).length;
   assert.ok(occupiedCells > 0);
 });
@@ -275,6 +292,8 @@ test('loadWorldStateSnapshot tolerates stale blueprint point counts by rebuildin
     mutationStats: {},
     globalEnergyGains: {},
     globalEnergyCosts: {},
+    simulationStep: 0,
+    instabilityTelemetry: {},
     fluidField: null,
     particles: [],
     softBodyPopulation: [],

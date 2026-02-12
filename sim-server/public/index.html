@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Neurogenesis Sim Client</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="left">
+      <div class="title">Authoritative Sim Client</div>
+      <div id="status" class="status">connecting…</div>
+    </div>
+    <div class="controls">
+      <select id="scenarioSelect"></select>
+      <input id="seedInput" type="number" min="0" step="1" value="23" />
+      <button id="setScenarioBtn">Set scenario</button>
+      <button id="pauseBtn">Pause</button>
+      <button id="resumeBtn">Resume</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <canvas id="canvas"></canvas>
+    <pre id="telemetry" class="telemetry"></pre>
+  </div>
+
+  <script type="module" src="/client.js"></script>
+</body>
+</html>

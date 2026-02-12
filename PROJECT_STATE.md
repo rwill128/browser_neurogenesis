@@ -158,3 +158,12 @@ For each scenario run:
 - Added/updated tests:
   - `node-harness/tests/stepWorld.test.mjs` instability telemetry coverage
   - `node-harness/tests/worldPersistence.test.mjs` simulationStep + instability telemetry round-trip coverage.
+- Added browser startup launcher UX for scenario-driven runs:
+  - initial overlay now shows two top actions: **Start Default World** and **Start Random World**
+  - displays clickable card library of micro scenarios (`micro_*`) sourced from `js/engine/scenarioDefs.mjs`.
+- Selecting a micro scenario launches its browser config preset directly (same named scenario family used by node micro tests).
+- Added random-world launch generator with bounded slider-inspired ranges:
+  - new module `js/engine/launcherConfig.mjs`
+  - randomizes world size/population/fluid + growth/reproduction control subset with relational guardrails.
+- Added unit coverage for random launcher config bounds/constraints:
+  - `node-harness/tests/launcherConfig.test.mjs`.

@@ -16,6 +16,111 @@ body {
     box-sizing: border-box;
 }
 
+/* Launch overlay shown on initial load for scenario selection. */
+.scenario-launcher-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at top, rgba(25, 45, 70, 0.96), rgba(5, 8, 12, 0.97));
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.scenario-launcher-overlay.hidden {
+    display: none;
+}
+
+.scenario-launcher-panel {
+    width: min(1080px, 96vw);
+    max-height: min(92vh, 980px);
+    overflow-y: auto;
+    border: 1px solid #3b5f80;
+    border-radius: 14px;
+    background: rgba(12, 18, 26, 0.95);
+    box-shadow: 0 15px 45px rgba(0, 0, 0, 0.45);
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.scenario-launcher-panel h2,
+.scenario-launcher-panel h3 {
+    margin: 0 0 10px;
+    color: #7fc9ff;
+}
+
+.scenario-launcher-subtitle {
+    margin: 0 0 16px;
+    color: #d5e7f7;
+    font-size: 0.95em;
+}
+
+.scenario-launcher-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+.scenario-launcher-primary {
+    border: none;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-weight: 700;
+    cursor: pointer;
+    color: #fff;
+    background: #1f77cc;
+}
+
+.scenario-launcher-primary.alt {
+    background: #155f9e;
+}
+
+.scenario-launcher-primary:hover {
+    filter: brightness(1.08);
+}
+
+.scenario-launcher-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 10px;
+}
+
+.scenario-launcher-card {
+    border: 1px solid #35516b;
+    border-radius: 10px;
+    background: rgba(25, 35, 48, 0.92);
+    color: #f2f7fb;
+    text-align: left;
+    padding: 12px;
+    cursor: pointer;
+}
+
+.scenario-launcher-card:hover {
+    border-color: #6ab8f0;
+    background: rgba(32, 47, 64, 0.95);
+}
+
+.scenario-launcher-card .name {
+    font-weight: 700;
+    color: #8dd0ff;
+    margin-bottom: 5px;
+}
+
+.scenario-launcher-card .desc {
+    font-size: 0.85em;
+    line-height: 1.3;
+    color: #d4e4f1;
+    margin-bottom: 8px;
+}
+
+.scenario-launcher-card .meta {
+    font-size: 0.78em;
+    color: #acc9df;
+}
+
 #simulationAndInfoWrapper {
     display: flex;
     flex-direction: row;
@@ -585,5 +690,13 @@ body.css-screensaver-active #canvasContainer {
 
     #frameTimeDisplay {
         display: none;
+    }
+
+    .scenario-launcher-panel {
+        padding: 14px;
+    }
+
+    .scenario-launcher-cards {
+        grid-template-columns: 1fr;
     }
 }

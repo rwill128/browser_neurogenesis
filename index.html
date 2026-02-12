@@ -7,6 +7,19 @@
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+    <div id="scenarioLauncherOverlay" class="scenario-launcher-overlay" role="dialog" aria-label="Scenario launcher">
+        <div class="scenario-launcher-panel">
+            <h2>World Launcher</h2>
+            <p class="scenario-launcher-subtitle">Choose a startup mode or launch one of the micro-scenarios used in node regression runs.</p>
+            <div class="scenario-launcher-actions">
+                <button id="launcherDefaultWorldButton" class="scenario-launcher-primary">Start Default World</button>
+                <button id="launcherRandomWorldButton" class="scenario-launcher-primary alt">Start Random World</button>
+            </div>
+            <h3>Micro Scenario Library</h3>
+            <div id="scenarioLauncherCards" class="scenario-launcher-cards"></div>
+        </div>
+    </div>
+
     <div id="pageContainer">
         <div id="simulationAndInfoWrapper">
             <div id="infoPanel"> 

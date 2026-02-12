@@ -17,13 +17,15 @@ import {
     initViscosityMap,
     draw
 } from './simulation.js';
-import { 
+import {
     canvas, webgpuCanvas, worldWidthInput, worldHeightInput,
     updateInstabilityIndicator, initializeAllSliderDisplays, updatePopulationCount, updateStatsPanel, updateInfoPanel,
     clampViewOffsets
 } from './ui.js';
 import { applyScenarioFromUrl } from './debug/scenarios.js';
 import { initDebugRuntime, shouldForceStep, consumeForcedStep, onSimulationTick } from './debug/telemetry.js';
+import { getScenarioDef, scenarioDefs } from './engine/scenarioDefs.mjs';
+import { buildRandomWorldLaunchConfig } from './engine/launcherConfig.mjs';
 
 let lastTime = 0;
 let deltaTime = 0;
@@ -36,29 +38,197 @@ let frameCountForAvg = 0;
 let perfLogLastTs = 0;
 const PERF_LOG_INTERVAL_MS = 5000;
 
+/**
+ * Copy browser-config overrides onto runtime config.
+ */
+function applyBrowserOverrides(overrides = {}) {
+    for (const [key, value] of Object.entries(overrides)) {
+        config[key] = value;
+    }
+}
+
+/**
+ * Apply one named scenario definition directly to browser runtime config.
+ */
+function applyNamedScenario(name) {
+    const scenario = getScenarioDef(name);
+    applyBrowserOverrides(scenario.browserConfig || {});
+    config.DEBUG_SCENARIO = scenario.name;
+    return {
+        name: scenario.name,
+        description: scenario.description || '',
+        seed: null
+    };
+}
+
+/**
+ * Keep launcher choices in URL so refresh preserves startup mode.
+ */
+function writeLaunchSelectionToUrl(selection) {
+    const params = new URLSearchParams(window.location.search);
+    params.delete('scenario');
+    params.delete('mini');
+    params.delete('seed');
+    params.delete('mode');
+
+    if (selection.mode === 'scenario') {
+        params.set('scenario', selection.name);
+    } else if (selection.mode === 'default') {
+        params.set('mode', 'default');
+    } else if (selection.mode === 'random') {
+        params.set('mode', 'random');
+    }
+
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}`;
+    window.history.replaceState({}, '', nextUrl);
+}
+
+function hideLauncherOverlay() {
+    const overlay = document.getElementById('scenarioLauncherOverlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+/**
+ * Render clickable cards for all micro scenarios (same family used in node harness).
+ */
+function renderMicroScenarioCards(container, onSelect) {
+    if (!container) return;
+    container.innerHTML = '';
+
+    const micros = Object.values(scenarioDefs)
+        .filter((s) => String(s?.name || '').startsWith('micro_'))
+        .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+    for (const scenario of micros) {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'scenario-launcher-card';
+        const nodeCfg = scenario.nodeConfig || {};
+        const world = nodeCfg.world || {};
+        const summary = `node: ${world.width ?? '?'}x${world.height ?? '?'} • creatures ${nodeCfg.creatures ?? '?'} • particles ${nodeCfg.particles ?? '?'}`;
+
+        card.innerHTML = `
+            <div class="name">${scenario.name}</div>
+            <div class="desc">${scenario.description || 'Micro scenario'}</div>
+            <div class="meta">${summary}</div>
+        `;
+
+        card.addEventListener('click', () => onSelect({ mode: 'scenario', name: scenario.name }));
+        container.appendChild(card);
+    }
+}
+
+/**
+ * Show launch picker and resolve once the user chooses an entry.
+ */
+function presentScenarioLauncher() {
+    return new Promise((resolve) => {
+        const overlay = document.getElementById('scenarioLauncherOverlay');
+        const cards = document.getElementById('scenarioLauncherCards');
+        const defaultBtn = document.getElementById('launcherDefaultWorldButton');
+        const randomBtn = document.getElementById('launcherRandomWorldButton');
+
+        if (!overlay || !cards || !defaultBtn || !randomBtn) {
+            resolve({ mode: 'default' });
+            return;
+        }
+
+        overlay.classList.remove('hidden');
+
+        const choose = (selection) => {
+            hideLauncherOverlay();
+            writeLaunchSelectionToUrl(selection);
+            resolve(selection);
+        };
+
+        renderMicroScenarioCards(cards, choose);
+
+        defaultBtn.onclick = () => choose({ mode: 'default' });
+        randomBtn.onclick = () => choose({ mode: 'random' });
+    });
+}
+
+/**
+ * Resolve startup mode from URL or interactive launcher.
+ */
+async function resolveLaunchSelection() {
+    const params = new URLSearchParams(window.location.search);
+    const explicitScenario = params.get('scenario') || params.get('mini');
+    if (explicitScenario) {
+        hideLauncherOverlay();
+        return { mode: 'url-scenario' };
+    }
+
+    const mode = params.get('mode');
+    if (mode === 'default') {
+        hideLauncherOverlay();
+        return { mode: 'default' };
+    }
+    if (mode === 'random') {
+        hideLauncherOverlay();
+        return { mode: 'random' };
+    }
+
+    return presentScenarioLauncher();
+}
+
+/**
+ * Apply selected launch mode and return display metadata.
+ */
+function applyLaunchSelection(selection) {
+    if (selection.mode === 'url-scenario') {
+        return applyScenarioFromUrl();
+    }
+
+    if (selection.mode === 'random') {
+        const preset = buildRandomWorldLaunchConfig();
+        applyBrowserOverrides(preset.browserConfig);
+        config.DEBUG_SCENARIO = preset.name;
+        return {
+            name: preset.name,
+            description: preset.description,
+            seed: null,
+            randomPreset: preset.browserConfig
+        };
+    }
+
+    if (selection.mode === 'scenario') {
+        return applyNamedScenario(selection.name);
+    }
+
+    return applyNamedScenario('baseline');
+}
+
 async function main() {
-    const scenarioInfo = applyScenarioFromUrl();
+    const launchSelection = await resolveLaunchSelection();
+    const scenarioInfo = applyLaunchSelection(launchSelection);
+
     initDebugRuntime();
     console.log(`[SCENARIO] Loaded: ${scenarioInfo.name} - ${scenarioInfo.description}${scenarioInfo.seed !== null && scenarioInfo.seed !== undefined ? ` | seed=${scenarioInfo.seed}` : ''}`);
+    if (scenarioInfo.randomPreset) {
+        console.log(`[SCENARIO] Random preset: ${JSON.stringify(scenarioInfo.randomPreset)}`);
+    }
 
     worldWidthInput.value = String(config.WORLD_WIDTH || parseInt(worldWidthInput.value) || 8000);
     worldHeightInput.value = String(config.WORLD_HEIGHT || parseInt(worldHeightInput.value) || 6000);
     config.WORLD_WIDTH = parseInt(worldWidthInput.value) || 8000;
     config.WORLD_HEIGHT = parseInt(worldHeightInput.value) || 6000;
+
     // Initial resize
     resizeCanvas();
 
     config.GRID_COLS = Math.ceil(config.WORLD_WIDTH / config.GRID_CELL_SIZE);
     config.GRID_ROWS = Math.ceil(config.WORLD_HEIGHT / config.GRID_CELL_SIZE);
 
-    config.INITIAL_POPULATION_SIZE = config.CREATURE_POPULATION_FLOOR; 
+    config.INITIAL_POPULATION_SIZE = config.CREATURE_POPULATION_FLOOR;
 
     initializeSpatialGrid();
     initializeAllSliderDisplays();
     await initFluidSimulation(config.USE_GPU_FLUID_SIMULATION ? webgpuCanvas : canvas);
-    initNutrientMap(); 
-    initLightMap(); 
-    initViscosityMap(); 
+    initNutrientMap();
+    initLightMap();
+    initViscosityMap();
     initParticles();
     initializePopulation();
     updateInstabilityIndicator();
@@ -81,7 +251,7 @@ function resizeCanvas() {
 
     clampViewOffsets();
 
-    // If using WebGPU, reconfigure the context with new size
+    // If using WebGPU, reconfigure the context with new size.
     if (config.USE_GPU_FLUID_SIMULATION && fluidField && fluidField.context) {
         fluidField.context.configure({
             device: fluidField.device,
@@ -115,7 +285,7 @@ function gameLoop(timestamp) {
     const loopStartTime = performance.now();
 
     deltaTime = (timestamp - lastTime) / 1000;
-    if (isNaN(deltaTime) || deltaTime <= 0) deltaTime = 1/60;
+    if (isNaN(deltaTime) || deltaTime <= 0) deltaTime = 1 / 60;
     lastTime = timestamp;
 
     const currentMaxDeltaTime = config.MAX_DELTA_TIME_MS / 1000.0;
@@ -128,16 +298,16 @@ function gameLoop(timestamp) {
 
         if (config.nutrientCyclePeriodSeconds > 0) {
             config.globalNutrientMultiplier = config.nutrientCycleBaseAmplitude + config.nutrientCycleWaveAmplitude * Math.sin((config.totalSimulationTime * 2 * Math.PI) / config.nutrientCyclePeriodSeconds);
-            config.globalNutrientMultiplier = Math.max(0.01, config.globalNutrientMultiplier); 
+            config.globalNutrientMultiplier = Math.max(0.01, config.globalNutrientMultiplier);
         } else {
             config.globalNutrientMultiplier = config.nutrientCycleBaseAmplitude + config.nutrientCycleWaveAmplitude;
         }
         currentNutrientMultiplierDisplay.textContent = config.globalNutrientMultiplier.toFixed(2);
 
         if (config.lightCyclePeriodSeconds > 0) {
-            config.globalLightMultiplier = (Math.sin((config.totalSimulationTime * 2 * Math.PI) / config.lightCyclePeriodSeconds) + 1) / 2; 
+            config.globalLightMultiplier = (Math.sin((config.totalSimulationTime * 2 * Math.PI) / config.lightCyclePeriodSeconds) + 1) / 2;
         } else {
-            config.globalLightMultiplier = 0.5; 
+            config.globalLightMultiplier = 0.5;
         }
         currentLightMultiplierDisplay.textContent = config.globalLightMultiplier.toFixed(2);
 

@@ -160,6 +160,9 @@ const config = {
     GROWTH_COOLDOWN_MAX: 45,
     GROWTH_GENE_MUTATION_CHANCE: 0.12,
     GROWTH_GENE_MUTATION_MAGNITUDE: 0.25,
+    GROWTH_STAGE_GENETICS_ENABLED: true,
+    GROWTH_STAGE_COUNT_MIN: 2,
+    GROWTH_STAGE_COUNT_MAX: 4,
     GROWTH_MIN_WEIGHT: 0.05,
 
     // Growth guardrails (new): keep ecology from exploding while preserving adaptation.

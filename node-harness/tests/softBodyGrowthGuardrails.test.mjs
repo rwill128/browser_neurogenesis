@@ -17,6 +17,22 @@ function withMockedRandom(value, fn) {
   }
 }
 
+function withMockedRandomSequence(values, fn) {
+  const original = Math.random;
+  let idx = 0;
+  Math.random = () => {
+    const v = values[Math.min(idx, values.length - 1)];
+    idx += 1;
+    return v;
+  };
+
+  try {
+    return fn();
+  } finally {
+    Math.random = original;
+  }
+}
+
 test('soft-body growth is suppressed when population exceeds hard growth limit', () => {
   const cfgBackup = {
     GROWTH_ENABLED: config.GROWTH_ENABLED,
@@ -316,6 +332,138 @@ test('triangulated growth attaches a new node to both endpoints of an existing e
     assert.ok(Math.abs(r0 - r1) < 1e-6);
     assert.ok((r0 + r1) + 1e-9 >= Number(sharedSpring.restLength));
     assert.equal(body.springs.length, preSpringCount + 2);
+  } finally {
+    Object.assign(config, cfgBackup);
+    runtimeState.softBodyPopulation = runtimeBackup.softBodyPopulation;
+  }
+});
+
+test('growth stage windows resolve different active tendency profiles by age', () => {
+  const body = new SoftBody(88, 200, 200, null, false);
+
+  const genome = body._sanitizeGrowthGenome({
+    growthChancePerTick: 0.05,
+    minEnergyRatioToGrow: 0.5,
+    growthCooldownTicks: 10,
+    nodesPerGrowthWeights: [{ count: 1, weight: 1 }],
+    newNodeTypeWeights: [{ nodeType: NodeType.SWIMMER, weight: 1 }],
+    anchorNodeTypeWeights: [{ nodeType: NodeType.SWIMMER, weight: 1 }],
+    anchorEdgeNodePairWeights: [{ nodeTypeA: NodeType.SWIMMER, nodeTypeB: NodeType.SWIMMER, weight: 1 }],
+    distanceRangeWeights: [{ key: 'near', min: 2, max: 8, weight: 1 }],
+    edgeTypeWeights: [{ type: 'soft', weight: 1 }],
+    growthStages: [
+      {
+        startAgeTicks: 0,
+        endAgeTicks: 120,
+        profile: {
+          anchorNodeTypeWeights: [{ nodeType: NodeType.PHOTOSYNTHETIC, weight: 1 }],
+          anchorEdgeNodePairWeights: [{ nodeTypeA: NodeType.PHOTOSYNTHETIC, nodeTypeB: NodeType.PHOTOSYNTHETIC, weight: 1 }]
+        }
+      },
+      {
+        startAgeTicks: 121,
+        endAgeTicks: 999,
+        profile: {
+          anchorNodeTypeWeights: [{ nodeType: NodeType.PREDATOR, weight: 1 }],
+          anchorEdgeNodePairWeights: [{ nodeTypeA: NodeType.PREDATOR, nodeTypeB: NodeType.SWIMMER, weight: 1 }]
+        }
+      }
+    ]
+  });
+
+  const early = body._resolveGrowthProfileForAge(genome, 60);
+  const late = body._resolveGrowthProfileForAge(genome, 300);
+
+  assert.equal(early.anchorNodeTypeWeights.length, 1);
+  assert.equal(early.anchorNodeTypeWeights[0].nodeType, NodeType.PHOTOSYNTHETIC);
+  assert.equal(late.anchorNodeTypeWeights.length, 1);
+  assert.equal(late.anchorNodeTypeWeights[0].nodeType, NodeType.PREDATOR);
+});
+
+test('triangulated growth can prefer specific anchor-edge node pairs', () => {
+  const cfgBackup = {
+    GROWTH_ENABLED: config.GROWTH_ENABLED,
+    GROWTH_TRIANGULATED_PRIMITIVES_ENABLED: config.GROWTH_TRIANGULATED_PRIMITIVES_ENABLED,
+    GROWTH_BASE_CHANCE_MIN: config.GROWTH_BASE_CHANCE_MIN,
+    GROWTH_BASE_CHANCE_MAX: config.GROWTH_BASE_CHANCE_MAX,
+    GROWTH_MIN_ENERGY_RATIO_MIN: config.GROWTH_MIN_ENERGY_RATIO_MIN,
+    GROWTH_MIN_ENERGY_RATIO_MAX: config.GROWTH_MIN_ENERGY_RATIO_MAX,
+    GROWTH_PLACEMENT_ATTEMPTS_PER_NODE: config.GROWTH_PLACEMENT_ATTEMPTS_PER_NODE,
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED
+  };
+  const runtimeBackup = {
+    softBodyPopulation: runtimeState.softBodyPopulation
+  };
+
+  try {
+    config.GROWTH_ENABLED = true;
+    config.GROWTH_TRIANGULATED_PRIMITIVES_ENABLED = true;
+    config.GROWTH_BASE_CHANCE_MIN = 1;
+    config.GROWTH_BASE_CHANCE_MAX = 1;
+    config.GROWTH_MIN_ENERGY_RATIO_MIN = 0;
+    config.GROWTH_MIN_ENERGY_RATIO_MAX = 0;
+    config.GROWTH_PLACEMENT_ATTEMPTS_PER_NODE = 8;
+    config.DYE_ECOLOGY_ENABLED = false;
+
+    const body = new SoftBody(89, 300, 240, null, false);
+    const a = body.massPoints[0];
+    const b = new SoftBody(90, 310, 240, null, false).massPoints[0];
+    const c = new SoftBody(91, 300, 250, null, false).massPoints[0];
+
+    a.nodeType = NodeType.SWIMMER;
+    b.nodeType = NodeType.PREDATOR;
+    c.nodeType = NodeType.EMITTER;
+
+    a.movementType = MovementType.NEUTRAL;
+    b.movementType = MovementType.NEUTRAL;
+    c.movementType = MovementType.NEUTRAL;
+
+    a.radius = 1.2;
+    b.radius = 1.2;
+    c.radius = 1.2;
+
+    a.pos.x = 300; a.pos.y = 240; a.prevPos.x = 300; a.prevPos.y = 240;
+    b.pos.x = 310; b.pos.y = 240; b.prevPos.x = 310; b.prevPos.y = 240;
+    c.pos.x = 300; c.pos.y = 250; c.prevPos.x = 300; c.prevPos.y = 250;
+
+    body.massPoints = [a, b, c];
+    body.springs = [
+      new Spring(a, b, 500, 5, 10, false),
+      new Spring(a, c, 500, 5, 10, false)
+    ];
+    body.creatureEnergy = body.currentMaxEnergy;
+    body.growthCooldownRemaining = 0;
+    body.growthGenome = {
+      growthChancePerTick: 1,
+      minEnergyRatioToGrow: 0,
+      growthCooldownTicks: 1,
+      nodesPerGrowthWeights: [{ count: 1, weight: 1 }],
+      newNodeTypeWeights: [{ nodeType: NodeType.SWIMMER, weight: 1 }],
+      anchorNodeTypeWeights: [{ nodeType: NodeType.SWIMMER, weight: 1 }],
+      anchorEdgeNodePairWeights: [
+        { nodeTypeA: NodeType.SWIMMER, nodeTypeB: NodeType.PREDATOR, weight: 1 },
+        { nodeTypeA: NodeType.SWIMMER, nodeTypeB: NodeType.EMITTER, weight: 0 }
+      ],
+      distanceRangeWeights: [{ key: 'near', min: 1, max: 100, weight: 1 }],
+      edgeTypeWeights: [{ type: 'soft', weight: 1 }],
+      edgeStiffnessScale: 1,
+      edgeDampingScale: 1,
+      nodeActivationIntervalBias: 0,
+      edgeActivationIntervalBias: 0,
+      activationIntervalJitter: 0
+    };
+
+    runtimeState.softBodyPopulation = [body];
+    const didGrow = withMockedRandomSequence([0, 0, 0, 0, 0, 0, 0], () => body._attemptGrowthStep(1 / 60));
+    assert.equal(didGrow, true);
+
+    const newPoint = body.massPoints[body.massPoints.length - 1];
+    const newSprings = body.springs.filter((s) => s.p1 === newPoint || s.p2 === newPoint);
+    const anchors = newSprings.map((s) => (s.p1 === newPoint ? s.p2 : s.p1));
+
+    assert.equal(anchors.includes(a), true);
+    assert.equal(anchors.includes(b), true);
+    assert.equal(anchors.includes(c), false);
   } finally {
     Object.assign(config, cfgBackup);
     runtimeState.softBodyPopulation = runtimeBackup.softBodyPopulation;

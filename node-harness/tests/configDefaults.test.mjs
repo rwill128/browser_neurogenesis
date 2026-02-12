@@ -28,6 +28,12 @@ test('growth triangulated primitive mode is enabled by default', () => {
   assert.equal(config.GROWTH_TRIANGULATED_PRIMITIVES_ENABLED, true);
 });
 
+test('growth stage genetics are enabled with sensible defaults', () => {
+  assert.equal(config.GROWTH_STAGE_GENETICS_ENABLED, true);
+  assert.ok(Number(config.GROWTH_STAGE_COUNT_MIN) >= 1);
+  assert.ok(Number(config.GROWTH_STAGE_COUNT_MAX) >= Number(config.GROWTH_STAGE_COUNT_MIN));
+});
+
 test('intra-body repulsion is enabled with slight default strength', () => {
   assert.equal(config.INTRA_BODY_REPULSION_ENABLED, true);
   assert.ok(Number(config.INTRA_BODY_REPULSION_STRENGTH) > 0);

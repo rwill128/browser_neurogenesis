@@ -878,6 +878,54 @@ export class SoftBody {
     }
 
 
+    _getGrowthEdgePairKey(nodeTypeA, nodeTypeB) {
+        const a = Math.floor(Number(nodeTypeA));
+        const b = Math.floor(Number(nodeTypeB));
+        if (!Number.isInteger(a) || !Number.isInteger(b)) return null;
+        return a <= b ? `${a}:${b}` : `${b}:${a}`;
+    }
+
+    _createRandomGrowthEdgePairWeights() {
+        const entries = [];
+        for (let i = 0; i < DEFAULT_GROWTH_NODE_TYPES.length; i++) {
+            const a = DEFAULT_GROWTH_NODE_TYPES[i];
+            for (let j = i; j < DEFAULT_GROWTH_NODE_TYPES.length; j++) {
+                const b = DEFAULT_GROWTH_NODE_TYPES[j];
+                entries.push({
+                    nodeTypeA: a,
+                    nodeTypeB: b,
+                    weight: config.GROWTH_MIN_WEIGHT + Math.random()
+                });
+            }
+        }
+        return entries;
+    }
+
+    _buildGrowthEdgePairWeightMap(entries) {
+        const map = new Map();
+        for (const entry of entries || []) {
+            const key = this._getGrowthEdgePairKey(entry?.nodeTypeA, entry?.nodeTypeB);
+            if (!key) continue;
+            const weight = Math.max(0, Number(entry?.weight) || 0);
+            map.set(key, weight);
+        }
+        return map;
+    }
+
+    _resolveGrowthProfileForAge(genome, ageTicks) {
+        if (!genome || typeof genome !== 'object') return this._sanitizeGrowthGenome(null);
+        const age = Math.max(0, Math.floor(Number(ageTicks) || 0));
+        const stages = Array.isArray(genome.growthStages) ? genome.growthStages : [];
+        for (const stage of stages) {
+            const start = Math.max(0, Math.floor(Number(stage?.startAgeTicks) || 0));
+            const end = Math.max(start, Math.floor(Number(stage?.endAgeTicks) || start));
+            if (age >= start && age <= end && stage?.profile && typeof stage.profile === 'object') {
+                return stage.profile;
+            }
+        }
+        return genome;
+    }
+
     /**
      * Create a random heritable growth genome for new creatures.
      *
@@ -890,7 +938,7 @@ export class SoftBody {
         const maxDist = Math.max(midStart + 1, config.GROWTH_DISTANCE_MAX);
         const farStart = Math.max(midStart + 1, Math.floor((midStart + maxDist) * 0.5));
 
-        return this._sanitizeGrowthGenome({
+        const baseGenome = {
             growthChancePerTick: config.GROWTH_BASE_CHANCE_MIN + Math.random() * Math.max(0.0001, (config.GROWTH_BASE_CHANCE_MAX - config.GROWTH_BASE_CHANCE_MIN)),
             minEnergyRatioToGrow: config.GROWTH_MIN_ENERGY_RATIO_MIN + Math.random() * Math.max(0.0001, (config.GROWTH_MIN_ENERGY_RATIO_MAX - config.GROWTH_MIN_ENERGY_RATIO_MIN)),
             growthCooldownTicks: Math.floor(config.GROWTH_COOLDOWN_MIN + Math.random() * Math.max(1, (config.GROWTH_COOLDOWN_MAX - config.GROWTH_COOLDOWN_MIN + 1))),
@@ -901,6 +949,7 @@ export class SoftBody {
             ],
             newNodeTypeWeights: DEFAULT_GROWTH_NODE_TYPES.map((nodeType) => ({ nodeType, weight: randomWeight() })),
             anchorNodeTypeWeights: DEFAULT_GROWTH_NODE_TYPES.map((nodeType) => ({ nodeType, weight: randomWeight() })),
+            anchorEdgeNodePairWeights: this._createRandomGrowthEdgePairWeights(),
             distanceRangeWeights: [
                 { key: 'near', min: config.GROWTH_DISTANCE_MIN, max: midStart, weight: randomWeight() },
                 { key: 'mid', min: midStart, max: farStart, weight: randomWeight() },
@@ -915,6 +964,54 @@ export class SoftBody {
             nodeActivationIntervalBias: (Math.random() - 0.5) * 2,
             edgeActivationIntervalBias: (Math.random() - 0.5) * 2,
             activationIntervalJitter: Math.random() * 1.5
+        };
+
+        if (config.GROWTH_STAGE_GENETICS_ENABLED === false) {
+            return this._sanitizeGrowthGenome(baseGenome);
+        }
+
+        const stageMin = Math.max(1, Math.floor(Number(config.GROWTH_STAGE_COUNT_MIN) || 1));
+        const stageMax = Math.max(stageMin, Math.floor(Number(config.GROWTH_STAGE_COUNT_MAX) || stageMin));
+        const stageCount = stageMin + Math.floor(Math.random() * Math.max(1, stageMax - stageMin + 1));
+        const maxAgeTicks = Math.max(60, Math.floor(Number(config.MAX_CREATURE_AGE_TICKS) || 10000));
+
+        const growthStages = [];
+        const stageSpan = Math.max(1, Math.floor(maxAgeTicks / stageCount));
+        for (let i = 0; i < stageCount; i++) {
+            const startAgeTicks = i * stageSpan;
+            const endAgeTicks = (i === stageCount - 1)
+                ? maxAgeTicks
+                : Math.max(startAgeTicks, ((i + 1) * stageSpan) - 1);
+
+            const profile = JSON.parse(JSON.stringify(baseGenome));
+            const jitterWeightList = (list) => {
+                for (const entry of list || []) {
+                    entry.weight = Math.max(0, (Number(entry.weight) || 0) * (0.4 + Math.random() * 1.6));
+                }
+            };
+
+            jitterWeightList(profile.nodesPerGrowthWeights);
+            jitterWeightList(profile.newNodeTypeWeights);
+            jitterWeightList(profile.anchorNodeTypeWeights);
+            jitterWeightList(profile.anchorEdgeNodePairWeights);
+            jitterWeightList(profile.distanceRangeWeights);
+            jitterWeightList(profile.edgeTypeWeights);
+
+            profile.growthChancePerTick = Math.max(
+                config.GROWTH_BASE_CHANCE_MIN,
+                Math.min(config.GROWTH_BASE_CHANCE_MAX, (Number(profile.growthChancePerTick) || config.GROWTH_BASE_CHANCE_MIN) * (0.6 + Math.random() * 1.2))
+            );
+            profile.minEnergyRatioToGrow = Math.max(
+                config.GROWTH_MIN_ENERGY_RATIO_MIN,
+                Math.min(config.GROWTH_MIN_ENERGY_RATIO_MAX, (Number(profile.minEnergyRatioToGrow) || config.GROWTH_MIN_ENERGY_RATIO_MIN) * (0.7 + Math.random() * 0.6))
+            );
+
+            growthStages.push({ startAgeTicks, endAgeTicks, profile });
+        }
+
+        return this._sanitizeGrowthGenome({
+            ...baseGenome,
+            growthStages
         });
     }
 
@@ -923,23 +1020,23 @@ export class SoftBody {
      */
     _sanitizeGrowthGenome(genome) {
         if (!genome || typeof genome !== 'object') {
-            // Avoid recursive call loops if fallback itself fails to return object.
-            const seeded = {
+            genome = {
                 growthChancePerTick: config.GROWTH_BASE_CHANCE_MIN,
                 minEnergyRatioToGrow: config.GROWTH_MIN_ENERGY_RATIO_MIN,
                 growthCooldownTicks: config.GROWTH_COOLDOWN_MIN,
                 nodesPerGrowthWeights: [{ count: 1, weight: 1 }],
                 newNodeTypeWeights: DEFAULT_GROWTH_NODE_TYPES.map((nodeType) => ({ nodeType, weight: 1 })),
                 anchorNodeTypeWeights: DEFAULT_GROWTH_NODE_TYPES.map((nodeType) => ({ nodeType, weight: 1 })),
+                anchorEdgeNodePairWeights: this._createRandomGrowthEdgePairWeights(),
                 distanceRangeWeights: [{ key: 'near', min: config.GROWTH_DISTANCE_MIN, max: config.GROWTH_DISTANCE_MAX, weight: 1 }],
                 edgeTypeWeights: [{ type: 'soft', weight: 1 }],
                 edgeStiffnessScale: 1,
                 edgeDampingScale: 1,
                 nodeActivationIntervalBias: 0,
                 edgeActivationIntervalBias: 0,
-                activationIntervalJitter: 0.5
+                activationIntervalJitter: 0.5,
+                growthStages: []
             };
-            genome = seeded;
         }
 
         const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -960,50 +1057,110 @@ export class SoftBody {
             return out;
         };
 
-        const sanitized = {
-            growthChancePerTick: clamp(Number(genome.growthChancePerTick) || config.GROWTH_BASE_CHANCE_MIN, config.GROWTH_BASE_CHANCE_MIN, config.GROWTH_BASE_CHANCE_MAX),
-            minEnergyRatioToGrow: clamp(Number(genome.minEnergyRatioToGrow) || config.GROWTH_MIN_ENERGY_RATIO_MIN, config.GROWTH_MIN_ENERGY_RATIO_MIN, config.GROWTH_MIN_ENERGY_RATIO_MAX),
-            growthCooldownTicks: Math.floor(clamp(Number(genome.growthCooldownTicks) || config.GROWTH_COOLDOWN_MIN, config.GROWTH_COOLDOWN_MIN, config.GROWTH_COOLDOWN_MAX)),
-            nodesPerGrowthWeights: normalizeWeights(genome.nodesPerGrowthWeights, (e) => {
-                const count = Math.max(1, Math.min(5, Math.floor(Number(e?.count) || 1)));
-                return { count, weight: Number(e?.weight) || 0 };
-            }),
-            newNodeTypeWeights: normalizeWeights(genome.newNodeTypeWeights, (e) => {
-                const nodeType = Math.floor(Number(e?.nodeType));
-                if (!Number.isInteger(nodeType)) return null;
-                return { nodeType, weight: Number(e?.weight) || 0 };
-            }),
-            anchorNodeTypeWeights: normalizeWeights(genome.anchorNodeTypeWeights, (e) => {
-                const nodeType = Math.floor(Number(e?.nodeType));
-                if (!Number.isInteger(nodeType)) return null;
-                return { nodeType, weight: Number(e?.weight) || 0 };
-            }),
-            distanceRangeWeights: normalizeWeights(genome.distanceRangeWeights, (e) => {
-                let min = Number(e?.min);
-                let max = Number(e?.max);
-                if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
-                min = clamp(min, config.GROWTH_DISTANCE_MIN, config.GROWTH_DISTANCE_MAX);
-                max = clamp(max, config.GROWTH_DISTANCE_MIN, config.GROWTH_DISTANCE_MAX);
-                if (max <= min) max = Math.min(config.GROWTH_DISTANCE_MAX, min + 1);
-                return { key: e?.key || 'custom', min, max, weight: Number(e?.weight) || 0 };
-            }),
-            edgeTypeWeights: normalizeWeights(genome.edgeTypeWeights, (e) => {
-                const type = e?.type === 'rigid' ? 'rigid' : 'soft';
-                return { type, weight: Number(e?.weight) || 0 };
-            }),
-            edgeStiffnessScale: clamp(Number(genome.edgeStiffnessScale) || 1, 0.1, 5),
-            edgeDampingScale: clamp(Number(genome.edgeDampingScale) || 1, 0.1, 5),
-            nodeActivationIntervalBias: clamp(Number(genome.nodeActivationIntervalBias) || 0, -3, 3),
-            edgeActivationIntervalBias: clamp(Number(genome.edgeActivationIntervalBias) || 0, -3, 3),
-            activationIntervalJitter: clamp(Number(genome.activationIntervalJitter) || 0.5, 0, 3)
+        const normalizePairWeights = (entries) => {
+            const out = [];
+            let total = 0;
+            for (const e of entries || []) {
+                const key = this._getGrowthEdgePairKey(e?.nodeTypeA, e?.nodeTypeB);
+                if (!key) continue;
+                const [nodeTypeA, nodeTypeB] = key.split(':').map((v) => Number(v));
+                const weight = Math.max(0, Number(e?.weight) || 0);
+                out.push({ nodeTypeA, nodeTypeB, weight });
+                total += weight;
+            }
+            if (out.length === 0) return [];
+            if (total <= 0) {
+                const equal = 1 / out.length;
+                out.forEach((e) => { e.weight = equal; });
+                return out;
+            }
+            out.forEach((e) => { e.weight /= total; });
+            return out;
         };
 
-        if (sanitized.nodesPerGrowthWeights.length === 0) sanitized.nodesPerGrowthWeights = [{ count: 1, weight: 1 }];
-        if (sanitized.newNodeTypeWeights.length === 0) sanitized.newNodeTypeWeights = DEFAULT_GROWTH_NODE_TYPES.map((nodeType) => ({ nodeType, weight: 1 / DEFAULT_GROWTH_NODE_TYPES.length }));
-        if (sanitized.anchorNodeTypeWeights.length === 0) sanitized.anchorNodeTypeWeights = DEFAULT_GROWTH_NODE_TYPES.map((nodeType) => ({ nodeType, weight: 1 / DEFAULT_GROWTH_NODE_TYPES.length }));
-        if (sanitized.distanceRangeWeights.length === 0) sanitized.distanceRangeWeights = [{ key: 'near', min: config.GROWTH_DISTANCE_MIN, max: config.GROWTH_DISTANCE_MAX, weight: 1 }];
-        if (sanitized.edgeTypeWeights.length === 0) sanitized.edgeTypeWeights = [{ type: 'soft', weight: 1 }];
+        const sanitizeProfile = (rawProfile) => {
+            const profile = rawProfile && typeof rawProfile === 'object' ? rawProfile : {};
+            const sanitized = {
+                growthChancePerTick: clamp(Number(profile.growthChancePerTick) || config.GROWTH_BASE_CHANCE_MIN, config.GROWTH_BASE_CHANCE_MIN, config.GROWTH_BASE_CHANCE_MAX),
+                minEnergyRatioToGrow: clamp(Number(profile.minEnergyRatioToGrow) || config.GROWTH_MIN_ENERGY_RATIO_MIN, config.GROWTH_MIN_ENERGY_RATIO_MIN, config.GROWTH_MIN_ENERGY_RATIO_MAX),
+                growthCooldownTicks: Math.floor(clamp(Number(profile.growthCooldownTicks) || config.GROWTH_COOLDOWN_MIN, config.GROWTH_COOLDOWN_MIN, config.GROWTH_COOLDOWN_MAX)),
+                nodesPerGrowthWeights: normalizeWeights(profile.nodesPerGrowthWeights, (e) => {
+                    const count = Math.max(1, Math.min(5, Math.floor(Number(e?.count) || 1)));
+                    return { count, weight: Number(e?.weight) || 0 };
+                }),
+                newNodeTypeWeights: normalizeWeights(profile.newNodeTypeWeights, (e) => {
+                    const nodeType = Math.floor(Number(e?.nodeType));
+                    if (!Number.isInteger(nodeType)) return null;
+                    return { nodeType, weight: Number(e?.weight) || 0 };
+                }),
+                anchorNodeTypeWeights: normalizeWeights(profile.anchorNodeTypeWeights, (e) => {
+                    const nodeType = Math.floor(Number(e?.nodeType));
+                    if (!Number.isInteger(nodeType)) return null;
+                    return { nodeType, weight: Number(e?.weight) || 0 };
+                }),
+                anchorEdgeNodePairWeights: normalizePairWeights(profile.anchorEdgeNodePairWeights),
+                distanceRangeWeights: normalizeWeights(profile.distanceRangeWeights, (e) => {
+                    let min = Number(e?.min);
+                    let max = Number(e?.max);
+                    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+                    min = clamp(min, config.GROWTH_DISTANCE_MIN, config.GROWTH_DISTANCE_MAX);
+                    max = clamp(max, config.GROWTH_DISTANCE_MIN, config.GROWTH_DISTANCE_MAX);
+                    if (max <= min) max = Math.min(config.GROWTH_DISTANCE_MAX, min + 1);
+                    return { key: e?.key || 'custom', min, max, weight: Number(e?.weight) || 0 };
+                }),
+                edgeTypeWeights: normalizeWeights(profile.edgeTypeWeights, (e) => {
+                    const type = e?.type === 'rigid' ? 'rigid' : 'soft';
+                    return { type, weight: Number(e?.weight) || 0 };
+                }),
+                edgeStiffnessScale: clamp(Number(profile.edgeStiffnessScale) || 1, 0.1, 5),
+                edgeDampingScale: clamp(Number(profile.edgeDampingScale) || 1, 0.1, 5),
+                nodeActivationIntervalBias: clamp(Number(profile.nodeActivationIntervalBias) || 0, -3, 3),
+                edgeActivationIntervalBias: clamp(Number(profile.edgeActivationIntervalBias) || 0, -3, 3),
+                activationIntervalJitter: clamp(Number(profile.activationIntervalJitter) || 0.5, 0, 3)
+            };
 
+            if (sanitized.nodesPerGrowthWeights.length === 0) sanitized.nodesPerGrowthWeights = [{ count: 1, weight: 1 }];
+            if (sanitized.newNodeTypeWeights.length === 0) sanitized.newNodeTypeWeights = DEFAULT_GROWTH_NODE_TYPES.map((nodeType) => ({ nodeType, weight: 1 / DEFAULT_GROWTH_NODE_TYPES.length }));
+            if (sanitized.anchorNodeTypeWeights.length === 0) sanitized.anchorNodeTypeWeights = DEFAULT_GROWTH_NODE_TYPES.map((nodeType) => ({ nodeType, weight: 1 / DEFAULT_GROWTH_NODE_TYPES.length }));
+            if (sanitized.anchorEdgeNodePairWeights.length === 0) {
+                const fallback = this._createRandomGrowthEdgePairWeights();
+                sanitized.anchorEdgeNodePairWeights = normalizePairWeights(fallback);
+            }
+            if (sanitized.distanceRangeWeights.length === 0) sanitized.distanceRangeWeights = [{ key: 'near', min: config.GROWTH_DISTANCE_MIN, max: config.GROWTH_DISTANCE_MAX, weight: 1 }];
+            if (sanitized.edgeTypeWeights.length === 0) sanitized.edgeTypeWeights = [{ type: 'soft', weight: 1 }];
+
+            return sanitized;
+        };
+
+        const sanitized = sanitizeProfile(genome);
+
+        const maxStageAge = Math.max(60, Math.floor(Number(config.MAX_CREATURE_AGE_TICKS) || 10000));
+        const rawStages = Array.isArray(genome.growthStages) ? genome.growthStages.slice() : [];
+        rawStages.sort((a, b) => (Number(a?.startAgeTicks) || 0) - (Number(b?.startAgeTicks) || 0));
+
+        const growthStages = [];
+        let lastEnd = -1;
+        for (const rawStage of rawStages) {
+            let startAgeTicks = Math.max(0, Math.floor(Number(rawStage?.startAgeTicks) || 0));
+            let endAgeTicks = Math.max(startAgeTicks, Math.floor(Number(rawStage?.endAgeTicks) || startAgeTicks));
+
+            if (startAgeTicks <= lastEnd) startAgeTicks = lastEnd + 1;
+            if (startAgeTicks > maxStageAge) continue;
+            endAgeTicks = Math.min(maxStageAge, Math.max(startAgeTicks, endAgeTicks));
+
+            const stageProfileRaw = rawStage?.profile && typeof rawStage.profile === 'object'
+                ? rawStage.profile
+                : rawStage;
+
+            growthStages.push({
+                startAgeTicks,
+                endAgeTicks,
+                profile: sanitizeProfile(stageProfileRaw)
+            });
+            lastEnd = endAgeTicks;
+        }
+
+        sanitized.growthStages = growthStages;
         return sanitized;
     }
 
@@ -1020,51 +1177,72 @@ export class SoftBody {
         const mutationMagnitude = Math.max(0, config.GROWTH_GENE_MUTATION_MAGNITUDE * config.GLOBAL_MUTATION_RATE_MODIFIER);
         let didMutate = false;
 
-        const mutateScalar = (key, lo, hi) => {
-            if (Math.random() >= mutationChance) return;
-            const old = Number(genome[key]) || lo;
-            const mutated = old * (1 + (Math.random() - 0.5) * 2 * mutationMagnitude);
-            genome[key] = Math.max(lo, Math.min(hi, mutated));
-            didMutate = didMutate || Math.abs(genome[key] - old) > 1e-6;
-        };
+        const mutateProfile = (profile) => {
+            if (!profile || typeof profile !== 'object') return;
 
-        mutateScalar('growthChancePerTick', config.GROWTH_BASE_CHANCE_MIN, config.GROWTH_BASE_CHANCE_MAX);
-        mutateScalar('minEnergyRatioToGrow', config.GROWTH_MIN_ENERGY_RATIO_MIN, config.GROWTH_MIN_ENERGY_RATIO_MAX);
-        if (Math.random() < mutationChance) {
-            const delta = Math.round((Math.random() - 0.5) * 2 * mutationMagnitude * 20);
-            genome.growthCooldownTicks = Math.max(config.GROWTH_COOLDOWN_MIN, Math.min(config.GROWTH_COOLDOWN_MAX, Math.floor(genome.growthCooldownTicks + delta)));
-            didMutate = didMutate || delta !== 0;
-        }
+            const mutateScalar = (key, lo, hi) => {
+                if (Math.random() >= mutationChance) return;
+                const old = Number(profile[key]) || lo;
+                const mutated = old * (1 + (Math.random() - 0.5) * 2 * mutationMagnitude);
+                profile[key] = Math.max(lo, Math.min(hi, mutated));
+                didMutate = didMutate || Math.abs(profile[key] - old) > 1e-6;
+            };
 
-        mutateScalar('edgeStiffnessScale', 0.1, 5);
-        mutateScalar('edgeDampingScale', 0.1, 5);
-        mutateScalar('nodeActivationIntervalBias', -3, 3);
-        mutateScalar('edgeActivationIntervalBias', -3, 3);
-        mutateScalar('activationIntervalJitter', 0, 3);
+            mutateScalar('growthChancePerTick', config.GROWTH_BASE_CHANCE_MIN, config.GROWTH_BASE_CHANCE_MAX);
+            mutateScalar('minEnergyRatioToGrow', config.GROWTH_MIN_ENERGY_RATIO_MIN, config.GROWTH_MIN_ENERGY_RATIO_MAX);
+            if (Math.random() < mutationChance) {
+                const delta = Math.round((Math.random() - 0.5) * 2 * mutationMagnitude * 20);
+                profile.growthCooldownTicks = Math.max(config.GROWTH_COOLDOWN_MIN, Math.min(config.GROWTH_COOLDOWN_MAX, Math.floor((Number(profile.growthCooldownTicks) || config.GROWTH_COOLDOWN_MIN) + delta)));
+                didMutate = didMutate || delta !== 0;
+            }
 
-        const mutateWeights = (entries, onEntry = null) => {
-            for (const e of entries || []) {
+            mutateScalar('edgeStiffnessScale', 0.1, 5);
+            mutateScalar('edgeDampingScale', 0.1, 5);
+            mutateScalar('nodeActivationIntervalBias', -3, 3);
+            mutateScalar('edgeActivationIntervalBias', -3, 3);
+            mutateScalar('activationIntervalJitter', 0, 3);
+
+            const mutateWeights = (entries, minWeight = config.GROWTH_MIN_WEIGHT, onEntry = null) => {
+                for (const e of entries || []) {
+                    if (Math.random() < mutationChance) {
+                        e.weight = Math.max(minWeight, (Number(e.weight) || minWeight) * (1 + (Math.random() - 0.5) * 2 * mutationMagnitude));
+                        didMutate = true;
+                    }
+                    if (onEntry) onEntry(e);
+                }
+            };
+
+            mutateWeights(profile.nodesPerGrowthWeights, config.GROWTH_MIN_WEIGHT);
+            mutateWeights(profile.newNodeTypeWeights, config.GROWTH_MIN_WEIGHT);
+            mutateWeights(profile.anchorNodeTypeWeights, config.GROWTH_MIN_WEIGHT);
+            mutateWeights(profile.edgeTypeWeights, config.GROWTH_MIN_WEIGHT);
+            mutateWeights(profile.anchorEdgeNodePairWeights, 0);
+            mutateWeights(profile.distanceRangeWeights, config.GROWTH_MIN_WEIGHT, (entry) => {
                 if (Math.random() < mutationChance) {
-                    e.weight = Math.max(config.GROWTH_MIN_WEIGHT, e.weight * (1 + (Math.random() - 0.5) * 2 * mutationMagnitude));
+                    const span = Math.max(1, entry.max - entry.min);
+                    const shift = span * (Math.random() - 0.5) * mutationMagnitude;
+                    entry.min = Math.max(config.GROWTH_DISTANCE_MIN, Math.min(config.GROWTH_DISTANCE_MAX - 1, entry.min + shift));
+                    entry.max = Math.max(entry.min + 1, Math.min(config.GROWTH_DISTANCE_MAX, entry.max + shift));
                     didMutate = true;
                 }
-                if (onEntry) onEntry(e);
-            }
+            });
         };
 
-        mutateWeights(genome.nodesPerGrowthWeights);
-        mutateWeights(genome.newNodeTypeWeights);
-        mutateWeights(genome.anchorNodeTypeWeights);
-        mutateWeights(genome.edgeTypeWeights);
-        mutateWeights(genome.distanceRangeWeights, (entry) => {
+        mutateProfile(genome);
+
+        for (const stage of genome.growthStages || []) {
             if (Math.random() < mutationChance) {
-                const span = Math.max(1, entry.max - entry.min);
-                const shift = span * (Math.random() - 0.5) * mutationMagnitude;
-                entry.min = Math.max(config.GROWTH_DISTANCE_MIN, Math.min(config.GROWTH_DISTANCE_MAX - 1, entry.min + shift));
-                entry.max = Math.max(entry.min + 1, Math.min(config.GROWTH_DISTANCE_MAX, entry.max + shift));
-                didMutate = true;
+                const shift = Math.round((Math.random() - 0.5) * 2 * mutationMagnitude * 300);
+                stage.startAgeTicks = Math.max(0, Math.floor((Number(stage.startAgeTicks) || 0) + shift));
+                didMutate = didMutate || shift !== 0;
             }
-        });
+            if (Math.random() < mutationChance) {
+                const shift = Math.round((Math.random() - 0.5) * 2 * mutationMagnitude * 300);
+                stage.endAgeTicks = Math.max(Number(stage.startAgeTicks) || 0, Math.floor((Number(stage.endAgeTicks) || 0) + shift));
+                didMutate = didMutate || shift !== 0;
+            }
+            mutateProfile(stage.profile);
+        }
 
         return {
             genome: this._sanitizeGrowthGenome(genome),
@@ -1683,9 +1861,10 @@ export class SoftBody {
 
         const genome = this._sanitizeGrowthGenome(this.growthGenome || this._createRandomGrowthGenome());
         this.growthGenome = genome;
+        const growthProfile = this._resolveGrowthProfileForAge(genome, this.absoluteAgeTicks);
 
         const energyRatio = this.currentMaxEnergy > 0 ? this.creatureEnergy / this.currentMaxEnergy : 0;
-        if (energyRatio < genome.minEnergyRatioToGrow) {
+        if (energyRatio < growthProfile.minEnergyRatioToGrow) {
             this.growthSuppressedByEnergy += 1;
             return false;
         }
@@ -1708,7 +1887,7 @@ export class SoftBody {
         }
 
         const dtScale = Math.max(0.1, dt * 60);
-        const baseChance = Math.max(0, Math.min(1, genome.growthChancePerTick));
+        const baseChance = Math.max(0, Math.min(1, growthProfile.growthChancePerTick));
         const dyeState = this._getDyeEcologyStateAtBodyCenter();
         const dyeGrowthScale = this._resolveDyeEffectScale(dyeState, {
             weight: Math.max(0, Number(config.DYE_GROWTH_EFFECT_WEIGHT) || 0.7)
@@ -1720,7 +1899,7 @@ export class SoftBody {
             return false;
         }
 
-        const nodesPlan = this._sampleWeightedEntry(genome.nodesPerGrowthWeights, { count: 1 });
+        const nodesPlan = this._sampleWeightedEntry(growthProfile.nodesPerGrowthWeights, { count: 1 });
         const maxNodesByPlan = Math.max(1, Math.floor(nodesPlan?.count || 1));
         const maxNodesByCapacity = Math.max(0, config.GROWTH_MAX_POINTS_PER_CREATURE - this.massPoints.length);
         const targetNodeAdds = Math.min(maxNodesByPlan, maxNodesByCapacity);
@@ -1737,18 +1916,19 @@ export class SoftBody {
 
         const movementChoices = [MovementType.FIXED, MovementType.FLOATING, MovementType.NEUTRAL];
         const useTriangulatedGrowth = config.GROWTH_TRIANGULATED_PRIMITIVES_ENABLED !== false;
+        const edgePairWeightMap = this._buildGrowthEdgePairWeightMap(growthProfile.anchorEdgeNodePairWeights);
 
         for (let i = 0; i < targetNodeAdds; i++) {
             let placed = false;
 
             for (let attempt = 0; attempt < config.GROWTH_PLACEMENT_ATTEMPTS_PER_NODE; attempt++) {
-                const anchorType = this._sampleWeightedEntry(genome.anchorNodeTypeWeights, null)?.nodeType;
+                const anchorType = this._sampleWeightedEntry(growthProfile.anchorNodeTypeWeights, null)?.nodeType;
                 const typedAnchors = preGrowthPoints.filter((p) => p.nodeType === anchorType);
                 const anchorPool = typedAnchors.length > 0 ? typedAnchors : preGrowthPoints;
                 const anchor = anchorPool[Math.floor(Math.random() * anchorPool.length)];
                 if (!anchor) break;
 
-                const distanceBucket = this._sampleWeightedEntry(genome.distanceRangeWeights, null)
+                const distanceBucket = this._sampleWeightedEntry(growthProfile.distanceRangeWeights, null)
                     || { min: config.GROWTH_DISTANCE_MIN, max: config.GROWTH_DISTANCE_MAX };
 
                 let x = 0;
@@ -1782,11 +1962,17 @@ export class SoftBody {
                         const dy = neighbor.pos.y - anchor.pos.y;
                         const dist = Math.sqrt(dx * dx + dy * dy);
                         if (dist >= minEdgeLen && dist <= maxEdgeLen) {
+                            const pairKey = this._getGrowthEdgePairKey(anchor.nodeType, neighbor.nodeType);
+                            const edgePreferenceWeight = pairKey && edgePairWeightMap.has(pairKey)
+                                ? Math.max(0, Number(edgePairWeightMap.get(pairKey)) || 0)
+                                : Math.max(0, Number(config.GROWTH_MIN_WEIGHT) || 0.05);
+
                             candidateNeighbors.push({
                                 neighbor,
                                 dx,
                                 dy,
                                 dist,
+                                edgePreferenceWeight,
                                 sharedSpringRestLength: Number.isFinite(Number(entry.sharedSpringRestLength))
                                     ? Number(entry.sharedSpringRestLength)
                                     : dist
@@ -1796,7 +1982,24 @@ export class SoftBody {
 
                     if (candidateNeighbors.length === 0) continue;
 
-                    const selectedNeighbor = candidateNeighbors[Math.floor(Math.random() * candidateNeighbors.length)];
+                    const positiveCandidates = candidateNeighbors.filter((c) => c.edgePreferenceWeight > 0);
+                    const weightedPool = positiveCandidates.length > 0
+                        ? positiveCandidates
+                        : candidateNeighbors.map((c) => ({ ...c, edgePreferenceWeight: 1 }));
+
+                    let totalEdgePreference = 0;
+                    for (const c of weightedPool) totalEdgePreference += Math.max(0, Number(c.edgePreferenceWeight) || 0);
+                    if (!(totalEdgePreference > 0)) continue;
+
+                    let rEdge = Math.random() * totalEdgePreference;
+                    let selectedNeighbor = weightedPool[weightedPool.length - 1];
+                    for (const c of weightedPool) {
+                        rEdge -= Math.max(0, Number(c.edgePreferenceWeight) || 0);
+                        if (rEdge <= 0) {
+                            selectedNeighbor = c;
+                            break;
+                        }
+                    }
                     triangleAnchor = selectedNeighbor.neighbor;
                     const baseLen = selectedNeighbor.dist;
                     if (!Number.isFinite(baseLen) || baseLen <= 0.0001) continue;
@@ -1831,7 +2034,7 @@ export class SoftBody {
                     if (x < 0 || x > config.WORLD_WIDTH || y < 0 || y > config.WORLD_HEIGHT) continue;
                 }
 
-                const nodeType = this._sampleWeightedEntry(genome.newNodeTypeWeights, null)?.nodeType;
+                const nodeType = this._sampleWeightedEntry(growthProfile.newNodeTypeWeights, null)?.nodeType;
                 if (nodeType === undefined || nodeType === null) continue;
 
                 const radius = Math.max(0.5, Math.min(anchor.radius * (0.75 + Math.random() * 0.6), anchor.radius * 1.5));
@@ -1864,10 +2067,10 @@ export class SoftBody {
 
                 // Growth-genome driven actuation interval inheritance:
                 // anchor gene + heritable bias + jitter.
-                const intervalJitter = (Math.random() - 0.5) * 2 * (genome.activationIntervalJitter || 0);
+                const intervalJitter = (Math.random() - 0.5) * 2 * (growthProfile.activationIntervalJitter || 0);
                 const inheritedNodeInterval = this._sanitizeActivationIntervalGene(
                     (anchor.activationIntervalGene ?? this._randomActivationIntervalGene()) +
-                    (genome.nodeActivationIntervalBias || 0) +
+                    (growthProfile.nodeActivationIntervalBias || 0) +
                     intervalJitter
                 );
                 newPoint.activationIntervalGene = inheritedNodeInterval;
@@ -1922,9 +2125,9 @@ export class SoftBody {
 
                 this.massPoints.push(newPoint);
 
-                const edgeType = this._sampleWeightedEntry(genome.edgeTypeWeights, { type: 'soft' })?.type || 'soft';
-                const stiffness = Math.max(100, this.stiffness * genome.edgeStiffnessScale * (0.8 + Math.random() * 0.4));
-                const damping = Math.max(0.1, this.springDamping * genome.edgeDampingScale * (0.8 + Math.random() * 0.4));
+                const edgeType = this._sampleWeightedEntry(growthProfile.edgeTypeWeights, { type: 'soft' })?.type || 'soft';
+                const stiffness = Math.max(100, this.stiffness * growthProfile.edgeStiffnessScale * (0.8 + Math.random() * 0.4));
+                const damping = Math.max(0.1, this.springDamping * growthProfile.edgeDampingScale * (0.8 + Math.random() * 0.4));
 
                 let edgeLengthThisPlacement = 0;
                 for (const springAnchor of springAnchors) {
@@ -1933,9 +2136,9 @@ export class SoftBody {
                     const parentIntervalA = springAnchor.activationIntervalGene ?? this._randomActivationIntervalGene();
                     const parentIntervalB = newPoint.activationIntervalGene ?? this._randomActivationIntervalGene();
                     const edgeIntervalBase = (parentIntervalA + parentIntervalB) * 0.5;
-                    const edgeIntervalJitter = (Math.random() - 0.5) * 2 * (genome.activationIntervalJitter || 0);
+                    const edgeIntervalJitter = (Math.random() - 0.5) * 2 * (growthProfile.activationIntervalJitter || 0);
                     spring.activationIntervalGene = this._sanitizeActivationIntervalGene(
-                        edgeIntervalBase + (genome.edgeActivationIntervalBias || 0) + edgeIntervalJitter
+                        edgeIntervalBase + (growthProfile.edgeActivationIntervalBias || 0) + edgeIntervalJitter
                     );
                     spring.actuationCooldownByChannel = { edge: 0 };
                     this.springs.push(spring);
@@ -1987,7 +2190,7 @@ export class SoftBody {
 
         this.creatureEnergy -= growthCost;
         this.totalGrowthEnergySpent += growthCost;
-        this.growthCooldownRemaining = Math.max(1, Math.floor(genome.growthCooldownTicks));
+        this.growthCooldownRemaining = Math.max(1, Math.floor(growthProfile.growthCooldownTicks));
         this.growthEventsCompleted += 1;
         this.growthNodesAdded += nodesAdded;
 

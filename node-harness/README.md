@@ -39,6 +39,11 @@ node node-harness/runScenario.mjs \
 You can also explicitly control floor/ceiling for reproduction headroom:
 `--creatureFloor`, `--creatureCeiling`, `--particleFloor`, `--particleCeiling`.
 
+Distributed-compute foundation toggles (serial for now):
+- `--creatureExecutionMode legacy_reverse|islands_deterministic|islands_shuffled`
+- `--creatureIslandNeighborRadiusCells <n>` (optional override)
+- `--creatureShuffleWithinIsland true|false` (only for shuffled mode)
+
 > Engine selection is removed: this harness always runs the real simulation code path.
 
 ## 2) Render timeline JSON into frames/video

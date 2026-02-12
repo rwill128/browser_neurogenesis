@@ -90,7 +90,14 @@ export class RealWorld {
         : 5000,
       creatureSpawnMargin: Number.isFinite(Number(stepBehavior.creatureSpawnMargin))
         ? Number(stepBehavior.creatureSpawnMargin)
-        : 10
+        : 10,
+      creatureExecutionMode: typeof stepBehavior.creatureExecutionMode === 'string'
+        ? stepBehavior.creatureExecutionMode
+        : null,
+      creatureIslandNeighborRadiusCells: Number.isFinite(Number(stepBehavior.creatureIslandNeighborRadiusCells))
+        ? Math.max(0, Math.floor(Number(stepBehavior.creatureIslandNeighborRadiusCells)))
+        : null,
+      creatureShuffleWithinIsland: Boolean(stepBehavior.creatureShuffleWithinIsland)
     };
 
     this._applyScenarioConfig();
@@ -295,7 +302,10 @@ export class RealWorld {
       applySelectedPointPush: this.stepBehavior.applySelectedPointPush,
       captureInstabilityTelemetry: this.stepBehavior.captureInstabilityTelemetry,
       maxRecentInstabilityDeaths: this.stepBehavior.maxRecentInstabilityDeaths,
-      creatureSpawnMargin: this.stepBehavior.creatureSpawnMargin
+      creatureSpawnMargin: this.stepBehavior.creatureSpawnMargin,
+      creatureExecutionMode: this.stepBehavior.creatureExecutionMode,
+      creatureIslandNeighborRadiusCells: this.stepBehavior.creatureIslandNeighborRadiusCells,
+      creatureShuffleWithinIsland: this.stepBehavior.creatureShuffleWithinIsland
     });
 
     this._syncAliasesFromWorldState();
@@ -504,6 +514,7 @@ export class RealWorld {
       worldStats: {
         globalEnergyGains: this.worldState?.globalEnergyGains || {},
         globalEnergyCosts: this.worldState?.globalEnergyCosts || {},
+        computeTelemetry: this.worldState?.lastComputeTelemetry || null,
         nodeTypeCounts: nodeTypeSummary.counts,
         nodeTypeRatios: nodeTypeSummary.ratios,
         totalNodes: nodeTypeSummary.totalNodes

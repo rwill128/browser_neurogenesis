@@ -8,6 +8,10 @@
 import { withRandomSource } from './randomScope.mjs';
 import { resolveConfigViews } from './configViews.mjs';
 import { stabilizeNewbornBody } from './newbornStability.mjs';
+import {
+  buildCreatureInteractionIslands,
+  computeIslandNeighborRadiusCells
+} from './creatureIslands.mjs';
 
 /**
  * Draw a deterministic random value from [min, max) using the provided RNG.
@@ -432,6 +436,111 @@ function removeDeadParticles(state, dt, rng) {
   }
 }
 
+function shuffleArrayInPlace(items, rng = Math.random) {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.max(0, Math.min(0.999999, Number(rng()) || 0)) * (i + 1));
+    const tmp = items[i];
+    items[i] = items[j];
+    items[j] = tmp;
+  }
+  return items;
+}
+
+function normalizeCreatureExecutionMode(mode) {
+  const value = String(mode || '').trim().toLowerCase();
+  if (!value) return 'legacy_reverse';
+
+  if (value === 'legacy' || value === 'legacy_reverse' || value === 'reverse') {
+    return 'legacy_reverse';
+  }
+  if (value === 'islands' || value === 'islands_deterministic' || value === 'islands_serial') {
+    return 'islands_deterministic';
+  }
+  if (value === 'islands_shuffled' || value === 'shuffled' || value === 'islands_randomized') {
+    return 'islands_shuffled';
+  }
+  return 'legacy_reverse';
+}
+
+function resolveCreatureExecutionPlan(state, runtimeConfig, constants, rng, {
+  creatureExecutionMode = null,
+  creatureIslandNeighborRadiusCells = null,
+  creatureShuffleWithinIsland = false
+} = {}) {
+  const mode = normalizeCreatureExecutionMode(
+    creatureExecutionMode ?? runtimeConfig.CREATURE_EXECUTION_MODE ?? 'legacy_reverse'
+  );
+
+  if (mode === 'legacy_reverse') {
+    const order = [];
+    for (let i = state.softBodyPopulation.length - 1; i >= 0; i--) {
+      order.push(state.softBodyPopulation[i]);
+    }
+    return {
+      order,
+      telemetry: {
+        mode,
+        islandCount: 0,
+        largestIslandSize: 0,
+        avgIslandSize: 0,
+        neighborRadiusCells: null,
+        shuffled: false,
+        shuffledWithinIsland: false,
+        bodyCount: order.length
+      }
+    };
+  }
+
+  const gridCellSize = constants.GRID_CELL_SIZE ?? runtimeConfig.GRID_CELL_SIZE;
+  const autoNeighborRadius = computeIslandNeighborRadiusCells(runtimeConfig, gridCellSize);
+  const neighborRadiusCells = Number.isFinite(Number(creatureIslandNeighborRadiusCells))
+    ? Math.max(0, Math.floor(Number(creatureIslandNeighborRadiusCells)))
+    : autoNeighborRadius;
+
+  const islandBuild = buildCreatureInteractionIslands({
+    softBodyPopulation: state.softBodyPopulation,
+    spatialGrid: state.spatialGrid,
+    gridCols: runtimeConfig.GRID_COLS,
+    gridRows: runtimeConfig.GRID_ROWS,
+    neighborRadiusCells
+  });
+
+  const islands = islandBuild.islands.map((group) => group.slice());
+  const shuffled = mode === 'islands_shuffled';
+  if (shuffled) {
+    shuffleArrayInPlace(islands, rng);
+    if (creatureShuffleWithinIsland) {
+      for (const group of islands) {
+        shuffleArrayInPlace(group, rng);
+      }
+    }
+  }
+
+  const order = islands.flat();
+  const islandSizes = islands.map((g) => g.length);
+  const largestIslandSize = islandSizes.length > 0 ? Math.max(...islandSizes) : 0;
+  const avgIslandSize = islandSizes.length > 0
+    ? islandSizes.reduce((sum, n) => sum + n, 0) / islandSizes.length
+    : 0;
+
+  return {
+    order,
+    telemetry: {
+      mode,
+      islandCount: islands.length,
+      largestIslandSize,
+      avgIslandSize: round(avgIslandSize, 4),
+      neighborRadiusCells,
+      autoNeighborRadius,
+      shuffled,
+      shuffledWithinIsland: Boolean(creatureShuffleWithinIsland),
+      bodyCount: order.length,
+      occupiedCells: islandBuild.occupiedCells,
+      graphEdgeCount: islandBuild.edgeCount
+    }
+  };
+}
+
 function maybeLogInstabilityDiagnostic(telemetry, removalEvent, {
   diagnosticEveryN = 100,
   diagnosticReasons = null
@@ -521,7 +630,7 @@ function removeUnstableBodies(state, {
  * @param {object} state - Mutable world state (bodies, particles, fields, grid).
  * @param {number} dt - Delta time in seconds.
  * @param {object} options - Runtime controls and injectable classes.
- * @returns {{removedCount:number,removedBodies:object[],currentAnyUnstable:boolean,spawnTelemetry:object,reproductionTelemetry:object,populations:{creatures:number,particles:number}}}
+ * @returns {{removedCount:number,removedBodies:object[],currentAnyUnstable:boolean,spawnTelemetry:object,reproductionTelemetry:object,computeTelemetry:object,populations:{creatures:number,particles:number}}}
  */
 export function stepWorld(state, dt, options = {}) {
   const {
@@ -536,6 +645,9 @@ export function stepWorld(state, dt, options = {}) {
     applyEmitters = true,
     applySelectedPointPush = true,
     creatureSpawnMargin = 50,
+    creatureExecutionMode = null,
+    creatureIslandNeighborRadiusCells = null,
+    creatureShuffleWithinIsland = false,
     captureInstabilityTelemetry = true,
     maxRecentInstabilityDeaths = 1000,
     instabilityDiagnosticEveryN = null,
@@ -625,9 +737,15 @@ export function stepWorld(state, dt, options = {}) {
     suppressedByPlacementOrOther: 0
   };
 
-  for (let i = state.softBodyPopulation.length - 1; i >= 0; i--) {
-    const body = state.softBodyPopulation[i];
-    if (body.isUnstable) continue;
+  const creatureExecutionPlan = resolveCreatureExecutionPlan(state, runtimeConfig, constants, rng, {
+    creatureExecutionMode,
+    creatureIslandNeighborRadiusCells,
+    creatureShuffleWithinIsland
+  });
+  state.lastComputeTelemetry = creatureExecutionPlan.telemetry;
+
+  for (const body of creatureExecutionPlan.order) {
+    if (!body || body.isUnstable) continue;
 
     withRandomSource(rng, () => body.updateSelf(dt, state.fluidField));
     if (body.isUnstable) {
@@ -751,6 +869,7 @@ export function stepWorld(state, dt, options = {}) {
       totalSpawns: reproductionBirths + floorSpawns
     },
     reproductionTelemetry,
+    computeTelemetry: creatureExecutionPlan.telemetry,
     populations: {
       creatures: state.softBodyPopulation.length,
       particles: state.particles.length

@@ -96,7 +96,15 @@ const runtimeScenario = {
     applySelectedPointPush: parseBoolArg('applySelectedPointPush', scenarioStepBehavior.applySelectedPointPush ?? false),
     captureInstabilityTelemetry: parseBoolArg('captureInstabilityTelemetry', scenarioStepBehavior.captureInstabilityTelemetry ?? true),
     maxRecentInstabilityDeaths: parseNum(arg('maxRecentInstabilityDeaths', null), Number.isFinite(Number(scenarioStepBehavior.maxRecentInstabilityDeaths)) ? Number(scenarioStepBehavior.maxRecentInstabilityDeaths) : 5000),
-    creatureSpawnMargin: parseNum(arg('creatureSpawnMargin', null), Number.isFinite(Number(scenarioStepBehavior.creatureSpawnMargin)) ? Number(scenarioStepBehavior.creatureSpawnMargin) : 50)
+    creatureSpawnMargin: parseNum(arg('creatureSpawnMargin', null), Number.isFinite(Number(scenarioStepBehavior.creatureSpawnMargin)) ? Number(scenarioStepBehavior.creatureSpawnMargin) : 50),
+    creatureExecutionMode: arg('creatureExecutionMode', scenarioStepBehavior.creatureExecutionMode ?? null),
+    creatureIslandNeighborRadiusCells: parseNum(
+      arg('creatureIslandNeighborRadiusCells', null),
+      Number.isFinite(Number(scenarioStepBehavior.creatureIslandNeighborRadiusCells))
+        ? Number(scenarioStepBehavior.creatureIslandNeighborRadiusCells)
+        : null
+    ),
+    creatureShuffleWithinIsland: parseBoolArg('creatureShuffleWithinIsland', scenarioStepBehavior.creatureShuffleWithinIsland ?? false)
   }
 };
 

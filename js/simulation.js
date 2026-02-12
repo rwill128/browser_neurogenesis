@@ -295,6 +295,9 @@ function updatePhysics(dt) {
             applyEmitters: true,
             applySelectedPointPush: true,
             creatureSpawnMargin: 50,
+            creatureExecutionMode: config.CREATURE_EXECUTION_MODE,
+            creatureIslandNeighborRadiusCells: config.CREATURE_ISLAND_NEIGHBOR_RADIUS_CELLS,
+            creatureShuffleWithinIsland: config.CREATURE_SHUFFLE_WITHIN_ISLAND,
             captureInstabilityTelemetry: true,
             maxRecentInstabilityDeaths: 5000
         },

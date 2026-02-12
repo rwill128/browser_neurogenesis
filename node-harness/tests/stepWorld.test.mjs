@@ -570,3 +570,112 @@ test('stepWorld floor-spawn applies newborn fit + spring clamping', () => {
   assert.ok(spawned.springs[0].stiffness < runtime.RIGID_SPRING_STIFFNESS);
   assert.ok(spawned.springs[0].stiffness <= 10000);
 });
+
+test('stepWorld legacy_reverse execution mode preserves historical reverse order', () => {
+  const runtime = createRuntimeConfig({
+    CREATURE_POPULATION_FLOOR: 0,
+    CREATURE_POPULATION_CEILING: 10,
+    PARTICLE_POPULATION_FLOOR: 0,
+    PARTICLE_POPULATION_CEILING: 0
+  });
+
+  const order = [];
+  class OrderedBody extends FakeSoftBody {
+    updateSelf() {
+      order.push(this.id);
+    }
+  }
+
+  const bodies = [
+    new OrderedBody(1, 10, 10),
+    new OrderedBody(2, 40, 40),
+    new OrderedBody(3, 70, 70)
+  ];
+
+  const state = createWorldState({ runtime, softBodies: bodies, particles: [] });
+  const result = stepWorld(state, 0.01, {
+    config: runtime,
+    rng: () => 0.5,
+    allowReproduction: false,
+    maintainCreatureFloor: false,
+    maintainParticleFloor: false,
+    creatureExecutionMode: 'legacy_reverse'
+  });
+
+  assert.deepEqual(order, [3, 2, 1]);
+  assert.equal(result.computeTelemetry.mode, 'legacy_reverse');
+});
+
+test('stepWorld islands_deterministic executes serially by deterministic island order', () => {
+  const runtime = createRuntimeConfig({
+    CREATURE_POPULATION_FLOOR: 0,
+    CREATURE_POPULATION_CEILING: 10,
+    PARTICLE_POPULATION_FLOOR: 0,
+    PARTICLE_POPULATION_CEILING: 0
+  });
+
+  const order = [];
+  class OrderedBody extends FakeSoftBody {
+    updateSelf() {
+      order.push(this.id);
+    }
+  }
+
+  const bodies = [
+    new OrderedBody(3, 5, 5),
+    new OrderedBody(1, 95, 95),
+    new OrderedBody(2, 150, 150)
+  ];
+
+  const state = createWorldState({ runtime, softBodies: bodies, particles: [] });
+  const result = stepWorld(state, 0.01, {
+    config: runtime,
+    rng: () => 0.5,
+    allowReproduction: false,
+    maintainCreatureFloor: false,
+    maintainParticleFloor: false,
+    creatureExecutionMode: 'islands_deterministic',
+    creatureIslandNeighborRadiusCells: 0
+  });
+
+  assert.deepEqual(order, [1, 2, 3]);
+  assert.equal(result.computeTelemetry.mode, 'islands_deterministic');
+  assert.equal(result.computeTelemetry.islandCount, 3);
+});
+
+test('stepWorld islands_shuffled randomizes serial island execution order', () => {
+  const runtime = createRuntimeConfig({
+    CREATURE_POPULATION_FLOOR: 0,
+    CREATURE_POPULATION_CEILING: 10,
+    PARTICLE_POPULATION_FLOOR: 0,
+    PARTICLE_POPULATION_CEILING: 0
+  });
+
+  const order = [];
+  class OrderedBody extends FakeSoftBody {
+    updateSelf() {
+      order.push(this.id);
+    }
+  }
+
+  const bodies = [
+    new OrderedBody(1, 5, 5),
+    new OrderedBody(2, 95, 95),
+    new OrderedBody(3, 150, 150)
+  ];
+
+  const state = createWorldState({ runtime, softBodies: bodies, particles: [] });
+  const result = stepWorld(state, 0.01, {
+    config: runtime,
+    rng: () => 0,
+    allowReproduction: false,
+    maintainCreatureFloor: false,
+    maintainParticleFloor: false,
+    creatureExecutionMode: 'islands_shuffled',
+    creatureIslandNeighborRadiusCells: 0
+  });
+
+  assert.deepEqual(order, [2, 3, 1]);
+  assert.equal(result.computeTelemetry.mode, 'islands_shuffled');
+  assert.equal(result.computeTelemetry.shuffled, true);
+});

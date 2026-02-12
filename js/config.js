@@ -167,6 +167,14 @@ const config = {
     ACTUATION_UPKEEP_COST_FRACTION: 0.2,
     ACTUATION_ACTIVATION_COST_MULTIPLIER: 0.8,
 
+    // Creature update execution planning (distributed-compute foundation).
+    // - legacy_reverse: historical reverse-order loop
+    // - islands_deterministic: connected components from broad-phase grid, serial deterministic order
+    // - islands_shuffled: same components but randomized serial order (seeded RNG-aware)
+    CREATURE_EXECUTION_MODE: 'legacy_reverse',
+    CREATURE_ISLAND_NEIGHBOR_RADIUS_CELLS: null,
+    CREATURE_SHUFFLE_WITHIN_ISLAND: false,
+
     MUTATION_RATE_PERCENT: 0.1,
     MUTATION_CHANCE_BOOL: 0.05,
     MUTATION_CHANCE_NODE_TYPE: 0.1,

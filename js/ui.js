@@ -447,6 +447,10 @@ function updateInfoPanel() {
         document.getElementById('infoBodyGrowthSuppEnergy').textContent = config.selectedInspectBody.growthSuppressedByEnergy || 0;
         document.getElementById('infoBodyGrowthSuppCooldown').textContent = config.selectedInspectBody.growthSuppressedByCooldown || 0;
         document.getElementById('infoBodyGrowthSuppPopulation').textContent = config.selectedInspectBody.growthSuppressedByPopulation || 0;
+        document.getElementById('infoBodyGrowthSuppMaxPoints').textContent = config.selectedInspectBody.growthSuppressedByMaxPoints || 0;
+        document.getElementById('infoBodyGrowthSuppNoCapacity').textContent = config.selectedInspectBody.growthSuppressedByNoCapacity || 0;
+        document.getElementById('infoBodyGrowthSuppChanceRoll').textContent = config.selectedInspectBody.growthSuppressedByChanceRoll || 0;
+        document.getElementById('infoBodyGrowthSuppPlacement').textContent = config.selectedInspectBody.growthSuppressedByPlacement || 0;
         document.getElementById('infoBodyNnTopologyVersion').textContent = config.selectedInspectBody.nnTopologyVersion || 0;
         document.getElementById('infoBodyRlTopologyResets').textContent = config.selectedInspectBody.rlBufferResetsDueToTopology || 0;
         document.getElementById('infoBodyReproSuppDensity').textContent = config.selectedInspectBody.reproductionSuppressedByDensity || 0;

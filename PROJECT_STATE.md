@@ -140,3 +140,10 @@ For each scenario run:
   - added separate `phenotypeBlueprint` in snapshots for reconstructing current grown physiology on load.
 - Load path now restores current physiology from phenotype snapshot while preserving reproductive blueprint for offspring generation.
 - Extended save/load regression tests to assert this separation explicitly (reproductive blueprint count can differ from current mass-point count after growth).
+- Added growth-failure telemetry expansion:
+  - `growthSuppressedByMaxPoints`
+  - `growthSuppressedByNoCapacity`
+  - `growthSuppressedByChanceRoll`
+  - `growthSuppressedByPlacement`
+- Surfaced new growth suppression counters in browser creature info panel and node soak summaries/log output.
+- Added unit coverage for new growth telemetry counters in `node-harness/tests/softBodyGrowthGuardrails.test.mjs`.

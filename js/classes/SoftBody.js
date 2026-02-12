@@ -93,6 +93,11 @@ export class SoftBody {
         this.growthSuppressedByPopulation = 0;
         this.growthSuppressedByEnergy = 0;
         this.growthSuppressedByCooldown = 0;
+        // Growth telemetry (new): make non-growth outcomes observable in soak/UI diagnostics.
+        this.growthSuppressedByMaxPoints = 0;
+        this.growthSuppressedByNoCapacity = 0;
+        this.growthSuppressedByChanceRoll = 0;
+        this.growthSuppressedByPlacement = 0;
         this.nnTopologyVersion = 0;
         this.rlBufferResetsDueToTopology = 0;
 
@@ -649,7 +654,12 @@ export class SoftBody {
      */
     _attemptGrowthStep(dt) {
         if (!config.GROWTH_ENABLED || this.isUnstable || this.massPoints.length === 0) return false;
-        if (this.massPoints.length >= config.GROWTH_MAX_POINTS_PER_CREATURE) return false;
+
+        // Telemetry: distinguish hard point-cap suppression from other non-growth outcomes.
+        if (this.massPoints.length >= config.GROWTH_MAX_POINTS_PER_CREATURE) {
+            this.growthSuppressedByMaxPoints += 1;
+            return false;
+        }
 
         if (this.growthCooldownRemaining > 0) {
             this.growthCooldownRemaining--;
@@ -686,13 +696,19 @@ export class SoftBody {
         const dtScale = Math.max(0.1, dt * 60);
         const baseChance = Math.max(0, Math.min(1, genome.growthChancePerTick));
         const growthChance = (1 - Math.pow(1 - baseChance, dtScale)) * popThrottle.scale;
-        if (Math.random() >= growthChance) return false;
+        if (Math.random() >= growthChance) {
+            this.growthSuppressedByChanceRoll += 1;
+            return false;
+        }
 
         const nodesPlan = this._sampleWeightedEntry(genome.nodesPerGrowthWeights, { count: 1 });
         const maxNodesByPlan = Math.max(1, Math.floor(nodesPlan?.count || 1));
         const maxNodesByCapacity = Math.max(0, config.GROWTH_MAX_POINTS_PER_CREATURE - this.massPoints.length);
         const targetNodeAdds = Math.min(maxNodesByPlan, maxNodesByCapacity);
-        if (targetNodeAdds <= 0) return false;
+        if (targetNodeAdds <= 0) {
+            this.growthSuppressedByNoCapacity += 1;
+            return false;
+        }
 
         const preGrowthPoints = this.massPoints.slice();
         const startPointCount = this.massPoints.length;
@@ -805,6 +821,7 @@ export class SoftBody {
         }
 
         if (nodesAdded <= 0) {
+            this.growthSuppressedByPlacement += 1;
             return false;
         }
 

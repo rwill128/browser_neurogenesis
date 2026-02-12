@@ -249,6 +249,10 @@ function summarize(worldState, tick, timeSec) {
   let growthSuppressedByPopulation = 0;
   let growthSuppressedByEnergy = 0;
   let growthSuppressedByCooldown = 0;
+  let growthSuppressedByMaxPoints = 0;
+  let growthSuppressedByNoCapacity = 0;
+  let growthSuppressedByChanceRoll = 0;
+  let growthSuppressedByPlacement = 0;
   let rlTopologyResets = 0;
   let topologyVersionTotal = 0;
 
@@ -272,6 +276,10 @@ function summarize(worldState, tick, timeSec) {
     growthSuppressedByPopulation += Number(b.growthSuppressedByPopulation || 0);
     growthSuppressedByEnergy += Number(b.growthSuppressedByEnergy || 0);
     growthSuppressedByCooldown += Number(b.growthSuppressedByCooldown || 0);
+    growthSuppressedByMaxPoints += Number(b.growthSuppressedByMaxPoints || 0);
+    growthSuppressedByNoCapacity += Number(b.growthSuppressedByNoCapacity || 0);
+    growthSuppressedByChanceRoll += Number(b.growthSuppressedByChanceRoll || 0);
+    growthSuppressedByPlacement += Number(b.growthSuppressedByPlacement || 0);
     rlTopologyResets += Number(b.rlBufferResetsDueToTopology || 0);
     topologyVersionTotal += Number(b.nnTopologyVersion || 0);
 
@@ -304,6 +312,10 @@ function summarize(worldState, tick, timeSec) {
     growthSuppressedByPopulation,
     growthSuppressedByEnergy,
     growthSuppressedByCooldown,
+    growthSuppressedByMaxPoints,
+    growthSuppressedByNoCapacity,
+    growthSuppressedByChanceRoll,
+    growthSuppressedByPlacement,
     rlTopologyResets,
     topologyVersionTotal,
     reproductionSuppressedByDensity,
@@ -474,6 +486,7 @@ for (tick = 1; tick <= steps; tick++) {
         `[SOAK] tick=${s.tick} creatures=${s.creatures} particles=${s.particles} ` +
         `totalPoints=${s.totalPoints} maxPts=${s.maxPointsPerCreature} ` +
         `growthEvents=${s.growthEvents} activeGrowers=${s.growthCohorts.activeGrowers} ` +
+        `growthSuppChance=${s.growthSuppressedByChanceRoll} growthSuppPlacement=${s.growthSuppressedByPlacement} ` +
         `nodeRichness=${s.nodeDiversity.richness} rlTopologyResets=${s.rlTopologyResets} ` +
         `reproSuppDensity=${s.reproductionSuppressedByDensity} reproSuppResource=${s.reproductionSuppressedByResources}`
       );

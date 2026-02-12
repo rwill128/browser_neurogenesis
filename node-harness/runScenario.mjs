@@ -104,8 +104,12 @@ const instabilityPath = resolve(outDir, `${scenario.name}-seed${seed}-steps${ste
 writeFileSync(instabilityPath, '', 'utf8');
 
 const timeline = [];
+let totalReproductionBirths = 0;
+let totalFloorSpawns = 0;
 for (let i = 0; i < steps; i++) {
   const stepResult = world.step(runtimeScenario.dt);
+  totalReproductionBirths += Number(stepResult?.spawnTelemetry?.reproductionBirths || 0);
+  totalFloorSpawns += Number(stepResult?.spawnTelemetry?.floorSpawns || 0);
 
   if (Array.isArray(stepResult?.removedBodies) && stepResult.removedBodies.length) {
     for (const death of stepResult.removedBodies) {
@@ -135,6 +139,11 @@ const payload = {
   stepBehavior: runtimeScenario.stepBehavior,
   generatedAt: new Date().toISOString(),
   instabilityTelemetry: world.worldState.instabilityTelemetry || {},
+  spawnTelemetry: {
+    totalReproductionBirths,
+    totalFloorSpawns,
+    totalSpawns: totalReproductionBirths + totalFloorSpawns
+  },
   artifacts: {
     instabilityDeathsPath: instabilityPath
   },

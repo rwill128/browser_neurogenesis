@@ -7,6 +7,7 @@
 
 import { withRandomSource } from './randomScope.mjs';
 import { resolveConfigViews } from './configViews.mjs';
+import { stabilizeNewbornBody } from './newbornStability.mjs';
 
 /**
  * Draw a deterministic random value from [min, max) using the provided RNG.
@@ -48,6 +49,7 @@ function ensureInstabilityTelemetryState(state, maxRecentDeaths = 1000) {
       totalNonPhysicsRemoved: 0,
       totalUnknownRemoved: 0,
       removedByReason: {},
+      removedByPhysicsKind: {},
       recentDeaths: [],
       maxRecentDeaths,
       lastDeathSeq: 0
@@ -60,6 +62,7 @@ function ensureInstabilityTelemetryState(state, maxRecentDeaths = 1000) {
   t.totalNonPhysicsRemoved = Number(t.totalNonPhysicsRemoved) || 0;
   t.totalUnknownRemoved = Number(t.totalUnknownRemoved) || 0;
   t.removedByReason = t.removedByReason && typeof t.removedByReason === 'object' ? t.removedByReason : {};
+  t.removedByPhysicsKind = t.removedByPhysicsKind && typeof t.removedByPhysicsKind === 'object' ? t.removedByPhysicsKind : {};
   t.recentDeaths = Array.isArray(t.recentDeaths) ? t.recentDeaths : [];
   t.lastDeathSeq = Number(t.lastDeathSeq) || 0;
   t.maxRecentDeaths = Math.max(10, Math.floor(Number(t.maxRecentDeaths) || maxRecentDeaths));
@@ -68,9 +71,22 @@ function ensureInstabilityTelemetryState(state, maxRecentDeaths = 1000) {
 
 function classifyInstabilityReason(reason) {
   const r = String(reason || 'unknown');
-  if (r.startsWith('physics_')) return 'physics';
-  if (r === 'unknown') return 'unknown';
-  return 'non_physics';
+  if (r === 'physics_out_of_bounds') {
+    return { unstableClass: 'physics', unstablePhysicsKind: 'boundary_exit' };
+  }
+  if (r === 'physics_invalid_motion_or_nan') {
+    return { unstableClass: 'physics', unstablePhysicsKind: 'numeric_or_nan' };
+  }
+  if (r === 'physics_spring_overstretch' || r === 'physics_span_exceeded') {
+    return { unstableClass: 'physics', unstablePhysicsKind: 'geometric_explosion' };
+  }
+  if (r.startsWith('physics_')) {
+    return { unstableClass: 'physics', unstablePhysicsKind: 'other_physics' };
+  }
+  if (r === 'unknown') {
+    return { unstableClass: 'unknown', unstablePhysicsKind: null };
+  }
+  return { unstableClass: 'non_physics', unstablePhysicsKind: null };
 }
 
 function summarizePhenotype(body) {
@@ -194,7 +210,7 @@ function summarizeHeritableParameters(body) {
 
 function buildInstabilityRemovalEvent(state, body) {
   const reason = String(body?.unstableReason || 'unknown');
-  const instabilityClass = classifyInstabilityReason(reason);
+  const classification = classifyInstabilityReason(reason);
   const telemetry = ensureInstabilityTelemetryState(state);
   const deathSeq = (telemetry.lastDeathSeq || 0) + 1;
   telemetry.lastDeathSeq = deathSeq;
@@ -204,8 +220,9 @@ function buildInstabilityRemovalEvent(state, body) {
     simulationStep: Number(state.simulationStep) || 0,
     bodyId: Number.isFinite(Number(body?.id)) ? Number(body.id) : null,
     unstableReason: reason,
-    unstableClass: instabilityClass,
-    physicsStabilityDeath: instabilityClass === 'physics',
+    unstableClass: classification.unstableClass,
+    unstablePhysicsKind: classification.unstablePhysicsKind,
+    physicsStabilityDeath: classification.unstableClass === 'physics',
     ticksSinceBirth: Number.isFinite(Number(body?.ticksSinceBirth)) ? Number(body.ticksSinceBirth) : null,
     creatureEnergy: round(body?.creatureEnergy, 6),
     currentMaxEnergy: round(body?.currentMaxEnergy, 6),
@@ -313,7 +330,7 @@ function spawnParticle(state, config, ParticleClass, rng) {
 /**
  * Spawn one creature while wiring world references needed by runtime systems.
  */
-function spawnCreature(state, config, SoftBodyClass, rng, margin = 50) {
+function spawnCreature(state, config, SoftBodyClass, rng, dt, margin = 50) {
   const x = randomInRange(rng, margin, config.WORLD_WIDTH - margin);
   const y = randomInRange(rng, margin, config.WORLD_HEIGHT - margin);
   const body = withRandomSource(rng, () => new SoftBodyClass(state.nextSoftBodyId++, x, y, null));
@@ -321,6 +338,14 @@ function spawnCreature(state, config, SoftBodyClass, rng, margin = 50) {
   body.setLightField(state.lightField);
   body.setParticles(state.particles);
   body.setSpatialGrid(state.spatialGrid);
+
+  // Spawn-time correction: keep newborn geometry inside world bounds and damp tiny-world rigidity.
+  stabilizeNewbornBody(body, {
+    config,
+    dt
+  });
+  body.__newbornStabilityApplied = true;
+
   state.softBodyPopulation.push(body);
   return body;
 }
@@ -383,6 +408,9 @@ function removeUnstableBodies(state, { captureInstabilityTelemetry = true, maxRe
       else telemetry.totalUnknownRemoved += 1;
 
       telemetry.removedByReason[removalEvent.unstableReason] = (telemetry.removedByReason[removalEvent.unstableReason] || 0) + 1;
+      if (removalEvent.unstablePhysicsKind) {
+        telemetry.removedByPhysicsKind[removalEvent.unstablePhysicsKind] = (telemetry.removedByPhysicsKind[removalEvent.unstablePhysicsKind] || 0) + 1;
+      }
       telemetry.recentDeaths.push(removalEvent);
       if (telemetry.recentDeaths.length > telemetry.maxRecentDeaths) {
         telemetry.recentDeaths.splice(0, telemetry.recentDeaths.length - telemetry.maxRecentDeaths);
@@ -431,6 +459,22 @@ export function stepWorld(state, dt, options = {}) {
   state.simulationStep = (Number(state.simulationStep) || 0) + 1;
   ensureInstabilityTelemetryState(state, maxRecentInstabilityDeaths);
 
+  // One-time newborn stabilization pass for already-present creatures (initial population,
+  // freshly loaded worlds, or externally inserted bodies).
+  for (const body of state.softBodyPopulation) {
+    if (!body || body.isUnstable || body.__newbornStabilityApplied) continue;
+    if (Number.isFinite(Number(body.ticksSinceBirth)) && Number(body.ticksSinceBirth) > 1) {
+      body.__newbornStabilityApplied = true;
+      continue;
+    }
+
+    stabilizeNewbornBody(body, {
+      config: runtimeConfig,
+      dt
+    });
+    body.__newbornStabilityApplied = true;
+  }
+
   updateSpatialGrid(state, runtimeConfig, constants);
 
   if (applyEmitters) {
@@ -468,6 +512,8 @@ export function stepWorld(state, dt, options = {}) {
 
   const canCreaturesReproduceGlobally = allowReproduction && state.softBodyPopulation.length < runtimeConfig.CREATURE_POPULATION_CEILING;
   const newOffspring = [];
+  let reproductionBirths = 0;
+  let floorSpawns = 0;
   let currentAnyUnstable = false;
 
   for (let i = state.softBodyPopulation.length - 1; i >= 0; i--) {
@@ -488,11 +534,21 @@ export function stepWorld(state, dt, options = {}) {
       body.failedReproductionCooldown <= 0
     ) {
       const offspring = withRandomSource(rng, () => body.reproduce());
-      if (offspring && offspring.length) newOffspring.push(...offspring);
+      if (offspring && offspring.length) {
+        reproductionBirths += offspring.length;
+        newOffspring.push(...offspring);
+      }
     }
   }
 
   if (newOffspring.length) {
+    for (const child of newOffspring) {
+      stabilizeNewbornBody(child, {
+        config: runtimeConfig,
+        dt
+      });
+      child.__newbornStabilityApplied = true;
+    }
     state.softBodyPopulation.push(...newOffspring);
   }
 
@@ -516,7 +572,8 @@ export function stepWorld(state, dt, options = {}) {
     if (neededToMaintainFloor > 0) {
       for (let i = 0; i < neededToMaintainFloor; i++) {
         if (state.softBodyPopulation.length >= runtimeConfig.CREATURE_POPULATION_CEILING) break;
-        spawnCreature(state, runtimeConfig, SoftBodyClass, rng, creatureSpawnMargin);
+        const spawned = spawnCreature(state, runtimeConfig, SoftBodyClass, rng, dt, creatureSpawnMargin);
+        if (spawned) floorSpawns += 1;
       }
     }
   }
@@ -525,6 +582,11 @@ export function stepWorld(state, dt, options = {}) {
     removedCount,
     removedBodies,
     currentAnyUnstable,
+    spawnTelemetry: {
+      reproductionBirths,
+      floorSpawns,
+      totalSpawns: reproductionBirths + floorSpawns
+    },
     populations: {
       creatures: state.softBodyPopulation.length,
       particles: state.particles.length

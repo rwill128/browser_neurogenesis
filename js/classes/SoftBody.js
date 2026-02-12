@@ -2406,7 +2406,9 @@ export class SoftBody {
                 const templates = [
                     {
                         name: 'triangle',
-                        weight: Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_TRIANGLE) || 1,
+                        weight: Number.isFinite(Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_TRIANGLE))
+                            ? Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_TRIANGLE)
+                            : 1,
                         points: [
                             { x: 0, y: 0 },
                             { x: 1, y: 0 },
@@ -2416,7 +2418,9 @@ export class SoftBody {
                     },
                     {
                         name: 'diamond',
-                        weight: Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_DIAMOND) || 1,
+                        weight: Number.isFinite(Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_DIAMOND))
+                            ? Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_DIAMOND)
+                            : 1,
                         points: [
                             { x: 0, y: 0 },
                             { x: 1, y: 0 },
@@ -2427,7 +2431,9 @@ export class SoftBody {
                     },
                     {
                         name: 'hexagon',
-                        weight: Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_HEXAGON) || 1,
+                        weight: Number.isFinite(Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_HEXAGON))
+                            ? Number(config.INITIAL_TRI_TEMPLATE_WEIGHT_HEXAGON)
+                            : 1,
                         points: [
                             { x: 0, y: 0 },
                             { x: 1, y: 0 },

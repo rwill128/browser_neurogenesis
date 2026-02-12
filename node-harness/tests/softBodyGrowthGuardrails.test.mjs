@@ -167,3 +167,63 @@ test('soft-body growth increments placement suppression telemetry when no candid
     runtimeState.softBodyPopulation = runtimeBackup.softBodyPopulation;
   }
 });
+
+test('dye mismatch can reduce growth chance and increment dye suppression telemetry', () => {
+  const cfgBackup = {
+    GROWTH_ENABLED: config.GROWTH_ENABLED,
+    GROWTH_BASE_CHANCE_MIN: config.GROWTH_BASE_CHANCE_MIN,
+    GROWTH_BASE_CHANCE_MAX: config.GROWTH_BASE_CHANCE_MAX,
+    GROWTH_MIN_ENERGY_RATIO_MIN: config.GROWTH_MIN_ENERGY_RATIO_MIN,
+    GROWTH_MIN_ENERGY_RATIO_MAX: config.GROWTH_MIN_ENERGY_RATIO_MAX,
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED,
+    DYE_GROWTH_EFFECT_WEIGHT: config.DYE_GROWTH_EFFECT_WEIGHT,
+    DYE_EFFECT_MIN_SCALE: config.DYE_EFFECT_MIN_SCALE,
+    DYE_EFFECT_MAX_SCALE: config.DYE_EFFECT_MAX_SCALE
+  };
+  const runtimeBackup = {
+    softBodyPopulation: runtimeState.softBodyPopulation,
+    fluidField: runtimeState.fluidField
+  };
+
+  try {
+    config.GROWTH_ENABLED = true;
+    config.GROWTH_BASE_CHANCE_MIN = 1;
+    config.GROWTH_BASE_CHANCE_MAX = 1;
+    config.GROWTH_MIN_ENERGY_RATIO_MIN = 0;
+    config.GROWTH_MIN_ENERGY_RATIO_MAX = 0;
+    config.DYE_ECOLOGY_ENABLED = true;
+    config.DYE_GROWTH_EFFECT_WEIGHT = 1.5;
+    config.DYE_EFFECT_MIN_SCALE = 0.01;
+    config.DYE_EFFECT_MAX_SCALE = 2.0;
+
+    const body = new SoftBody(55, 100, 100, null, false);
+    body.creatureEnergy = body.currentMaxEnergy;
+    body.growthCooldownRemaining = 0;
+    body.dyePreferredHue = 0.0; // red
+    body.dyeHueTolerance = 0.02;
+    body.dyeResponseGain = 1.5;
+    body.dyeResponseSign = 1;
+
+    runtimeState.fluidField = {
+      scaleX: 1,
+      scaleY: 1,
+      IX: () => 0,
+      densityR: new Float32Array([0]),
+      densityG: new Float32Array([255]),
+      densityB: new Float32Array([255])
+    };
+    runtimeState.softBodyPopulation = [body];
+
+    const beforeChance = body.growthSuppressedByChanceRoll;
+    const beforeDye = body.growthSuppressedByDye;
+    const didGrow = withMockedRandom(0.9, () => body._attemptGrowthStep(1 / 60));
+
+    assert.equal(didGrow, false);
+    assert.equal(body.growthSuppressedByChanceRoll, beforeChance + 1);
+    assert.equal(body.growthSuppressedByDye > beforeDye, true);
+  } finally {
+    Object.assign(config, cfgBackup);
+    runtimeState.softBodyPopulation = runtimeBackup.softBodyPopulation;
+    runtimeState.fluidField = runtimeBackup.fluidField;
+  }
+});

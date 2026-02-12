@@ -365,6 +365,11 @@ export class RealWorld {
           ticksSinceBirth: Number.isFinite(Number(b.ticksSinceBirth)) ? Number(b.ticksSinceBirth) : null,
           canReproduce: Boolean(b.canReproduce),
           rewardStrategy: b.rewardStrategy ?? null,
+          dyePreferredHue: round(b.dyePreferredHue, 5),
+          dyeHueTolerance: round(b.dyeHueTolerance, 5),
+          dyeResponseGain: round(b.dyeResponseGain, 5),
+          dyeResponseSign: Number(b.dyeResponseSign) < 0 ? -1 : 1,
+          dyeNodeTypeAffinity: b.dyeNodeTypeAffinity || {},
           reproductionCooldownGene: Number.isFinite(Number(b.reproductionCooldownGene)) ? Number(b.reproductionCooldownGene) : null,
           effectiveReproductionCooldown: Number.isFinite(Number(b.effectiveReproductionCooldown)) ? Number(b.effectiveReproductionCooldown) : null,
           energyGains: {
@@ -379,6 +384,7 @@ export class RealWorld {
             suppressedByEnergy: Number(b.growthSuppressedByEnergy || 0),
             suppressedByCooldown: Number(b.growthSuppressedByCooldown || 0),
             suppressedByPopulation: Number(b.growthSuppressedByPopulation || 0),
+            suppressedByDye: Number(b.growthSuppressedByDye || 0),
             suppressedByMaxPoints: Number(b.growthSuppressedByMaxPoints || 0),
             suppressedByNoCapacity: Number(b.growthSuppressedByNoCapacity || 0),
             suppressedByChanceRoll: Number(b.growthSuppressedByChanceRoll || 0),
@@ -392,6 +398,7 @@ export class RealWorld {
             density: Number(b.reproductionSuppressedByDensity || 0),
             resources: Number(b.reproductionSuppressedByResources || 0),
             fertilityRoll: Number(b.reproductionSuppressedByFertilityRoll || 0),
+            dye: Number(b.reproductionSuppressedByDye || 0),
             resourceDebits: Number(b.reproductionResourceDebitApplied || 0)
           },
           energyCostsByType: {

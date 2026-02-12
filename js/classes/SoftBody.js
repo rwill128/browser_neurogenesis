@@ -28,6 +28,39 @@ const DEFAULT_GROWTH_NODE_TYPES = [
     NodeType.REPULSOR
 ];
 
+const DYE_AFFINITY_KEYS = ['EATER', 'PREDATOR', 'PHOTOSYNTHETIC', 'SWIMMER', 'JET', 'EMITTER'];
+
+function clampNumber(value, lo, hi) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return lo;
+    return Math.max(lo, Math.min(hi, n));
+}
+
+function computeHueFromRgb(r, g, b) {
+    const rn = clampNumber(r, 0, 255) / 255;
+    const gn = clampNumber(g, 0, 255) / 255;
+    const bn = clampNumber(b, 0, 255) / 255;
+
+    const max = Math.max(rn, gn, bn);
+    const min = Math.min(rn, gn, bn);
+    const d = max - min;
+    if (d <= 1e-8) return 0;
+
+    let h = 0;
+    if (max === rn) h = ((gn - bn) / d) % 6;
+    else if (max === gn) h = ((bn - rn) / d) + 2;
+    else h = ((rn - gn) / d) + 4;
+
+    h /= 6;
+    if (h < 0) h += 1;
+    return h;
+}
+
+function circularHueDistance(a, b) {
+    const da = Math.abs((Number(a) || 0) - (Number(b) || 0));
+    return Math.min(da, 1 - da);
+}
+
 // --- SoftBody Class ---
 export class SoftBody {
     constructor(id, initialX, initialY, creationData = null, isBlueprint = false) {
@@ -108,7 +141,19 @@ export class SoftBody {
         this.reproductionSuppressedByDensity = 0;
         this.reproductionSuppressedByResources = 0;
         this.reproductionSuppressedByFertilityRoll = 0;
+        this.reproductionSuppressedByDye = 0;
         this.reproductionResourceDebitApplied = 0;
+
+        // Heritable dye ecology genes/state (new): color niche + response profile.
+        this.dyePreferredHue = Math.random();
+        this.dyeHueTolerance = 0.2;
+        this.dyeResponseGain = 1.0;
+        this.dyeResponseSign = 1;
+        this.dyeNodeTypeAffinity = {};
+        this.lastDyeEcologyState = null;
+
+        // Growth telemetry (new): track dye-driven suppression independently.
+        this.growthSuppressedByDye = 0;
 
         // Actuation telemetry (new): evaluative throttling observability.
         this.actuationEvaluations = 0;
@@ -144,6 +189,12 @@ export class SoftBody {
             this.rlAlgorithmType = blueprint.rlAlgorithmType;
             this.rewardStrategy = blueprint.rewardStrategy;
             this.growthGenome = this._sanitizeGrowthGenome(blueprint.growthGenome || this._createRandomGrowthGenome());
+            this.dyePreferredHue = Number(blueprint.dyePreferredHue);
+            this.dyeHueTolerance = Number(blueprint.dyeHueTolerance);
+            this.dyeResponseGain = Number(blueprint.dyeResponseGain);
+            this.dyeResponseSign = Number(blueprint.dyeResponseSign);
+            this.dyeNodeTypeAffinity = blueprint.dyeNodeTypeAffinity || {};
+            this._sanitizeDyeEcologyGenes();
 
             // Directly use the blueprint's structure
             this.blueprintPoints = JSON.parse(JSON.stringify(blueprint.blueprintPoints));
@@ -268,6 +319,8 @@ export class SoftBody {
                     runtimeState.mutationStats.growthGenomeMutations = (runtimeState.mutationStats.growthGenomeMutations || 0) + 1;
                 }
 
+                this._inheritAndMutateDyeEcologyGenes(parentBody);
+
             } else {
                 // Initial defaults for brand new creatures
                 this.stiffness = 500 + Math.random() * 2500;
@@ -306,6 +359,7 @@ export class SoftBody {
                     : 5000;
                 this.reproductionCooldownGene = reproCooldownMin + Math.floor(Math.random() * (reproCooldownMax - reproCooldownMin + 1));
                 this.growthGenome = this._createRandomGrowthGenome();
+                this._initializeRandomDyeEcologyGenes();
             }
 
             // Clamp activation properties after they've been set/inherited/mutated
@@ -328,6 +382,7 @@ export class SoftBody {
             this.springConnectionRadius = Math.max(10, Math.min(this.springConnectionRadius, 100));
             this.jetMaxVelocityGene = Math.max(0.1, Math.min(this.jetMaxVelocityGene, 50.0));
             this.growthGenome = this._sanitizeGrowthGenome(this.growthGenome || this._createRandomGrowthGenome());
+            this._sanitizeDyeEcologyGenes();
 
             this.fluidEntrainment = config.BODY_FLUID_ENTRAINMENT_FACTOR;
             this.fluidCurrentStrength = config.FLUID_CURRENT_STRENGTH_ON_BODY;
@@ -445,6 +500,185 @@ export class SoftBody {
         const direction = Math.random() < 0.5 ? -1 : 1;
         const mutated = this._sanitizeActivationIntervalGene(gene + (direction * step));
         return { gene: mutated, didMutate: mutated !== gene };
+    }
+
+    _createRandomDyeAffinityMap() {
+        const out = {};
+        for (const key of DYE_AFFINITY_KEYS) {
+            out[key] = 0.6 + Math.random() * 0.8;
+        }
+        return out;
+    }
+
+    _sanitizeDyeAffinityMap(rawMap = {}) {
+        const out = {};
+        for (const key of DYE_AFFINITY_KEYS) {
+            const raw = Number(rawMap?.[key]);
+            out[key] = Number.isFinite(raw) ? Math.max(0.05, Math.min(3.0, raw)) : 1.0;
+        }
+        return out;
+    }
+
+    _initializeRandomDyeEcologyGenes() {
+        this.dyePreferredHue = Math.random();
+        this.dyeHueTolerance = (Number(config.DYE_RECEPTOR_HUE_TOLERANCE_MIN) || 0.04)
+            + Math.random() * Math.max(0.001, (Number(config.DYE_RECEPTOR_HUE_TOLERANCE_MAX) || 0.35) - (Number(config.DYE_RECEPTOR_HUE_TOLERANCE_MIN) || 0.04));
+        this.dyeResponseGain = (Number(config.DYE_RECEPTOR_RESPONSE_GAIN_MIN) || 0.25)
+            + Math.random() * Math.max(0.001, (Number(config.DYE_RECEPTOR_RESPONSE_GAIN_MAX) || 1.5) - (Number(config.DYE_RECEPTOR_RESPONSE_GAIN_MIN) || 0.25));
+        this.dyeResponseSign = Math.random() < 0.5 ? -1 : 1;
+        this.dyeNodeTypeAffinity = this._createRandomDyeAffinityMap();
+        this._sanitizeDyeEcologyGenes();
+    }
+
+    _sanitizeDyeEcologyGenes() {
+        const tolMin = Math.max(0.005, Number(config.DYE_RECEPTOR_HUE_TOLERANCE_MIN) || 0.04);
+        const tolMax = Math.max(tolMin, Number(config.DYE_RECEPTOR_HUE_TOLERANCE_MAX) || 0.35);
+        const gainMin = Math.max(0, Number(config.DYE_RECEPTOR_RESPONSE_GAIN_MIN) || 0.25);
+        const gainMax = Math.max(gainMin, Number(config.DYE_RECEPTOR_RESPONSE_GAIN_MAX) || 1.5);
+
+        this.dyePreferredHue = ((Number(this.dyePreferredHue) || 0) % 1 + 1) % 1;
+        this.dyeHueTolerance = clampNumber(this.dyeHueTolerance, tolMin, tolMax);
+        this.dyeResponseGain = clampNumber(this.dyeResponseGain, gainMin, gainMax);
+        this.dyeResponseSign = Number(this.dyeResponseSign) < 0 ? -1 : 1;
+        this.dyeNodeTypeAffinity = this._sanitizeDyeAffinityMap(this.dyeNodeTypeAffinity || {});
+    }
+
+    _inheritAndMutateDyeEcologyGenes(parentBody) {
+        if (!parentBody) {
+            this._initializeRandomDyeEcologyGenes();
+            return;
+        }
+
+        this.dyePreferredHue = Number(parentBody.dyePreferredHue);
+        this.dyeHueTolerance = Number(parentBody.dyeHueTolerance);
+        this.dyeResponseGain = Number(parentBody.dyeResponseGain);
+        this.dyeResponseSign = Number(parentBody.dyeResponseSign) < 0 ? -1 : 1;
+        this.dyeNodeTypeAffinity = this._sanitizeDyeAffinityMap(parentBody.dyeNodeTypeAffinity || {});
+
+        const mutationChance = Math.max(0, Math.min(1, Number(config.DYE_RECEPTOR_MUTATION_CHANCE) || 0));
+        const mutationMagnitude = Math.max(0, Number(config.DYE_RECEPTOR_MUTATION_MAGNITUDE) || 0);
+
+        if (Math.random() < mutationChance) {
+            this.dyePreferredHue = ((this.dyePreferredHue + ((Math.random() - 0.5) * 2 * mutationMagnitude)) % 1 + 1) % 1;
+            this._bumpMutationStat('dyePreferredHue');
+        }
+        if (Math.random() < mutationChance) {
+            this.dyeHueTolerance += (Math.random() - 0.5) * 2 * mutationMagnitude * 0.2;
+            this._bumpMutationStat('dyeHueTolerance');
+        }
+        if (Math.random() < mutationChance) {
+            this.dyeResponseGain += (Math.random() - 0.5) * 2 * mutationMagnitude;
+            this._bumpMutationStat('dyeResponseGain');
+        }
+        if (Math.random() < mutationChance * 0.5) {
+            this.dyeResponseSign = this.dyeResponseSign < 0 ? 1 : -1;
+            this._bumpMutationStat('dyeResponseSign');
+        }
+
+        for (const key of DYE_AFFINITY_KEYS) {
+            if (Math.random() < mutationChance) {
+                this.dyeNodeTypeAffinity[key] = (Number(this.dyeNodeTypeAffinity[key]) || 1)
+                    + ((Math.random() - 0.5) * 2 * mutationMagnitude);
+                this._bumpMutationStat('dyeNodeTypeAffinity');
+            }
+        }
+
+        this._sanitizeDyeEcologyGenes();
+    }
+
+    _sampleLocalDyeAt(worldX, worldY) {
+        const fluid = runtimeState.fluidField;
+        if (!fluid || !fluid.scaleX || !fluid.scaleY) {
+            return { r: 0, g: 0, b: 0, intensity: 0, hue: 0, saturation: 0 };
+        }
+
+        const gx = Math.floor(worldX / fluid.scaleX);
+        const gy = Math.floor(worldY / fluid.scaleY);
+        const idx = fluid.IX(gx, gy);
+
+        const r = Number(fluid.densityR?.[idx]) || 0;
+        const g = Number(fluid.densityG?.[idx]) || 0;
+        const b = Number(fluid.densityB?.[idx]) || 0;
+
+        const maxCh = Math.max(r, g, b) / 255;
+        const minCh = Math.min(r, g, b) / 255;
+        const intensity = Math.max(0, Math.min(1, (r + g + b) / (255 * 3)));
+        const saturation = maxCh <= 1e-8 ? 0 : Math.max(0, Math.min(1, (maxCh - minCh) / Math.max(maxCh, 1e-8)));
+        const hue = computeHueFromRgb(r, g, b);
+
+        return { r, g, b, intensity, hue, saturation };
+    }
+
+    _computeDyeEcologyStateAt(worldX, worldY) {
+        if (!config.DYE_ECOLOGY_ENABLED) {
+            return {
+                ...this._sampleLocalDyeAt(worldX, worldY),
+                match: 0.5,
+                preferredMatch: 0.5,
+                response: 0,
+                overexposure: 0,
+                emitterInhibitionScale: 1
+            };
+        }
+
+        const sample = this._sampleLocalDyeAt(worldX, worldY);
+        const hueDist = circularHueDistance(sample.hue, this.dyePreferredHue);
+        const tol = Math.max(0.005, Number(this.dyeHueTolerance) || 0.1);
+        const match = Math.exp(-(hueDist * hueDist) / Math.max(1e-6, 2 * tol * tol));
+        const preferredMatch = this.dyeResponseSign >= 0 ? match : (1 - match);
+        const centered = (preferredMatch - 0.5) * 2;
+        const response = centered * (Number(this.dyeResponseGain) || 1);
+
+        const overThresh = Math.max(0, Math.min(1, Number(config.DYE_OVEREXPOSURE_THRESHOLD) || 0.82));
+        const overexposure = sample.intensity > overThresh
+            ? Math.max(0, Math.min(1, (sample.intensity - overThresh) / Math.max(1e-6, 1 - overThresh)))
+            : 0;
+
+        const inhibThresh = Math.max(0, Math.min(1, Number(config.DYE_EMITTER_SELF_INHIBITION_THRESHOLD) || 0.6));
+        const inhibStrength = Math.max(0, Number(config.DYE_EMITTER_SELF_INHIBITION_STRENGTH) || 0.55);
+        const inhibNorm = sample.intensity > inhibThresh
+            ? Math.max(0, Math.min(1, (sample.intensity - inhibThresh) / Math.max(1e-6, 1 - inhibThresh)))
+            : 0;
+        const emitterInhibitionScale = Math.max(0.1, 1 - inhibNorm * inhibStrength);
+
+        return {
+            ...sample,
+            match,
+            preferredMatch,
+            response,
+            overexposure,
+            emitterInhibitionScale
+        };
+    }
+
+    _resolveDyeEffectScale(state, { weight = 1, affinityKey = null, includeEmitterInhibition = false } = {}) {
+        if (!config.DYE_ECOLOGY_ENABLED) return 1;
+
+        const minScale = Math.max(0.05, Number(config.DYE_EFFECT_MIN_SCALE) || 0.35);
+        const maxScale = Math.max(minScale, Number(config.DYE_EFFECT_MAX_SCALE) || 1.9);
+
+        let affinity = 1;
+        if (affinityKey) {
+            affinity = Number(this.dyeNodeTypeAffinity?.[affinityKey]);
+            if (!Number.isFinite(affinity)) affinity = 1;
+        }
+
+        const base = 1 + ((Number(state?.response) || 0) * weight * affinity);
+        let out = Math.max(minScale, Math.min(maxScale, base));
+
+        if (includeEmitterInhibition) {
+            out *= Math.max(0.1, Number(state?.emitterInhibitionScale) || 1);
+            out = Math.max(0.05, Math.min(maxScale, out));
+        }
+
+        return out;
+    }
+
+    _getDyeEcologyStateAtBodyCenter() {
+        const c = this.getAveragePosition();
+        const state = this._computeDyeEcologyStateAt(c.x, c.y);
+        this.lastDyeEcologyState = state;
+        return state;
     }
 
     _resolveActuationCooldownMultiplier(point, channel = 'node') {
@@ -1296,9 +1530,14 @@ export class SoftBody {
 
         const dtScale = Math.max(0.1, dt * 60);
         const baseChance = Math.max(0, Math.min(1, genome.growthChancePerTick));
-        const growthChance = (1 - Math.pow(1 - baseChance, dtScale)) * popThrottle.scale;
+        const dyeState = this._getDyeEcologyStateAtBodyCenter();
+        const dyeGrowthScale = this._resolveDyeEffectScale(dyeState, {
+            weight: Math.max(0, Number(config.DYE_GROWTH_EFFECT_WEIGHT) || 0.7)
+        });
+        const growthChance = (1 - Math.pow(1 - baseChance, dtScale)) * popThrottle.scale * dyeGrowthScale;
         if (Math.random() >= growthChance) {
             this.growthSuppressedByChanceRoll += 1;
+            if (dyeGrowthScale < 1) this.growthSuppressedByDye += 1;
             return false;
         }
 
@@ -2350,6 +2589,12 @@ export class SoftBody {
         const hasNutrientField = this.nutrientField !== null && typeof this.nutrientField !== 'undefined';
         const hasLightField = this.lightField !== null && typeof this.lightField !== 'undefined';
 
+        const dyeState = this._getDyeEcologyStateAtBodyCenter();
+        const photosynthesisDyeScale = this._resolveDyeEffectScale(dyeState, {
+            affinityKey: 'PHOTOSYNTHETIC',
+            weight: Math.max(0, Number(config.DYE_PHOTOSYNTHESIS_EFFECT_WEIGHT) || 0.55)
+        });
+
         const scaleX = hasFluidField ? fluidFieldRef.scaleX : 0;
         const scaleY = hasFluidField ? fluidFieldRef.scaleY : 0;
 
@@ -2447,7 +2692,7 @@ export class SoftBody {
                     if (hasLightField && hasFluidField && mapIdx !== -1) { // mapIdx would have been calculated if hasFluidField
                         const baseLightValue = this.lightField[mapIdx] !== undefined ? this.lightField[mapIdx] : 0.0;
                         const effectiveLightValue = baseLightValue * config.globalLightMultiplier;
-                        const energyGainThisPoint = effectiveLightValue * config.PHOTOSYNTHESIS_EFFICIENCY * (point.radius / 5) * dt;
+                        const energyGainThisPoint = effectiveLightValue * config.PHOTOSYNTHESIS_EFFICIENCY * (point.radius / 5) * dt * photosynthesisDyeScale;
                         currentFrameEnergyGain += energyGainThisPoint;
                         this.energyGainedFromPhotosynthesis += energyGainThisPoint; // Lifetime total
                         this.energyGainedFromPhotosynthesisThisTick += energyGainThisPoint; // Current tick total
@@ -2503,6 +2748,15 @@ export class SoftBody {
             this.creatureEnergy -= poisonDamageThisFrame * dt * 60; // dt is in seconds, scale strength to be per-second
         }
 
+        if (config.DYE_ECOLOGY_ENABLED) {
+            const overexposureDrain = (Number(config.DYE_OVEREXPOSURE_ENERGY_DRAIN) || 0)
+                * (Number(dyeState.overexposure) || 0)
+                * Math.max(0, Number(this.dyeResponseGain) || 0);
+            if (overexposureDrain > 0) {
+                this.creatureEnergy -= overexposureDrain * dt * 60;
+            }
+        }
+
         this.creatureEnergy += currentFrameEnergyGain; // Gains are already dt-scaled
         this.creatureEnergy -= currentFrameEnergyCost * dt; // Costs are per-frame, so scale by dt here
         this.creatureEnergy = Math.min(this.currentMaxEnergy, Math.max(0, this.creatureEnergy));
@@ -2514,6 +2768,21 @@ export class SoftBody {
 
     _performPhysicalUpdates(dt, fluidFieldRef) {
         const restitution = 0.4; // Local constant for boundary collision restitution
+        const dyeState = this._getDyeEcologyStateAtBodyCenter();
+        const swimmerDyeScale = this._resolveDyeEffectScale(dyeState, {
+            affinityKey: 'SWIMMER',
+            weight: Math.max(0, Number(config.DYE_SWIMMER_EFFECT_WEIGHT) || 0.35)
+        });
+        const jetDyeScale = this._resolveDyeEffectScale(dyeState, {
+            affinityKey: 'JET',
+            weight: Math.max(0, Number(config.DYE_JET_EFFECT_WEIGHT) || 0.35)
+        });
+        const emitterDyeScale = this._resolveDyeEffectScale(dyeState, {
+            affinityKey: 'EMITTER',
+            weight: Math.max(0, Number(config.DYE_EMITTER_EFFECT_WEIGHT) || 0.4),
+            includeEmitterInhibition: true
+        });
+
         if (fluidFieldRef) {
             for (let point of this.massPoints) {
                 const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
@@ -2529,7 +2798,7 @@ export class SoftBody {
 
                 // --- Fluid Interactions (should occur even if fixed) ---
                 if (point.nodeType === NodeType.EMITTER) {
-                    let dyeEmissionStrength = 50 * point.currentExertionLevel;
+                    let dyeEmissionStrength = 50 * point.currentExertionLevel * emitterDyeScale;
                     fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], dyeEmissionStrength);
                 }
 
@@ -2541,7 +2810,7 @@ export class SoftBody {
                         const currentFluidSpeedSq = currentFluidVelX ** 2 + currentFluidVelY ** 2;
 
                         if (currentFluidSpeedSq < point.maxEffectiveJetVelocity ** 2) {
-                            const finalMagnitude = point.jetData.currentMagnitude;
+                            const finalMagnitude = point.jetData.currentMagnitude * jetDyeScale;
                             const angle = point.jetData.currentAngle;
                             const appliedForceX = finalMagnitude * Math.cos(angle);
                             const appliedForceY = finalMagnitude * Math.sin(angle);
@@ -2551,7 +2820,7 @@ export class SoftBody {
                 }
 
                 if (point.nodeType === NodeType.SWIMMER && !point.isFixed) {
-                    const magnitude = Math.max(0, Number(point.swimmerActuation?.magnitude) || 0);
+                    const magnitude = Math.max(0, (Number(point.swimmerActuation?.magnitude) || 0) * swimmerDyeScale);
                     const angle = Number(point.swimmerActuation?.angle) || 0;
                     if (magnitude > 0.0001) {
                         point.applyForce(new Vec2(Math.cos(angle) * (magnitude / dt), Math.sin(angle) * (magnitude / dt)));
@@ -2635,8 +2904,18 @@ export class SoftBody {
     }
 
     _finalizeUpdateAndCheckStability(dt) { 
-        this.preyPredatedThisTick = new Set(); // Initialize/clear for this body for this tick
+        this.preyPredatedThisTick = new Set(); // Keyed by "predatorPointIndex:preyBodyId" for this body's current tick
         if (this.isUnstable) return; 
+
+        const dyeState = this._getDyeEcologyStateAtBodyCenter();
+        const predatorDyeScale = this._resolveDyeEffectScale(dyeState, {
+            affinityKey: 'PREDATOR',
+            weight: Math.max(0, Number(config.DYE_PREDATOR_EFFECT_WEIGHT) || 0.65)
+        });
+        const eaterDyeScale = this._resolveDyeEffectScale(dyeState, {
+            affinityKey: 'EATER',
+            weight: Math.max(0, Number(config.DYE_EATER_EFFECT_WEIGHT) || 0.65)
+        });
 
         // Inter-body repulsion & Predation
         // Use this._tempVec1 for diff, and this._tempVec2 for forceDir/repulsionForce
@@ -2749,15 +3028,16 @@ export class SoftBody {
                                         const predationRadius = p1.radius * effectivePredationRadiusMultiplier;
 
                                         if (distSq < predationRadius * predationRadius) {
-                                            // NEW CHECK: Has this prey body (otherItem.bodyRef) already been predated by THIS predator (this) this tick?
-                                            if (!this.preyPredatedThisTick.has(otherItem.bodyRef.id)) {
-                                                const effectiveEnergySapped = config.ENERGY_SAPPED_PER_PREDATION_BASE + (config.ENERGY_SAPPED_PER_PREDATION_MAX_BONUS * p1Exertion);
+                                            // Allow multi-node predation pressure: each predator node may sap a given prey once per tick.
+                                            const predationKey = `${i_p1}:${otherItem.bodyRef.id}`;
+                                            if (!this.preyPredatedThisTick.has(predationKey)) {
+                                                const effectiveEnergySapped = (config.ENERGY_SAPPED_PER_PREDATION_BASE + (config.ENERGY_SAPPED_PER_PREDATION_MAX_BONUS * p1Exertion)) * predatorDyeScale;
                                                 const energyToSap = Math.min(otherItem.bodyRef.creatureEnergy, effectiveEnergySapped); 
                                                 if (energyToSap > 0) {
                                                     otherItem.bodyRef.creatureEnergy -= energyToSap;
                                                     this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyToSap); 
                                                     this.energyGainedFromPredation += energyToSap;
-                                                    this.preyPredatedThisTick.add(otherItem.bodyRef.id); // Mark this prey as predated for this tick
+                                                    this.preyPredatedThisTick.add(predationKey);
                                                 }
                                             }
                                         }
@@ -2811,6 +3091,7 @@ export class SoftBody {
                                                 const effectiveNutrientAtParticle = baseNutrientValueAtParticle * config.globalNutrientMultiplier;
                                                 energyGain *= Math.max(config.MIN_NUTRIENT_VALUE, effectiveNutrientAtParticle);
                                             }
+                                            energyGain *= eaterDyeScale;
                                             this.creatureEnergy = Math.min(this.currentMaxEnergy, this.creatureEnergy + energyGain); // Use currentMaxEnergy
                                             this.energyGainedFromEating += energyGain;
                                         }
@@ -3010,13 +3291,20 @@ export class SoftBody {
             resourceFertilityScale = resourceCoupling.fertilityScale;
         }
 
+        const dyeState = this._computeDyeEcologyStateAt(parentAvgPos.x, parentAvgPos.y);
+        this.lastDyeEcologyState = dyeState;
+        const dyeFertilityScale = this._resolveDyeEffectScale(dyeState, {
+            weight: Math.max(0, Number(config.DYE_REPRO_EFFECT_WEIGHT) || 0.7)
+        });
+
         const fertilityScale = Math.max(
             config.REPRO_MIN_FERTILITY_SCALE,
-            Math.max(0, Math.min(1, densityScale.scale * resourceFertilityScale))
+            Math.max(0, Math.min(1, densityScale.scale * resourceFertilityScale * dyeFertilityScale))
         );
 
         if (Math.random() > fertilityScale) {
             if (densityScale.scale < 1) this.reproductionSuppressedByDensity += 1;
+            if (dyeFertilityScale < 1) this.reproductionSuppressedByDye += 1;
             this.reproductionSuppressedByFertilityRoll += 1;
             return [];
         }
@@ -3533,6 +3821,11 @@ export class SoftBody {
             rlAlgorithmType: this.rlAlgorithmType,
             rewardStrategy: this.rewardStrategy,
             growthGenome: this.growthGenome,
+            dyePreferredHue: this.dyePreferredHue,
+            dyeHueTolerance: this.dyeHueTolerance,
+            dyeResponseGain: this.dyeResponseGain,
+            dyeResponseSign: this.dyeResponseSign,
+            dyeNodeTypeAffinity: this.dyeNodeTypeAffinity,
             blueprintPoints: this.blueprintPoints,
             blueprintSprings: this.blueprintSprings
         };

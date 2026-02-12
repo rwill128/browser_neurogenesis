@@ -530,6 +530,7 @@ export function stepWorld(state, dt, options = {}) {
     suppressedByResources: 0,
     suppressedByDensity: 0,
     suppressedByFertilityRoll: 0,
+    suppressedByDye: 0,
     suppressedByPlacementOrOther: 0
   };
 
@@ -570,6 +571,7 @@ export function stepWorld(state, dt, options = {}) {
     const densityBefore = Number(body.reproductionSuppressedByDensity) || 0;
     const resourcesBefore = Number(body.reproductionSuppressedByResources) || 0;
     const fertilityBefore = Number(body.reproductionSuppressedByFertilityRoll) || 0;
+    const dyeBefore = Number(body.reproductionSuppressedByDye) || 0;
 
     reproductionTelemetry.attemptedParents += 1;
     const offspring = withRandomSource(rng, () => body.reproduce({ maxOffspring: remainingCreatureSlots }));
@@ -577,10 +579,12 @@ export function stepWorld(state, dt, options = {}) {
     const densityDelta = Math.max(0, (Number(body.reproductionSuppressedByDensity) || 0) - densityBefore);
     const resourcesDelta = Math.max(0, (Number(body.reproductionSuppressedByResources) || 0) - resourcesBefore);
     const fertilityDelta = Math.max(0, (Number(body.reproductionSuppressedByFertilityRoll) || 0) - fertilityBefore);
+    const dyeDelta = Math.max(0, (Number(body.reproductionSuppressedByDye) || 0) - dyeBefore);
 
     reproductionTelemetry.suppressedByDensity += densityDelta;
     reproductionTelemetry.suppressedByResources += resourcesDelta;
     reproductionTelemetry.suppressedByFertilityRoll += fertilityDelta;
+    reproductionTelemetry.suppressedByDye += dyeDelta;
 
     if (cooldownBefore > 0) {
       reproductionTelemetry.suppressedByCooldown += 1;
@@ -600,7 +604,8 @@ export function stepWorld(state, dt, options = {}) {
       cooldownBefore <= 0 &&
       densityDelta === 0 &&
       resourcesDelta === 0 &&
-      fertilityDelta === 0
+      fertilityDelta === 0 &&
+      dyeDelta === 0
     ) {
       reproductionTelemetry.suppressedByPlacementOrOther += 1;
     }

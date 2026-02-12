@@ -194,7 +194,7 @@ function createMockFluidField(size = 16) {
   };
 }
 
-test('predator does not double-sap the same prey body in a single tick', () => {
+test('different predator nodes can each sap the same prey body once per tick', () => {
   const cfgBackup = {
     GRID_CELL_SIZE: config.GRID_CELL_SIZE,
     GRID_COLS: config.GRID_COLS,
@@ -274,8 +274,8 @@ test('predator does not double-sap the same prey body in a single tick', () => {
     predator._finalizeUpdateAndCheckStability(1 / 60);
 
     const lost = beforePrey - prey.creatureEnergy;
-    assert.equal(lost > 0, true);
-    assert.equal(lost <= config.ENERGY_SAPPED_PER_PREDATION_BASE + 1e-9, true);
+    assert.equal(lost > config.ENERGY_SAPPED_PER_PREDATION_BASE, true);
+    assert.equal(lost <= (config.ENERGY_SAPPED_PER_PREDATION_BASE * 2) + 1e-9, true);
   } finally {
     Object.assign(config, cfgBackup);
     runtimeState.softBodyPopulation = runtimeBackup.softBodyPopulation;

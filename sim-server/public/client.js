@@ -279,6 +279,9 @@ function renderPanels(worldId) {
   const reasons = snap?.instabilityTelemetry?.removedByReason || {};
   const topReason = Object.keys(reasons).sort((a, b) => (reasons[b] || 0) - (reasons[a] || 0))[0] || '—';
 
+  const energyGains = snap?.worldStats?.globalEnergyGains || {};
+  const energyCosts = snap?.worldStats?.globalEnergyCosts || {};
+
   setKV(worldStatsEl, [
     ['world', worldId],
     ['scenario', snap.scenario],
@@ -291,6 +294,15 @@ function renderPanels(worldId) {
     ['fluidActiveCells', snap.fluid?.activeCells],
     ['removedTotal', removedTotal],
     ['topRemovalReason', `${topReason} (${reasons[topReason] || 0})`],
+    ['removedByPhysicsKind', JSON.stringify(snap?.instabilityTelemetry?.removedByPhysicsKind || {})],
+    ['globalGain.photo', energyGains?.photosynthesis],
+    ['globalGain.eat', energyGains?.eating],
+    ['globalGain.pred', energyGains?.predation],
+    ['globalCost.base', energyCosts?.baseNodes],
+    ['globalCost.neuron', energyCosts?.neuronNodes],
+    ['globalCost.eater', energyCosts?.eaterNodes],
+    ['globalCost.predator', energyCosts?.predatorNodes],
+    ['mutationStats', JSON.stringify(snap?.mutationStats || {})],
     ['zoom', cam.zoom]
   ]);
 
@@ -305,18 +317,74 @@ function renderPanels(worldId) {
       ['hint', 'click creature or use prev/next']
     ]);
   } else {
+    const fs = selected.fullStats || {};
+    const growth = fs.growth || {};
+    const repro = fs.reproductionSuppression || {};
+    const costs = fs.energyCostsByType || {};
+    const gains = fs.energyGains || {};
+    const topo = fs.topology || {};
+    const following = String(followByWorld.get(worldId) || '') === String(selected.id) ? 'yes' : 'no';
+
     setKV(creatureStatsEl, [
       ['id', selected.id],
+      ['following', following],
       ['energy', selected.energy],
+      ['currentMaxEnergy', fs.currentMaxEnergy],
+      ['reproThreshold', fs.reproductionEnergyThreshold],
+      ['ticksSinceBirth', fs.ticksSinceBirth],
+      ['canReproduce', fs.canReproduce],
+      ['rewardStrategy', fs.rewardStrategy],
       ['centerX', selected.center?.x],
       ['centerY', selected.center?.y],
       ['points', selected.vertices?.length],
       ['springs', selected.springs?.length],
+      ['stiffness(avg)', fs.stiffness],
+      ['damping(avg)', fs.damping],
+      ['motorInterval', fs.motorImpulseInterval],
+      ['motorCap', fs.motorImpulseMagnitudeCap],
+      ['emitterStrength', fs.emitterStrength],
+      ['emitterDir', `${asDisplayValue(fs?.emitterDirection?.x)}, ${asDisplayValue(fs?.emitterDirection?.y)}`],
+      ['numOffspring', fs.numOffspring],
+      ['offspringRadius', fs.offspringSpawnRadius],
+      ['pointAddChance', fs.pointAddChance],
+      ['springConnectionRadius', fs.springConnectionRadius],
+      ['reproCooldownGene', fs.reproductionCooldownGene],
+      ['effectiveReproCooldown', fs.effectiveReproductionCooldown],
       ['nodeTypes', JSON.stringify(selected.nodeTypeCounts || {})],
       ['actEvals', selected.actuationTelemetry?.evaluations],
       ['actSkips', selected.actuationTelemetry?.skips],
       ['actAvgInterval', selected.actuationTelemetry?.avgEffectiveInterval],
-      ['following', String(followByWorld.get(worldId) || '') === String(selected.id) ? 'yes' : 'no']
+      ['gain.photo', gains.photosynthesis],
+      ['gain.eat', gains.eating],
+      ['gain.pred', gains.predation],
+      ['growth.events', growth.eventsCompleted],
+      ['growth.nodesAdded', growth.nodesAdded],
+      ['growth.energySpent', growth.totalEnergySpent],
+      ['growth.supp.energy', growth.suppressedByEnergy],
+      ['growth.supp.cooldown', growth.suppressedByCooldown],
+      ['growth.supp.population', growth.suppressedByPopulation],
+      ['growth.supp.maxPoints', growth.suppressedByMaxPoints],
+      ['growth.supp.noCapacity', growth.suppressedByNoCapacity],
+      ['growth.supp.chanceRoll', growth.suppressedByChanceRoll],
+      ['growth.supp.placement', growth.suppressedByPlacement],
+      ['topology.version', topo.nnTopologyVersion],
+      ['topology.rlResets', topo.rlTopologyResets],
+      ['reproSupp.density', repro.density],
+      ['reproSupp.resources', repro.resources],
+      ['reproSupp.fertilityRoll', repro.fertilityRoll],
+      ['reproSupp.resourceDebits', repro.resourceDebits],
+      ['cost.base', costs.base],
+      ['cost.emitter', costs.emitter],
+      ['cost.eater', costs.eater],
+      ['cost.predator', costs.predator],
+      ['cost.neuron', costs.neuron],
+      ['cost.swimmer', costs.swimmer],
+      ['cost.photosynthetic', costs.photosynthetic],
+      ['cost.grabbing', costs.grabbing],
+      ['cost.eye', costs.eye],
+      ['cost.jet', costs.jet],
+      ['cost.attractor', costs.attractor],
+      ['cost.repulsor', costs.repulsor]
     ]);
   }
 

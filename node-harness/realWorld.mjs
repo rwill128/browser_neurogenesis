@@ -22,6 +22,13 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+function round(value, digits = 4) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  const p = 10 ** digits;
+  return Math.round(n * p) / p;
+}
+
 function invertEnum(obj) {
   return Object.fromEntries(Object.entries(obj).map(([k, v]) => [v, k]));
 }
@@ -339,6 +346,69 @@ export class RealWorld {
           energyCostUpkeep: Number((b.energyCostFromActuationUpkeep || 0).toFixed(3)),
           energyCostEvents: Number((b.energyCostFromActuationEvents || 0).toFixed(3))
         },
+        fullStats: {
+          stiffness: round(typeof b.getAverageStiffness === 'function' ? b.getAverageStiffness() : b.stiffness, 4),
+          damping: round(typeof b.getAverageDamping === 'function' ? b.getAverageDamping() : b.springDamping, 4),
+          motorImpulseInterval: Number.isFinite(Number(b.motorImpulseInterval)) ? Number(b.motorImpulseInterval) : null,
+          motorImpulseMagnitudeCap: round(b.motorImpulseMagnitudeCap, 4),
+          emitterStrength: round(b.emitterStrength, 4),
+          emitterDirection: {
+            x: round(b.emitterDirection?.x, 4),
+            y: round(b.emitterDirection?.y, 4)
+          },
+          numOffspring: Number.isFinite(Number(b.numOffspring)) ? Number(b.numOffspring) : null,
+          offspringSpawnRadius: round(b.offspringSpawnRadius, 4),
+          pointAddChance: round(b.pointAddChance, 6),
+          springConnectionRadius: round(b.springConnectionRadius, 4),
+          reproductionEnergyThreshold: round(b.reproductionEnergyThreshold, 4),
+          currentMaxEnergy: round(b.currentMaxEnergy, 4),
+          ticksSinceBirth: Number.isFinite(Number(b.ticksSinceBirth)) ? Number(b.ticksSinceBirth) : null,
+          canReproduce: Boolean(b.canReproduce),
+          rewardStrategy: b.rewardStrategy ?? null,
+          reproductionCooldownGene: Number.isFinite(Number(b.reproductionCooldownGene)) ? Number(b.reproductionCooldownGene) : null,
+          effectiveReproductionCooldown: Number.isFinite(Number(b.effectiveReproductionCooldown)) ? Number(b.effectiveReproductionCooldown) : null,
+          energyGains: {
+            photosynthesis: round(b.energyGainedFromPhotosynthesis, 4),
+            eating: round(b.energyGainedFromEating, 4),
+            predation: round(b.energyGainedFromPredation, 4)
+          },
+          growth: {
+            eventsCompleted: Number(b.growthEventsCompleted || 0),
+            nodesAdded: Number(b.growthNodesAdded || 0),
+            totalEnergySpent: round(b.totalGrowthEnergySpent, 4),
+            suppressedByEnergy: Number(b.growthSuppressedByEnergy || 0),
+            suppressedByCooldown: Number(b.growthSuppressedByCooldown || 0),
+            suppressedByPopulation: Number(b.growthSuppressedByPopulation || 0),
+            suppressedByMaxPoints: Number(b.growthSuppressedByMaxPoints || 0),
+            suppressedByNoCapacity: Number(b.growthSuppressedByNoCapacity || 0),
+            suppressedByChanceRoll: Number(b.growthSuppressedByChanceRoll || 0),
+            suppressedByPlacement: Number(b.growthSuppressedByPlacement || 0)
+          },
+          topology: {
+            nnTopologyVersion: Number(b.nnTopologyVersion || 0),
+            rlTopologyResets: Number(b.rlBufferResetsDueToTopology || 0)
+          },
+          reproductionSuppression: {
+            density: Number(b.reproductionSuppressedByDensity || 0),
+            resources: Number(b.reproductionSuppressedByResources || 0),
+            fertilityRoll: Number(b.reproductionSuppressedByFertilityRoll || 0),
+            resourceDebits: Number(b.reproductionResourceDebitApplied || 0)
+          },
+          energyCostsByType: {
+            base: round(b.energyCostFromBaseNodes, 4),
+            emitter: round(b.energyCostFromEmitterNodes, 4),
+            eater: round(b.energyCostFromEaterNodes, 4),
+            predator: round(b.energyCostFromPredatorNodes, 4),
+            neuron: round(b.energyCostFromNeuronNodes, 4),
+            swimmer: round(b.energyCostFromSwimmerNodes, 4),
+            photosynthetic: round(b.energyCostFromPhotosyntheticNodes, 4),
+            grabbing: round(b.energyCostFromGrabbingNodes, 4),
+            eye: round(b.energyCostFromEyeNodes, 4),
+            jet: round(b.energyCostFromJetNodes, 4),
+            attractor: round(b.energyCostFromAttractorNodes, 4),
+            repulsor: round(b.energyCostFromRepulsorNodes, 4)
+          }
+        },
         vertices: b.massPoints.map((p, idx) => ({
           index: idx,
           x: Number(clamp(p.pos.x, 0, config.WORLD_WIDTH).toFixed(2)),
@@ -384,12 +454,17 @@ export class RealWorld {
         liveCreatures: creatures.length,
         particles: this.particles.length
       },
+      worldStats: {
+        globalEnergyGains: this.worldState?.globalEnergyGains || {},
+        globalEnergyCosts: this.worldState?.globalEnergyCosts || {}
+      },
       instabilityTelemetry: {
         totalRemoved: Number(instabilityTelemetry.totalRemoved) || 0,
         totalPhysicsRemoved: Number(instabilityTelemetry.totalPhysicsRemoved) || 0,
         totalNonPhysicsRemoved: Number(instabilityTelemetry.totalNonPhysicsRemoved) || 0,
         totalUnknownRemoved: Number(instabilityTelemetry.totalUnknownRemoved) || 0,
         removedByReason: instabilityTelemetry.removedByReason || {},
+        removedByPhysicsKind: instabilityTelemetry.removedByPhysicsKind || {},
         recentDeaths: Array.isArray(instabilityTelemetry.recentDeaths)
           ? instabilityTelemetry.recentDeaths.slice(-20)
           : []

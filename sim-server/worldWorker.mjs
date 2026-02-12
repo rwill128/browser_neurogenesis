@@ -164,6 +164,7 @@ function computeSnapshot(mode = 'render') {
       seed: snap.seed,
       world: worldDims,
       populations: snap.populations,
+      worldStats: snap.worldStats,
       instabilityTelemetry: snap.instabilityTelemetry,
       mutationStats: snap.mutationStats,
       sampleCreatures: snap.sampleCreatures
@@ -179,6 +180,7 @@ function computeSnapshot(mode = 'render') {
       seed: snap.seed,
       world: worldDims,
       populations: snap.populations,
+      worldStats: snap.worldStats,
       instabilityTelemetry: snap.instabilityTelemetry,
       mutationStats: snap.mutationStats,
       fluid: snap.fluid,
@@ -195,6 +197,7 @@ function computeSnapshot(mode = 'render') {
       seed: snap.seed,
       world: worldDims,
       populations: snap.populations,
+      worldStats: snap.worldStats,
       instabilityTelemetry: snap.instabilityTelemetry,
       mutationStats: snap.mutationStats,
       fluid: snap.fluid,

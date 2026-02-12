@@ -90,6 +90,14 @@ function hideLauncherOverlay() {
 }
 
 /**
+ * Return to the launcher overlay by clearing startup URL mode and reloading.
+ */
+function returnToScenarioLibrary() {
+    const cleanUrl = `${window.location.pathname}${window.location.hash || ''}`;
+    window.location.assign(cleanUrl);
+}
+
+/**
  * Render clickable cards for all micro scenarios (same family used in node harness).
  */
 function renderMicroScenarioCards(container, onSelect) {
@@ -208,6 +216,11 @@ async function main() {
     console.log(`[SCENARIO] Loaded: ${scenarioInfo.name} - ${scenarioInfo.description}${scenarioInfo.seed !== null && scenarioInfo.seed !== undefined ? ` | seed=${scenarioInfo.seed}` : ''}`);
     if (scenarioInfo.randomPreset) {
         console.log(`[SCENARIO] Random preset: ${JSON.stringify(scenarioInfo.randomPreset)}`);
+    }
+
+    const libraryButton = document.getElementById('openScenarioLibraryButton');
+    if (libraryButton) {
+        libraryButton.onclick = () => returnToScenarioLibrary();
     }
 
     worldWidthInput.value = String(config.WORLD_WIDTH || parseInt(worldWidthInput.value) || 8000);

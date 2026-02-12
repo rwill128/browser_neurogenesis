@@ -167,3 +167,6 @@ For each scenario run:
   - randomizes world size/population/fluid + growth/reproduction control subset with relational guardrails.
 - Added unit coverage for random launcher config bounds/constraints:
   - `node-harness/tests/launcherConfig.test.mjs`.
+- Added direct return path to launcher after simulation start:
+  - new fixed **Scenario Library** button (`#openScenarioLibraryButton`) in top-left HUD
+  - clicking clears startup URL params and reloads to the launcher overlay so users can switch scenarios/modes quickly.

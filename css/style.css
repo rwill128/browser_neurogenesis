@@ -252,6 +252,11 @@ canvas.emitter-edit-mode {
     left: 15px;
 }
 
+#openScenarioLibraryButton {
+    top: 105px;
+    left: 15px;
+}
+
 .ui-info-top-left {
     position: fixed;
     left: 15px;
@@ -265,7 +270,7 @@ canvas.emitter-edit-mode {
 }
 
 #frameTimeDisplay {
-    top: 105px; /* Position below the View Entire Sim button */
+    top: 150px; /* Position below the Scenario Library button */
 }
 
 #controls {

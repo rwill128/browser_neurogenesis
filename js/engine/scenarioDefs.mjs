@@ -5,6 +5,40 @@ export const scenarioDefs = {
     browserConfig: {},
     nodeConfig: { world: { width: 140, height: 90 }, creatures: 10, particles: 240, dt: 1/30, steps: 300 }
   },
+  browser_default_big: {
+    name: 'browser_default_big',
+    description: 'Big browser-like default world (matches config.js defaults: 20000x16000, floor=100, PPS=100)',
+    browserConfig: {
+      WORLD_WIDTH: 20000,
+      WORLD_HEIGHT: 16000,
+      CREATURE_POPULATION_FLOOR: 100,
+      CREATURE_POPULATION_CEILING: 10000,
+      PARTICLE_POPULATION_FLOOR: 0,
+      PARTICLE_POPULATION_CEILING: 60000,
+      PARTICLES_PER_SECOND: 100,
+      FLUID_GRID_SIZE_CONTROL: 128,
+      AUTO_FOLLOW_CREATURE: true
+    },
+    nodeConfig: {
+      world: { width: 20000, height: 16000 },
+      creatures: 100,
+      creatureFloor: 100,
+      creatureCeiling: 10000,
+      particles: 0,
+      particleFloor: 0,
+      particleCeiling: 60000,
+      particlesPerSecond: 100,
+      dt: 0.01,
+      steps: 0,
+      events: [],
+      stepBehavior: {
+        allowReproduction: true,
+        maintainCreatureFloor: true,
+        maintainParticleFloor: true,
+        applyEmitters: true
+      }
+    }
+  },
   micro_stability: {
     name: 'micro_stability',
     description: 'Small world for stability debugging',

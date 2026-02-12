@@ -7,15 +7,17 @@ export const scenarioDefs = {
   },
   browser_default_big: {
     name: 'browser_default_big',
-    description: 'Big browser-like default world (matches config.js defaults: 20000x16000, floor=100, PPS=100)',
+    description: 'Big browser-like default world (20000x16000, creature floor=100, particle-free)',
     browserConfig: {
       WORLD_WIDTH: 20000,
       WORLD_HEIGHT: 16000,
       CREATURE_POPULATION_FLOOR: 100,
       CREATURE_POPULATION_CEILING: 1000,
       PARTICLE_POPULATION_FLOOR: 0,
-      PARTICLE_POPULATION_CEILING: 60000,
-      PARTICLES_PER_SECOND: 100,
+      PARTICLE_POPULATION_CEILING: 0,
+      PARTICLES_PER_SECOND: 0,
+      SWIMMER_NODE_ENERGY_COST: 0.12,
+      JET_NODE_ENERGY_COST: 0.2,
       FLUID_GRID_SIZE_CONTROL: 128,
       AUTO_FOLLOW_CREATURE: true
     },
@@ -26,11 +28,15 @@ export const scenarioDefs = {
       creatureCeiling: 1000,
       particles: 0,
       particleFloor: 0,
-      particleCeiling: 60000,
-      particlesPerSecond: 100,
+      particleCeiling: 0,
+      particlesPerSecond: 0,
       dt: 0.01,
       steps: 0,
       events: [],
+      configOverrides: {
+        SWIMMER_NODE_ENERGY_COST: 0.12,
+        JET_NODE_ENERGY_COST: 0.2
+      },
       stepBehavior: {
         allowReproduction: true,
         maintainCreatureFloor: true,

@@ -17,7 +17,9 @@ Outputs JSON under `./artifacts`.
 Also writes instability-death JSONL (`*-instability-deaths.jsonl`) with one record per removed unstable body,
 including current physiology + hereditary blueprint snapshots for offline parameter mining.
 
-Run payload includes `spawnTelemetry` (`totalReproductionBirths`, `totalFloorSpawns`) so you can separate mutation/reproduction activity from floor-refill churn.
+Run payload includes:
+- `spawnTelemetry` (`totalReproductionBirths`, `totalFloorSpawns`) to separate mutation/reproduction activity from floor-refill churn.
+- `reproductionTelemetry` per-run totals (`attemptedParents`, `successfulBirths`, suppression counters like `suppressedByEnergy`, `suppressedByCooldown`, `suppressedByResources`, `suppressedByDensity`, `suppressedByFertilityRoll`, `suppressedByPlacementOrOther`).
 
 Default stepping is now **browser-like for ecology telemetry**:
 - reproduction enabled,

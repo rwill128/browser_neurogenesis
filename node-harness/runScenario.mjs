@@ -106,10 +106,31 @@ writeFileSync(instabilityPath, '', 'utf8');
 const timeline = [];
 let totalReproductionBirths = 0;
 let totalFloorSpawns = 0;
+const totalReproductionTelemetry = {
+  consideredBodies: 0,
+  attemptedParents: 0,
+  successfulParents: 0,
+  successfulBirths: 0,
+  attemptsWithoutBirths: 0,
+  suppressedByGlobalDisabled: 0,
+  suppressedByGlobalCeiling: 0,
+  suppressedByCanReproduce: 0,
+  suppressedByEnergy: 0,
+  suppressedByCooldown: 0,
+  suppressedByResources: 0,
+  suppressedByDensity: 0,
+  suppressedByFertilityRoll: 0,
+  suppressedByPlacementOrOther: 0
+};
 for (let i = 0; i < steps; i++) {
   const stepResult = world.step(runtimeScenario.dt);
   totalReproductionBirths += Number(stepResult?.spawnTelemetry?.reproductionBirths || 0);
   totalFloorSpawns += Number(stepResult?.spawnTelemetry?.floorSpawns || 0);
+
+  const stepReproductionTelemetry = stepResult?.reproductionTelemetry || {};
+  for (const key of Object.keys(totalReproductionTelemetry)) {
+    totalReproductionTelemetry[key] += Number(stepReproductionTelemetry[key] || 0);
+  }
 
   if (Array.isArray(stepResult?.removedBodies) && stepResult.removedBodies.length) {
     for (const death of stepResult.removedBodies) {
@@ -144,6 +165,7 @@ const payload = {
     totalFloorSpawns,
     totalSpawns: totalReproductionBirths + totalFloorSpawns
   },
+  reproductionTelemetry: totalReproductionTelemetry,
   artifacts: {
     instabilityDeathsPath: instabilityPath
   },

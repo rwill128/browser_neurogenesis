@@ -432,7 +432,7 @@ function removeUnstableBodies(state, { captureInstabilityTelemetry = true, maxRe
  * @param {object} state - Mutable world state (bodies, particles, fields, grid).
  * @param {number} dt - Delta time in seconds.
  * @param {object} options - Runtime controls and injectable classes.
- * @returns {{removedCount:number,removedBodies:object[],currentAnyUnstable:boolean,populations:{creatures:number,particles:number}}}
+ * @returns {{removedCount:number,removedBodies:object[],currentAnyUnstable:boolean,spawnTelemetry:object,reproductionTelemetry:object,populations:{creatures:number,particles:number}}}
  */
 export function stepWorld(state, dt, options = {}) {
   const {
@@ -515,6 +515,22 @@ export function stepWorld(state, dt, options = {}) {
   let reproductionBirths = 0;
   let floorSpawns = 0;
   let currentAnyUnstable = false;
+  const reproductionTelemetry = {
+    consideredBodies: 0,
+    attemptedParents: 0,
+    successfulParents: 0,
+    successfulBirths: 0,
+    attemptsWithoutBirths: 0,
+    suppressedByGlobalDisabled: 0,
+    suppressedByGlobalCeiling: 0,
+    suppressedByCanReproduce: 0,
+    suppressedByEnergy: 0,
+    suppressedByCooldown: 0,
+    suppressedByResources: 0,
+    suppressedByDensity: 0,
+    suppressedByFertilityRoll: 0,
+    suppressedByPlacementOrOther: 0
+  };
 
   for (let i = state.softBodyPopulation.length - 1; i >= 0; i--) {
     const body = state.softBodyPopulation[i];
@@ -526,18 +542,65 @@ export function stepWorld(state, dt, options = {}) {
       continue;
     }
 
+    reproductionTelemetry.consideredBodies += 1;
+
+    if (!allowReproduction) {
+      reproductionTelemetry.suppressedByGlobalDisabled += 1;
+      continue;
+    }
+
+    if (!canCreaturesReproduceGlobally) {
+      reproductionTelemetry.suppressedByGlobalCeiling += 1;
+      continue;
+    }
+
+    if (!body.canReproduce) {
+      reproductionTelemetry.suppressedByCanReproduce += 1;
+      continue;
+    }
+
+    if (body.creatureEnergy < body.reproductionEnergyThreshold) {
+      reproductionTelemetry.suppressedByEnergy += 1;
+      continue;
+    }
+
+    const cooldownBefore = Number(body.failedReproductionCooldown) || 0;
+    const densityBefore = Number(body.reproductionSuppressedByDensity) || 0;
+    const resourcesBefore = Number(body.reproductionSuppressedByResources) || 0;
+    const fertilityBefore = Number(body.reproductionSuppressedByFertilityRoll) || 0;
+
+    reproductionTelemetry.attemptedParents += 1;
+    const offspring = withRandomSource(rng, () => body.reproduce());
+
+    const densityDelta = Math.max(0, (Number(body.reproductionSuppressedByDensity) || 0) - densityBefore);
+    const resourcesDelta = Math.max(0, (Number(body.reproductionSuppressedByResources) || 0) - resourcesBefore);
+    const fertilityDelta = Math.max(0, (Number(body.reproductionSuppressedByFertilityRoll) || 0) - fertilityBefore);
+
+    reproductionTelemetry.suppressedByDensity += densityDelta;
+    reproductionTelemetry.suppressedByResources += resourcesDelta;
+    reproductionTelemetry.suppressedByFertilityRoll += fertilityDelta;
+
+    if (cooldownBefore > 0) {
+      reproductionTelemetry.suppressedByCooldown += 1;
+    }
+
+    if (offspring && offspring.length) {
+      reproductionBirths += offspring.length;
+      reproductionTelemetry.successfulParents += 1;
+      reproductionTelemetry.successfulBirths += offspring.length;
+      newOffspring.push(...offspring);
+      continue;
+    }
+
+    reproductionTelemetry.attemptsWithoutBirths += 1;
+
     if (
-      allowReproduction &&
-      body.creatureEnergy >= body.reproductionEnergyThreshold &&
-      body.canReproduce &&
-      canCreaturesReproduceGlobally &&
-      body.failedReproductionCooldown <= 0
+      cooldownBefore <= 0 &&
+      densityDelta === 0 &&
+      resourcesDelta === 0 &&
+      fertilityDelta === 0
     ) {
-      const offspring = withRandomSource(rng, () => body.reproduce());
-      if (offspring && offspring.length) {
-        reproductionBirths += offspring.length;
-        newOffspring.push(...offspring);
-      }
+      reproductionTelemetry.suppressedByPlacementOrOther += 1;
     }
   }
 
@@ -587,6 +650,7 @@ export function stepWorld(state, dt, options = {}) {
       floorSpawns,
       totalSpawns: reproductionBirths + floorSpawns
     },
+    reproductionTelemetry,
     populations: {
       creatures: state.softBodyPopulation.length,
       particles: state.particles.length

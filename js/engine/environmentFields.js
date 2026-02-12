@@ -85,6 +85,18 @@ export function createLightField(
   return field;
 }
 
+function applyMidpointContrast01(value, strength = 0) {
+  const v = Math.max(0, Math.min(1, Number(value) || 0));
+  const s = Math.max(0, Number(strength) || 0);
+  if (s <= 0) return v;
+
+  const exponent = 1 + (s * 4);
+  if (v < 0.5) {
+    return 0.5 * Math.pow(v / 0.5, exponent);
+  }
+  return 1 - 0.5 * Math.pow((1 - v) / 0.5, exponent);
+}
+
 export function createViscosityField(
   size = Math.round(config.FLUID_GRID_SIZE_CONTROL),
   random = Math.random,
@@ -93,14 +105,43 @@ export function createViscosityField(
   const field = createField(size);
   if (field.length === 0) return field;
 
-  const noiseScale = 0.06;
+  const noiseScale = Math.max(0.0001, Number(config.VISCOSITY_LANDSCAPE_NOISE_SCALE) || 0.03);
+  const octaves = Math.max(1, Math.floor(Number(config.VISCOSITY_LANDSCAPE_OCTAVES) || 1));
+  const lacunarity = Math.max(1.0, Number(config.VISCOSITY_LANDSCAPE_LACUNARITY) || 2.0);
+  const gain = Math.max(0.05, Math.min(1, Number(config.VISCOSITY_LANDSCAPE_GAIN) || 0.55));
+  const contrast = Math.max(0, Number(config.VISCOSITY_LANDSCAPE_CONTRAST) || 0);
+  const bands = Math.max(0, Math.floor(Number(config.VISCOSITY_LANDSCAPE_BANDS) || 0));
+
   const noiseOffsetX = random() * 1000 + 2000;
   const noiseOffsetY = random() * 1000 + 2000;
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const noiseValue = noise.noise(x * noiseScale + noiseOffsetX, y * noiseScale + noiseOffsetY);
-      const mappedValue = ((noiseValue + 1) / 2) * (config.MAX_VISCOSITY_MULTIPLIER - config.MIN_VISCOSITY_MULTIPLIER) + config.MIN_VISCOSITY_MULTIPLIER;
+      let sum = 0;
+      let amp = 1;
+      let freq = 1;
+      let norm = 0;
+
+      for (let o = 0; o < octaves; o++) {
+        const n = noise.noise(
+          x * noiseScale * freq + noiseOffsetX,
+          y * noiseScale * freq + noiseOffsetY
+        );
+        sum += n * amp;
+        norm += amp;
+        amp *= gain;
+        freq *= lacunarity;
+      }
+
+      const fbm = norm > 0 ? (sum / norm) : 0;
+      let t = (fbm + 1) / 2;
+      t = applyMidpointContrast01(t, contrast);
+
+      if (bands >= 2) {
+        t = Math.round(t * (bands - 1)) / (bands - 1);
+      }
+
+      const mappedValue = t * (config.MAX_VISCOSITY_MULTIPLIER - config.MIN_VISCOSITY_MULTIPLIER) + config.MIN_VISCOSITY_MULTIPLIER;
       field[y * size + x] = Math.max(config.MIN_VISCOSITY_MULTIPLIER, Math.min(config.MAX_VISCOSITY_MULTIPLIER, mappedValue));
     }
   }

@@ -42,3 +42,12 @@ test('landscape dye emitter defaults are available and disabled by default', () 
   assert.ok(Number(config.LANDSCAPE_DYE_EMITTER_STRENGTH_MAX) >= Number(config.LANDSCAPE_DYE_EMITTER_STRENGTH_MIN));
   assert.ok(Number(config.FLUID_FADE_RATE) > 0);
 });
+
+test('viscosity landscape defaults expose stronger-shape controls', () => {
+  assert.ok(Number(config.VISCOSITY_LANDSCAPE_NOISE_SCALE) > 0);
+  assert.ok(Number(config.VISCOSITY_LANDSCAPE_OCTAVES) >= 1);
+  assert.ok(Number(config.VISCOSITY_LANDSCAPE_LACUNARITY) >= 1);
+  assert.ok(Number(config.VISCOSITY_LANDSCAPE_GAIN) > 0);
+  assert.ok(Number(config.VISCOSITY_LANDSCAPE_CONTRAST) >= 0);
+  assert.ok(Number(config.VISCOSITY_LANDSCAPE_BANDS) >= 0);
+});

@@ -35,7 +35,8 @@ Open:
 - `POST /api/worlds` body `{ "scenario": "micro_repro_sustain", "seed": 23, "id": "optional" }` → create world
 - `DELETE /api/worlds/:id` → delete world (default `w0` protected)
 - `GET /api/worlds/:id/status`
-- `GET /api/worlds/:id/snapshot?mode=lite|render|full`
+- `GET /api/worlds/:id/snapshot?mode=lite|render|renderFull|full`
+- `GET /api/worlds/:id/config`
 - `POST /api/worlds/:id/control/pause`
 - `POST /api/worlds/:id/control/resume`
 - `POST /api/worlds/:id/control/setScenario` body `{ "name": "micro_predation", "seed": 23 }` (resets that world)
@@ -57,7 +58,7 @@ Open:
 
 ## WebSocket
 
-- `WS /ws?world=w0&mode=render&hz=10`
+- `WS /ws?world=w0&mode=renderFull&hz=10`
   - sends messages:
     - `{ kind: "status", data: <worldStatus> }`
     - `{ kind: "snapshot", data: <worldSnapshot> }`
@@ -66,5 +67,7 @@ Open:
 
 - Server runs the real engine via `node-harness/realWorld.mjs` + shared `stepWorld`.
 - Worlds run in **worker threads** to isolate the module-level config singleton (`js/config.js`).
-- Persistence uses SQLite via `better-sqlite3` (works on Node 22+, unlike `node:sqlite` which is not available on Node v22).
+- Persistence uses SQLite with runtime fallback:
+  - prefers built-in `node:sqlite` when available,
+  - falls back to `better-sqlite3` on Node versions without `node:sqlite` (e.g. Node 22).
 - Next steps for remote hosting: auth token + rate limiting + metrics endpoints.

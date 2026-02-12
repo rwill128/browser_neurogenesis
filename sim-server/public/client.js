@@ -1,5 +1,4 @@
 const statusEl = document.getElementById('status');
-const telemetryEl = document.getElementById('telemetry');
 const canvas = document.getElementById('canvas');
 
 const worldSelect = document.getElementById('worldSelect');
@@ -12,12 +11,99 @@ const pauseBtn = document.getElementById('pauseBtn');
 const resumeBtn = document.getElementById('resumeBtn');
 const fitBtn = document.getElementById('fitBtn');
 
+const prevCreatureBtn = document.getElementById('prevCreatureBtn');
+const nextCreatureBtn = document.getElementById('nextCreatureBtn');
+const toggleFollowBtn = document.getElementById('toggleFollowBtn');
+
+const refreshConfigBtn = document.getElementById('refreshConfigBtn');
+const applyConfigBtn = document.getElementById('applyConfigBtn');
+
+const worldStatsEl = document.getElementById('worldStats');
+const creatureStatsEl = document.getElementById('creatureStats');
+const configEditorEl = document.getElementById('configEditor');
+
 const ctx = canvas.getContext('2d');
+
+const NODE_TYPE_COLORS = {
+  PREDATOR: '#ff4d4d',
+  EATER: '#ff9f1c',
+  PHOTOSYNTHETIC: '#7CFF6B',
+  NEURON: '#b48bff',
+  EMITTER: '#4dd6ff',
+  SWIMMER: '#4d7cff',
+  EYE: '#ffffff',
+  JET: '#00e5ff',
+  ATTRACTOR: '#ffd24d',
+  REPULSOR: '#ff4de1'
+};
+
+const CONFIG_FIELDS = [
+  'PHOTOSYNTHESIS_EFFICIENCY',
+  'globalNutrientMultiplier',
+  'globalLightMultiplier',
+  'ENERGY_PER_PARTICLE',
+  'EATER_NODE_ENERGY_COST',
+  'PREDATOR_NODE_ENERGY_COST',
+  'SWIMMER_NODE_ENERGY_COST',
+  'JET_NODE_ENERGY_COST',
+  'ATTRACTOR_NODE_ENERGY_COST',
+  'REPULSOR_NODE_ENERGY_COST',
+  'FLUID_CURRENT_STRENGTH_ON_BODY',
+  'SOFT_BODY_PUSH_STRENGTH',
+  'BODY_REPULSION_STRENGTH',
+  'REPRO_RESOURCE_MIN_NUTRIENT',
+  'REPRO_RESOURCE_MIN_LIGHT',
+  'FAILED_REPRODUCTION_COOLDOWN_TICKS'
+];
 
 let ws = null;
 let currentWorldId = null;
 
 const cameraByWorld = new Map();
+const selectionByWorld = new Map();
+const followByWorld = new Map();
+const lastSnapshotByWorld = new Map();
+const lastStatusByWorld = new Map();
+const configDraftByWorld = new Map();
+
+function fmt(n, digits = 3) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return '—';
+  return x.toFixed(digits);
+}
+
+function colorForVertex(v) {
+  const name = v?.nodeTypeName || null;
+  if (name && NODE_TYPE_COLORS[name]) return NODE_TYPE_COLORS[name];
+  return 'rgba(255,255,255,0.75)';
+}
+
+function asDisplayValue(v) {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'number') {
+    if (!Number.isFinite(v)) return '—';
+    if (Math.abs(v) >= 1000) return String(Math.round(v));
+    if (Math.abs(v) >= 1) return String(Number(v.toFixed(3)));
+    return String(Number(v.toFixed(6)));
+  }
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (typeof v === 'string') return v;
+  return JSON.stringify(v);
+}
+
+function setKV(el, entries) {
+  el.innerHTML = '';
+  for (const [k, v] of entries) {
+    const dk = document.createElement('div');
+    dk.className = 'k';
+    dk.textContent = k;
+    const dv = document.createElement('div');
+    dv.className = 'v';
+    dv.textContent = asDisplayValue(v);
+    el.appendChild(dk);
+    el.appendChild(dv);
+  }
+}
 
 function getCamera(worldId) {
   if (!cameraByWorld.has(worldId)) {
@@ -109,33 +195,133 @@ async function apiPost(path, payload = null) {
   return json;
 }
 
-function fmt(n, digits = 3) {
-  const x = Number(n);
-  if (!Number.isFinite(x)) return '—';
-  return x.toFixed(digits);
+function sortedCreatures(snap) {
+  const arr = Array.isArray(snap?.creatures) ? [...snap.creatures] : [];
+  arr.sort((a, b) => Number(a?.id || 0) - Number(b?.id || 0));
+  return arr;
 }
 
-const NODE_TYPE_COLORS = {
-  PREDATOR: '#ff4d4d',
-  EATER: '#ff9f1c',
-  PHOTOSYNTHETIC: '#7CFF6B',
-  NEURON: '#b48bff',
-  EMITTER: '#4dd6ff',
-  SWIMMER: '#4d7cff',
-  EYE: '#ffffff',
-  JET: '#00e5ff',
-  ATTRACTOR: '#ffd24d',
-  REPULSOR: '#ff4de1'
-};
-
-function colorForVertex(v) {
-  const name = v?.nodeTypeName || null;
-  if (name && NODE_TYPE_COLORS[name]) return NODE_TYPE_COLORS[name];
-  return 'rgba(255,255,255,0.75)';
+function updateFollowButton() {
+  if (!currentWorldId) {
+    toggleFollowBtn.textContent = 'Follow (F)';
+    return;
+  }
+  const sel = selectionByWorld.get(currentWorldId);
+  const follow = followByWorld.get(currentWorldId);
+  const on = (sel !== null && sel !== undefined && String(sel) === String(follow));
+  toggleFollowBtn.textContent = on ? 'Following (F)' : 'Follow (F)';
 }
 
-const selectionByWorld = new Map();
-const followByWorld = new Map();
+function renderConfigEditor(worldId) {
+  const draft = configDraftByWorld.get(worldId) || {};
+  configEditorEl.innerHTML = '';
+
+  for (const key of CONFIG_FIELDS) {
+    const row = document.createElement('div');
+    row.className = 'configField';
+
+    const label = document.createElement('label');
+    label.textContent = key;
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = 'any';
+    input.dataset.configKey = key;
+    const v = draft[key];
+    if (typeof v === 'number' && Number.isFinite(v)) input.value = String(v);
+    else input.value = '';
+
+    row.appendChild(label);
+    row.appendChild(input);
+    configEditorEl.appendChild(row);
+  }
+}
+
+async function refreshConfig(worldId) {
+  if (!worldId) return;
+  const out = await apiGet(`/api/worlds/${encodeURIComponent(worldId)}/config`);
+  configDraftByWorld.set(worldId, out?.values || {});
+  renderConfigEditor(worldId);
+}
+
+async function applyConfig(worldId) {
+  if (!worldId) return;
+
+  const overrides = {};
+  for (const input of configEditorEl.querySelectorAll('input[data-config-key]')) {
+    const key = input.dataset.configKey;
+    const raw = String(input.value || '').trim();
+    if (!raw) continue;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) continue;
+    overrides[key] = n;
+  }
+
+  if (Object.keys(overrides).length === 0) return;
+
+  await apiPost(`/api/worlds/${encodeURIComponent(worldId)}/control/configOverrides`, { overrides });
+  await refreshConfig(worldId);
+}
+
+function renderPanels(worldId) {
+  const snap = lastSnapshotByWorld.get(worldId) || null;
+  const status = lastStatusByWorld.get(worldId) || null;
+  const cam = getCamera(worldId);
+
+  if (!snap) {
+    setKV(worldStatsEl, [['world', worldId], ['snapshot', 'waiting…']]);
+    setKV(creatureStatsEl, [['selected', 'none']]);
+    updateFollowButton();
+    return;
+  }
+
+  const removedTotal = Number(snap?.instabilityTelemetry?.totalRemoved) || 0;
+  const reasons = snap?.instabilityTelemetry?.removedByReason || {};
+  const topReason = Object.keys(reasons).sort((a, b) => (reasons[b] || 0) - (reasons[a] || 0))[0] || '—';
+
+  setKV(worldStatsEl, [
+    ['world', worldId],
+    ['scenario', snap.scenario],
+    ['tick', snap.tick],
+    ['time', snap.time],
+    ['sps', status?.stepsPerSecond],
+    ['dt', status?.dt],
+    ['creatures', snap.populations?.creatures],
+    ['particles', snap.populations?.particles],
+    ['fluidActiveCells', snap.fluid?.activeCells],
+    ['removedTotal', removedTotal],
+    ['topRemovalReason', `${topReason} (${reasons[topReason] || 0})`],
+    ['zoom', cam.zoom]
+  ]);
+
+  const selectedId = selectionByWorld.get(worldId) || null;
+  const selected = selectedId !== null
+    ? (snap.creatures || []).find((c) => String(c.id) === String(selectedId))
+    : null;
+
+  if (!selected) {
+    setKV(creatureStatsEl, [
+      ['selected', 'none'],
+      ['hint', 'click creature or use prev/next']
+    ]);
+  } else {
+    setKV(creatureStatsEl, [
+      ['id', selected.id],
+      ['energy', selected.energy],
+      ['centerX', selected.center?.x],
+      ['centerY', selected.center?.y],
+      ['points', selected.vertices?.length],
+      ['springs', selected.springs?.length],
+      ['nodeTypes', JSON.stringify(selected.nodeTypeCounts || {})],
+      ['actEvals', selected.actuationTelemetry?.evaluations],
+      ['actSkips', selected.actuationTelemetry?.skips],
+      ['actAvgInterval', selected.actuationTelemetry?.avgEffectiveInterval],
+      ['following', String(followByWorld.get(worldId) || '') === String(selected.id) ? 'yes' : 'no']
+    ]);
+  }
+
+  updateFollowButton();
+}
 
 function drawSnapshot(snap) {
   const rect = canvas.getBoundingClientRect();
@@ -146,12 +332,10 @@ function drawSnapshot(snap) {
   const worldId = currentWorldId || snap?.id || 'w0';
   const cam = getCamera(worldId);
 
-  // auto-fit on first snapshot or world resize
   if (!cam.initialized || cam.worldW !== worldW || cam.worldH !== worldH) {
     fitCameraToWorld(worldId, worldW, worldH);
   }
 
-  // follow camera (center selected creature)
   const followId = followByWorld.get(worldId) || null;
   if (followId !== null) {
     const target = (snap.creatures || []).find((c) => c && String(c.id) === String(followId));
@@ -165,7 +349,6 @@ function drawSnapshot(snap) {
 
   ctx.clearRect(0, 0, rect.width, rect.height);
 
-  // world bounds
   ctx.strokeStyle = 'rgba(255,255,255,0.08)';
   ctx.lineWidth = 1;
   ctx.strokeRect(cam.offsetX, cam.offsetY, worldW * cam.zoom, worldH * cam.zoom);
@@ -173,12 +356,9 @@ function drawSnapshot(snap) {
   const worldToScreenX = (x) => cam.offsetX + x * cam.zoom;
   const worldToScreenY = (y) => cam.offsetY + y * cam.zoom;
 
-  // Fluid
-  const fluid = snap.fluid;
-
-  // Prefer dense grid when available (highest fidelity)
+  // Dense fluid path
   if (snap.fluidDense && snap.fluidDense.rgbaBase64 && Number(snap.fluidDense.gridSize) > 0) {
-    const N = Number(snap.fluidDense.gridSize) || 0;
+    const N = Number(snap.fluidDense.gridSize);
     try {
       const bin = atob(snap.fluidDense.rgbaBase64);
       const bytes = new Uint8ClampedArray(bin.length);
@@ -197,10 +377,10 @@ function drawSnapshot(snap) {
       ctx.drawImage(off, cam.offsetX, cam.offsetY, worldW * cam.zoom, worldH * cam.zoom);
       ctx.restore();
     } catch {
-      // fall back to sparse
+      // ignore; sparse fallback below
     }
   } else {
-    // Sparse cell list — NOTE: server snapshot uses worldCell.width/height (not cellSize)
+    const fluid = snap.fluid;
     const cellW = Number(fluid?.worldCell?.width) || 0;
     const cellH = Number(fluid?.worldCell?.height) || 0;
     if (fluid && Array.isArray(fluid.cells) && cellW > 0 && cellH > 0) {
@@ -228,11 +408,7 @@ function drawSnapshot(snap) {
     }
   }
 
-  const selectedId = selectionByWorld.get(worldId) || null;
-
-  // Particles (draw after fluid, before creatures)
   if (Array.isArray(snap.particles) && snap.particles.length) {
-    ctx.fillStyle = 'rgba(220,220,250,0.45)';
     for (const p of snap.particles) {
       const x = Number(p?.x);
       const y = Number(p?.y);
@@ -247,13 +423,13 @@ function drawSnapshot(snap) {
     }
   }
 
+  const selectedId = selectionByWorld.get(worldId) || null;
+
   for (const c of snap.creatures || []) {
     const verts = c.vertices || [];
     const springs = c.springs || [];
-
     const isSelected = selectedId !== null && String(c.id) === String(selectedId);
 
-    // non-rigid springs
     ctx.lineWidth = isSelected ? 1.5 : 1;
     ctx.strokeStyle = isSelected ? 'rgba(220,220,240,0.35)' : 'rgba(220,220,240,0.18)';
     ctx.beginPath();
@@ -267,7 +443,6 @@ function drawSnapshot(snap) {
     }
     ctx.stroke();
 
-    // rigid springs
     ctx.lineWidth = isSelected ? 2.0 : 1.5;
     ctx.strokeStyle = isSelected ? 'rgba(255, 230, 90, 0.65)' : 'rgba(255, 230, 90, 0.40)';
     ctx.beginPath();
@@ -281,7 +456,6 @@ function drawSnapshot(snap) {
     }
     ctx.stroke();
 
-    // points
     for (const v of verts) {
       const r = Math.max(0.75, (v.radius || 2) * cam.zoom);
       ctx.fillStyle = colorForVertex(v);
@@ -299,43 +473,14 @@ function drawSnapshot(snap) {
     }
 
     if (isSelected && c.center) {
-      ctx.fillStyle = 'rgba(255,255,255,0.65)';
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
       ctx.beginPath();
       ctx.arc(worldToScreenX(c.center.x), worldToScreenY(c.center.y), 3, 0, Math.PI * 2);
       ctx.fill();
     }
   }
 
-  // telemetry panel: world + fluid + selected creature
-  const selected = selectedId !== null
-    ? (snap.creatures || []).find((c) => c && String(c.id) === String(selectedId))
-    : null;
-
-  telemetryEl.textContent = JSON.stringify({
-    world: worldId,
-    scenario: snap.scenario,
-    tick: snap.tick,
-    time: snap.time,
-    populations: snap.populations,
-    camera: { zoom: cam.zoom, offsetX: cam.offsetX, offsetY: cam.offsetY },
-    fluid: fluid ? {
-      gridSize: fluid.gridSize,
-      activeCells: fluid.activeCells,
-      scannedCells: fluid.scannedCells,
-      maxDye: fluid.maxDye,
-      maxSpeed: fluid.maxSpeed
-    } : null,
-    fluidDense: snap.fluidDense ? { gridSize: snap.fluidDense.gridSize } : null,
-    particles: Array.isArray(snap.particles) ? { count: snap.particles.length } : null,
-    selectedCreature: selected ? {
-      id: selected.id,
-      energy: selected.energy,
-      center: selected.center,
-      nodeTypeCounts: selected.nodeTypeCounts,
-      actuationTelemetry: selected.actuationTelemetry
-    } : null,
-    following: followId
-  }, null, 2);
+  renderPanels(worldId);
 }
 
 async function refreshScenarios() {
@@ -394,11 +539,26 @@ function connectStream({ worldId, mode = 'renderFull', hz = 10 } = {}) {
 
       if (msg.kind === 'status') {
         const s = msg.data;
+        lastStatusByWorld.set(worldId, s);
         const cam = currentWorldId ? getCamera(currentWorldId) : null;
         const zoomLabel = cam ? ` zoom=${fmt(cam.zoom, 3)}` : '';
         statusEl.textContent = `world=${s.id} scenario=${s.scenario} seed=${s.seed} tick=${s.tick} t=${fmt(s.time, 2)} dt=${fmt(s.dt, 5)} paused=${s.paused} sps=${s.stepsPerSecond} stepWallMs=${s.lastStepWallMs}${zoomLabel}`;
       } else if (msg.kind === 'snapshot') {
         const snap = msg.data;
+        lastSnapshotByWorld.set(worldId, snap);
+
+        // keep selection sane
+        const sel = selectionByWorld.get(worldId);
+        if (sel !== undefined && sel !== null) {
+          const exists = (snap.creatures || []).some((c) => String(c.id) === String(sel));
+          if (!exists) {
+            selectionByWorld.delete(worldId);
+            if (String(followByWorld.get(worldId) || '') === String(sel)) {
+              followByWorld.delete(worldId);
+            }
+          }
+        }
+
         drawSnapshot(snap);
       }
     } catch {
@@ -420,8 +580,46 @@ function connectStream({ worldId, mode = 'renderFull', hz = 10 } = {}) {
   return ws;
 }
 
+function cycleCreature(delta) {
+  if (!currentWorldId) return;
+  const snap = lastSnapshotByWorld.get(currentWorldId);
+  if (!snap) return;
+
+  const list = sortedCreatures(snap);
+  if (!list.length) return;
+
+  const cur = selectionByWorld.get(currentWorldId);
+  const ids = list.map((c) => c.id);
+  let idx = ids.findIndex((id) => String(id) === String(cur));
+  if (idx < 0) idx = 0;
+  else idx = (idx + delta + ids.length) % ids.length;
+
+  const nextId = ids[idx];
+  selectionByWorld.set(currentWorldId, nextId);
+
+  if (followByWorld.has(currentWorldId)) {
+    followByWorld.set(currentWorldId, nextId);
+  }
+
+  renderPanels(currentWorldId);
+}
+
+function toggleFollowSelected() {
+  if (!currentWorldId) return;
+  const sel = selectionByWorld.get(currentWorldId);
+  if (sel === undefined || sel === null) return;
+
+  const cur = followByWorld.get(currentWorldId);
+  const on = String(cur || '') === String(sel);
+  if (on) followByWorld.delete(currentWorldId);
+  else followByWorld.set(currentWorldId, sel);
+
+  updateFollowButton();
+}
+
 worldSelect.addEventListener('change', async () => {
   currentWorldId = worldSelect.value;
+  await refreshConfig(currentWorldId);
   connectStream({ worldId: currentWorldId, mode: 'renderFull', hz: 10 });
 });
 
@@ -431,6 +629,7 @@ newWorldBtn.addEventListener('click', async () => {
   const out = await apiPost('/api/worlds', { scenario, seed });
   currentWorldId = out.id;
   await refreshWorlds();
+  await refreshConfig(currentWorldId);
   connectStream({ worldId: currentWorldId, mode: 'renderFull', hz: 10 });
 });
 
@@ -439,6 +638,9 @@ setScenarioBtn.addEventListener('click', async () => {
   const seed = Number(seedInput.value || 0) >>> 0;
   if (!currentWorldId) return;
   await apiPost(`/api/worlds/${encodeURIComponent(currentWorldId)}/control/setScenario`, { name, seed });
+  selectionByWorld.delete(currentWorldId);
+  followByWorld.delete(currentWorldId);
+  await refreshConfig(currentWorldId);
 });
 
 pauseBtn.addEventListener('click', async () => {
@@ -453,34 +655,50 @@ resumeBtn.addEventListener('click', async () => {
   await refreshWorlds();
 });
 
-fitBtn.addEventListener('click', async () => {
+fitBtn.addEventListener('click', () => {
   if (!currentWorldId) return;
   const cam = getCamera(currentWorldId);
   fitCameraToWorld(currentWorldId, cam.worldW || 1, cam.worldH || 1);
 });
 
-// Follow selected creature
+prevCreatureBtn.addEventListener('click', () => cycleCreature(-1));
+nextCreatureBtn.addEventListener('click', () => cycleCreature(1));
+toggleFollowBtn.addEventListener('click', () => toggleFollowSelected());
+
+refreshConfigBtn.addEventListener('click', async () => {
+  if (!currentWorldId) return;
+  await refreshConfig(currentWorldId);
+});
+
+applyConfigBtn.addEventListener('click', async () => {
+  if (!currentWorldId) return;
+  await applyConfig(currentWorldId);
+});
+
 window.addEventListener('keydown', (ev) => {
   if (!currentWorldId) return;
   if (ev.key.toLowerCase() === 'f') {
-    const sel = selectionByWorld.get(currentWorldId);
-    if (sel !== undefined && sel !== null) {
-      const isFollowing = String(followByWorld.get(currentWorldId) || '') === String(sel);
-      if (isFollowing) followByWorld.delete(currentWorldId);
-      else followByWorld.set(currentWorldId, sel);
-    }
+    toggleFollowSelected();
+    ev.preventDefault();
+  }
+  if (ev.key === 'ArrowLeft') {
+    cycleCreature(-1);
+    ev.preventDefault();
+  }
+  if (ev.key === 'ArrowRight') {
+    cycleCreature(1);
+    ev.preventDefault();
   }
   if (ev.key === 'Escape') {
     selectionByWorld.delete(currentWorldId);
     followByWorld.delete(currentWorldId);
+    renderPanels(currentWorldId);
   }
 });
 
-// Pan + zoom controls
 let isDragging = false;
 let lastDragX = 0;
 let lastDragY = 0;
-
 let dragMovedPx = 0;
 
 canvas.addEventListener('pointerdown', (ev) => {
@@ -512,17 +730,13 @@ canvas.addEventListener('pointermove', (ev) => {
   lastDragY = p.y;
 });
 
-async function maybeSelectCreatureAt(ev) {
+function selectCreatureAtCanvasPoint(canvasPoint) {
   if (!currentWorldId) return;
-  if (dragMovedPx > 4) return; // treat as pan, not click
+  const snap = lastSnapshotByWorld.get(currentWorldId);
+  if (!snap) return;
 
-  // Query a lite snapshot for selection without stopping the stream.
-  // (Could also cache the last render snapshot; keep it simple for now.)
-  const snap = await apiGet(`/api/worlds/${encodeURIComponent(currentWorldId)}/snapshot?mode=render`);
   const cam = getCamera(currentWorldId);
-
-  const p = eventToCanvasXY(ev);
-  const w = screenToWorld(cam, p.x, p.y);
+  const w = screenToWorld(cam, canvasPoint.x, canvasPoint.y);
 
   let best = null;
   let bestD2 = Infinity;
@@ -538,31 +752,29 @@ async function maybeSelectCreatureAt(ev) {
     }
   }
 
-  // 120 world units default pick radius (scaled a bit by zoom)
-  const pickRadius = 120;
-  if (best && bestD2 <= pickRadius * pickRadius) {
+  const pickRadiusWorld = Math.max(25, 14 / Math.max(0.0005, cam.zoom));
+  if (best && bestD2 <= pickRadiusWorld * pickRadiusWorld) {
     selectionByWorld.set(currentWorldId, best.id);
   } else {
     selectionByWorld.delete(currentWorldId);
     followByWorld.delete(currentWorldId);
   }
+
+  renderPanels(currentWorldId);
 }
 
-async function endDrag(ev) {
+function endDrag(ev) {
   if (!isDragging) return;
   isDragging = false;
-
   try { canvas.releasePointerCapture(ev.pointerId); } catch {}
 
-  // click selects
-  try {
-    await maybeSelectCreatureAt(ev);
-  } catch {
-    // ignore
+  if (dragMovedPx <= 4) {
+    selectCreatureAtCanvasPoint(eventToCanvasXY(ev));
   }
 }
-canvas.addEventListener('pointerup', (ev) => { endDrag(ev); });
-canvas.addEventListener('pointercancel', (ev) => { endDrag(ev); });
+
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
 
 canvas.addEventListener('dblclick', () => {
   if (!currentWorldId) return;
@@ -577,16 +789,17 @@ canvas.addEventListener('wheel', (ev) => {
   const cam = getCamera(currentWorldId);
   const p = eventToCanvasXY(ev);
 
-  // wheel delta is in screen pixels; use exponential scaling for smoothness.
   const zoomFactor = Math.exp(-ev.deltaY * 0.0015);
   zoomAround(cam, p.x, p.y, zoomFactor);
 }, { passive: false });
 
 await refreshScenarios();
 await refreshWorlds();
-if (currentWorldId) connectStream({ worldId: currentWorldId, mode: 'renderFull', hz: 10 });
+if (currentWorldId) {
+  await refreshConfig(currentWorldId);
+  connectStream({ worldId: currentWorldId, mode: 'renderFull', hz: 10 });
+}
 
 setInterval(() => {
-  // keep world labels fresh (paused/crashed)
   refreshWorlds().catch(() => {});
-}, 2000);
+}, 4000);

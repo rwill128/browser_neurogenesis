@@ -179,6 +179,8 @@ function computeSnapshot(mode = 'render') {
       seed: snap.seed,
       world: worldDims,
       populations: snap.populations,
+      instabilityTelemetry: snap.instabilityTelemetry,
+      mutationStats: snap.mutationStats,
       fluid: snap.fluid,
       creatures: snap.creatures
     };
@@ -193,6 +195,8 @@ function computeSnapshot(mode = 'render') {
       seed: snap.seed,
       world: worldDims,
       populations: snap.populations,
+      instabilityTelemetry: snap.instabilityTelemetry,
+      mutationStats: snap.mutationStats,
       fluid: snap.fluid,
       fluidDense: collectFluidDenseRGBA(),
       particles: collectAllParticles(),
@@ -334,6 +338,51 @@ parentPort.on('message', (msg) => {
         }
         const loadInfo = world.loadStateSnapshot(snapshot);
         return reply(requestId, { ok: true, result: { loaded: true, loadInfo } });
+      }
+
+      if (method === 'getConfig') {
+        const keys = Array.isArray(args?.keys) ? args.keys : null;
+        const allow = new Set(keys || [
+          'PHOTOSYNTHESIS_EFFICIENCY',
+          'globalNutrientMultiplier',
+          'globalLightMultiplier',
+          'ENERGY_PER_PARTICLE',
+          'BASE_NODE_EXISTENCE_COST',
+          'EMITTER_NODE_ENERGY_COST',
+          'EATER_NODE_ENERGY_COST',
+          'PREDATOR_NODE_ENERGY_COST',
+          'NEURON_NODE_ENERGY_COST',
+          'SWIMMER_NODE_ENERGY_COST',
+          'PHOTOSYNTHETIC_NODE_ENERGY_COST',
+          'GRABBING_NODE_ENERGY_COST',
+          'EYE_NODE_ENERGY_COST',
+          'JET_NODE_ENERGY_COST',
+          'ATTRACTOR_NODE_ENERGY_COST',
+          'REPULSOR_NODE_ENERGY_COST',
+          'FLUID_CURRENT_STRENGTH_ON_BODY',
+          'SOFT_BODY_PUSH_STRENGTH',
+          'BODY_REPULSION_STRENGTH',
+          'BODY_REPULSION_RADIUS_FACTOR',
+          'MAX_FLUID_VELOCITY_COMPONENT',
+          'REPRO_RESOURCE_MIN_NUTRIENT',
+          'REPRO_RESOURCE_MIN_LIGHT',
+          'REPRO_FERTILITY_GLOBAL_MIN_SCALE',
+          'REPRO_FERTILITY_LOCAL_MIN_SCALE',
+          'REPRO_MIN_FERTILITY_SCALE',
+          'FAILED_REPRODUCTION_COOLDOWN_TICKS'
+        ]);
+
+        const out = {};
+        for (const key of allow) {
+          if (Object.prototype.hasOwnProperty.call(config, key)) {
+            const v = config[key];
+            if (v === null || v === undefined) out[key] = v;
+            else if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') out[key] = v;
+            else out[key] = v; // best-effort; UI will ignore non-primitives
+          }
+        }
+
+        return reply(requestId, { ok: true, result: { id, scenario: scenarioName, seed, values: out } });
       }
 
       return reply(requestId, { ok: false, error: `Unknown method: ${method}` });

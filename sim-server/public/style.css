@@ -75,3 +75,89 @@ html, body {
   font-size: 12px;
   line-height: 1.35;
 }
+
+.panelSection {
+  padding: 10px 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  background: rgba(0,0,0,0.15);
+  margin-bottom: 10px;
+}
+
+.sectionTitle {
+  font-weight: 700;
+  font-size: 12px;
+  margin-bottom: 8px;
+  opacity: 0.9;
+  letter-spacing: 0.2px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.row button {
+  background: #131629;
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #e8e8e8;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.row button:hover {
+  border-color: rgba(255,255,255,0.25);
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+}
+
+.kv .k {
+  opacity: 0.7;
+}
+
+.kv .v {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.configEditor {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.configField {
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  gap: 8px;
+  align-items: center;
+}
+
+.configField label {
+  opacity: 0.85;
+}
+
+.configField input {
+  background: #131629;
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #e8e8e8;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.hint .small {
+  opacity: 0.75;
+  line-height: 1.4;
+}

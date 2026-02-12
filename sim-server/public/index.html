@@ -26,7 +26,39 @@
 
   <div class="main">
     <canvas id="canvas"></canvas>
-    <pre id="telemetry" class="telemetry"></pre>
+    <div class="telemetry">
+      <div class="panelSection">
+        <div class="sectionTitle">World</div>
+        <div id="worldStats" class="kv"></div>
+      </div>
+
+      <div class="panelSection">
+        <div class="sectionTitle">Creature</div>
+        <div class="row">
+          <button id="prevCreatureBtn">Prev</button>
+          <button id="nextCreatureBtn">Next</button>
+          <button id="toggleFollowBtn">Follow (F)</button>
+        </div>
+        <div id="creatureStats" class="kv"></div>
+      </div>
+
+      <div class="panelSection">
+        <div class="sectionTitle">Config</div>
+        <div class="row">
+          <button id="refreshConfigBtn">Refresh</button>
+          <button id="applyConfigBtn">Apply</button>
+        </div>
+        <div id="configEditor" class="configEditor"></div>
+      </div>
+
+      <div class="panelSection hint">
+        <div class="sectionTitle">Shortcuts</div>
+        <div class="small">
+          Drag: pan · Wheel: zoom · Double click / Fit: fit world<br />
+          Click: select creature · F: follow · ←/→: prev/next creature · Esc: clear
+        </div>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="/client.js"></script>

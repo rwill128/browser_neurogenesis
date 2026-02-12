@@ -18,7 +18,6 @@ import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { mkdirSync } from 'node:fs';
 import { gzipSync, gunzipSync } from 'node:zlib';
-import Database from 'better-sqlite3';
 
 import { scenarioDefs } from '../js/engine/scenarioDefs.mjs';
 
@@ -48,7 +47,37 @@ const workerUrl = new URL('./worldWorker.mjs', import.meta.url);
 
 mkdirSync(dataDir, { recursive: true });
 
-const db = new Database(dbPath);
+let db = null;
+let dbDriver = null;
+let dbInitError = null;
+
+try {
+  const mod = await import('node:sqlite');
+  const DatabaseSync = mod?.DatabaseSync;
+  if (typeof DatabaseSync === 'function') {
+    db = new DatabaseSync(dbPath);
+    dbDriver = 'node:sqlite';
+  }
+} catch (err) {
+  dbInitError = err;
+}
+
+if (!db) {
+  try {
+    const mod = await import('better-sqlite3');
+    const BetterSqlite = mod?.default || mod;
+    db = new BetterSqlite(dbPath);
+    dbDriver = 'better-sqlite3';
+    dbInitError = null;
+  } catch (err) {
+    dbInitError = err;
+  }
+}
+
+if (!db) {
+  throw new Error(`Unable to initialize SQLite backend. Last error: ${String(dbInitError?.message || dbInitError)}`);
+}
+
 db.exec(`
   PRAGMA journal_mode = WAL;
   CREATE TABLE IF NOT EXISTS checkpoints (
@@ -447,6 +476,18 @@ app.post('/api/worlds/:id/restore', async (req, reply) => {
   }
 });
 
+app.get('/api/worlds/:id/config', async (req, reply) => {
+  try {
+    const keys = Array.isArray(req.query?.keys)
+      ? req.query.keys
+      : null;
+    return await getWorldOrThrow(req.params.id).rpc('getConfig', { keys });
+  } catch (err) {
+    reply.code(400);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 // Legacy aliases (operate on default world w0)
 app.get('/api/status', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('getStatus'));
 app.get('/api/snapshot', async (req) => {
@@ -527,7 +568,7 @@ await app.listen({ port, host: '0.0.0.0' });
 console.log(`[sim-server] listening on http://localhost:${port}`);
 // eslint-disable-next-line no-console
 console.log(`[sim-server] defaultWorld=${DEFAULT_WORLD_ID} scenario=${initialScenarioName} seed=${initialSeed} maxWorlds=${maxWorlds}`);
-console.log(`[sim-server] db=${dbPath} checkpointEverySec=${checkpointEverySec} checkpointKeep=${checkpointKeep}`);
+console.log(`[sim-server] db=${dbPath} driver=${dbDriver} checkpointEverySec=${checkpointEverySec} checkpointKeep=${checkpointKeep}`);
 
 // Auto-checkpoint loop
 if (checkpointEverySec > 0) {

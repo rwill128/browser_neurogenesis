@@ -124,6 +124,10 @@ test('predator nodes sap nearby foreign body energy and gain predation energy', 
     predatorPoint.radius = 10;
     predatorPoint.isGrabbing = false;
     predatorPoint.movementType = MovementType.NEUTRAL;
+    predatorPoint.pos.x = 60;
+    predatorPoint.pos.y = 60;
+    predatorPoint.prevPos.x = 60;
+    predatorPoint.prevPos.y = 60;
 
     predatorBody.massPoints = [predatorPoint];
     predatorBody.springs = [];
@@ -137,6 +141,10 @@ test('predator nodes sap nearby foreign body energy and gain predation energy', 
     preyPoint.radius = 8;
     preyPoint.isGrabbing = false;
     preyPoint.movementType = MovementType.NEUTRAL;
+    preyPoint.pos.x = 63;
+    preyPoint.pos.y = 60;
+    preyPoint.prevPos.x = 63;
+    preyPoint.prevPos.y = 60;
     preyBody.massPoints = [preyPoint];
     preyBody.springs = [];
     preyBody.currentMaxEnergy = 500;
@@ -224,10 +232,14 @@ test('predator does not double-sap the same prey body in a single tick', () => {
     pB.isGrabbing = false;
     pA.radius = 10;
     pB.radius = 10;
-    pB.pos.x = pA.pos.x + 1;
-    pB.pos.y = pA.pos.y;
-    pB.prevPos.x = pB.pos.x;
-    pB.prevPos.y = pB.pos.y;
+    pA.pos.x = 60;
+    pA.pos.y = 60;
+    pA.prevPos.x = 60;
+    pA.prevPos.y = 60;
+    pB.pos.x = 61;
+    pB.pos.y = 60;
+    pB.prevPos.x = 61;
+    pB.prevPos.y = 60;
 
     predator.massPoints = [pA, pB];
     predator.springs = [];
@@ -240,6 +252,10 @@ test('predator does not double-sap the same prey body in a single tick', () => {
     preyPoint.radius = 8;
     preyPoint.movementType = MovementType.NEUTRAL;
     preyPoint.isGrabbing = false;
+    preyPoint.pos.x = 63;
+    preyPoint.pos.y = 60;
+    preyPoint.prevPos.x = 63;
+    preyPoint.prevPos.y = 60;
     prey.massPoints = [preyPoint];
     prey.springs = [];
     prey.creatureEnergy = 100;
@@ -386,5 +402,175 @@ test('emitter and jet nodes inject density/velocity into fluid, and swimmer actu
   } finally {
     Object.assign(config, cfgBackup);
     runtimeState.fluidField = runtimeBackup.fluidField;
+  }
+});
+
+test('eater does not consume particles outside eating radius', () => {
+  const cfgBackup = {
+    GRID_CELL_SIZE: config.GRID_CELL_SIZE,
+    GRID_COLS: config.GRID_COLS,
+    GRID_ROWS: config.GRID_ROWS,
+    ENERGY_PER_PARTICLE: config.ENERGY_PER_PARTICLE,
+    EATING_RADIUS_MULTIPLIER_BASE: config.EATING_RADIUS_MULTIPLIER_BASE,
+    EATING_RADIUS_MULTIPLIER_MAX_BONUS: config.EATING_RADIUS_MULTIPLIER_MAX_BONUS,
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED
+  };
+
+  try {
+    config.GRID_CELL_SIZE = 20;
+    config.GRID_COLS = 8;
+    config.GRID_ROWS = 8;
+    config.ENERGY_PER_PARTICLE = 25;
+    config.EATING_RADIUS_MULTIPLIER_BASE = 1.0;
+    config.EATING_RADIUS_MULTIPLIER_MAX_BONUS = 0;
+    config.DYE_ECOLOGY_ENABLED = false;
+
+    const body = new SoftBody(601, 50, 50, null, false);
+    const eater = body.massPoints[0];
+    eater.nodeType = NodeType.EATER;
+    eater.currentExertionLevel = 1;
+    eater.radius = 6;
+    eater.movementType = MovementType.NEUTRAL;
+    eater.isGrabbing = false;
+
+    body.massPoints = [eater];
+    body.springs = [];
+    body.creatureEnergy = 100;
+    body.energyGainedFromEating = 0;
+
+    const farParticle = { pos: { x: eater.pos.x + 80, y: eater.pos.y + 80 }, life: 1, isEaten: false };
+    const grid = makeGrid(config.GRID_COLS, config.GRID_ROWS);
+    const idx = gridIndex(farParticle.pos.x, farParticle.pos.y, config.GRID_CELL_SIZE, config.GRID_COLS, config.GRID_ROWS);
+    grid[idx].push({ type: 'particle', particleRef: farParticle });
+    body.setSpatialGrid(grid);
+
+    body._finalizeUpdateAndCheckStability(1 / 60);
+
+    assert.equal(farParticle.isEaten, false);
+    assert.equal(farParticle.life, 1);
+    assert.equal(body.energyGainedFromEating, 0);
+    assert.equal(body.creatureEnergy, 100);
+  } finally {
+    Object.assign(config, cfgBackup);
+  }
+});
+
+test('predator does not sap prey outside predation radius', () => {
+  const cfgBackup = {
+    GRID_CELL_SIZE: config.GRID_CELL_SIZE,
+    GRID_COLS: config.GRID_COLS,
+    GRID_ROWS: config.GRID_ROWS,
+    PREDATION_RADIUS_MULTIPLIER_BASE: config.PREDATION_RADIUS_MULTIPLIER_BASE,
+    PREDATION_RADIUS_MULTIPLIER_MAX_BONUS: config.PREDATION_RADIUS_MULTIPLIER_MAX_BONUS,
+    ENERGY_SAPPED_PER_PREDATION_BASE: config.ENERGY_SAPPED_PER_PREDATION_BASE,
+    ENERGY_SAPPED_PER_PREDATION_MAX_BONUS: config.ENERGY_SAPPED_PER_PREDATION_MAX_BONUS,
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED
+  };
+
+  try {
+    config.GRID_CELL_SIZE = 20;
+    config.GRID_COLS = 8;
+    config.GRID_ROWS = 8;
+    config.PREDATION_RADIUS_MULTIPLIER_BASE = 1.0;
+    config.PREDATION_RADIUS_MULTIPLIER_MAX_BONUS = 0;
+    config.ENERGY_SAPPED_PER_PREDATION_BASE = 10;
+    config.ENERGY_SAPPED_PER_PREDATION_MAX_BONUS = 0;
+    config.DYE_ECOLOGY_ENABLED = false;
+
+    const predator = new SoftBody(701, 40, 40, null, false);
+    const predPoint = predator.massPoints[0];
+    predPoint.nodeType = NodeType.PREDATOR;
+    predPoint.currentExertionLevel = 1;
+    predPoint.radius = 6;
+    predPoint.movementType = MovementType.NEUTRAL;
+    predPoint.isGrabbing = false;
+
+    predator.massPoints = [predPoint];
+    predator.springs = [];
+    predator.creatureEnergy = 100;
+    predator.energyGainedFromPredation = 0;
+
+    const prey = new SoftBody(702, 180, 180, null, false);
+    const preyPoint = prey.massPoints[0];
+    preyPoint.nodeType = NodeType.EATER;
+    preyPoint.radius = 6;
+    preyPoint.movementType = MovementType.NEUTRAL;
+    preyPoint.isGrabbing = false;
+
+    prey.massPoints = [preyPoint];
+    prey.springs = [];
+    prey.creatureEnergy = 120;
+
+    const grid = makeGrid(config.GRID_COLS, config.GRID_ROWS);
+    const predIdx = gridIndex(predPoint.pos.x, predPoint.pos.y, config.GRID_CELL_SIZE, config.GRID_COLS, config.GRID_ROWS);
+    const preyIdx = gridIndex(preyPoint.pos.x, preyPoint.pos.y, config.GRID_CELL_SIZE, config.GRID_COLS, config.GRID_ROWS);
+    grid[predIdx].push({ type: 'softbody_point', pointRef: predPoint, bodyRef: predator });
+    grid[preyIdx].push({ type: 'softbody_point', pointRef: preyPoint, bodyRef: prey });
+
+    predator.setSpatialGrid(grid);
+
+    predator._finalizeUpdateAndCheckStability(1 / 60);
+
+    assert.equal(predator.energyGainedFromPredation, 0);
+    assert.equal(predator.creatureEnergy, 100);
+    assert.equal(prey.creatureEnergy, 120);
+  } finally {
+    Object.assign(config, cfgBackup);
+  }
+});
+
+test('same particle is not double-counted by multiple eater nodes in one tick', () => {
+  const cfgBackup = {
+    GRID_CELL_SIZE: config.GRID_CELL_SIZE,
+    GRID_COLS: config.GRID_COLS,
+    GRID_ROWS: config.GRID_ROWS,
+    ENERGY_PER_PARTICLE: config.ENERGY_PER_PARTICLE,
+    EATING_RADIUS_MULTIPLIER_BASE: config.EATING_RADIUS_MULTIPLIER_BASE,
+    EATING_RADIUS_MULTIPLIER_MAX_BONUS: config.EATING_RADIUS_MULTIPLIER_MAX_BONUS,
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED
+  };
+
+  try {
+    config.GRID_CELL_SIZE = 20;
+    config.GRID_COLS = 8;
+    config.GRID_ROWS = 8;
+    config.ENERGY_PER_PARTICLE = 30;
+    config.EATING_RADIUS_MULTIPLIER_BASE = 1.0;
+    config.EATING_RADIUS_MULTIPLIER_MAX_BONUS = 0;
+    config.DYE_ECOLOGY_ENABLED = false;
+
+    const body = new SoftBody(801, 50, 50, null, false);
+    const eaterA = body.massPoints[0];
+    const eaterB = new SoftBody(802, 52, 50, null, false).massPoints[0];
+    eaterA.nodeType = NodeType.EATER;
+    eaterB.nodeType = NodeType.EATER;
+    eaterA.currentExertionLevel = 1;
+    eaterB.currentExertionLevel = 1;
+    eaterA.radius = 8;
+    eaterB.radius = 8;
+    eaterA.movementType = MovementType.NEUTRAL;
+    eaterB.movementType = MovementType.NEUTRAL;
+    eaterA.isGrabbing = false;
+    eaterB.isGrabbing = false;
+
+    body.massPoints = [eaterA, eaterB];
+    body.springs = [];
+    body.currentMaxEnergy = 1000;
+    body.creatureEnergy = 100;
+    body.energyGainedFromEating = 0;
+
+    const particle = { pos: { x: eaterA.pos.x + 2, y: eaterA.pos.y }, life: 1, isEaten: false };
+    const grid = makeGrid(config.GRID_COLS, config.GRID_ROWS);
+    const idx = gridIndex(particle.pos.x, particle.pos.y, config.GRID_CELL_SIZE, config.GRID_COLS, config.GRID_ROWS);
+    grid[idx].push({ type: 'particle', particleRef: particle });
+    body.setSpatialGrid(grid);
+
+    body._finalizeUpdateAndCheckStability(1 / 60);
+
+    assert.equal(particle.isEaten, true);
+    assert.equal(body.energyGainedFromEating, config.ENERGY_PER_PARTICLE);
+    assert.equal(body.creatureEnergy, 100 + config.ENERGY_PER_PARTICLE);
+  } finally {
+    Object.assign(config, cfgBackup);
   }
 });

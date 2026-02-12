@@ -27,6 +27,7 @@ import { createWorldState } from './engine/worldState.mjs';
 import { runBrowserStepAdapter } from './engine/browserStepAdapter.mjs';
 import { createConfigViews } from './engine/configViews.mjs';
 import { saveWorldStateSnapshot, loadWorldStateSnapshot } from './engine/worldPersistence.mjs';
+import { resolveCanvasRenderMetrics } from './engine/cameraMath.mjs';
 
 let offscreenFluidCanvas, offscreenFluidCtx;
 let spatialGrid;
@@ -292,39 +293,49 @@ function updatePhysics(dt) {
 
 // --- Drawing --- (draw() function is now standalone)
 export function draw() {
+    // Keep camera math in CSS-pixel space while drawing into device-pixel backing buffers.
+    const fallbackDpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+    const { cssWidth, cssHeight, dprX, dprY } = resolveCanvasRenderMetrics({
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+        clientWidth: canvas.clientWidth,
+        clientHeight: canvas.clientHeight,
+        fallbackDpr
+    });
+
+    // Clear in backing-store pixels, then switch to CSS-pixel camera units.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.save();
-
+    ctx.scale(dprX, dprY);
     ctx.scale(viewport.zoom, viewport.zoom);
     ctx.translate(-viewport.offsetX, -viewport.offsetY);
 
     if (fluidField) {
-        // Reverted: Direct blocky drawing
-        const viewportWorldWidth = canvas.width / viewport.zoom;
-        const viewportWorldHeight = canvas.height / viewport.zoom;
-        fluidField.draw(ctx, canvas.width, canvas.height, viewport.offsetX, viewport.offsetY, viewport.zoom);
+        // Draw in CSS-space viewport units; renderer transform handles world->screen mapping.
+        fluidField.draw(ctx, cssWidth, cssHeight, viewport.offsetX, viewport.offsetY, viewport.zoom);
     }
     if (config.SHOW_NUTRIENT_MAP && nutrientField && fluidField) {
-        drawNutrientMap(ctx, canvas.width, canvas.height, viewport.offsetX, viewport.offsetY, viewport.zoom);
+        drawNutrientMap(ctx, cssWidth, cssHeight, viewport.offsetX, viewport.offsetY, viewport.zoom);
     }
     if (config.SHOW_LIGHT_MAP && lightField && fluidField) {
-        drawLightMap(ctx, canvas.width, canvas.height, viewport.offsetX, viewport.offsetY, viewport.zoom);
+        drawLightMap(ctx, cssWidth, cssHeight, viewport.offsetX, viewport.offsetY, viewport.zoom);
     }
     if (config.SHOW_VISCOSITY_MAP && viscosityField && fluidField) {
-        drawViscosityMap(ctx, canvas.width, canvas.height, viewport.offsetX, viewport.offsetY, viewport.zoom);
+        drawViscosityMap(ctx, cssWidth, cssHeight, viewport.offsetX, viewport.offsetY, viewport.zoom);
     }
 
     //console.log("[Debug] In draw() function, about to check SHOW_FLUID_VELOCITY. Value:", config.SHOW_FLUID_VELOCITY);
     if (config.SHOW_FLUID_VELOCITY && fluidField) {
-        drawFluidVelocities(ctx, fluidField, canvas.width, canvas.height, viewport.offsetX, viewport.offsetY, viewport.zoom);
+        drawFluidVelocities(ctx, fluidField, cssWidth, cssHeight, viewport.offsetX, viewport.offsetY, viewport.zoom);
     }
 
     for (let particle of particles) {
         // Culling check (particles are small, so checking their center point + radius is good)
-        const viewRightWorld = viewport.offsetX + canvas.width / viewport.zoom;
-        const viewBottomWorld = viewport.offsetY + canvas.height / viewport.zoom;
+        const viewRightWorld = viewport.offsetX + cssWidth / viewport.zoom;
+        const viewBottomWorld = viewport.offsetY + cssHeight / viewport.zoom;
         const particleRadius = particle.size; // Assuming particle.size is its radius
 
         if (particle.pos.x + particleRadius < viewport.offsetX || particle.pos.x - particleRadius > viewRightWorld ||
@@ -336,8 +347,8 @@ export function draw() {
     for (let body of softBodyPopulation) {
         // Culling check for soft bodies
         const bbox = body.getBoundingBox(); // { minX, minY, maxX, maxY } in world coords
-        const viewRightWorld = viewport.offsetX + canvas.width / viewport.zoom;
-        const viewBottomWorld = viewport.offsetY + canvas.height / viewport.zoom;
+        const viewRightWorld = viewport.offsetX + cssWidth / viewport.zoom;
+        const viewBottomWorld = viewport.offsetY + cssHeight / viewport.zoom;
 
         if (bbox.maxX < viewport.offsetX || bbox.minX > viewRightWorld ||
             bbox.maxY < viewport.offsetY || bbox.minY > viewBottomWorld) {

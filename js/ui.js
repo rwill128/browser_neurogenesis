@@ -18,6 +18,7 @@ import {
 import { perlin, getNodeTypeString, getRewardStrategyString, getEyeTargetTypeString, getMovementTypeString, sigmoid } from './utils.js';
 import {NodeType} from "./classes/constants.js";
 import viewport from './viewport.js';
+import { displayToWorld, solveViewOffsetForAnchor } from './engine/cameraMath.mjs';
 
 // --- DOM Element Selections ---
 const canvas = document.getElementById('simulationCanvas');
@@ -689,18 +690,15 @@ function updateMouse(e) {
 }
 
 function getMouseWorldCoordinates(displayMouseX, displayMouseY) {
-    // Size that the world currently covers on-screen (may leave black bars on one axis)
-    const worldDisplayWidth  = config.WORLD_WIDTH  * config.viewZoom;
-    const worldDisplayHeight = config.WORLD_HEIGHT * config.viewZoom;
-
-    // Black-bar margins (letterboxing) in CSS pixels
-    const marginX = (canvas.clientWidth  - worldDisplayWidth)  * 0.5;
-    const marginY = (canvas.clientHeight - worldDisplayHeight) * 0.5;
-
-    // Convert display pixel to world coordinate, accounting for margins and zoom
-    const worldX = ((displayMouseX - marginX) / config.viewZoom) + config.viewOffsetX;
-    const worldY = ((displayMouseY - marginY) / config.viewZoom) + config.viewOffsetY;
-    return { x: worldX, y: worldY };
+    // Camera mapping is always screen=(world-offset)*zoom, even when offsets are negative
+    // to center a small world in a large viewport. Keep input math aligned with renderer math.
+    return displayToWorld({
+        displayX: displayMouseX,
+        displayY: displayMouseY,
+        viewZoom: config.viewZoom,
+        viewOffsetX: config.viewOffsetX,
+        viewOffsetY: config.viewOffsetY
+    });
 }
 
 // --- Event Listeners ---
@@ -728,7 +726,7 @@ function disableAutoFollowForManualControl() {
 }
 
 function applyManualZoom(displayX, displayY, direction) {
-    // Use the same world-coordinate mapping used by input handling (accounts for letterboxing).
+    // Use the same world-coordinate mapping used by input handling.
     const worldBefore = getMouseWorldCoordinates(displayX, displayY);
     const worldXBefore = worldBefore.x;
     const worldYBefore = worldBefore.y;
@@ -741,14 +739,16 @@ function applyManualZoom(displayX, displayY, direction) {
 
     viewZoom = newZoom;
 
-    // Inverse of getMouseWorldCoordinates at the new zoom (preserve world point under cursor).
-    const worldDisplayWidth = config.WORLD_WIDTH * viewZoom;
-    const worldDisplayHeight = config.WORLD_HEIGHT * viewZoom;
-    const marginX = (canvas.clientWidth - worldDisplayWidth) * 0.5;
-    const marginY = (canvas.clientHeight - worldDisplayHeight) * 0.5;
-
-    viewOffsetX = worldXBefore - ((displayX - marginX) / viewZoom);
-    viewOffsetY = worldYBefore - ((displayY - marginY) / viewZoom);
+    // Preserve the same world anchor under the pointer after zoom changes.
+    const anchoredOffset = solveViewOffsetForAnchor({
+        displayX,
+        displayY,
+        worldX: worldXBefore,
+        worldY: worldYBefore,
+        viewZoom
+    });
+    viewOffsetX = anchoredOffset.offsetX;
+    viewOffsetY = anchoredOffset.offsetY;
 
     clampViewOffsets();
 

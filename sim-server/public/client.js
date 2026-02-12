@@ -20,6 +20,8 @@ const applyConfigBtn = document.getElementById('applyConfigBtn');
 
 const worldStatsEl = document.getElementById('worldStats');
 const creatureStatsEl = document.getElementById('creatureStats');
+const creaturePointDetailsEl = document.getElementById('creaturePointDetails');
+const creatureSpringDetailsEl = document.getElementById('creatureSpringDetails');
 const configEditorEl = document.getElementById('configEditor');
 
 const ctx = canvas.getContext('2d');
@@ -103,6 +105,67 @@ function setKV(el, entries) {
     el.appendChild(dk);
     el.appendChild(dv);
   }
+}
+
+function setDetailText(el, text) {
+  if (!el) return;
+  el.textContent = text;
+}
+
+function buildPointDetailsText(selected) {
+  const verts = Array.isArray(selected?.vertices) ? selected.vertices : [];
+  if (verts.length === 0) return 'no points';
+
+  const header = '# idx type move x y r m eye target grabber grabbing exert sees tMag tDir';
+  const lines = [header];
+
+  for (const v of verts) {
+    lines.push([
+      'P',
+      asDisplayValue(v.index),
+      v.nodeTypeName || v.nodeType || '—',
+      v.movementTypeName || v.movementType || '—',
+      asDisplayValue(v.x),
+      asDisplayValue(v.y),
+      asDisplayValue(v.radius),
+      asDisplayValue(v.mass),
+      v.isDesignatedEye ? '1' : '0',
+      v.eyeTargetTypeName || v.eyeTargetType || '—',
+      v.canBeGrabber ? '1' : '0',
+      v.isGrabbing ? '1' : '0',
+      asDisplayValue(v.currentExertionLevel),
+      v.seesTarget ? '1' : '0',
+      asDisplayValue(v.nearestTargetMagnitude),
+      asDisplayValue(v.nearestTargetDirection)
+    ].join(' '));
+  }
+
+  return lines.join('\n');
+}
+
+function buildSpringDetailsText(selected) {
+  const springs = Array.isArray(selected?.springs) ? selected.springs : [];
+  if (springs.length === 0) return 'no springs';
+
+  const header = '# idx a b rigid rest curr strain stiff damp';
+  const lines = [header];
+
+  springs.forEach((s, idx) => {
+    lines.push([
+      'S',
+      idx,
+      asDisplayValue(s.a),
+      asDisplayValue(s.b),
+      s.isRigid ? '1' : '0',
+      asDisplayValue(s.restLength),
+      asDisplayValue(s.currentLength),
+      asDisplayValue(s.strain),
+      asDisplayValue(s.stiffness),
+      asDisplayValue(s.dampingFactor)
+    ].join(' '));
+  });
+
+  return lines.join('\n');
 }
 
 function getCamera(worldId) {
@@ -271,6 +334,8 @@ function renderPanels(worldId) {
   if (!snap) {
     setKV(worldStatsEl, [['world', worldId], ['snapshot', 'waiting…']]);
     setKV(creatureStatsEl, [['selected', 'none']]);
+    setDetailText(creaturePointDetailsEl, 'waiting for snapshot…');
+    setDetailText(creatureSpringDetailsEl, 'waiting for snapshot…');
     updateFollowButton();
     return;
   }
@@ -316,6 +381,8 @@ function renderPanels(worldId) {
       ['selected', 'none'],
       ['hint', 'click creature or use prev/next']
     ]);
+    setDetailText(creaturePointDetailsEl, 'select a creature to inspect per-point details');
+    setDetailText(creatureSpringDetailsEl, 'select a creature to inspect per-spring details');
   } else {
     const fs = selected.fullStats || {};
     const growth = fs.growth || {};
@@ -386,6 +453,9 @@ function renderPanels(worldId) {
       ['cost.attractor', costs.attractor],
       ['cost.repulsor', costs.repulsor]
     ]);
+
+    setDetailText(creaturePointDetailsEl, buildPointDetailsText(selected));
+    setDetailText(creatureSpringDetailsEl, buildSpringDetailsText(selected));
   }
 
   updateFollowButton();

@@ -422,14 +422,33 @@ export class RealWorld {
           eyeTargetType: p.eyeTargetType,
           eyeTargetTypeName: eyeTargetTypeNameById[p.eyeTargetType] || null,
           canBeGrabber: Boolean(p.canBeGrabber),
-          isDesignatedEye: Boolean(p.isDesignatedEye)
+          isDesignatedEye: Boolean(p.isDesignatedEye),
+          isGrabbing: Boolean(p.isGrabbing),
+          currentExertionLevel: round(p.currentExertionLevel, 4),
+          seesTarget: Boolean(p.seesTarget),
+          nearestTargetMagnitude: round(p.nearestTargetMagnitude, 4),
+          nearestTargetDirection: round(p.nearestTargetDirection, 4)
         })),
         springs: b.springs
-          .map((s) => ({
-            a: pointIndex.get(s.p1),
-            b: pointIndex.get(s.p2),
-            isRigid: Boolean(s.isRigid)
-          }))
+          .map((s) => {
+            const a = pointIndex.get(s.p1);
+            const bIndex = pointIndex.get(s.p2);
+            const dx = (s.p1?.pos?.x || 0) - (s.p2?.pos?.x || 0);
+            const dy = (s.p1?.pos?.y || 0) - (s.p2?.pos?.y || 0);
+            const currentLength = Math.hypot(dx, dy);
+            const restLength = Number(s.restLength) || 0;
+            const strain = restLength > 1e-8 ? ((currentLength - restLength) / restLength) : 0;
+            return {
+              a,
+              b: bIndex,
+              isRigid: Boolean(s.isRigid),
+              restLength: round(restLength, 4),
+              currentLength: round(currentLength, 4),
+              strain: round(strain, 5),
+              stiffness: round(s.stiffness, 4),
+              dampingFactor: round(s.dampingFactor, 4)
+            };
+          })
           .filter((s) => Number.isInteger(s.a) && Number.isInteger(s.b) && s.a !== s.b)
       };
     });

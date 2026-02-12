@@ -157,6 +157,29 @@ html, body {
   font-size: 12px;
 }
 
+.subsectionTitle {
+  margin-top: 10px;
+  margin-bottom: 6px;
+  font-weight: 600;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.detailBlock {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  background: rgba(0,0,0,0.18);
+  color: #cfd4ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre;
+  overflow: auto;
+  max-height: 170px;
+}
+
 .hint .small {
   opacity: 0.75;
   line-height: 1.4;

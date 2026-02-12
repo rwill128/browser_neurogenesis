@@ -276,6 +276,153 @@ test('predator self-damages when its own nodes are inside active predation radiu
   }
 });
 
+test('eater nodes incur predator-like contact penalty when activated and touching own body', () => {
+  const cfgBackup = {
+    GRID_CELL_SIZE: config.GRID_CELL_SIZE,
+    GRID_COLS: config.GRID_COLS,
+    GRID_ROWS: config.GRID_ROWS,
+    BODY_REPULSION_RADIUS_FACTOR: config.BODY_REPULSION_RADIUS_FACTOR,
+    PREDATOR_SELF_DAMAGE_BASE: config.PREDATOR_SELF_DAMAGE_BASE,
+    PREDATOR_SELF_DAMAGE_MAX_BONUS: config.PREDATOR_SELF_DAMAGE_MAX_BONUS,
+    PREDATOR_SELF_DAMAGE_MAX_OVERLAPS_PER_TICK: config.PREDATOR_SELF_DAMAGE_MAX_OVERLAPS_PER_TICK,
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED
+  };
+  const runtimeBackup = {
+    softBodyPopulation: runtimeState.softBodyPopulation
+  };
+
+  try {
+    config.GRID_CELL_SIZE = 20;
+    config.GRID_COLS = 8;
+    config.GRID_ROWS = 8;
+    config.BODY_REPULSION_RADIUS_FACTOR = 1.0;
+    config.PREDATOR_SELF_DAMAGE_BASE = 5;
+    config.PREDATOR_SELF_DAMAGE_MAX_BONUS = 0;
+    config.PREDATOR_SELF_DAMAGE_MAX_OVERLAPS_PER_TICK = 4;
+    config.DYE_ECOLOGY_ENABLED = false;
+
+    const body = new SoftBody(271, 60, 60, null, false);
+    const eater = body.massPoints[0];
+    const neighbor = new SoftBody(272, 62, 60, null, false).massPoints[0];
+
+    eater.nodeType = NodeType.EATER;
+    eater.currentExertionLevel = 1;
+    eater.radius = 10;
+    eater.movementType = MovementType.NEUTRAL;
+    eater.isGrabbing = false;
+    eater.pos.x = 60;
+    eater.pos.y = 60;
+    eater.prevPos.x = 60;
+    eater.prevPos.y = 60;
+
+    neighbor.nodeType = NodeType.SWIMMER;
+    neighbor.radius = 8;
+    neighbor.movementType = MovementType.NEUTRAL;
+    neighbor.isGrabbing = false;
+    neighbor.pos.x = 63;
+    neighbor.pos.y = 60;
+    neighbor.prevPos.x = 63;
+    neighbor.prevPos.y = 60;
+
+    body.massPoints = [eater, neighbor];
+    body.springs = [];
+    body.currentMaxEnergy = 500;
+    body.creatureEnergy = 100;
+
+    const grid = makeGrid(config.GRID_COLS, config.GRID_ROWS);
+    const idx = gridIndex(eater.pos.x, eater.pos.y, config.GRID_CELL_SIZE, config.GRID_COLS, config.GRID_ROWS);
+    grid[idx].push({ type: 'softbody_point', pointRef: eater, bodyRef: body });
+    grid[idx].push({ type: 'softbody_point', pointRef: neighbor, bodyRef: body });
+    body.setSpatialGrid(grid);
+
+    runtimeState.softBodyPopulation = [body];
+
+    body._finalizeUpdateAndCheckStability(1 / 60);
+
+    assert.equal(body.creatureEnergy, 95);
+  } finally {
+    Object.assign(config, cfgBackup);
+    runtimeState.softBodyPopulation = runtimeBackup.softBodyPopulation;
+  }
+});
+
+test('eater nodes incur predator-like contact penalty when activated and touching foreign nodes', () => {
+  const cfgBackup = {
+    GRID_CELL_SIZE: config.GRID_CELL_SIZE,
+    GRID_COLS: config.GRID_COLS,
+    GRID_ROWS: config.GRID_ROWS,
+    BODY_REPULSION_RADIUS_FACTOR: config.BODY_REPULSION_RADIUS_FACTOR,
+    PREDATOR_SELF_DAMAGE_BASE: config.PREDATOR_SELF_DAMAGE_BASE,
+    PREDATOR_SELF_DAMAGE_MAX_BONUS: config.PREDATOR_SELF_DAMAGE_MAX_BONUS,
+    PREDATOR_SELF_DAMAGE_MAX_OVERLAPS_PER_TICK: config.PREDATOR_SELF_DAMAGE_MAX_OVERLAPS_PER_TICK,
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED
+  };
+  const runtimeBackup = {
+    softBodyPopulation: runtimeState.softBodyPopulation
+  };
+
+  try {
+    config.GRID_CELL_SIZE = 20;
+    config.GRID_COLS = 8;
+    config.GRID_ROWS = 8;
+    config.BODY_REPULSION_RADIUS_FACTOR = 1.0;
+    config.PREDATOR_SELF_DAMAGE_BASE = 5;
+    config.PREDATOR_SELF_DAMAGE_MAX_BONUS = 0;
+    config.PREDATOR_SELF_DAMAGE_MAX_OVERLAPS_PER_TICK = 4;
+    config.DYE_ECOLOGY_ENABLED = false;
+
+    const eaterBody = new SoftBody(281, 60, 60, null, false);
+    const eater = eaterBody.massPoints[0];
+    eater.nodeType = NodeType.EATER;
+    eater.currentExertionLevel = 1;
+    eater.radius = 10;
+    eater.movementType = MovementType.NEUTRAL;
+    eater.isGrabbing = false;
+    eater.pos.x = 60;
+    eater.pos.y = 60;
+    eater.prevPos.x = 60;
+    eater.prevPos.y = 60;
+    eaterBody.massPoints = [eater];
+    eaterBody.springs = [];
+    eaterBody.currentMaxEnergy = 500;
+    eaterBody.creatureEnergy = 100;
+
+    const foreignBody = new SoftBody(282, 63, 60, null, false);
+    const foreign = foreignBody.massPoints[0];
+    foreign.nodeType = NodeType.PREDATOR;
+    foreign.currentExertionLevel = 0;
+    foreign.radius = 8;
+    foreign.movementType = MovementType.NEUTRAL;
+    foreign.isGrabbing = false;
+    foreign.pos.x = 63;
+    foreign.pos.y = 60;
+    foreign.prevPos.x = 63;
+    foreign.prevPos.y = 60;
+    foreignBody.massPoints = [foreign];
+    foreignBody.springs = [];
+
+    const grid = makeGrid(config.GRID_COLS, config.GRID_ROWS);
+    const idx = gridIndex(eater.pos.x, eater.pos.y, config.GRID_CELL_SIZE, config.GRID_COLS, config.GRID_ROWS);
+    grid[idx].push({ type: 'softbody_point', pointRef: eater, bodyRef: eaterBody });
+    grid[idx].push({ type: 'softbody_point', pointRef: foreign, bodyRef: foreignBody });
+    eaterBody.setSpatialGrid(grid);
+    foreignBody.setSpatialGrid(grid);
+
+    runtimeState.softBodyPopulation = [eaterBody, foreignBody];
+
+    eaterBody._finalizeUpdateAndCheckStability(1 / 60);
+    assert.equal(eaterBody.creatureEnergy, 95);
+
+    eaterBody.creatureEnergy = 100;
+    eater.currentExertionLevel = 0;
+    eaterBody._finalizeUpdateAndCheckStability(1 / 60);
+    assert.equal(eaterBody.creatureEnergy, 100);
+  } finally {
+    Object.assign(config, cfgBackup);
+    runtimeState.softBodyPopulation = runtimeBackup.softBodyPopulation;
+  }
+});
+
 test('different predator nodes can each sap the same prey body once per tick', () => {
   const cfgBackup = {
     GRID_CELL_SIZE: config.GRID_CELL_SIZE,
@@ -628,6 +775,8 @@ test('same particle is not double-counted by multiple eater nodes in one tick', 
     ENERGY_PER_PARTICLE: config.ENERGY_PER_PARTICLE,
     EATING_RADIUS_MULTIPLIER_BASE: config.EATING_RADIUS_MULTIPLIER_BASE,
     EATING_RADIUS_MULTIPLIER_MAX_BONUS: config.EATING_RADIUS_MULTIPLIER_MAX_BONUS,
+    PREDATOR_SELF_DAMAGE_BASE: config.PREDATOR_SELF_DAMAGE_BASE,
+    PREDATOR_SELF_DAMAGE_MAX_BONUS: config.PREDATOR_SELF_DAMAGE_MAX_BONUS,
     DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED
   };
 
@@ -638,6 +787,8 @@ test('same particle is not double-counted by multiple eater nodes in one tick', 
     config.ENERGY_PER_PARTICLE = 30;
     config.EATING_RADIUS_MULTIPLIER_BASE = 1.0;
     config.EATING_RADIUS_MULTIPLIER_MAX_BONUS = 0;
+    config.PREDATOR_SELF_DAMAGE_BASE = 0;
+    config.PREDATOR_SELF_DAMAGE_MAX_BONUS = 0;
     config.DYE_ECOLOGY_ENABLED = false;
 
     const body = new SoftBody(801, 50, 50, null, false);

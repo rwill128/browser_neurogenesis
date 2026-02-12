@@ -3370,6 +3370,10 @@ export class SoftBody {
 
             if (p1.isFixed) continue;
 
+            const p1ExertionClamped = Math.max(0, Math.min(1, Number(p1.currentExertionLevel) || 0));
+            const eaterPenaltyArmed = p1.nodeType === NodeType.EATER && p1ExertionClamped > 0.01;
+            const eaterTouchedForeignPoints = eaterPenaltyArmed ? new Set() : null;
+
             const p1Gx = Math.max(0, Math.min(config.GRID_COLS - 1, Math.floor(p1.pos.x / config.GRID_CELL_SIZE)));
             const p1Gy = Math.max(0, Math.min(config.GRID_ROWS - 1, Math.floor(p1.pos.y / config.GRID_CELL_SIZE)));
 
@@ -3404,6 +3408,10 @@ export class SoftBody {
                                         const repulsionForceMag = config.BODY_REPULSION_STRENGTH * overlap * 0.5;
                                         tempForceVec.mulInPlace(repulsionForceMag);
                                         p1.applyForce(tempForceVec);
+                                    }
+
+                                    if (eaterPenaltyArmed && distSq < interactionRadius * interactionRadius) {
+                                        eaterTouchedForeignPoints.add(p2);
                                     }
 
                                     if (p1.nodeType === NodeType.PREDATOR) {
@@ -3459,6 +3467,35 @@ export class SoftBody {
                         if (totalSelfDamage > 0) {
                             this.creatureEnergy -= totalSelfDamage;
                         }
+                    }
+                }
+            }
+
+            if (eaterPenaltyArmed) {
+                let eaterSelfTouches = 0;
+                for (let selfIdx = 0; selfIdx < this.massPoints.length; selfIdx++) {
+                    if (selfIdx === i_p1) continue;
+                    const selfPoint = this.massPoints[selfIdx];
+                    if (!selfPoint) continue;
+
+                    tempDiffVec.copyFrom(p1.pos).subInPlace(selfPoint.pos);
+                    const selfDistSq = tempDiffVec.magSq();
+                    const selfInteractionRadius = (p1.radius + selfPoint.radius) * config.BODY_REPULSION_RADIUS_FACTOR;
+                    if (selfDistSq < selfInteractionRadius * selfInteractionRadius) {
+                        eaterSelfTouches += 1;
+                    }
+                }
+
+                const foreignTouches = eaterTouchedForeignPoints ? eaterTouchedForeignPoints.size : 0;
+                const totalTouches = eaterSelfTouches + foreignTouches;
+                if (totalTouches > 0) {
+                    const maxOverlaps = Math.max(1, Math.floor(Number(config.PREDATOR_SELF_DAMAGE_MAX_OVERLAPS_PER_TICK) || 1));
+                    const overlapFactor = Math.min(totalTouches, maxOverlaps);
+                    const damagePerOverlap = (Number(config.PREDATOR_SELF_DAMAGE_BASE) || 0)
+                        + ((Number(config.PREDATOR_SELF_DAMAGE_MAX_BONUS) || 0) * p1ExertionClamped);
+                    const totalContactPenalty = Math.min(this.creatureEnergy, damagePerOverlap * overlapFactor);
+                    if (totalContactPenalty > 0) {
+                        this.creatureEnergy -= totalContactPenalty;
                     }
                 }
             }

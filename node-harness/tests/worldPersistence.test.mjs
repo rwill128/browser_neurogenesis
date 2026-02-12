@@ -199,6 +199,9 @@ test('save/load world snapshot round-trips body, particles, and selection', () =
     meta: { source: 'unit-test' }
   });
 
+  assert.ok(snapshot.world.softBodies[0].phenotypeBlueprint);
+  assert.ok(Array.isArray(snapshot.world.softBodies[0].phenotypeBlueprint.blueprintPoints));
+
   const runtimeReloaded = createRuntime();
   const worldReloaded = {
     nextSoftBodyId: 0,
@@ -290,5 +293,12 @@ test('loadWorldStateSnapshot tolerates stale blueprint point counts by rebuildin
   });
 
   assert.equal(worldReloaded.softBodyPopulation.length, 1);
-  assert.equal(worldReloaded.softBodyPopulation[0].massPoints.length, snapshot.world.softBodies[0].massPoints.length);
+
+  const restored = worldReloaded.softBodyPopulation[0];
+  assert.equal(restored.massPoints.length, snapshot.world.softBodies[0].massPoints.length);
+  assert.equal(restored.blueprintPoints.length, snapshot.world.softBodies[0].blueprint.blueprintPoints.length);
+  assert.equal(restored.blueprintSprings.length, snapshot.world.softBodies[0].blueprint.blueprintSprings.length);
+
+  // Ensure reproductive blueprint and current physiology can remain intentionally distinct.
+  assert.notEqual(restored.blueprintPoints.length, restored.massPoints.length);
 });

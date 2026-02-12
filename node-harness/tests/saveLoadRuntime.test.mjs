@@ -68,6 +68,13 @@ test('runtime can step, save, and load after growth-active steps', () => {
 
     assert.ok(snapshot.world.softBodies.length > 0, 'expected at least one saved body');
 
+    const divergent = snapshot.world.softBodies.find((b) => {
+      const reproCount = b?.blueprint?.blueprintPoints?.length || 0;
+      const phenotypeCount = b?.phenotypeBlueprint?.blueprintPoints?.length || 0;
+      return phenotypeCount > reproCount;
+    });
+    assert.ok(divergent, 'expected at least one snapshot body with phenotype > reproductive blueprint count');
+
     const restored = new RealWorld(scenario, 9090);
     assert.doesNotThrow(() => {
       restored.loadStateSnapshot(snapshot);
@@ -78,6 +85,12 @@ test('runtime can step, save, and load after growth-active steps', () => {
     const savedTotalPoints = snapshot.world.softBodies.reduce((sum, b) => sum + (b.massPoints?.length || 0), 0);
     const restoredTotalPoints = restored.softBodyPopulation.reduce((sum, b) => sum + (b.massPoints?.length || 0), 0);
     assert.equal(restoredTotalPoints, savedTotalPoints);
+
+    const restoredDivergent = restored.softBodyPopulation.find((b) => b.id === divergent.id);
+    assert.ok(restoredDivergent, 'expected divergent body id to survive load');
+    assert.equal(restoredDivergent.massPoints.length, divergent.massPoints.length);
+    assert.equal(restoredDivergent.blueprintPoints.length, divergent.blueprint.blueprintPoints.length);
+    assert.notEqual(restoredDivergent.blueprintPoints.length, restoredDivergent.massPoints.length);
   } finally {
     Object.assign(config, backup);
   }

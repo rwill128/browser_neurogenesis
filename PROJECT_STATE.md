@@ -135,3 +135,8 @@ For each scenario run:
 - Added new regression coverage:
   - `node-harness/tests/saveLoadRuntime.test.mjs` (run live world for growth-active steps, save, then load)
   - extended `worldPersistence.test.mjs` with stale-blueprint compatibility restore case.
+- Clarified and enforced blueprint semantics in persistence:
+  - `blueprint` now remains the heritable/reproductive body plan (birth plan + genes)
+  - added separate `phenotypeBlueprint` in snapshots for reconstructing current grown physiology on load.
+- Load path now restores current physiology from phenotype snapshot while preserving reproductive blueprint for offspring generation.
+- Extended save/load regression tests to assert this separation explicitly (reproductive blueprint count can differ from current mass-point count after growth).

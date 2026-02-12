@@ -155,8 +155,10 @@ function serializeSpring(spring, pointsIndex) {
 }
 
 /**
- * Build a shape blueprint from the current phenotype so save/load stays
- * consistent even after runtime growth changed point/spring counts.
+ * Build a constructor-safe blueprint from the current phenotype.
+ *
+ * This is used only for reconstructing the current body shape on load,
+ * not as the heritable reproductive blueprint.
  */
 function buildPhenotypeBlueprint(body, pointsIndex) {
   const points = Array.isArray(body?.massPoints) ? body.massPoints : [];
@@ -249,10 +251,10 @@ function buildBlueprintFromBodySnapshot(bodySnapshot) {
     }))
     .filter((s) => Number.isInteger(s.p1Index) && Number.isInteger(s.p2Index) && s.p1Index !== s.p2Index);
 
-  const blueprint = deepClone(bodySnapshot?.blueprint || {});
+  const base = deepClone(bodySnapshot?.phenotypeBlueprint || bodySnapshot?.blueprint || {});
   return {
-    ...blueprint,
-    version: Number(blueprint?.version) || 2,
+    ...base,
+    version: Number(base?.version) || 2,
     blueprintPoints,
     blueprintSprings
   };
@@ -265,9 +267,18 @@ function serializeSoftBody(body) {
   const pointsIndex = new Map();
   body.massPoints.forEach((p, idx) => pointsIndex.set(p, idx));
 
+  const reproductiveBlueprint = typeof body.exportBlueprint === 'function'
+    ? deepClone(body.exportBlueprint())
+    : {
+        version: 2,
+        blueprintPoints: deepClone(body.blueprintPoints || []),
+        blueprintSprings: deepClone(body.blueprintSprings || [])
+      };
+
   return {
     id: body.id,
-    blueprint: buildPhenotypeBlueprint(body, pointsIndex),
+    blueprint: reproductiveBlueprint,
+    phenotypeBlueprint: buildPhenotypeBlueprint(body, pointsIndex),
     state: captureSerializableOwnProps(body, BODY_EXCLUDE_KEYS),
     primaryEyePointIndex: body.primaryEyePoint ? pointsIndex.get(body.primaryEyePoint) : -1,
     massPoints: body.massPoints.map(serializeMassPoint),
@@ -285,12 +296,15 @@ function restoreSoftBody(bodySnapshot, { SoftBodyClass, SpringClass, worldState 
 
   const restorePointCount = (bodySnapshot.massPoints || []).length;
 
+  const reproductiveBlueprint = deepClone(bodySnapshot.blueprint || null);
+  const constructorBlueprint = bodySnapshot.phenotypeBlueprint || bodySnapshot.blueprint || null;
+
   let body = new SoftBodyClass(
     Number(bodySnapshot.id) || 0,
     initialX,
     initialY,
-    bodySnapshot.blueprint || null,
-    Boolean(bodySnapshot.blueprint)
+    constructorBlueprint || null,
+    Boolean(constructorBlueprint)
   );
 
   // Legacy save compatibility: stale blueprint shapes may not match runtime points.
@@ -347,6 +361,15 @@ function restoreSoftBody(bodySnapshot, { SoftBodyClass, SpringClass, worldState 
   body.primaryEyePoint = Number.isInteger(eyeIdx) && eyeIdx >= 0 && eyeIdx < body.massPoints.length
     ? body.massPoints[eyeIdx]
     : null;
+
+  // Preserve heritable reproductive blueprint separately from current phenotype.
+  if (reproductiveBlueprint && Array.isArray(reproductiveBlueprint.blueprintPoints) && Array.isArray(reproductiveBlueprint.blueprintSprings)) {
+    body.blueprintPoints = deepClone(reproductiveBlueprint.blueprintPoints);
+    body.blueprintSprings = deepClone(reproductiveBlueprint.blueprintSprings);
+    if (typeof body._calculateBlueprintRadius === 'function') {
+      body._calculateBlueprintRadius();
+    }
+  }
 
   body.setNutrientField(worldState.nutrientField);
   body.setLightField(worldState.lightField);

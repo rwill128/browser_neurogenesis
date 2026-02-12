@@ -91,6 +91,66 @@ function computeStatus() {
   };
 }
 
+function collectAllParticles() {
+  if (!Array.isArray(world?.particles)) return [];
+  const out = [];
+  for (const p of world.particles) {
+    if (!p?.pos) continue;
+    out.push({
+      x: Number(p.pos.x) || 0,
+      y: Number(p.pos.y) || 0,
+      life: Number(p.life) || 0,
+      size: Number(p.size) || 1,
+      isEaten: Boolean(p.isEaten)
+    });
+  }
+  return out;
+}
+
+function collectFluidDenseRGBA() {
+  const fluid = world?.fluidField;
+  const dims = world?.config?.world;
+  const N = Math.round(Number(fluid?.size) || 0);
+  if (!fluid || !dims || !Number.isFinite(N) || N <= 0) {
+    return null;
+  }
+
+  const total = N * N;
+  const rgba = new Uint8ClampedArray(total * 4);
+
+  for (let i = 0; i < total; i++) {
+    const r = Math.min(255, Math.max(0, Math.floor(fluid.densityR?.[i] || 0)));
+    const g = Math.min(255, Math.max(0, Math.floor(fluid.densityG?.[i] || 0)));
+    const b = Math.min(255, Math.max(0, Math.floor(fluid.densityB?.[i] || 0)));
+
+    // If dye is low, still show speed as faint grayscale.
+    const vx = Number(fluid.Vx?.[i] || 0);
+    const vy = Number(fluid.Vy?.[i] || 0);
+    const speed = Math.sqrt(vx * vx + vy * vy);
+
+    const dye = r + g + b;
+    const alpha = Math.min(200, Math.max(0, Math.floor((dye > 3 ? 90 : 0) + Math.min(110, speed * 22))));
+
+    const o = i * 4;
+    rgba[o + 0] = r || (dye <= 3 ? 90 : 0);
+    rgba[o + 1] = g || (dye <= 3 ? 90 : 0);
+    rgba[o + 2] = b || (dye <= 3 ? 120 : 0);
+    rgba[o + 3] = alpha;
+  }
+
+  const worldCell = {
+    width: Number((dims.width / N).toFixed(4)),
+    height: Number((dims.height / N).toFixed(4))
+  };
+
+  return {
+    gridSize: N,
+    worldCell,
+    // base64-encoded RGBA for ImageData
+    rgbaBase64: Buffer.from(rgba.buffer).toString('base64')
+  };
+}
+
 function computeSnapshot(mode = 'render') {
   const snap = world.snapshot();
   const worldDims = world?.config?.world || null;
@@ -120,6 +180,22 @@ function computeSnapshot(mode = 'render') {
       world: worldDims,
       populations: snap.populations,
       fluid: snap.fluid,
+      creatures: snap.creatures
+    };
+  }
+
+  if (mode === 'renderFull') {
+    return {
+      id,
+      scenario: scenarioName,
+      tick: snap.tick,
+      time: snap.time,
+      seed: snap.seed,
+      world: worldDims,
+      populations: snap.populations,
+      fluid: snap.fluid,
+      fluidDense: collectFluidDenseRGBA(),
+      particles: collectAllParticles(),
       creatures: snap.creatures
     };
   }

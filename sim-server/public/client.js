@@ -173,36 +173,79 @@ function drawSnapshot(snap) {
   const worldToScreenX = (x) => cam.offsetX + x * cam.zoom;
   const worldToScreenY = (y) => cam.offsetY + y * cam.zoom;
 
-  // Fluid (sparse cell list) — NOTE: server snapshot uses worldCell.width/height (not cellSize)
+  // Fluid
   const fluid = snap.fluid;
-  const cellW = Number(fluid?.worldCell?.width) || 0;
-  const cellH = Number(fluid?.worldCell?.height) || 0;
-  if (fluid && Array.isArray(fluid.cells) && cellW > 0 && cellH > 0) {
-    for (const cell of fluid.cells) {
-      const r = Number(cell.r) || 0;
-      const g = Number(cell.g) || 0;
-      const b = Number(cell.b) || 0;
-      const dye = Number(cell.dye) || (r + g + b);
-      const speed = Number(cell.speed) || 0;
 
-      // Prefer dye color; fall back to speed when dye is low.
-      const alpha = Math.max(0.03, Math.min(0.35, (dye / 255) * 0.35 + Math.min(0.15, speed * 0.04)));
-      ctx.fillStyle = `rgba(${Math.min(255, r)},${Math.min(255, g)},${Math.min(255, b)},${alpha})`;
+  // Prefer dense grid when available (highest fidelity)
+  if (snap.fluidDense && snap.fluidDense.rgbaBase64 && Number(snap.fluidDense.gridSize) > 0) {
+    const N = Number(snap.fluidDense.gridSize) || 0;
+    try {
+      const bin = atob(snap.fluidDense.rgbaBase64);
+      const bytes = new Uint8ClampedArray(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
 
-      const x = Number(cell.x);
-      const y = Number(cell.y);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const img = new ImageData(bytes, N, N);
+      const off = document.createElement('canvas');
+      off.width = N;
+      off.height = N;
+      const offCtx = off.getContext('2d');
+      offCtx.putImageData(img, 0, 0);
 
-      ctx.fillRect(
-        worldToScreenX(x - cellW * 0.5),
-        worldToScreenY(y - cellH * 0.5),
-        cellW * cam.zoom,
-        cellH * cam.zoom
-      );
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      ctx.globalAlpha = 0.95;
+      ctx.drawImage(off, cam.offsetX, cam.offsetY, worldW * cam.zoom, worldH * cam.zoom);
+      ctx.restore();
+    } catch {
+      // fall back to sparse
+    }
+  } else {
+    // Sparse cell list — NOTE: server snapshot uses worldCell.width/height (not cellSize)
+    const cellW = Number(fluid?.worldCell?.width) || 0;
+    const cellH = Number(fluid?.worldCell?.height) || 0;
+    if (fluid && Array.isArray(fluid.cells) && cellW > 0 && cellH > 0) {
+      for (const cell of fluid.cells) {
+        const r = Number(cell.r) || 0;
+        const g = Number(cell.g) || 0;
+        const b = Number(cell.b) || 0;
+        const dye = Number(cell.dye) || (r + g + b);
+        const speed = Number(cell.speed) || 0;
+
+        const alpha = Math.max(0.03, Math.min(0.35, (dye / 255) * 0.35 + Math.min(0.15, speed * 0.04)));
+        ctx.fillStyle = `rgba(${Math.min(255, r)},${Math.min(255, g)},${Math.min(255, b)},${alpha})`;
+
+        const x = Number(cell.x);
+        const y = Number(cell.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+        ctx.fillRect(
+          worldToScreenX(x - cellW * 0.5),
+          worldToScreenY(y - cellH * 0.5),
+          cellW * cam.zoom,
+          cellH * cam.zoom
+        );
+      }
     }
   }
 
   const selectedId = selectionByWorld.get(worldId) || null;
+
+  // Particles (draw after fluid, before creatures)
+  if (Array.isArray(snap.particles) && snap.particles.length) {
+    ctx.fillStyle = 'rgba(220,220,250,0.45)';
+    for (const p of snap.particles) {
+      const x = Number(p?.x);
+      const y = Number(p?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const life = Math.max(0, Math.min(1, Number(p?.life) || 0));
+      const size = Math.max(0.5, Math.min(4.0, Number(p?.size) || 1));
+      const r = Math.max(0.6, size * cam.zoom);
+      ctx.fillStyle = `rgba(220,220,250,${0.08 + life * 0.35})`;
+      ctx.beginPath();
+      ctx.arc(worldToScreenX(x), worldToScreenY(y), Math.min(r, 4.5), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 
   for (const c of snap.creatures || []) {
     const verts = c.vertices || [];
@@ -282,6 +325,8 @@ function drawSnapshot(snap) {
       maxDye: fluid.maxDye,
       maxSpeed: fluid.maxSpeed
     } : null,
+    fluidDense: snap.fluidDense ? { gridSize: snap.fluidDense.gridSize } : null,
+    particles: Array.isArray(snap.particles) ? { count: snap.particles.length } : null,
     selectedCreature: selected ? {
       id: selected.id,
       energy: selected.energy,
@@ -325,7 +370,7 @@ async function refreshWorlds() {
   return data;
 }
 
-function connectStream({ worldId, mode = 'render', hz = 10 } = {}) {
+function connectStream({ worldId, mode = 'renderFull', hz = 10 } = {}) {
   if (ws) {
     try { ws.close(); } catch {}
     ws = null;
@@ -377,7 +422,7 @@ function connectStream({ worldId, mode = 'render', hz = 10 } = {}) {
 
 worldSelect.addEventListener('change', async () => {
   currentWorldId = worldSelect.value;
-  connectStream({ worldId: currentWorldId, mode: 'render', hz: 10 });
+  connectStream({ worldId: currentWorldId, mode: 'renderFull', hz: 10 });
 });
 
 newWorldBtn.addEventListener('click', async () => {
@@ -386,7 +431,7 @@ newWorldBtn.addEventListener('click', async () => {
   const out = await apiPost('/api/worlds', { scenario, seed });
   currentWorldId = out.id;
   await refreshWorlds();
-  connectStream({ worldId: currentWorldId, mode: 'render', hz: 10 });
+  connectStream({ worldId: currentWorldId, mode: 'renderFull', hz: 10 });
 });
 
 setScenarioBtn.addEventListener('click', async () => {
@@ -539,7 +584,7 @@ canvas.addEventListener('wheel', (ev) => {
 
 await refreshScenarios();
 await refreshWorlds();
-if (currentWorldId) connectStream({ worldId: currentWorldId, mode: 'render', hz: 10 });
+if (currentWorldId) connectStream({ worldId: currentWorldId, mode: 'renderFull', hz: 10 });
 
 setInterval(() => {
   // keep world labels fresh (paused/crashed)

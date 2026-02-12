@@ -261,6 +261,7 @@ async function checkpointWorld(worldId, { label = null } = {}) {
   }
 
   const row = db.prepare('SELECT last_insert_rowid() AS id').get();
+
   return {
     ok: true,
     id: Number(row?.id) || null,

@@ -131,6 +131,7 @@ export class SoftBody {
 
         // Growth/development state (new): creatures can probabilistically add nodes over lifetime.
         this.growthGenome = null;
+        this.growthProgramState = null;
         this.growthCooldownRemaining = 0;
         this.growthEventsCompleted = 0;
         this.growthNodesAdded = 0;
@@ -993,7 +994,11 @@ export class SoftBody {
                 symmetryCoupling: 0.9,
                 appendageBias: (Math.random() - 0.5) * 2,
                 branchDepthCap: 1 + Math.floor(Math.random() * 3)
-            }
+            },
+            growthProgram: [
+                { op: 'GROW' },
+                { op: 'GOTO', line: 0 }
+            ]
         };
 
         if (config.GROWTH_STAGE_GENETICS_ENABLED === false) {
@@ -1071,6 +1076,10 @@ export class SoftBody {
                     appendageBias: 0,
                     branchDepthCap: 2
                 },
+                growthProgram: [
+                    { op: 'GROW' },
+                    { op: 'GOTO', line: 0 }
+                ],
                 growthStages: []
             };
         }
@@ -1124,6 +1133,33 @@ export class SoftBody {
                 appendageBias: clamp(Number(plan.appendageBias) || 0, -1, 1),
                 branchDepthCap: Math.max(1, Math.min(8, Math.floor(Number(plan.branchDepthCap) || 2)))
             };
+        };
+
+        const sanitizeGrowthProgram = (rawProgram) => {
+            const program = Array.isArray(rawProgram) ? rawProgram : [];
+            const out = [];
+            for (const rawInstr of program) {
+                if (!rawInstr || typeof rawInstr !== 'object') continue;
+                const op = String(rawInstr.op || '').toUpperCase();
+                if (op === 'GROW') {
+                    out.push({ op: 'GROW' });
+                } else if (op === 'GOTO') {
+                    out.push({ op: 'GOTO', line: Math.max(0, Math.floor(Number(rawInstr.line) || 0)) });
+                } else if (op === 'IF_ENERGY_GOTO') {
+                    out.push({
+                        op: 'IF_ENERGY_GOTO',
+                        minRatio: clamp(Number(rawInstr.minRatio) || 0.5, 0, 5),
+                        line: Math.max(0, Math.floor(Number(rawInstr.line) || 0))
+                    });
+                } else if (op === 'HALT') {
+                    out.push({ op: 'HALT' });
+                }
+            }
+            if (out.length === 0) {
+                out.push({ op: 'GROW' });
+                out.push({ op: 'GOTO', line: 0 });
+            }
+            return out.slice(0, 32);
         };
 
         const sanitizeProfile = (rawProfile) => {
@@ -1182,6 +1218,7 @@ export class SoftBody {
 
         const sanitized = sanitizeProfile(genome);
         sanitized.growthPlan = sanitizeGrowthPlan(genome.growthPlan);
+        sanitized.growthProgram = sanitizeGrowthProgram(genome.growthProgram);
 
         const maxStageAge = Math.max(60, Math.floor(Number(config.MAX_CREATURE_AGE_TICKS) || 10000));
         const rawStages = Array.isArray(genome.growthStages) ? genome.growthStages.slice() : [];
@@ -1332,6 +1369,42 @@ export class SoftBody {
         }
         genome.growthPlan = growthPlan;
 
+        const program = Array.isArray(genome.growthProgram) ? genome.growthProgram : [{ op: 'GROW' }, { op: 'GOTO', line: 0 }];
+        if (Math.random() < mutationChance) {
+            const idx = Math.floor(Math.random() * program.length);
+            const instr = program[idx] || { op: 'GROW' };
+            const ops = ['GROW', 'GOTO', 'IF_ENERGY_GOTO', 'HALT'];
+            const nextOp = ops[Math.floor(Math.random() * ops.length)];
+            if (nextOp === 'GOTO') {
+                program[idx] = { op: 'GOTO', line: Math.floor(Math.random() * Math.max(1, program.length)) };
+            } else if (nextOp === 'IF_ENERGY_GOTO') {
+                program[idx] = {
+                    op: 'IF_ENERGY_GOTO',
+                    minRatio: Math.max(0, Math.min(5, (Number(instr.minRatio) || 0.5) + (Math.random() - 0.5) * 2 * mutationMagnitude)),
+                    line: Math.floor(Math.random() * Math.max(1, program.length))
+                };
+            } else if (nextOp === 'HALT') {
+                program[idx] = { op: 'HALT' };
+            } else {
+                program[idx] = { op: 'GROW' };
+            }
+            didMutate = true;
+        }
+        if (Math.random() < mutationChance * 0.5 && program.length < 32) {
+            const insertAt = Math.floor(Math.random() * (program.length + 1));
+            const op = Math.random() < 0.7 ? 'GROW' : 'GOTO';
+            const instr = op === 'GOTO'
+                ? { op: 'GOTO', line: Math.floor(Math.random() * Math.max(1, program.length + 1)) }
+                : { op: 'GROW' };
+            program.splice(insertAt, 0, instr);
+            didMutate = true;
+        }
+        if (Math.random() < mutationChance * 0.3 && program.length > 2) {
+            program.splice(Math.floor(Math.random() * program.length), 1);
+            didMutate = true;
+        }
+        genome.growthProgram = program;
+
         return {
             genome: this._sanitizeGrowthGenome(genome),
             didMutate
@@ -1355,6 +1428,51 @@ export class SoftBody {
             if (r <= 0) return e;
         }
         return entries[entries.length - 1] || fallback;
+    }
+
+    _ensureGrowthProgramState(programLength = 0) {
+        const len = Math.max(1, Math.floor(Number(programLength) || 1));
+        if (!this.growthProgramState || typeof this.growthProgramState !== 'object') {
+            this.growthProgramState = { ip: 0, halted: false, executed: 0 };
+        }
+        this.growthProgramState.ip = Math.max(0, Math.min(len - 1, Math.floor(Number(this.growthProgramState.ip) || 0)));
+        this.growthProgramState.halted = Boolean(this.growthProgramState.halted);
+        this.growthProgramState.executed = Math.max(0, Math.floor(Number(this.growthProgramState.executed) || 0));
+        return this.growthProgramState;
+    }
+
+    _executeGrowthProgramStep(genome, energyRatio) {
+        const program = Array.isArray(genome?.growthProgram) ? genome.growthProgram : [];
+        if (program.length === 0) return { allowGrowth: true, reason: 'no_program' };
+
+        const state = this._ensureGrowthProgramState(program.length);
+        if (state.halted) return { allowGrowth: false, reason: 'halted' };
+
+        const instr = program[state.ip] || { op: 'GROW' };
+        const op = String(instr.op || 'GROW').toUpperCase();
+        state.executed += 1;
+
+        if (op === 'GOTO') {
+            state.ip = Math.max(0, Math.min(program.length - 1, Math.floor(Number(instr.line) || 0)));
+            return { allowGrowth: false, reason: 'goto' };
+        }
+        if (op === 'IF_ENERGY_GOTO') {
+            const minRatio = Number(instr.minRatio) || 0;
+            if (energyRatio >= minRatio) {
+                state.ip = Math.max(0, Math.min(program.length - 1, Math.floor(Number(instr.line) || 0)));
+                return { allowGrowth: false, reason: 'if_goto_taken' };
+            }
+            state.ip = Math.min(program.length - 1, state.ip + 1);
+            return { allowGrowth: false, reason: 'if_goto_not_taken' };
+        }
+        if (op === 'HALT') {
+            state.halted = true;
+            return { allowGrowth: false, reason: 'halt' };
+        }
+
+        // Default/GROW
+        state.ip = Math.min(program.length - 1, state.ip + 1);
+        return { allowGrowth: true, reason: 'grow' };
     }
 
     _bumpMutationStat(key, amount = 1) {
@@ -2213,6 +2331,11 @@ export class SoftBody {
             : { symmetryMode: 'none', symmetryCoupling: 0.9, appendageBias: 0, branchDepthCap: 2 };
 
         const energyRatio = this.currentMaxEnergy > 0 ? this.creatureEnergy / this.currentMaxEnergy : 0;
+        const programStep = this._executeGrowthProgramStep(genome, energyRatio);
+        if (!programStep.allowGrowth) {
+            return false;
+        }
+
         if (energyRatio < growthProfile.minEnergyRatioToGrow) {
             this.growthSuppressedByEnergy += 1;
             return false;

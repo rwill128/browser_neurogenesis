@@ -439,6 +439,10 @@ export class RealWorld {
             maxAccelerationBefore: round(b.motionGuardMaxAccelerationBefore, 4),
             maxVelocityBefore: round(b.motionGuardMaxVelocityBefore, 4)
           },
+          rigidConstraints: {
+            projectionCorrections: Number(b.rigidConstraintProjectionCorrections || 0),
+            maxRelativeErrorBefore: round(b.rigidConstraintProjectionMaxRelativeError, 6)
+          },
           reproductionSuppression: {
             density: Number(b.reproductionSuppressedByDensity || 0),
             resources: Number(b.reproductionSuppressedByResources || 0),

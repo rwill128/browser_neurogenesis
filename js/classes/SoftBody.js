@@ -187,6 +187,10 @@ export class SoftBody {
         this.motionGuardMaxAccelerationBefore = 0;
         this.motionGuardMaxVelocityBefore = 0;
 
+        // Rigid-constraint projection telemetry.
+        this.rigidConstraintProjectionCorrections = 0;
+        this.rigidConstraintProjectionMaxRelativeError = 0;
+
         // Initialize heritable/mutable properties
         if (isBlueprint && creationData) {
             // --- CREATION FROM IMPORTED BLUEPRINT ---
@@ -3939,6 +3943,15 @@ export class SoftBody {
             }
         }
 
+        const rigidProjection = this._projectRigidSpringConstraints();
+        if (rigidProjection.corrections > 0) {
+            this.rigidConstraintProjectionCorrections += rigidProjection.corrections;
+            this.rigidConstraintProjectionMaxRelativeError = Math.max(
+                this.rigidConstraintProjectionMaxRelativeError,
+                Number(rigidProjection.maxRelativeErrorBefore) || 0
+            );
+        }
+
         const MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ = (config.MAX_PIXELS_PER_FRAME_DISPLACEMENT) ** 2;
         for (let i = 0; i < this.massPoints.length; i++) {
             const point = this.massPoints[i];
@@ -4032,6 +4045,92 @@ export class SoftBody {
                 }
             }
         }
+    }
+
+    _projectRigidSpringConstraints() {
+        if (config.RIGID_CONSTRAINT_PROJECTION_ENABLED === false) {
+            return { corrections: 0, maxRelativeErrorBefore: 0, iterationsUsed: 0 };
+        }
+
+        const iterations = Math.max(1, Math.floor(Number(config.RIGID_CONSTRAINT_PROJECTION_ITERATIONS) || 1));
+        const maxRelativeError = Math.max(0, Number(config.RIGID_CONSTRAINT_MAX_RELATIVE_ERROR) || 0);
+
+        let totalCorrections = 0;
+        let maxRelativeErrorBefore = 0;
+        let iterationsUsed = 0;
+
+        for (let iter = 0; iter < iterations; iter++) {
+            let correctionsThisIter = 0;
+            iterationsUsed = iter + 1;
+
+            for (const spring of this.springs) {
+                if (!spring || spring.isRigid !== true || !spring.p1 || !spring.p2) continue;
+
+                const p1 = spring.p1;
+                const p2 = spring.p2;
+
+                this._tempVec1.copyFrom(p1.pos).subInPlace(p2.pos);
+                const currentLength = this._tempVec1.mag();
+                if (!Number.isFinite(currentLength) || currentLength <= 1e-9) continue;
+
+                const restLength = Math.max(1e-9, Number(spring.restLength) || currentLength);
+                const lengthError = currentLength - restLength;
+                const relativeError = Math.abs(lengthError) / restLength;
+
+                if (relativeError > maxRelativeErrorBefore) {
+                    maxRelativeErrorBefore = relativeError;
+                }
+
+                if (relativeError <= maxRelativeError) continue;
+
+                const nx = this._tempVec1.x / currentLength;
+                const ny = this._tempVec1.y / currentLength;
+
+                const p1Fixed = p1.isFixed === true;
+                const p2Fixed = p2.isFixed === true;
+
+                let moveP1 = 0;
+                let moveP2 = 0;
+
+                if (p1Fixed && p2Fixed) continue;
+                if (p1Fixed) {
+                    moveP2 = lengthError;
+                } else if (p2Fixed) {
+                    moveP1 = lengthError;
+                } else {
+                    const invMass1 = Math.max(0, Number(p1.invMass) || 0);
+                    const invMass2 = Math.max(0, Number(p2.invMass) || 0);
+                    const denom = Math.max(1e-9, invMass1 + invMass2);
+                    moveP1 = lengthError * (invMass1 / denom);
+                    moveP2 = lengthError * (invMass2 / denom);
+                }
+
+                if (moveP1 !== 0) {
+                    const dx = nx * moveP1;
+                    const dy = ny * moveP1;
+                    p1.pos.x -= dx;
+                    p1.pos.y -= dy;
+                    p1.prevPos.x -= dx;
+                    p1.prevPos.y -= dy;
+                }
+
+                if (moveP2 !== 0) {
+                    const dx = nx * moveP2;
+                    const dy = ny * moveP2;
+                    p2.pos.x += dx;
+                    p2.pos.y += dy;
+                    p2.prevPos.x += dx;
+                    p2.prevPos.y += dy;
+                }
+
+                correctionsThisIter += 1;
+            }
+
+            totalCorrections += correctionsThisIter;
+            if (correctionsThisIter === 0) break;
+        }
+
+        return { corrections: totalCorrections, maxRelativeErrorBefore, iterationsUsed };
     }
 
     _applyEdgeLengthHardCap() {

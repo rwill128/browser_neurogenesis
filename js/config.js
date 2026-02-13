@@ -71,6 +71,10 @@ const config = {
     // Rigid Spring Properties (New)
     RIGID_SPRING_STIFFNESS: 500000,
     RIGID_SPRING_DAMPING: 150,
+    // Enforce rigid edges with a post-integration distance-constraint projection pass.
+    RIGID_CONSTRAINT_PROJECTION_ENABLED: true,
+    RIGID_CONSTRAINT_PROJECTION_ITERATIONS: 8,
+    RIGID_CONSTRAINT_MAX_RELATIVE_ERROR: 0.001,
     CHANCE_FOR_RIGID_SPRING: 0.5,
 
     // Newborn spawn stabilization (new): world/dt-aware spring clamps for tiny worlds.

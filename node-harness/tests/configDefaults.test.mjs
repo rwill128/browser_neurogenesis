@@ -71,6 +71,9 @@ test('edge-length telemetry defaults are enabled and hard cap defaults on at fac
   assert.ok(Number(config.EDGE_LENGTH_HARD_CAP_FACTOR) >= 6);
   assert.equal(config.SPRING_OVERSTRETCH_KILL_ENABLED, false);
   assert.equal(config.FORCE_ALL_SPRINGS_RIGID, false);
+  assert.equal(config.RIGID_CONSTRAINT_PROJECTION_ENABLED, true);
+  assert.ok(Number(config.RIGID_CONSTRAINT_PROJECTION_ITERATIONS) >= 1);
+  assert.ok(Number(config.RIGID_CONSTRAINT_MAX_RELATIVE_ERROR) >= 0);
   assert.equal(config.MUTATION_TRIANGLE_SILO_MODE, false);
   assert.ok(Number(config.TRIANGLE_EXTRUSION_MUTATION_CHANCE_MULTIPLIER) > 0);
 });

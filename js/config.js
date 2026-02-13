@@ -17,8 +17,8 @@ const config = {
     MAX_PIXELS_PER_FRAME_DISPLACEMENT: 300,
     MAX_SPRING_STRETCH_FACTOR: 20.0,
     MAX_SPAN_PER_POINT_FACTOR: 300, // GRID_CELL_SIZE * 3
-    // Optional hard geometric guardrail: projection-style spring length cap before instability checks.
-    EDGE_LENGTH_HARD_CAP_ENABLED: false,
+    // Hard geometric guardrail: projection-style spring length cap before instability checks.
+    EDGE_LENGTH_HARD_CAP_ENABLED: true,
     EDGE_LENGTH_HARD_CAP_FACTOR: 6.0,
 
     // Edge-length telemetry (current simulated lengths, not rest lengths).

@@ -42,8 +42,8 @@ Open:
 - `GET /api/worlds/:id/status`
 - `GET /api/worlds/:id/snapshot?mode=lite|render|renderFull|full`
 - `GET /api/worlds/:id/config`
-- `POST /api/worlds/:id/capture/randomCreature` body `{ "creatureId": 123?, "size": 800? }` → SVG portrait
-- `POST /api/worlds/:id/capture/creatureClip` body `{ "creatureId": 123?, "durationSec": 5?, "fps": 12?, "size": 800? }` → MP4 clip of next seconds of life
+- `POST /api/worlds/:id/capture/randomCreature` body `{ "creatureId": 123?, "size": 800?, "zoomOutFactor": 1? }` → SVG portrait
+- `POST /api/worlds/:id/capture/creatureClip` body `{ "creatureId": 123?, "durationSec": 5?, "fps": 12?, "size": 800?, "zoomOutFactor": 1? }` → MP4 clip of next seconds of life
 - `GET /api/worlds/:id/captures/:file` → fetch saved `.svg`/`.png`/`.mp4` capture artifacts
 - `POST /api/worlds/:id/control/pause`
 - `POST /api/worlds/:id/control/resume`

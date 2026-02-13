@@ -309,7 +309,7 @@ function nodeColor(name) {
   }
 }
 
-function renderCreatureSvg({ creature, worldId, tick, time, size = 800, padding = 40 }) {
+function renderCreatureSvg({ creature, worldId, tick, time, size = 800, padding = 40, zoomOutFactor = 1 }) {
   const vertices = Array.isArray(creature?.vertices) ? creature.vertices : [];
   const springs = Array.isArray(creature?.springs) ? creature.springs : [];
   if (vertices.length === 0) {
@@ -338,18 +338,26 @@ function renderCreatureSvg({ creature, worldId, tick, time, size = 800, padding 
 
   const width = Math.max(1, maxX - minX);
   const height = Math.max(1, maxY - minY);
+  const centerX = (minX + maxX) * 0.5;
+  const centerY = (minY + maxY) * 0.5;
+  const zoom = Math.max(1, Math.min(50, Number(zoomOutFactor) || 1));
+
+  const viewWidth = Math.max(1, width * zoom);
+  const viewHeight = Math.max(1, height * zoom);
+  const viewMinX = centerX - viewWidth * 0.5;
+  const viewMinY = centerY - viewHeight * 0.5;
 
   const svgSize = Math.max(256, Math.floor(Number(size) || 800));
   const inner = Math.max(16, svgSize - 2 * padding);
-  const scale = Math.min(inner / width, inner / height);
+  const scale = Math.min(inner / viewWidth, inner / viewHeight);
 
-  const drawW = width * scale;
-  const drawH = height * scale;
+  const drawW = viewWidth * scale;
+  const drawH = viewHeight * scale;
   const offsetX = (svgSize - drawW) * 0.5;
   const offsetY = (svgSize - drawH) * 0.5;
 
-  const sx = (x) => ((x - minX) * scale + offsetX);
-  const sy = (y) => ((y - minY) * scale + offsetY);
+  const sx = (x) => ((x - viewMinX) * scale + offsetX);
+  const sy = (y) => ((y - viewMinY) * scale + offsetY);
 
   const springLinesSoft = [];
   const springLinesRigid = [];
@@ -379,7 +387,7 @@ function renderCreatureSvg({ creature, worldId, tick, time, size = 800, padding 
     pointDots.push(`<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${Math.min(10, r).toFixed(2)}" fill="${fill}"/>`);
   }
 
-  const caption = `world=${worldId} creature=${creature?.id} tick=${tick} t=${Number(time || 0).toFixed(2)} points=${vertices.length} springs=${springs.length}`;
+  const caption = `world=${worldId} creature=${creature?.id} tick=${tick} t=${Number(time || 0).toFixed(2)} points=${vertices.length} springs=${springs.length} zoom=${zoom.toFixed(2)}x`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${svgSize}" height="${svgSize}" viewBox="0 0 ${svgSize} ${svgSize}">
@@ -436,7 +444,7 @@ function readCaptureFilePayload(fileParam) {
   };
 }
 
-async function captureCreaturePortrait({ worldId, creatureId = null, random = true, size = 800 }) {
+async function captureCreaturePortrait({ worldId, creatureId = null, random = true, size = 800, zoomOutFactor = 1 }) {
   const handle = getWorldOrThrow(worldId);
   const snap = await handle.rpc('getSnapshot', { mode: 'render' });
   const creatures = Array.isArray(snap?.creatures) ? snap.creatures : [];
@@ -462,7 +470,8 @@ async function captureCreaturePortrait({ worldId, creatureId = null, random = tr
     worldId,
     tick: snap?.tick,
     time: snap?.time,
-    size
+    size,
+    zoomOutFactor
   });
 
   const safeWorldId = String(worldId).replace(/[^a-zA-Z0-9_-]+/g, '_');
@@ -480,6 +489,7 @@ async function captureCreaturePortrait({ worldId, creatureId = null, random = tr
     creatureId: selected?.id ?? null,
     vertices: Array.isArray(selected?.vertices) ? selected.vertices.length : 0,
     springs: Array.isArray(selected?.springs) ? selected.springs.length : 0,
+    zoomOutFactor: Math.max(1, Math.min(50, Number(zoomOutFactor) || 1)),
     fileName,
     filePath: absPath,
     downloadUrl: `/api/worlds/${encodeURIComponent(worldId)}/captures/${encodeURIComponent(fileName)}`
@@ -497,7 +507,8 @@ async function captureCreatureClip({
   random = true,
   size = 800,
   durationSec = 5,
-  fps = 12
+  fps = 12,
+  zoomOutFactor = 1
 }) {
   const handle = getWorldOrThrow(worldId);
 
@@ -575,7 +586,8 @@ async function captureCreatureClip({
         worldId,
         tick: f.tick,
         time: f.time,
-        size: renderSize
+        size: renderSize,
+        zoomOutFactor
       });
 
       const idx = String(i).padStart(4, '0');
@@ -618,6 +630,7 @@ async function captureCreatureClip({
     timeStart: Number(frames[0]?.time) || 0,
     timeEnd: Number(frames[frames.length - 1]?.time) || 0,
     fps: clipFps,
+    zoomOutFactor: Math.max(1, Math.min(50, Number(zoomOutFactor) || 1)),
     durationRequestedSec: clipDurationSec,
     durationCapturedSec: Number(((frames.length - 1) / clipFps).toFixed(3)),
     framesCaptured: frames.length,
@@ -962,9 +975,11 @@ app.post('/api/worlds/:id/capture/randomCreature', async (req, reply) => {
     const creatureId = req.body?.creatureId ?? null;
     const random = creatureId == null;
     const sizeRaw = Number(req.body?.size ?? req.query?.size ?? 800);
+    const zoomRaw = Number(req.body?.zoomOutFactor ?? req.query?.zoomOutFactor ?? 1);
     const size = Number.isFinite(sizeRaw) ? Math.max(256, Math.min(2048, Math.floor(sizeRaw))) : 800;
+    const zoomOutFactor = Number.isFinite(zoomRaw) ? Math.max(1, Math.min(50, zoomRaw)) : 1;
 
-    return await captureCreaturePortrait({ worldId, creatureId, random, size });
+    return await captureCreaturePortrait({ worldId, creatureId, random, size, zoomOutFactor });
   } catch (err) {
     reply.code(400);
     return { ok: false, error: String(err?.message || err) };
@@ -979,12 +994,14 @@ app.post('/api/worlds/:id/capture/creatureClip', async (req, reply) => {
     const sizeRaw = Number(req.body?.size ?? req.query?.size ?? 800);
     const durationRaw = Number(req.body?.durationSec ?? req.query?.durationSec ?? 5);
     const fpsRaw = Number(req.body?.fps ?? req.query?.fps ?? 12);
+    const zoomRaw = Number(req.body?.zoomOutFactor ?? req.query?.zoomOutFactor ?? 1);
 
     const size = Number.isFinite(sizeRaw) ? Math.max(256, Math.min(2048, Math.floor(sizeRaw))) : 800;
     const durationSec = Number.isFinite(durationRaw) ? Math.max(1, Math.min(20, durationRaw)) : 5;
     const fps = Number.isFinite(fpsRaw) ? Math.max(4, Math.min(30, Math.floor(fpsRaw))) : 12;
+    const zoomOutFactor = Number.isFinite(zoomRaw) ? Math.max(1, Math.min(50, zoomRaw)) : 1;
 
-    return await captureCreatureClip({ worldId, creatureId, random, size, durationSec, fps });
+    return await captureCreatureClip({ worldId, creatureId, random, size, durationSec, fps, zoomOutFactor });
   } catch (err) {
     reply.code(400);
     return { ok: false, error: String(err?.message || err) };
@@ -1027,8 +1044,10 @@ app.post('/api/capture/randomCreature', async (req, reply) => {
     const creatureId = req.body?.creatureId ?? null;
     const random = creatureId == null;
     const sizeRaw = Number(req.body?.size ?? req.query?.size ?? 800);
+    const zoomRaw = Number(req.body?.zoomOutFactor ?? req.query?.zoomOutFactor ?? 1);
     const size = Number.isFinite(sizeRaw) ? Math.max(256, Math.min(2048, Math.floor(sizeRaw))) : 800;
-    return await captureCreaturePortrait({ worldId: DEFAULT_WORLD_ID, creatureId, random, size });
+    const zoomOutFactor = Number.isFinite(zoomRaw) ? Math.max(1, Math.min(50, zoomRaw)) : 1;
+    return await captureCreaturePortrait({ worldId: DEFAULT_WORLD_ID, creatureId, random, size, zoomOutFactor });
   } catch (err) {
     reply.code(400);
     return { ok: false, error: String(err?.message || err) };
@@ -1041,12 +1060,14 @@ app.post('/api/capture/creatureClip', async (req, reply) => {
     const sizeRaw = Number(req.body?.size ?? req.query?.size ?? 800);
     const durationRaw = Number(req.body?.durationSec ?? req.query?.durationSec ?? 5);
     const fpsRaw = Number(req.body?.fps ?? req.query?.fps ?? 12);
+    const zoomRaw = Number(req.body?.zoomOutFactor ?? req.query?.zoomOutFactor ?? 1);
 
     const size = Number.isFinite(sizeRaw) ? Math.max(256, Math.min(2048, Math.floor(sizeRaw))) : 800;
     const durationSec = Number.isFinite(durationRaw) ? Math.max(1, Math.min(20, durationRaw)) : 5;
     const fps = Number.isFinite(fpsRaw) ? Math.max(4, Math.min(30, Math.floor(fpsRaw))) : 12;
+    const zoomOutFactor = Number.isFinite(zoomRaw) ? Math.max(1, Math.min(50, zoomRaw)) : 1;
 
-    return await captureCreatureClip({ worldId: DEFAULT_WORLD_ID, creatureId, random, size, durationSec, fps });
+    return await captureCreatureClip({ worldId: DEFAULT_WORLD_ID, creatureId, random, size, durationSec, fps, zoomOutFactor });
   } catch (err) {
     reply.code(400);
     return { ok: false, error: String(err?.message || err) };

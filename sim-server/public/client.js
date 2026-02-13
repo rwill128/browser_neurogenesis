@@ -24,6 +24,10 @@ const creaturePointDetailsEl = document.getElementById('creaturePointDetails');
 const creatureSpringDetailsEl = document.getElementById('creatureSpringDetails');
 const configEditorEl = document.getElementById('configEditor');
 
+const historySliderEl = document.getElementById('historySlider');
+const historyLiveBtn = document.getElementById('historyLiveBtn');
+const historyInfoEl = document.getElementById('historyInfo');
+
 const ctx = canvas.getContext('2d');
 
 const NODE_TYPE_COLORS = {
@@ -43,6 +47,10 @@ const CONFIG_FIELDS = [
   'PHOTOSYNTHESIS_EFFICIENCY',
   'globalNutrientMultiplier',
   'globalLightMultiplier',
+  'CREATURE_POPULATION_FLOOR',
+  'CREATURE_POPULATION_CEILING',
+  'PARTICLE_POPULATION_FLOOR',
+  'PARTICLE_POPULATION_CEILING',
   'ENERGY_PER_PARTICLE',
   'EATER_NODE_ENERGY_COST',
   'PREDATOR_NODE_ENERGY_COST',
@@ -81,11 +89,73 @@ const followByWorld = new Map();
 const lastSnapshotByWorld = new Map();
 const lastStatusByWorld = new Map();
 const configDraftByWorld = new Map();
+const frameBufferByWorld = new Map();
+const scrubOffsetByWorld = new Map();
 
 function fmt(n, digits = 3) {
   const x = Number(n);
   if (!Number.isFinite(x)) return '—';
   return x.toFixed(digits);
+}
+
+function getScrubOffset(worldId) {
+  return Math.max(0, Math.floor(Number(scrubOffsetByWorld.get(worldId)) || 0));
+}
+
+function getFrameBufferMeta(worldId) {
+  return frameBufferByWorld.get(worldId) || { available: 0, max: 0, stepStride: 1, latestSeq: null, latestTick: null };
+}
+
+function updateHistoryUi(worldId) {
+  if (!historySliderEl || !historyInfoEl) return;
+
+  const meta = getFrameBufferMeta(worldId);
+  const maxOffset = Math.max(0, (Number(meta.available) || 0) - 1);
+  const offset = Math.min(getScrubOffset(worldId), maxOffset);
+  scrubOffsetByWorld.set(worldId, offset);
+
+  historySliderEl.max = String(maxOffset);
+  historySliderEl.value = String(offset);
+
+  if (offset === 0) {
+    historyInfoEl.textContent = `live · buffer ${meta.available || 0}/${meta.max || 0}`;
+  } else {
+    historyInfoEl.textContent = `${offset} step(s) behind · buffer ${meta.available || 0}/${meta.max || 0}`;
+  }
+}
+
+async function loadScrubFrame(worldId, frameOffset) {
+  const safeOffset = Math.max(0, Math.floor(Number(frameOffset) || 0));
+  if (!worldId || safeOffset === 0) return;
+
+  try {
+    const snap = await apiGet(`/api/worlds/${encodeURIComponent(worldId)}/snapshot?mode=render&frameOffset=${encodeURIComponent(safeOffset)}`);
+    if (!snap || currentWorldId !== worldId) return;
+
+    lastSnapshotByWorld.set(worldId, snap);
+    drawSnapshot(snap);
+  } catch {
+    // ignore transient history misses while buffer rolls
+  }
+}
+
+function setScrubOffset(worldId, nextOffset) {
+  if (!worldId) return;
+
+  const meta = getFrameBufferMeta(worldId);
+  const maxOffset = Math.max(0, (Number(meta.available) || 0) - 1);
+  const safeOffset = Math.max(0, Math.min(maxOffset, Math.floor(Number(nextOffset) || 0)));
+  scrubOffsetByWorld.set(worldId, safeOffset);
+  updateHistoryUi(worldId);
+
+  if (safeOffset > 0) {
+    loadScrubFrame(worldId, safeOffset);
+  } else {
+    const live = lastSnapshotByWorld.get(worldId);
+    if (live && currentWorldId === worldId) {
+      drawSnapshot(live);
+    }
+  }
 }
 
 function colorForVertex(v) {
@@ -361,11 +431,17 @@ function renderPanels(worldId) {
   const energyGains = snap?.worldStats?.globalEnergyGains || {};
   const energyCosts = snap?.worldStats?.globalEnergyCosts || {};
 
+  const scrubOffset = getScrubOffset(worldId);
+  const frameMeta = getFrameBufferMeta(worldId);
+
   setKV(worldStatsEl, [
     ['world', worldId],
     ['scenario', snap.scenario],
     ['tick', snap.tick],
     ['time', snap.time],
+    ['viewOffsetSteps', scrubOffset],
+    ['frameBuffer', `${frameMeta.available || 0}/${frameMeta.max || 0}`],
+    ['frameStride', frameMeta.stepStride || 1],
     ['sps', status?.stepsPerSecond],
     ['dt', status?.dt],
     ['creatures', snap.populations?.creatures],
@@ -680,10 +756,23 @@ async function refreshWorlds() {
     worldSelect.value = currentWorldId;
   }
 
+  for (const w of data.worlds || []) {
+    if (!scrubOffsetByWorld.has(w.id)) scrubOffsetByWorld.set(w.id, 0);
+    if (!frameBufferByWorld.has(w.id)) {
+      frameBufferByWorld.set(w.id, {
+        available: 0,
+        max: 0,
+        stepStride: 1,
+        latestSeq: null,
+        latestTick: null
+      });
+    }
+  }
+
   return data;
 }
 
-function connectStream({ worldId, mode = 'renderFull', hz = 10 } = {}) {
+function connectStream({ worldId, mode = 'render', hz = 10 } = {}) {
   if (ws) {
     try { ws.close(); } catch {}
     ws = null;
@@ -708,12 +797,26 @@ function connectStream({ worldId, mode = 'renderFull', hz = 10 } = {}) {
       if (msg.kind === 'status') {
         const s = msg.data;
         lastStatusByWorld.set(worldId, s);
+
+        const fb = s?.frameBuffer || {};
+        frameBufferByWorld.set(worldId, {
+          available: Number(fb.available) || 0,
+          max: Number(fb.max) || 0,
+          stepStride: Math.max(1, Number(fb.stepStride) || 1),
+          latestSeq: Number.isFinite(Number(fb.latestSeq)) ? Number(fb.latestSeq) : null,
+          latestTick: Number.isFinite(Number(fb.latestTick)) ? Number(fb.latestTick) : null
+        });
+        if (currentWorldId === worldId) {
+          updateHistoryUi(worldId);
+        }
+
         const cam = currentWorldId ? getCamera(currentWorldId) : null;
         const zoomLabel = cam ? ` zoom=${fmt(cam.zoom, 3)}` : '';
-        statusEl.textContent = `world=${s.id} scenario=${s.scenario} seed=${s.seed} tick=${s.tick} t=${fmt(s.time, 2)} dt=${fmt(s.dt, 5)} paused=${s.paused} sps=${s.stepsPerSecond} stepWallMs=${s.lastStepWallMs}${zoomLabel}`;
+        const scrubOffset = getScrubOffset(worldId);
+        const scrubLabel = scrubOffset > 0 ? ` view=-${scrubOffset}` : ' view=live';
+        statusEl.textContent = `world=${s.id} scenario=${s.scenario} seed=${s.seed} tick=${s.tick} t=${fmt(s.time, 2)} dt=${fmt(s.dt, 5)} paused=${s.paused} sps=${s.stepsPerSecond} stepWallMs=${s.lastStepWallMs}${zoomLabel}${scrubLabel}`;
       } else if (msg.kind === 'snapshot') {
         const snap = msg.data;
-        lastSnapshotByWorld.set(worldId, snap);
 
         // keep selection sane
         const sel = selectionByWorld.get(worldId);
@@ -727,7 +830,11 @@ function connectStream({ worldId, mode = 'renderFull', hz = 10 } = {}) {
           }
         }
 
-        drawSnapshot(snap);
+        const scrubOffset = getScrubOffset(worldId);
+        if (scrubOffset === 0) {
+          lastSnapshotByWorld.set(worldId, snap);
+          drawSnapshot(snap);
+        }
       }
     } catch {
       // ignore malformed
@@ -785,10 +892,22 @@ function toggleFollowSelected() {
   updateFollowButton();
 }
 
+historySliderEl?.addEventListener('input', () => {
+  if (!currentWorldId) return;
+  const nextOffset = Number(historySliderEl.value || 0);
+  setScrubOffset(currentWorldId, nextOffset);
+});
+
+historyLiveBtn?.addEventListener('click', () => {
+  if (!currentWorldId) return;
+  setScrubOffset(currentWorldId, 0);
+});
+
 worldSelect.addEventListener('change', async () => {
   currentWorldId = worldSelect.value;
+  updateHistoryUi(currentWorldId);
   await refreshConfig(currentWorldId);
-  connectStream({ worldId: currentWorldId, mode: 'renderFull', hz: 10 });
+  connectStream({ worldId: currentWorldId, mode: 'render', hz: 10 });
 });
 
 newWorldBtn.addEventListener('click', async () => {
@@ -796,9 +915,11 @@ newWorldBtn.addEventListener('click', async () => {
   const seed = Number(seedInput.value || 0) >>> 0;
   const out = await apiPost('/api/worlds', { scenario, seed });
   currentWorldId = out.id;
+  scrubOffsetByWorld.set(currentWorldId, 0);
   await refreshWorlds();
+  updateHistoryUi(currentWorldId);
   await refreshConfig(currentWorldId);
-  connectStream({ worldId: currentWorldId, mode: 'renderFull', hz: 10 });
+  connectStream({ worldId: currentWorldId, mode: 'render', hz: 10 });
 });
 
 setScenarioBtn.addEventListener('click', async () => {
@@ -808,6 +929,15 @@ setScenarioBtn.addEventListener('click', async () => {
   await apiPost(`/api/worlds/${encodeURIComponent(currentWorldId)}/control/setScenario`, { name, seed });
   selectionByWorld.delete(currentWorldId);
   followByWorld.delete(currentWorldId);
+  scrubOffsetByWorld.set(currentWorldId, 0);
+  frameBufferByWorld.set(currentWorldId, {
+    available: 0,
+    max: 0,
+    stepStride: 1,
+    latestSeq: null,
+    latestTick: null
+  });
+  updateHistoryUi(currentWorldId);
   await refreshConfig(currentWorldId);
 });
 
@@ -964,10 +1094,20 @@ canvas.addEventListener('wheel', (ev) => {
 await refreshScenarios();
 await refreshWorlds();
 if (currentWorldId) {
+  if (!scrubOffsetByWorld.has(currentWorldId)) scrubOffsetByWorld.set(currentWorldId, 0);
+  updateHistoryUi(currentWorldId);
   await refreshConfig(currentWorldId);
-  connectStream({ worldId: currentWorldId, mode: 'renderFull', hz: 10 });
+  connectStream({ worldId: currentWorldId, mode: 'render', hz: 10 });
 }
 
 setInterval(() => {
-  refreshWorlds().catch(() => {});
+  refreshWorlds()
+    .then(() => {
+      if (currentWorldId) updateHistoryUi(currentWorldId);
+      const offset = currentWorldId ? getScrubOffset(currentWorldId) : 0;
+      if (currentWorldId && offset > 0) {
+        loadScrubFrame(currentWorldId, offset);
+      }
+    })
+    .catch(() => {});
 }, 4000);

@@ -451,7 +451,29 @@ app.get('/api/worlds/:id/status', async (req, reply) => {
 app.get('/api/worlds/:id/snapshot', async (req, reply) => {
   try {
     const mode = String(req.query?.mode || 'render');
-    return await getWorldOrThrow(req.params.id).rpc('getSnapshot', { mode });
+    const frameOffsetRaw = req.query?.frameOffset;
+    const frameSeqRaw = req.query?.frameSeq;
+
+    const args = { mode };
+    if (frameOffsetRaw !== undefined) {
+      const n = Number(frameOffsetRaw);
+      if (Number.isFinite(n)) args.frameOffset = Math.max(0, Math.floor(n));
+    }
+    if (frameSeqRaw !== undefined) {
+      const n = Number(frameSeqRaw);
+      if (Number.isFinite(n)) args.frameSeq = Math.floor(n);
+    }
+
+    return await getWorldOrThrow(req.params.id).rpc('getSnapshot', args);
+  } catch (err) {
+    reply.code(404);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+app.get('/api/worlds/:id/frameTimeline', async (req, reply) => {
+  try {
+    return await getWorldOrThrow(req.params.id).rpc('getFrameTimeline');
   } catch (err) {
     reply.code(404);
     return { ok: false, error: String(err?.message || err) };
@@ -570,8 +592,20 @@ app.get('/api/worlds/:id/config', async (req, reply) => {
 app.get('/api/status', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('getStatus'));
 app.get('/api/snapshot', async (req) => {
   const mode = String(req.query?.mode || 'render');
-  return getWorldOrThrow(DEFAULT_WORLD_ID).rpc('getSnapshot', { mode });
+  const args = { mode };
+
+  if (req.query?.frameOffset !== undefined) {
+    const n = Number(req.query.frameOffset);
+    if (Number.isFinite(n)) args.frameOffset = Math.max(0, Math.floor(n));
+  }
+  if (req.query?.frameSeq !== undefined) {
+    const n = Number(req.query.frameSeq);
+    if (Number.isFinite(n)) args.frameSeq = Math.floor(n);
+  }
+
+  return getWorldOrThrow(DEFAULT_WORLD_ID).rpc('getSnapshot', args);
 });
+app.get('/api/frameTimeline', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('getFrameTimeline'));
 app.post('/api/control/pause', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('pause'));
 app.post('/api/control/resume', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('resume'));
 app.post('/api/control/setScenario', async (req, reply) => {

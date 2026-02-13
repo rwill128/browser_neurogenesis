@@ -263,7 +263,7 @@ const config = {
 
     // --- Global Variables & Constants (with initial hardcoded defaults) ---
     CREATURE_POPULATION_FLOOR: 100,
-    CREATURE_POPULATION_CEILING: 1000,
+    CREATURE_POPULATION_CEILING: 10000,
     PARTICLE_POPULATION_FLOOR: 0,
     PARTICLE_POPULATION_CEILING: 60000,
     canCreaturesReproduceGlobally: true,

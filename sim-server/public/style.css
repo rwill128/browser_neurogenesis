@@ -27,6 +27,42 @@ html, body {
   margin-top: 4px;
 }
 
+.scrubBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.scrubLabel {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+#historySlider {
+  width: 220px;
+}
+
+#historyLiveBtn {
+  background: #131629;
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #e8e8e8;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+#historyLiveBtn:hover {
+  border-color: rgba(255,255,255,0.25);
+}
+
+.scrubInfo {
+  font-size: 11px;
+  opacity: 0.8;
+  min-width: 130px;
+}
+
 .controls {
   display: flex;
   gap: 8px;

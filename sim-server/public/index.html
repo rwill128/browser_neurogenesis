@@ -11,6 +11,12 @@
     <div class="left">
       <div class="title">Authoritative Sim Client</div>
       <div id="status" class="status">connecting…</div>
+      <div class="scrubBar">
+        <span class="scrubLabel">History</span>
+        <input id="historySlider" type="range" min="0" max="0" value="0" step="1" />
+        <button id="historyLiveBtn">Live</button>
+        <span id="historyInfo" class="scrubInfo">live</span>
+      </div>
     </div>
     <div class="controls">
       <select id="worldSelect"></select>

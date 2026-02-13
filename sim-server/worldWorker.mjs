@@ -42,6 +42,16 @@ let lastStepsPerSecondAt = Date.now();
 let crashed = false;
 let crash = null;
 
+// Render-frame buffering for UI decoupling:
+// simulation advances independently, clients consume recent cached frames.
+const FRAME_HISTORY_MAX = 100;
+const FRAME_CAPTURE_STEP_STRIDE = 1;
+const FRAME_BUFFER_IDLE_MS = 30_000;
+let frameHistory = [];
+let frameSeq = 0;
+let lastFrameCaptureTick = -1;
+let frameBufferLastAccessAt = 0;
+
 function resetWorld(nextScenarioName, nextSeed) {
   const s = String(nextScenarioName || '').trim();
   if (!s || !(s in scenarioDefs)) {
@@ -64,6 +74,11 @@ function resetWorld(nextScenarioName, nextSeed) {
 
   crashed = false;
   crash = null;
+
+  frameHistory = [];
+  frameSeq = 0;
+  lastFrameCaptureTick = -1;
+  frameBufferLastAccessAt = 0;
 }
 
 resetWorld(scenarioName, seed);
@@ -88,7 +103,15 @@ function computeStatus() {
     },
     stepsPerSecond,
     lastStepWallMs,
-    edgeLengthTelemetryLatest: world?.worldState?.edgeLengthTelemetry?.latest || null
+    edgeLengthTelemetryLatest: world?.worldState?.edgeLengthTelemetry?.latest || null,
+    frameBuffer: {
+      active: isFrameBufferActive(),
+      available: frameHistory.length,
+      max: FRAME_HISTORY_MAX,
+      stepStride: FRAME_CAPTURE_STEP_STRIDE,
+      latestSeq: frameHistory.length ? Number(frameHistory[frameHistory.length - 1]?.__frameSeq || 0) : null,
+      latestTick: frameHistory.length ? Number(frameHistory[frameHistory.length - 1]?.tick || 0) : null
+    }
   };
 }
 
@@ -216,6 +239,87 @@ function computeSnapshot(mode = 'render') {
   };
 }
 
+function markFrameBufferAccess() {
+  frameBufferLastAccessAt = Date.now();
+}
+
+function isFrameBufferActive() {
+  if (!frameBufferLastAccessAt) return false;
+  return (Date.now() - frameBufferLastAccessAt) <= FRAME_BUFFER_IDLE_MS;
+}
+
+function captureRenderFrameIfNeeded({ force = false } = {}) {
+  if (!world) return null;
+
+  const tick = Number(world?.tick) || 0;
+  if (!force) {
+    if (!isFrameBufferActive()) return null;
+    if (tick <= 0) return null;
+    if (tick === lastFrameCaptureTick) return null;
+    if ((tick % FRAME_CAPTURE_STEP_STRIDE) !== 0) return null;
+  }
+
+  const frame = computeSnapshot('render');
+  frameSeq += 1;
+  frame.__frameSeq = frameSeq;
+  frame.__capturedAtIso = new Date().toISOString();
+
+  frameHistory.push(frame);
+  if (frameHistory.length > FRAME_HISTORY_MAX) {
+    frameHistory.splice(0, frameHistory.length - FRAME_HISTORY_MAX);
+  }
+
+  lastFrameCaptureTick = tick;
+  return frame;
+}
+
+function getLatestRenderFrame() {
+  if (frameHistory.length === 0) {
+    const seeded = captureRenderFrameIfNeeded({ force: true });
+    return seeded || null;
+  }
+  return frameHistory[frameHistory.length - 1] || null;
+}
+
+function getRenderFrameByOffset(frameOffset = 0) {
+  const offset = Math.max(0, Math.floor(Number(frameOffset) || 0));
+  const idx = frameHistory.length - 1 - offset;
+  if (idx < 0 || idx >= frameHistory.length) return null;
+  return frameHistory[idx] || null;
+}
+
+function getRenderFrameBySeq(seq) {
+  const target = Math.floor(Number(seq));
+  if (!Number.isFinite(target)) return null;
+  for (let i = frameHistory.length - 1; i >= 0; i--) {
+    const frame = frameHistory[i];
+    if (Number(frame?.__frameSeq) === target) return frame;
+  }
+  return null;
+}
+
+function getFrameTimeline() {
+  const frames = frameHistory.map((f) => ({
+    seq: Number(f?.__frameSeq) || 0,
+    tick: Number(f?.tick) || 0,
+    time: Number(f?.time) || 0,
+    capturedAtIso: f?.__capturedAtIso || null
+  }));
+  const latest = frames[frames.length - 1] || null;
+  const oldest = frames[0] || null;
+
+  return {
+    worldId: id,
+    available: frames.length,
+    max: FRAME_HISTORY_MAX,
+    stepStride: FRAME_CAPTURE_STEP_STRIDE,
+    oldestSeq: oldest?.seq ?? null,
+    latestSeq: latest?.seq ?? null,
+    latestTick: latest?.tick ?? null,
+    frames
+  };
+}
+
 // Fixed-step simulation loop with accumulator.
 const LOOP_WALL_MS = 10;
 let loopLastAt = Date.now();
@@ -256,6 +360,7 @@ setInterval(() => {
 
   if (steps > 0) {
     lastStepWallMs = Date.now() - t0;
+    captureRenderFrameIfNeeded({ force: false });
   }
 
   if (now - lastStepsPerSecondAt >= 1000) {
@@ -285,7 +390,36 @@ parentPort.on('message', (msg) => {
 
       if (method === 'getSnapshot') {
         const mode = String(args?.mode || 'render');
+
+        if (mode === 'render') {
+          markFrameBufferAccess();
+
+          const requestedSeq = args?.frameSeq;
+          if (requestedSeq !== undefined && requestedSeq !== null && requestedSeq !== '') {
+            const bySeq = getRenderFrameBySeq(requestedSeq);
+            if (bySeq) return reply(requestId, { ok: true, result: bySeq });
+          }
+
+          const requestedOffset = args?.frameOffset;
+          if (requestedOffset !== undefined && requestedOffset !== null && requestedOffset !== '') {
+            const byOffset = getRenderFrameByOffset(requestedOffset);
+            if (byOffset) return reply(requestId, { ok: true, result: byOffset });
+          }
+
+          const latest = getLatestRenderFrame() || computeSnapshot('render');
+          return reply(requestId, { ok: true, result: latest });
+        }
+
         return reply(requestId, { ok: true, result: computeSnapshot(mode) });
+      }
+
+      if (method === 'getFrameTimeline') {
+        markFrameBufferAccess();
+        // Ensure timeline has at least one frame after first UI access.
+        if (frameHistory.length === 0) {
+          captureRenderFrameIfNeeded({ force: true });
+        }
+        return reply(requestId, { ok: true, result: getFrameTimeline() });
       }
 
       if (method === 'pause') {
@@ -350,6 +484,10 @@ parentPort.on('message', (msg) => {
           'PHOTOSYNTHESIS_EFFICIENCY',
           'globalNutrientMultiplier',
           'globalLightMultiplier',
+          'CREATURE_POPULATION_FLOOR',
+          'CREATURE_POPULATION_CEILING',
+          'PARTICLE_POPULATION_FLOOR',
+          'PARTICLE_POPULATION_CEILING',
           'ENERGY_PER_PARTICLE',
           'BASE_NODE_EXISTENCE_COST',
           'EMITTER_NODE_ENERGY_COST',

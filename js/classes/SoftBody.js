@@ -1512,6 +1512,261 @@ export class SoftBody {
         return visited.size;
     }
 
+    _collectBlueprintBoundaryEdges() {
+        const points = Array.isArray(this.blueprintPoints) ? this.blueprintPoints : [];
+        const springs = Array.isArray(this.blueprintSprings) ? this.blueprintSprings : [];
+        if (points.length < 3 || springs.length < 3) return [];
+
+        const adjacency = Array.from({ length: points.length }, () => new Set());
+        const edgeMap = new Map();
+        const edgeKey = (a, b) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+
+        for (const spring of springs) {
+            const a = Math.floor(Number(spring?.p1Index));
+            const b = Math.floor(Number(spring?.p2Index));
+            if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
+            if (a < 0 || b < 0 || a >= points.length || b >= points.length) continue;
+
+            const key = edgeKey(a, b);
+            if (edgeMap.has(key)) continue;
+
+            edgeMap.set(key, { a, b, spring });
+            adjacency[a].add(b);
+            adjacency[b].add(a);
+        }
+
+        const boundaryEdges = [];
+        for (const edge of edgeMap.values()) {
+            const neighborsA = adjacency[edge.a];
+            const neighborsB = adjacency[edge.b];
+            if (!neighborsA || !neighborsB) continue;
+
+            const common = [];
+            const [small, big] = neighborsA.size <= neighborsB.size
+                ? [neighborsA, neighborsB]
+                : [neighborsB, neighborsA];
+
+            for (const n of small) {
+                if (n === edge.a || n === edge.b) continue;
+                if (big.has(n)) common.push(n);
+            }
+
+            // Boundary edge for manifold triangle mesh: exactly one adjacent triangle.
+            if (common.length === 1) {
+                boundaryEdges.push({
+                    a: edge.a,
+                    b: edge.b,
+                    interiorThird: common[0],
+                    spring: edge.spring
+                });
+            }
+        }
+
+        return boundaryEdges;
+    }
+
+    _attemptTriangleBoundaryExtrusionMutation() {
+        this._bumpMutationStat('triangleExtrusionAttempt');
+
+        const points = Array.isArray(this.blueprintPoints) ? this.blueprintPoints : [];
+        const springs = Array.isArray(this.blueprintSprings) ? this.blueprintSprings : [];
+        const maxTotalPoints = Math.max(1, Math.floor(Number(config.GROWTH_MAX_POINTS_PER_CREATURE) || 80));
+        if (points.length >= maxTotalPoints) {
+            this._bumpMutationStat('triangleExtrusionRejectedCapacity');
+            return false;
+        }
+
+        const candidates = this._collectBlueprintBoundaryEdges();
+        if (!Array.isArray(candidates) || candidates.length === 0) {
+            this._bumpMutationStat('triangleExtrusionRejectedNoBoundaryEdge');
+            return false;
+        }
+
+        const startIndex = Math.floor(Math.random() * candidates.length);
+        for (let i = 0; i < candidates.length; i++) {
+            const candidate = candidates[(startIndex + i) % candidates.length];
+            const idxA = candidate.a;
+            const idxB = candidate.b;
+            const idxInterior = candidate.interiorThird;
+            const pA = points[idxA];
+            const pB = points[idxB];
+            if (!pA || !pB) continue;
+
+            const ax = Number(pA.relX) || 0;
+            const ay = Number(pA.relY) || 0;
+            const bx = Number(pB.relX) || 0;
+            const by = Number(pB.relY) || 0;
+            const dx = bx - ax;
+            const dy = by - ay;
+            const baseLen = Math.sqrt(dx * dx + dy * dy);
+            if (!(baseLen > 1e-6)) continue;
+
+            const midX = (ax + bx) * 0.5;
+            const midY = (ay + by) * 0.5;
+
+            // Candidate normal and orientation toward outside.
+            let nx = -dy / baseLen;
+            let ny = dx / baseLen;
+
+            const pInterior = points[idxInterior];
+            let orientedByInterior = false;
+            if (pInterior) {
+                const tx = (Number(pInterior.relX) || 0) - midX;
+                const ty = (Number(pInterior.relY) || 0) - midY;
+                const side = nx * tx + ny * ty;
+                if (Number.isFinite(side) && Math.abs(side) > 1e-9) {
+                    // Interior lies on this side; outside is opposite side.
+                    if (side > 0) {
+                        nx *= -1;
+                        ny *= -1;
+                    }
+                    orientedByInterior = true;
+                }
+            }
+
+            if (!orientedByInterior) {
+                let centroidX = 0;
+                let centroidY = 0;
+                for (const p of points) {
+                    centroidX += Number(p?.relX) || 0;
+                    centroidY += Number(p?.relY) || 0;
+                }
+                centroidX /= Math.max(1, points.length);
+                centroidY /= Math.max(1, points.length);
+                const outwardScore = nx * (midX - centroidX) + ny * (midY - centroidY);
+                if (!(outwardScore > 0)) {
+                    nx *= -1;
+                    ny *= -1;
+                }
+            }
+
+            // Equilateral extrusion: AC == BC == AB.
+            const sideLength = baseLen;
+            const halfBase = baseLen * 0.5;
+            const height = Math.sqrt(Math.max(0, sideLength * sideLength - halfBase * halfBase));
+            if (!(height > 0)) continue;
+
+            const newX = midX + nx * height;
+            const newY = midY + ny * height;
+            if (!Number.isFinite(newX) || !Number.isFinite(newY)) continue;
+
+            const radiusA = Math.max(0.5, Number(pA.radius) || 0.5);
+            const radiusB = Math.max(0.5, Number(pB.radius) || 0.5);
+            const newRadius = Math.max(0.5, Math.min(12, (radiusA + radiusB) * 0.5));
+
+            const clearanceFactor = Math.max(0, Number(config.GROWTH_MIN_POINT_CLEARANCE_FACTOR) || 1.4);
+            let blocked = false;
+            for (let j = 0; j < points.length; j++) {
+                if (j === idxA || j === idxB) continue;
+                const q = points[j];
+                if (!q) continue;
+                const qx = Number(q.relX) || 0;
+                const qy = Number(q.relY) || 0;
+                const qRadius = Math.max(0.5, Number(q.radius) || 0.5);
+                const ddx = qx - newX;
+                const ddy = qy - newY;
+                const d = Math.sqrt(ddx * ddx + ddy * ddy);
+                const minDist = (qRadius + newRadius) * clearanceFactor;
+                if (d < minDist) {
+                    blocked = true;
+                    break;
+                }
+            }
+            if (blocked) continue;
+
+            const sourcePoint = Math.random() < 0.5 ? pA : pB;
+            const nodeType = Number.isFinite(Number(sourcePoint?.nodeType))
+                ? Math.max(NodeType.PREDATOR, Math.min(NodeType.REPULSOR, Math.floor(Number(sourcePoint.nodeType))))
+                : NodeType.EATER;
+            let movementType = Number.isFinite(Number(sourcePoint?.movementType))
+                ? Math.max(MovementType.FIXED, Math.min(MovementType.NEUTRAL, Math.floor(Number(sourcePoint.movementType))))
+                : MovementType.NEUTRAL;
+            if (nodeType === NodeType.SWIMMER) movementType = MovementType.NEUTRAL;
+
+            const dyeA = Array.isArray(pA.dyeColor) ? pA.dyeColor : [200, 50, 50];
+            const dyeB = Array.isArray(pB.dyeColor) ? pB.dyeColor : [200, 50, 50];
+            const dyeColor = [0, 1, 2].map((k) => Math.max(0, Math.min(255,
+                Math.floor((((Number(dyeA[k]) || 0) + (Number(dyeB[k]) || 0)) * 0.5)))));
+
+            let neuronDataBlueprint = null;
+            if (nodeType === NodeType.NEURON) {
+                const hiddenFromA = Number(pA?.neuronDataBlueprint?.hiddenLayerSize);
+                const hiddenFromB = Number(pB?.neuronDataBlueprint?.hiddenLayerSize);
+                const baseHidden = Number.isFinite(hiddenFromA)
+                    ? hiddenFromA
+                    : (Number.isFinite(hiddenFromB) ? hiddenFromB : config.DEFAULT_HIDDEN_LAYER_SIZE_MIN);
+                neuronDataBlueprint = {
+                    hiddenLayerSize: Math.max(
+                        config.DEFAULT_HIDDEN_LAYER_SIZE_MIN,
+                        Math.min(config.DEFAULT_HIDDEN_LAYER_SIZE_MAX, Math.floor(baseHidden))
+                    )
+                };
+            }
+
+            const activationA = this._sanitizeActivationIntervalGene(pA.activationIntervalGene ?? this._randomActivationIntervalGene());
+            const activationB = this._sanitizeActivationIntervalGene(pB.activationIntervalGene ?? this._randomActivationIntervalGene());
+            const springActivation = this._sanitizeActivationIntervalGene(candidate?.spring?.activationIntervalGene ?? this._randomActivationIntervalGene());
+            const newActivation = this._sanitizeActivationIntervalGene((activationA + activationB + springActivation) / 3);
+
+            const predA = this._sanitizePredatorRadiusGene(pA.predatorRadiusGene ?? this._randomPredatorRadiusGene());
+            const predB = this._sanitizePredatorRadiusGene(pB.predatorRadiusGene ?? this._randomPredatorRadiusGene());
+
+            const newPoint = {
+                relX: newX,
+                relY: newY,
+                radius: newRadius,
+                mass: Math.max(0.1, Math.min(2.5, ((Number(pA.mass) || 0.5) + (Number(pB.mass) || 0.5)) * 0.5)),
+                nodeType,
+                movementType,
+                dyeColor,
+                canBeGrabber: Boolean(sourcePoint?.canBeGrabber),
+                neuronDataBlueprint,
+                activationIntervalGene: newActivation,
+                predatorRadiusGene: this._sanitizePredatorRadiusGene((predA + predB) * 0.5),
+                eyeTargetType: nodeType === NodeType.EYE
+                    ? (Number(sourcePoint?.eyeTargetType) === EyeTargetType.FOREIGN_BODY_POINT
+                        ? EyeTargetType.FOREIGN_BODY_POINT
+                        : EyeTargetType.PARTICLE)
+                    : undefined
+            };
+
+            const newPointIndex = this.blueprintPoints.length;
+            this.blueprintPoints.push(newPoint);
+
+            const stiffness = Math.max(100, Math.min(10000, Number(candidate?.spring?.stiffness) || this.stiffness));
+            const damping = Math.max(0.1, Math.min(50, Number(candidate?.spring?.damping) || this.springDamping));
+            const isRigid = Boolean(candidate?.spring?.isRigid);
+            const restLength = Math.max(1, sideLength);
+
+            this.blueprintSprings.push({
+                p1Index: idxA,
+                p2Index: newPointIndex,
+                restLength,
+                isRigid,
+                stiffness,
+                damping,
+                activationIntervalGene: newActivation
+            });
+            this.blueprintSprings.push({
+                p1Index: idxB,
+                p2Index: newPointIndex,
+                restLength,
+                isRigid,
+                stiffness,
+                damping,
+                activationIntervalGene: newActivation
+            });
+
+            this._bumpMutationStat('triangleExtrusionApplied');
+            this._bumpMutationStat('pointAddActual');
+            this._bumpMutationStat('springAddition', 2);
+            return true;
+        }
+
+        this._bumpMutationStat('triangleExtrusionRejectedPlacement');
+        return false;
+    }
+
     _evaluateBlueprintViability() {
         const points = this.blueprintPoints || [];
         const springs = this.blueprintSprings || [];
@@ -2693,8 +2948,20 @@ export class SoftBody {
                     this._attemptDonorModuleGraftMutation(parentBody);
                 }
             } else {
-                // Silo mode: keep parent blueprint exactly, mutating only non-structural inherited genes.
+                // Triangle-silo mode: allow only outward boundary-edge triangle extrusion.
                 this._bumpMutationStat('mutationTriangleSiloApplied');
+                const extrusionChance = Math.max(
+                    0,
+                    Math.min(
+                        1,
+                        (Number(this.pointAddChance) || 0)
+                        * (Number(config.GLOBAL_MUTATION_RATE_MODIFIER) || 1)
+                        * (Number(config.TRIANGLE_EXTRUSION_MUTATION_CHANCE_MULTIPLIER) || 1)
+                    )
+                );
+                if (Math.random() < extrusionChance) {
+                    this._attemptTriangleBoundaryExtrusionMutation();
+                }
             }
 
             // Finalize and validate mutated blueprint before instantiation.

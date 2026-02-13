@@ -99,14 +99,13 @@ test('donor module graft mutation can add donor blueprint module to offspring', 
   }
 });
 
-test('triangle silo mutation mode preserves parent blueprint topology exactly', () => {
+test('triangle silo mutation mode extrudes one outward triangle from a boundary edge', () => {
   const cfgBackup = {
     MUTATION_TRIANGLE_SILO_MODE: config.MUTATION_TRIANGLE_SILO_MODE,
-    MUTATION_CHANCE_BOOL: config.MUTATION_CHANCE_BOOL,
-    MUTATION_CHANCE_NODE_TYPE: config.MUTATION_CHANCE_NODE_TYPE,
-    ADD_POINT_MUTATION_CHANCE: config.ADD_POINT_MUTATION_CHANCE,
-    SPRING_SUBDIVISION_MUTATION_CHANCE: config.SPRING_SUBDIVISION_MUTATION_CHANCE,
-    HGT_GRAFT_MUTATION_CHANCE: config.HGT_GRAFT_MUTATION_CHANCE
+    TRIANGLE_EXTRUSION_MUTATION_CHANCE_MULTIPLIER: config.TRIANGLE_EXTRUSION_MUTATION_CHANCE_MULTIPLIER,
+    OFFSPRING_MIN_NODE_TYPE_DIVERSITY: config.OFFSPRING_MIN_NODE_TYPE_DIVERSITY,
+    OFFSPRING_REQUIRE_HARVESTER_NODE: config.OFFSPRING_REQUIRE_HARVESTER_NODE,
+    OFFSPRING_REQUIRE_ACTUATOR_NODE: config.OFFSPRING_REQUIRE_ACTUATOR_NODE
   };
 
   const runtimeBackup = {
@@ -114,47 +113,74 @@ test('triangle silo mutation mode preserves parent blueprint topology exactly', 
     softBodyPopulation: runtimeState.softBodyPopulation
   };
 
+  const edgeKey = (a, b) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+
   try {
     config.MUTATION_TRIANGLE_SILO_MODE = true;
-    config.MUTATION_CHANCE_BOOL = 1;
-    config.MUTATION_CHANCE_NODE_TYPE = 1;
-    config.ADD_POINT_MUTATION_CHANCE = 1;
-    config.SPRING_SUBDIVISION_MUTATION_CHANCE = 1;
-    config.HGT_GRAFT_MUTATION_CHANCE = 1;
+    config.TRIANGLE_EXTRUSION_MUTATION_CHANCE_MULTIPLIER = 1;
+    config.OFFSPRING_MIN_NODE_TYPE_DIVERSITY = 1;
+    config.OFFSPRING_REQUIRE_HARVESTER_NODE = false;
+    config.OFFSPRING_REQUIRE_ACTUATOR_NODE = false;
 
     runtimeState.mutationStats = {};
 
     const parent = new SoftBody(1110, 200, 200, null, false);
-    const parentBlueprintSnapshot = JSON.parse(JSON.stringify({
-      points: parent.blueprintPoints,
-      springs: parent.blueprintSprings
-    }));
+    parent.blueprintPoints = [
+      { relX: 0, relY: 0, radius: 1, mass: 1, nodeType: NodeType.EATER, movementType: MovementType.NEUTRAL, dyeColor: [255, 0, 0], canBeGrabber: false },
+      { relX: 4, relY: 0, radius: 1, mass: 1, nodeType: NodeType.SWIMMER, movementType: MovementType.NEUTRAL, dyeColor: [0, 255, 0], canBeGrabber: false },
+      { relX: 2, relY: 3.4641016151, radius: 1, mass: 1, nodeType: NodeType.NEURON, movementType: MovementType.NEUTRAL, dyeColor: [0, 0, 255], canBeGrabber: false, neuronDataBlueprint: { hiddenLayerSize: 8 } }
+    ];
+    parent.blueprintSprings = [
+      { p1Index: 0, p2Index: 1, restLength: 4, isRigid: false, stiffness: 800, damping: 8, activationIntervalGene: 2 },
+      { p1Index: 1, p2Index: 2, restLength: 4, isRigid: false, stiffness: 800, damping: 8, activationIntervalGene: 2 },
+      { p1Index: 2, p2Index: 0, restLength: 4, isRigid: false, stiffness: 800, damping: 8, activationIntervalGene: 2 }
+    ];
+    parent._sanitizeBlueprintDataInPlace();
+    parent.pointAddChance = 1;
+
+    const parentEdgeSet = new Set(parent.blueprintSprings.map((s) => edgeKey(s.p1Index, s.p2Index)));
 
     runtimeState.softBodyPopulation = [parent];
 
     const child = withMockedRandom(0, () => new SoftBody(1111, 210, 210, parent, false));
 
-    assert.equal(child.blueprintPoints.length, parentBlueprintSnapshot.points.length);
-    assert.equal(child.blueprintSprings.length, parentBlueprintSnapshot.springs.length);
+    assert.equal(child.blueprintPoints.length, parent.blueprintPoints.length + 1);
+    assert.equal(child.blueprintSprings.length, parent.blueprintSprings.length + 2);
 
-    for (let i = 0; i < child.blueprintPoints.length; i++) {
-      const c = child.blueprintPoints[i];
-      const p = parentBlueprintSnapshot.points[i];
-      assert.equal(c.relX, p.relX);
-      assert.equal(c.relY, p.relY);
-      assert.equal(c.nodeType, p.nodeType);
-      assert.equal(c.movementType, p.movementType);
+    const childEdgeSet = new Set(child.blueprintSprings.map((s) => edgeKey(s.p1Index, s.p2Index)));
+    for (const key of parentEdgeSet) {
+      assert.equal(childEdgeSet.has(key), true);
     }
 
-    for (let i = 0; i < child.blueprintSprings.length; i++) {
-      const c = child.blueprintSprings[i];
-      const p = parentBlueprintSnapshot.springs[i];
-      assert.equal(c.p1Index, p.p1Index);
-      assert.equal(c.p2Index, p.p2Index);
-      assert.equal(c.restLength, p.restLength);
-    }
+    const newPointIndex = child.blueprintPoints.length - 1;
+    const newPointEdges = child.blueprintSprings.filter((s) => s.p1Index === newPointIndex || s.p2Index === newPointIndex);
+    assert.equal(newPointEdges.length, 2);
+
+    const endpointA = newPointEdges[0].p1Index === newPointIndex ? newPointEdges[0].p2Index : newPointEdges[0].p1Index;
+    const endpointB = newPointEdges[1].p1Index === newPointIndex ? newPointEdges[1].p2Index : newPointEdges[1].p1Index;
+    assert.notEqual(endpointA, endpointB);
+    assert.equal(parentEdgeSet.has(edgeKey(endpointA, endpointB)), true);
+
+    assert.equal(newPointEdges[0].restLength, newPointEdges[1].restLength);
+
+    const thirdIdx = [0, 1, 2].find((idx) => idx !== endpointA && idx !== endpointB);
+    assert.notEqual(thirdIdx, undefined);
+
+    const pa = parent.blueprintPoints[endpointA];
+    const pb = parent.blueprintPoints[endpointB];
+    const pt = parent.blueprintPoints[thirdIdx];
+    const pn = child.blueprintPoints[newPointIndex];
+
+    const midX = (pa.relX + pb.relX) * 0.5;
+    const midY = (pa.relY + pb.relY) * 0.5;
+    const nx = -(pb.relY - pa.relY);
+    const ny = (pb.relX - pa.relX);
+    const sideThird = nx * (pt.relX - midX) + ny * (pt.relY - midY);
+    const sideNew = nx * (pn.relX - midX) + ny * (pn.relY - midY);
+    assert.ok(sideThird * sideNew < 0);
 
     assert.equal((runtimeState.mutationStats.mutationTriangleSiloApplied || 0) >= 1, true);
+    assert.equal((runtimeState.mutationStats.triangleExtrusionApplied || 0) >= 1, true);
   } finally {
     Object.assign(config, cfgBackup);
     runtimeState.mutationStats = runtimeBackup.mutationStats;

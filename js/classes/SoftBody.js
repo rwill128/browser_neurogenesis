@@ -955,6 +955,13 @@ export class SoftBody {
         const maxDist = Math.max(midStart + 1, config.GROWTH_DISTANCE_MAX);
         const farStart = Math.max(midStart + 1, Math.floor((midStart + maxDist) * 0.5));
 
+        const randomSymmetryMode = () => {
+            const r = Math.random();
+            if (r < 0.5) return 'none';
+            if (r < 0.85) return 'bilateral';
+            return 'radial3';
+        };
+
         const baseGenome = {
             growthChancePerTick: config.GROWTH_BASE_CHANCE_MIN + Math.random() * Math.max(0.0001, (config.GROWTH_BASE_CHANCE_MAX - config.GROWTH_BASE_CHANCE_MIN)),
             minEnergyRatioToGrow: config.GROWTH_MIN_ENERGY_RATIO_MIN + Math.random() * Math.max(0.0001, (config.GROWTH_MIN_ENERGY_RATIO_MAX - config.GROWTH_MIN_ENERGY_RATIO_MIN)),
@@ -980,7 +987,12 @@ export class SoftBody {
             edgeDampingScale: 0.6 + Math.random() * 1.2,
             nodeActivationIntervalBias: (Math.random() - 0.5) * 2,
             edgeActivationIntervalBias: (Math.random() - 0.5) * 2,
-            activationIntervalJitter: Math.random() * 1.5
+            activationIntervalJitter: Math.random() * 1.5,
+            growthPlan: {
+                symmetryMode: randomSymmetryMode(),
+                appendageBias: (Math.random() - 0.5) * 2,
+                branchDepthCap: 1 + Math.floor(Math.random() * 3)
+            }
         };
 
         if (config.GROWTH_STAGE_GENETICS_ENABLED === false) {
@@ -1052,6 +1064,11 @@ export class SoftBody {
                 nodeActivationIntervalBias: 0,
                 edgeActivationIntervalBias: 0,
                 activationIntervalJitter: 0.5,
+                growthPlan: {
+                    symmetryMode: 'none',
+                    appendageBias: 0,
+                    branchDepthCap: 2
+                },
                 growthStages: []
             };
         }
@@ -1093,6 +1110,17 @@ export class SoftBody {
             }
             out.forEach((e) => { e.weight /= total; });
             return out;
+        };
+
+        const sanitizeGrowthPlan = (rawPlan) => {
+            const plan = rawPlan && typeof rawPlan === 'object' ? rawPlan : {};
+            const symmetryRaw = String(plan.symmetryMode || 'none').toLowerCase();
+            const symmetryMode = ['none', 'bilateral', 'radial3'].includes(symmetryRaw) ? symmetryRaw : 'none';
+            return {
+                symmetryMode,
+                appendageBias: clamp(Number(plan.appendageBias) || 0, -1, 1),
+                branchDepthCap: Math.max(1, Math.min(8, Math.floor(Number(plan.branchDepthCap) || 2)))
+            };
         };
 
         const sanitizeProfile = (rawProfile) => {
@@ -1150,6 +1178,7 @@ export class SoftBody {
         };
 
         const sanitized = sanitizeProfile(genome);
+        sanitized.growthPlan = sanitizeGrowthPlan(genome.growthPlan);
 
         const maxStageAge = Math.max(60, Math.floor(Number(config.MAX_CREATURE_AGE_TICKS) || 10000));
         const rawStages = Array.isArray(genome.growthStages) ? genome.growthStages.slice() : [];
@@ -1270,6 +1299,28 @@ export class SoftBody {
             }
             mutateProfile(stage.profile);
         }
+
+        const growthPlan = genome.growthPlan && typeof genome.growthPlan === 'object' ? genome.growthPlan : {};
+        if (Math.random() < mutationChance) {
+            const modes = ['none', 'bilateral', 'radial3'];
+            const current = modes.includes(String(growthPlan.symmetryMode)) ? String(growthPlan.symmetryMode) : 'none';
+            const alternatives = modes.filter((m) => m !== current);
+            growthPlan.symmetryMode = alternatives[Math.floor(Math.random() * alternatives.length)] || current;
+            didMutate = true;
+        }
+        if (Math.random() < mutationChance) {
+            const old = Number(growthPlan.appendageBias) || 0;
+            const next = old + (Math.random() - 0.5) * 2 * mutationMagnitude;
+            growthPlan.appendageBias = Math.max(-1, Math.min(1, next));
+            didMutate = didMutate || Math.abs(growthPlan.appendageBias - old) > 1e-6;
+        }
+        if (Math.random() < mutationChance) {
+            const delta = Math.round((Math.random() - 0.5) * 2 * mutationMagnitude * 4);
+            const old = Math.floor(Number(growthPlan.branchDepthCap) || 2);
+            growthPlan.branchDepthCap = Math.max(1, Math.min(8, old + delta));
+            didMutate = didMutate || growthPlan.branchDepthCap !== old;
+        }
+        genome.growthPlan = growthPlan;
 
         return {
             genome: this._sanitizeGrowthGenome(genome),
@@ -2147,6 +2198,9 @@ export class SoftBody {
             this.growthGenome = genome;
         }
         const growthProfile = this._resolveGrowthProfileForAge(genome, this.absoluteAgeTicks);
+        const growthPlan = genome.growthPlan && typeof genome.growthPlan === 'object'
+            ? genome.growthPlan
+            : { symmetryMode: 'none', appendageBias: 0, branchDepthCap: 2 };
 
         const energyRatio = this.currentMaxEnergy > 0 ? this.creatureEnergy / this.currentMaxEnergy : 0;
         if (energyRatio < growthProfile.minEnergyRatioToGrow) {
@@ -2301,7 +2355,18 @@ export class SoftBody {
                     const heightSq = Math.max(0, (sideLength * sideLength) - ((baseLen * baseLen) * 0.25));
                     const height = Math.sqrt(heightSq);
                     if (!Number.isFinite(height) || height <= 0.0001) continue;
-                    const sideSign = Math.random() < 0.5 ? 1 : -1;
+                    let sideSign = Math.random() < 0.5 ? 1 : -1;
+                    if (growthPlan.symmetryMode === 'bilateral') {
+                        const centerX = Number(this.getAveragePosition()?.x) || 0;
+                        sideSign = anchor.pos.x >= centerX ? 1 : -1;
+                    } else if (growthPlan.symmetryMode === 'radial3') {
+                        const center = this.getAveragePosition();
+                        const centerX = Number(center?.x) || 0;
+                        const centerY = Number(center?.y) || 0;
+                        const anchorAngle = Math.atan2(anchor.pos.y - centerY, anchor.pos.x - centerX);
+                        const sector = Math.round((anchorAngle / (Math.PI * 2)) * 3);
+                        sideSign = (sector % 2 === 0) ? 1 : -1;
+                    }
                     x = midX + nx * height * sideSign;
                     y = midY + ny * height * sideSign;
                     triangleEdgeRestLength = sideLength;

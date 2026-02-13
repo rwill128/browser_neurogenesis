@@ -45,6 +45,7 @@ const pauseResumeButton = document.getElementById('pauseResumeButton');
 const toggleControlsButton = document.getElementById('toggleControlsButton');
 const screensaverButton = document.getElementById('screensaverButton');
 const controlsPanel = document.getElementById('controls');
+const controlsBackdrop = document.getElementById('controlsBackdrop');
 const viewEntireSimButton = document.getElementById('viewEntireSimButton');
 const toggleStatsPanelButton = document.getElementById('toggleStatsPanelButton');
 const statsPanel = document.getElementById('statsPanel');
@@ -708,6 +709,13 @@ function updateInfoPanel() {
 
 function showMessageModal(message) {
     let modal = document.getElementById('messageModal');
+    if (modal && modal.dataset.bound !== 'true') {
+        const existingCloseButton = modal.querySelector('#modalCloseButton, button');
+        if (existingCloseButton) {
+            existingCloseButton.onclick = () => { modal.style.display = 'none'; };
+        }
+        modal.dataset.bound = 'true';
+    }
     if (!modal) {
         modal = document.createElement('div');
         modal.id = 'messageModal';
@@ -737,6 +745,7 @@ function showMessageModal(message) {
         closeButton.style.cursor = 'pointer';
         closeButton.onclick = () => modal.style.display = 'none';
 
+        modal.dataset.bound = 'true';
         modal.appendChild(messageP);
         modal.appendChild(closeButton);
         document.body.appendChild(modal);
@@ -960,9 +969,34 @@ pauseResumeButton.onclick = function () {
         requestAnimationFrame(gameLoop); // gameLoop is in main.js
     }
 }
+function syncControlsModalState() {
+    const isOpen = controlsPanel.classList.contains('open');
+    if (controlsBackdrop) {
+        controlsBackdrop.classList.toggle('open', isOpen);
+        controlsBackdrop.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+    }
+    document.body.classList.toggle('controls-open', isOpen);
+}
+
+function closeControlsPanel() {
+    controlsPanel.classList.remove('open');
+    syncControlsModalState();
+}
+
 toggleControlsButton.onclick = function () {
     controlsPanel.classList.toggle('open');
+    syncControlsModalState();
 }
+
+if (controlsBackdrop) {
+    controlsBackdrop.onclick = closeControlsPanel;
+}
+
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && controlsPanel.classList.contains('open')) {
+        closeControlsPanel();
+    }
+});
 
 function toggleStatsPanel() {
     statsPanel.classList.toggle('open');

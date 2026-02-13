@@ -42,7 +42,7 @@
                     <p><strong>Energy:</strong> <span id="infoBodyEnergy">-</span></p>
                     <p><strong>Current Max Energy:</strong> <span id="infoBodyCurrentMaxEnergy">-</span></p>
                     <p><strong>Reproduction Energy Threshold:</strong> <span id="infoBodyReproEnergyThreshold">-</span></p>
-                    <p><strong>Ticks Since Birth:</strong> <span id="infoBodyTicksBirth">-</span></p>
+                    <p id="infoBodyTicksBirthP"><strong>Ticks Since Birth:</strong> <span id="infoBodyTicksBirth">-</span></p>
                     <p><strong>Can Reproduce:</strong> <span id="infoBodyCanReproduce">-</span></p>
                     <p><strong>Reward Strategy:</strong> <span id="infoBodyRewardStrategy">-</span></p>
                     <p><strong>Energy from Photosynthesis:</strong> <span id="infoBodyEnergyPhoto">-</span></p>
@@ -92,6 +92,7 @@
 
         <button id="toggleStatsPanelButton" class="ui-button-top-right">Stats</button>
         <button id="toggleControlsButton" class="ui-button-top-right">Controls</button>
+        <div id="controlsBackdrop" class="controls-backdrop" aria-hidden="true"></div>
         <button id="screensaverButton" class="ui-button-top-left">Enter Screensaver</button>
         <button id="viewEntireSimButton" class="ui-button-top-left">View Entire Sim</button>
         <button id="openScenarioLibraryButton" class="ui-button-top-left">Scenario Library</button>
@@ -481,6 +482,13 @@
             <!-- Mutation type counts will be listed here -->
         </div>
         <!-- More stats can be added later -->
+    </div>
+
+    <div id="messageModal" class="message-modal" style="display:none;">
+        <div class="message-modal-card">
+            <p id="modalMessageText"></p>
+            <button id="modalCloseButton">OK</button>
+        </div>
     </div>
 
     <!-- Configuration & Utilities -->

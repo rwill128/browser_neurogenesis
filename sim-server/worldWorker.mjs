@@ -231,9 +231,16 @@ function computeSnapshot(mode = 'render') {
   const snap = world.snapshot();
   const worldDims = world?.config?.world || null;
 
-  // Archive/storage hygiene: do not persist bulky recent-death payloads in frame snapshots.
+  // Archive/storage hygiene: strip bulky/derived telemetry from per-tick frames.
   if (snap?.instabilityTelemetry && typeof snap.instabilityTelemetry === 'object') {
     delete snap.instabilityTelemetry.recentDeaths;
+  }
+  if (Array.isArray(snap?.creatures)) {
+    for (const c of snap.creatures) {
+      if (!c || typeof c !== 'object') continue;
+      delete c.fullStats;
+      delete c.actuationTelemetry;
+    }
   }
 
   if (mode === 'lite') {

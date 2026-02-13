@@ -3521,7 +3521,16 @@ export class SoftBody {
             }
         }
 
+        const forceAllSpringsRigid = config.FORCE_ALL_SPRINGS_RIGID === true;
+        const rigidStiffness = Number(config.RIGID_SPRING_STIFFNESS);
+        const rigidDamping = Number(config.RIGID_SPRING_DAMPING);
+
         for (let spring of this.springs) {
+            if (forceAllSpringsRigid && spring && spring.isRigid !== true) {
+                spring.isRigid = true;
+                spring.stiffness = rigidStiffness;
+                spring.dampingFactor = rigidDamping;
+            }
             spring.applyForce();
         }
 

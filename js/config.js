@@ -18,6 +18,8 @@ const config = {
     MAX_SPRING_STRETCH_FACTOR: 20.0,
     MAX_SPAN_PER_POINT_FACTOR: 300, // GRID_CELL_SIZE * 3
     SPRING_OVERSTRETCH_KILL_ENABLED: false,
+    // Experiment toggle: force every spring/edge to rigid physics (overrides per-edge type).
+    FORCE_ALL_SPRINGS_RIGID: false,
 
     // Motion guardrails: clamp extreme acceleration/implicit velocity before declaring instability.
     PHYSICS_MOTION_GUARD_ENABLED: true,

@@ -70,6 +70,7 @@ test('edge-length telemetry defaults are enabled and hard cap defaults on at fac
   assert.equal(config.EDGE_LENGTH_HARD_CAP_ENABLED, true);
   assert.ok(Number(config.EDGE_LENGTH_HARD_CAP_FACTOR) >= 6);
   assert.equal(config.SPRING_OVERSTRETCH_KILL_ENABLED, false);
+  assert.equal(config.FORCE_ALL_SPRINGS_RIGID, false);
 });
 
 test('physics motion guard defaults are enabled with finite caps', () => {

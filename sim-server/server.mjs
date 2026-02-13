@@ -119,6 +119,19 @@ db.exec(`
     PRIMARY KEY (worldId, tick)
   );
   CREATE INDEX IF NOT EXISTS idx_archived_frames_world_tick ON archived_frames(worldId, tick);
+
+  CREATE TABLE IF NOT EXISTS archived_frame_chunks (
+    worldId TEXT NOT NULL,
+    chunkStartTick INTEGER NOT NULL,
+    chunkEndTick INTEGER NOT NULL,
+    frameCount INTEGER NOT NULL,
+    codec TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    payloadGzip BLOB NOT NULL,
+    PRIMARY KEY (worldId, chunkStartTick)
+  );
+  CREATE INDEX IF NOT EXISTS idx_archived_frame_chunks_world_range ON archived_frame_chunks(worldId, chunkStartTick, chunkEndTick);
 `);
 
 const stmtInsertCheckpoint = db.prepare(`
@@ -192,6 +205,41 @@ const stmtDeleteArchivedFramesForWorld = db.prepare(`
   WHERE worldId = ?
 `);
 
+const stmtDeleteArchivedFramesRange = db.prepare(`
+  DELETE FROM archived_frames
+  WHERE worldId = ? AND tick >= ? AND tick <= ?
+`);
+
+const stmtInsertArchivedChunk = db.prepare(`
+  INSERT INTO archived_frame_chunks (worldId, chunkStartTick, chunkEndTick, frameCount, codec, createdAt, bytes, payloadGzip)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(worldId, chunkStartTick) DO UPDATE SET
+    chunkEndTick = excluded.chunkEndTick,
+    frameCount = excluded.frameCount,
+    codec = excluded.codec,
+    createdAt = excluded.createdAt,
+    bytes = excluded.bytes,
+    payloadGzip = excluded.payloadGzip
+`);
+
+const stmtGetArchivedChunkByStart = db.prepare(`
+  SELECT worldId, chunkStartTick, chunkEndTick, frameCount, codec, createdAt, bytes, payloadGzip
+  FROM archived_frame_chunks
+  WHERE worldId = ? AND chunkStartTick = ?
+  LIMIT 1
+`);
+
+const stmtArchivedChunkStats = db.prepare(`
+  SELECT COUNT(*) AS chunkCount, COALESCE(SUM(frameCount), 0) AS frameCount
+  FROM archived_frame_chunks
+  WHERE worldId = ?
+`);
+
+const stmtDeleteArchivedChunksForWorld = db.prepare(`
+  DELETE FROM archived_frame_chunks
+  WHERE worldId = ?
+`);
+
 const port = Math.floor(parseNum(arg('port', null), 8787));
 const initialScenarioName = arg('scenario', 'micro_repro_sustain');
 const initialSeed = (parseNum(arg('seed', null), 23) >>> 0);
@@ -204,8 +252,10 @@ const restoreLatest = hasFlag('restoreLatest')
   : false;
 
 const DEFAULT_WORLD_ID = 'w0';
+const ARCHIVE_CHUNK_SIZE = 100;
 
 let nextRequestId = 1;
+const pendingChunkFramesByWorld = new Map();
 
 class WorldHandle {
   constructor({ id, scenario, seed }) {
@@ -234,8 +284,15 @@ class WorldHandle {
           const tick = Math.max(0, Math.floor(Number(msg.tick) || 0));
           const frame = msg.frame;
           if (!frame || typeof frame !== 'object') return;
+
+          // Persist per-frame immediately (for newest/tail access), then compact into chunks.
           const encoded = encodeArchivedFrame(frame);
           stmtInsertArchivedFrame.run(worldId, tick, new Date().toISOString(), encoded.gz.length, encoded.gz);
+
+          const chunkStartTick = chunkStartForTick(tick);
+          const buf = getChunkBuffer(worldId, chunkStartTick);
+          buf.push({ tick, frame });
+          persistChunkIfReady(worldId, chunkStartTick);
         } catch {
           // best effort persistence; keep simulation running even if archival write fails.
         }
@@ -320,6 +377,9 @@ async function deleteWorld(id) {
   const handle = worlds.get(key);
   if (!handle) throw new Error(`Unknown world: ${key}`);
   worlds.delete(key);
+  clearChunkBuffersForWorld(key);
+  stmtDeleteArchivedFramesForWorld.run(key);
+  stmtDeleteArchivedChunksForWorld.run(key);
   await handle.terminate();
 }
 
@@ -328,6 +388,90 @@ function getWorldOrThrow(id) {
   const handle = worlds.get(key);
   if (!handle) throw new Error(`Unknown world: ${key}`);
   return handle;
+}
+
+function chunkStartForTick(tick) {
+  const t = Math.max(0, Math.floor(Number(tick) || 0));
+  return Math.floor(t / ARCHIVE_CHUNK_SIZE) * ARCHIVE_CHUNK_SIZE;
+}
+
+function getChunkBuffer(worldId, chunkStartTick) {
+  let worldMap = pendingChunkFramesByWorld.get(worldId);
+  if (!worldMap) {
+    worldMap = new Map();
+    pendingChunkFramesByWorld.set(worldId, worldMap);
+  }
+  let arr = worldMap.get(chunkStartTick);
+  if (!arr) {
+    arr = [];
+    worldMap.set(chunkStartTick, arr);
+  }
+  return arr;
+}
+
+function clearChunkBuffersForWorld(worldId) {
+  pendingChunkFramesByWorld.delete(worldId);
+}
+
+function persistChunkIfReady(worldId, chunkStartTick) {
+  const worldMap = pendingChunkFramesByWorld.get(worldId);
+  if (!worldMap) return;
+  const buf = worldMap.get(chunkStartTick);
+  if (!buf || buf.length < ARCHIVE_CHUNK_SIZE) return;
+
+  const dedup = new Map();
+  for (const it of buf) dedup.set(Number(it?.tick) || 0, it?.frame);
+  const frames = Array.from(dedup.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([, frame]) => frame)
+    .filter(Boolean);
+
+  const expectedEnd = chunkStartTick + ARCHIVE_CHUNK_SIZE - 1;
+  if (frames.length !== ARCHIVE_CHUNK_SIZE) return;
+  const firstTick = Number(frames[0]?.tick) || 0;
+  const lastTick = Number(frames[frames.length - 1]?.tick) || 0;
+  if (firstTick !== chunkStartTick || lastTick !== expectedEnd) return;
+
+  const encoded = encodeArchivedFrameChunk(frames);
+  stmtInsertArchivedChunk.run(
+    worldId,
+    chunkStartTick,
+    expectedEnd,
+    frames.length,
+    'gzip-json-array-v1',
+    new Date().toISOString(),
+    encoded.gz.length,
+    encoded.gz
+  );
+
+  // Once chunked, prune per-frame rows for that completed range.
+  stmtDeleteArchivedFramesRange.run(worldId, chunkStartTick, expectedEnd);
+  worldMap.delete(chunkStartTick);
+  if (worldMap.size === 0) pendingChunkFramesByWorld.delete(worldId);
+}
+
+function getArchivedFrameByTick(worldId, tick) {
+  const t = Math.max(0, Math.floor(Number(tick) || 0));
+
+  const row = stmtGetArchivedFrame.get(worldId, t);
+  if (row) return decodeArchivedFrame(row.payloadGzip);
+
+  const chunkStartTick = chunkStartForTick(t);
+  const cRow = stmtGetArchivedChunkByStart.get(worldId, chunkStartTick);
+  if (cRow) {
+    const frames = decodeArchivedFrameChunk(cRow.payloadGzip);
+    for (const f of frames) {
+      if (Number(f?.tick) === t) return f;
+    }
+  }
+
+  const worldMap = pendingChunkFramesByWorld.get(worldId);
+  const pending = worldMap?.get(chunkStartTick) || [];
+  for (const it of pending) {
+    if (Number(it?.tick) === t && it?.frame) return it.frame;
+  }
+
+  return null;
 }
 
 function encodeCheckpoint(snapshot) {
@@ -350,6 +494,18 @@ function encodeArchivedFrame(frame) {
 function decodeArchivedFrame(gzBuffer) {
   const json = gunzipSync(gzBuffer).toString('utf8');
   return JSON.parse(json);
+}
+
+function encodeArchivedFrameChunk(frames) {
+  const json = JSON.stringify({ frames });
+  const gz = gzipSync(Buffer.from(json, 'utf8'));
+  return { gz, jsonBytes: Buffer.byteLength(json, 'utf8') };
+}
+
+function decodeArchivedFrameChunk(gzBuffer) {
+  const json = gunzipSync(gzBuffer).toString('utf8');
+  const payload = JSON.parse(json);
+  return Array.isArray(payload?.frames) ? payload.frames : [];
 }
 
 function xmlEscape(s) {
@@ -909,6 +1065,8 @@ async function restoreLatestCheckpointForWorld(worldId) {
 // Bootstrap default world.
 if (!restoreLatest) {
   stmtDeleteArchivedFramesForWorld.run(DEFAULT_WORLD_ID);
+  stmtDeleteArchivedChunksForWorld.run(DEFAULT_WORLD_ID);
+  clearChunkBuffersForWorld(DEFAULT_WORLD_ID);
 }
 await createWorld({ id: DEFAULT_WORLD_ID, scenario: initialScenarioName, seed: initialSeed });
 
@@ -1029,13 +1187,43 @@ app.get('/api/worlds/:id/frameTimeline', async (req, reply) => {
     // Ensure world exists/running.
     await getWorldOrThrow(worldId).rpc('getStatus');
 
-    const stats = stmtArchivedFrameStats.get(worldId) || {};
+    const frameStats = stmtArchivedFrameStats.get(worldId) || {};
+    const chunkStats = stmtArchivedChunkStats.get(worldId) || {};
+
+    const frameCount = Number(frameStats.count) || 0;
+    const chunkFrameCount = Number(chunkStats.frameCount) || 0;
+    const oldestCandidates = [frameStats.oldestTick, frameStats.latestTick, null];
+    const latestCandidates = [frameStats.latestTick, frameStats.oldestTick, null];
+
+    // Chunk bounds are deterministic by chunkStartTick/frameCount.
+    const firstChunk = db.prepare(
+      'SELECT chunkStartTick, chunkEndTick FROM archived_frame_chunks WHERE worldId = ? ORDER BY chunkStartTick ASC LIMIT 1'
+    ).get(worldId);
+    const lastChunk = db.prepare(
+      'SELECT chunkStartTick, chunkEndTick FROM archived_frame_chunks WHERE worldId = ? ORDER BY chunkStartTick DESC LIMIT 1'
+    ).get(worldId);
+
+    if (firstChunk) oldestCandidates.push(Number(firstChunk.chunkStartTick));
+    if (lastChunk) latestCandidates.push(Number(lastChunk.chunkEndTick));
+
+    const oldestTick = oldestCandidates
+      .map((v) => Number(v))
+      .filter((v) => Number.isFinite(v))
+      .sort((a, b) => a - b)[0] ?? null;
+    const latestTick = latestCandidates
+      .map((v) => Number(v))
+      .filter((v) => Number.isFinite(v))
+      .sort((a, b) => b - a)[0] ?? null;
+
     return {
       ok: true,
       worldId,
-      archiveFrames: Number(stats.count) || 0,
-      archiveOldestTick: Number.isFinite(Number(stats.oldestTick)) ? Number(stats.oldestTick) : null,
-      archiveLatestTick: Number.isFinite(Number(stats.latestTick)) ? Number(stats.latestTick) : null
+      archiveFrames: frameCount + chunkFrameCount,
+      archiveOldestTick: oldestTick,
+      archiveLatestTick: latestTick,
+      chunkFrames: chunkFrameCount,
+      tailFrames: frameCount,
+      chunkSize: ARCHIVE_CHUNK_SIZE
     };
   } catch (err) {
     reply.code(404);
@@ -1052,13 +1240,13 @@ app.get('/api/worlds/:id/frame/:tick', async (req, reply) => {
       return { ok: false, error: 'tick must be a non-negative integer' };
     }
 
-    const row = stmtGetArchivedFrame.get(worldId, tick);
-    if (!row) {
+    const frame = getArchivedFrameByTick(worldId, tick);
+    if (!frame) {
       reply.code(404);
       return { ok: false, error: `frame not found for tick ${tick}` };
     }
 
-    return decodeArchivedFrame(row.payloadGzip);
+    return frame;
   } catch (err) {
     reply.code(400);
     return { ok: false, error: String(err?.message || err) };
@@ -1077,12 +1265,10 @@ app.get('/api/worlds/:id/frames', async (req, reply) => {
       return { ok: false, error: 'invalid startTick/endTick range' };
     }
 
-    const rows = stmtListArchivedFramesRange.all(worldId, startTick, endTick);
     const frames = [];
-    for (const row of rows) {
-      const t = Number(row.tick) || 0;
-      if (((t - startTick) % stride) !== 0) continue;
-      frames.push(decodeArchivedFrame(row.payloadGzip));
+    for (let t = startTick; t <= endTick; t += stride) {
+      const frame = getArchivedFrameByTick(worldId, t);
+      if (frame) frames.push(frame);
     }
 
     return {
@@ -1144,6 +1330,8 @@ app.post('/api/worlds/:id/control/setScenario', async (req, reply) => {
     const nextSeed = (Number.isFinite(Number(req.body?.seed)) ? Number(req.body.seed) : initialSeed) >>> 0;
     ensureScenarioExists(nextScenario);
     stmtDeleteArchivedFramesForWorld.run(worldId);
+    stmtDeleteArchivedChunksForWorld.run(worldId);
+    clearChunkBuffersForWorld(worldId);
     return await getWorldOrThrow(worldId).rpc('setScenario', { name: nextScenario, seed: nextSeed });
   } catch (err) {
     reply.code(400);

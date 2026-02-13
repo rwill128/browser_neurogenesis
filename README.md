@@ -4,23 +4,6 @@
 
 Browser Neurogenesis is an experimental artificial-life simulation that blends **rigid-body constraints**, **soft-body deformation**, **fluid dynamics**, and **particle ecology** into one continuous system. Creatures are not pre-scripted sprites — they are physically embodied, energy-constrained, and mutation-driven organisms that survive (or fail) inside a dynamic environment.
 
-## Why this project is inspiring
-
-Most simulations pick one axis:
-- neat cellular automata,
-- purely kinematic boids,
-- or isolated physics toy systems.
-
-This project combines several hard problems at once:
-- **Body plan evolution** (topology + morphology)
-- **Embodied control** (neural/actuation behavior tied to physical form)
-- **Continuous media interaction** (fluids, drag, dye, viscosity fields)
-- **Ecological pressure** (resource fields, density constraints, reproduction gates)
-
-That combination creates a rare kind of emergent behavior: lineages that are not only visually distinct, but *mechanically and metabolically distinct*.
-
----
-
 ## Core features
 
 ### 1) Hybrid body physics (rigid + soft)

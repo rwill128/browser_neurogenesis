@@ -329,7 +329,7 @@ function captureRenderFrameIfNeeded({ force = false, includeArchive = false } = 
     }
   }
 
-  const includeRichStats = includeArchive && (tick % ARCHIVE_RICH_STATS_EVERY_N_TICKS === 0);
+  const includeRichStats = includeArchive && tick > 0 && (tick % ARCHIVE_RICH_STATS_EVERY_N_TICKS === 0);
   const frame = computeSnapshot('render', { includeRichStats });
   frameSeq += 1;
   frame.__frameSeq = frameSeq;

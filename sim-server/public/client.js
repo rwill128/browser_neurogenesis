@@ -34,6 +34,25 @@ const historyInfoEl = document.getElementById('historyInfo');
 const ctx = canvas.getContext('2d');
 const renderPerfByWorld = new Map();
 
+let renderRafPending = false;
+let renderPanelsOnNextFrame = false;
+
+function scheduleRender({ includePanels = false } = {}) {
+  if (includePanels) renderPanelsOnNextFrame = true;
+  if (renderRafPending) return;
+  renderRafPending = true;
+
+  requestAnimationFrame(() => {
+    renderRafPending = false;
+    if (!currentWorldId) return;
+    const snap = lastSnapshotByWorld.get(currentWorldId);
+    if (!snap) return;
+    const shouldRenderPanels = renderPanelsOnNextFrame;
+    renderPanelsOnNextFrame = false;
+    drawSnapshot(snap, { includePanels: shouldRenderPanels });
+  });
+}
+
 let creatureStatsMode = 'compact';
 
 function syncCreatureStatsModeUI() {
@@ -687,7 +706,7 @@ function renderPanels(worldId) {
   updateFollowButton();
 }
 
-function drawSnapshot(snap) {
+function drawSnapshot(snap, { includePanels = true } = {}) {
   const renderStartMs = performance.now();
   const rect = canvas.getBoundingClientRect();
 
@@ -882,7 +901,9 @@ function drawSnapshot(snap) {
     atTick: Number(snap.tick) || 0
   });
 
-  renderPanels(worldId);
+  if (includePanels) {
+    renderPanels(worldId);
+  }
 }
 
 async function refreshScenarios() {
@@ -1049,7 +1070,7 @@ function cycleCreature(delta) {
     followByWorld.set(currentWorldId, nextId);
   }
 
-  renderPanels(currentWorldId);
+  scheduleRender({ includePanels: true });
 }
 
 function toggleFollowSelected() {
@@ -1140,6 +1161,7 @@ fitBtn.addEventListener('click', () => {
   if (!currentWorldId) return;
   const cam = getCamera(currentWorldId);
   fitCameraToWorld(currentWorldId, cam.worldW || 1, cam.worldH || 1);
+  scheduleRender({ includePanels: false });
 });
 
 prevCreatureBtn.addEventListener('click', () => cycleCreature(-1));
@@ -1148,7 +1170,7 @@ toggleFollowBtn.addEventListener('click', () => toggleFollowSelected());
 creatureStatsModeBtn?.addEventListener('click', () => {
   creatureStatsMode = creatureStatsMode === 'compact' ? 'expanded' : 'compact';
   syncCreatureStatsModeUI();
-  if (currentWorldId) renderPanels(currentWorldId);
+  scheduleRender({ includePanels: true });
 });
 
 refreshConfigBtn.addEventListener('click', async () => {
@@ -1178,7 +1200,7 @@ window.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape') {
     selectionByWorld.delete(currentWorldId);
     followByWorld.delete(currentWorldId);
-    renderPanels(currentWorldId);
+    scheduleRender({ includePanels: true });
   }
 });
 
@@ -1214,6 +1236,8 @@ canvas.addEventListener('pointermove', (ev) => {
 
   lastDragX = p.x;
   lastDragY = p.y;
+
+  scheduleRender({ includePanels: false });
 });
 
 function selectCreatureAtCanvasPoint(canvasPoint) {
@@ -1246,7 +1270,7 @@ function selectCreatureAtCanvasPoint(canvasPoint) {
     followByWorld.delete(currentWorldId);
   }
 
-  renderPanels(currentWorldId);
+  scheduleRender({ includePanels: true });
 }
 
 function endDrag(ev) {
@@ -1266,6 +1290,7 @@ canvas.addEventListener('dblclick', () => {
   if (!currentWorldId) return;
   const cam = getCamera(currentWorldId);
   fitCameraToWorld(currentWorldId, cam.worldW || 1, cam.worldH || 1);
+  scheduleRender({ includePanels: false });
 });
 
 canvas.addEventListener('wheel', (ev) => {
@@ -1277,6 +1302,7 @@ canvas.addEventListener('wheel', (ev) => {
 
   const zoomFactor = Math.exp(-ev.deltaY * 0.0015);
   zoomAround(cam, p.x, p.y, zoomFactor);
+  scheduleRender({ includePanels: false });
 }, { passive: false });
 
 syncCreatureStatsModeUI();

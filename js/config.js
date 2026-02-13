@@ -222,6 +222,8 @@ const config = {
 
     MUTATION_RATE_PERCENT: 0.1,
     MUTATION_CHANCE_BOOL: 0.05,
+    // Experimental mutation strategy: preserve parent triangle-like blueprint topology (silo legacy mutator).
+    MUTATION_TRIANGLE_SILO_MODE: false,
     MUTATION_CHANCE_NODE_TYPE: 0.1,
     MUTATION_CHANCE_REASSIGN_NEURON_LINK: 0.02,
     ADD_POINT_MUTATION_CHANCE: 0.03,

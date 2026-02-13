@@ -99,6 +99,69 @@ test('donor module graft mutation can add donor blueprint module to offspring', 
   }
 });
 
+test('triangle silo mutation mode preserves parent blueprint topology exactly', () => {
+  const cfgBackup = {
+    MUTATION_TRIANGLE_SILO_MODE: config.MUTATION_TRIANGLE_SILO_MODE,
+    MUTATION_CHANCE_BOOL: config.MUTATION_CHANCE_BOOL,
+    MUTATION_CHANCE_NODE_TYPE: config.MUTATION_CHANCE_NODE_TYPE,
+    ADD_POINT_MUTATION_CHANCE: config.ADD_POINT_MUTATION_CHANCE,
+    SPRING_SUBDIVISION_MUTATION_CHANCE: config.SPRING_SUBDIVISION_MUTATION_CHANCE,
+    HGT_GRAFT_MUTATION_CHANCE: config.HGT_GRAFT_MUTATION_CHANCE
+  };
+
+  const runtimeBackup = {
+    mutationStats: runtimeState.mutationStats,
+    softBodyPopulation: runtimeState.softBodyPopulation
+  };
+
+  try {
+    config.MUTATION_TRIANGLE_SILO_MODE = true;
+    config.MUTATION_CHANCE_BOOL = 1;
+    config.MUTATION_CHANCE_NODE_TYPE = 1;
+    config.ADD_POINT_MUTATION_CHANCE = 1;
+    config.SPRING_SUBDIVISION_MUTATION_CHANCE = 1;
+    config.HGT_GRAFT_MUTATION_CHANCE = 1;
+
+    runtimeState.mutationStats = {};
+
+    const parent = new SoftBody(1110, 200, 200, null, false);
+    const parentBlueprintSnapshot = JSON.parse(JSON.stringify({
+      points: parent.blueprintPoints,
+      springs: parent.blueprintSprings
+    }));
+
+    runtimeState.softBodyPopulation = [parent];
+
+    const child = withMockedRandom(0, () => new SoftBody(1111, 210, 210, parent, false));
+
+    assert.equal(child.blueprintPoints.length, parentBlueprintSnapshot.points.length);
+    assert.equal(child.blueprintSprings.length, parentBlueprintSnapshot.springs.length);
+
+    for (let i = 0; i < child.blueprintPoints.length; i++) {
+      const c = child.blueprintPoints[i];
+      const p = parentBlueprintSnapshot.points[i];
+      assert.equal(c.relX, p.relX);
+      assert.equal(c.relY, p.relY);
+      assert.equal(c.nodeType, p.nodeType);
+      assert.equal(c.movementType, p.movementType);
+    }
+
+    for (let i = 0; i < child.blueprintSprings.length; i++) {
+      const c = child.blueprintSprings[i];
+      const p = parentBlueprintSnapshot.springs[i];
+      assert.equal(c.p1Index, p.p1Index);
+      assert.equal(c.p2Index, p.p2Index);
+      assert.equal(c.restLength, p.restLength);
+    }
+
+    assert.equal((runtimeState.mutationStats.mutationTriangleSiloApplied || 0) >= 1, true);
+  } finally {
+    Object.assign(config, cfgBackup);
+    runtimeState.mutationStats = runtimeBackup.mutationStats;
+    runtimeState.softBodyPopulation = runtimeBackup.softBodyPopulation;
+  }
+});
+
 test('offspring falls back to parent blueprint when viability guardrails reject mutation result', () => {
   const cfgBackup = {
     OFFSPRING_MIN_NODE_TYPE_DIVERSITY: config.OFFSPRING_MIN_NODE_TYPE_DIVERSITY

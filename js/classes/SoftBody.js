@@ -2277,8 +2277,9 @@ export class SoftBody {
             this.blueprintSprings = JSON.parse(JSON.stringify(parentBody.blueprintSprings));
             const parentBlueprintSnapshot = this._cloneBlueprintSnapshot(this.blueprintPoints, this.blueprintSprings);
 
-            // 2. Mutate blueprint points (coordinates, types, properties)
-            this.blueprintPoints.forEach(bp => {
+            if (config.MUTATION_TRIANGLE_SILO_MODE !== true) {
+                // 2. Mutate blueprint points (coordinates, types, properties)
+                this.blueprintPoints.forEach(bp => {
                 bp.activationIntervalGene = this._sanitizeActivationIntervalGene(
                     bp.activationIntervalGene ?? this._randomActivationIntervalGene()
                 );
@@ -2685,11 +2686,15 @@ export class SoftBody {
                     }
                 }
             }
-            // TODO: Add blueprint versions of Segment Duplication, Symmetrical Duplication etc.
+                // TODO: Add blueprint versions of Segment Duplication, Symmetrical Duplication etc.
 
-            // Optional HGT-like donor graft: pull a connected module from a nearby donor blueprint.
-            if (Math.random() < Math.max(0, Math.min(1, Number(config.HGT_GRAFT_MUTATION_CHANCE) || 0))) {
-                this._attemptDonorModuleGraftMutation(parentBody);
+                // Optional HGT-like donor graft: pull a connected module from a nearby donor blueprint.
+                if (Math.random() < Math.max(0, Math.min(1, Number(config.HGT_GRAFT_MUTATION_CHANCE) || 0))) {
+                    this._attemptDonorModuleGraftMutation(parentBody);
+                }
+            } else {
+                // Silo mode: keep parent blueprint exactly, mutating only non-structural inherited genes.
+                this._bumpMutationStat('mutationTriangleSiloApplied');
             }
 
             // Finalize and validate mutated blueprint before instantiation.

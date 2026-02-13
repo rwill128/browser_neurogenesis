@@ -1151,6 +1151,19 @@ export class SoftBody {
                         minRatio: clamp(Number(rawInstr.minRatio) || 0.5, 0, 5),
                         line: Math.max(0, Math.floor(Number(rawInstr.line) || 0))
                     });
+                } else if (op === 'WAIT') {
+                    out.push({ op: 'WAIT', ticks: Math.max(1, Math.min(5000, Math.floor(Number(rawInstr.ticks) || 1))) });
+                } else if (op === 'INC') {
+                    out.push({ op: 'INC', reg: Math.max(0, Math.min(3, Math.floor(Number(rawInstr.reg) || 0))) });
+                } else if (op === 'DEC') {
+                    out.push({ op: 'DEC', reg: Math.max(0, Math.min(3, Math.floor(Number(rawInstr.reg) || 0))) });
+                } else if (op === 'IF_REG_GOTO') {
+                    out.push({
+                        op: 'IF_REG_GOTO',
+                        reg: Math.max(0, Math.min(3, Math.floor(Number(rawInstr.reg) || 0))),
+                        gte: Math.max(-100000, Math.min(100000, Math.floor(Number(rawInstr.gte) || 0))),
+                        line: Math.max(0, Math.floor(Number(rawInstr.line) || 0))
+                    });
                 } else if (op === 'HALT') {
                     out.push({ op: 'HALT' });
                 }
@@ -1373,7 +1386,7 @@ export class SoftBody {
         if (Math.random() < mutationChance) {
             const idx = Math.floor(Math.random() * program.length);
             const instr = program[idx] || { op: 'GROW' };
-            const ops = ['GROW', 'GOTO', 'IF_ENERGY_GOTO', 'HALT'];
+            const ops = ['GROW', 'GOTO', 'IF_ENERGY_GOTO', 'WAIT', 'INC', 'DEC', 'IF_REG_GOTO', 'HALT'];
             const nextOp = ops[Math.floor(Math.random() * ops.length)];
             if (nextOp === 'GOTO') {
                 program[idx] = { op: 'GOTO', line: Math.floor(Math.random() * Math.max(1, program.length)) };
@@ -1381,6 +1394,19 @@ export class SoftBody {
                 program[idx] = {
                     op: 'IF_ENERGY_GOTO',
                     minRatio: Math.max(0, Math.min(5, (Number(instr.minRatio) || 0.5) + (Math.random() - 0.5) * 2 * mutationMagnitude)),
+                    line: Math.floor(Math.random() * Math.max(1, program.length))
+                };
+            } else if (nextOp === 'WAIT') {
+                program[idx] = { op: 'WAIT', ticks: Math.max(1, Math.min(5000, Math.floor((Number(instr.ticks) || 5) + (Math.random() - 0.5) * 2 * 100 * mutationMagnitude))) };
+            } else if (nextOp === 'INC') {
+                program[idx] = { op: 'INC', reg: Math.floor(Math.random() * 4) };
+            } else if (nextOp === 'DEC') {
+                program[idx] = { op: 'DEC', reg: Math.floor(Math.random() * 4) };
+            } else if (nextOp === 'IF_REG_GOTO') {
+                program[idx] = {
+                    op: 'IF_REG_GOTO',
+                    reg: Math.floor(Math.random() * 4),
+                    gte: Math.floor((Math.random() - 0.5) * 20),
                     line: Math.floor(Math.random() * Math.max(1, program.length))
                 };
             } else if (nextOp === 'HALT') {
@@ -1433,11 +1459,16 @@ export class SoftBody {
     _ensureGrowthProgramState(programLength = 0) {
         const len = Math.max(1, Math.floor(Number(programLength) || 1));
         if (!this.growthProgramState || typeof this.growthProgramState !== 'object') {
-            this.growthProgramState = { ip: 0, halted: false, executed: 0 };
+            this.growthProgramState = { ip: 0, halted: false, executed: 0, waitRemaining: 0, regs: [0, 0, 0, 0], backwardsJumpsInWindow: 0 };
         }
         this.growthProgramState.ip = Math.max(0, Math.min(len - 1, Math.floor(Number(this.growthProgramState.ip) || 0)));
         this.growthProgramState.halted = Boolean(this.growthProgramState.halted);
         this.growthProgramState.executed = Math.max(0, Math.floor(Number(this.growthProgramState.executed) || 0));
+        this.growthProgramState.waitRemaining = Math.max(0, Math.floor(Number(this.growthProgramState.waitRemaining) || 0));
+        this.growthProgramState.backwardsJumpsInWindow = Math.max(0, Math.floor(Number(this.growthProgramState.backwardsJumpsInWindow) || 0));
+        if (!Array.isArray(this.growthProgramState.regs)) this.growthProgramState.regs = [0, 0, 0, 0];
+        this.growthProgramState.regs = this.growthProgramState.regs.slice(0, 4).map((v) => Math.max(-100000, Math.min(100000, Math.floor(Number(v) || 0))));
+        while (this.growthProgramState.regs.length < 4) this.growthProgramState.regs.push(0);
         return this.growthProgramState;
     }
 
@@ -1448,22 +1479,66 @@ export class SoftBody {
         const state = this._ensureGrowthProgramState(program.length);
         if (state.halted) return { allowGrowth: false, reason: 'halted' };
 
+        if (state.waitRemaining > 0) {
+            state.waitRemaining -= 1;
+            return { allowGrowth: false, reason: 'wait' };
+        }
+
         const instr = program[state.ip] || { op: 'GROW' };
         const op = String(instr.op || 'GROW').toUpperCase();
         state.executed += 1;
 
+        const jumpTo = (line, reason) => {
+            const next = Math.max(0, Math.min(program.length - 1, Math.floor(Number(line) || 0)));
+            if (next <= state.ip) {
+                state.backwardsJumpsInWindow += 1;
+                if (state.backwardsJumpsInWindow > 64) {
+                    state.halted = true;
+                    return { allowGrowth: false, reason: 'loop_guard_halt' };
+                }
+            } else {
+                state.backwardsJumpsInWindow = 0;
+            }
+            state.ip = next;
+            return { allowGrowth: false, reason };
+        };
+
         if (op === 'GOTO') {
-            state.ip = Math.max(0, Math.min(program.length - 1, Math.floor(Number(instr.line) || 0)));
-            return { allowGrowth: false, reason: 'goto' };
+            return jumpTo(instr.line, 'goto');
         }
         if (op === 'IF_ENERGY_GOTO') {
             const minRatio = Number(instr.minRatio) || 0;
             if (energyRatio >= minRatio) {
-                state.ip = Math.max(0, Math.min(program.length - 1, Math.floor(Number(instr.line) || 0)));
-                return { allowGrowth: false, reason: 'if_goto_taken' };
+                return jumpTo(instr.line, 'if_goto_taken');
             }
             state.ip = Math.min(program.length - 1, state.ip + 1);
             return { allowGrowth: false, reason: 'if_goto_not_taken' };
+        }
+        if (op === 'IF_REG_GOTO') {
+            const reg = Math.max(0, Math.min(3, Math.floor(Number(instr.reg) || 0)));
+            const gte = Math.floor(Number(instr.gte) || 0);
+            if ((Number(state.regs[reg]) || 0) >= gte) {
+                return jumpTo(instr.line, 'if_reg_goto_taken');
+            }
+            state.ip = Math.min(program.length - 1, state.ip + 1);
+            return { allowGrowth: false, reason: 'if_reg_goto_not_taken' };
+        }
+        if (op === 'WAIT') {
+            state.waitRemaining = Math.max(0, Math.floor(Number(instr.ticks) || 1));
+            state.ip = Math.min(program.length - 1, state.ip + 1);
+            return { allowGrowth: false, reason: 'wait_set' };
+        }
+        if (op === 'INC') {
+            const reg = Math.max(0, Math.min(3, Math.floor(Number(instr.reg) || 0)));
+            state.regs[reg] = Math.max(-100000, Math.min(100000, (Number(state.regs[reg]) || 0) + 1));
+            state.ip = Math.min(program.length - 1, state.ip + 1);
+            return { allowGrowth: false, reason: 'inc' };
+        }
+        if (op === 'DEC') {
+            const reg = Math.max(0, Math.min(3, Math.floor(Number(instr.reg) || 0)));
+            state.regs[reg] = Math.max(-100000, Math.min(100000, (Number(state.regs[reg]) || 0) - 1));
+            state.ip = Math.min(program.length - 1, state.ip + 1);
+            return { allowGrowth: false, reason: 'dec' };
         }
         if (op === 'HALT') {
             state.halted = true;
@@ -1471,6 +1546,7 @@ export class SoftBody {
         }
 
         // Default/GROW
+        state.backwardsJumpsInWindow = 0;
         state.ip = Math.min(program.length - 1, state.ip + 1);
         return { allowGrowth: true, reason: 'grow' };
     }

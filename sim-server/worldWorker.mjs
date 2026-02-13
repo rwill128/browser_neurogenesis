@@ -273,6 +273,11 @@ function captureRenderFrameIfNeeded({ force = false } = {}) {
     if (tick <= 0) return null;
     if (tick === lastFrameCaptureTick) return null;
     if ((tick % FRAME_CAPTURE_STEP_STRIDE) !== 0) return null;
+  } else {
+    // Forced capture should still avoid pushing duplicate frames for the same tick.
+    if (frameHistory.length > 0 && tick === lastFrameCaptureTick) {
+      return frameHistory[frameHistory.length - 1] || null;
+    }
   }
 
   const frame = computeSnapshot('render');
@@ -450,7 +455,10 @@ parentPort.on('message', (msg) => {
             if (byOffset) return reply(requestId, { ok: true, result: byOffset });
           }
 
-          const latest = getLatestRenderFrame() || computeSnapshot('render');
+          // No explicit historical request: force-capture a fresh frame so HTTP/WS render snapshots
+          // stay aligned with current simulation status even after idle frame-buffer periods.
+          const fresh = captureRenderFrameIfNeeded({ force: true });
+          const latest = fresh || getLatestRenderFrame() || computeSnapshot('render');
           return reply(requestId, { ok: true, result: latest });
         }
 

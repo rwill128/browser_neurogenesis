@@ -66,6 +66,56 @@ function summarizePopulationNodeTypes(softBodies) {
   return { counts, ratios, totalNodes };
 }
 
+function normalizeInstabilityTelemetry(raw) {
+  const t = raw && typeof raw === 'object' ? raw : {};
+
+  const removedByReason = { ...(t.removedByReason && typeof t.removedByReason === 'object' ? t.removedByReason : {}) };
+  const removedByPhysicsKind = { ...(t.removedByPhysicsKind && typeof t.removedByPhysicsKind === 'object' ? t.removedByPhysicsKind : {}) };
+  const removedByBirthOrigin = { ...(t.removedByBirthOrigin && typeof t.removedByBirthOrigin === 'object' ? t.removedByBirthOrigin : {}) };
+  const removedByLifecycleStage = { ...(t.removedByLifecycleStage && typeof t.removedByLifecycleStage === 'object' ? t.removedByLifecycleStage : {}) };
+
+  let sumReasons = 0;
+  let derivedPhysicsFromReasons = 0;
+  for (const [reason, countRaw] of Object.entries(removedByReason)) {
+    const count = Math.max(0, Number(countRaw) || 0);
+    sumReasons += count;
+    if (String(reason).startsWith('physics_')) {
+      derivedPhysicsFromReasons += count;
+    }
+  }
+  const derivedNonPhysicsFromReasons = Math.max(0, sumReasons - derivedPhysicsFromReasons);
+
+  let totalPhysicsRemoved = Math.max(0, Number(t.totalPhysicsRemoved) || 0, derivedPhysicsFromReasons);
+  let totalNonPhysicsRemoved = Math.max(0, Number(t.totalNonPhysicsRemoved) || 0, derivedNonPhysicsFromReasons);
+  let totalUnknownRemoved = Math.max(0, Number(t.totalUnknownRemoved) || 0);
+
+  let totalRemoved = Math.max(
+    0,
+    Number(t.totalRemoved) || 0,
+    sumReasons,
+    totalPhysicsRemoved + totalNonPhysicsRemoved + totalUnknownRemoved
+  );
+
+  const knownClassTotal = totalPhysicsRemoved + totalNonPhysicsRemoved;
+  if (knownClassTotal > totalRemoved) {
+    totalRemoved = knownClassTotal;
+  }
+  totalUnknownRemoved = Math.max(totalUnknownRemoved, totalRemoved - knownClassTotal);
+
+  return {
+    totalRemoved,
+    totalPhysicsRemoved,
+    totalNonPhysicsRemoved,
+    totalUnknownRemoved,
+    removedByReason,
+    removedByPhysicsKind,
+    removedByBirthOrigin,
+    removedByLifecycleStage,
+    recentDeaths: Array.isArray(t.recentDeaths) ? t.recentDeaths.slice(-20) : [],
+    sampledDiagnostics: Array.isArray(t.sampledDiagnostics) ? t.sampledDiagnostics.slice(-10) : []
+  };
+}
+
 export class RealWorld {
   constructor(scenario, seed = 42) {
     this.config = scenario;
@@ -517,7 +567,7 @@ export class RealWorld {
       maxCells: 1200
     });
 
-    const instabilityTelemetry = this.worldState.instabilityTelemetry || {};
+    const instabilityTelemetry = normalizeInstabilityTelemetry(this.worldState.instabilityTelemetry || {});
     const edgeLengthTelemetry = this.worldState.edgeLengthTelemetry || {};
     const nodeTypeSummary = summarizePopulationNodeTypes(this.softBodyPopulation);
 
@@ -543,22 +593,7 @@ export class RealWorld {
       nodeTypeCounts: nodeTypeSummary.counts,
       nodeTypeRatios: nodeTypeSummary.ratios,
       totalNodes: nodeTypeSummary.totalNodes,
-      instabilityTelemetry: {
-        totalRemoved: Number(instabilityTelemetry.totalRemoved) || 0,
-        totalPhysicsRemoved: Number(instabilityTelemetry.totalPhysicsRemoved) || 0,
-        totalNonPhysicsRemoved: Number(instabilityTelemetry.totalNonPhysicsRemoved) || 0,
-        totalUnknownRemoved: Number(instabilityTelemetry.totalUnknownRemoved) || 0,
-        removedByReason: instabilityTelemetry.removedByReason || {},
-        removedByPhysicsKind: instabilityTelemetry.removedByPhysicsKind || {},
-        removedByBirthOrigin: instabilityTelemetry.removedByBirthOrigin || {},
-        removedByLifecycleStage: instabilityTelemetry.removedByLifecycleStage || {},
-        recentDeaths: Array.isArray(instabilityTelemetry.recentDeaths)
-          ? instabilityTelemetry.recentDeaths.slice(-20)
-          : [],
-        sampledDiagnostics: Array.isArray(instabilityTelemetry.sampledDiagnostics)
-          ? instabilityTelemetry.sampledDiagnostics.slice(-10)
-          : []
-      },
+      instabilityTelemetry,
       edgeLengthTelemetry: {
         enabled: edgeLengthTelemetry.enabled !== false,
         sampleEveryNSteps: Number(edgeLengthTelemetry.sampleEveryNSteps) || 0,

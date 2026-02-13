@@ -90,6 +90,11 @@ function resetWorld(nextScenarioName, nextSeed) {
     PARTICLE_POPULATION_FLOOR: 0,
     PARTICLE_POPULATION_CEILING: 0,
     PARTICLES_PER_SECOND: 0,
+    INITIAL_TRIANGULATED_PRIMITIVES_ENABLED: true,
+    INITIAL_TRI_TEMPLATE_WEIGHT_TRIANGLE: 1,
+    INITIAL_TRI_TEMPLATE_WEIGHT_DIAMOND: 0,
+    INITIAL_TRI_TEMPLATE_WEIGHT_HEXAGON: 0,
+    INITIAL_TRI_MESH_EDGE_RIGID_CHANCE: 1,
     FORCE_ALL_SPRINGS_RIGID: true,
     RIGID_CONSTRAINT_PROJECTION_ENABLED: true,
     RIGID_CONSTRAINT_PROJECTION_ITERATIONS: 8,
@@ -225,6 +230,11 @@ function collectFluidDenseRGBA() {
 function computeSnapshot(mode = 'render') {
   const snap = world.snapshot();
   const worldDims = world?.config?.world || null;
+
+  // Archive/storage hygiene: do not persist bulky recent-death payloads in frame snapshots.
+  if (snap?.instabilityTelemetry && typeof snap.instabilityTelemetry === 'object') {
+    delete snap.instabilityTelemetry.recentDeaths;
+  }
 
   if (mode === 'lite') {
     return {
@@ -426,7 +436,7 @@ let loopLastAt = Date.now();
 const MAX_STEPS_PER_LOOP_REALTIME = 50;
 const MAX_STEPS_PER_LOOP_MAX = 5000;
 const MAX_MODE_BATCH_WALL_MS = 25;
-const REALTIME_MAX_STEPS_PER_SEC = 10;
+const REALTIME_MAX_STEPS_PER_SEC = 2;
 const REALTIME_MIN_STEP_INTERVAL_MS = Math.max(1, Math.floor(1000 / REALTIME_MAX_STEPS_PER_SEC));
 
 function scheduleNextLoop() {

@@ -446,7 +446,7 @@ let loopLastAt = Date.now();
 const MAX_STEPS_PER_LOOP_REALTIME = 50;
 const MAX_STEPS_PER_LOOP_MAX = 5000;
 const MAX_MODE_BATCH_WALL_MS = 25;
-const REALTIME_MAX_STEPS_PER_SEC = 2;
+const REALTIME_MAX_STEPS_PER_SEC = 0.5;
 const REALTIME_MIN_STEP_INTERVAL_MS = Math.max(1, Math.floor(1000 / REALTIME_MAX_STEPS_PER_SEC));
 
 function scheduleNextLoop() {

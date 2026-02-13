@@ -59,27 +59,48 @@ export class FluidField {
     }
 
     lin_solve(b, x, x0, a_global_param, c_global_param, field_type, base_diff_rate, dt_param) {
+        const N = this.size;
+        const NMinus1 = N - 1;
         const cRecipGlobal = 1.0 / c_global_param;
-        for (let k_iter = 0; k_iter < this.iterations; k_iter++) {
-            for (let j = 1; j < this.size - 1; j++) {
-                for (let i = 1; i < this.size - 1; i++) {
-                    const idx = this.IX(i,j);
-                    let effective_a = a_global_param;
-                    let effective_cRecip = cRecipGlobal;
 
-                    if ((field_type === 'velX' || field_type === 'velY')) {
-                        if (this.viscosityField && this.viscosityField[idx] !== undefined) { 
-                            const localViscosityMultiplier = Math.max(config.MIN_VISCOSITY_MULTIPLIER, Math.min(this.viscosityField[idx], config.MAX_VISCOSITY_MULTIPLIER));
-                            const cell_specific_diff_rate = base_diff_rate * localViscosityMultiplier; 
-                            const temp_effective_a = dt_param * cell_specific_diff_rate * (this.size - 2) * (this.size - 2);
-                            const temp_denominator_c = 1 + 4 * temp_effective_a;
-                            if (temp_denominator_c !== 0 && !isNaN(temp_effective_a) && isFinite(temp_effective_a)) {
-                                effective_a = temp_effective_a;
-                                effective_cRecip = 1.0 / temp_denominator_c;
-                            } 
-                        }
+        const isVelocityField = (field_type === 'velX' || field_type === 'velY');
+        const viscosityField = (isVelocityField && this.viscosityField) ? this.viscosityField : null;
+
+        if (!viscosityField) {
+            for (let k_iter = 0; k_iter < this.iterations; k_iter++) {
+                for (let j = 1; j < NMinus1; j++) {
+                    let idx = j * N + 1;
+                    const rowEnd = j * N + NMinus1;
+                    while (idx < rowEnd) {
+                        x[idx] = (x0[idx] + a_global_param * (x[idx + 1] + x[idx - 1] + x[idx + N] + x[idx - N])) * cRecipGlobal;
+                        idx++;
                     }
-                    x[idx] = (x0[idx] + effective_a * (x[this.IX(i+1,j)] + x[this.IX(i-1,j)] + x[this.IX(i,j+1)] + x[this.IX(i,j-1)])) * effective_cRecip;
+                }
+                this.set_bnd(b, x);
+            }
+            return;
+        }
+
+        const minVisc = Number(config.MIN_VISCOSITY_MULTIPLIER);
+        const maxVisc = Number(config.MAX_VISCOSITY_MULTIPLIER);
+        const gridFactor = (N - 2) * (N - 2);
+        const baseScale = dt_param * base_diff_rate * gridFactor;
+
+        for (let k_iter = 0; k_iter < this.iterations; k_iter++) {
+            for (let j = 1; j < NMinus1; j++) {
+                let idx = j * N + 1;
+                const rowEnd = j * N + NMinus1;
+                while (idx < rowEnd) {
+                    let localMultiplier = viscosityField[idx];
+                    if (!Number.isFinite(localMultiplier)) localMultiplier = 1;
+                    if (localMultiplier < minVisc) localMultiplier = minVisc;
+                    else if (localMultiplier > maxVisc) localMultiplier = maxVisc;
+
+                    const effectiveA = baseScale * localMultiplier;
+                    const effectiveCRecip = 1.0 / (1 + 4 * effectiveA);
+
+                    x[idx] = (x0[idx] + effectiveA * (x[idx + 1] + x[idx - 1] + x[idx + N] + x[idx - N])) * effectiveCRecip;
+                    idx++;
                 }
             }
             this.set_bnd(b, x);
@@ -92,43 +113,52 @@ export class FluidField {
     }
 
     project(velocX_in_out, velocY_in_out, p_temp, div_temp) {
-        for (let j = 1; j < this.size - 1; j++) {
-            for (let i = 1; i < this.size - 1; i++) {
-                const idx = this.IX(i,j);
-                div_temp[idx] = -0.5 * (velocX_in_out[this.IX(i+1,j)] - velocX_in_out[this.IX(i-1,j)] + velocY_in_out[this.IX(i,j+1)] - velocY_in_out[this.IX(i,j-1)]) / this.size;
+        const N = this.size;
+        const NMinus1 = N - 1;
+
+        for (let j = 1; j < NMinus1; j++) {
+            let idx = j * N + 1;
+            const rowEnd = j * N + NMinus1;
+            while (idx < rowEnd) {
+                div_temp[idx] = -0.5 * (velocX_in_out[idx + 1] - velocX_in_out[idx - 1] + velocY_in_out[idx + N] - velocY_in_out[idx - N]) / N;
                 p_temp[idx] = 0;
+                idx++;
             }
         }
+
         this.set_bnd(0, div_temp);
         this.set_bnd(0, p_temp);
         this.lin_solve(0, p_temp, div_temp, 1, 4, 'pressure', 0, 0);
 
-        for (let j = 1; j < this.size - 1; j++) {
-            for (let i = 1; i < this.size - 1; i++) {
-                const idx = this.IX(i,j);
-                velocX_in_out[idx] -= 0.5 * (p_temp[this.IX(i+1,j)] - p_temp[this.IX(i-1,j)]) * this.size;
-                velocY_in_out[idx] -= 0.5 * (p_temp[this.IX(i,j+1)] - p_temp[this.IX(i,j-1)]) * this.size;
+        for (let j = 1; j < NMinus1; j++) {
+            let idx = j * N + 1;
+            const rowEnd = j * N + NMinus1;
+            while (idx < rowEnd) {
+                velocX_in_out[idx] -= 0.5 * (p_temp[idx + 1] - p_temp[idx - 1]) * N;
+                velocY_in_out[idx] -= 0.5 * (p_temp[idx + N] - p_temp[idx - N]) * N;
+                idx++;
             }
         }
+
         this.set_bnd(1, velocX_in_out);
         this.set_bnd(2, velocY_in_out);
     }
 
     advect(b, d_out, d_in, velocX_source, velocY_source, dt) {
-        let i0, i1, j0, j1;
         const N = this.size;
-        const dtx_scaled = dt * N; 
+        const NMinus1 = N - 1;
+        const dtx_scaled = dt * N;
         const dty_scaled = dt * N;
 
-        let s0, s1, t0, t1;
-        let x, y;
+        for (let j_cell = 1; j_cell < NMinus1; j_cell++) {
+            let current_idx = j_cell * N + 1;
+            const rowEnd = j_cell * N + NMinus1;
 
-        for (let j_cell = 1; j_cell < N - 1; j_cell++) {
-            for (let i_cell = 1; i_cell < N - 1; i_cell++) {
-                const current_idx = this.IX(i_cell, j_cell);
-                x = i_cell - (dtx_scaled * velocX_source[current_idx]); 
-                y = j_cell - (dty_scaled * velocY_source[current_idx]);
+            for (let i_cell = 1; current_idx < rowEnd; i_cell++, current_idx++) {
+                let x = i_cell - (dtx_scaled * velocX_source[current_idx]);
+                let y = j_cell - (dty_scaled * velocY_source[current_idx]);
 
+                let i0, i1, j0, j1;
                 if (this.useWrapping) {
                     x = (x % N + N) % N;
                     y = (y % N + N) % N;
@@ -138,55 +168,76 @@ export class FluidField {
                     j1 = (j0 + 1) % N;
                 } else {
                     if (x < 0.5) x = 0.5;
-                    if (x > N - 1.5) x = N - 1.5; 
+                    else if (x > N - 1.5) x = N - 1.5;
                     i0 = Math.floor(x);
                     i1 = i0 + 1;
+
                     if (y < 0.5) y = 0.5;
-                    if (y > N - 1.5) y = N - 1.5;
+                    else if (y > N - 1.5) y = N - 1.5;
                     j0 = Math.floor(y);
                     j1 = j0 + 1;
                 }
 
-                s1 = x - i0;
-                s0 = 1.0 - s1;
-                t1 = y - j0;
-                t0 = 1.0 - t1;
+                const s1 = x - i0;
+                const s0 = 1.0 - s1;
+                const t1 = y - j0;
+                const t0 = 1.0 - t1;
 
-                d_out[current_idx] = s0 * (t0 * d_in[this.IX(i0,j0)] + t1 * d_in[this.IX(i0,j1)]) +
-                                     s1 * (t0 * d_in[this.IX(i1,j0)] + t1 * d_in[this.IX(i1,j1)]);
+                const idx00 = i0 + j0 * N;
+                const idx01 = i0 + j1 * N;
+                const idx10 = i1 + j0 * N;
+                const idx11 = i1 + j1 * N;
+
+                d_out[current_idx] = s0 * (t0 * d_in[idx00] + t1 * d_in[idx01]) +
+                                     s1 * (t0 * d_in[idx10] + t1 * d_in[idx11]);
             }
         }
+
         this.set_bnd(b, d_out);
     }
 
     set_bnd(b, x_arr) {
+        const N = this.size;
+        const NMinus1 = N - 1;
+        const NMinus2 = N - 2;
+
         if (this.useWrapping) {
-            for (let i = 1; i < this.size - 1; i++) {
-                x_arr[this.IX(i, 0)] = x_arr[this.IX(i, this.size - 2)];
-                x_arr[this.IX(i, this.size - 1)] = x_arr[this.IX(i, 1)];
+            for (let i = 1; i < NMinus1; i++) {
+                x_arr[i] = x_arr[i + NMinus2 * N];
+                x_arr[i + NMinus1 * N] = x_arr[i + N];
             }
-            for (let j = 1; j < this.size - 1; j++) {
-                x_arr[this.IX(0, j)] = x_arr[this.IX(this.size - 2, j)];
-                x_arr[this.IX(this.size - 1, j)] = x_arr[this.IX(1, j)];
+            for (let j = 1; j < NMinus1; j++) {
+                const row = j * N;
+                x_arr[row] = x_arr[row + NMinus2];
+                x_arr[row + NMinus1] = x_arr[row + 1];
             }
-            x_arr[this.IX(0, 0)] = 0.5 * (x_arr[this.IX(1, 0)] + x_arr[this.IX(0, 1)]);
-            x_arr[this.IX(0, this.size - 1)] = 0.5 * (x_arr[this.IX(1, this.size - 1)] + x_arr[this.IX(0, this.size - 2)]);
-            x_arr[this.IX(this.size - 1, 0)] = 0.5 * (x_arr[this.IX(this.size - 2, 0)] + x_arr[this.IX(this.size - 1, 1)]);
-            x_arr[this.IX(this.size - 1, this.size - 1)] = 0.5 * (x_arr[this.IX(this.size - 2, this.size - 1)] + x_arr[this.IX(this.size - 1, this.size - 2)]);
-        } else {
-            for (let i = 1; i < this.size - 1; i++) {
-                x_arr[this.IX(i, 0)] = b === 2 ? -x_arr[this.IX(i, 1)] : x_arr[this.IX(i, 1)];
-                x_arr[this.IX(i, this.size - 1)] = b === 2 ? -x_arr[this.IX(i, this.size - 2)] : x_arr[this.IX(i, this.size - 2)];
-            }
-            for (let j = 1; j < this.size - 1; j++) {
-                x_arr[this.IX(0, j)] = b === 1 ? -x_arr[this.IX(1, j)] : x_arr[this.IX(1, j)];
-                x_arr[this.IX(this.size - 1, j)] = b === 1 ? -x_arr[this.IX(this.size - 2, j)] : x_arr[this.IX(this.size - 2, j)];
-            }
-            x_arr[this.IX(0, 0)] = 0.5 * (x_arr[this.IX(1, 0)] + x_arr[this.IX(0, 1)]);
-            x_arr[this.IX(0, this.size - 1)] = 0.5 * (x_arr[this.IX(1, this.size - 1)] + x_arr[this.IX(0, this.size - 2)]);
-            x_arr[this.IX(this.size - 1, 0)] = 0.5 * (x_arr[this.IX(this.size - 2, 0)] + x_arr[this.IX(this.size - 1, 1)]);
-            x_arr[this.IX(this.size - 1, this.size - 1)] = 0.5 * (x_arr[this.IX(this.size - 2, this.size - 1)] + x_arr[this.IX(this.size - 1, this.size - 2)]);
+
+            x_arr[0] = 0.5 * (x_arr[1] + x_arr[N]);
+            x_arr[NMinus1 * N] = 0.5 * (x_arr[NMinus1 * N + 1] + x_arr[NMinus2 * N]);
+            x_arr[NMinus1] = 0.5 * (x_arr[NMinus2] + x_arr[NMinus1 + N]);
+            x_arr[N * N - 1] = 0.5 * (x_arr[N * N - 2] + x_arr[N * (NMinus1 - 1) + NMinus1]);
+            return;
         }
+
+        const invertY = b === 2;
+        const invertX = b === 1;
+
+        for (let i = 1; i < NMinus1; i++) {
+            x_arr[i] = invertY ? -x_arr[i + N] : x_arr[i + N];
+            const bottomIdx = i + NMinus1 * N;
+            x_arr[bottomIdx] = invertY ? -x_arr[i + NMinus2 * N] : x_arr[i + NMinus2 * N];
+        }
+        for (let j = 1; j < NMinus1; j++) {
+            const row = j * N;
+            x_arr[row] = invertX ? -x_arr[row + 1] : x_arr[row + 1];
+            const rightIdx = row + NMinus1;
+            x_arr[rightIdx] = invertX ? -x_arr[row + NMinus2] : x_arr[row + NMinus2];
+        }
+
+        x_arr[0] = 0.5 * (x_arr[1] + x_arr[N]);
+        x_arr[NMinus1] = 0.5 * (x_arr[NMinus2] + x_arr[NMinus1 + N]);
+        x_arr[NMinus1 * N] = 0.5 * (x_arr[NMinus1 * N + 1] + x_arr[NMinus2 * N]);
+        x_arr[N * N - 1] = 0.5 * (x_arr[N * N - 2] + x_arr[N * (NMinus1 - 1) + NMinus1]);
     }
 
     step() {

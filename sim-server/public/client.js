@@ -469,6 +469,12 @@ function renderPanels(worldId) {
 
   const energyGains = snap?.worldStats?.globalEnergyGains || {};
   const energyCosts = snap?.worldStats?.globalEnergyCosts || {};
+  const mutationStats = snap?.mutationStats || snap?.worldStats?.mutationStats || {};
+  const mutationEntries = Object.entries(mutationStats)
+    .map(([k, v]) => [k, Number(v) || 0])
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1]);
+  const mutationTopSummary = mutationEntries.slice(0, 8).map(([k, v]) => `${k}:${v}`).join(', ');
 
   const scrubOffset = getScrubOffset(worldId);
   const frameMeta = getFrameBufferMeta(worldId);
@@ -499,7 +505,9 @@ function renderPanels(worldId) {
     ['globalCost.neuron', energyCosts?.neuronNodes],
     ['globalCost.eater', energyCosts?.eaterNodes],
     ['globalCost.predator', energyCosts?.predatorNodes],
-    ['mutationStats', JSON.stringify(snap?.mutationStats || {})],
+    ['mutationStatKeys', mutationEntries.length],
+    ['mutationTop', mutationTopSummary || '—'],
+    ['mutationStats', JSON.stringify(mutationStats)],
     ['zoom', cam.zoom]
   ]);
 

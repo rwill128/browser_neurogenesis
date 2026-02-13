@@ -179,6 +179,10 @@ test('triangle mutation path extrudes one outward triangle from a boundary edge'
 
     assert.equal((runtimeState.mutationStats.mutationTriangleSiloApplied || 0) >= 1, true);
     assert.equal((runtimeState.mutationStats.triangleExtrusionApplied || 0) >= 1, true);
+    for (const value of Object.values(runtimeState.mutationStats)) {
+      assert.equal(Number.isFinite(Number(value)), true);
+      assert.equal(Number(value) >= 0, true);
+    }
   } finally {
     Object.assign(config, cfgBackup);
     runtimeState.mutationStats = runtimeBackup.mutationStats;

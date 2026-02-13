@@ -588,7 +588,8 @@ export class RealWorld {
         nodeTypeCounts: nodeTypeSummary.counts,
         nodeTypeRatios: nodeTypeSummary.ratios,
         totalNodes: nodeTypeSummary.totalNodes,
-        edgeLengthTelemetryLatest: edgeLengthTelemetry?.latest || null
+        edgeLengthTelemetryLatest: edgeLengthTelemetry?.latest || null,
+        mutationStats: this.worldState?.mutationStats || {}
       },
       nodeTypeCounts: nodeTypeSummary.counts,
       nodeTypeRatios: nodeTypeSummary.ratios,

@@ -260,41 +260,41 @@ export class SoftBody {
                 this.ticksSinceLastReproduction = null;
 
                 this.stiffness = parentBody.stiffness * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.stiffness !== parentBody.stiffness) runtimeState.mutationStats.springStiffness++;
+                if (this.stiffness !== parentBody.stiffness) runtimeState.mutationStats.springStiffness = (runtimeState.mutationStats.springStiffness || 0) + 1;
                 this.springDamping = parentBody.springDamping * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.springDamping !== parentBody.springDamping) runtimeState.mutationStats.springDamping++;
+                if (this.springDamping !== parentBody.springDamping) runtimeState.mutationStats.springDamping = (runtimeState.mutationStats.springDamping || 0) + 1;
 
                 let oldMotorInterval = parentBody.motorImpulseInterval;
                 this.motorImpulseInterval = parentBody.motorImpulseInterval * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
-                if (Math.floor(this.motorImpulseInterval) !== Math.floor(oldMotorInterval)) runtimeState.mutationStats.motorInterval++;
+                if (Math.floor(this.motorImpulseInterval) !== Math.floor(oldMotorInterval)) runtimeState.mutationStats.motorInterval = (runtimeState.mutationStats.motorInterval || 0) + 1;
 
                 let oldMotorCap = parentBody.motorImpulseMagnitudeCap;
                 this.motorImpulseMagnitudeCap = parentBody.motorImpulseMagnitudeCap * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.motorImpulseMagnitudeCap !== oldMotorCap) runtimeState.mutationStats.motorCap++;
+                if (this.motorImpulseMagnitudeCap !== oldMotorCap) runtimeState.mutationStats.motorCap = (runtimeState.mutationStats.motorCap || 0) + 1;
 
                 let oldEmitterStrength = parentBody.emitterStrength;
                 this.emitterStrength = parentBody.emitterStrength * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.emitterStrength !== oldEmitterStrength) runtimeState.mutationStats.emitterStrength++;
+                if (this.emitterStrength !== oldEmitterStrength) runtimeState.mutationStats.emitterStrength = (runtimeState.mutationStats.emitterStrength || 0) + 1;
 
                 let oldJetMaxVel = parentBody.jetMaxVelocityGene;
                 this.jetMaxVelocityGene = parentBody.jetMaxVelocityGene * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.jetMaxVelocityGene !== oldJetMaxVel) runtimeState.mutationStats.jetMaxVelocityGene++;
+                if (this.jetMaxVelocityGene !== oldJetMaxVel) runtimeState.mutationStats.jetMaxVelocityGene = (runtimeState.mutationStats.jetMaxVelocityGene || 0) + 1;
 
                 let offspringNumChange = (Math.random() < Math.max(0, Math.min(1, config.MUTATION_CHANCE_BOOL * config.GLOBAL_MUTATION_RATE_MODIFIER))) ? (Math.random() < 0.5 ? -1 : 1) : 0;
                 this.numOffspring = parentBody.numOffspring + offspringNumChange;
-                if (offspringNumChange !== 0) runtimeState.mutationStats.numOffspring++;
+                if (offspringNumChange !== 0) runtimeState.mutationStats.numOffspring = (runtimeState.mutationStats.numOffspring || 0) + 1;
 
                 let oldOffspringSpawnRadius = parentBody.offspringSpawnRadius;
                 this.offspringSpawnRadius = parentBody.offspringSpawnRadius * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER * 0.5));
-                if (this.offspringSpawnRadius !== oldOffspringSpawnRadius) runtimeState.mutationStats.offspringSpawnRadius++;
+                if (this.offspringSpawnRadius !== oldOffspringSpawnRadius) runtimeState.mutationStats.offspringSpawnRadius = (runtimeState.mutationStats.offspringSpawnRadius || 0) + 1;
 
                 let oldPointAddChance = parentBody.pointAddChance;
                 this.pointAddChance = parentBody.pointAddChance * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER * 2));
-                if (this.pointAddChance !== oldPointAddChance) runtimeState.mutationStats.pointAddChanceGene++;
+                if (this.pointAddChance !== oldPointAddChance) runtimeState.mutationStats.pointAddChanceGene = (runtimeState.mutationStats.pointAddChanceGene || 0) + 1;
 
                 let oldSpringConnectionRadius = parentBody.springConnectionRadius;
                 this.springConnectionRadius = parentBody.springConnectionRadius * (1 + (Math.random() - 0.5) * 2 * (config.MUTATION_RATE_PERCENT * config.GLOBAL_MUTATION_RATE_MODIFIER));
-                if (this.springConnectionRadius !== oldSpringConnectionRadius) runtimeState.mutationStats.springConnectionRadiusGene++;
+                if (this.springConnectionRadius !== oldSpringConnectionRadius) runtimeState.mutationStats.springConnectionRadiusGene = (runtimeState.mutationStats.springConnectionRadiusGene || 0) + 1;
 
                 if (parentBody.emitterDirection) {
                     const oldEmitterDirX = parentBody.emitterDirection.x;
@@ -302,11 +302,11 @@ export class SoftBody {
                     const cosA = Math.cos(angleMutation);
                     const sinA = Math.sin(angleMutation);
                     this.emitterDirection = new Vec2(parentBody.emitterDirection.x * cosA - parentBody.emitterDirection.y * sinA, parentBody.emitterDirection.x * sinA + parentBody.emitterDirection.y * cosA).normalize();
-                    if (this.emitterDirection.x !== oldEmitterDirX) runtimeState.mutationStats.emitterDirection++; // Simplified check
+                    if (this.emitterDirection.x !== oldEmitterDirX) runtimeState.mutationStats.emitterDirection = (runtimeState.mutationStats.emitterDirection || 0) + 1; // Simplified check
                 } else {
                     this.emitterDirection = new Vec2(Math.random()*2-1, Math.random()*2-1).normalize();
                     console.warn(`Parent body ${parentBody.id} was missing emitterDirection. Offspring ${this.id} gets random emitterDirection.`);
-                    runtimeState.mutationStats.emitterDirection++; // Count as a change if parent was missing it
+                    runtimeState.mutationStats.emitterDirection = (runtimeState.mutationStats.emitterDirection || 0) + 1; // Count as a change if parent was missing it
                 }
 
                 let oldReproThreshold = parentBody.reproductionEnergyThreshold;
@@ -330,13 +330,13 @@ export class SoftBody {
                     let newStrategy = strategies[Math.floor(Math.random() * strategies.length)];
                     if (newStrategy !== parentBody.rewardStrategy) {
                         this.rewardStrategy = newStrategy;
-                        runtimeState.mutationStats.rewardStrategyChange++;
+                        runtimeState.mutationStats.rewardStrategyChange = (runtimeState.mutationStats.rewardStrategyChange || 0) + 1;
                     } else {
                         if (strategies.length > 1) {
                             let tempStrategies = strategies.filter(s => s !== parentBody.rewardStrategy);
                             if (tempStrategies.length > 0) {
                                 this.rewardStrategy = tempStrategies[Math.floor(Math.random() * tempStrategies.length)];
-                                runtimeState.mutationStats.rewardStrategyChange++; 
+                                runtimeState.mutationStats.rewardStrategyChange = (runtimeState.mutationStats.rewardStrategyChange || 0) + 1; 
                             } else {
                                 this.rewardStrategy = parentBody.rewardStrategy;
                             }
@@ -474,7 +474,7 @@ export class SoftBody {
                     });
                     this.offspringSpawnRadius *= scaleFactor;
                     this.offspringSpawnRadius = Math.max(10, this.offspringSpawnRadius); 
-                    runtimeState.mutationStats.bodyScale++;
+                    runtimeState.mutationStats.bodyScale = (runtimeState.mutationStats.bodyScale || 0) + 1;
                 }
             }
 
@@ -500,7 +500,7 @@ export class SoftBody {
             this.reproductionEnergyThreshold = Math.max(this.currentMaxEnergy * 0.05, Math.min(this.reproductionEnergyThreshold, this.currentMaxEnergy));
             this.reproductionEnergyThreshold = Math.round(this.reproductionEnergyThreshold);
             if (parentBodyForMutation && this.reproductionEnergyThreshold !== oldReproThresholdForStat) { // Only count if from parent and changed
-                runtimeState.mutationStats.reproductionEnergyThreshold++;
+                runtimeState.mutationStats.reproductionEnergyThreshold = (runtimeState.mutationStats.reproductionEnergyThreshold || 0) + 1;
             }
 
         }

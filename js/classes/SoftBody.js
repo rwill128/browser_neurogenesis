@@ -2362,6 +2362,37 @@ export class SoftBody {
     }
 
     /**
+     * Per-node aging: remove nodes that reach max age, and drop attached springs.
+     */
+    _applyNodeAgingAndSenescence() {
+        if (!Array.isArray(this.massPoints) || this.massPoints.length === 0) return 0;
+
+        const toRemove = new Set();
+        for (const p of this.massPoints) {
+            if (!p || typeof p !== 'object') continue;
+            p.ageTicks = Math.max(0, Math.floor(Number(p.ageTicks) || 0) + 1);
+            const maxAge = Math.max(1, Math.floor(Number(p.maxAgeTicks) || Number(config.NODE_MAX_AGE_TICKS_MIN) || 1));
+            if (p.ageTicks >= maxAge) toRemove.add(p);
+        }
+
+        if (toRemove.size === 0) return 0;
+
+        if (this.primaryEyePoint && toRemove.has(this.primaryEyePoint)) {
+            this.primaryEyePoint = null;
+        }
+
+        this.massPoints = this.massPoints.filter((p) => !toRemove.has(p));
+        this.springs = this.springs.filter((s) => !toRemove.has(s.p1) && !toRemove.has(s.p2));
+
+        if (!this.primaryEyePoint) {
+            const fallbackEye = this.massPoints.find((p) => p.isDesignatedEye) || this.massPoints[0] || null;
+            this.primaryEyePoint = fallbackEye;
+        }
+
+        return toRemove.size;
+    }
+
+    /**
      * Keep blueprintRadius conservative when phenotype grows at runtime.
      */
     _updateBlueprintRadiusFromCurrentPhenotype() {
@@ -4489,10 +4520,14 @@ export class SoftBody {
             this.ticksSinceLastReproduction = Math.max(0, Math.floor(Number(this.ticksSinceLastReproduction) + 1));
         }
 
-        // Check for max age
-        if (this.ticksSinceBirth > config.MAX_CREATURE_AGE_TICKS) {
-            this._markUnstable('age_limit');
-            return; // Creature dies of old age
+        const agedOutNodes = this._applyNodeAgingAndSenescence();
+        if (agedOutNodes > 0) {
+            this._recountNodeTypeCaches();
+            this.calculateCurrentMaxEnergy();
+            if (this.massPoints.length <= 0) {
+                this._markUnstable('node_old_age_exhaustion');
+                return;
+            }
         }
 
         if (this.ticksSinceBirth > this.effectiveReproductionCooldown) { // Use effective cooldown

@@ -28,6 +28,12 @@ export class MassPoint {
         this.maxEffectiveJetVelocity = 0; // New: For JET type
         this.sensedFluidVelocity = new Vec2(); // For JET and SWIMMER
         this.jetData = {currentMagnitude: 0, currentAngle: 0}; // For JET type
+
+        // Per-node aging (new): nodes can die of old age independently.
+        this.ageTicks = 0;
+        const minNodeAge = Math.max(10, Math.floor(Number(config.NODE_MAX_AGE_TICKS_MIN) || 2000));
+        const maxNodeAge = Math.max(minNodeAge, Math.floor(Number(config.NODE_MAX_AGE_TICKS_MAX) || minNodeAge));
+        this.maxAgeTicks = minNodeAge + Math.floor(Math.random() * Math.max(1, (maxNodeAge - minNodeAge + 1)));
     }
 
     applyForce(f) {

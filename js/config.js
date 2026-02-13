@@ -275,6 +275,9 @@ const config = {
     REPRO_RESOURCE_FIELD_MIN_CLAMP: 0,
 
     MAX_CREATURE_AGE_TICKS: 10000,
+    // Per-node aging model (new): nodes die individually when max age is reached.
+    NODE_MAX_AGE_TICKS_MIN: 5000,
+    NODE_MAX_AGE_TICKS_MAX: 30000,
 
     // --- Global Variables & Constants (with initial hardcoded defaults) ---
     CREATURE_POPULATION_FLOOR: 100,

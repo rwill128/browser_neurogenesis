@@ -9,6 +9,8 @@ const seedInput = document.getElementById('seedInput');
 const setScenarioBtn = document.getElementById('setScenarioBtn');
 const pauseBtn = document.getElementById('pauseBtn');
 const resumeBtn = document.getElementById('resumeBtn');
+const runModeSelect = document.getElementById('runModeSelect');
+const setRunModeBtn = document.getElementById('setRunModeBtn');
 const fitBtn = document.getElementById('fitBtn');
 
 const prevCreatureBtn = document.getElementById('prevCreatureBtn');
@@ -437,6 +439,7 @@ function renderPanels(worldId) {
   setKV(worldStatsEl, [
     ['world', worldId],
     ['scenario', snap.scenario],
+    ['runMode', status?.runMode || 'realtime'],
     ['tick', snap.tick],
     ['time', snap.time],
     ['viewOffsetSteps', scrubOffset],
@@ -814,7 +817,10 @@ function connectStream({ worldId, mode = 'render', hz = 10 } = {}) {
         const zoomLabel = cam ? ` zoom=${fmt(cam.zoom, 3)}` : '';
         const scrubOffset = getScrubOffset(worldId);
         const scrubLabel = scrubOffset > 0 ? ` view=-${scrubOffset}` : ' view=live';
-        statusEl.textContent = `world=${s.id} scenario=${s.scenario} seed=${s.seed} tick=${s.tick} t=${fmt(s.time, 2)} dt=${fmt(s.dt, 5)} paused=${s.paused} sps=${s.stepsPerSecond} stepWallMs=${s.lastStepWallMs}${zoomLabel}${scrubLabel}`;
+        if (runModeSelect && s?.runMode) {
+          runModeSelect.value = String(s.runMode);
+        }
+        statusEl.textContent = `world=${s.id} scenario=${s.scenario} seed=${s.seed} mode=${s.runMode || 'realtime'} tick=${s.tick} t=${fmt(s.time, 2)} dt=${fmt(s.dt, 5)} paused=${s.paused} sps=${s.stepsPerSecond} stepWallMs=${s.lastStepWallMs}${zoomLabel}${scrubLabel}`;
       } else if (msg.kind === 'snapshot') {
         const snap = msg.data;
 
@@ -950,6 +956,13 @@ pauseBtn.addEventListener('click', async () => {
 resumeBtn.addEventListener('click', async () => {
   if (!currentWorldId) return;
   await apiPost(`/api/worlds/${encodeURIComponent(currentWorldId)}/control/resume`);
+  await refreshWorlds();
+});
+
+setRunModeBtn?.addEventListener('click', async () => {
+  if (!currentWorldId) return;
+  const mode = String(runModeSelect?.value || 'realtime');
+  await apiPost(`/api/worlds/${encodeURIComponent(currentWorldId)}/control/runMode`, { mode });
   await refreshWorlds();
 });
 

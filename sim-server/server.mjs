@@ -498,6 +498,25 @@ app.post('/api/worlds/:id/control/resume', async (req, reply) => {
   }
 });
 
+app.post('/api/worlds/:id/control/runMode', async (req, reply) => {
+  try {
+    const mode = String(req.body?.mode || '').trim();
+    return await getWorldOrThrow(req.params.id).rpc('setRunMode', { mode });
+  } catch (err) {
+    reply.code(400);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+app.get('/api/worlds/:id/control/runMode', async (req, reply) => {
+  try {
+    return await getWorldOrThrow(req.params.id).rpc('getRunMode');
+  } catch (err) {
+    reply.code(404);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 app.post('/api/worlds/:id/control/setScenario', async (req, reply) => {
   try {
     const nextScenario = String(req.body?.name || req.body?.scenario || '').trim();
@@ -608,6 +627,16 @@ app.get('/api/snapshot', async (req) => {
 app.get('/api/frameTimeline', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('getFrameTimeline'));
 app.post('/api/control/pause', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('pause'));
 app.post('/api/control/resume', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('resume'));
+app.post('/api/control/runMode', async (req, reply) => {
+  try {
+    const mode = String(req.body?.mode || '').trim();
+    return getWorldOrThrow(DEFAULT_WORLD_ID).rpc('setRunMode', { mode });
+  } catch (err) {
+    reply.code(400);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+app.get('/api/control/runMode', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('getRunMode'));
 app.post('/api/control/setScenario', async (req, reply) => {
   try {
     const nextScenario = String(req.body?.name || '').trim();

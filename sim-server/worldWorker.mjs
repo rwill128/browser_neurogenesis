@@ -25,6 +25,17 @@ function asU32(n, fallback = 23) {
   return (x >>> 0);
 }
 
+function normalizeRunMode(raw, fallback = RUN_MODE_REALTIME) {
+  const mode = String(raw || '').trim().toLowerCase();
+  if (mode === RUN_MODE_MAX || mode === 'fast' || mode === 'asap' || mode === 'max_speed') {
+    return RUN_MODE_MAX;
+  }
+  if (mode === RUN_MODE_REALTIME || mode === 'normal') {
+    return RUN_MODE_REALTIME;
+  }
+  return fallback;
+}
+
 let id = String(workerData?.id || 'world');
 let scenarioName = String(workerData?.scenario || 'micro_repro_sustain');
 let seed = asU32(workerData?.seed, 23);
@@ -38,6 +49,10 @@ let lastStepWallMs = 0;
 let stepsThisSecond = 0;
 let stepsPerSecond = 0;
 let lastStepsPerSecondAt = Date.now();
+
+const RUN_MODE_REALTIME = 'realtime';
+const RUN_MODE_MAX = 'max';
+let runMode = RUN_MODE_REALTIME;
 
 let crashed = false;
 let crash = null;
@@ -92,6 +107,7 @@ function computeStatus() {
     paused,
     crashed,
     crash,
+    runMode,
     dt,
     tick: Number(world?.tick) || 0,
     time: Number(world?.time) || 0,
@@ -320,34 +336,58 @@ function getFrameTimeline() {
   };
 }
 
-// Fixed-step simulation loop with accumulator.
+// Fixed-step simulation loop: realtime pacing (default) or max-throughput mode.
 const LOOP_WALL_MS = 10;
 let loopLastAt = Date.now();
-const MAX_STEPS_PER_LOOP = 50;
+const MAX_STEPS_PER_LOOP_REALTIME = 50;
+const MAX_STEPS_PER_LOOP_MAX = 5000;
+const MAX_MODE_BATCH_WALL_MS = 25;
 
-setInterval(() => {
+function scheduleNextLoop() {
+  if (runMode === RUN_MODE_MAX) {
+    setImmediate(runLoop);
+  } else {
+    setTimeout(runLoop, LOOP_WALL_MS);
+  }
+}
+
+function runLoop() {
   const now = Date.now();
-  const elapsed = now - loopLastAt;
+  const elapsed = Math.max(0, now - loopLastAt);
   loopLastAt = now;
 
   if (!world || paused || crashed) {
     accumulatorMs = 0;
-    stepsThisSecond = 0;
+    if (now - lastStepsPerSecondAt >= 1000) {
+      stepsPerSecond = stepsThisSecond;
+      stepsThisSecond = 0;
+      lastStepsPerSecondAt = now;
+    }
+    scheduleNextLoop();
     return;
   }
 
-  accumulatorMs += elapsed;
-  const dtMs = dt * 1000;
-
   const t0 = Date.now();
   let steps = 0;
+
   try {
-    while (accumulatorMs >= dtMs && steps < MAX_STEPS_PER_LOOP) {
-      world.step(dt);
-      accumulatorMs -= dtMs;
-      steps += 1;
-      stepsThisSecond += 1;
+    if (runMode === RUN_MODE_MAX) {
+      const batchStart = Date.now();
+      while (steps < MAX_STEPS_PER_LOOP_MAX && (Date.now() - batchStart) < MAX_MODE_BATCH_WALL_MS) {
+        world.step(dt);
+        steps += 1;
+      }
+    } else {
+      accumulatorMs += elapsed;
+      const dtMs = dt * 1000;
+      while (accumulatorMs >= dtMs && steps < MAX_STEPS_PER_LOOP_REALTIME) {
+        world.step(dt);
+        accumulatorMs -= dtMs;
+        steps += 1;
+      }
     }
+
+    stepsThisSecond += steps;
   } catch (err) {
     crashed = true;
     paused = true;
@@ -368,7 +408,11 @@ setInterval(() => {
     stepsThisSecond = 0;
     lastStepsPerSecondAt = now;
   }
-}, LOOP_WALL_MS);
+
+  scheduleNextLoop();
+}
+
+scheduleNextLoop();
 
 // RPC handling
 const pending = new Map();
@@ -430,6 +474,17 @@ parentPort.on('message', (msg) => {
       if (method === 'resume') {
         paused = false;
         return reply(requestId, { ok: true, result: { paused } });
+      }
+
+      if (method === 'setRunMode') {
+        runMode = normalizeRunMode(args?.mode, runMode);
+        accumulatorMs = 0;
+        loopLastAt = Date.now();
+        return reply(requestId, { ok: true, result: { runMode } });
+      }
+
+      if (method === 'getRunMode') {
+        return reply(requestId, { ok: true, result: { runMode } });
       }
 
       if (method === 'setScenario') {

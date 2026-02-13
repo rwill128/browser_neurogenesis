@@ -103,6 +103,8 @@ const lastStatusByWorld = new Map();
 const configDraftByWorld = new Map();
 const frameBufferByWorld = new Map();
 const scrubOffsetByWorld = new Map();
+const scrubFetchInFlightByWorld = new Map();
+const scrubFetchLastAtByWorld = new Map();
 
 function fmt(n, digits = 3) {
   const x = Number(n);
@@ -126,19 +128,25 @@ function updateHistoryUi(worldId) {
   const offset = Math.min(getScrubOffset(worldId), maxOffset);
   scrubOffsetByWorld.set(worldId, offset);
 
+  // UX semantics: slider right = newer/live, slider left = older.
+  const sliderValue = Math.max(0, maxOffset - offset);
   historySliderEl.max = String(maxOffset);
-  historySliderEl.value = String(offset);
+  historySliderEl.value = String(sliderValue);
 
   if (offset === 0) {
     historyInfoEl.textContent = `live · buffer ${meta.available || 0}/${meta.max || 0}`;
   } else {
-    historyInfoEl.textContent = `${offset} step(s) behind · buffer ${meta.available || 0}/${meta.max || 0}`;
+    historyInfoEl.textContent = `${offset} step(s) behind · moving window · buffer ${meta.available || 0}/${meta.max || 0}`;
   }
 }
 
 async function loadScrubFrame(worldId, frameOffset) {
   const safeOffset = Math.max(0, Math.floor(Number(frameOffset) || 0));
   if (!worldId || safeOffset === 0) return;
+  if (scrubFetchInFlightByWorld.get(worldId)) return;
+
+  scrubFetchInFlightByWorld.set(worldId, true);
+  scrubFetchLastAtByWorld.set(worldId, Date.now());
 
   try {
     const snap = await apiGet(`/api/worlds/${encodeURIComponent(worldId)}/snapshot?mode=render&frameOffset=${encodeURIComponent(safeOffset)}`);
@@ -148,7 +156,21 @@ async function loadScrubFrame(worldId, frameOffset) {
     drawSnapshot(snap);
   } catch {
     // ignore transient history misses while buffer rolls
+  } finally {
+    scrubFetchInFlightByWorld.set(worldId, false);
   }
+}
+
+function syncScrubFrameWindow(worldId, { force = false } = {}) {
+  if (!worldId) return;
+  const offset = getScrubOffset(worldId);
+  if (offset <= 0) return;
+
+  const now = Date.now();
+  const lastAt = Number(scrubFetchLastAtByWorld.get(worldId)) || 0;
+  if (!force && (now - lastAt) < 150) return;
+
+  loadScrubFrame(worldId, offset);
 }
 
 function setScrubOffset(worldId, nextOffset) {
@@ -161,7 +183,7 @@ function setScrubOffset(worldId, nextOffset) {
   updateHistoryUi(worldId);
 
   if (safeOffset > 0) {
-    loadScrubFrame(worldId, safeOffset);
+    syncScrubFrameWindow(worldId, { force: true });
   } else {
     const live = lastSnapshotByWorld.get(worldId);
     if (live && currentWorldId === worldId) {
@@ -830,6 +852,7 @@ function connectStream({ worldId, mode = 'render', hz = 10 } = {}) {
         });
         if (currentWorldId === worldId) {
           updateHistoryUi(worldId);
+          syncScrubFrameWindow(worldId, { force: false });
         }
 
         const cam = currentWorldId ? getCamera(currentWorldId) : null;
@@ -859,6 +882,8 @@ function connectStream({ worldId, mode = 'render', hz = 10 } = {}) {
         if (scrubOffset === 0) {
           lastSnapshotByWorld.set(worldId, snap);
           drawSnapshot(snap);
+        } else {
+          syncScrubFrameWindow(worldId, { force: false });
         }
       }
     } catch {
@@ -921,7 +946,10 @@ function toggleFollowSelected() {
 
 historySliderEl?.addEventListener('input', () => {
   if (!currentWorldId) return;
-  const nextOffset = Number(historySliderEl.value || 0);
+  const meta = getFrameBufferMeta(currentWorldId);
+  const maxOffset = Math.max(0, (Number(meta.available) || 0) - 1);
+  const sliderValue = Math.max(0, Math.min(maxOffset, Math.floor(Number(historySliderEl.value) || 0)));
+  const nextOffset = maxOffset - sliderValue;
   setScrubOffset(currentWorldId, nextOffset);
 });
 
@@ -1165,6 +1193,12 @@ setInterval(async () => {
 
     updateHistoryUi(currentWorldId);
     drawSnapshot(snap);
+
+    const cam = getCamera(currentWorldId);
+    const zoomLabel = cam ? ` zoom=${fmt(cam.zoom, 3)}` : '';
+    const scrubOffset = getScrubOffset(currentWorldId);
+    const scrubLabel = scrubOffset > 0 ? ` view=-${scrubOffset}` : ' view=live';
+    statusEl.textContent = `world=${status.id} scenario=${status.scenario} seed=${status.seed} mode=${status.runMode || 'realtime'} tick=${status.tick} t=${fmt(status.time, 2)} dt=${fmt(status.dt, 5)} paused=${status.paused} sps=${status.stepsPerSecond} stepWallMs=${status.lastStepWallMs}${zoomLabel}${scrubLabel} (http fallback)`;
   } catch {
     // keep quiet; WS reconnect loop + periodic world refresh continue.
   }

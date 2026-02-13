@@ -63,6 +63,7 @@ const FRAME_HISTORY_MAX = 100;
 const FRAME_CAPTURE_STEP_STRIDE = 1;
 const FRAME_BUFFER_IDLE_MS = 30_000;
 let frameHistory = [];
+let frameArchive = [];
 let frameSeq = 0;
 let lastFrameCaptureTick = -1;
 let frameBufferLastAccessAt = 0;
@@ -91,9 +92,13 @@ function resetWorld(nextScenarioName, nextSeed) {
   crash = null;
 
   frameHistory = [];
+  frameArchive = [];
   frameSeq = 0;
   lastFrameCaptureTick = -1;
   frameBufferLastAccessAt = 0;
+
+  // Seed tick-0 frame so history is addressable from frame 0.
+  captureRenderFrameIfNeeded({ force: true, includeArchive: true });
 }
 
 resetWorld(scenarioName, seed);
@@ -126,7 +131,10 @@ function computeStatus() {
       max: FRAME_HISTORY_MAX,
       stepStride: FRAME_CAPTURE_STEP_STRIDE,
       latestSeq: frameHistory.length ? Number(frameHistory[frameHistory.length - 1]?.__frameSeq || 0) : null,
-      latestTick: frameHistory.length ? Number(frameHistory[frameHistory.length - 1]?.tick || 0) : null
+      latestTick: frameHistory.length ? Number(frameHistory[frameHistory.length - 1]?.tick || 0) : null,
+      archiveFrames: frameArchive.length,
+      archiveOldestTick: frameArchive.length ? Number(frameArchive[0]?.tick || 0) : null,
+      archiveLatestTick: frameArchive.length ? Number(frameArchive[frameArchive.length - 1]?.tick || 0) : null
     }
   };
 }
@@ -264,7 +272,7 @@ function isFrameBufferActive() {
   return (Date.now() - frameBufferLastAccessAt) <= FRAME_BUFFER_IDLE_MS;
 }
 
-function captureRenderFrameIfNeeded({ force = false } = {}) {
+function captureRenderFrameIfNeeded({ force = false, includeArchive = false } = {}) {
   if (!world) return null;
 
   const tick = Number(world?.tick) || 0;
@@ -290,8 +298,16 @@ function captureRenderFrameIfNeeded({ force = false } = {}) {
     frameHistory.splice(0, frameHistory.length - FRAME_HISTORY_MAX);
   }
 
+  if (includeArchive) {
+    frameArchive.push(frame);
+  }
+
   lastFrameCaptureTick = tick;
   return frame;
+}
+
+function archiveCurrentStepFrame() {
+  return captureRenderFrameIfNeeded({ force: true, includeArchive: true });
 }
 
 function getLatestRenderFrame() {
@@ -337,8 +353,39 @@ function getFrameTimeline() {
     oldestSeq: oldest?.seq ?? null,
     latestSeq: latest?.seq ?? null,
     latestTick: latest?.tick ?? null,
+    archiveFrames: frameArchive.length,
+    archiveOldestTick: frameArchive.length ? Number(frameArchive[0]?.tick || 0) : null,
+    archiveLatestTick: frameArchive.length ? Number(frameArchive[frameArchive.length - 1]?.tick || 0) : null,
     frames
   };
+}
+
+function getArchivedFrameByTick(tick) {
+  const target = Math.floor(Number(tick));
+  if (!Number.isFinite(target)) return null;
+  // Start from tail because most queries are near latest.
+  for (let i = frameArchive.length - 1; i >= 0; i--) {
+    const f = frameArchive[i];
+    if (Number(f?.tick) === target) return f;
+    if (Number(f?.tick) < target) break;
+  }
+  return null;
+}
+
+function getArchivedFramesRange(startTick, endTick, stride = 1) {
+  const start = Math.floor(Number(startTick));
+  const end = Math.floor(Number(endTick));
+  const step = Math.max(1, Math.floor(Number(stride) || 1));
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return [];
+
+  const out = [];
+  for (const f of frameArchive) {
+    const t = Number(f?.tick);
+    if (t < start) continue;
+    if (t > end) break;
+    if (((t - start) % step) === 0) out.push(f);
+  }
+  return out;
 }
 
 // Fixed-step simulation loop: realtime pacing (default) or max-throughput mode.
@@ -380,6 +427,7 @@ function runLoop() {
       const batchStart = Date.now();
       while (steps < MAX_STEPS_PER_LOOP_MAX && (Date.now() - batchStart) < MAX_MODE_BATCH_WALL_MS) {
         world.step(dt);
+        archiveCurrentStepFrame();
         steps += 1;
       }
     } else {
@@ -387,6 +435,7 @@ function runLoop() {
       const dtMs = dt * 1000;
       while (accumulatorMs >= dtMs && steps < MAX_STEPS_PER_LOOP_REALTIME) {
         world.step(dt);
+        archiveCurrentStepFrame();
         accumulatorMs -= dtMs;
         steps += 1;
       }
@@ -405,7 +454,6 @@ function runLoop() {
 
   if (steps > 0) {
     lastStepWallMs = Date.now() - t0;
-    captureRenderFrameIfNeeded({ force: false });
   }
 
   if (now - lastStepsPerSecondAt >= 1000) {
@@ -472,6 +520,31 @@ parentPort.on('message', (msg) => {
           captureRenderFrameIfNeeded({ force: true });
         }
         return reply(requestId, { ok: true, result: getFrameTimeline() });
+      }
+
+      if (method === 'getArchivedFrameByTick') {
+        const tick = args?.tick;
+        const frame = getArchivedFrameByTick(tick);
+        if (!frame) return reply(requestId, { ok: false, error: `frame not found for tick ${tick}` });
+        return reply(requestId, { ok: true, result: frame });
+      }
+
+      if (method === 'getArchivedFramesRange') {
+        const startTick = args?.startTick;
+        const endTick = args?.endTick;
+        const stride = args?.stride;
+        const frames = getArchivedFramesRange(startTick, endTick, stride);
+        return reply(requestId, {
+          ok: true,
+          result: {
+            worldId: id,
+            startTick: Math.floor(Number(startTick)),
+            endTick: Math.floor(Number(endTick)),
+            stride: Math.max(1, Math.floor(Number(stride) || 1)),
+            count: frames.length,
+            frames
+          }
+        });
       }
 
       if (method === 'pause') {

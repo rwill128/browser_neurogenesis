@@ -41,6 +41,9 @@ Open:
 - `DELETE /api/worlds/:id` → delete world (default `w0` protected)
 - `GET /api/worlds/:id/status`
 - `GET /api/worlds/:id/snapshot?mode=lite|render|renderFull|full`
+- `GET /api/worlds/:id/frameTimeline` → short rolling frame buffer metadata + archive bounds
+- `GET /api/worlds/:id/frame/:tick` → exact archived frame by tick
+- `GET /api/worlds/:id/frames?startTick=0&endTick=1000&stride=1` → archived frame range
 - `GET /api/worlds/:id/config`
 - `POST /api/worlds/:id/capture/randomCreature` body `{ "creatureId": 123?, "size": 800?, "zoomOutFactor": 1?, "includeFluid": true?, "includeNeighbors": true? }` → SVG portrait
 - `POST /api/worlds/:id/capture/creatureClip` body `{ "creatureId": 123?, "durationSec": 5?, "fps": 12?, "size": 800?, "zoomOutFactor": 1?, "includeFluid": true?, "includeNeighbors": true? }` → MP4 clip of next seconds of life

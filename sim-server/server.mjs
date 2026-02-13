@@ -960,6 +960,43 @@ app.get('/api/worlds/:id/frameTimeline', async (req, reply) => {
   }
 });
 
+app.get('/api/worlds/:id/frame/:tick', async (req, reply) => {
+  try {
+    const tick = Math.floor(Number(req.params.tick));
+    if (!Number.isFinite(tick) || tick < 0) {
+      reply.code(400);
+      return { ok: false, error: 'tick must be a non-negative integer' };
+    }
+    return await getWorldOrThrow(req.params.id).rpc('getArchivedFrameByTick', { tick });
+  } catch (err) {
+    const msg = String(err?.message || err);
+    reply.code(msg.includes('not found') ? 404 : 400);
+    return { ok: false, error: msg };
+  }
+});
+
+app.get('/api/worlds/:id/frames', async (req, reply) => {
+  try {
+    const startTick = Math.floor(Number(req.query?.startTick));
+    const endTick = Math.floor(Number(req.query?.endTick));
+    const stride = Math.max(1, Math.floor(Number(req.query?.stride) || 1));
+
+    if (!Number.isFinite(startTick) || !Number.isFinite(endTick) || startTick < 0 || endTick < startTick) {
+      reply.code(400);
+      return { ok: false, error: 'invalid startTick/endTick range' };
+    }
+
+    return await getWorldOrThrow(req.params.id).rpc('getArchivedFramesRange', {
+      startTick,
+      endTick,
+      stride
+    });
+  } catch (err) {
+    reply.code(400);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 app.post('/api/worlds/:id/control/pause', async (req, reply) => {
   try {
     return await getWorldOrThrow(req.params.id).rpc('pause');

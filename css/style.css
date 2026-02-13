@@ -290,25 +290,30 @@ canvas.emitter-edit-mode {
 
 #controls {
     position: fixed;
-    top: 2.5vh;
-    right: -380px;
-    width: min(92vw, 360px);
-    height: 95vh;
-    background-color: rgba(40,40,40,0.97);
+    top: 50%;
+    left: 50%;
+    width: min(92vw, 980px);
+    height: min(90vh, 860px);
+    background-color: rgba(40,40,40,0.98);
     padding: 15px;
     border: 1px solid #555;
-    border-radius: 10px 0 0 10px;
-    box-shadow: -8px 0 24px rgba(0,0,0,0.35);
+    border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.5);
     overflow-y: auto;
     z-index: 1001;
-    transition: right 0.25s ease-in-out;
     display: flex;
     flex-direction: column;
     gap: 10px;
     box-sizing: border-box;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, -50%) scale(0.97);
+    transition: opacity 0.2s ease, transform 0.2s ease;
 }
 #controls.open {
-    right: 0;
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, -50%) scale(1);
 }
 #controls div.control-group {
     padding: 10px;
@@ -699,8 +704,8 @@ body.css-screensaver-active #canvasContainer {
     }
 
     #controls {
-        width: min(92vw, 360px);
-        right: calc(-1 * min(92vw, 360px) - 16px);
+        width: 94vw;
+        height: 88vh;
     }
 
     #toggleControlsButton,

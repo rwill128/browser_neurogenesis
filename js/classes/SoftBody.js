@@ -2444,6 +2444,13 @@ export class SoftBody {
             if (!p || typeof p !== 'object') continue;
             p.ageTicks = Math.max(0, Math.floor(Number(p.ageTicks) || 0) + 1);
             const maxAge = Math.max(1, Math.floor(Number(p.maxAgeTicks) || Number(config.NODE_MAX_AGE_TICKS_MIN) || 1));
+            const lifeRatio = Math.max(0, Math.min(1, p.ageTicks / maxAge));
+            // Built-in senescence phase: final 20% of node life linearly weakens actuation to 20%.
+            if (lifeRatio < 0.8) p.senescenceScale = 1;
+            else {
+                const t = Math.max(0, Math.min(1, (lifeRatio - 0.8) / 0.2));
+                p.senescenceScale = Math.max(0.2, 1 - (0.8 * t));
+            }
             if (p.ageTicks >= maxAge) toRemove.add(p);
         }
 
@@ -3474,6 +3481,12 @@ export class SoftBody {
         this.spatialGrid = grid;
     }
 
+    _getNodeSenescenceScale(point) {
+        const s = Number(point?.senescenceScale);
+        if (!Number.isFinite(s)) return 1;
+        return Math.max(0.05, Math.min(1, s));
+    }
+
     _applyDefaultActivationPatterns() {
         this.massPoints.forEach(point => {
             // If the point is an EATER or PREDATOR, default-pattern fallback keeps exertion at zero.
@@ -3502,7 +3515,7 @@ export class SoftBody {
                     baseActivation = (timeFactor % 1.0 < 0.1) ? this.defaultActivationLevel : 0;
                     break;
             }
-            point.currentExertionLevel = Math.max(0, Math.min(1, baseActivation)); // Clamp to 0-1
+            point.currentExertionLevel = Math.max(0, Math.min(1, baseActivation * this._getNodeSenescenceScale(point))); // Clamp to 0-1
         });
     }
 
@@ -3594,7 +3607,7 @@ export class SoftBody {
                 if (!point.isFixed && point.movementType !== MovementType.FLOATING) { // Swimmers (not floating) can still have motor impulses
                     const randomAngle = Math.random() * Math.PI * 2;
                     const impulseDir = new Vec2(Math.cos(randomAngle), Math.sin(randomAngle));
-                    const impulseMag = Math.random() * this.motorImpulseMagnitudeCap;
+                    const impulseMag = Math.random() * this.motorImpulseMagnitudeCap * this._getNodeSenescenceScale(point);
                     point.applyForce(impulseDir.mul(impulseMag / dt));
                 }
             }
@@ -3664,7 +3677,7 @@ export class SoftBody {
             currentFrameEnergyCost += baseNodeCostThisFrame;
             this.energyCostFromBaseNodes += baseNodeCostThisFrame * dt;
 
-            const exertion = point.currentExertionLevel || 0;
+            const exertion = (point.currentExertionLevel || 0) * this._getNodeSenescenceScale(point);
             const exertionSq = exertion * exertion; // Calculate once if used multiple times
             const wasActuationEvaluated = point.__actuationEvaluatedThisTick === true;
             const upkeepFraction = Math.max(0, Math.min(1, Number(config.ACTUATION_UPKEEP_COST_FRACTION) || 0));
@@ -3824,12 +3837,12 @@ export class SoftBody {
 
                 // --- Fluid Interactions (should occur even if fixed) ---
                 if (point.nodeType === NodeType.EMITTER) {
-                    let dyeEmissionStrength = 50 * point.currentExertionLevel * emitterDyeScale;
+                    let dyeEmissionStrength = 50 * (point.currentExertionLevel || 0) * this._getNodeSenescenceScale(point) * emitterDyeScale;
                     fluidFieldRef.addDensity(fluidGridX, fluidGridY, point.dyeColor[0], point.dyeColor[1], point.dyeColor[2], dyeEmissionStrength);
                 }
 
                 if (point.nodeType === NodeType.JET) {
-                    const exertion = point.currentExertionLevel || 0;
+                    const exertion = (point.currentExertionLevel || 0) * this._getNodeSenescenceScale(point);
                     if (exertion > 0.01) {
                         const currentFluidVelX = fluidFieldRef.Vx ? fluidFieldRef.Vx[idx] : 0; // Placeholder for GPU
                         const currentFluidVelY = fluidFieldRef.Vy ? fluidFieldRef.Vy[idx] : 0; // Placeholder for GPU
@@ -3846,7 +3859,7 @@ export class SoftBody {
                 }
 
                 if (point.nodeType === NodeType.SWIMMER && !point.isFixed) {
-                    const magnitude = Math.max(0, (Number(point.swimmerActuation?.magnitude) || 0) * swimmerDyeScale);
+                    const magnitude = Math.max(0, (Number(point.swimmerActuation?.magnitude) || 0) * this._getNodeSenescenceScale(point) * swimmerDyeScale);
                     const angle = Number(point.swimmerActuation?.angle) || 0;
                     if (magnitude > 0.0001) {
                         point.applyForce(new Vec2(Math.cos(angle) * (magnitude / dt), Math.sin(angle) * (magnitude / dt)));

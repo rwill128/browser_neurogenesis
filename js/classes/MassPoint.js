@@ -34,6 +34,7 @@ export class MassPoint {
         const minNodeAge = Math.max(10, Math.floor(Number(config.NODE_MAX_AGE_TICKS_MIN) || 2000));
         const maxNodeAge = Math.max(minNodeAge, Math.floor(Number(config.NODE_MAX_AGE_TICKS_MAX) || minNodeAge));
         this.maxAgeTicks = minNodeAge + Math.floor(Math.random() * Math.max(1, (maxNodeAge - minNodeAge + 1)));
+        this.senescenceScale = 1;
     }
 
     applyForce(f) {

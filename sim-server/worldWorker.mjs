@@ -67,6 +67,7 @@ let frameArchive = [];
 let frameSeq = 0;
 let lastFrameCaptureTick = -1;
 let frameBufferLastAccessAt = 0;
+let lastRealtimeStepAt = 0;
 
 function resetWorld(nextScenarioName, nextSeed) {
   const s = String(nextScenarioName || '').trim();
@@ -108,6 +109,7 @@ function resetWorld(nextScenarioName, nextSeed) {
   stepsThisSecond = 0;
   stepsPerSecond = 0;
   lastStepsPerSecondAt = Date.now();
+  lastRealtimeStepAt = 0;
 
   crashed = false;
   crash = null;
@@ -424,6 +426,8 @@ let loopLastAt = Date.now();
 const MAX_STEPS_PER_LOOP_REALTIME = 50;
 const MAX_STEPS_PER_LOOP_MAX = 5000;
 const MAX_MODE_BATCH_WALL_MS = 25;
+const REALTIME_MAX_STEPS_PER_SEC = 10;
+const REALTIME_MIN_STEP_INTERVAL_MS = Math.max(1, Math.floor(1000 / REALTIME_MAX_STEPS_PER_SEC));
 
 function scheduleNextLoop() {
   if (runMode === RUN_MODE_MAX) {
@@ -464,10 +468,15 @@ function runLoop() {
       accumulatorMs += elapsed;
       const dtMs = dt * 1000;
       while (accumulatorMs >= dtMs && steps < MAX_STEPS_PER_LOOP_REALTIME) {
+        const nowStep = Date.now();
+        if (lastRealtimeStepAt && (nowStep - lastRealtimeStepAt) < REALTIME_MIN_STEP_INTERVAL_MS) {
+          break;
+        }
         world.step(dt);
         archiveCurrentStepFrame();
         accumulatorMs -= dtMs;
         steps += 1;
+        lastRealtimeStepAt = nowStep;
       }
     }
 

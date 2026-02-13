@@ -309,7 +309,19 @@ function nodeColor(name) {
   }
 }
 
-function renderCreatureSvg({ creature, worldId, tick, time, size = 800, padding = 40, zoomOutFactor = 1 }) {
+function renderCreatureSvg({
+  creature,
+  worldId,
+  tick,
+  time,
+  size = 800,
+  padding = 40,
+  zoomOutFactor = 1,
+  allCreatures = null,
+  fluid = null,
+  includeFluid = true,
+  includeNeighbors = true
+}) {
   const vertices = Array.isArray(creature?.vertices) ? creature.vertices : [];
   const springs = Array.isArray(creature?.springs) ? creature.springs : [];
   if (vertices.length === 0) {
@@ -359,47 +371,129 @@ function renderCreatureSvg({ creature, worldId, tick, time, size = 800, padding 
   const sx = (x) => ((x - viewMinX) * scale + offsetX);
   const sy = (y) => ((y - viewMinY) * scale + offsetY);
 
-  const springLinesSoft = [];
-  const springLinesRigid = [];
-  for (const s of springs) {
-    const a = Number(s?.a);
-    const b = Number(s?.b);
-    if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a >= vertices.length || b >= vertices.length) continue;
-    const va = vertices[a];
-    const vb = vertices[b];
-    const x1 = sx(Number(va?.x));
-    const y1 = sy(Number(va?.y));
-    const x2 = sx(Number(vb?.x));
-    const y2 = sy(Number(vb?.y));
-    if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
-    const line = `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}"/>`;
-    if (s?.isRigid) springLinesRigid.push(line);
-    else springLinesSoft.push(line);
+  const selectedSoft = [];
+  const selectedRigid = [];
+  const selectedDots = [];
+  const neighborSoft = [];
+  const neighborRigid = [];
+  const neighborDots = [];
+
+  const appendCreatureGeometry = (srcCreature, {
+    softSink,
+    rigidSink,
+    dotSink,
+    dotOpacity = 1,
+    dotRadiusScale = 1
+  } = {}) => {
+    const srcVertices = Array.isArray(srcCreature?.vertices) ? srcCreature.vertices : [];
+    const srcSprings = Array.isArray(srcCreature?.springs) ? srcCreature.springs : [];
+    if (srcVertices.length === 0) return;
+
+    for (const s of srcSprings) {
+      const a = Number(s?.a);
+      const b = Number(s?.b);
+      if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a >= srcVertices.length || b >= srcVertices.length) continue;
+      const va = srcVertices[a];
+      const vb = srcVertices[b];
+      const x1 = sx(Number(va?.x));
+      const y1 = sy(Number(va?.y));
+      const x2 = sx(Number(vb?.x));
+      const y2 = sy(Number(vb?.y));
+      if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
+      const line = `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}"/>`;
+      if (s?.isRigid) rigidSink.push(line);
+      else softSink.push(line);
+    }
+
+    for (const v of srcVertices) {
+      const x = sx(Number(v?.x));
+      const y = sy(Number(v?.y));
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const r = Math.max(1.0, (Number(v?.radius) || 1) * scale * 0.6 * dotRadiusScale);
+      const fill = nodeColor(v?.nodeTypeName || v?.nodeType);
+      const opacityAttr = dotOpacity < 0.999 ? ` fill-opacity="${Math.max(0, Math.min(1, dotOpacity)).toFixed(3)}"` : '';
+      dotSink.push(`<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${Math.min(10, r).toFixed(2)}" fill="${fill}"${opacityAttr}/>`);
+    }
+  };
+
+  const selectedId = String(creature?.id ?? '');
+  const creaturePool = Array.isArray(allCreatures) && allCreatures.length > 0 ? allCreatures : [creature];
+
+  appendCreatureGeometry(creature, {
+    softSink: selectedSoft,
+    rigidSink: selectedRigid,
+    dotSink: selectedDots,
+    dotOpacity: 1,
+    dotRadiusScale: 1
+  });
+
+  let neighborsRendered = 0;
+  if (includeNeighbors) {
+    for (const c of creaturePool) {
+      if (!c) continue;
+      if (String(c?.id ?? '') === selectedId) continue;
+      appendCreatureGeometry(c, {
+        softSink: neighborSoft,
+        rigidSink: neighborRigid,
+        dotSink: neighborDots,
+        dotOpacity: 0.35,
+        dotRadiusScale: 0.8
+      });
+      neighborsRendered += 1;
+    }
   }
 
-  const pointDots = [];
-  for (const v of vertices) {
-    const x = sx(Number(v?.x));
-    const y = sy(Number(v?.y));
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    const r = Math.max(1.0, (Number(v?.radius) || 1) * scale * 0.6);
-    const fill = nodeColor(v?.nodeTypeName || v?.nodeType);
-    pointDots.push(`<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${Math.min(10, r).toFixed(2)}" fill="${fill}"/>`);
+  const fluidRects = [];
+  let fluidCellsRendered = 0;
+  if (includeFluid && fluid && Array.isArray(fluid?.cells) && fluid.cells.length > 0) {
+    const cellWWorld = Math.max(1e-6, Number(fluid?.worldCell?.width) || 0);
+    const cellHWorld = Math.max(1e-6, Number(fluid?.worldCell?.height) || 0);
+    const cellW = Math.max(0.8, cellWWorld * scale);
+    const cellH = Math.max(0.8, cellHWorld * scale);
+
+    for (const cell of fluid.cells) {
+      const cx = sx(Number(cell?.x));
+      const cy = sy(Number(cell?.y));
+      if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+
+      const r = Math.max(0, Math.min(255, Math.round(Number(cell?.r) || 0)));
+      const g = Math.max(0, Math.min(255, Math.round(Number(cell?.g) || 0)));
+      const b = Math.max(0, Math.min(255, Math.round(Number(cell?.b) || 0)));
+      const dye = Math.max(0, Number(cell?.dye) || 0);
+      const alpha = Math.max(0.04, Math.min(0.45, dye / 200));
+
+      fluidRects.push(
+        `<rect x="${(cx - cellW * 0.5).toFixed(2)}" y="${(cy - cellH * 0.5).toFixed(2)}" width="${cellW.toFixed(2)}" height="${cellH.toFixed(2)}" fill="rgb(${r},${g},${b})" fill-opacity="${alpha.toFixed(3)}"/>`
+      );
+      fluidCellsRendered += 1;
+    }
   }
 
-  const caption = `world=${worldId} creature=${creature?.id} tick=${tick} t=${Number(time || 0).toFixed(2)} points=${vertices.length} springs=${springs.length} zoom=${zoom.toFixed(2)}x`;
+  const caption = `world=${worldId} creature=${creature?.id} tick=${tick} t=${Number(time || 0).toFixed(2)} points=${vertices.length} springs=${springs.length} zoom=${zoom.toFixed(2)}x neighbors=${neighborsRendered} fluidCells=${fluidCellsRendered}`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${svgSize}" height="${svgSize}" viewBox="0 0 ${svgSize} ${svgSize}">
   <rect x="0" y="0" width="${svgSize}" height="${svgSize}" fill="#070b1a"/>
-  <g opacity="0.35" stroke="#cfd6ff" stroke-width="1.2" fill="none">
-    ${springLinesSoft.join('\n    ')}
+  <g>
+    ${fluidRects.join('\n    ')}
   </g>
-  <g opacity="0.70" stroke="#ffe16b" stroke-width="1.5" fill="none">
-    ${springLinesRigid.join('\n    ')}
+  <g opacity="0.14" stroke="#a8b7ff" stroke-width="0.9" fill="none">
+    ${neighborSoft.join('\n    ')}
+  </g>
+  <g opacity="0.22" stroke="#ffe16b" stroke-width="1.0" fill="none">
+    ${neighborRigid.join('\n    ')}
   </g>
   <g>
-    ${pointDots.join('\n    ')}
+    ${neighborDots.join('\n    ')}
+  </g>
+  <g opacity="0.35" stroke="#cfd6ff" stroke-width="1.2" fill="none">
+    ${selectedSoft.join('\n    ')}
+  </g>
+  <g opacity="0.70" stroke="#ffe16b" stroke-width="1.5" fill="none">
+    ${selectedRigid.join('\n    ')}
+  </g>
+  <g>
+    ${selectedDots.join('\n    ')}
   </g>
   <text x="14" y="${svgSize - 14}" font-family="ui-monospace, Menlo, monospace" font-size="12" fill="#d7deff">${xmlEscape(caption)}</text>
 </svg>`;
@@ -444,7 +538,15 @@ function readCaptureFilePayload(fileParam) {
   };
 }
 
-async function captureCreaturePortrait({ worldId, creatureId = null, random = true, size = 800, zoomOutFactor = 1 }) {
+async function captureCreaturePortrait({
+  worldId,
+  creatureId = null,
+  random = true,
+  size = 800,
+  zoomOutFactor = 1,
+  includeFluid = true,
+  includeNeighbors = true
+}) {
   const handle = getWorldOrThrow(worldId);
   const snap = await handle.rpc('getSnapshot', { mode: 'render' });
   const creatures = Array.isArray(snap?.creatures) ? snap.creatures : [];
@@ -471,7 +573,11 @@ async function captureCreaturePortrait({ worldId, creatureId = null, random = tr
     tick: snap?.tick,
     time: snap?.time,
     size,
-    zoomOutFactor
+    zoomOutFactor,
+    allCreatures: creatures,
+    fluid: snap?.fluid,
+    includeFluid,
+    includeNeighbors
   });
 
   const safeWorldId = String(worldId).replace(/[^a-zA-Z0-9_-]+/g, '_');
@@ -490,6 +596,8 @@ async function captureCreaturePortrait({ worldId, creatureId = null, random = tr
     vertices: Array.isArray(selected?.vertices) ? selected.vertices.length : 0,
     springs: Array.isArray(selected?.springs) ? selected.springs.length : 0,
     zoomOutFactor: Math.max(1, Math.min(50, Number(zoomOutFactor) || 1)),
+    includeFluid: Boolean(includeFluid),
+    includeNeighbors: Boolean(includeNeighbors),
     fileName,
     filePath: absPath,
     downloadUrl: `/api/worlds/${encodeURIComponent(worldId)}/captures/${encodeURIComponent(fileName)}`
@@ -508,7 +616,9 @@ async function captureCreatureClip({
   size = 800,
   durationSec = 5,
   fps = 12,
-  zoomOutFactor = 1
+  zoomOutFactor = 1,
+  includeFluid = true,
+  includeNeighbors = true
 }) {
   const handle = getWorldOrThrow(worldId);
 
@@ -555,7 +665,9 @@ async function captureCreatureClip({
     frames.push({
       tick: Number(snap?.tick) || 0,
       time: Number(snap?.time) || 0,
-      creature
+      creature,
+      creatures,
+      fluid: snap?.fluid || null
     });
   }
 
@@ -587,7 +699,11 @@ async function captureCreatureClip({
         tick: f.tick,
         time: f.time,
         size: renderSize,
-        zoomOutFactor
+        zoomOutFactor,
+        allCreatures: f.creatures,
+        fluid: f.fluid,
+        includeFluid,
+        includeNeighbors
       });
 
       const idx = String(i).padStart(4, '0');
@@ -631,6 +747,8 @@ async function captureCreatureClip({
     timeEnd: Number(frames[frames.length - 1]?.time) || 0,
     fps: clipFps,
     zoomOutFactor: Math.max(1, Math.min(50, Number(zoomOutFactor) || 1)),
+    includeFluid: Boolean(includeFluid),
+    includeNeighbors: Boolean(includeNeighbors),
     durationRequestedSec: clipDurationSec,
     durationCapturedSec: Number(((frames.length - 1) / clipFps).toFixed(3)),
     framesCaptured: frames.length,
@@ -976,10 +1094,12 @@ app.post('/api/worlds/:id/capture/randomCreature', async (req, reply) => {
     const random = creatureId == null;
     const sizeRaw = Number(req.body?.size ?? req.query?.size ?? 800);
     const zoomRaw = Number(req.body?.zoomOutFactor ?? req.query?.zoomOutFactor ?? 1);
+    const includeFluid = parseBool(req.body?.includeFluid ?? req.query?.includeFluid ?? true, true);
+    const includeNeighbors = parseBool(req.body?.includeNeighbors ?? req.query?.includeNeighbors ?? true, true);
     const size = Number.isFinite(sizeRaw) ? Math.max(256, Math.min(2048, Math.floor(sizeRaw))) : 800;
     const zoomOutFactor = Number.isFinite(zoomRaw) ? Math.max(1, Math.min(50, zoomRaw)) : 1;
 
-    return await captureCreaturePortrait({ worldId, creatureId, random, size, zoomOutFactor });
+    return await captureCreaturePortrait({ worldId, creatureId, random, size, zoomOutFactor, includeFluid, includeNeighbors });
   } catch (err) {
     reply.code(400);
     return { ok: false, error: String(err?.message || err) };
@@ -995,13 +1115,15 @@ app.post('/api/worlds/:id/capture/creatureClip', async (req, reply) => {
     const durationRaw = Number(req.body?.durationSec ?? req.query?.durationSec ?? 5);
     const fpsRaw = Number(req.body?.fps ?? req.query?.fps ?? 12);
     const zoomRaw = Number(req.body?.zoomOutFactor ?? req.query?.zoomOutFactor ?? 1);
+    const includeFluid = parseBool(req.body?.includeFluid ?? req.query?.includeFluid ?? true, true);
+    const includeNeighbors = parseBool(req.body?.includeNeighbors ?? req.query?.includeNeighbors ?? true, true);
 
     const size = Number.isFinite(sizeRaw) ? Math.max(256, Math.min(2048, Math.floor(sizeRaw))) : 800;
     const durationSec = Number.isFinite(durationRaw) ? Math.max(1, Math.min(20, durationRaw)) : 5;
     const fps = Number.isFinite(fpsRaw) ? Math.max(4, Math.min(30, Math.floor(fpsRaw))) : 12;
     const zoomOutFactor = Number.isFinite(zoomRaw) ? Math.max(1, Math.min(50, zoomRaw)) : 1;
 
-    return await captureCreatureClip({ worldId, creatureId, random, size, durationSec, fps, zoomOutFactor });
+    return await captureCreatureClip({ worldId, creatureId, random, size, durationSec, fps, zoomOutFactor, includeFluid, includeNeighbors });
   } catch (err) {
     reply.code(400);
     return { ok: false, error: String(err?.message || err) };
@@ -1045,9 +1167,11 @@ app.post('/api/capture/randomCreature', async (req, reply) => {
     const random = creatureId == null;
     const sizeRaw = Number(req.body?.size ?? req.query?.size ?? 800);
     const zoomRaw = Number(req.body?.zoomOutFactor ?? req.query?.zoomOutFactor ?? 1);
+    const includeFluid = parseBool(req.body?.includeFluid ?? req.query?.includeFluid ?? true, true);
+    const includeNeighbors = parseBool(req.body?.includeNeighbors ?? req.query?.includeNeighbors ?? true, true);
     const size = Number.isFinite(sizeRaw) ? Math.max(256, Math.min(2048, Math.floor(sizeRaw))) : 800;
     const zoomOutFactor = Number.isFinite(zoomRaw) ? Math.max(1, Math.min(50, zoomRaw)) : 1;
-    return await captureCreaturePortrait({ worldId: DEFAULT_WORLD_ID, creatureId, random, size, zoomOutFactor });
+    return await captureCreaturePortrait({ worldId: DEFAULT_WORLD_ID, creatureId, random, size, zoomOutFactor, includeFluid, includeNeighbors });
   } catch (err) {
     reply.code(400);
     return { ok: false, error: String(err?.message || err) };
@@ -1061,13 +1185,15 @@ app.post('/api/capture/creatureClip', async (req, reply) => {
     const durationRaw = Number(req.body?.durationSec ?? req.query?.durationSec ?? 5);
     const fpsRaw = Number(req.body?.fps ?? req.query?.fps ?? 12);
     const zoomRaw = Number(req.body?.zoomOutFactor ?? req.query?.zoomOutFactor ?? 1);
+    const includeFluid = parseBool(req.body?.includeFluid ?? req.query?.includeFluid ?? true, true);
+    const includeNeighbors = parseBool(req.body?.includeNeighbors ?? req.query?.includeNeighbors ?? true, true);
 
     const size = Number.isFinite(sizeRaw) ? Math.max(256, Math.min(2048, Math.floor(sizeRaw))) : 800;
     const durationSec = Number.isFinite(durationRaw) ? Math.max(1, Math.min(20, durationRaw)) : 5;
     const fps = Number.isFinite(fpsRaw) ? Math.max(4, Math.min(30, Math.floor(fpsRaw))) : 12;
     const zoomOutFactor = Number.isFinite(zoomRaw) ? Math.max(1, Math.min(50, zoomRaw)) : 1;
 
-    return await captureCreatureClip({ worldId: DEFAULT_WORLD_ID, creatureId, random, size, durationSec, fps, zoomOutFactor });
+    return await captureCreatureClip({ worldId: DEFAULT_WORLD_ID, creatureId, random, size, durationSec, fps, zoomOutFactor, includeFluid, includeNeighbors });
   } catch (err) {
     reply.code(400);
     return { ok: false, error: String(err?.message || err) };

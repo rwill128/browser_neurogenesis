@@ -17,6 +17,17 @@ const config = {
     MAX_PIXELS_PER_FRAME_DISPLACEMENT: 300,
     MAX_SPRING_STRETCH_FACTOR: 20.0,
     MAX_SPAN_PER_POINT_FACTOR: 300, // GRID_CELL_SIZE * 3
+    // Optional hard geometric guardrail: projection-style spring length cap before instability checks.
+    EDGE_LENGTH_HARD_CAP_ENABLED: false,
+    EDGE_LENGTH_HARD_CAP_FACTOR: 6.0,
+
+    // Edge-length telemetry (current simulated lengths, not rest lengths).
+    EDGE_LENGTH_TELEMETRY_ENABLED: true,
+    EDGE_LENGTH_TELEMETRY_SAMPLE_EVERY_N_STEPS: 10,
+    EDGE_LENGTH_TELEMETRY_MODE_BIN_SIZE: 0.01,
+    EDGE_LENGTH_TELEMETRY_HUGE_OUTLIER_IQR_MULTIPLIER: 3.0,
+    EDGE_LENGTH_TELEMETRY_HISTORY_MAX_SAMPLES: 120,
+    EDGE_LENGTH_TELEMETRY_MAX_RECORDED_OUTLIERS: 24,
 
     // Instability policy: when false, boundary crossings are resolved via clamp/wrap instead of instant death.
     KILL_ON_OUT_OF_BOUNDS: true,

@@ -506,6 +506,7 @@ export class RealWorld {
     });
 
     const instabilityTelemetry = this.worldState.instabilityTelemetry || {};
+    const edgeLengthTelemetry = this.worldState.edgeLengthTelemetry || {};
     const nodeTypeSummary = summarizePopulationNodeTypes(this.softBodyPopulation);
 
     return {
@@ -524,7 +525,8 @@ export class RealWorld {
         computeTelemetry: this.worldState?.lastComputeTelemetry || null,
         nodeTypeCounts: nodeTypeSummary.counts,
         nodeTypeRatios: nodeTypeSummary.ratios,
-        totalNodes: nodeTypeSummary.totalNodes
+        totalNodes: nodeTypeSummary.totalNodes,
+        edgeLengthTelemetryLatest: edgeLengthTelemetry?.latest || null
       },
       nodeTypeCounts: nodeTypeSummary.counts,
       nodeTypeRatios: nodeTypeSummary.ratios,
@@ -543,6 +545,17 @@ export class RealWorld {
           : [],
         sampledDiagnostics: Array.isArray(instabilityTelemetry.sampledDiagnostics)
           ? instabilityTelemetry.sampledDiagnostics.slice(-10)
+          : []
+      },
+      edgeLengthTelemetry: {
+        enabled: edgeLengthTelemetry.enabled !== false,
+        sampleEveryNSteps: Number(edgeLengthTelemetry.sampleEveryNSteps) || 0,
+        samplesCollected: Number(edgeLengthTelemetry.samplesCollected) || 0,
+        totalSpringSamples: Number(edgeLengthTelemetry.totalSpringSamples) || 0,
+        totalHugeOutliers: Number(edgeLengthTelemetry.totalHugeOutliers) || 0,
+        latest: edgeLengthTelemetry.latest || null,
+        recentSamples: Array.isArray(edgeLengthTelemetry.recentSamples)
+          ? edgeLengthTelemetry.recentSamples.slice(-20)
           : []
       },
       mutationStats: this.worldState?.mutationStats || {},

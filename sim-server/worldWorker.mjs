@@ -87,7 +87,8 @@ function computeStatus() {
       particles: Array.isArray(world?.particles) ? world.particles.length : null
     },
     stepsPerSecond,
-    lastStepWallMs
+    lastStepWallMs,
+    edgeLengthTelemetryLatest: world?.worldState?.edgeLengthTelemetry?.latest || null
   };
 }
 
@@ -388,7 +389,13 @@ parentPort.on('message', (msg) => {
           'REPRO_FERTILITY_GLOBAL_MIN_SCALE',
           'REPRO_FERTILITY_LOCAL_MIN_SCALE',
           'REPRO_MIN_FERTILITY_SCALE',
-          'FAILED_REPRODUCTION_COOLDOWN_TICKS'
+          'FAILED_REPRODUCTION_COOLDOWN_TICKS',
+          'EDGE_LENGTH_HARD_CAP_ENABLED',
+          'EDGE_LENGTH_HARD_CAP_FACTOR',
+          'EDGE_LENGTH_TELEMETRY_ENABLED',
+          'EDGE_LENGTH_TELEMETRY_SAMPLE_EVERY_N_STEPS',
+          'EDGE_LENGTH_TELEMETRY_MODE_BIN_SIZE',
+          'EDGE_LENGTH_TELEMETRY_HUGE_OUTLIER_IQR_MULTIPLIER'
         ]);
 
         const out = {};

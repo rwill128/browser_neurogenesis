@@ -125,6 +125,167 @@ function ensureInstabilityTelemetryState(state, maxRecentDeaths = 1000) {
   return t;
 }
 
+function percentileSorted(sorted, p) {
+  if (!Array.isArray(sorted) || sorted.length === 0) return 0;
+  const clampedP = Math.max(0, Math.min(100, Number(p) || 0));
+  if (clampedP <= 0) return sorted[0];
+  if (clampedP >= 100) return sorted[sorted.length - 1];
+
+  const idx = (sorted.length - 1) * (clampedP / 100);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  const w = idx - lo;
+  return sorted[lo] * (1 - w) + sorted[hi] * w;
+}
+
+function ensureEdgeLengthTelemetryState(state, runtimeConfig) {
+  if (!state.edgeLengthTelemetry || typeof state.edgeLengthTelemetry !== 'object') {
+    state.edgeLengthTelemetry = {
+      samplesCollected: 0,
+      totalSpringSamples: 0,
+      totalHugeOutliers: 0,
+      latest: null,
+      recentSamples: []
+    };
+  }
+
+  const t = state.edgeLengthTelemetry;
+  t.samplesCollected = Number(t.samplesCollected) || 0;
+  t.totalSpringSamples = Number(t.totalSpringSamples) || 0;
+  t.totalHugeOutliers = Number(t.totalHugeOutliers) || 0;
+  t.latest = t.latest && typeof t.latest === 'object' ? t.latest : null;
+  t.recentSamples = Array.isArray(t.recentSamples) ? t.recentSamples : [];
+
+  t.enabled = runtimeConfig.EDGE_LENGTH_TELEMETRY_ENABLED !== false;
+  t.sampleEveryNSteps = Math.max(1, Math.floor(Number(runtimeConfig.EDGE_LENGTH_TELEMETRY_SAMPLE_EVERY_N_STEPS) || 10));
+  t.modeBinSize = Math.max(0.0001, Number(runtimeConfig.EDGE_LENGTH_TELEMETRY_MODE_BIN_SIZE) || 0.01);
+  t.hugeOutlierIqrMultiplier = Math.max(1, Number(runtimeConfig.EDGE_LENGTH_TELEMETRY_HUGE_OUTLIER_IQR_MULTIPLIER) || 3);
+  t.historyMaxSamples = Math.max(1, Math.floor(Number(runtimeConfig.EDGE_LENGTH_TELEMETRY_HISTORY_MAX_SAMPLES) || 120));
+  t.maxRecordedOutliers = Math.max(0, Math.floor(Number(runtimeConfig.EDGE_LENGTH_TELEMETRY_MAX_RECORDED_OUTLIERS) || 24));
+  return t;
+}
+
+function updateEdgeLengthTelemetry(state, runtimeConfig) {
+  const telemetry = ensureEdgeLengthTelemetryState(state, runtimeConfig);
+  if (!telemetry.enabled) return;
+
+  const step = Number(state.simulationStep) || 0;
+  if (step <= 0 || (step % telemetry.sampleEveryNSteps) !== 0) return;
+
+  const lengths = [];
+  const ratios = [];
+  const records = [];
+
+  for (const body of state.softBodyPopulation || []) {
+    if (!body || !Array.isArray(body.springs)) continue;
+    for (let i = 0; i < body.springs.length; i++) {
+      const spring = body.springs[i];
+      if (!spring?.p1?.pos || !spring?.p2?.pos) continue;
+
+      const dx = (Number(spring.p1.pos.x) || 0) - (Number(spring.p2.pos.x) || 0);
+      const dy = (Number(spring.p1.pos.y) || 0) - (Number(spring.p2.pos.y) || 0);
+      const currentLength = Math.hypot(dx, dy);
+      if (!Number.isFinite(currentLength) || currentLength <= 0) continue;
+
+      const restLength = Math.max(1e-9, Number(spring.restLength) || 1e-9);
+      const ratio = currentLength / restLength;
+
+      lengths.push(currentLength);
+      ratios.push(ratio);
+      records.push({
+        bodyId: Number.isFinite(Number(body.id)) ? Number(body.id) : null,
+        springIndex: i,
+        currentLength,
+        restLength,
+        ratio
+      });
+    }
+  }
+
+  if (lengths.length === 0) {
+    telemetry.latest = {
+      sampledAtStep: step,
+      sampledAtIso: new Date().toISOString(),
+      springCount: 0
+    };
+    return;
+  }
+
+  lengths.sort((a, b) => a - b);
+  ratios.sort((a, b) => a - b);
+
+  const count = lengths.length;
+  const sum = lengths.reduce((acc, v) => acc + v, 0);
+  const mean = sum / count;
+  const median = percentileSorted(lengths, 50);
+  const q1 = percentileSorted(lengths, 25);
+  const q3 = percentileSorted(lengths, 75);
+  const iqr = Math.max(0, q3 - q1);
+  const hugeThreshold = q3 + (telemetry.hugeOutlierIqrMultiplier * iqr);
+  const hugeOutliers = records.filter((r) => r.currentLength > hugeThreshold).sort((a, b) => b.currentLength - a.currentLength);
+
+  const modeBinCounts = new Map();
+  for (const value of lengths) {
+    const bin = Math.round(value / telemetry.modeBinSize) * telemetry.modeBinSize;
+    modeBinCounts.set(bin, (modeBinCounts.get(bin) || 0) + 1);
+  }
+  let modeValue = lengths[0];
+  let modeCount = 0;
+  for (const [bin, cnt] of modeBinCounts.entries()) {
+    if (cnt > modeCount) {
+      modeCount = cnt;
+      modeValue = bin;
+    }
+  }
+
+  const stretchLimit = Math.max(1, Number(runtimeConfig.MAX_SPRING_STRETCH_FACTOR) || 1);
+  const ratioAboveStretchLimit = ratios.filter((r) => r > stretchLimit).length;
+
+  const summary = {
+    sampledAtStep: step,
+    sampledAtIso: new Date().toISOString(),
+    springCount: count,
+    meanCurrentLength: round(mean, 6),
+    medianCurrentLength: round(median, 6),
+    modeCurrentLength: round(modeValue, 6),
+    modeCount,
+    p95CurrentLength: round(percentileSorted(lengths, 95), 6),
+    p99CurrentLength: round(percentileSorted(lengths, 99), 6),
+    maxCurrentLength: round(lengths[lengths.length - 1], 6),
+    q1CurrentLength: round(q1, 6),
+    q3CurrentLength: round(q3, 6),
+    iqrCurrentLength: round(iqr, 6),
+    hugeOutlierThreshold: round(hugeThreshold, 6),
+    hugeOutlierCount: hugeOutliers.length,
+    hugeOutlierPct: round((hugeOutliers.length / count) * 100, 6),
+    meanStretchRatio: round(ratios.reduce((acc, v) => acc + v, 0) / ratios.length, 6),
+    medianStretchRatio: round(percentileSorted(ratios, 50), 6),
+    p95StretchRatio: round(percentileSorted(ratios, 95), 6),
+    p99StretchRatio: round(percentileSorted(ratios, 99), 6),
+    maxStretchRatio: round(ratios[ratios.length - 1], 6),
+    stretchLimit,
+    aboveStretchLimitCount: ratioAboveStretchLimit,
+    aboveStretchLimitPct: round((ratioAboveStretchLimit / ratios.length) * 100, 6),
+    hugeOutliersTop: hugeOutliers.slice(0, telemetry.maxRecordedOutliers).map((r) => ({
+      bodyId: r.bodyId,
+      springIndex: r.springIndex,
+      currentLength: round(r.currentLength, 6),
+      restLength: round(r.restLength, 6),
+      ratio: round(r.ratio, 6)
+    }))
+  };
+
+  telemetry.samplesCollected += 1;
+  telemetry.totalSpringSamples += count;
+  telemetry.totalHugeOutliers += hugeOutliers.length;
+  telemetry.latest = summary;
+  telemetry.recentSamples.push(summary);
+  if (telemetry.recentSamples.length > telemetry.historyMaxSamples) {
+    telemetry.recentSamples.splice(0, telemetry.recentSamples.length - telemetry.historyMaxSamples);
+  }
+}
+
 function classifyInstabilityReason(reason) {
   const r = String(reason || 'unknown');
   if (r === 'physics_out_of_bounds') {
@@ -1000,6 +1161,8 @@ export function stepWorld(state, dt, options = {}) {
     }
     state.softBodyPopulation.push(...newOffspring);
   }
+
+  updateEdgeLengthTelemetry(state, runtimeConfig);
 
   removeDeadParticles(state, dt, rng);
 

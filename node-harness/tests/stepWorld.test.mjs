@@ -117,6 +117,12 @@ function createRuntimeConfig(overrides = {}) {
     LANDSCAPE_DYE_EMITTER_RADIUS_CELLS: 0,
     LANDSCAPE_DYE_EMITTER_PULSE_HZ_MIN: 0.02,
     LANDSCAPE_DYE_EMITTER_PULSE_HZ_MAX: 0.09,
+    EDGE_LENGTH_TELEMETRY_ENABLED: true,
+    EDGE_LENGTH_TELEMETRY_SAMPLE_EVERY_N_STEPS: 10,
+    EDGE_LENGTH_TELEMETRY_MODE_BIN_SIZE: 0.01,
+    EDGE_LENGTH_TELEMETRY_HUGE_OUTLIER_IQR_MULTIPLIER: 3,
+    EDGE_LENGTH_TELEMETRY_HISTORY_MAX_SAMPLES: 120,
+    EDGE_LENGTH_TELEMETRY_MAX_RECORDED_OUTLIERS: 24,
     selectedSoftBodyPoint: null,
     SOFT_BODY_PUSH_STRENGTH: 1,
     isAnySoftBodyUnstable: false,
@@ -766,4 +772,63 @@ test('stepWorld islands_shuffled randomizes serial island execution order', () =
   assert.deepEqual(order, [2, 3, 1]);
   assert.equal(result.computeTelemetry.mode, 'islands_shuffled');
   assert.equal(result.computeTelemetry.shuffled, true);
+});
+
+test('stepWorld samples edge-length telemetry (mean/median/mode + huge outliers)', () => {
+  const runtime = createRuntimeConfig({
+    EDGE_LENGTH_TELEMETRY_ENABLED: true,
+    EDGE_LENGTH_TELEMETRY_SAMPLE_EVERY_N_STEPS: 1,
+    EDGE_LENGTH_TELEMETRY_MODE_BIN_SIZE: 0.01,
+    EDGE_LENGTH_TELEMETRY_HUGE_OUTLIER_IQR_MULTIPLIER: 3,
+    EDGE_LENGTH_TELEMETRY_HISTORY_MAX_SAMPLES: 8,
+    EDGE_LENGTH_TELEMETRY_MAX_RECORDED_OUTLIERS: 4
+  });
+
+  const body = new FakeSoftBody(1, 0, 0);
+  body.canReproduce = false;
+  const p1 = { pos: { x: 0, y: 0 }, prevPos: { x: 0, y: 0 }, force: { x: 0, y: 0 }, movementType: 2, mass: 1 };
+  const p2 = { pos: { x: 4, y: 0 }, prevPos: { x: 4, y: 0 }, force: { x: 0, y: 0 }, movementType: 2, mass: 1 };
+  const p3 = { pos: { x: 8, y: 0 }, prevPos: { x: 8, y: 0 }, force: { x: 0, y: 0 }, movementType: 2, mass: 1 };
+  const p4 = { pos: { x: 50, y: 0 }, prevPos: { x: 50, y: 0 }, force: { x: 0, y: 0 }, movementType: 2, mass: 1 };
+  body.massPoints = [p1, p2, p3, p4];
+
+  const makeSpring = (a, b, restLength) => ({ p1: a, p2: b, restLength, isRigid: false, stiffness: 1000, dampingFactor: 10 });
+  body.springs = [
+    makeSpring(p1, p2, 4),
+    makeSpring(p1, p2, 4),
+    makeSpring(p1, p2, 4),
+    makeSpring(p2, p3, 4),
+    makeSpring(p2, p3, 4),
+    makeSpring(p2, p3, 4),
+    makeSpring(p1, p3, 8),
+    makeSpring(p1, p3, 8),
+    makeSpring(p1, p4, 4)
+  ];
+
+  const state = createWorldState({
+    runtime,
+    softBodies: [body],
+    particles: [],
+    fluidField: new FakeFluidField()
+  });
+
+  stepWorld(state, 0.01, {
+    config: runtime,
+    rng: () => 0.5,
+    SoftBodyClass: FakeSoftBody,
+    ParticleClass: FakeParticle,
+    allowReproduction: false,
+    maintainCreatureFloor: false,
+    maintainParticleFloor: false
+  });
+
+  assert.ok(state.edgeLengthTelemetry);
+  assert.ok(state.edgeLengthTelemetry.latest);
+  assert.equal(state.edgeLengthTelemetry.latest.springCount, 9);
+  assert.ok(state.edgeLengthTelemetry.latest.meanCurrentLength > 0);
+  assert.ok(state.edgeLengthTelemetry.latest.medianCurrentLength > 0);
+  assert.ok(state.edgeLengthTelemetry.latest.modeCurrentLength > 0);
+  assert.equal(state.edgeLengthTelemetry.latest.hugeOutlierCount >= 1, true);
+  assert.equal(Array.isArray(state.edgeLengthTelemetry.latest.hugeOutliersTop), true);
+  assert.equal(state.edgeLengthTelemetry.samplesCollected >= 1, true);
 });

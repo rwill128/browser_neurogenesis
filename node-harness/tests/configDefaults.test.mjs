@@ -57,3 +57,11 @@ test('viscosity landscape defaults expose stronger-shape controls', () => {
   assert.ok(Number(config.VISCOSITY_LANDSCAPE_CONTRAST) >= 0);
   assert.ok(Number(config.VISCOSITY_LANDSCAPE_BANDS) >= 0);
 });
+
+test('edge-length telemetry defaults are enabled and hard cap is opt-in', () => {
+  assert.equal(config.EDGE_LENGTH_TELEMETRY_ENABLED, true);
+  assert.ok(Number(config.EDGE_LENGTH_TELEMETRY_SAMPLE_EVERY_N_STEPS) >= 1);
+  assert.ok(Number(config.EDGE_LENGTH_TELEMETRY_MODE_BIN_SIZE) > 0);
+  assert.equal(config.EDGE_LENGTH_HARD_CAP_ENABLED, false);
+  assert.ok(Number(config.EDGE_LENGTH_HARD_CAP_FACTOR) > 1);
+});

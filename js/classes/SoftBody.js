@@ -174,6 +174,11 @@ export class SoftBody {
         this.energyCostFromActuationUpkeep = 0;
         this.energyCostFromActuationEvents = 0;
 
+        // Edge-length hard-cap telemetry (optional geometric projection guardrail).
+        this.edgeLengthClampEvents = 0;
+        this.edgeLengthClampTotalCorrection = 0;
+        this.edgeLengthClampMaxRatioBefore = 0;
+
         // Initialize heritable/mutable properties
         if (isBlueprint && creationData) {
             // --- CREATION FROM IMPORTED BLUEPRINT ---
@@ -3661,6 +3666,83 @@ export class SoftBody {
         }
     }
 
+    _applyEdgeLengthHardCap() {
+        if (config.EDGE_LENGTH_HARD_CAP_ENABLED === false) {
+            return { clamped: 0, totalCorrection: 0, maxRatioBefore: 0 };
+        }
+
+        const capFactor = Math.max(1.01, Number(config.EDGE_LENGTH_HARD_CAP_FACTOR) || 1.01);
+        let clamped = 0;
+        let totalCorrection = 0;
+        let maxRatioBefore = 0;
+
+        for (const spring of this.springs) {
+            if (!spring || !spring.p1 || !spring.p2) continue;
+
+            this._tempVec1.copyFrom(spring.p1.pos).subInPlace(spring.p2.pos);
+            const currentLength = this._tempVec1.mag();
+            if (!Number.isFinite(currentLength) || currentLength <= 1e-9) continue;
+
+            const restLength = Math.max(1e-9, Number(spring.restLength) || 1e-9);
+            const ratioBefore = currentLength / restLength;
+            if (ratioBefore > maxRatioBefore) maxRatioBefore = ratioBefore;
+
+            const maxLength = restLength * capFactor;
+            if (currentLength <= maxLength) continue;
+
+            const excess = currentLength - maxLength;
+            if (!Number.isFinite(excess) || excess <= 0) continue;
+
+            const nx = this._tempVec1.x / currentLength;
+            const ny = this._tempVec1.y / currentLength;
+
+            const p1 = spring.p1;
+            const p2 = spring.p2;
+            const p1Fixed = p1.movementType === MovementType.FIXED;
+            const p2Fixed = p2.movementType === MovementType.FIXED;
+
+            let moveP1 = 0;
+            let moveP2 = 0;
+
+            if (p1Fixed && p2Fixed) continue;
+            if (p1Fixed) {
+                moveP2 = excess;
+            } else if (p2Fixed) {
+                moveP1 = excess;
+            } else {
+                const invMass1 = 1 / Math.max(1e-6, Number(p1.mass) || 1);
+                const invMass2 = 1 / Math.max(1e-6, Number(p2.mass) || 1);
+                const denom = Math.max(1e-6, invMass1 + invMass2);
+                moveP1 = excess * (invMass1 / denom);
+                moveP2 = excess * (invMass2 / denom);
+            }
+
+            if (moveP1 > 0) {
+                const dx = nx * moveP1;
+                const dy = ny * moveP1;
+                p1.pos.x -= dx;
+                p1.pos.y -= dy;
+                // Preserve implicit velocity; avoid injecting additional displacement spikes.
+                p1.prevPos.x -= dx;
+                p1.prevPos.y -= dy;
+            }
+
+            if (moveP2 > 0) {
+                const dx = nx * moveP2;
+                const dy = ny * moveP2;
+                p2.pos.x += dx;
+                p2.pos.y += dy;
+                p2.prevPos.x += dx;
+                p2.prevPos.y += dy;
+            }
+
+            clamped += 1;
+            totalCorrection += excess;
+        }
+
+        return { clamped, totalCorrection, maxRatioBefore };
+    }
+
     _finalizeUpdateAndCheckStability(dt) { 
         this.preyPredatedThisTick = new Set(); // Keyed by "predatorPointIndex:preyBodyId" for this body's current tick
         if (this.isUnstable) return; 
@@ -3929,6 +4011,13 @@ export class SoftBody {
             }
         }
         if (this.isUnstable) return; 
+
+        const edgeClamp = this._applyEdgeLengthHardCap();
+        if (edgeClamp.clamped > 0) {
+            this.edgeLengthClampEvents += edgeClamp.clamped;
+            this.edgeLengthClampTotalCorrection += edgeClamp.totalCorrection;
+            this.edgeLengthClampMaxRatioBefore = Math.max(this.edgeLengthClampMaxRatioBefore, edgeClamp.maxRatioBefore || 0);
+        }
 
         // Final Instability Checks: Springs and Span
         const localMaxSpringStretchFactor = config.MAX_SPRING_STRETCH_FACTOR;

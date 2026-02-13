@@ -13,10 +13,12 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 
-import { resolve, basename } from 'node:path';
+import { resolve, basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
-import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { gzipSync, gunzipSync } from 'node:zlib';
 
 import { scenarioDefs } from '../js/engine/scenarioDefs.mjs';
@@ -395,6 +397,45 @@ function renderCreatureSvg({ creature, worldId, tick, time, size = 800, padding 
 </svg>`;
 }
 
+function readCaptureFilePayload(fileParam) {
+  const fileName = basename(String(fileParam || ''));
+  const lower = fileName.toLowerCase();
+  const isSvg = lower.endsWith('.svg');
+  const isPng = lower.endsWith('.png');
+  const isMp4 = lower.endsWith('.mp4');
+  const isGif = lower.endsWith('.gif');
+  const isWebm = lower.endsWith('.webm');
+
+  if (!fileName || (!isSvg && !isPng && !isMp4 && !isGif && !isWebm)) {
+    throw new Error('invalid capture file name');
+  }
+
+  const absPath = resolve(capturesDir, fileName);
+  if (!absPath.startsWith(capturesDir)) {
+    throw new Error('invalid capture path');
+  }
+
+  if (isSvg) {
+    return {
+      payload: readFileSync(absPath, 'utf8'),
+      contentType: 'image/svg+xml; charset=utf-8'
+    };
+  }
+
+  const contentType = isPng
+    ? 'image/png'
+    : (isMp4
+      ? 'video/mp4'
+      : (isGif
+        ? 'image/gif'
+        : 'video/webm'));
+
+  return {
+    payload: readFileSync(absPath),
+    contentType
+  };
+}
+
 async function captureCreaturePortrait({ worldId, creatureId = null, random = true, size = 800 }) {
   const handle = getWorldOrThrow(worldId);
   const snap = await handle.rpc('getSnapshot', { mode: 'render' });
@@ -439,6 +480,148 @@ async function captureCreaturePortrait({ worldId, creatureId = null, random = tr
     creatureId: selected?.id ?? null,
     vertices: Array.isArray(selected?.vertices) ? selected.vertices.length : 0,
     springs: Array.isArray(selected?.springs) ? selected.springs.length : 0,
+    fileName,
+    filePath: absPath,
+    downloadUrl: `/api/worlds/${encodeURIComponent(worldId)}/captures/${encodeURIComponent(fileName)}`
+  };
+}
+
+function waitMs(ms) {
+  const delay = Math.max(0, Number(ms) || 0);
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, delay));
+}
+
+async function captureCreatureClip({
+  worldId,
+  creatureId = null,
+  random = true,
+  size = 800,
+  durationSec = 5,
+  fps = 12
+}) {
+  const handle = getWorldOrThrow(worldId);
+
+  const clipDurationSec = Math.max(1, Math.min(20, Number(durationSec) || 5));
+  const clipFps = Math.max(4, Math.min(30, Math.floor(Number(fps) || 12)));
+  const frameCountTarget = Math.max(2, Math.round(clipDurationSec * clipFps));
+  const frameIntervalMs = 1000 / clipFps;
+  const renderSize = Math.max(256, Math.floor(Number(size) || 800));
+
+  const firstSnap = await handle.rpc('getSnapshot', { mode: 'render' });
+  const firstCreatures = Array.isArray(firstSnap?.creatures) ? firstSnap.creatures : [];
+  if (firstCreatures.length === 0) {
+    throw new Error(`no creatures available in world ${worldId}`);
+  }
+
+  let selectedId = null;
+  if (creatureId !== null && creatureId !== undefined && creatureId !== '') {
+    selectedId = String(creatureId);
+    const exists = firstCreatures.some((c) => String(c?.id) === selectedId);
+    if (!exists) throw new Error(`creature not found: ${selectedId}`);
+  } else if (random) {
+    selectedId = String(firstCreatures[Math.floor(Math.random() * firstCreatures.length)]?.id);
+  } else {
+    selectedId = String(firstCreatures[0]?.id);
+  }
+
+  const frames = [];
+  let endedEarly = false;
+
+  for (let i = 0; i < frameCountTarget; i++) {
+    if (i > 0) await waitMs(frameIntervalMs);
+
+    const snap = (i === 0)
+      ? firstSnap
+      : await handle.rpc('getSnapshot', { mode: 'render' });
+
+    const creatures = Array.isArray(snap?.creatures) ? snap.creatures : [];
+    const creature = creatures.find((c) => String(c?.id) === selectedId) || null;
+    if (!creature) {
+      endedEarly = true;
+      break;
+    }
+
+    frames.push({
+      tick: Number(snap?.tick) || 0,
+      time: Number(snap?.time) || 0,
+      creature
+    });
+  }
+
+  if (frames.length === 0) {
+    throw new Error(`creature ${selectedId} disappeared before capture started`);
+  }
+
+  if (frames.length === 1) {
+    frames.push({ ...frames[0] });
+    endedEarly = true;
+  }
+
+  const safeWorldId = String(worldId).replace(/[^a-zA-Z0-9_-]+/g, '_');
+  const safeCreatureId = String(selectedId || 'unknown').replace(/[^a-zA-Z0-9_-]+/g, '_');
+  const stamp = Date.now();
+  const fileName = `creature-clip-${safeWorldId}-${safeCreatureId}-tick${frames[0].tick}-${stamp}.mp4`;
+  const absPath = resolve(capturesDir, fileName);
+
+  const tempRoot = mkdtempSync(join(tmpdir(), 'bn-creature-clip-'));
+  const framesDir = join(tempRoot, 'frames');
+  mkdirSync(framesDir, { recursive: true });
+
+  try {
+    for (let i = 0; i < frames.length; i++) {
+      const f = frames[i];
+      const svg = renderCreatureSvg({
+        creature: f.creature,
+        worldId,
+        tick: f.tick,
+        time: f.time,
+        size: renderSize
+      });
+
+      const idx = String(i).padStart(4, '0');
+      const svgPath = join(framesDir, `frame-${idx}.svg`);
+      const pngPath = join(framesDir, `frame-${idx}.png`);
+      writeFileSync(svgPath, svg, 'utf8');
+
+      execFileSync('sips', ['-s', 'format', 'png', svgPath, '--out', pngPath], {
+        stdio: 'ignore'
+      });
+    }
+
+    execFileSync('ffmpeg', [
+      '-y',
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-framerate', String(clipFps),
+      '-start_number', '0',
+      '-i', join(framesDir, 'frame-%04d.png'),
+      '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+      absPath
+    ], {
+      stdio: 'ignore'
+    });
+  } catch (err) {
+    throw new Error(`failed to build creature clip: ${String(err?.message || err)}`);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+
+  return {
+    ok: true,
+    worldId,
+    scenario: firstSnap?.scenario || null,
+    creatureId: Number.isFinite(Number(selectedId)) ? Number(selectedId) : selectedId,
+    tickStart: Number(frames[0]?.tick) || 0,
+    tickEnd: Number(frames[frames.length - 1]?.tick) || 0,
+    timeStart: Number(frames[0]?.time) || 0,
+    timeEnd: Number(frames[frames.length - 1]?.time) || 0,
+    fps: clipFps,
+    durationRequestedSec: clipDurationSec,
+    durationCapturedSec: Number(((frames.length - 1) / clipFps).toFixed(3)),
+    framesCaptured: frames.length,
+    endedEarly,
     fileName,
     filePath: absPath,
     downloadUrl: `/api/worlds/${encodeURIComponent(worldId)}/captures/${encodeURIComponent(fileName)}`
@@ -788,27 +971,36 @@ app.post('/api/worlds/:id/capture/randomCreature', async (req, reply) => {
   }
 });
 
+app.post('/api/worlds/:id/capture/creatureClip', async (req, reply) => {
+  try {
+    const worldId = String(req.params.id);
+    const creatureId = req.body?.creatureId ?? null;
+    const random = creatureId == null;
+    const sizeRaw = Number(req.body?.size ?? req.query?.size ?? 800);
+    const durationRaw = Number(req.body?.durationSec ?? req.query?.durationSec ?? 5);
+    const fpsRaw = Number(req.body?.fps ?? req.query?.fps ?? 12);
+
+    const size = Number.isFinite(sizeRaw) ? Math.max(256, Math.min(2048, Math.floor(sizeRaw))) : 800;
+    const durationSec = Number.isFinite(durationRaw) ? Math.max(1, Math.min(20, durationRaw)) : 5;
+    const fps = Number.isFinite(fpsRaw) ? Math.max(4, Math.min(30, Math.floor(fpsRaw))) : 12;
+
+    return await captureCreatureClip({ worldId, creatureId, random, size, durationSec, fps });
+  } catch (err) {
+    reply.code(400);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 app.get('/api/worlds/:id/captures/:file', async (req, reply) => {
   try {
-    const fileName = basename(String(req.params.file || ''));
-    if (!fileName || !fileName.endsWith('.svg')) {
-      reply.code(400);
-      return { ok: false, error: 'invalid capture file name' };
-    }
-
-    const absPath = resolve(capturesDir, fileName);
-    if (!absPath.startsWith(capturesDir)) {
-      reply.code(400);
-      return { ok: false, error: 'invalid capture path' };
-    }
-
-    const svg = readFileSync(absPath, 'utf8');
-    reply.header('content-type', 'image/svg+xml; charset=utf-8');
+    const out = readCaptureFilePayload(req.params.file);
+    reply.header('content-type', out.contentType);
     reply.header('cache-control', 'no-store');
-    return reply.send(svg);
+    return reply.send(out.payload);
   } catch (err) {
-    reply.code(404);
-    return { ok: false, error: String(err?.message || err) };
+    const msg = String(err?.message || err);
+    reply.code(msg.includes('invalid capture') ? 400 : 404);
+    return { ok: false, error: msg };
   }
 });
 
@@ -842,21 +1034,34 @@ app.post('/api/capture/randomCreature', async (req, reply) => {
     return { ok: false, error: String(err?.message || err) };
   }
 });
+app.post('/api/capture/creatureClip', async (req, reply) => {
+  try {
+    const creatureId = req.body?.creatureId ?? null;
+    const random = creatureId == null;
+    const sizeRaw = Number(req.body?.size ?? req.query?.size ?? 800);
+    const durationRaw = Number(req.body?.durationSec ?? req.query?.durationSec ?? 5);
+    const fpsRaw = Number(req.body?.fps ?? req.query?.fps ?? 12);
+
+    const size = Number.isFinite(sizeRaw) ? Math.max(256, Math.min(2048, Math.floor(sizeRaw))) : 800;
+    const durationSec = Number.isFinite(durationRaw) ? Math.max(1, Math.min(20, durationRaw)) : 5;
+    const fps = Number.isFinite(fpsRaw) ? Math.max(4, Math.min(30, Math.floor(fpsRaw))) : 12;
+
+    return await captureCreatureClip({ worldId: DEFAULT_WORLD_ID, creatureId, random, size, durationSec, fps });
+  } catch (err) {
+    reply.code(400);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
 app.get('/api/captures/:file', async (req, reply) => {
   try {
-    const fileName = basename(String(req.params.file || ''));
-    if (!fileName || !fileName.endsWith('.svg')) {
-      reply.code(400);
-      return { ok: false, error: 'invalid capture file name' };
-    }
-    const absPath = resolve(capturesDir, fileName);
-    const svg = readFileSync(absPath, 'utf8');
-    reply.header('content-type', 'image/svg+xml; charset=utf-8');
+    const out = readCaptureFilePayload(req.params.file);
+    reply.header('content-type', out.contentType);
     reply.header('cache-control', 'no-store');
-    return reply.send(svg);
+    return reply.send(out.payload);
   } catch (err) {
-    reply.code(404);
-    return { ok: false, error: String(err?.message || err) };
+    const msg = String(err?.message || err);
+    reply.code(msg.includes('invalid capture') ? 400 : 404);
+    return { ok: false, error: msg };
   }
 });
 app.post('/api/control/pause', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('pause'));

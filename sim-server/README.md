@@ -42,6 +42,9 @@ Open:
 - `GET /api/worlds/:id/status`
 - `GET /api/worlds/:id/snapshot?mode=lite|render|renderFull|full`
 - `GET /api/worlds/:id/config`
+- `POST /api/worlds/:id/capture/randomCreature` body `{ "creatureId": 123?, "size": 800? }` → SVG portrait
+- `POST /api/worlds/:id/capture/creatureClip` body `{ "creatureId": 123?, "durationSec": 5?, "fps": 12?, "size": 800? }` → MP4 clip of next seconds of life
+- `GET /api/worlds/:id/captures/:file` → fetch saved `.svg`/`.png`/`.mp4` capture artifacts
 - `POST /api/worlds/:id/control/pause`
 - `POST /api/worlds/:id/control/resume`
 - `POST /api/worlds/:id/control/setScenario` body `{ "name": "micro_predation", "seed": 23 }` (resets that world)
@@ -57,6 +60,9 @@ Open:
 
 - `GET /api/status`
 - `GET /api/snapshot?mode=lite|render|full`
+- `POST /api/capture/randomCreature`
+- `POST /api/capture/creatureClip`
+- `GET /api/captures/:file`
 - `POST /api/control/pause`
 - `POST /api/control/resume`
 - `POST /api/control/setScenario`

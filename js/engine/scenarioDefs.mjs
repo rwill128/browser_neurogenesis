@@ -39,7 +39,7 @@ export const scenarioDefs = {
       particleFloor: 0,
       particleCeiling: 0,
       particlesPerSecond: 0,
-      dt: 0.01,
+      dt: 0.0001,
       steps: 0,
       events: [],
       configOverrides: {

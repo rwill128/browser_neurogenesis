@@ -38,8 +38,8 @@ const config = {
     EDGE_LENGTH_TELEMETRY_HISTORY_MAX_SAMPLES: 120,
     EDGE_LENGTH_TELEMETRY_MAX_RECORDED_OUTLIERS: 24,
 
-    // Instability policy: when false, boundary crossings are resolved via clamp/wrap instead of instant death.
-    KILL_ON_OUT_OF_BOUNDS: true,
+    // Instability policy: keep creatures in-bounds via correction instead of instant death.
+    KILL_ON_OUT_OF_BOUNDS: false,
     // Sample high-fidelity instability diagnostics to logs every N removals (per reason).
     INSTABILITY_DIAGNOSTIC_EVERY_N: 100,
     INSTABILITY_DIAGNOSTIC_REASONS: ['physics_invalid_motion', 'physics_nan_position', 'physics_non_finite_position'],

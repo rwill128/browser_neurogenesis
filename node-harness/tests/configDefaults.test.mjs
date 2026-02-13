@@ -79,4 +79,5 @@ test('physics motion guard defaults are enabled with finite caps', () => {
   assert.ok(Number(config.PHYSICS_MAX_ACCELERATION_MAGNITUDE) > 0);
   assert.ok(Number(config.PHYSICS_MAX_IMPLICIT_VELOCITY_PER_STEP) > 0);
   assert.ok(Number(config.PHYSICS_MAX_IMPLICIT_VELOCITY_PER_STEP) < Number(config.MAX_PIXELS_PER_FRAME_DISPLACEMENT));
+  assert.equal(config.KILL_ON_OUT_OF_BOUNDS, false);
 });

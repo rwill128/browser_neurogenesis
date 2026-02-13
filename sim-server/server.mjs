@@ -13,10 +13,10 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 
-import { resolve } from 'node:path';
+import { resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { gzipSync, gunzipSync } from 'node:zlib';
 
 import { scenarioDefs } from '../js/engine/scenarioDefs.mjs';
@@ -54,10 +54,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = resolve(__filename, '..');
 const publicDir = resolve(__dirname, 'public');
 const dataDir = resolve(__dirname, 'data');
+const capturesDir = resolve(dataDir, 'captures');
 const dbPath = resolve(dataDir, 'sim.sqlite');
 const workerUrl = new URL('./worldWorker.mjs', import.meta.url);
 
 mkdirSync(dataDir, { recursive: true });
+mkdirSync(capturesDir, { recursive: true });
 
 let db = null;
 let dbDriver = null;
@@ -277,6 +279,170 @@ function encodeCheckpoint(snapshot) {
 function decodeCheckpoint(gzBuffer) {
   const json = gunzipSync(gzBuffer).toString('utf8');
   return JSON.parse(json);
+}
+
+function xmlEscape(s) {
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;');
+}
+
+function nodeColor(name) {
+  const key = String(name || '').toUpperCase();
+  switch (key) {
+    case 'PREDATOR': return '#ff4d4d';
+    case 'EATER': return '#ff9f1c';
+    case 'PHOTOSYNTHETIC': return '#7cff6b';
+    case 'NEURON': return '#b48bff';
+    case 'EMITTER': return '#4dd6ff';
+    case 'SWIMMER': return '#4d7cff';
+    case 'EYE': return '#ffffff';
+    case 'JET': return '#00e5ff';
+    case 'ATTRACTOR': return '#ffd24d';
+    case 'REPULSOR': return '#ff4de1';
+    default: return '#d7ddff';
+  }
+}
+
+function renderCreatureSvg({ creature, worldId, tick, time, size = 800, padding = 40 }) {
+  const vertices = Array.isArray(creature?.vertices) ? creature.vertices : [];
+  const springs = Array.isArray(creature?.springs) ? creature.springs : [];
+  if (vertices.length === 0) {
+    throw new Error('creature has no vertices to render');
+  }
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const v of vertices) {
+    const x = Number(v?.x);
+    const y = Number(v?.y);
+    const r = Math.max(0.5, Number(v?.radius) || 1);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    minX = Math.min(minX, x - r);
+    minY = Math.min(minY, y - r);
+    maxX = Math.max(maxX, x + r);
+    maxY = Math.max(maxY, y + r);
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    throw new Error('creature bounds invalid');
+  }
+
+  const width = Math.max(1, maxX - minX);
+  const height = Math.max(1, maxY - minY);
+
+  const svgSize = Math.max(256, Math.floor(Number(size) || 800));
+  const inner = Math.max(16, svgSize - 2 * padding);
+  const scale = Math.min(inner / width, inner / height);
+
+  const drawW = width * scale;
+  const drawH = height * scale;
+  const offsetX = (svgSize - drawW) * 0.5;
+  const offsetY = (svgSize - drawH) * 0.5;
+
+  const sx = (x) => ((x - minX) * scale + offsetX);
+  const sy = (y) => ((y - minY) * scale + offsetY);
+
+  const springLinesSoft = [];
+  const springLinesRigid = [];
+  for (const s of springs) {
+    const a = Number(s?.a);
+    const b = Number(s?.b);
+    if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a >= vertices.length || b >= vertices.length) continue;
+    const va = vertices[a];
+    const vb = vertices[b];
+    const x1 = sx(Number(va?.x));
+    const y1 = sy(Number(va?.y));
+    const x2 = sx(Number(vb?.x));
+    const y2 = sy(Number(vb?.y));
+    if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
+    const line = `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}"/>`;
+    if (s?.isRigid) springLinesRigid.push(line);
+    else springLinesSoft.push(line);
+  }
+
+  const pointDots = [];
+  for (const v of vertices) {
+    const x = sx(Number(v?.x));
+    const y = sy(Number(v?.y));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    const r = Math.max(1.0, (Number(v?.radius) || 1) * scale * 0.6);
+    const fill = nodeColor(v?.nodeTypeName || v?.nodeType);
+    pointDots.push(`<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${Math.min(10, r).toFixed(2)}" fill="${fill}"/>`);
+  }
+
+  const caption = `world=${worldId} creature=${creature?.id} tick=${tick} t=${Number(time || 0).toFixed(2)} points=${vertices.length} springs=${springs.length}`;
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${svgSize}" height="${svgSize}" viewBox="0 0 ${svgSize} ${svgSize}">
+  <rect x="0" y="0" width="${svgSize}" height="${svgSize}" fill="#070b1a"/>
+  <g opacity="0.35" stroke="#cfd6ff" stroke-width="1.2" fill="none">
+    ${springLinesSoft.join('\n    ')}
+  </g>
+  <g opacity="0.70" stroke="#ffe16b" stroke-width="1.5" fill="none">
+    ${springLinesRigid.join('\n    ')}
+  </g>
+  <g>
+    ${pointDots.join('\n    ')}
+  </g>
+  <text x="14" y="${svgSize - 14}" font-family="ui-monospace, Menlo, monospace" font-size="12" fill="#d7deff">${xmlEscape(caption)}</text>
+</svg>`;
+}
+
+async function captureCreaturePortrait({ worldId, creatureId = null, random = true, size = 800 }) {
+  const handle = getWorldOrThrow(worldId);
+  const snap = await handle.rpc('getSnapshot', { mode: 'render' });
+  const creatures = Array.isArray(snap?.creatures) ? snap.creatures : [];
+  if (creatures.length === 0) {
+    throw new Error(`no creatures available in world ${worldId}`);
+  }
+
+  let selected = null;
+  if (creatureId !== null && creatureId !== undefined && creatureId !== '') {
+    const target = String(creatureId);
+    selected = creatures.find((c) => String(c?.id) === target) || null;
+    if (!selected) {
+      throw new Error(`creature not found: ${target}`);
+    }
+  } else if (random) {
+    selected = creatures[Math.floor(Math.random() * creatures.length)] || creatures[0];
+  } else {
+    selected = creatures[0];
+  }
+
+  const svg = renderCreatureSvg({
+    creature: selected,
+    worldId,
+    tick: snap?.tick,
+    time: snap?.time,
+    size
+  });
+
+  const safeWorldId = String(worldId).replace(/[^a-zA-Z0-9_-]+/g, '_');
+  const safeCreatureId = String(selected?.id ?? 'unknown').replace(/[^a-zA-Z0-9_-]+/g, '_');
+  const fileName = `creature-${safeWorldId}-${safeCreatureId}-tick${Number(snap?.tick) || 0}-${Date.now()}.svg`;
+  const absPath = resolve(capturesDir, fileName);
+  writeFileSync(absPath, svg, 'utf8');
+
+  return {
+    ok: true,
+    worldId,
+    scenario: snap?.scenario || null,
+    tick: Number(snap?.tick) || 0,
+    time: Number(snap?.time) || 0,
+    creatureId: selected?.id ?? null,
+    vertices: Array.isArray(selected?.vertices) ? selected.vertices.length : 0,
+    springs: Array.isArray(selected?.springs) ? selected.springs.length : 0,
+    fileName,
+    filePath: absPath,
+    downloadUrl: `/api/worlds/${encodeURIComponent(worldId)}/captures/${encodeURIComponent(fileName)}`
+  };
 }
 
 async function checkpointWorld(worldId, { label = null } = {}) {
@@ -607,6 +773,45 @@ app.get('/api/worlds/:id/config', async (req, reply) => {
   }
 });
 
+app.post('/api/worlds/:id/capture/randomCreature', async (req, reply) => {
+  try {
+    const worldId = String(req.params.id);
+    const creatureId = req.body?.creatureId ?? null;
+    const random = creatureId == null;
+    const sizeRaw = Number(req.body?.size ?? req.query?.size ?? 800);
+    const size = Number.isFinite(sizeRaw) ? Math.max(256, Math.min(2048, Math.floor(sizeRaw))) : 800;
+
+    return await captureCreaturePortrait({ worldId, creatureId, random, size });
+  } catch (err) {
+    reply.code(400);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+app.get('/api/worlds/:id/captures/:file', async (req, reply) => {
+  try {
+    const fileName = basename(String(req.params.file || ''));
+    if (!fileName || !fileName.endsWith('.svg')) {
+      reply.code(400);
+      return { ok: false, error: 'invalid capture file name' };
+    }
+
+    const absPath = resolve(capturesDir, fileName);
+    if (!absPath.startsWith(capturesDir)) {
+      reply.code(400);
+      return { ok: false, error: 'invalid capture path' };
+    }
+
+    const svg = readFileSync(absPath, 'utf8');
+    reply.header('content-type', 'image/svg+xml; charset=utf-8');
+    reply.header('cache-control', 'no-store');
+    return reply.send(svg);
+  } catch (err) {
+    reply.code(404);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
 // Legacy aliases (operate on default world w0)
 app.get('/api/status', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('getStatus'));
 app.get('/api/snapshot', async (req) => {
@@ -625,6 +830,35 @@ app.get('/api/snapshot', async (req) => {
   return getWorldOrThrow(DEFAULT_WORLD_ID).rpc('getSnapshot', args);
 });
 app.get('/api/frameTimeline', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('getFrameTimeline'));
+app.post('/api/capture/randomCreature', async (req, reply) => {
+  try {
+    const creatureId = req.body?.creatureId ?? null;
+    const random = creatureId == null;
+    const sizeRaw = Number(req.body?.size ?? req.query?.size ?? 800);
+    const size = Number.isFinite(sizeRaw) ? Math.max(256, Math.min(2048, Math.floor(sizeRaw))) : 800;
+    return await captureCreaturePortrait({ worldId: DEFAULT_WORLD_ID, creatureId, random, size });
+  } catch (err) {
+    reply.code(400);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+app.get('/api/captures/:file', async (req, reply) => {
+  try {
+    const fileName = basename(String(req.params.file || ''));
+    if (!fileName || !fileName.endsWith('.svg')) {
+      reply.code(400);
+      return { ok: false, error: 'invalid capture file name' };
+    }
+    const absPath = resolve(capturesDir, fileName);
+    const svg = readFileSync(absPath, 'utf8');
+    reply.header('content-type', 'image/svg+xml; charset=utf-8');
+    reply.header('cache-control', 'no-store');
+    return reply.send(svg);
+  } catch (err) {
+    reply.code(404);
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
 app.post('/api/control/pause', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('pause'));
 app.post('/api/control/resume', async () => getWorldOrThrow(DEFAULT_WORLD_ID).rpc('resume'));
 app.post('/api/control/runMode', async (req, reply) => {

@@ -226,8 +226,7 @@ const config = {
 
     MUTATION_RATE_PERCENT: 0.1,
     MUTATION_CHANCE_BOOL: 0.05,
-    // Experimental mutation strategy: preserve triangle-stable topology and use simple outward edge extrusion.
-    MUTATION_TRIANGLE_SILO_MODE: false,
+    // Mutation strategy: triangle-stable topology with outward boundary-edge extrusion.
     TRIANGLE_EXTRUSION_MUTATION_CHANCE_MULTIPLIER: 1.0,
     MUTATION_CHANCE_NODE_TYPE: 0.1,
     MUTATION_CHANCE_REASSIGN_NEURON_LINK: 0.02,

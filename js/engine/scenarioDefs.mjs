@@ -28,8 +28,7 @@ export const scenarioDefs = {
       VISCOSITY_LANDSCAPE_CONTRAST: 0.9,
       VISCOSITY_LANDSCAPE_BANDS: 12,
       FLUID_GRID_SIZE_CONTROL: 128,
-      AUTO_FOLLOW_CREATURE: true,
-      MUTATION_TRIANGLE_SILO_MODE: true
+      AUTO_FOLLOW_CREATURE: true
     },
     nodeConfig: {
       world: { width: 20000, height: 16000 },
@@ -54,8 +53,7 @@ export const scenarioDefs = {
         MIN_VISCOSITY_MULTIPLIER: 0.1,
         MAX_VISCOSITY_MULTIPLIER: 12.0,
         VISCOSITY_LANDSCAPE_CONTRAST: 0.9,
-        VISCOSITY_LANDSCAPE_BANDS: 12,
-        MUTATION_TRIANGLE_SILO_MODE: true
+        VISCOSITY_LANDSCAPE_BANDS: 12
       },
       stepBehavior: {
         allowReproduction: true,

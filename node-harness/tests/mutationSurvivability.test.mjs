@@ -99,9 +99,8 @@ test('donor module graft mutation can add donor blueprint module to offspring', 
   }
 });
 
-test('triangle silo mutation mode extrudes one outward triangle from a boundary edge', () => {
+test('triangle mutation path extrudes one outward triangle from a boundary edge', () => {
   const cfgBackup = {
-    MUTATION_TRIANGLE_SILO_MODE: config.MUTATION_TRIANGLE_SILO_MODE,
     TRIANGLE_EXTRUSION_MUTATION_CHANCE_MULTIPLIER: config.TRIANGLE_EXTRUSION_MUTATION_CHANCE_MULTIPLIER,
     OFFSPRING_MIN_NODE_TYPE_DIVERSITY: config.OFFSPRING_MIN_NODE_TYPE_DIVERSITY,
     OFFSPRING_REQUIRE_HARVESTER_NODE: config.OFFSPRING_REQUIRE_HARVESTER_NODE,
@@ -116,7 +115,6 @@ test('triangle silo mutation mode extrudes one outward triangle from a boundary 
   const edgeKey = (a, b) => (a < b ? `${a}:${b}` : `${b}:${a}`);
 
   try {
-    config.MUTATION_TRIANGLE_SILO_MODE = true;
     config.TRIANGLE_EXTRUSION_MUTATION_CHANCE_MULTIPLIER = 1;
     config.OFFSPRING_MIN_NODE_TYPE_DIVERSITY = 1;
     config.OFFSPRING_REQUIRE_HARVESTER_NODE = false;

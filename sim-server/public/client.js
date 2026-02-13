@@ -91,6 +91,8 @@ const CONFIG_FIELDS = [
 
 let ws = null;
 let currentWorldId = null;
+let wsConnected = false;
+let lastWsMessageAt = 0;
 
 const cameraByWorld = new Map();
 const selectionByWorld = new Map();
@@ -594,6 +596,12 @@ function drawSnapshot(snap) {
   if (followId !== null) {
     const target = (snap.creatures || []).find((c) => c && String(c.id) === String(followId));
     if (target?.center) {
+      // Following should be inspectable, not a tiny dot at fit-world zoom.
+      const MIN_FOLLOW_ZOOM = 0.25;
+      if (cam.zoom < MIN_FOLLOW_ZOOM) {
+        cam.zoom = MIN_FOLLOW_ZOOM;
+      }
+
       const cx = Number(target.center.x) || 0;
       const cy = Number(target.center.y) || 0;
       cam.offsetX = (rect.width / 2) - cx * cam.zoom;
@@ -711,7 +719,7 @@ function drawSnapshot(snap) {
     ctx.stroke();
 
     for (const v of verts) {
-      const r = Math.max(0.75, (v.radius || 2) * cam.zoom);
+      const r = Math.max(1.35, (v.radius || 2) * cam.zoom);
       ctx.fillStyle = colorForVertex(v);
       ctx.beginPath();
       ctx.arc(worldToScreenX(v.x), worldToScreenY(v.y), Math.min(r, 8), 0, Math.PI * 2);
@@ -793,10 +801,13 @@ function connectStream({ worldId, mode = 'render', hz = 10 } = {}) {
   ws = new WebSocket(url);
 
   ws.addEventListener('open', () => {
+    wsConnected = true;
+    lastWsMessageAt = Date.now();
     statusEl.textContent = `stream connected (world=${worldId})…`;
   });
 
   ws.addEventListener('message', (ev) => {
+    lastWsMessageAt = Date.now();
     try {
       const msg = JSON.parse(ev.data);
       if (msg.kind === 'error') {
@@ -855,6 +866,7 @@ function connectStream({ worldId, mode = 'render', hz = 10 } = {}) {
   });
 
   ws.addEventListener('close', () => {
+    wsConnected = false;
     statusEl.textContent = 'stream disconnected (retrying in 1s)…';
     setTimeout(() => {
       if (currentWorldId) connectStream({ worldId: currentWorldId, mode, hz });
@@ -862,6 +874,7 @@ function connectStream({ worldId, mode = 'render', hz = 10 } = {}) {
   });
 
   ws.addEventListener('error', () => {
+    wsConnected = false;
     try { ws.close(); } catch {}
   });
 
@@ -1119,6 +1132,42 @@ if (currentWorldId) {
   await refreshConfig(currentWorldId);
   connectStream({ worldId: currentWorldId, mode: 'render', hz: 10 });
 }
+
+setInterval(async () => {
+  if (!currentWorldId) return;
+
+  // Fallback when WS is blocked/stale: keep UI alive via HTTP polling.
+  const wsStale = !wsConnected || (Date.now() - lastWsMessageAt) > 2500;
+  if (!wsStale) return;
+
+  try {
+    const [status, snap] = await Promise.all([
+      apiGet(`/api/worlds/${encodeURIComponent(currentWorldId)}/status`),
+      apiGet(`/api/worlds/${encodeURIComponent(currentWorldId)}/snapshot?mode=render&frameOffset=${encodeURIComponent(getScrubOffset(currentWorldId))}`)
+    ]);
+
+    lastStatusByWorld.set(currentWorldId, status);
+    lastSnapshotByWorld.set(currentWorldId, snap);
+
+    if (runModeSelect && status?.runMode) {
+      runModeSelect.value = String(status.runMode);
+    }
+
+    const fb = status?.frameBuffer || {};
+    frameBufferByWorld.set(currentWorldId, {
+      available: Number(fb.available) || 0,
+      max: Number(fb.max) || 0,
+      stepStride: Math.max(1, Number(fb.stepStride) || 1),
+      latestSeq: Number.isFinite(Number(fb.latestSeq)) ? Number(fb.latestSeq) : null,
+      latestTick: Number.isFinite(Number(fb.latestTick)) ? Number(fb.latestTick) : null
+    });
+
+    updateHistoryUi(currentWorldId);
+    drawSnapshot(snap);
+  } catch {
+    // keep quiet; WS reconnect loop + periodic world refresh continue.
+  }
+}, 1500);
 
 setInterval(() => {
   refreshWorlds()

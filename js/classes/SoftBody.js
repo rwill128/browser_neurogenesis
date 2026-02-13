@@ -1161,6 +1161,16 @@ export class SoftBody {
         }
 
         sanitized.growthStages = growthStages;
+        try {
+            Object.defineProperty(sanitized, '__growthGenomeSanitized', {
+                value: true,
+                writable: true,
+                configurable: true,
+                enumerable: false
+            });
+        } catch (_) {
+            sanitized.__growthGenomeSanitized = true;
+        }
         return sanitized;
     }
 
@@ -1859,8 +1869,11 @@ export class SoftBody {
             return false;
         }
 
-        const genome = this._sanitizeGrowthGenome(this.growthGenome || this._createRandomGrowthGenome());
-        this.growthGenome = genome;
+        let genome = this.growthGenome;
+        if (!genome || typeof genome !== 'object' || genome.__growthGenomeSanitized !== true) {
+            genome = this._sanitizeGrowthGenome(genome || this._createRandomGrowthGenome());
+            this.growthGenome = genome;
+        }
         const growthProfile = this._resolveGrowthProfileForAge(genome, this.absoluteAgeTicks);
 
         const energyRatio = this.currentMaxEnergy > 0 ? this.creatureEnergy / this.currentMaxEnergy : 0;

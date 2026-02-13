@@ -219,6 +219,13 @@ function asDisplayValue(v) {
 function setKV(el, entries) {
   el.innerHTML = '';
   for (const [k, v] of entries) {
+    if (typeof k === 'string' && k.startsWith('@@')) {
+      const ds = document.createElement('div');
+      ds.className = 'section';
+      ds.textContent = k.slice(2);
+      el.appendChild(ds);
+      continue;
+    }
     const dk = document.createElement('div');
     dk.className = 'k';
     dk.textContent = k;
@@ -480,24 +487,32 @@ function renderPanels(worldId) {
   const frameMeta = getFrameBufferMeta(worldId);
 
   setKV(worldStatsEl, [
+    ['@@World'],
     ['world', worldId],
     ['scenario', snap.scenario],
     ['runMode', status?.runMode || 'realtime'],
     ['tick', snap.tick],
     ['time', snap.time],
-    ['viewOffsetSteps', scrubOffset],
-    ['frameBuffer', `${frameMeta.available || 0}/${frameMeta.max || 0}`],
-    ['frameStride', frameMeta.stepStride || 1],
     ['sps', status?.stepsPerSecond],
     ['dt', status?.dt],
+    ['zoom', cam.zoom],
+
+    ['@@Population & Frames'],
     ['creatures', snap.populations?.creatures],
     ['particles', snap.populations?.particles],
     ['fluidActiveCells', snap.fluid?.activeCells],
+    ['viewOffsetSteps', scrubOffset],
+    ['frameBuffer', `${frameMeta.available || 0}/${frameMeta.max || 0}`],
+    ['frameStride', frameMeta.stepStride || 1],
+
+    ['@@Instability'],
     ['removedTotal', removedTotal],
     ['topRemovalReason', `${topReason} (${reasons[topReason] || 0})`],
     ['removedByPhysicsKind', JSON.stringify(snap?.instabilityTelemetry?.removedByPhysicsKind || {})],
     ['removedByBirthOrigin', JSON.stringify(snap?.instabilityTelemetry?.removedByBirthOrigin || {})],
     ['removedByLifecycleStage', JSON.stringify(snap?.instabilityTelemetry?.removedByLifecycleStage || {})],
+
+    ['@@Energy'],
     ['globalGain.photo', energyGains?.photosynthesis],
     ['globalGain.eat', energyGains?.eating],
     ['globalGain.pred', energyGains?.predation],
@@ -505,10 +520,11 @@ function renderPanels(worldId) {
     ['globalCost.neuron', energyCosts?.neuronNodes],
     ['globalCost.eater', energyCosts?.eaterNodes],
     ['globalCost.predator', energyCosts?.predatorNodes],
+
+    ['@@Mutation Stats'],
     ['mutationStatKeys', mutationEntries.length],
     ['mutationTop', mutationTopSummary || '—'],
-    ['mutationStats', JSON.stringify(mutationStats)],
-    ['zoom', cam.zoom]
+    ['mutationStats', JSON.stringify(mutationStats)]
   ]);
 
   const selectedId = selectionByWorld.get(worldId) || null;

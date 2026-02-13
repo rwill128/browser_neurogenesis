@@ -190,6 +190,16 @@ body {
   text-overflow: ellipsis;
 }
 
+.kv .section {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: #9fd4ff;
+}
+
 .configEditor {
   display: grid;
   grid-template-columns: 1fr;

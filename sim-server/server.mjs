@@ -252,7 +252,7 @@ const restoreLatest = hasFlag('restoreLatest')
   : false;
 
 const DEFAULT_WORLD_ID = 'w0';
-const ARCHIVE_CHUNK_SIZE = 100;
+const ARCHIVE_CHUNK_SIZE = 1000;
 
 let nextRequestId = 1;
 const pendingChunkFramesByWorld = new Map();

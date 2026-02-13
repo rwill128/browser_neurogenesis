@@ -161,7 +161,7 @@ const lastSnapshotByWorld = new Map();
 const lastStatusByWorld = new Map();
 const configDraftByWorld = new Map();
 const frameBufferByWorld = new Map();
-const scrubOffsetByWorld = new Map();
+const scrubTickByWorld = new Map();
 const scrubFetchInFlightByWorld = new Map();
 const scrubFetchLastAtByWorld = new Map();
 
@@ -171,84 +171,88 @@ function fmt(n, digits = 3) {
   return x.toFixed(digits);
 }
 
-function getScrubOffset(worldId) {
-  return Math.max(0, Math.floor(Number(scrubOffsetByWorld.get(worldId)) || 0));
+function getScrubTick(worldId) {
+  const v = scrubTickByWorld.get(worldId);
+  if (v === null || v === undefined) return null;
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) ? Math.max(0, n) : null;
 }
 
 function getFrameBufferMeta(worldId) {
-  return frameBufferByWorld.get(worldId) || { available: 0, max: 0, stepStride: 1, latestSeq: null, latestTick: null };
+  return frameBufferByWorld.get(worldId) || {
+    available: 0,
+    max: 0,
+    stepStride: 1,
+    latestSeq: null,
+    latestTick: null,
+    archiveFrames: 0,
+    archiveOldestTick: null,
+    archiveLatestTick: null
+  };
 }
 
 function updateHistoryUi(worldId) {
   if (!historySliderEl || !historyInfoEl) return;
 
   const meta = getFrameBufferMeta(worldId);
-  const maxOffset = Math.max(0, (Number(meta.available) || 0) - 1);
-  const offset = Math.min(getScrubOffset(worldId), maxOffset);
-  scrubOffsetByWorld.set(worldId, offset);
+  const oldestTick = Number.isFinite(Number(meta.archiveOldestTick)) ? Math.max(0, Math.floor(Number(meta.archiveOldestTick))) : 0;
+  const latestTick = Number.isFinite(Number(meta.archiveLatestTick)) ? Math.max(oldestTick, Math.floor(Number(meta.archiveLatestTick))) : oldestTick;
 
-  // UX semantics: slider right = newer/live, slider left = older.
-  const sliderValue = Math.max(0, maxOffset - offset);
-  historySliderEl.max = String(maxOffset);
-  historySliderEl.value = String(sliderValue);
+  const scrubTick = getScrubTick(worldId);
+  const isLive = (scrubTick === null) || scrubTick >= latestTick;
+  const safeTick = isLive ? latestTick : Math.max(oldestTick, Math.min(latestTick, scrubTick));
+  if (!isLive) scrubTickByWorld.set(worldId, safeTick);
 
-  if (offset === 0) {
-    historyInfoEl.textContent = `live · buffer ${meta.available || 0}/${meta.max || 0}`;
+  historySliderEl.min = String(oldestTick);
+  historySliderEl.max = String(latestTick);
+  historySliderEl.value = String(safeTick);
+
+  if (isLive) {
+    historyInfoEl.textContent = `live @ tick ${latestTick} · archive ${meta.archiveFrames || 0} frame(s)`;
   } else {
-    historyInfoEl.textContent = `${offset} step(s) behind · moving window · buffer ${meta.available || 0}/${meta.max || 0}`;
+    historyInfoEl.textContent = `tick ${safeTick} (latest ${latestTick}) · archive ${meta.archiveFrames || 0} frame(s)`;
   }
 }
 
-async function loadScrubFrame(worldId, frameOffset) {
-  const safeOffset = Math.max(0, Math.floor(Number(frameOffset) || 0));
-  if (!worldId || safeOffset === 0) return;
+async function loadScrubFrameByTick(worldId, tick) {
+  const safeTick = Math.max(0, Math.floor(Number(tick) || 0));
+  if (!worldId) return;
   if (scrubFetchInFlightByWorld.get(worldId)) return;
 
   scrubFetchInFlightByWorld.set(worldId, true);
   scrubFetchLastAtByWorld.set(worldId, Date.now());
 
   try {
-    const snap = await apiGet(`/api/worlds/${encodeURIComponent(worldId)}/snapshot?mode=render&frameOffset=${encodeURIComponent(safeOffset)}`);
+    const snap = await apiGet(`/api/worlds/${encodeURIComponent(worldId)}/frame/${encodeURIComponent(safeTick)}`);
     if (!snap || currentWorldId !== worldId) return;
 
     lastSnapshotByWorld.set(worldId, snap);
-    drawSnapshot(snap);
+    scheduleRender({ includePanels: true });
   } catch {
-    // ignore transient history misses while buffer rolls
+    // ignore transient history misses while archive grows
   } finally {
     scrubFetchInFlightByWorld.set(worldId, false);
   }
 }
 
-function syncScrubFrameWindow(worldId, { force = false } = {}) {
-  if (!worldId) return;
-  const offset = getScrubOffset(worldId);
-  if (offset <= 0) return;
-
-  const now = Date.now();
-  const lastAt = Number(scrubFetchLastAtByWorld.get(worldId)) || 0;
-  if (!force && (now - lastAt) < 150) return;
-
-  loadScrubFrame(worldId, offset);
-}
-
-function setScrubOffset(worldId, nextOffset) {
+function setScrubTick(worldId, nextTickOrNull) {
   if (!worldId) return;
 
   const meta = getFrameBufferMeta(worldId);
-  const maxOffset = Math.max(0, (Number(meta.available) || 0) - 1);
-  const safeOffset = Math.max(0, Math.min(maxOffset, Math.floor(Number(nextOffset) || 0)));
-  scrubOffsetByWorld.set(worldId, safeOffset);
-  updateHistoryUi(worldId);
+  const oldestTick = Number.isFinite(Number(meta.archiveOldestTick)) ? Math.max(0, Math.floor(Number(meta.archiveOldestTick))) : 0;
+  const latestTick = Number.isFinite(Number(meta.archiveLatestTick)) ? Math.max(oldestTick, Math.floor(Number(meta.archiveLatestTick))) : oldestTick;
 
-  if (safeOffset > 0) {
-    syncScrubFrameWindow(worldId, { force: true });
-  } else {
-    const live = lastSnapshotByWorld.get(worldId);
-    if (live && currentWorldId === worldId) {
-      drawSnapshot(live);
-    }
+  if (nextTickOrNull === null || nextTickOrNull === undefined) {
+    scrubTickByWorld.set(worldId, null);
+    updateHistoryUi(worldId);
+    scheduleRender({ includePanels: true });
+    return;
   }
+
+  const safeTick = Math.max(oldestTick, Math.min(latestTick, Math.floor(Number(nextTickOrNull) || latestTick)));
+  scrubTickByWorld.set(worldId, safeTick);
+  updateHistoryUi(worldId);
+  loadScrubFrameByTick(worldId, safeTick);
 }
 
 function colorForVertex(v) {
@@ -537,7 +541,7 @@ function renderPanels(worldId) {
     .sort((a, b) => b[1] - a[1]);
   const mutationTopSummary = mutationEntries.slice(0, 8).map(([k, v]) => `${k}:${v}`).join(', ');
 
-  const scrubOffset = getScrubOffset(worldId);
+  const scrubTick = getScrubTick(worldId);
   const frameMeta = getFrameBufferMeta(worldId);
 
   setKV(worldStatsEl, [
@@ -555,8 +559,10 @@ function renderPanels(worldId) {
     ['creatures', snap.populations?.creatures],
     ['particles', snap.populations?.particles],
     ['fluidActiveCells', snap.fluid?.activeCells],
-    ['viewOffsetSteps', scrubOffset],
+    ['viewTick', scrubTick === null ? `live@${frameMeta.archiveLatestTick ?? snap.tick}` : scrubTick],
     ['frameBuffer', `${frameMeta.available || 0}/${frameMeta.max || 0}`],
+    ['archiveFrames', frameMeta.archiveFrames || 0],
+    ['archiveRange', `${frameMeta.archiveOldestTick ?? 0}..${frameMeta.archiveLatestTick ?? snap.tick}`],
     ['frameStride', frameMeta.stepStride || 1],
 
     ['@@Instability'],
@@ -936,14 +942,17 @@ async function refreshWorlds() {
   }
 
   for (const w of data.worlds || []) {
-    if (!scrubOffsetByWorld.has(w.id)) scrubOffsetByWorld.set(w.id, 0);
+    if (!scrubTickByWorld.has(w.id)) scrubTickByWorld.set(w.id, null);
     if (!frameBufferByWorld.has(w.id)) {
       frameBufferByWorld.set(w.id, {
         available: 0,
         max: 0,
         stepStride: 1,
         latestSeq: null,
-        latestTick: null
+        latestTick: null,
+        archiveFrames: 0,
+        archiveOldestTick: null,
+        archiveLatestTick: null
       });
     }
   }
@@ -986,17 +995,19 @@ function connectStream({ worldId, mode = 'render', hz = 10 } = {}) {
           max: Number(fb.max) || 0,
           stepStride: Math.max(1, Number(fb.stepStride) || 1),
           latestSeq: Number.isFinite(Number(fb.latestSeq)) ? Number(fb.latestSeq) : null,
-          latestTick: Number.isFinite(Number(fb.latestTick)) ? Number(fb.latestTick) : null
+          latestTick: Number.isFinite(Number(fb.latestTick)) ? Number(fb.latestTick) : null,
+          archiveFrames: Number(fb.archiveFrames) || 0,
+          archiveOldestTick: Number.isFinite(Number(fb.archiveOldestTick)) ? Number(fb.archiveOldestTick) : null,
+          archiveLatestTick: Number.isFinite(Number(fb.archiveLatestTick)) ? Number(fb.archiveLatestTick) : null
         });
         if (currentWorldId === worldId) {
           updateHistoryUi(worldId);
-          syncScrubFrameWindow(worldId, { force: false });
         }
 
         const cam = currentWorldId ? getCamera(currentWorldId) : null;
         const zoomLabel = cam ? ` zoom=${fmt(cam.zoom, 3)}` : '';
-        const scrubOffset = getScrubOffset(worldId);
-        const scrubLabel = scrubOffset > 0 ? ` view=-${scrubOffset}` : ' view=live';
+        const scrubTick = getScrubTick(worldId);
+        const scrubLabel = scrubTick === null ? ' view=live' : ` view=tick:${scrubTick}`;
         if (runModeSelect && s?.runMode) {
           runModeSelect.value = String(s.runMode);
         }
@@ -1020,12 +1031,10 @@ function connectStream({ worldId, mode = 'render', hz = 10 } = {}) {
           }
         }
 
-        const scrubOffset = getScrubOffset(worldId);
-        if (scrubOffset === 0) {
+        const scrubTick = getScrubTick(worldId);
+        if (scrubTick === null) {
           lastSnapshotByWorld.set(worldId, snap);
           drawSnapshot(snap);
-        } else {
-          syncScrubFrameWindow(worldId, { force: false });
         }
       }
     } catch {
@@ -1088,16 +1097,13 @@ function toggleFollowSelected() {
 
 historySliderEl?.addEventListener('input', () => {
   if (!currentWorldId) return;
-  const meta = getFrameBufferMeta(currentWorldId);
-  const maxOffset = Math.max(0, (Number(meta.available) || 0) - 1);
-  const sliderValue = Math.max(0, Math.min(maxOffset, Math.floor(Number(historySliderEl.value) || 0)));
-  const nextOffset = maxOffset - sliderValue;
-  setScrubOffset(currentWorldId, nextOffset);
+  const nextTick = Math.max(0, Math.floor(Number(historySliderEl.value) || 0));
+  setScrubTick(currentWorldId, nextTick);
 });
 
 historyLiveBtn?.addEventListener('click', () => {
   if (!currentWorldId) return;
-  setScrubOffset(currentWorldId, 0);
+  setScrubTick(currentWorldId, null);
 });
 
 worldSelect.addEventListener('change', async () => {
@@ -1112,7 +1118,7 @@ newWorldBtn.addEventListener('click', async () => {
   const seed = Number(seedInput.value || 0) >>> 0;
   const out = await apiPost('/api/worlds', { scenario, seed });
   currentWorldId = out.id;
-  scrubOffsetByWorld.set(currentWorldId, 0);
+  scrubTickByWorld.set(currentWorldId, null);
   await refreshWorlds();
   updateHistoryUi(currentWorldId);
   await refreshConfig(currentWorldId);
@@ -1126,13 +1132,16 @@ setScenarioBtn.addEventListener('click', async () => {
   await apiPost(`/api/worlds/${encodeURIComponent(currentWorldId)}/control/setScenario`, { name, seed });
   selectionByWorld.delete(currentWorldId);
   followByWorld.delete(currentWorldId);
-  scrubOffsetByWorld.set(currentWorldId, 0);
+  scrubTickByWorld.set(currentWorldId, null);
   frameBufferByWorld.set(currentWorldId, {
     available: 0,
     max: 0,
     stepStride: 1,
     latestSeq: null,
-    latestTick: null
+    latestTick: null,
+    archiveFrames: 0,
+    archiveOldestTick: null,
+    archiveLatestTick: null
   });
   updateHistoryUi(currentWorldId);
   await refreshConfig(currentWorldId);
@@ -1310,7 +1319,7 @@ syncCreatureStatsModeUI();
 await refreshScenarios();
 await refreshWorlds();
 if (currentWorldId) {
-  if (!scrubOffsetByWorld.has(currentWorldId)) scrubOffsetByWorld.set(currentWorldId, 0);
+  if (!scrubTickByWorld.has(currentWorldId)) scrubTickByWorld.set(currentWorldId, null);
   updateHistoryUi(currentWorldId);
   await refreshConfig(currentWorldId);
   connectStream({ worldId: currentWorldId, mode: 'render', hz: 10 });
@@ -1324,10 +1333,11 @@ setInterval(async () => {
   if (!wsStale) return;
 
   try {
-    const [status, snap] = await Promise.all([
-      apiGet(`/api/worlds/${encodeURIComponent(currentWorldId)}/status`),
-      apiGet(`/api/worlds/${encodeURIComponent(currentWorldId)}/snapshot?mode=render&frameOffset=${encodeURIComponent(getScrubOffset(currentWorldId))}`)
-    ]);
+    const status = await apiGet(`/api/worlds/${encodeURIComponent(currentWorldId)}/status`);
+    const scrubTick = getScrubTick(currentWorldId);
+    const snap = scrubTick === null
+      ? await apiGet(`/api/worlds/${encodeURIComponent(currentWorldId)}/snapshot?mode=render`)
+      : await apiGet(`/api/worlds/${encodeURIComponent(currentWorldId)}/frame/${encodeURIComponent(scrubTick)}`);
 
     lastStatusByWorld.set(currentWorldId, status);
     lastSnapshotByWorld.set(currentWorldId, snap);
@@ -1342,7 +1352,10 @@ setInterval(async () => {
       max: Number(fb.max) || 0,
       stepStride: Math.max(1, Number(fb.stepStride) || 1),
       latestSeq: Number.isFinite(Number(fb.latestSeq)) ? Number(fb.latestSeq) : null,
-      latestTick: Number.isFinite(Number(fb.latestTick)) ? Number(fb.latestTick) : null
+      latestTick: Number.isFinite(Number(fb.latestTick)) ? Number(fb.latestTick) : null,
+      archiveFrames: Number(fb.archiveFrames) || 0,
+      archiveOldestTick: Number.isFinite(Number(fb.archiveOldestTick)) ? Number(fb.archiveOldestTick) : null,
+      archiveLatestTick: Number.isFinite(Number(fb.archiveLatestTick)) ? Number(fb.archiveLatestTick) : null
     });
 
     updateHistoryUi(currentWorldId);
@@ -1350,8 +1363,8 @@ setInterval(async () => {
 
     const cam = getCamera(currentWorldId);
     const zoomLabel = cam ? ` zoom=${fmt(cam.zoom, 3)}` : '';
-    const scrubOffset = getScrubOffset(currentWorldId);
-    const scrubLabel = scrubOffset > 0 ? ` view=-${scrubOffset}` : ' view=live';
+    const activeScrubTick = getScrubTick(currentWorldId);
+    const scrubLabel = activeScrubTick === null ? ' view=live' : ` view=tick:${activeScrubTick}`;
     const renderPerf = renderPerfByWorld.get(currentWorldId) || null;
     const renderLabel = renderPerf
       ? ` renderMs=${fmt(renderPerf.lastRenderMs, 2)} avg=${fmt(renderPerf.avgRenderMs, 2)} draw=${renderPerf.drawnCreatures}/${renderPerf.totalCreatures}`
@@ -1366,9 +1379,9 @@ setInterval(() => {
   refreshWorlds()
     .then(() => {
       if (currentWorldId) updateHistoryUi(currentWorldId);
-      const offset = currentWorldId ? getScrubOffset(currentWorldId) : 0;
-      if (currentWorldId && offset > 0) {
-        loadScrubFrame(currentWorldId, offset);
+      const tick = currentWorldId ? getScrubTick(currentWorldId) : null;
+      if (currentWorldId && tick !== null) {
+        loadScrubFrameByTick(currentWorldId, tick);
       }
     })
     .catch(() => {});

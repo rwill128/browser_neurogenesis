@@ -109,6 +109,16 @@ db.exec(`
     payloadGzip BLOB NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_checkpoints_world_created ON checkpoints(worldId, createdAt DESC);
+
+  CREATE TABLE IF NOT EXISTS archived_frames (
+    worldId TEXT NOT NULL,
+    tick INTEGER NOT NULL,
+    createdAt TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    payloadGzip BLOB NOT NULL,
+    PRIMARY KEY (worldId, tick)
+  );
+  CREATE INDEX IF NOT EXISTS idx_archived_frames_world_tick ON archived_frames(worldId, tick);
 `);
 
 const stmtInsertCheckpoint = db.prepare(`
@@ -148,6 +158,40 @@ const stmtPruneCheckpoints = db.prepare(`
   )
 `);
 
+const stmtInsertArchivedFrame = db.prepare(`
+  INSERT INTO archived_frames (worldId, tick, createdAt, bytes, payloadGzip)
+  VALUES (?, ?, ?, ?, ?)
+  ON CONFLICT(worldId, tick) DO UPDATE SET
+    createdAt = excluded.createdAt,
+    bytes = excluded.bytes,
+    payloadGzip = excluded.payloadGzip
+`);
+
+const stmtGetArchivedFrame = db.prepare(`
+  SELECT worldId, tick, createdAt, bytes, payloadGzip
+  FROM archived_frames
+  WHERE worldId = ? AND tick = ?
+  LIMIT 1
+`);
+
+const stmtListArchivedFramesRange = db.prepare(`
+  SELECT worldId, tick, createdAt, bytes, payloadGzip
+  FROM archived_frames
+  WHERE worldId = ? AND tick >= ? AND tick <= ?
+  ORDER BY tick ASC
+`);
+
+const stmtArchivedFrameStats = db.prepare(`
+  SELECT COUNT(*) AS count, MIN(tick) AS oldestTick, MAX(tick) AS latestTick
+  FROM archived_frames
+  WHERE worldId = ?
+`);
+
+const stmtDeleteArchivedFramesForWorld = db.prepare(`
+  DELETE FROM archived_frames
+  WHERE worldId = ?
+`);
+
 const port = Math.floor(parseNum(arg('port', null), 8787));
 const initialScenarioName = arg('scenario', 'micro_repro_sustain');
 const initialSeed = (parseNum(arg('seed', null), 23) >>> 0);
@@ -181,6 +225,20 @@ class WorldHandle {
         this.pending.delete(requestId);
         if (ok) pending.resolve(result);
         else pending.reject(new Error(error || 'rpc error'));
+        return;
+      }
+
+      if (msg.type === 'frameArchive') {
+        try {
+          const worldId = String(msg.worldId || this.id);
+          const tick = Math.max(0, Math.floor(Number(msg.tick) || 0));
+          const frame = msg.frame;
+          if (!frame || typeof frame !== 'object') return;
+          const encoded = encodeArchivedFrame(frame);
+          stmtInsertArchivedFrame.run(worldId, tick, new Date().toISOString(), encoded.gz.length, encoded.gz);
+        } catch {
+          // best effort persistence; keep simulation running even if archival write fails.
+        }
       }
     });
 
@@ -279,6 +337,17 @@ function encodeCheckpoint(snapshot) {
 }
 
 function decodeCheckpoint(gzBuffer) {
+  const json = gunzipSync(gzBuffer).toString('utf8');
+  return JSON.parse(json);
+}
+
+function encodeArchivedFrame(frame) {
+  const json = JSON.stringify(frame);
+  const gz = gzipSync(Buffer.from(json, 'utf8'));
+  return { jsonBytes: Buffer.byteLength(json, 'utf8'), gz };
+}
+
+function decodeArchivedFrame(gzBuffer) {
   const json = gunzipSync(gzBuffer).toString('utf8');
   return JSON.parse(json);
 }
@@ -838,6 +907,9 @@ async function restoreLatestCheckpointForWorld(worldId) {
 }
 
 // Bootstrap default world.
+if (!restoreLatest) {
+  stmtDeleteArchivedFramesForWorld.run(DEFAULT_WORLD_ID);
+}
 await createWorld({ id: DEFAULT_WORLD_ID, scenario: initialScenarioName, seed: initialSeed });
 
 let startupRestore = {
@@ -953,7 +1025,18 @@ app.get('/api/worlds/:id/snapshot', async (req, reply) => {
 
 app.get('/api/worlds/:id/frameTimeline', async (req, reply) => {
   try {
-    return await getWorldOrThrow(req.params.id).rpc('getFrameTimeline');
+    const worldId = String(req.params.id);
+    // Ensure world exists/running.
+    await getWorldOrThrow(worldId).rpc('getStatus');
+
+    const stats = stmtArchivedFrameStats.get(worldId) || {};
+    return {
+      ok: true,
+      worldId,
+      archiveFrames: Number(stats.count) || 0,
+      archiveOldestTick: Number.isFinite(Number(stats.oldestTick)) ? Number(stats.oldestTick) : null,
+      archiveLatestTick: Number.isFinite(Number(stats.latestTick)) ? Number(stats.latestTick) : null
+    };
   } catch (err) {
     reply.code(404);
     return { ok: false, error: String(err?.message || err) };
@@ -962,21 +1045,29 @@ app.get('/api/worlds/:id/frameTimeline', async (req, reply) => {
 
 app.get('/api/worlds/:id/frame/:tick', async (req, reply) => {
   try {
+    const worldId = String(req.params.id);
     const tick = Math.floor(Number(req.params.tick));
     if (!Number.isFinite(tick) || tick < 0) {
       reply.code(400);
       return { ok: false, error: 'tick must be a non-negative integer' };
     }
-    return await getWorldOrThrow(req.params.id).rpc('getArchivedFrameByTick', { tick });
+
+    const row = stmtGetArchivedFrame.get(worldId, tick);
+    if (!row) {
+      reply.code(404);
+      return { ok: false, error: `frame not found for tick ${tick}` };
+    }
+
+    return decodeArchivedFrame(row.payloadGzip);
   } catch (err) {
-    const msg = String(err?.message || err);
-    reply.code(msg.includes('not found') ? 404 : 400);
-    return { ok: false, error: msg };
+    reply.code(400);
+    return { ok: false, error: String(err?.message || err) };
   }
 });
 
 app.get('/api/worlds/:id/frames', async (req, reply) => {
   try {
+    const worldId = String(req.params.id);
     const startTick = Math.floor(Number(req.query?.startTick));
     const endTick = Math.floor(Number(req.query?.endTick));
     const stride = Math.max(1, Math.floor(Number(req.query?.stride) || 1));
@@ -986,11 +1077,23 @@ app.get('/api/worlds/:id/frames', async (req, reply) => {
       return { ok: false, error: 'invalid startTick/endTick range' };
     }
 
-    return await getWorldOrThrow(req.params.id).rpc('getArchivedFramesRange', {
+    const rows = stmtListArchivedFramesRange.all(worldId, startTick, endTick);
+    const frames = [];
+    for (const row of rows) {
+      const t = Number(row.tick) || 0;
+      if (((t - startTick) % stride) !== 0) continue;
+      frames.push(decodeArchivedFrame(row.payloadGzip));
+    }
+
+    return {
+      ok: true,
+      worldId,
       startTick,
       endTick,
-      stride
-    });
+      stride,
+      count: frames.length,
+      frames
+    };
   } catch (err) {
     reply.code(400);
     return { ok: false, error: String(err?.message || err) };
@@ -1036,10 +1139,12 @@ app.get('/api/worlds/:id/control/runMode', async (req, reply) => {
 
 app.post('/api/worlds/:id/control/setScenario', async (req, reply) => {
   try {
+    const worldId = String(req.params.id);
     const nextScenario = String(req.body?.name || req.body?.scenario || '').trim();
     const nextSeed = (Number.isFinite(Number(req.body?.seed)) ? Number(req.body.seed) : initialSeed) >>> 0;
     ensureScenarioExists(nextScenario);
-    return await getWorldOrThrow(req.params.id).rpc('setScenario', { name: nextScenario, seed: nextSeed });
+    stmtDeleteArchivedFramesForWorld.run(worldId);
+    return await getWorldOrThrow(worldId).rpc('setScenario', { name: nextScenario, seed: nextSeed });
   } catch (err) {
     reply.code(400);
     return { ok: false, error: String(err?.message || err) };

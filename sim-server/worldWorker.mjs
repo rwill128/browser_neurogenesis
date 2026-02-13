@@ -78,6 +78,27 @@ function resetWorld(nextScenarioName, nextSeed) {
   seed = asU32(nextSeed, seed);
 
   const scenario = getScenario(scenarioName);
+
+  // Enforce stable defaults across all scenarios for the current archive-first phase.
+  scenario.particles = 0;
+  scenario.particleFloor = 0;
+  scenario.particleCeiling = 0;
+  scenario.particlesPerSecond = 0;
+  scenario.configOverrides = {
+    ...(scenario.configOverrides || {}),
+    PARTICLE_POPULATION_FLOOR: 0,
+    PARTICLE_POPULATION_CEILING: 0,
+    PARTICLES_PER_SECOND: 0,
+    FORCE_ALL_SPRINGS_RIGID: true,
+    RIGID_CONSTRAINT_PROJECTION_ENABLED: true,
+    RIGID_CONSTRAINT_PROJECTION_ITERATIONS: 8,
+    RIGID_CONSTRAINT_MAX_RELATIVE_ERROR: 0.001,
+    EDGE_LENGTH_HARD_CAP_ENABLED: true,
+    EDGE_LENGTH_HARD_CAP_FACTOR: 6,
+    PHYSICS_MOTION_GUARD_ENABLED: true,
+    PHYSICS_NONFINITE_FORCE_ZERO: true
+  };
+
   dt = Number(scenario.dt) || (1 / 60);
 
   world = new RealWorld(scenario, seed);
@@ -98,7 +119,7 @@ function resetWorld(nextScenarioName, nextSeed) {
   frameBufferLastAccessAt = 0;
 
   // Seed tick-0 frame so history is addressable from frame 0.
-  captureRenderFrameIfNeeded({ force: true, includeArchive: true });
+  archiveCurrentStepFrame();
 }
 
 resetWorld(scenarioName, seed);
@@ -307,7 +328,16 @@ function captureRenderFrameIfNeeded({ force = false, includeArchive = false } = 
 }
 
 function archiveCurrentStepFrame() {
-  return captureRenderFrameIfNeeded({ force: true, includeArchive: true });
+  const frame = captureRenderFrameIfNeeded({ force: true, includeArchive: true });
+  if (frame) {
+    parentPort.postMessage({
+      type: 'frameArchive',
+      worldId: id,
+      tick: Number(frame.tick) || 0,
+      frame
+    });
+  }
+  return frame;
 }
 
 function getLatestRenderFrame() {

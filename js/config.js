@@ -315,7 +315,7 @@ const config = {
     JET_NODE_ENERGY_COST: 0.0,
     ATTRACTOR_NODE_ENERGY_COST: 0.0,
     REPULSOR_NODE_ENERGY_COST: 0.0,
-    PHOTOSYNTHESIS_EFFICIENCY: 135.0,
+    PHOTOSYNTHESIS_EFFICIENCY: 420.0,
     // Photosynth topology constraints (relaxed by default to avoid over-penalizing photosynth lineages).
     PHOTOSYNTH_FORCE_RIGID_CONNECTED_SPRINGS: false,
     PHOTOSYNTH_NEUTRALIZE_NON_PHOTOSYNTH_NEIGHBORS: false,

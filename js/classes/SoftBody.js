@@ -132,6 +132,7 @@ export class SoftBody {
         // Growth/development state (new): creatures can probabilistically add nodes over lifetime.
         this.growthGenome = null;
         this.growthProgramState = null;
+        this.growthProgramNoveltyScore = 0;
         this.growthCooldownRemaining = 0;
         this.growthEventsCompleted = 0;
         this.growthNodesAdded = 0;
@@ -1484,13 +1485,14 @@ export class SoftBody {
     _ensureGrowthProgramState(programLength = 0) {
         const len = Math.max(1, Math.floor(Number(programLength) || 1));
         if (!this.growthProgramState || typeof this.growthProgramState !== 'object') {
-            this.growthProgramState = { ip: 0, halted: false, executed: 0, waitRemaining: 0, regs: [0, 0, 0, 0], backwardsJumpsInWindow: 0 };
+            this.growthProgramState = { ip: 0, halted: false, executed: 0, waitRemaining: 0, regs: [0, 0, 0, 0], backwardsJumpsInWindow: 0, opCounts: {} };
         }
         this.growthProgramState.ip = Math.max(0, Math.min(len - 1, Math.floor(Number(this.growthProgramState.ip) || 0)));
         this.growthProgramState.halted = Boolean(this.growthProgramState.halted);
         this.growthProgramState.executed = Math.max(0, Math.floor(Number(this.growthProgramState.executed) || 0));
         this.growthProgramState.waitRemaining = Math.max(0, Math.floor(Number(this.growthProgramState.waitRemaining) || 0));
         this.growthProgramState.backwardsJumpsInWindow = Math.max(0, Math.floor(Number(this.growthProgramState.backwardsJumpsInWindow) || 0));
+        if (!this.growthProgramState.opCounts || typeof this.growthProgramState.opCounts !== 'object') this.growthProgramState.opCounts = {};
         if (!Array.isArray(this.growthProgramState.regs)) this.growthProgramState.regs = [0, 0, 0, 0];
         this.growthProgramState.regs = this.growthProgramState.regs.slice(0, 4).map((v) => Math.max(-100000, Math.min(100000, Math.floor(Number(v) || 0))));
         while (this.growthProgramState.regs.length < 4) this.growthProgramState.regs.push(0);
@@ -1548,6 +1550,9 @@ export class SoftBody {
         const instr = program[state.ip] || { op: 'GROW' };
         const op = String(instr.op || 'GROW').toUpperCase();
         state.executed += 1;
+        state.opCounts[op] = (Number(state.opCounts[op]) || 0) + 1;
+        const uniqueOps = Object.keys(state.opCounts).length;
+        this.growthProgramNoveltyScore = Math.max(0, Math.min(1, (uniqueOps / 8) * Math.min(1, state.executed / 32)));
 
         const jumpTo = (line, reason) => {
             const next = Math.max(0, Math.min(program.length - 1, Math.floor(Number(line) || 0)));
@@ -3141,6 +3146,62 @@ export class SoftBody {
                 ];
 
                 const selected = selectWeightedTemplate(templates);
+
+                // If starting from single-triangle template, randomly extrude up to 4 more edge-sharing triangles.
+                if (selected?.name === 'triangle') {
+                    const pts = selected.points.map((p) => ({ x: Number(p.x) || 0, y: Number(p.y) || 0 }));
+                    const tris = selected.triangles.map((t) => t.slice(0, 3));
+                    const extra = Math.floor(Math.random() * 5); // 0..4 => total 1..5 triangles
+                    for (let n = 0; n < extra; n++) {
+                        const edgeUse = new Map();
+                        for (const tri of tris) {
+                            const edges = [[tri[0], tri[1]], [tri[1], tri[2]], [tri[2], tri[0]]];
+                            for (const [a0, b0] of edges) {
+                                const a = Math.min(a0, b0), b = Math.max(a0, b0);
+                                const k = `${a}:${b}`;
+                                edgeUse.set(k, (edgeUse.get(k) || 0) + 1);
+                            }
+                        }
+                        const boundary = [];
+                        for (const [k, c] of edgeUse.entries()) {
+                            if (c === 1) {
+                                const [a, b] = k.split(':').map((v) => Number(v));
+                                boundary.push([a, b]);
+                            }
+                        }
+                        if (boundary.length === 0) break;
+                        const [a, b] = boundary[Math.floor(Math.random() * boundary.length)];
+                        const pa = pts[a], pb = pts[b];
+                        if (!pa || !pb) break;
+                        const mx = (pa.x + pb.x) * 0.5;
+                        const my = (pa.y + pb.y) * 0.5;
+                        const dx = pb.x - pa.x;
+                        const dy = pb.y - pa.y;
+                        const len = Math.hypot(dx, dy) || 1;
+                        const nx = -dy / len;
+                        const ny = dx / len;
+                        const h = (Math.sqrt(3) / 2) * len;
+                        const candidates = [
+                            { x: mx + nx * h, y: my + ny * h },
+                            { x: mx - nx * h, y: my - ny * h }
+                        ];
+                        let pick = candidates[0];
+                        let best = -Infinity;
+                        for (const c of candidates) {
+                            const score = Math.hypot(c.x, c.y) + (Math.random() * 0.01);
+                            if (score > best) {
+                                best = score;
+                                pick = c;
+                            }
+                        }
+                        const ci = pts.length;
+                        pts.push(pick);
+                        tris.push([a, b, ci]);
+                    }
+                    selected.points = pts;
+                    selected.triangles = tris;
+                }
+
                 const rigidChance = Math.max(0, Math.min(1, Number(config.INITIAL_TRI_MESH_EDGE_RIGID_CHANCE) || 0));
                 const sharedEdgeStiffness = drawRandomEdgeStiffness(1.1);
                 const sharedEdgeDamping = drawRandomEdgeDamping();
@@ -3797,6 +3858,8 @@ export class SoftBody {
         }
 
         this.creatureEnergy += currentFrameEnergyGain; // Gains are already dt-scaled
+        // Program novelty pressure: small energy bonus for diverse, executed growth programs.
+        this.creatureEnergy += Math.max(0, Math.min(1, Number(this.growthProgramNoveltyScore) || 0)) * 0.6 * dt;
         this.creatureEnergy -= currentFrameEnergyCost * dt; // Costs are per-frame, so scale by dt here
         this.creatureEnergy = Math.min(this.currentMaxEnergy, Math.max(0, this.creatureEnergy));
 

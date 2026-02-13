@@ -990,6 +990,7 @@ export class SoftBody {
             activationIntervalJitter: Math.random() * 1.5,
             growthPlan: {
                 symmetryMode: randomSymmetryMode(),
+                symmetryCoupling: 0.9,
                 appendageBias: (Math.random() - 0.5) * 2,
                 branchDepthCap: 1 + Math.floor(Math.random() * 3)
             }
@@ -1066,6 +1067,7 @@ export class SoftBody {
                 activationIntervalJitter: 0.5,
                 growthPlan: {
                     symmetryMode: 'none',
+                    symmetryCoupling: 0.9,
                     appendageBias: 0,
                     branchDepthCap: 2
                 },
@@ -1118,6 +1120,7 @@ export class SoftBody {
             const symmetryMode = ['none', 'bilateral', 'radial3'].includes(symmetryRaw) ? symmetryRaw : 'none';
             return {
                 symmetryMode,
+                symmetryCoupling: clamp(Number(plan.symmetryCoupling) || 0.9, 0, 1),
                 appendageBias: clamp(Number(plan.appendageBias) || 0, -1, 1),
                 branchDepthCap: Math.max(1, Math.min(8, Math.floor(Number(plan.branchDepthCap) || 2)))
             };
@@ -1307,6 +1310,13 @@ export class SoftBody {
             const alternatives = modes.filter((m) => m !== current);
             growthPlan.symmetryMode = alternatives[Math.floor(Math.random() * alternatives.length)] || current;
             didMutate = true;
+        }
+        if (Math.random() < mutationChance) {
+            const old = Number(growthPlan.symmetryCoupling);
+            const base = Number.isFinite(old) ? old : 0.9;
+            const next = base + (Math.random() - 0.5) * 2 * mutationMagnitude;
+            growthPlan.symmetryCoupling = Math.max(0, Math.min(1, next));
+            didMutate = didMutate || Math.abs(growthPlan.symmetryCoupling - base) > 1e-6;
         }
         if (Math.random() < mutationChance) {
             const old = Number(growthPlan.appendageBias) || 0;
@@ -2200,7 +2210,7 @@ export class SoftBody {
         const growthProfile = this._resolveGrowthProfileForAge(genome, this.absoluteAgeTicks);
         const growthPlan = genome.growthPlan && typeof genome.growthPlan === 'object'
             ? genome.growthPlan
-            : { symmetryMode: 'none', appendageBias: 0, branchDepthCap: 2 };
+            : { symmetryMode: 'none', symmetryCoupling: 0.9, appendageBias: 0, branchDepthCap: 2 };
 
         const energyRatio = this.currentMaxEnergy > 0 ? this.creatureEnergy / this.currentMaxEnergy : 0;
         if (energyRatio < growthProfile.minEnergyRatioToGrow) {
@@ -2283,6 +2293,22 @@ export class SoftBody {
                 weight: Math.max(0.0001, (Number(entry?.weight) || 0.0001) * Math.max(0.1, factor))
             };
         });
+
+        const findNearestAnchor = (x, y, pool, exclude = null) => {
+            let best = null;
+            let bestD2 = Infinity;
+            for (const p of pool || []) {
+                if (!p || p === exclude) continue;
+                const dx = (Number(p?.pos?.x) || 0) - x;
+                const dy = (Number(p?.pos?.y) || 0) - y;
+                const d2 = dx * dx + dy * dy;
+                if (d2 < bestD2) {
+                    bestD2 = d2;
+                    best = p;
+                }
+            }
+            return best;
+        };
 
         for (let i = 0; i < targetNodeAdds; i++) {
             let placed = false;
@@ -2532,6 +2558,67 @@ export class SoftBody {
                 if (edgeLengthThisPlacement <= 0) {
                     this.massPoints.pop();
                     continue;
+                }
+
+                // Mirrored execution guarantee (bilateral): attempt paired placement on reflected side.
+                const symmetryCoupling = Math.max(0, Math.min(1, Number(growthPlan.symmetryCoupling) || 0));
+                const canTryMirror = growthPlan.symmetryMode === 'bilateral'
+                    && symmetryCoupling > 0
+                    && nodesAdded + 1 < targetNodeAdds;
+                if (canTryMirror && Math.random() < symmetryCoupling) {
+                    const mx = centerX - (newPoint.pos.x - centerX);
+                    const my = newPoint.pos.y;
+                    const mirrorPoint = new MassPoint(mx, my, newPoint.mass, newPoint.radius);
+                    mirrorPoint.nodeType = newPoint.nodeType;
+                    mirrorPoint.movementType = newPoint.movementType;
+                    mirrorPoint.dyeColor = Array.isArray(newPoint.dyeColor) ? newPoint.dyeColor.slice() : [200, 50, 50];
+                    mirrorPoint.canBeGrabber = Boolean(newPoint.canBeGrabber);
+                    mirrorPoint.activationIntervalGene = this._sanitizeActivationIntervalGene(newPoint.activationIntervalGene ?? this._randomActivationIntervalGene());
+                    mirrorPoint.predatorRadiusGene = this._sanitizePredatorRadiusGene(newPoint.predatorRadiusGene ?? this._randomPredatorRadiusGene());
+                    mirrorPoint.actuationCooldownByChannel = { node: 0, grabber: 0, default_pattern: 0 };
+                    mirrorPoint.swimmerActuation = { magnitude: 0, angle: 0 };
+                    mirrorPoint.eyeTargetType = newPoint.eyeTargetType;
+                    mirrorPoint.maxEffectiveJetVelocity = newPoint.maxEffectiveJetVelocity;
+                    mirrorPoint.neuronData = newPoint.neuronData ? JSON.parse(JSON.stringify(newPoint.neuronData)) : null;
+
+                    const clearanceFactor = Math.max(1.0, config.GROWTH_MIN_POINT_CLEARANCE_FACTOR);
+                    let mirrorCollides = false;
+                    for (const existing of this.massPoints) {
+                        const dx = mirrorPoint.pos.x - existing.pos.x;
+                        const dy = mirrorPoint.pos.y - existing.pos.y;
+                        const minDist = (mirrorPoint.radius + existing.radius) * clearanceFactor;
+                        if (dx * dx + dy * dy < minDist * minDist) {
+                            mirrorCollides = true;
+                            break;
+                        }
+                    }
+
+                    if (!mirrorCollides) {
+                        const anchorA = findNearestAnchor(mx, my, preGrowthPoints, null);
+                        const anchorB = useTriangulatedGrowth ? findNearestAnchor(mx, my, preGrowthPoints, anchorA) : null;
+                        const mirrorAnchors = [anchorA, anchorB].filter(Boolean);
+                        this.massPoints.push(mirrorPoint);
+                        let mirrorEdgeLen = 0;
+                        for (const springAnchor of mirrorAnchors) {
+                            const spring = new Spring(springAnchor, mirrorPoint, stiffness, damping, targetRestLength, edgeType === 'rigid');
+                            const parentIntervalA = springAnchor.activationIntervalGene ?? this._randomActivationIntervalGene();
+                            const parentIntervalB = mirrorPoint.activationIntervalGene ?? this._randomActivationIntervalGene();
+                            const edgeIntervalBase = (parentIntervalA + parentIntervalB) * 0.5;
+                            const edgeIntervalJitter = (Math.random() - 0.5) * 2 * (growthProfile.activationIntervalJitter || 0);
+                            spring.activationIntervalGene = this._sanitizeActivationIntervalGene(
+                                edgeIntervalBase + (growthProfile.edgeActivationIntervalBias || 0) + edgeIntervalJitter
+                            );
+                            spring.actuationCooldownByChannel = { edge: 0 };
+                            this.springs.push(spring);
+                            mirrorEdgeLen += targetRestLength;
+                        }
+                        if (mirrorEdgeLen > 0) {
+                            edgeLengthThisPlacement += mirrorEdgeLen;
+                            nodesAdded++;
+                        } else {
+                            this.massPoints.pop();
+                        }
+                    }
                 }
 
                 totalEdgeLength += edgeLengthThisPlacement;

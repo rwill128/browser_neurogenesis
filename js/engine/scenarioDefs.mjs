@@ -3,7 +3,7 @@ export const scenarioDefs = {
     name: 'baseline',
     description: 'Default full simulation settings',
     browserConfig: {},
-    nodeConfig: { world: { width: 140, height: 90 }, creatures: 10, particles: 240, dt: 1/30, steps: 300 }
+    nodeConfig: { world: { width: 140, height: 90 }, creatures: 10, particles: 240, dt: 1/3, steps: 300 }
   },
   browser_default_big: {
     name: 'browser_default_big',
@@ -39,7 +39,7 @@ export const scenarioDefs = {
       particleFloor: 0,
       particleCeiling: 0,
       particlesPerSecond: 0,
-      dt: 0.0001,
+      dt: 0.001,
       steps: 0,
       events: [],
       configOverrides: {
@@ -80,7 +80,7 @@ export const scenarioDefs = {
       AUTO_FOLLOW_CREATURE: true
     },
     nodeConfig: {
-      world: { width: 120, height: 80 }, creatures: 8, creatureCeiling: 16, particles: 200, particleCeiling: 400, dt: 1/30, steps: 300,
+      world: { width: 120, height: 80 }, creatures: 8, creatureCeiling: 16, particles: 200, particleCeiling: 400, dt: 1/3, steps: 300,
       events: [
         { tick: 60, kind: 'energySpike', amount: 8 },
         { tick: 120, kind: 'velocityKick', amount: 1.2 }
@@ -104,7 +104,7 @@ export const scenarioDefs = {
       AUTO_FOLLOW_CREATURE: true
     },
     nodeConfig: {
-      world: { width: 100, height: 70 }, creatures: 12, creatureCeiling: 24, particles: 260, particleCeiling: 520, dt: 1/30, steps: 300,
+      world: { width: 100, height: 70 }, creatures: 12, creatureCeiling: 24, particles: 260, particleCeiling: 520, dt: 1/3, steps: 300,
       events: [
         { tick: 80, kind: 'energyDrain', amount: 12 },
         { tick: 140, kind: 'velocityKick', amount: 1.6 }
@@ -162,7 +162,7 @@ export const scenarioDefs = {
       particles: 260,
       particleCeiling: 900,
       particlesPerSecond: 22,
-      dt: 1/120,
+      dt: 1/12,
       steps: 3600,
       events: [],
       stepBehavior: {
@@ -256,7 +256,7 @@ export const scenarioDefs = {
       particles: 320,
       particleCeiling: 1100,
       particlesPerSecond: 28,
-      dt: 1/120,
+      dt: 1/12,
       steps: 4200,
       events: [
         { tick: 360, kind: 'velocityKick', amount: 0.45 },
@@ -316,7 +316,7 @@ export const scenarioDefs = {
       AUTO_FOLLOW_CREATURE: true
     },
     nodeConfig: {
-      world: { width: 100, height: 100 }, creatures: 1, creatureFloor: 1, creatureCeiling: 16, particles: 40, particleCeiling: 80, dt: 1/30, steps: 240,
+      world: { width: 100, height: 100 }, creatures: 1, creatureFloor: 1, creatureCeiling: 16, particles: 40, particleCeiling: 80, dt: 1/3, steps: 240,
       events: [
         { tick: 60, kind: 'velocityKick', amount: 0.4 },
         { tick: 150, kind: 'energySpike', amount: 4 }
@@ -343,7 +343,7 @@ export const scenarioDefs = {
       AUTO_FOLLOW_CREATURE: false
     },
     nodeConfig: {
-      world: { width: 100, height: 100 }, creatures: 0, creatureCeiling: 0, particles: 0, particleCeiling: 0, dt: 1/30, steps: 120,
+      world: { width: 100, height: 100 }, creatures: 0, creatureCeiling: 0, particles: 0, particleCeiling: 0, dt: 1/3, steps: 120,
       events: []
     }
   },
@@ -367,7 +367,7 @@ export const scenarioDefs = {
       AUTO_FOLLOW_CREATURE: true
     },
     nodeConfig: {
-      world: { width: 100, height: 100 }, creatures: 1, creatureFloor: 1, creatureCeiling: 16, particles: 0, particleCeiling: 0, dt: 1/30, steps: 120,
+      world: { width: 100, height: 100 }, creatures: 1, creatureFloor: 1, creatureCeiling: 16, particles: 0, particleCeiling: 0, dt: 1/3, steps: 120,
       events: []
     }
   }

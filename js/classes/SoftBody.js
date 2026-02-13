@@ -2257,6 +2257,33 @@ export class SoftBody {
         const useTriangulatedGrowth = config.GROWTH_TRIANGULATED_PRIMITIVES_ENABLED !== false;
         const edgePairWeightMap = this._buildGrowthEdgePairWeightMap(growthProfile.anchorEdgeNodePairWeights);
 
+        const bodyCenter = this.getAveragePosition();
+        const centerX = Number(bodyCenter?.x) || 0;
+        const centerY = Number(bodyCenter?.y) || 0;
+        const maxAnchorRadius = Math.max(
+            0.001,
+            ...preGrowthPoints.map((p) => {
+                const dx = (Number(p?.pos?.x) || 0) - centerX;
+                const dy = (Number(p?.pos?.y) || 0) - centerY;
+                return Math.sqrt(dx * dx + dy * dy);
+            })
+        );
+
+        const appendageBias = Math.max(-1, Math.min(1, Number(growthPlan.appendageBias) || 0));
+        const branchDepthCap = Math.max(1, Math.min(8, Math.floor(Number(growthPlan.branchDepthCap) || 2)));
+        const maxAnchorNorm = Math.min(1, 0.15 + 0.12 * branchDepthCap);
+
+        const adjustedDistanceWeights = (growthProfile.distanceRangeWeights || []).map((entry) => {
+            const key = String(entry?.key || '').toLowerCase();
+            let factor = 1;
+            if (key.includes('far')) factor = 1 + (appendageBias * 0.9);
+            else if (key.includes('near')) factor = 1 - (appendageBias * 0.9);
+            return {
+                ...entry,
+                weight: Math.max(0.0001, (Number(entry?.weight) || 0.0001) * Math.max(0.1, factor))
+            };
+        });
+
         for (let i = 0; i < targetNodeAdds; i++) {
             let placed = false;
 
@@ -2267,7 +2294,14 @@ export class SoftBody {
                 const anchor = anchorPool[Math.floor(Math.random() * anchorPool.length)];
                 if (!anchor) break;
 
-                const distanceBucket = this._sampleWeightedEntry(growthProfile.distanceRangeWeights, null)
+                const anchorDx = (Number(anchor?.pos?.x) || 0) - centerX;
+                const anchorDy = (Number(anchor?.pos?.y) || 0) - centerY;
+                const anchorNorm = Math.sqrt(anchorDx * anchorDx + anchorDy * anchorDy) / maxAnchorRadius;
+                if (anchorNorm > maxAnchorNorm && Math.random() < 0.85) {
+                    continue;
+                }
+
+                const distanceBucket = this._sampleWeightedEntry(adjustedDistanceWeights, null)
                     || { min: config.GROWTH_DISTANCE_MIN, max: config.GROWTH_DISTANCE_MAX };
 
                 let x = 0;

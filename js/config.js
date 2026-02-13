@@ -19,7 +19,7 @@ const config = {
     MAX_SPAN_PER_POINT_FACTOR: 300, // GRID_CELL_SIZE * 3
     SPRING_OVERSTRETCH_KILL_ENABLED: false,
     // Experiment toggle: force every spring/edge to rigid physics (overrides per-edge type).
-    FORCE_ALL_SPRINGS_RIGID: false,
+    FORCE_ALL_SPRINGS_RIGID: true,
 
     // Motion guardrails: clamp extreme acceleration/implicit velocity before declaring instability.
     PHYSICS_MOTION_GUARD_ENABLED: true,
@@ -280,7 +280,7 @@ const config = {
     CREATURE_POPULATION_FLOOR: 100,
     CREATURE_POPULATION_CEILING: 10000,
     PARTICLE_POPULATION_FLOOR: 0,
-    PARTICLE_POPULATION_CEILING: 60000,
+    PARTICLE_POPULATION_CEILING: 0,
     canCreaturesReproduceGlobally: true,
 
     BODY_FLUID_ENTRAINMENT_FACTOR: 0.485,
@@ -337,7 +337,7 @@ const config = {
     LANDSCAPE_DYE_EMITTER_PULSE_HZ_MIN: 0.02,
     LANDSCAPE_DYE_EMITTER_PULSE_HZ_MAX: 0.09,
     IS_WORLD_WRAPPING: false,
-    PARTICLES_PER_SECOND: 100,
+    PARTICLES_PER_SECOND: 0,
     PARTICLE_FLUID_INFLUENCE: 0.9,
     PARTICLE_BASE_LIFE_DECAY: 0.001,
     IS_PARTICLE_LIFE_INFINITE: false,

@@ -373,6 +373,38 @@ export const scenarioDefs = {
   }
 };
 
+const STABLE_DEFAULTS = {
+  FORCE_ALL_SPRINGS_RIGID: true,
+  RIGID_CONSTRAINT_PROJECTION_ENABLED: true,
+  RIGID_CONSTRAINT_PROJECTION_ITERATIONS: 8,
+  RIGID_CONSTRAINT_MAX_RELATIVE_ERROR: 0.001,
+  EDGE_LENGTH_HARD_CAP_ENABLED: true,
+  EDGE_LENGTH_HARD_CAP_FACTOR: 6,
+  SPRING_OVERSTRETCH_KILL_ENABLED: false,
+  PARTICLE_POPULATION_FLOOR: 0,
+  PARTICLE_POPULATION_CEILING: 0,
+  PARTICLES_PER_SECOND: 0
+};
+
+for (const def of Object.values(scenarioDefs)) {
+  def.browserConfig = {
+    ...(def.browserConfig || {}),
+    ...STABLE_DEFAULTS
+  };
+
+  if (def.nodeConfig) {
+    def.nodeConfig.particles = 0;
+    def.nodeConfig.particleFloor = 0;
+    def.nodeConfig.particleCeiling = 0;
+    def.nodeConfig.particlesPerSecond = 0;
+
+    def.nodeConfig.configOverrides = {
+      ...(def.nodeConfig.configOverrides || {}),
+      ...STABLE_DEFAULTS
+    };
+  }
+}
+
 export function getScenarioDef(name = 'baseline') {
   return scenarioDefs[name] || scenarioDefs.baseline;
 }

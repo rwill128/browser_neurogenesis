@@ -7,11 +7,11 @@ export const scenarioDefs = {
   },
   browser_default_big: {
     name: 'browser_default_big',
-    description: 'Big browser-like default world (20000x16000, creature floor=100, particle-free)',
+    description: 'Big browser-like default world (20000x16000, creature floor=0, particle-free)',
     browserConfig: {
       WORLD_WIDTH: 20000,
       WORLD_HEIGHT: 16000,
-      CREATURE_POPULATION_FLOOR: 100,
+      CREATURE_POPULATION_FLOOR: 0,
       CREATURE_POPULATION_CEILING: 10000,
       PARTICLE_POPULATION_FLOOR: 0,
       PARTICLE_POPULATION_CEILING: 0,
@@ -33,7 +33,7 @@ export const scenarioDefs = {
     nodeConfig: {
       world: { width: 20000, height: 16000 },
       creatures: 100,
-      creatureFloor: 100,
+      creatureFloor: 0,
       creatureCeiling: 10000,
       particles: 0,
       particleFloor: 0,

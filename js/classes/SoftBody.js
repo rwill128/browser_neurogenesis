@@ -1142,7 +1142,16 @@ export class SoftBody {
                 if (!rawInstr || typeof rawInstr !== 'object') continue;
                 const op = String(rawInstr.op || '').toUpperCase();
                 if (op === 'GROW') {
-                    out.push({ op: 'GROW' });
+                    const distanceKeyRaw = rawInstr.distanceKey == null ? null : String(rawInstr.distanceKey).toLowerCase();
+                    out.push({
+                        op: 'GROW',
+                        newNodeType: Number.isFinite(Number(rawInstr.newNodeType)) ? Math.floor(Number(rawInstr.newNodeType)) : null,
+                        anchorNodeType: Number.isFinite(Number(rawInstr.anchorNodeType)) ? Math.floor(Number(rawInstr.anchorNodeType)) : null,
+                        edgeType: rawInstr.edgeType === 'rigid' ? 'rigid' : (rawInstr.edgeType === 'soft' ? 'soft' : null),
+                        distanceKey: distanceKeyRaw && distanceKeyRaw.length > 0 ? distanceKeyRaw : null,
+                        chanceScale: clamp(Number(rawInstr.chanceScale) || 1, 0.1, 4),
+                        cooldownScale: clamp(Number(rawInstr.cooldownScale) || 1, 0.2, 4)
+                    });
                 } else if (op === 'GOTO') {
                     out.push({ op: 'GOTO', line: Math.max(0, Math.floor(Number(rawInstr.line) || 0)) });
                 } else if (op === 'IF_ENERGY_GOTO') {
@@ -1412,7 +1421,15 @@ export class SoftBody {
             } else if (nextOp === 'HALT') {
                 program[idx] = { op: 'HALT' };
             } else {
-                program[idx] = { op: 'GROW' };
+                program[idx] = {
+                    op: 'GROW',
+                    newNodeType: Math.random() < 0.5 ? Math.floor(Math.random() * 11) : null,
+                    anchorNodeType: Math.random() < 0.5 ? Math.floor(Math.random() * 11) : null,
+                    edgeType: Math.random() < 0.33 ? 'soft' : (Math.random() < 0.5 ? 'rigid' : null),
+                    distanceKey: Math.random() < 0.4 ? (['near', 'mid', 'far'][Math.floor(Math.random() * 3)]) : null,
+                    chanceScale: Math.max(0.1, Math.min(4, 1 + (Math.random() - 0.5) * 2 * mutationMagnitude * 2)),
+                    cooldownScale: Math.max(0.2, Math.min(4, 1 + (Math.random() - 0.5) * 2 * mutationMagnitude * 2))
+                };
             }
             didMutate = true;
         }
@@ -1421,7 +1438,15 @@ export class SoftBody {
             const op = Math.random() < 0.7 ? 'GROW' : 'GOTO';
             const instr = op === 'GOTO'
                 ? { op: 'GOTO', line: Math.floor(Math.random() * Math.max(1, program.length + 1)) }
-                : { op: 'GROW' };
+                : {
+                    op: 'GROW',
+                    newNodeType: Math.random() < 0.5 ? Math.floor(Math.random() * 11) : null,
+                    anchorNodeType: Math.random() < 0.5 ? Math.floor(Math.random() * 11) : null,
+                    edgeType: Math.random() < 0.33 ? 'soft' : (Math.random() < 0.5 ? 'rigid' : null),
+                    distanceKey: Math.random() < 0.4 ? (['near', 'mid', 'far'][Math.floor(Math.random() * 3)]) : null,
+                    chanceScale: Math.max(0.1, Math.min(4, 0.8 + Math.random() * 1.6)),
+                    cooldownScale: Math.max(0.2, Math.min(4, 0.8 + Math.random() * 1.6))
+                };
             program.splice(insertAt, 0, instr);
             didMutate = true;
         }
@@ -1472,9 +1497,45 @@ export class SoftBody {
         return this.growthProgramState;
     }
 
+    _applyGrowthInstructionPatch(profile, rawPatch) {
+        const patch = rawPatch && typeof rawPatch === 'object' ? rawPatch : null;
+        if (!patch) return profile;
+
+        const out = {
+            ...profile,
+            newNodeTypeWeights: Array.isArray(profile.newNodeTypeWeights) ? profile.newNodeTypeWeights.map((e) => ({ ...e })) : [],
+            anchorNodeTypeWeights: Array.isArray(profile.anchorNodeTypeWeights) ? profile.anchorNodeTypeWeights.map((e) => ({ ...e })) : [],
+            edgeTypeWeights: Array.isArray(profile.edgeTypeWeights) ? profile.edgeTypeWeights.map((e) => ({ ...e })) : [],
+            distanceRangeWeights: Array.isArray(profile.distanceRangeWeights) ? profile.distanceRangeWeights.map((e) => ({ ...e })) : []
+        };
+
+        if (Number.isFinite(Number(patch.newNodeType))) {
+            const target = Math.floor(Number(patch.newNodeType));
+            out.newNodeTypeWeights = out.newNodeTypeWeights.map((e) => ({ ...e, weight: (e.nodeType === target ? e.weight * 3 : e.weight * 0.6) }));
+        }
+        if (Number.isFinite(Number(patch.anchorNodeType))) {
+            const target = Math.floor(Number(patch.anchorNodeType));
+            out.anchorNodeTypeWeights = out.anchorNodeTypeWeights.map((e) => ({ ...e, weight: (e.nodeType === target ? e.weight * 3 : e.weight * 0.6) }));
+        }
+        if (patch.edgeType === 'rigid' || patch.edgeType === 'soft') {
+            out.edgeTypeWeights = out.edgeTypeWeights.map((e) => ({ ...e, weight: (e.type === patch.edgeType ? e.weight * 4 : e.weight * 0.25) }));
+        }
+        if (patch.distanceKey) {
+            const key = String(patch.distanceKey).toLowerCase();
+            out.distanceRangeWeights = out.distanceRangeWeights.map((e) => ({
+                ...e,
+                weight: (String(e.key || '').toLowerCase().includes(key) ? e.weight * 3 : e.weight * 0.5)
+            }));
+        }
+
+        out.growthChancePerTick = Math.max(0, Math.min(1, Number(out.growthChancePerTick || 0) * Math.max(0.1, Math.min(4, Number(patch.chanceScale) || 1))));
+        out.growthCooldownTicks = Math.max(1, Math.floor(Number(out.growthCooldownTicks || 1) * Math.max(0.2, Math.min(4, Number(patch.cooldownScale) || 1))));
+        return out;
+    }
+
     _executeGrowthProgramStep(genome, energyRatio) {
         const program = Array.isArray(genome?.growthProgram) ? genome.growthProgram : [];
-        if (program.length === 0) return { allowGrowth: true, reason: 'no_program' };
+        if (program.length === 0) return { allowGrowth: true, reason: 'no_program', growPatch: null };
 
         const state = this._ensureGrowthProgramState(program.length);
         if (state.halted) return { allowGrowth: false, reason: 'halted' };
@@ -1548,7 +1609,18 @@ export class SoftBody {
         // Default/GROW
         state.backwardsJumpsInWindow = 0;
         state.ip = Math.min(program.length - 1, state.ip + 1);
-        return { allowGrowth: true, reason: 'grow' };
+        return {
+            allowGrowth: true,
+            reason: 'grow',
+            growPatch: {
+                newNodeType: Number.isFinite(Number(instr.newNodeType)) ? Math.floor(Number(instr.newNodeType)) : null,
+                anchorNodeType: Number.isFinite(Number(instr.anchorNodeType)) ? Math.floor(Number(instr.anchorNodeType)) : null,
+                edgeType: instr.edgeType === 'rigid' ? 'rigid' : (instr.edgeType === 'soft' ? 'soft' : null),
+                distanceKey: instr.distanceKey == null ? null : String(instr.distanceKey).toLowerCase(),
+                chanceScale: Math.max(0.1, Math.min(4, Number(instr.chanceScale) || 1)),
+                cooldownScale: Math.max(0.2, Math.min(4, Number(instr.cooldownScale) || 1))
+            }
+        };
     }
 
     _bumpMutationStat(key, amount = 1) {
@@ -2432,7 +2504,7 @@ export class SoftBody {
             genome = this._sanitizeGrowthGenome(genome || this._createRandomGrowthGenome());
             this.growthGenome = genome;
         }
-        const growthProfile = this._resolveGrowthProfileForAge(genome, this.absoluteAgeTicks);
+        const baseGrowthProfile = this._resolveGrowthProfileForAge(genome, this.absoluteAgeTicks);
         const growthPlan = genome.growthPlan && typeof genome.growthPlan === 'object'
             ? genome.growthPlan
             : { symmetryMode: 'none', symmetryCoupling: 0.9, appendageBias: 0, branchDepthCap: 2 };
@@ -2442,6 +2514,7 @@ export class SoftBody {
         if (!programStep.allowGrowth) {
             return false;
         }
+        const growthProfile = this._applyGrowthInstructionPatch(baseGrowthProfile, programStep.growPatch);
 
         if (energyRatio < growthProfile.minEnergyRatioToGrow) {
             this.growthSuppressedByEnergy += 1;

@@ -16,6 +16,7 @@ const fitBtn = document.getElementById('fitBtn');
 const prevCreatureBtn = document.getElementById('prevCreatureBtn');
 const nextCreatureBtn = document.getElementById('nextCreatureBtn');
 const toggleFollowBtn = document.getElementById('toggleFollowBtn');
+const creatureStatsModeBtn = document.getElementById('creatureStatsModeBtn');
 
 const refreshConfigBtn = document.getElementById('refreshConfigBtn');
 const applyConfigBtn = document.getElementById('applyConfigBtn');
@@ -31,6 +32,39 @@ const historyLiveBtn = document.getElementById('historyLiveBtn');
 const historyInfoEl = document.getElementById('historyInfo');
 
 const ctx = canvas.getContext('2d');
+
+let creatureStatsMode = 'compact';
+
+function syncCreatureStatsModeUI() {
+  if (creatureStatsModeBtn) {
+    creatureStatsModeBtn.textContent = creatureStatsMode === 'compact' ? 'Mode: Compact' : 'Mode: Expanded';
+  }
+  const showDetails = creatureStatsMode === 'expanded';
+  if (creaturePointDetailsEl) {
+    creaturePointDetailsEl.style.display = showDetails ? '' : 'none';
+    if (creaturePointDetailsEl.previousElementSibling) {
+      creaturePointDetailsEl.previousElementSibling.style.display = showDetails ? '' : 'none';
+    }
+  }
+  if (creatureSpringDetailsEl) {
+    creatureSpringDetailsEl.style.display = showDetails ? '' : 'none';
+    if (creatureSpringDetailsEl.previousElementSibling) {
+      creatureSpringDetailsEl.previousElementSibling.style.display = showDetails ? '' : 'none';
+    }
+  }
+}
+
+function compactCreatureEntries(entries) {
+  const keep = new Set([
+    '@@Identity', 'id', 'following', 'points', 'springs', 'nodeTypes',
+    '@@Lifecycle', 'birthOrigin', 'generation', 'ticksSinceBirth', 'canReproduce',
+    '@@Energy', 'energy', 'currentMaxEnergy', 'reproThreshold', 'gain.photo', 'gain.eat', 'gain.pred',
+    '@@Growth', 'growth.events', 'growth.nodesAdded', 'growth.energySpent', 'growth.supp.energy', 'growth.supp.population',
+    '@@Topology', 'topology.version', 'topology.rlResets',
+    '@@Reproduction Suppression', 'reproSupp.density', 'reproSupp.resources'
+  ]);
+  return entries.filter(([k]) => (typeof k === 'string' && k.startsWith('@@')) || keep.has(k));
+}
 
 const NODE_TYPE_COLORS = {
   PREDATOR: '#ff4d4d',
@@ -548,7 +582,7 @@ function renderPanels(worldId) {
     const topo = fs.topology || {};
     const following = String(followByWorld.get(worldId) || '') === String(selected.id) ? 'yes' : 'no';
 
-    setKV(creatureStatsEl, [
+    const creatureEntries = [
       ['@@Identity'],
       ['id', selected.id],
       ['following', following],
@@ -641,7 +675,9 @@ function renderPanels(worldId) {
       ['cost.jet', costs.jet],
       ['cost.attractor', costs.attractor],
       ['cost.repulsor', costs.repulsor]
-    ]);
+    ];
+
+    setKV(creatureStatsEl, creatureStatsMode === 'compact' ? compactCreatureEntries(creatureEntries) : creatureEntries);
 
     setDetailText(creaturePointDetailsEl, buildPointDetailsText(selected));
     setDetailText(creatureSpringDetailsEl, buildSpringDetailsText(selected));
@@ -1072,6 +1108,11 @@ fitBtn.addEventListener('click', () => {
 prevCreatureBtn.addEventListener('click', () => cycleCreature(-1));
 nextCreatureBtn.addEventListener('click', () => cycleCreature(1));
 toggleFollowBtn.addEventListener('click', () => toggleFollowSelected());
+creatureStatsModeBtn?.addEventListener('click', () => {
+  creatureStatsMode = creatureStatsMode === 'compact' ? 'expanded' : 'compact';
+  syncCreatureStatsModeUI();
+  if (currentWorldId) renderPanels(currentWorldId);
+});
 
 refreshConfigBtn.addEventListener('click', async () => {
   if (!currentWorldId) return;
@@ -1200,6 +1241,8 @@ canvas.addEventListener('wheel', (ev) => {
   const zoomFactor = Math.exp(-ev.deltaY * 0.0015);
   zoomAround(cam, p.x, p.y, zoomFactor);
 }, { passive: false });
+
+syncCreatureStatsModeUI();
 
 await refreshScenarios();
 await refreshWorlds();

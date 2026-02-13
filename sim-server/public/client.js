@@ -32,6 +32,7 @@ const historyLiveBtn = document.getElementById('historyLiveBtn');
 const historyInfoEl = document.getElementById('historyInfo');
 
 const ctx = canvas.getContext('2d');
+const renderPerfByWorld = new Map();
 
 let creatureStatsMode = 'compact';
 
@@ -687,6 +688,7 @@ function renderPanels(worldId) {
 }
 
 function drawSnapshot(snap) {
+  const renderStartMs = performance.now();
   const rect = canvas.getBoundingClientRect();
 
   const worldW = Number(snap?.world?.width) || 1;
@@ -724,6 +726,12 @@ function drawSnapshot(snap) {
 
   const worldToScreenX = (x) => cam.offsetX + x * cam.zoom;
   const worldToScreenY = (y) => cam.offsetY + y * cam.zoom;
+
+  const viewMinX = (-cam.offsetX) / cam.zoom;
+  const viewMaxX = (rect.width - cam.offsetX) / cam.zoom;
+  const viewMinY = (-cam.offsetY) / cam.zoom;
+  const viewMaxY = (rect.height - cam.offsetY) / cam.zoom;
+  const cullMargin = 250 / Math.max(cam.zoom, 0.05);
 
   // Dense fluid path
   if (snap.fluidDense && snap.fluidDense.rgbaBase64 && Number(snap.fluidDense.gridSize) > 0) {
@@ -782,6 +790,7 @@ function drawSnapshot(snap) {
       const x = Number(p?.x);
       const y = Number(p?.y);
       if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (x < viewMinX - cullMargin || x > viewMaxX + cullMargin || y < viewMinY - cullMargin || y > viewMaxY + cullMargin) continue;
       const life = Math.max(0, Math.min(1, Number(p?.life) || 0));
       const size = Math.max(0.5, Math.min(4.0, Number(p?.size) || 1));
       const r = Math.max(0.6, size * cam.zoom);
@@ -793,11 +802,24 @@ function drawSnapshot(snap) {
   }
 
   const selectedId = selectionByWorld.get(worldId) || null;
+  const totalCreatures = Array.isArray(snap.creatures) ? snap.creatures.length : 0;
+  let drawnCreatures = 0;
 
   for (const c of snap.creatures || []) {
     const verts = c.vertices || [];
     const springs = c.springs || [];
     const isSelected = selectedId !== null && String(c.id) === String(selectedId);
+
+    if (!isSelected && c?.center) {
+      const cx = Number(c.center.x);
+      const cy = Number(c.center.y);
+      if (Number.isFinite(cx) && Number.isFinite(cy)) {
+        if (cx < viewMinX - cullMargin || cx > viewMaxX + cullMargin || cy < viewMinY - cullMargin || cy > viewMaxY + cullMargin) {
+          continue;
+        }
+      }
+    }
+    drawnCreatures += 1;
 
     ctx.lineWidth = isSelected ? 1.5 : 1;
     ctx.strokeStyle = isSelected ? 'rgba(220,220,240,0.35)' : 'rgba(220,220,240,0.18)';
@@ -848,6 +870,17 @@ function drawSnapshot(snap) {
       ctx.fill();
     }
   }
+
+  const renderMs = performance.now() - renderStartMs;
+  const prevPerf = renderPerfByWorld.get(worldId) || { avgRenderMs: renderMs };
+  const avgRenderMs = prevPerf.avgRenderMs * 0.85 + renderMs * 0.15;
+  renderPerfByWorld.set(worldId, {
+    lastRenderMs: renderMs,
+    avgRenderMs,
+    drawnCreatures,
+    totalCreatures,
+    atTick: Number(snap.tick) || 0
+  });
 
   renderPanels(worldId);
 }
@@ -946,7 +979,11 @@ function connectStream({ worldId, mode = 'render', hz = 10 } = {}) {
         if (runModeSelect && s?.runMode) {
           runModeSelect.value = String(s.runMode);
         }
-        statusEl.textContent = `world=${s.id} scenario=${s.scenario} seed=${s.seed} mode=${s.runMode || 'realtime'} tick=${s.tick} t=${fmt(s.time, 2)} dt=${fmt(s.dt, 5)} paused=${s.paused} sps=${s.stepsPerSecond} stepWallMs=${s.lastStepWallMs}${zoomLabel}${scrubLabel}`;
+        const renderPerf = renderPerfByWorld.get(worldId) || null;
+        const renderLabel = renderPerf
+          ? ` renderMs=${fmt(renderPerf.lastRenderMs, 2)} avg=${fmt(renderPerf.avgRenderMs, 2)} draw=${renderPerf.drawnCreatures}/${renderPerf.totalCreatures}`
+          : '';
+        statusEl.textContent = `world=${s.id} scenario=${s.scenario} seed=${s.seed} mode=${s.runMode || 'realtime'} tick=${s.tick} t=${fmt(s.time, 2)} dt=${fmt(s.dt, 5)} paused=${s.paused} sps=${s.stepsPerSecond} stepWallMs=${s.lastStepWallMs}${renderLabel}${zoomLabel}${scrubLabel}`;
       } else if (msg.kind === 'snapshot') {
         const snap = msg.data;
 
@@ -1289,7 +1326,11 @@ setInterval(async () => {
     const zoomLabel = cam ? ` zoom=${fmt(cam.zoom, 3)}` : '';
     const scrubOffset = getScrubOffset(currentWorldId);
     const scrubLabel = scrubOffset > 0 ? ` view=-${scrubOffset}` : ' view=live';
-    statusEl.textContent = `world=${status.id} scenario=${status.scenario} seed=${status.seed} mode=${status.runMode || 'realtime'} tick=${status.tick} t=${fmt(status.time, 2)} dt=${fmt(status.dt, 5)} paused=${status.paused} sps=${status.stepsPerSecond} stepWallMs=${status.lastStepWallMs}${zoomLabel}${scrubLabel} (http fallback)`;
+    const renderPerf = renderPerfByWorld.get(currentWorldId) || null;
+    const renderLabel = renderPerf
+      ? ` renderMs=${fmt(renderPerf.lastRenderMs, 2)} avg=${fmt(renderPerf.avgRenderMs, 2)} draw=${renderPerf.drawnCreatures}/${renderPerf.totalCreatures}`
+      : '';
+    statusEl.textContent = `world=${status.id} scenario=${status.scenario} seed=${status.seed} mode=${status.runMode || 'realtime'} tick=${status.tick} t=${fmt(status.time, 2)} dt=${fmt(status.dt, 5)} paused=${status.paused} sps=${status.stepsPerSecond} stepWallMs=${status.lastStepWallMs}${renderLabel}${zoomLabel}${scrubLabel} (http fallback)`;
   } catch {
     // keep quiet; WS reconnect loop + periodic world refresh continue.
   }

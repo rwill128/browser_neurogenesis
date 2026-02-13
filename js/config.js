@@ -17,6 +17,7 @@ const config = {
     MAX_PIXELS_PER_FRAME_DISPLACEMENT: 300,
     MAX_SPRING_STRETCH_FACTOR: 20.0,
     MAX_SPAN_PER_POINT_FACTOR: 300, // GRID_CELL_SIZE * 3
+    SPRING_OVERSTRETCH_KILL_ENABLED: false,
 
     // Motion guardrails: clamp extreme acceleration/implicit velocity before declaring instability.
     PHYSICS_MOTION_GUARD_ENABLED: true,

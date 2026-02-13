@@ -4109,15 +4109,18 @@ export class SoftBody {
         // Final Instability Checks: Springs and Span
         const localMaxSpringStretchFactor = config.MAX_SPRING_STRETCH_FACTOR;
         const localMaxSpanPerPointFactor = config.MAX_SPAN_PER_POINT_FACTOR;
+        const killOnSpringOverstretch = config.SPRING_OVERSTRETCH_KILL_ENABLED === true;
 
-        for (const spring of this.springs) {
-            // const currentLength = spring.p1.pos.sub(spring.p2.pos).mag();
-            this._tempVec1.copyFrom(spring.p1.pos).subInPlace(spring.p2.pos);
-            const currentLength = this._tempVec1.mag();
-            if (currentLength > spring.restLength * localMaxSpringStretchFactor) {
-                this._markUnstable('physics_spring_overstretch');
-                // console.warn(...)
-                return;
+        if (killOnSpringOverstretch) {
+            for (const spring of this.springs) {
+                // const currentLength = spring.p1.pos.sub(spring.p2.pos).mag();
+                this._tempVec1.copyFrom(spring.p1.pos).subInPlace(spring.p2.pos);
+                const currentLength = this._tempVec1.mag();
+                if (currentLength > spring.restLength * localMaxSpringStretchFactor) {
+                    this._markUnstable('physics_spring_overstretch');
+                    // console.warn(...)
+                    return;
+                }
             }
         }
 

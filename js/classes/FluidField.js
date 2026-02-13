@@ -24,6 +24,10 @@ export class FluidField {
         this.Vx0 = new Float32Array(this.size * this.size).fill(0);
         this.Vy0 = new Float32Array(this.size * this.size).fill(0);
 
+        // Scratch coefficient buffers for variable-viscosity solver path (reused to avoid per-step allocation).
+        this._linSolveEffectiveA = new Float32Array(this.size * this.size);
+        this._linSolveEffectiveCRecip = new Float32Array(this.size * this.size);
+
         this.iterations = 4; 
     }
 
@@ -58,16 +62,32 @@ export class FluidField {
         }
     }
 
+    _getSolverIterationsForField(field_type) {
+        const fallback = Math.max(1, Math.floor(Number(this.iterations) || 4));
+
+        if (field_type === 'velX' || field_type === 'velY') {
+            return Math.max(1, Math.floor(Number(config.FLUID_SOLVER_ITERATIONS_VELOCITY) || fallback));
+        }
+        if (field_type === 'pressure') {
+            return Math.max(1, Math.floor(Number(config.FLUID_SOLVER_ITERATIONS_PRESSURE) || fallback));
+        }
+        if (field_type === 'density') {
+            return Math.max(1, Math.floor(Number(config.FLUID_SOLVER_ITERATIONS_DENSITY) || fallback));
+        }
+        return fallback;
+    }
+
     lin_solve(b, x, x0, a_global_param, c_global_param, field_type, base_diff_rate, dt_param) {
         const N = this.size;
         const NMinus1 = N - 1;
         const cRecipGlobal = 1.0 / c_global_param;
+        const solverIterations = this._getSolverIterationsForField(field_type);
 
         const isVelocityField = (field_type === 'velX' || field_type === 'velY');
         const viscosityField = (isVelocityField && this.viscosityField) ? this.viscosityField : null;
 
         if (!viscosityField) {
-            for (let k_iter = 0; k_iter < this.iterations; k_iter++) {
+            for (let k_iter = 0; k_iter < solverIterations; k_iter++) {
                 for (let j = 1; j < NMinus1; j++) {
                     let idx = j * N + 1;
                     const rowEnd = j * N + NMinus1;
@@ -86,19 +106,33 @@ export class FluidField {
         const gridFactor = (N - 2) * (N - 2);
         const baseScale = dt_param * base_diff_rate * gridFactor;
 
-        for (let k_iter = 0; k_iter < this.iterations; k_iter++) {
+        const effectiveAByIdx = this._linSolveEffectiveA;
+        const effectiveCRecipByIdx = this._linSolveEffectiveCRecip;
+
+        // Build local coefficients once; reuse across all Gauss-Seidel iterations in this solve.
+        for (let j = 1; j < NMinus1; j++) {
+            let idx = j * N + 1;
+            const rowEnd = j * N + NMinus1;
+            while (idx < rowEnd) {
+                let localMultiplier = viscosityField[idx];
+                if (!Number.isFinite(localMultiplier)) localMultiplier = 1;
+                if (localMultiplier < minVisc) localMultiplier = minVisc;
+                else if (localMultiplier > maxVisc) localMultiplier = maxVisc;
+
+                const effectiveA = baseScale * localMultiplier;
+                effectiveAByIdx[idx] = effectiveA;
+                effectiveCRecipByIdx[idx] = 1.0 / (1 + 4 * effectiveA);
+                idx++;
+            }
+        }
+
+        for (let k_iter = 0; k_iter < solverIterations; k_iter++) {
             for (let j = 1; j < NMinus1; j++) {
                 let idx = j * N + 1;
                 const rowEnd = j * N + NMinus1;
                 while (idx < rowEnd) {
-                    let localMultiplier = viscosityField[idx];
-                    if (!Number.isFinite(localMultiplier)) localMultiplier = 1;
-                    if (localMultiplier < minVisc) localMultiplier = minVisc;
-                    else if (localMultiplier > maxVisc) localMultiplier = maxVisc;
-
-                    const effectiveA = baseScale * localMultiplier;
-                    const effectiveCRecip = 1.0 / (1 + 4 * effectiveA);
-
+                    const effectiveA = effectiveAByIdx[idx];
+                    const effectiveCRecip = effectiveCRecipByIdx[idx];
                     x[idx] = (x0[idx] + effectiveA * (x[idx + 1] + x[idx - 1] + x[idx + N] + x[idx - N])) * effectiveCRecip;
                     idx++;
                 }

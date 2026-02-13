@@ -56,6 +56,11 @@ test('viscosity landscape defaults expose stronger-shape controls', () => {
   assert.ok(Number(config.VISCOSITY_LANDSCAPE_GAIN) > 0);
   assert.ok(Number(config.VISCOSITY_LANDSCAPE_CONTRAST) >= 0);
   assert.ok(Number(config.VISCOSITY_LANDSCAPE_BANDS) >= 0);
+  assert.ok(Number(config.FLUID_SOLVER_ITERATIONS_VELOCITY) >= 1);
+  assert.ok(Number(config.FLUID_SOLVER_ITERATIONS_PRESSURE) >= 1);
+  assert.ok(Number(config.FLUID_SOLVER_ITERATIONS_DENSITY) >= 1);
+  assert.ok(Number(config.FLUID_SOLVER_ITERATIONS_VELOCITY) >= Number(config.FLUID_SOLVER_ITERATIONS_PRESSURE));
+  assert.ok(Number(config.FLUID_SOLVER_ITERATIONS_PRESSURE) >= Number(config.FLUID_SOLVER_ITERATIONS_DENSITY));
 });
 
 test('edge-length telemetry defaults are enabled and hard cap defaults on at factor 6+', () => {

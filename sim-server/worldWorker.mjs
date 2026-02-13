@@ -62,6 +62,7 @@ let crash = null;
 const FRAME_HISTORY_MAX = 100;
 const FRAME_CAPTURE_STEP_STRIDE = 1;
 const FRAME_BUFFER_IDLE_MS = 30_000;
+const ARCHIVE_RICH_STATS_EVERY_N_TICKS = 1000;
 let frameHistory = [];
 let frameArchive = [];
 let frameSeq = 0;
@@ -227,15 +228,15 @@ function collectFluidDenseRGBA() {
   };
 }
 
-function computeSnapshot(mode = 'render') {
+function computeSnapshot(mode = 'render', { includeRichStats = false } = {}) {
   const snap = world.snapshot();
   const worldDims = world?.config?.world || null;
 
-  // Archive/storage hygiene: strip bulky/derived telemetry from per-tick frames.
+  // Archive/storage hygiene: strip bulky/derived telemetry from most per-tick frames.
   if (snap?.instabilityTelemetry && typeof snap.instabilityTelemetry === 'object') {
     delete snap.instabilityTelemetry.recentDeaths;
   }
-  if (Array.isArray(snap?.creatures)) {
+  if (!includeRichStats && Array.isArray(snap?.creatures)) {
     for (const c of snap.creatures) {
       if (!c || typeof c !== 'object') continue;
       delete c.fullStats;
@@ -328,10 +329,12 @@ function captureRenderFrameIfNeeded({ force = false, includeArchive = false } = 
     }
   }
 
-  const frame = computeSnapshot('render');
+  const includeRichStats = includeArchive && (tick % ARCHIVE_RICH_STATS_EVERY_N_TICKS === 0);
+  const frame = computeSnapshot('render', { includeRichStats });
   frameSeq += 1;
   frame.__frameSeq = frameSeq;
   frame.__capturedAtIso = new Date().toISOString();
+  frame.__richStats = includeRichStats;
 
   frameHistory.push(frame);
   if (frameHistory.length > FRAME_HISTORY_MAX) {

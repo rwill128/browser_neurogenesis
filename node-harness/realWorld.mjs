@@ -431,6 +431,14 @@ export class RealWorld {
             nnTopologyVersion: Number(b.nnTopologyVersion || 0),
             rlTopologyResets: Number(b.rlBufferResetsDueToTopology || 0)
           },
+          motionGuards: {
+            accelerationClampEvents: Number(b.motionGuardAccelerationClampEvents || 0),
+            velocityClampEvents: Number(b.motionGuardVelocityClampEvents || 0),
+            nonFiniteForceResets: Number(b.motionGuardNonFiniteForceResets || 0),
+            positionResets: Number(b.motionGuardPositionResets || 0),
+            maxAccelerationBefore: round(b.motionGuardMaxAccelerationBefore, 4),
+            maxVelocityBefore: round(b.motionGuardMaxVelocityBefore, 4)
+          },
           reproductionSuppression: {
             density: Number(b.reproductionSuppressedByDensity || 0),
             resources: Number(b.reproductionSuppressedByResources || 0),

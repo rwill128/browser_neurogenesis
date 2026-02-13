@@ -179,6 +179,14 @@ export class SoftBody {
         this.edgeLengthClampTotalCorrection = 0;
         this.edgeLengthClampMaxRatioBefore = 0;
 
+        // Motion guard telemetry (acceleration / implicit-velocity clamps and force sanitization).
+        this.motionGuardAccelerationClampEvents = 0;
+        this.motionGuardVelocityClampEvents = 0;
+        this.motionGuardNonFiniteForceResets = 0;
+        this.motionGuardPositionResets = 0;
+        this.motionGuardMaxAccelerationBefore = 0;
+        this.motionGuardMaxVelocityBefore = 0;
+
         // Initialize heritable/mutable properties
         if (isBlueprint && creationData) {
             // --- CREATION FROM IMPORTED BLUEPRINT ---
@@ -3567,8 +3575,87 @@ export class SoftBody {
             }
         }
 
-        for (let point of this.massPoints) {
+        const motionGuardEnabled = config.PHYSICS_MOTION_GUARD_ENABLED !== false;
+        const sanitizeNonFiniteForce = config.PHYSICS_NONFINITE_FORCE_ZERO !== false;
+        const maxAcceleration = Math.max(0, Number(config.PHYSICS_MAX_ACCELERATION_MAGNITUDE) || 0);
+        const maxAccelerationSq = maxAcceleration * maxAcceleration;
+        const maxImplicitVelocity = Math.max(0, Number(config.PHYSICS_MAX_IMPLICIT_VELOCITY_PER_STEP) || 0);
+        const maxImplicitVelocitySq = maxImplicitVelocity * maxImplicitVelocity;
+
+        for (let i = 0; i < this.massPoints.length; i++) {
+            const point = this.massPoints[i];
+
+            if (motionGuardEnabled) {
+                const posFinite = Number.isFinite(point.pos.x) && Number.isFinite(point.pos.y);
+                const prevPosFinite = Number.isFinite(point.prevPos.x) && Number.isFinite(point.prevPos.y);
+
+                if (!posFinite || !prevPosFinite) {
+                    if (posFinite && !prevPosFinite) {
+                        point.prevPos.x = point.pos.x;
+                        point.prevPos.y = point.pos.y;
+                        this.motionGuardPositionResets += 1;
+                    } else if (!posFinite && prevPosFinite) {
+                        point.pos.x = point.prevPos.x;
+                        point.pos.y = point.prevPos.y;
+                        this.motionGuardPositionResets += 1;
+                    } else {
+                        this._markUnstable('physics_non_finite_position', {
+                            phase: 'pre_update',
+                            pointIndex: i,
+                            pos: { x: point.pos.x, y: point.pos.y },
+                            prevPos: { x: point.prevPos.x, y: point.prevPos.y },
+                            nodeType: point.nodeType,
+                            movementType: point.movementType,
+                            ticksSinceBirth: this.ticksSinceBirth
+                        });
+                        return;
+                    }
+                }
+
+                if (sanitizeNonFiniteForce) {
+                    const forceFinite = Number.isFinite(point.force.x) && Number.isFinite(point.force.y);
+                    if (!forceFinite) {
+                        point.force.x = 0;
+                        point.force.y = 0;
+                        this.motionGuardNonFiniteForceResets += 1;
+                    }
+                }
+
+                if (!point.isFixed && maxAccelerationSq > 0) {
+                    const invMass = Number(point.invMass) || 0;
+                    if (invMass > 0) {
+                        const accelX = point.force.x * invMass;
+                        const accelY = point.force.y * invMass;
+                        const accelSq = accelX * accelX + accelY * accelY;
+
+                        if (Number.isFinite(accelSq) && accelSq > maxAccelerationSq) {
+                            const accelMag = Math.sqrt(accelSq);
+                            this.motionGuardMaxAccelerationBefore = Math.max(this.motionGuardMaxAccelerationBefore, accelMag);
+                            const scale = maxAcceleration / Math.max(1e-9, accelMag);
+                            point.force.x *= scale;
+                            point.force.y *= scale;
+                            this.motionGuardAccelerationClampEvents += 1;
+                        }
+                    }
+                }
+            }
+
             point.update(dt);
+
+            if (motionGuardEnabled && !point.isFixed && maxImplicitVelocitySq > 0) {
+                const dx = point.pos.x - point.prevPos.x;
+                const dy = point.pos.y - point.prevPos.y;
+                const velSq = dx * dx + dy * dy;
+
+                if (Number.isFinite(velSq) && velSq > maxImplicitVelocitySq) {
+                    const velMag = Math.sqrt(velSq);
+                    this.motionGuardMaxVelocityBefore = Math.max(this.motionGuardMaxVelocityBefore, velMag);
+                    const scale = maxImplicitVelocity / Math.max(1e-9, velMag);
+                    point.pos.x = point.prevPos.x + dx * scale;
+                    point.pos.y = point.prevPos.y + dy * scale;
+                    this.motionGuardVelocityClampEvents += 1;
+                }
+            }
         }
 
         const MAX_PIXELS_PER_FRAME_DISPLACEMENT_SQ = (config.MAX_PIXELS_PER_FRAME_DISPLACEMENT) ** 2;

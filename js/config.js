@@ -17,6 +17,12 @@ const config = {
     MAX_PIXELS_PER_FRAME_DISPLACEMENT: 300,
     MAX_SPRING_STRETCH_FACTOR: 20.0,
     MAX_SPAN_PER_POINT_FACTOR: 300, // GRID_CELL_SIZE * 3
+
+    // Motion guardrails: clamp extreme acceleration/implicit velocity before declaring instability.
+    PHYSICS_MOTION_GUARD_ENABLED: true,
+    PHYSICS_NONFINITE_FORCE_ZERO: true,
+    PHYSICS_MAX_ACCELERATION_MAGNITUDE: 120000,
+    PHYSICS_MAX_IMPLICIT_VELOCITY_PER_STEP: 240,
     // Hard geometric guardrail: projection-style spring length cap before instability checks.
     EDGE_LENGTH_HARD_CAP_ENABLED: true,
     EDGE_LENGTH_HARD_CAP_FACTOR: 6.0,

@@ -23,6 +23,12 @@ body {
   background: #0f111a;
 }
 
+.left {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .title {
   font-weight: 700;
   letter-spacing: 0.2px;
@@ -32,6 +38,12 @@ body {
   font-size: 12px;
   opacity: 0.85;
   margin-top: 4px;
+  min-height: 16px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(62vw, 920px);
 }
 
 .scrubBar {

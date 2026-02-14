@@ -661,6 +661,30 @@ export class FluidField {
         return mergedDomain;
     }
 
+    _expandTileMap(tileMap, haloTiles = 1) {
+        const halo = Math.max(0, Math.floor(Number(haloTiles) || 0));
+        if (!tileMap || typeof tileMap.keys !== 'function') return tileMap;
+        if (halo <= 0) return tileMap;
+
+        const expanded = new Map();
+        for (const key of tileMap.keys()) {
+            const parts = String(key).split(':');
+            if (parts.length !== 2) continue;
+            const tx = Number(parts[0]);
+            const ty = Number(parts[1]);
+            if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+
+            for (let oy = -halo; oy <= halo; oy++) {
+                for (let ox = -halo; ox <= halo; ox++) {
+                    const nx = Math.max(0, Math.min(this.activeTileCols - 1, tx + ox));
+                    const ny = Math.max(0, Math.min(this.activeTileRows - 1, ty + oy));
+                    expanded.set(`${nx}:${ny}`, this.activeTileTtlMax);
+                }
+            }
+        }
+        return expanded;
+    }
+
     step(worldTick = 0) {
         const tStart = Date.now();
         let t0 = Date.now();
@@ -668,7 +692,8 @@ export class FluidField {
         const seedMomentumMs = Date.now() - t0;
 
         const carrierBounds = this._buildSparseDomainFromTiles(this.carrierTiles);
-        const momentumBounds = this._buildSparseDomainFromTiles(this.momentumTiles);
+        const expandedMomentumTiles = this._expandTileMap(this.momentumTiles, 1);
+        const momentumBounds = this._buildSparseDomainFromTiles(expandedMomentumTiles);
         const momentumEvery = Math.max(1, Math.floor(Number(config.FLUID_MOMENTUM_ONLY_STEP_EVERY_N_TICKS) || 10));
         const allowMomentumSolve = (Math.max(0, Math.floor(Number(worldTick) || 0)) % momentumEvery) === 0;
 

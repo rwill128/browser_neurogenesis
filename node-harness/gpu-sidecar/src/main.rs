@@ -464,9 +464,9 @@ async fn run_fluid_step(
     for _ in 0..steps {
         let mut encoder = device.create_command_encoder(&Default::default());
 
-        // reset pressure buffers before solve so each projection starts from a clean slate
+        // reset pressure source before solve so each projection starts from a clean slate.
+        // pressure_b is fully overwritten on the first Jacobi pass, so clearing it is wasted work.
         encoder.clear_buffer(&pressure_a, 0, None);
-        encoder.clear_buffer(&pressure_b, 0, None);
 
         // velocity advection
         {

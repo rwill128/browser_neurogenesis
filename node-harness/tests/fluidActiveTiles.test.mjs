@@ -17,7 +17,7 @@ test('active tile telemetry tracks activity from density/velocity writes', () =>
   const t = f.getActiveTileTelemetry();
   assert.ok(Number(t.totalTiles) >= 1);
   assert.ok(Number(t.carrierActiveTiles) >= 1);
-  assert.ok(Number(t.momentumActiveTiles) >= 1);
+  assert.ok(Number(t.momentumTilesTotal) >= 1);
   assert.ok(Number(t.carrierTouchedTiles) >= 1);
   assert.ok(Number(t.carrierPct) > 0);
 });

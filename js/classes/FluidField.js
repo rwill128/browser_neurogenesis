@@ -47,12 +47,12 @@ export class FluidField {
         this.momentumTilesTouchedThisStep = new Set();
         this.lastActiveTileTelemetry = {
             carrierActiveTiles: 0,
-            momentumActiveTiles: 0,
-            momentumOnlyTiles: 0,
+            momentumTilesTotal: 0,
+            momentumTilesNonCarrier: 0,
             totalTiles: this.activeTileCols * this.activeTileRows,
             carrierPct: 0,
             momentumPct: 0,
-            momentumOnlyPct: 0,
+            momentumNonCarrierPct: 0,
             carrierTouchedTiles: 0,
             momentumTouchedTiles: 0,
             sleepingCarrierTiles: 0,
@@ -157,19 +157,19 @@ export class FluidField {
 
         const totalTiles = Math.max(1, this.activeTileCols * this.activeTileRows);
         const carrierActiveTiles = this.carrierTiles.size;
-        const momentumActiveTiles = this.momentumTiles.size;
-        let momentumOnlyTiles = 0;
+        const momentumTilesTotal = this.momentumTiles.size;
+        let momentumTilesNonCarrier = 0;
         for (const key of this.momentumTiles.keys()) {
-            if (!this.carrierTiles.has(key)) momentumOnlyTiles++;
+            if (!this.carrierTiles.has(key)) momentumTilesNonCarrier++;
         }
         this.lastActiveTileTelemetry = {
             carrierActiveTiles,
-            momentumActiveTiles,
-            momentumOnlyTiles,
+            momentumTilesTotal,
+            momentumTilesNonCarrier,
             totalTiles,
             carrierPct: carrierActiveTiles / totalTiles,
-            momentumPct: momentumActiveTiles / totalTiles,
-            momentumOnlyPct: momentumOnlyTiles / totalTiles,
+            momentumPct: momentumTilesTotal / totalTiles,
+            momentumNonCarrierPct: momentumTilesNonCarrier / totalTiles,
             carrierTouchedTiles: this.carrierTilesTouchedThisStep.size,
             momentumTouchedTiles: this.momentumTilesTouchedThisStep.size,
             sleepingCarrierTiles,

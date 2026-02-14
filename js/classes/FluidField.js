@@ -137,6 +137,31 @@ export class FluidField {
         }
     }
 
+    /**
+     * Mark momentum tiles from the evolved velocity field so "invisible currents" are represented
+     * even when no fresh addVelocity() impulse happened this tick.
+     */
+    seedMomentumTilesFromVelocityField() {
+        const threshold = Math.max(0, Number(config.FLUID_MOMENTUM_ACTIVITY_SPEED_THRESHOLD) || 0);
+        if (threshold <= 0) return;
+        const thresholdSq = threshold * threshold;
+        const N = this.size;
+        const NMinus1 = N - 1;
+        for (let y = 1; y < NMinus1; y++) {
+            let idx = y * N + 1;
+            const rowEnd = y * N + NMinus1;
+            while (idx < rowEnd) {
+                const vx = this.Vx[idx];
+                const vy = this.Vy[idx];
+                if ((vx * vx + vy * vy) >= thresholdSq) {
+                    const gx = idx % N;
+                    this.markMomentumCell(gx, y);
+                }
+                idx++;
+            }
+        }
+    }
+
     _decayTileMap(tileMap) {
         let sleeping = 0;
         for (const [key, ttlRaw] of Array.from(tileMap.entries())) {
@@ -462,6 +487,7 @@ export class FluidField {
     }
 
     step(worldTick = 0) {
+        this.seedMomentumTilesFromVelocityField();
         const carrierBounds = this._getActiveCellBounds(this.carrierTiles);
         const momentumBounds = this._getActiveCellBounds(this.momentumTiles);
         const momentumEvery = Math.max(1, Math.floor(Number(config.FLUID_MOMENTUM_ONLY_STEP_EVERY_N_TICKS) || 6));

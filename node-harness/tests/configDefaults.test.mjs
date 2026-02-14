@@ -66,6 +66,7 @@ test('viscosity landscape defaults expose stronger-shape controls', () => {
   assert.ok(Number(config.FLUID_ACTIVE_TILE_HALO_TILES) >= 0);
   assert.ok(Number(config.FLUID_ACTIVE_TILE_TTL_STEPS) >= 1);
   assert.ok(Number(config.FLUID_MOMENTUM_ONLY_STEP_EVERY_N_TICKS) >= 1);
+  assert.ok(Number(config.FLUID_MOMENTUM_ACTIVITY_SPEED_THRESHOLD) >= 0);
 });
 
 test('edge-length telemetry defaults are enabled and hard cap defaults on at factor 6+', () => {

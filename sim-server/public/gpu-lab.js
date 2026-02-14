@@ -1259,7 +1259,7 @@ function drawBodiesOverlay(sim) {
       b._rtheta += ((b.theta || 0) - b._rtheta) * smooth;
     }
     const sp = worldToScreen(sim, b._rx, b._ry);
-    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillStyle = b.digestEnabled ? 'rgba(255, 90, 120, 0.16)' : 'rgba(255,255,255,0.06)';
     ctx.beginPath();
     const sides = Math.max(3, b.sides || (i === 0 ? 3 : 4));
     const rot = (b._rtheta || 0) + (sides === 3 ? -Math.PI * 0.5 : Math.PI * 0.25);
@@ -1291,6 +1291,31 @@ function drawBodiesOverlay(sim) {
       node._ry += (node.y - node._ry) * smooth;
     }
   }
+
+  const softClusters = new Map();
+  for (const node of s.nodes) {
+    const cid = node.clusterId ?? 0;
+    if (!softClusters.has(cid)) softClusters.set(cid, []);
+    softClusters.get(cid).push(node);
+  }
+  for (const nodes of softClusters.values()) {
+    if (!nodes.length || !nodes[0].digestEnabled) continue;
+    let cx = 0, cy = 0;
+    for (const n0 of nodes) { cx += n0._rx; cy += n0._ry; }
+    cx /= nodes.length; cy /= nodes.length;
+    const ordered = [...nodes]
+      .map((p) => ({ x: p._rx, y: p._ry, a: Math.atan2(p._ry - cy, p._rx - cx) }))
+      .sort((a, b2) => a.a - b2.a);
+    ctx.fillStyle = 'rgba(255, 80, 140, 0.14)';
+    ctx.beginPath();
+    for (let i = 0; i < ordered.length; i++) {
+      const p = worldToScreen(sim, ordered[i].x, ordered[i].y);
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
   for (const [i, j, _rest, edgeSolid, edgeDyeBlock] of s.springs) {
     const a = s.nodes[i], b = s.nodes[j];
     const pa = worldToScreen(sim, a._rx, a._ry);
@@ -1312,7 +1337,7 @@ function drawBodiesOverlay(sim) {
 
   ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
-  ctx.fillText(`Blocked edges=white/cyan, permeable=blue | zoom ${sim.camera.zoom.toFixed(2)}x`, 10, canvas.height - 28);
+  ctx.fillText(`Blocked edges=white/cyan, permeable=blue, digest ON=magenta fill | zoom ${sim.camera.zoom.toFixed(2)}x`, 10, canvas.height - 28);
   ctx.fillStyle = 'rgba(0,255,208,0.95)';
   ctx.fillText('Rigid+soft mixed edge permeability | Alt+drag/right-drag pan, wheel zoom', 10, canvas.height - 12);
   ctx.restore();

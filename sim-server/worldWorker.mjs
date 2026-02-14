@@ -9,6 +9,7 @@
  */
 
 import { parentPort, workerData } from 'node:worker_threads';
+import { serialize as v8Serialize } from 'node:v8';
 
 import config from '../js/config.js';
 import { applyConfigOverrides } from '../js/engine/configOverride.mjs';
@@ -396,12 +397,15 @@ function archiveCurrentStepFrame() {
 
   const frame = captureRenderFrameIfNeeded({ force: true, includeArchive: true });
   if (frame) {
+    const lean = buildLeanArchiveFrame(frame);
+    const wire = v8Serialize(lean);
+    const ab = wire.buffer.slice(wire.byteOffset, wire.byteOffset + wire.byteLength);
     parentPort.postMessage({
       type: 'frameArchive',
       worldId: id,
       tick: Number(frame.tick) || 0,
-      frame: buildLeanArchiveFrame(frame)
-    });
+      frameBuf: ab
+    }, [ab]);
   }
   return frame;
 }

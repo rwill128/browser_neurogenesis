@@ -332,7 +332,13 @@ class WorldHandle {
         try {
           const worldId = String(msg.worldId || this.id);
           const tick = Math.max(0, Math.floor(Number(msg.tick) || 0));
-          const frame = msg.frame;
+
+          let frame = null;
+          if (msg.frameBuf) {
+            frame = v8Deserialize(Buffer.from(msg.frameBuf));
+          } else if (msg.frame && typeof msg.frame === 'object') {
+            frame = msg.frame;
+          }
           if (!frame || typeof frame !== 'object') return;
 
           // Chunk-first archival path: keep newest tail in memory, persist compressed chunks.
@@ -1272,6 +1278,7 @@ app.get('/api/worlds', async () => {
   const items = [];
   for (const [id, handle] of worlds.entries()) {
     const status = await handle.rpc('getStatus');
+    if (status && typeof status === 'object') status.edgeLengthTelemetryLatest = null;
     items.push(status);
   }
   return { ok: true, worlds: items, defaultWorldId: DEFAULT_WORLD_ID, maxWorlds };
@@ -1303,7 +1310,15 @@ app.delete('/api/worlds/:id', async (req, reply) => {
 
 app.get('/api/worlds/:id/status', async (req, reply) => {
   try {
-    return await getWorldOrThrow(req.params.id).rpc('getStatus');
+    const status = await getWorldOrThrow(req.params.id).rpc('getStatus');
+    const verbose = String(req.query?.verbose || '').trim().toLowerCase();
+    if (verbose === '1' || verbose === 'true' || verbose === 'full') return status;
+
+    // Default compact status for lower JSON serialization overhead on hot polling paths.
+    if (status && typeof status === 'object') {
+      status.edgeLengthTelemetryLatest = null;
+    }
+    return status;
   } catch (err) {
     reply.code(404);
     return { ok: false, error: String(err?.message || err) };

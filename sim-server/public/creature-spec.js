@@ -35,6 +35,7 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
     name: options.name || 'unnamed-creature',
     space: { width, height },
     rigidBodies: rigidBuild.rigidBodies,
+    rigidWelds: rigidBuild.rigidWelds,
     softBodies: softBuild.softBodies,
     hybridJoints,
   };
@@ -70,6 +71,7 @@ export function parseCreatureSpec(jsonText) {
   if (!Array.isArray(obj.rigidBodies) || !Array.isArray(obj.softBodies) || !Array.isArray(obj.hybridJoints)) {
     throw new Error('CreatureSpec missing rigidBodies/softBodies/hybridJoints arrays');
   }
+  if (!Array.isArray(obj.rigidWelds)) obj.rigidWelds = [];
   for (const rb of obj.rigidBodies) {
     if (!Array.isArray(rb.hull) || rb.hull.length < 3) throw new Error('Rigid body missing hull vertices');
   }
@@ -87,7 +89,9 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
   const sRest = 0.5 * (sx + sy);
 
   const rigid = [];
-  for (const rb of spec.rigidBodies || []) {
+  const rigidIndexMap = new Map();
+  for (let rbi = 0; rbi < (spec.rigidBodies || []).length; rbi++) {
+    const rb = spec.rigidBodies[rbi];
     const hull = (rb.hull || []).map((p) => ({ x: (Number(p.x) || 0) * sx, y: (Number(p.y) || 0) * sy }));
     if (hull.length < 3) continue;
 
@@ -97,6 +101,7 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
     const sides = Math.max(3, verticesLocal.length);
     const mass = finiteOr(Number(rb.mass), controls.massHeavy);
 
+    rigidIndexMap.set(rbi, rigid.length);
     rigid.push({
       x: c.x,
       y: c.y,
@@ -114,6 +119,24 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
       omega: 0,
       inertia: finiteOr(Number(rb.inertia), 0.5 * mass * r * r),
     });
+  }
+
+  const rigidWelds = [];
+  for (const w of (spec.rigidWelds || [])) {
+    const aSrc = Number(w.a);
+    const bSrc = Number(w.b);
+    if (!Number.isInteger(aSrc) || !Number.isInteger(bSrc)) continue;
+    const a = rigidIndexMap.get(aSrc);
+    const b = rigidIndexMap.get(bSrc);
+    if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
+    const ra = rigid[a];
+    const rb = rigid[b];
+    if (!ra || !rb) continue;
+    const a0 = Math.max(0, Math.min(ra.sides - 1, Number(w.a0) | 0));
+    const a1 = Math.max(0, Math.min(ra.sides - 1, Number(w.a1) | 0));
+    const b0 = Math.max(0, Math.min(rb.sides - 1, Number(w.b0) | 0));
+    const b1 = Math.max(0, Math.min(rb.sides - 1, Number(w.b1) | 0));
+    rigidWelds.push({ a, b, a0, a1, b0, b1 });
   }
 
   const soft = { nodes: [], springs: [] };
@@ -187,49 +210,79 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
     });
   }
 
-  return { rigid, soft, hybrid };
+  return { rigid, soft, hybrid, rigidWelds };
 }
 
 function buildRigidExport(tris, nodes, options) {
   const comps = triangleComponents(tris);
   const rigidBodies = [];
+  const rigidWelds = [];
   const components = [];
 
-  for (const comp of comps) {
-    const pointIds = new Set();
+  for (let compIdx = 0; compIdx < comps.length; compIdx++) {
+    const comp = comps[compIdx];
+    const localPieces = [];
+
     for (const t of comp) {
-      pointIds.add(t.a); pointIds.add(t.b); pointIds.add(t.c);
+      const idsRaw = [Number(t.a), Number(t.b), Number(t.c)];
+      const ids = [...new Set(idsRaw)].filter((id) => Number.isInteger(id) && nodes[id]);
+      if (ids.length < 3) continue;
+
+      const hull = ids.map((id) => ({ x: nodes[id].x, y: nodes[id].y }));
+      const c = centroid(hull);
+      const r = Math.max(2.5, ...hull.map((p) => Math.hypot(p.x - c.x, p.y - c.y)));
+      const sides = hull.length;
+
+      const rigidIndex = rigidBodies.length;
+      rigidBodies.push({
+        id: `rigid_${rigidIndex}`,
+        compoundId: `compound_${compIdx}`,
+        hull,
+        mass: finiteOr(Number(options.massHeavy), 5),
+        edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
+        edgeDyeMode: Array.from({ length: sides }, () => [...EDGE_DYE_DEFLECT_RGB]),
+        digestEnabled: false,
+        digestRGB: [1, 1, 1],
+      });
+
+      components.push({
+        index: rigidIndex,
+        nodeIds: new Set(ids),
+        radius: r,
+      });
+
+      localPieces.push({ rigidIndex, nodeIds: ids });
     }
 
-    const pts = [...pointIds].map((i) => nodes[i]).filter(Boolean);
-    if (pts.length < 3) continue;
+    // Weld neighboring rigid pieces that share an edge (two common source vertices).
+    for (let i = 0; i < localPieces.length; i++) {
+      for (let j = i + 1; j < localPieces.length; j++) {
+        const a = localPieces[i];
+        const b = localPieces[j];
+        const shared = a.nodeIds.filter((id) => b.nodeIds.includes(id));
+        if (shared.length < 2) continue;
 
-    const hull = convexHull(pts).map((p) => ({ x: p.x, y: p.y }));
-    if (hull.length < 3) continue;
+        const s0 = shared[0];
+        const s1 = shared[1];
+        const a0 = a.nodeIds.indexOf(s0);
+        const a1 = a.nodeIds.indexOf(s1);
+        const b0 = b.nodeIds.indexOf(s0);
+        const b1 = b.nodeIds.indexOf(s1);
+        if ([a0, a1, b0, b1].some((x) => x < 0)) continue;
 
-    const c = centroid(hull);
-    const r = Math.max(2.5, ...hull.map((p) => Math.hypot(p.x - c.x, p.y - c.y)));
-    const sides = hull.length;
-
-    const rigidBody = {
-      id: `rigid_${rigidBodies.length}`,
-      hull,
-      mass: finiteOr(Number(options.massHeavy), 5),
-      edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
-      edgeDyeMode: Array.from({ length: sides }, () => [...EDGE_DYE_DEFLECT_RGB]),
-      digestEnabled: false,
-      digestRGB: [1, 1, 1],
-    };
-
-    rigidBodies.push(rigidBody);
-    components.push({
-      index: rigidBodies.length - 1,
-      nodeIds: pointIds,
-      radius: r,
-    });
+        rigidWelds.push({
+          a: a.rigidIndex,
+          b: b.rigidIndex,
+          a0,
+          a1,
+          b0,
+          b1,
+        });
+      }
+    }
   }
 
-  return { rigidBodies, components };
+  return { rigidBodies, rigidWelds, components };
 }
 
 function buildSoftExport(tris, nodes, options) {

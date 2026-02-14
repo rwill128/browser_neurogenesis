@@ -687,7 +687,7 @@ function initBodies(n, controls) {
     });
   }
 
-  return { rigid, soft: { nodes: softNodes, springs }, hybrid };
+  return { rigid, soft: { nodes: softNodes, springs }, hybrid, rigidWelds: [] };
 }
 
 function initEmitters(n) {
@@ -1162,13 +1162,19 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     vmax: Math.max(0.4, vmaxBase / (1 + 0.28 * honey)),
   });
 
-  if (bodies.rigid[0]) {
-    bodies.rigid[0].mass = sim.controls.massLight;
-    bodies.rigid[0].inertia = 0.5 * bodies.rigid[0].mass * bodies.rigid[0].r * bodies.rigid[0].r;
-  }
-  if (bodies.rigid[1]) {
-    bodies.rigid[1].mass = sim.controls.massHeavy;
-    bodies.rigid[1].inertia = 0.5 * bodies.rigid[1].mass * bodies.rigid[1].r * bodies.rigid[1].r;
+  if ((bodies.rigidWelds || []).length === 0) {
+    if (bodies.rigid[0]) {
+      bodies.rigid[0].mass = sim.controls.massLight;
+      bodies.rigid[0].inertia = 0.5 * bodies.rigid[0].mass * bodies.rigid[0].r * bodies.rigid[0].r;
+    }
+    if (bodies.rigid[1]) {
+      bodies.rigid[1].mass = sim.controls.massHeavy;
+      bodies.rigid[1].inertia = 0.5 * bodies.rigid[1].mass * bodies.rigid[1].r * bodies.rigid[1].r;
+    }
+  } else {
+    for (const rb of bodies.rigid) {
+      rb.inertia = 0.5 * rb.mass * rb.r * rb.r;
+    }
   }
   for (const node of bodies.soft.nodes) node.mass = sim.controls.massSoft;
 
@@ -1180,6 +1186,13 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     return { x: sx / arr.length, y: sy / arr.length };
   };
   const rigidCenterBefore = computeRigidCenter(bodies.rigid);
+
+  const rigidWeldPairSet = new Set();
+  for (const w of (bodies.rigidWelds || [])) {
+    const a = Math.min(w.a, w.b);
+    const b = Math.max(w.a, w.b);
+    rigidWeldPairSet.add(`${a}:${b}`);
+  }
 
   let rigidCarryTransfer = 0;
   let softCarryTransfer = 0;
@@ -1292,6 +1305,35 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       b.vx -= nx * err * 0.034; b.vy -= ny * err * 0.034;
     }
 
+    // Rigid-rigid weld constraints for compound rigid shapes.
+    for (const w of (bodies.rigidWelds || [])) {
+      const ra = bodies.rigid[w.a];
+      const rb = bodies.rigid[w.b];
+      if (!ra || !rb) continue;
+      const a0 = rigidVertexWorld(ra, w.a0);
+      const a1 = rigidVertexWorld(ra, w.a1);
+      const b0 = rigidVertexWorld(rb, w.b0);
+      const b1 = rigidVertexWorld(rb, w.b1);
+      const pairs = [[a0, b0], [a1, b1]];
+      for (const [pa, pb] of pairs) {
+        const dx = pb.x - pa.x;
+        const dy = pb.y - pa.y;
+        const d = Math.max(1e-6, Math.hypot(dx, dy));
+        const err = d * 0.95;
+        const nx = dx / d;
+        const ny = dy / d;
+        const k = 0.06;
+        ra.vx += nx * err * k;
+        ra.vy += ny * err * k;
+        rb.vx -= nx * err * k;
+        rb.vy -= ny * err * k;
+        const rax = pa.x - ra.x, ray = pa.y - ra.y;
+        const rbx = pb.x - rb.x, rby = pb.y - rb.y;
+        ra.omega = (ra.omega || 0) + (rax * ny - ray * nx) * err * 0.0009;
+        rb.omega = (rb.omega || 0) - (rbx * ny - rby * nx) * err * 0.0009;
+      }
+    }
+
     // Hybrid rigid-soft attachment constraints (weld-like springs to rigid edge vertices).
     for (const h of (bodies.hybrid || [])) {
       const rb = bodies.rigid[h.rigidIndex];
@@ -1326,6 +1368,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   for (let iter = 0; iter < 2; iter++) {
     for (let i = 0; i < bodies.rigid.length; i++) {
       for (let j = i + 1; j < bodies.rigid.length; j++) {
+        if (rigidWeldPairSet.has(`${i}:${j}`)) continue;
         resolveCircleCollision(bodies.rigid[i], bodies.rigid[j], 0.45);
       }
     }
@@ -1555,6 +1598,7 @@ function mergeBodiesIntoSim(target, incoming) {
   target.rigid = target.rigid || [];
   target.soft = target.soft || { nodes: [], springs: [] };
   target.hybrid = target.hybrid || [];
+  target.rigidWelds = target.rigidWelds || [];
 
   const rigidOffset = target.rigid.length;
   const nodeOffset = target.soft.nodes.length;
@@ -1576,6 +1620,14 @@ function mergeBodiesIntoSim(target, incoming) {
       ...h,
       rigidIndex: (h.rigidIndex || 0) + rigidOffset,
       nodeIndex: (h.nodeIndex || 0) + nodeOffset,
+    });
+  }
+
+  for (const w of incoming.rigidWelds || []) {
+    target.rigidWelds.push({
+      ...w,
+      a: (w.a || 0) + rigidOffset,
+      b: (w.b || 0) + rigidOffset,
     });
   }
 }
@@ -1620,6 +1672,24 @@ function drawBodiesOverlay(sim) {
       ctx.stroke();
     }
   }
+
+  for (const w of (sim.bodies.rigidWelds || [])) {
+    const ra = sim.bodies.rigid[w.a];
+    const rb = sim.bodies.rigid[w.b];
+    if (!ra || !rb) continue;
+    const a0 = rigidVertexWorld(ra, w.a0);
+    const a1 = rigidVertexWorld(ra, w.a1);
+    const b0 = rigidVertexWorld(rb, w.b0);
+    const b1 = rigidVertexWorld(rb, w.b1);
+    const ma = worldToScreen(sim, (a0.x + a1.x) * 0.5, (a0.y + a1.y) * 0.5);
+    const mb = worldToScreen(sim, (b0.x + b1.x) * 0.5, (b0.y + b1.y) * 0.5);
+    ctx.strokeStyle = 'rgba(255,200,80,0.9)';
+    ctx.beginPath();
+    ctx.moveTo(ma.x, ma.y);
+    ctx.lineTo(mb.x, mb.y);
+    ctx.stroke();
+  }
+
   const s = sim.bodies.soft;
   for (const node of s.nodes) {
     if (node._rx == null) {

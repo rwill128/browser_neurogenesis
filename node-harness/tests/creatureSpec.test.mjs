@@ -25,6 +25,7 @@ test('CreatureSpec v2 roundtrip parse and build bodies', () => {
   assert.equal(spec.schemaVersion, CREATURE_SPEC_VERSION);
   assert.ok(Array.isArray(spec.rigidBodies));
   assert.ok(Array.isArray(spec.softBodies));
+  assert.ok(Array.isArray(spec.rigidWelds));
   assert.ok(Array.isArray(spec.hybridJoints));
   assert.equal(spec.mesh, undefined);
 
@@ -35,6 +36,7 @@ test('CreatureSpec v2 roundtrip parse and build bodies', () => {
   assert.ok(Array.isArray(bodies.soft.nodes));
   assert.ok(Array.isArray(bodies.soft.springs));
   assert.ok(Array.isArray(bodies.hybrid));
+  assert.ok(Array.isArray(bodies.rigidWelds));
   assert.equal(bodies.rigid.length, 1);
   assert.ok(bodies.soft.nodes.length >= 3);
   for (const [a, b] of bodies.soft.springs) {
@@ -85,8 +87,13 @@ test('hybrid links anchor to nearest rigid hull edge for irregular rigid meshes'
     meta: { width: 24, height: 24 },
   };
 
-  const bodies = buildBodiesFromCreatureSpec(createCreatureSpecFromMesh(mesh), 256, CONTROLS);
-  assert.equal(bodies.rigid.length, 1);
+  const spec = createCreatureSpecFromMesh(mesh);
+  assert.equal(spec.rigidBodies.length, 2);
+  assert.ok(spec.rigidWelds.length >= 1);
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+  assert.equal(bodies.rigid.length, 2);
+  assert.ok(bodies.rigidWelds.length >= 1);
   assert.ok(bodies.hybrid.length >= 2);
 
   for (const h of bodies.hybrid) {
@@ -113,7 +120,7 @@ test('hybrid links at rigid vertices choose a local incident edge (deterministic
   };
 
   const bodies = buildBodiesFromCreatureSpec(createCreatureSpecFromMesh(mesh), 256, CONTROLS);
-  assert.equal(bodies.rigid.length, 1);
+  assert.equal(bodies.rigid.length, 2);
 
   const sharedVertexLink = bodies.hybrid.find((h) => {
     const rb0 = bodies.rigid[h.rigidIndex];

@@ -456,17 +456,20 @@ function initBodies(n, controls) {
   const rigidCount = bigMode ? 10 : 2;
   const softClusterCount = bigMode ? 10 : 1;
 
+  const rigidShapeCycle = [3, 4, 5, 6];
   const rigid = [];
   for (let i = 0; i < rigidCount; i++) {
     const t = rigidCount <= 1 ? 0.5 : i / (rigidCount - 1);
     const mass = (i % 2 === 0) ? controls.massLight : controls.massHeavy;
-    const r = ((i % 2 === 0) ? 5 : 6) * scale * bodyScale;
+    const sides = rigidShapeCycle[i % rigidShapeCycle.length];
+    const r = ((i % 2 === 0) ? 5 : 6) * scale * bodyScale * (sides >= 5 ? 0.95 : 1.0);
     rigid.push({
       x: n * (0.15 + 0.7 * ((t + Math.random() * 0.1) % 1)),
       y: n * (0.2 + 0.6 * Math.random()),
       vx: 0,
       vy: 0,
       r,
+      sides,
       mass,
       theta: Math.random() * Math.PI * 2,
       omega: 0,
@@ -476,24 +479,38 @@ function initBodies(n, controls) {
 
   const softNodes = [];
   const springs = [];
-  const clusterEdges = [[0,1],[1,2],[2,3],[3,0],[0,2],[1,3]];
+  const softShapeCycle = [3, 4, 6];
+
   for (let c = 0; c < softClusterCount; c++) {
     const cx = n * (0.18 + 0.64 * Math.random());
     const cy = n * (0.2 + 0.6 * Math.random());
-    const local = [
-      { x: cx - 6 * scale * bodyScale, y: cy - 8 * scale * bodyScale },
-      { x: cx + 6 * scale * bodyScale, y: cy - 2 * scale * bodyScale },
-      { x: cx - 4 * scale * bodyScale, y: cy + 5 * scale * bodyScale },
-      { x: cx + 3 * scale * bodyScale, y: cy + 9 * scale * bodyScale },
-    ];
+    const nodeCount = softShapeCycle[c % softShapeCycle.length];
+    const radius = (8 + (nodeCount === 6 ? 2 : 0)) * scale * bodyScale;
     const base = softNodes.length;
-    for (const p of local) {
-      softNodes.push({ x: p.x, y: p.y, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 * scale * bodyScale });
+
+    const local = [];
+    for (let i = 0; i < nodeCount; i++) {
+      const a = (i / nodeCount) * Math.PI * 2 + Math.random() * 0.22;
+      local.push({ x: cx + Math.cos(a) * radius, y: cy + Math.sin(a) * radius });
     }
-    for (const [i, j] of clusterEdges) {
+
+    for (const p of local) {
+      softNodes.push({ x: p.x, y: p.y, vx: 0, vy: 0, mass: controls.massSoft, r: 1.4 * scale * bodyScale });
+    }
+
+    // Ring springs
+    for (let i = 0; i < nodeCount; i++) {
+      const j = (i + 1) % nodeCount;
       const a = local[i], b = local[j];
-      const rest = Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y));
-      springs.push([base + i, base + j, rest]);
+      springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y))]);
+    }
+    // Cross/diagonal springs for shape retention
+    for (let i = 0; i < nodeCount; i++) {
+      const j = (i + 2) % nodeCount;
+      if (i < j || nodeCount <= 4) {
+        const a = local[i], b = local[j];
+        springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y))]);
+      }
     }
   }
 
@@ -708,7 +725,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const b = bodies.rigid[bi];
     const invMass = 1 / Math.max(0.05, b.mass);
     const invInertia = 1 / Math.max(0.05, b.inertia || 1);
-    const sampleCount = bi === 0 ? 3 : 4;
+    const sampleCount = Math.max(3, b.sides || (bi === 0 ? 3 : 4));
     let forceX = 0;
     let forceY = 0;
     let torque = 0;
@@ -962,12 +979,13 @@ function drawBodiesOverlay(sim) {
     ctx.strokeStyle = '#ffffff';
     ctx.fillStyle = 'rgba(255,255,255,0.06)';
     ctx.beginPath();
+    const sides = Math.max(3, b.sides || (i === 0 ? 3 : 4));
     drawRegularPolygon(
       sp.x,
       sp.y,
       b.r * pxPerWorld,
-      i === 0 ? 3 : 4,
-      (b._rtheta || 0) + (i === 0 ? -Math.PI * 0.5 : Math.PI * 0.25)
+      sides,
+      (b._rtheta || 0) + (sides === 3 ? -Math.PI * 0.5 : Math.PI * 0.25)
     );
     ctx.fill();
     ctx.stroke();

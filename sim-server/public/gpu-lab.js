@@ -1133,6 +1133,92 @@ function summarizeCouplingTelemetry(telemetry) {
   };
 }
 
+function pointInPolygon(x, y, verts) {
+  let inside = false;
+  for (let i = 0, j = verts.length - 1; i < verts.length; j = i++) {
+    const xi = verts[i].x, yi = verts[i].y;
+    const xj = verts[j].x, yj = verts[j].y;
+    const intersect = ((yi > y) !== (yj > y)) &&
+      (x < ((xj - xi) * (y - yi)) / Math.max(1e-9, (yj - yi)) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function applyDigestiveCapture(sim, r, g, b) {
+  const n = sim.controls.n;
+  const rigidCapture = 0.055;
+  const softCapture = 0.045;
+  let captured = 0;
+
+  for (const rb of sim.bodies.rigid) {
+    const sides = Math.max(3, rb.sides || 4);
+    const verts = [];
+    for (let i = 0; i < sides; i++) {
+      const a = (rb.theta || 0) + (i / sides) * Math.PI * 2;
+      verts.push({ x: rb.x + Math.cos(a) * rb.r, y: rb.y + Math.sin(a) * rb.r });
+    }
+    let minX = n - 1, minY = n - 1, maxX = 0, maxY = 0;
+    for (const v of verts) {
+      minX = Math.min(minX, v.x); minY = Math.min(minY, v.y);
+      maxX = Math.max(maxX, v.x); maxY = Math.max(maxY, v.y);
+    }
+    minX = Math.max(0, Math.floor(minX)); minY = Math.max(0, Math.floor(minY));
+    maxX = Math.min(n - 1, Math.ceil(maxX)); maxY = Math.min(n - 1, Math.ceil(maxY));
+
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        if (!pointInPolygon(x + 0.5, y + 0.5, verts)) continue;
+        const i = y * n + x;
+        const takeR = r[i] * rigidCapture;
+        const takeG = g[i] * rigidCapture;
+        const takeB = b[i] * rigidCapture;
+        r[i] -= takeR; g[i] -= takeG; b[i] -= takeB;
+        captured += takeR + takeG + takeB;
+      }
+    }
+  }
+
+  const clusters = new Map();
+  for (const node of sim.bodies.soft.nodes) {
+    const id = node.clusterId ?? 0;
+    if (!clusters.has(id)) clusters.set(id, []);
+    clusters.get(id).push(node);
+  }
+  for (const nodes of clusters.values()) {
+    if (nodes.length < 3) continue;
+    let cx = 0, cy = 0;
+    for (const n0 of nodes) { cx += n0.x; cy += n0.y; }
+    cx /= nodes.length; cy /= nodes.length;
+    const verts = [...nodes]
+      .map((p) => ({ x: p.x, y: p.y, a: Math.atan2(p.y - cy, p.x - cx) }))
+      .sort((a, b2) => a.a - b2.a)
+      .map(({ x, y }) => ({ x, y }));
+
+    let minX = n - 1, minY = n - 1, maxX = 0, maxY = 0;
+    for (const v of verts) {
+      minX = Math.min(minX, v.x); minY = Math.min(minY, v.y);
+      maxX = Math.max(maxX, v.x); maxY = Math.max(maxY, v.y);
+    }
+    minX = Math.max(0, Math.floor(minX)); minY = Math.max(0, Math.floor(minY));
+    maxX = Math.min(n - 1, Math.ceil(maxX)); maxY = Math.min(n - 1, Math.ceil(maxY));
+
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        if (!pointInPolygon(x + 0.5, y + 0.5, verts)) continue;
+        const i = y * n + x;
+        const takeR = r[i] * softCapture;
+        const takeG = g[i] * softCapture;
+        const takeB = b[i] * softCapture;
+        r[i] -= takeR; g[i] -= takeG; b[i] -= takeB;
+        captured += takeR + takeG + takeB;
+      }
+    }
+  }
+
+  sim.digestiveCapture = (sim.digestiveCapture || 0) * 0.97 + captured * 0.03;
+}
+
 function drawRegularPolygon(cx, cy, radius, sides, rotation = 0) {
   const n = Math.max(3, sides | 0);
   for (let i = 0; i < n; i++) {
@@ -1372,6 +1458,7 @@ async function stepAndRender() {
     const couplingInstant = stepBodiesAndInject(s, vx, vy);
     applyEmitters(s, r, g, b, vx, vy);
     applyBodyEdgeFieldBarriers(s, r, g, b, vx, vy);
+    applyDigestiveCapture(s, r, g, b);
     enforceFluidEdgeBoundariesCpu(vx, vy, s.controls.n);
     s.device.queue.writeBuffer(s.vx0, 0, vx);
     s.device.queue.writeBuffer(s.vy0, 0, vy);
@@ -1426,6 +1513,7 @@ async function stepAndRender() {
       bodyFeedback: s.controls.bodyFeedback,
       paintValue: Number(paintValueEl.value) || 0.85,
       brushSize: Number(brushSizeEl.value) || 12,
+      digestiveCapture: +((s.digestiveCapture || 0).toFixed(2)),
       coupling: couplingSnapshot,
     });
   }

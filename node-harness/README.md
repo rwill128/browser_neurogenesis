@@ -149,10 +149,21 @@ nohup node node-harness/browserDefaultSoak.mjs \
   > /tmp/browser-default-soak/seed41.stdout 2>&1 &
 ```
 
-## 7) Unit tests (growth controls + topology-resize RL handling)
+## 7) Unit tests
 
+Run everything:
 ```bash
 node --test node-harness/tests/*.test.mjs
+```
+
+Run GPU track only (mesh/gpu-lab contract tests):
+```bash
+node node-harness/test-gpu-track.mjs
+```
+
+Run legacy track only:
+```bash
+node node-harness/test-legacy-track.mjs
 ```
 
 ## Current status

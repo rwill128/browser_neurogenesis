@@ -40,13 +40,25 @@ Browser Neurogenesis is an experimental artificial-life simulation that blends *
 
 ## Architecture at a glance
 
+This repo now has two explicit tracks:
+
+### Legacy simulation track
 - `js/` — browser runtime, simulation engine, UI, config
 - `js/engine/` — shared world-step core and runtime helpers
 - `js/classes/` — core physical/biological classes (SoftBody, Brain, etc.)
-- `sim-server/` — authoritative server + world workers + API + capture endpoints
-- `node-harness/` — deterministic scenario runs, soak tools, regressions, tests
+- `index.html`
 
-The key design direction: **shared core logic across browser and Node tooling**, so experiments, regressions, and live behavior stay aligned.
+### GPU track (new)
+- `sim-server/public/gpu-lab.html` + `gpu-lab.js` — GPU Lab runtime (fluid + rigid/soft coupling)
+- `sim-server/public/mesh-lab.html` + `mesh-lab.js` — Mesh Lab authoring UI
+- `sim-server/public/field-to-structure-core.js` — field→mesh compiler
+- `sim-server/public/creature-spec.js` — export/import schema contract
+
+Shared infra:
+- `sim-server/` — server + API + static hosting for labs and app
+- `node-harness/` — deterministic scenario runs, regressions, tests
+
+See `WORKSTREAMS.md` for strict scope boundaries and test split commands.
 
 ---
 
@@ -63,7 +75,9 @@ node server.mjs --port 8787 --scenario browser_default_big --seed 23
 ```
 
 Then open:
-- http://localhost:8787/
+- Legacy app: http://localhost:8787/
+- GPU Lab: http://localhost:8787/gpu-lab.html
+- Mesh Lab: http://localhost:8787/mesh-lab.html
 
 ---
 

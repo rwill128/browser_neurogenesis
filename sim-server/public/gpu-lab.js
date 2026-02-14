@@ -14,6 +14,7 @@ const impulseEl = document.getElementById('impulse');
 const radiusEl = document.getElementById('radius');
 const brushSizeEl = document.getElementById('brushSize');
 const paintValueEl = document.getElementById('paintValue');
+const showViscEl = document.getElementById('showVisc');
 const massLightEl = document.getElementById('massLight');
 const massHeavyEl = document.getElementById('massHeavy');
 const massSoftEl = document.getElementById('massSoft');
@@ -1205,7 +1206,7 @@ async function stepAndRender() {
     const view = getCameraView(s);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(tmp, view.x, view.y, view.w, view.h, 0, 0, canvas.width, canvas.height);
-    drawViscosityOverlay();
+    if (!showViscEl || showViscEl.checked) drawViscosityOverlay();
     drawBodiesOverlay(s);
 
     const elapsed = (performance.now() - s.t0) / 1000;

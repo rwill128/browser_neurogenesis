@@ -1002,6 +1002,23 @@ export class GPUFluidField {
     }
 
     // --- Coupling-oriented CPU shadow sampling methods ---
+    IX(x, y) {
+        let gx = Math.floor(Number(x));
+        let gy = Math.floor(Number(y));
+
+        if (!Number.isFinite(gx) || !Number.isFinite(gy)) return 0;
+
+        if (this.useWrapping) {
+            gx = ((gx % this.size) + this.size) % this.size;
+            gy = ((gy % this.size) + this.size) % this.size;
+        } else {
+            gx = Math.max(0, Math.min(this.size - 1, gx));
+            gy = Math.max(0, Math.min(this.size - 1, gy));
+        }
+
+        return gx + gy * this.size;
+    }
+
     getDensityAtWorld(worldX, worldY) {
         const cell = this._toShadowGridCell(worldX, worldY);
         if (!cell) return [0, 0, 0, 0];

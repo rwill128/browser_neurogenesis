@@ -4754,16 +4754,32 @@ export class SoftBody {
 
     _updateJetAndSwimmerFluidSensor(fluidFieldRef) {
         if (!fluidFieldRef) return;
+
+        const safeScaleX = Math.max(1e-6, Number(fluidFieldRef.scaleX) || 1);
+        const safeScaleY = Math.max(1e-6, Number(fluidFieldRef.scaleY) || 1);
+        const hasIX = typeof fluidFieldRef.IX === 'function';
+
         this.massPoints.forEach(point => {
-            if (point.nodeType === NodeType.JET || point.nodeType === NodeType.SWIMMER) {
-                const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
-                const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
-                const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
-                const fluidVelX = fluidFieldRef.Vx[idx];
-                const fluidVelY = fluidFieldRef.Vy[idx];
-                point.sensedFluidVelocity.x = fluidVelX;
-                point.sensedFluidVelocity.y = fluidVelY;
+            if (point.nodeType !== NodeType.JET && point.nodeType !== NodeType.SWIMMER) return;
+
+            let fluidVelX = 0;
+            let fluidVelY = 0;
+
+            const fluidGridX = Math.floor(point.pos.x / safeScaleX);
+            const fluidGridY = Math.floor(point.pos.y / safeScaleY);
+            const idx = hasIX ? fluidFieldRef.IX(fluidGridX, fluidGridY) : -1;
+
+            if (idx >= 0 && fluidFieldRef.Vx && fluidFieldRef.Vy && idx < fluidFieldRef.Vx.length) {
+                fluidVelX = Number(fluidFieldRef.Vx[idx]) || 0;
+                fluidVelY = Number(fluidFieldRef.Vy[idx]) || 0;
+            } else if (typeof fluidFieldRef.getVelocityAtWorld === 'function') {
+                const sampled = fluidFieldRef.getVelocityAtWorld(point.pos.x, point.pos.y);
+                fluidVelX = Number(sampled?.vx) || 0;
+                fluidVelY = Number(sampled?.vy) || 0;
             }
+
+            point.sensedFluidVelocity.x = fluidVelX;
+            point.sensedFluidVelocity.y = fluidVelY;
         });
     }
 

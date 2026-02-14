@@ -1,4 +1,5 @@
 import { parseCreatureSpec, buildBodiesFromCreatureSpec } from '/creature-spec.js';
+import { applyRigidWeldConstraints, buildRigidWeldPairSet } from '/rigid-weld.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -1187,12 +1188,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   };
   const rigidCenterBefore = computeRigidCenter(bodies.rigid);
 
-  const rigidWeldPairSet = new Set();
-  for (const w of (bodies.rigidWelds || [])) {
-    const a = Math.min(w.a, w.b);
-    const b = Math.max(w.a, w.b);
-    rigidWeldPairSet.add(`${a}:${b}`);
-  }
+  const rigidWeldPairSet = buildRigidWeldPairSet(bodies.rigidWelds);
 
   let rigidCarryTransfer = 0;
   let softCarryTransfer = 0;
@@ -1306,33 +1302,11 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     }
 
     // Rigid-rigid weld constraints for compound rigid shapes.
-    for (const w of (bodies.rigidWelds || [])) {
-      const ra = bodies.rigid[w.a];
-      const rb = bodies.rigid[w.b];
-      if (!ra || !rb) continue;
-      const a0 = rigidVertexWorld(ra, w.a0);
-      const a1 = rigidVertexWorld(ra, w.a1);
-      const b0 = rigidVertexWorld(rb, w.b0);
-      const b1 = rigidVertexWorld(rb, w.b1);
-      const pairs = [[a0, b0], [a1, b1]];
-      for (const [pa, pb] of pairs) {
-        const dx = pb.x - pa.x;
-        const dy = pb.y - pa.y;
-        const d = Math.max(1e-6, Math.hypot(dx, dy));
-        const err = d * 0.95;
-        const nx = dx / d;
-        const ny = dy / d;
-        const k = 0.06;
-        ra.vx += nx * err * k;
-        ra.vy += ny * err * k;
-        rb.vx -= nx * err * k;
-        rb.vy -= ny * err * k;
-        const rax = pa.x - ra.x, ray = pa.y - ra.y;
-        const rbx = pb.x - rb.x, rby = pb.y - rb.y;
-        ra.omega = (ra.omega || 0) + (rax * ny - ray * nx) * err * 0.0009;
-        rb.omega = (rb.omega || 0) - (rbx * ny - rby * nx) * err * 0.0009;
-      }
-    }
+    applyRigidWeldConstraints({
+      rigid: bodies.rigid,
+      rigidWelds: bodies.rigidWelds,
+      rigidVertexWorld,
+    });
 
     // Hybrid rigid-soft attachment constraints (weld-like springs to rigid edge vertices).
     for (const h of (bodies.hybrid || [])) {

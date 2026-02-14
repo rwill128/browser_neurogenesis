@@ -8,7 +8,38 @@ use std::io::{self, Read};
 enum Request {
     Smoke { n: u32 },
     SmokeSweep { sizes: Vec<u32> },
+    FluidInit {
+        width: u32,
+        height: u32,
+        #[serde(default = "default_dye_radius")]
+        dye_radius: f32,
+        #[serde(default = "default_impulse")]
+        impulse: f32,
+    },
+    FluidStep {
+        width: u32,
+        height: u32,
+        #[serde(default = "default_steps")]
+        steps: u32,
+        #[serde(default = "default_dt")]
+        dt: f32,
+        #[serde(default = "default_fade")]
+        fade: f32,
+        #[serde(default = "default_jacobi")]
+        jacobi_iters: u32,
+        #[serde(default = "default_dye_radius")]
+        dye_radius: f32,
+        #[serde(default = "default_impulse")]
+        impulse: f32,
+    },
 }
+
+fn default_steps() -> u32 { 1 }
+fn default_dt() -> f32 { 0.1 }
+fn default_fade() -> f32 { 0.995 }
+fn default_jacobi() -> u32 { 30 }
+fn default_dye_radius() -> f32 { 0.15 }
+fn default_impulse() -> f32 { 25.0 }
 
 #[derive(Debug, Serialize)]
 struct SmokeResponse {
@@ -28,13 +59,42 @@ struct SmokeSweepResponse {
     runs: Vec<SmokeResponse>,
 }
 
+#[derive(Debug, Serialize)]
+struct FluidInitResponse {
+    ok: bool,
+    backend: &'static str,
+    width: u32,
+    height: u32,
+    initialized_cells: u32,
+    elapsed_ms: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct FluidStepResponse {
+    ok: bool,
+    backend: &'static str,
+    width: u32,
+    height: u32,
+    steps: u32,
+    elapsed_ms: f64,
+    sps: f64,
+    avg_speed: f32,
+    max_speed: f32,
+    dye_footprint: f32,
+    dye_total: f32,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Params {
-    n: u32,
+    width: u32,
+    height: u32,
+    jacobi_iters: u32,
     _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
+    dt: f32,
+    fade: f32,
+    dye_radius: f32,
+    impulse: f32,
 }
 
 fn main() {
@@ -76,14 +136,43 @@ fn run() -> Result<()> {
             };
             println!("{}", serde_json::to_string_pretty(&resp)?);
         }
+        Request::FluidInit {
+            width,
+            height,
+            dye_radius,
+            impulse,
+        } => {
+            let resp = pollster::block_on(run_fluid_init(width.max(16), height.max(16), dye_radius, impulse))?;
+            println!("{}", serde_json::to_string_pretty(&resp)?);
+        }
+        Request::FluidStep {
+            width,
+            height,
+            steps,
+            dt,
+            fade,
+            jacobi_iters,
+            dye_radius,
+            impulse,
+        } => {
+            let resp = pollster::block_on(run_fluid_step(
+                width.max(16),
+                height.max(16),
+                steps.max(1),
+                dt.max(1e-4),
+                fade.clamp(0.8, 1.0),
+                jacobi_iters.clamp(5, 120),
+                dye_radius,
+                impulse,
+            ))?;
+            println!("{}", serde_json::to_string_pretty(&resp)?);
+        }
     }
 
     Ok(())
 }
 
-async fn run_smoke(n: u32) -> Result<SmokeResponse> {
-    let t0 = std::time::Instant::now();
-
+async fn create_device() -> Result<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::METAL,
         ..Default::default()
@@ -97,6 +186,390 @@ async fn run_smoke(n: u32) -> Result<SmokeResponse> {
         .request_device(&wgpu::DeviceDescriptor::default())
         .await
         .context("request_device failed")?;
+    Ok((device, queue))
+}
+
+async fn run_fluid_init(width: u32, height: u32, dye_radius: f32, impulse: f32) -> Result<FluidInitResponse> {
+    let t0 = std::time::Instant::now();
+    let (device, queue) = create_device().await?;
+    let cells = (width as usize) * (height as usize);
+
+    let params = Params {
+        width,
+        height,
+        jacobi_iters: 0,
+        _pad0: 0,
+        dt: default_dt(),
+        fade: default_fade(),
+        dye_radius,
+        impulse,
+    };
+
+    let params_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("fluid-params"),
+        size: std::mem::size_of::<Params>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&params_buf, 0, bytemuck::bytes_of(&params));
+
+    let vel_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("vel"),
+        size: (cells * std::mem::size_of::<[f32; 2]>()) as u64,
+        usage: wgpu::BufferUsages::STORAGE,
+        mapped_at_creation: false,
+    });
+    let dye_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("dye"),
+        size: (cells * std::mem::size_of::<f32>()) as u64,
+        usage: wgpu::BufferUsages::STORAGE,
+        mapped_at_creation: false,
+    });
+
+    let init_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("fluid-init"),
+        source: wgpu::ShaderSource::Wgsl(FLUID_INIT_WGSL.into()),
+    });
+    let init_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("fluid-init-pipeline"),
+        layout: None,
+        module: &init_shader,
+        entry_point: Some("main"),
+        compilation_options: wgpu::PipelineCompilationOptions::default(),
+        cache: None,
+    });
+    let init_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("fluid-init-bg"),
+        layout: &init_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: vel_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: dye_buf.as_entire_binding() },
+        ],
+    });
+
+    let mut encoder = device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&init_pipeline);
+        pass.set_bind_group(0, &init_bg, &[]);
+        pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+    }
+    queue.submit(Some(encoder.finish()));
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+
+    Ok(FluidInitResponse {
+        ok: true,
+        backend: "metal/wgpu",
+        width,
+        height,
+        initialized_cells: cells as u32,
+        elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,
+    })
+}
+
+async fn run_fluid_step(
+    width: u32,
+    height: u32,
+    steps: u32,
+    dt: f32,
+    fade: f32,
+    jacobi_iters: u32,
+    dye_radius: f32,
+    impulse: f32,
+) -> Result<FluidStepResponse> {
+    let t0 = std::time::Instant::now();
+    let (device, queue) = create_device().await?;
+    let cells = (width as usize) * (height as usize);
+
+    let params = Params {
+        width,
+        height,
+        jacobi_iters,
+        _pad0: 0,
+        dt,
+        fade,
+        dye_radius,
+        impulse,
+    };
+
+    let params_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("fluid-params"),
+        size: std::mem::size_of::<Params>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&params_buf, 0, bytemuck::bytes_of(&params));
+
+    let vel_a = mk_storage_vec2(&device, "vel-a", cells);
+    let vel_b = mk_storage_vec2(&device, "vel-b", cells);
+    let dye_a = mk_storage_f32(&device, "dye-a", cells);
+    let dye_b = mk_storage_f32(&device, "dye-b", cells);
+    let div = mk_storage_f32(&device, "div", cells);
+    let pressure_a = mk_storage_f32(&device, "pressure-a", cells);
+    let pressure_b = mk_storage_f32(&device, "pressure-b", cells);
+
+    let vel_read = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("vel-read"),
+        size: (cells * std::mem::size_of::<[f32; 2]>()) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let dye_read = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("dye-read"),
+        size: (cells * std::mem::size_of::<f32>()) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+
+    let init_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("fluid-init"),
+        source: wgpu::ShaderSource::Wgsl(FLUID_INIT_WGSL.into()),
+    });
+    let init_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("fluid-init-pipeline"),
+        layout: None,
+        module: &init_shader,
+        entry_point: Some("main"),
+        compilation_options: wgpu::PipelineCompilationOptions::default(),
+        cache: None,
+    });
+
+    let advect_vel_pipeline = mk_pipeline(&device, "advect-vel", FLUID_ADVECT_VEL_WGSL);
+    let divergence_pipeline = mk_pipeline(&device, "divergence", FLUID_DIVERGENCE_WGSL);
+    let jacobi_pipeline = mk_pipeline(&device, "jacobi", FLUID_JACOBI_WGSL);
+    let project_pipeline = mk_pipeline(&device, "project", FLUID_PROJECT_WGSL);
+    let advect_dye_pipeline = mk_pipeline(&device, "advect-dye", FLUID_ADVECT_DYE_WGSL);
+    let fade_pipeline = mk_pipeline(&device, "fade", FLUID_FADE_WGSL);
+
+    let mut encoder = device.create_command_encoder(&Default::default());
+
+    // seed initial velocity + dye
+    {
+        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bg-init"),
+            layout: &init_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: dye_a.as_entire_binding() },
+            ],
+        });
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&init_pipeline);
+        pass.set_bind_group(0, &bg, &[]);
+        pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+    }
+
+    for _ in 0..steps {
+        // velocity advection
+        {
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bg-advect-vel"),
+                layout: &advect_vel_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: vel_b.as_entire_binding() },
+                ],
+            });
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&advect_vel_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        }
+
+        // divergence
+        {
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bg-div"),
+                layout: &divergence_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: vel_b.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: div.as_entire_binding() },
+                ],
+            });
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&divergence_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        }
+
+        for i in 0..jacobi_iters {
+            let (p_in, p_out) = if i % 2 == 0 { (&pressure_a, &pressure_b) } else { (&pressure_b, &pressure_a) };
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bg-jacobi"),
+                layout: &jacobi_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: p_in.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: div.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: p_out.as_entire_binding() },
+                ],
+            });
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&jacobi_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        }
+
+        let p_final = if jacobi_iters % 2 == 0 { &pressure_a } else { &pressure_b };
+
+        // projection
+        {
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bg-project"),
+                layout: &project_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: vel_b.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: p_final.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: vel_a.as_entire_binding() },
+                ],
+            });
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&project_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        }
+
+        // dye advection
+        {
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bg-advect-dye"),
+                layout: &advect_dye_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: dye_a.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: dye_b.as_entire_binding() },
+                ],
+            });
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&advect_dye_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        }
+
+        // dye fade and re-seed source slightly
+        {
+            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("bg-fade"),
+                layout: &fade_pipeline.get_bind_group_layout(0),
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: dye_b.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: dye_a.as_entire_binding() },
+                ],
+            });
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&fade_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        }
+    }
+
+    encoder.copy_buffer_to_buffer(&vel_a, 0, &vel_read, 0, (cells * std::mem::size_of::<[f32; 2]>()) as u64);
+    encoder.copy_buffer_to_buffer(&dye_a, 0, &dye_read, 0, (cells * std::mem::size_of::<f32>()) as u64);
+
+    queue.submit(Some(encoder.finish()));
+
+    let vel_slice = vel_read.slice(..);
+    let dye_slice = dye_read.slice(..);
+    map_wait(&device, &vel_slice)?;
+    map_wait(&device, &dye_slice)?;
+
+    let vel_mapped = vel_slice.get_mapped_range();
+    let dye_mapped = dye_slice.get_mapped_range();
+    let vel: &[[f32; 2]] = bytemuck::cast_slice(&vel_mapped);
+    let dye: &[f32] = bytemuck::cast_slice(&dye_mapped);
+
+    let mut sum_speed = 0.0f32;
+    let mut max_speed = 0.0f32;
+    for v in vel {
+        let s = (v[0] * v[0] + v[1] * v[1]).sqrt();
+        sum_speed += s;
+        max_speed = max_speed.max(s);
+    }
+
+    let mut dye_total = 0.0f32;
+    let mut nonzero = 0usize;
+    for &d in dye {
+        dye_total += d;
+        if d > 0.01 {
+            nonzero += 1;
+        }
+    }
+
+    drop(vel_mapped);
+    drop(dye_mapped);
+    vel_read.unmap();
+    dye_read.unmap();
+
+    let elapsed = t0.elapsed().as_secs_f64();
+    Ok(FluidStepResponse {
+        ok: true,
+        backend: "metal/wgpu",
+        width,
+        height,
+        steps,
+        elapsed_ms: elapsed * 1000.0,
+        sps: (steps as f64) / elapsed.max(1e-6),
+        avg_speed: sum_speed / (cells as f32),
+        max_speed,
+        dye_footprint: (nonzero as f32) / (cells as f32),
+        dye_total,
+    })
+}
+
+fn mk_pipeline(device: &wgpu::Device, label: &str, wgsl: &str) -> wgpu::ComputePipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(label),
+        source: wgpu::ShaderSource::Wgsl(wgsl.into()),
+    });
+    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some(label),
+        layout: None,
+        module: &shader,
+        entry_point: Some("main"),
+        compilation_options: wgpu::PipelineCompilationOptions::default(),
+        cache: None,
+    })
+}
+
+fn mk_storage_vec2(device: &wgpu::Device, label: &str, cells: usize) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: (cells * std::mem::size_of::<[f32; 2]>()) as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    })
+}
+
+fn mk_storage_f32(device: &wgpu::Device, label: &str, cells: usize) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: (cells * std::mem::size_of::<f32>()) as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    })
+}
+
+fn map_wait(device: &wgpu::Device, slice: &wgpu::BufferSlice<'_>) -> Result<()> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |r| {
+        let _ = tx.send(r);
+    });
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    rx.recv().context("map_async channel closed")??;
+    Ok(())
+}
+
+async fn run_smoke(n: u32) -> Result<SmokeResponse> {
+    let t0 = std::time::Instant::now();
+
+    let (device, queue) = create_device().await?;
 
     let len = n as usize;
     let bytes = (len * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
@@ -128,10 +601,14 @@ async fn run_smoke(n: u32) -> Result<SmokeResponse> {
         &params_buf,
         0,
         bytemuck::bytes_of(&Params {
-            n,
+            width: n,
+            height: 1,
+            jacobi_iters: 0,
             _pad0: 0,
-            _pad1: 0,
-            _pad2: 0,
+            dt: 0.0,
+            fade: 0.0,
+            dye_radius: 0.0,
+            impulse: 0.0,
         }),
     );
 
@@ -140,10 +617,14 @@ async fn run_smoke(n: u32) -> Result<SmokeResponse> {
         source: wgpu::ShaderSource::Wgsl(
             "
 struct Params {
-  n: u32,
+  width: u32,
+  height: u32,
+  jacobi_iters: u32,
   _pad0: u32,
-  _pad1: u32,
-  _pad2: u32,
+  dt: f32,
+  fade: f32,
+  dye_radius: f32,
+  impulse: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
 @group(0) @binding(1) var<storage, read_write> data: array<f32>;
@@ -151,7 +632,7 @@ struct Params {
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
-  if (i < p.n) {
+  if (i < p.width) {
     data[i] = data[i] + 1.0;
   }
 }
@@ -196,12 +677,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     queue.submit(Some(encoder.finish()));
 
     let slice = readback.slice(..);
-    let (tx, rx) = std::sync::mpsc::channel();
-    slice.map_async(wgpu::MapMode::Read, move |r| {
-        let _ = tx.send(r);
-    });
-    let _ = device.poll(wgpu::PollType::wait_indefinitely());
-    rx.recv().context("map_async channel closed")??;
+    map_wait(&device, &slice)?;
 
     let mapped = slice.get_mapped_range();
     let out: &[f32] = bytemuck::cast_slice(&mapped);
@@ -233,3 +709,256 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         max_abs_error,
     })
 }
+
+const FLUID_INIT_WGSL: &str = r#"
+struct Params {
+  width: u32,
+  height: u32,
+  jacobi_iters: u32,
+  _pad0: u32,
+  dt: f32,
+  fade: f32,
+  dye_radius: f32,
+  impulse: f32,
+};
+@group(0) @binding(0) var<uniform> p: Params;
+@group(0) @binding(1) var<storage, read_write> vel: array<vec2<f32>>;
+@group(0) @binding(2) var<storage, read_write> dye: array<f32>;
+
+fn idx(x: u32, y: u32) -> u32 { return y * p.width + x; }
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= p.width || gid.y >= p.height) { return; }
+  let uv = (vec2<f32>(f32(gid.x), f32(gid.y)) + vec2<f32>(0.5, 0.5)) / vec2<f32>(f32(p.width), f32(p.height));
+  let c = uv - vec2<f32>(0.5, 0.5);
+  let r = length(c);
+  let id = idx(gid.x, gid.y);
+  let swirl = vec2<f32>(-c.y, c.x) * p.impulse * exp(-30.0 * r * r);
+  vel[id] = swirl;
+  dye[id] = select(0.0, 1.0 - r / max(p.dye_radius, 0.01), r <= p.dye_radius);
+}
+"#;
+
+const FLUID_ADVECT_VEL_WGSL: &str = r#"
+struct Params {
+  width: u32,
+  height: u32,
+  jacobi_iters: u32,
+  _pad0: u32,
+  dt: f32,
+  fade: f32,
+  dye_radius: f32,
+  impulse: f32,
+};
+@group(0) @binding(0) var<uniform> p: Params;
+@group(0) @binding(1) var<storage, read> src: array<vec2<f32>>;
+@group(0) @binding(2) var<storage, read_write> dst: array<vec2<f32>>;
+
+fn idx(x: u32, y: u32) -> u32 { return y * p.width + x; }
+fn clamp_xy(x: i32, y: i32) -> vec2<u32> {
+  let cx = u32(clamp(x, 0, i32(p.width) - 1));
+  let cy = u32(clamp(y, 0, i32(p.height) - 1));
+  return vec2<u32>(cx, cy);
+}
+fn sample_vel(pos: vec2<f32>) -> vec2<f32> {
+  let x = clamp(pos.x, 0.0, f32(p.width) - 1.001);
+  let y = clamp(pos.y, 0.0, f32(p.height) - 1.001);
+  let x0 = i32(floor(x));
+  let y0 = i32(floor(y));
+  let x1 = x0 + 1;
+  let y1 = y0 + 1;
+  let fx = fract(x);
+  let fy = fract(y);
+  let a = src[idx(clamp_xy(x0, y0).x, clamp_xy(x0, y0).y)];
+  let b = src[idx(clamp_xy(x1, y0).x, clamp_xy(x1, y0).y)];
+  let c = src[idx(clamp_xy(x0, y1).x, clamp_xy(x0, y1).y)];
+  let d = src[idx(clamp_xy(x1, y1).x, clamp_xy(x1, y1).y)];
+  return mix(mix(a, b, fx), mix(c, d, fx), fy);
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= p.width || gid.y >= p.height) { return; }
+  let id = idx(gid.x, gid.y);
+  let pos = vec2<f32>(f32(gid.x), f32(gid.y));
+  let v = src[id];
+  let back = pos - p.dt * v;
+  dst[id] = sample_vel(back);
+}
+"#;
+
+const FLUID_DIVERGENCE_WGSL: &str = r#"
+struct Params {
+  width: u32,
+  height: u32,
+  jacobi_iters: u32,
+  _pad0: u32,
+  dt: f32,
+  fade: f32,
+  dye_radius: f32,
+  impulse: f32,
+};
+@group(0) @binding(0) var<uniform> p: Params;
+@group(0) @binding(1) var<storage, read> vel: array<vec2<f32>>;
+@group(0) @binding(2) var<storage, read_write> div: array<f32>;
+
+fn idx(x: u32, y: u32) -> u32 { return y * p.width + x; }
+fn c(x: i32, maxv: u32) -> u32 { return u32(clamp(x, 0, i32(maxv) - 1)); }
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= p.width || gid.y >= p.height) { return; }
+  let x = i32(gid.x);
+  let y = i32(gid.y);
+  let vl = vel[idx(c(x - 1, p.width), c(y, p.height))].x;
+  let vr = vel[idx(c(x + 1, p.width), c(y, p.height))].x;
+  let vb = vel[idx(c(x, p.width), c(y - 1, p.height))].y;
+  let vt = vel[idx(c(x, p.width), c(y + 1, p.height))].y;
+  div[idx(gid.x, gid.y)] = 0.5 * ((vr - vl) + (vt - vb));
+}
+"#;
+
+const FLUID_JACOBI_WGSL: &str = r#"
+struct Params {
+  width: u32,
+  height: u32,
+  jacobi_iters: u32,
+  _pad0: u32,
+  dt: f32,
+  fade: f32,
+  dye_radius: f32,
+  impulse: f32,
+};
+@group(0) @binding(0) var<uniform> p: Params;
+@group(0) @binding(1) var<storage, read> p_in: array<f32>;
+@group(0) @binding(2) var<storage, read> div: array<f32>;
+@group(0) @binding(3) var<storage, read_write> p_out: array<f32>;
+
+fn idx(x: u32, y: u32) -> u32 { return y * p.width + x; }
+fn c(x: i32, maxv: u32) -> u32 { return u32(clamp(x, 0, i32(maxv) - 1)); }
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= p.width || gid.y >= p.height) { return; }
+  let x = i32(gid.x);
+  let y = i32(gid.y);
+  let pl = p_in[idx(c(x - 1, p.width), c(y, p.height))];
+  let pr = p_in[idx(c(x + 1, p.width), c(y, p.height))];
+  let pb = p_in[idx(c(x, p.width), c(y - 1, p.height))];
+  let pt = p_in[idx(c(x, p.width), c(y + 1, p.height))];
+  let d = div[idx(gid.x, gid.y)];
+  p_out[idx(gid.x, gid.y)] = (pl + pr + pb + pt - d) * 0.25;
+}
+"#;
+
+const FLUID_PROJECT_WGSL: &str = r#"
+struct Params {
+  width: u32,
+  height: u32,
+  jacobi_iters: u32,
+  _pad0: u32,
+  dt: f32,
+  fade: f32,
+  dye_radius: f32,
+  impulse: f32,
+};
+@group(0) @binding(0) var<uniform> p: Params;
+@group(0) @binding(1) var<storage, read> vel: array<vec2<f32>>;
+@group(0) @binding(2) var<storage, read> pressure: array<f32>;
+@group(0) @binding(3) var<storage, read_write> out_vel: array<vec2<f32>>;
+
+fn idx(x: u32, y: u32) -> u32 { return y * p.width + x; }
+fn c(x: i32, maxv: u32) -> u32 { return u32(clamp(x, 0, i32(maxv) - 1)); }
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= p.width || gid.y >= p.height) { return; }
+  let x = i32(gid.x);
+  let y = i32(gid.y);
+  let pl = pressure[idx(c(x - 1, p.width), c(y, p.height))];
+  let pr = pressure[idx(c(x + 1, p.width), c(y, p.height))];
+  let pb = pressure[idx(c(x, p.width), c(y - 1, p.height))];
+  let pt = pressure[idx(c(x, p.width), c(y + 1, p.height))];
+  let grad = vec2<f32>(pr - pl, pt - pb) * 0.5;
+  out_vel[idx(gid.x, gid.y)] = vel[idx(gid.x, gid.y)] - grad;
+}
+"#;
+
+const FLUID_ADVECT_DYE_WGSL: &str = r#"
+struct Params {
+  width: u32,
+  height: u32,
+  jacobi_iters: u32,
+  _pad0: u32,
+  dt: f32,
+  fade: f32,
+  dye_radius: f32,
+  impulse: f32,
+};
+@group(0) @binding(0) var<uniform> p: Params;
+@group(0) @binding(1) var<storage, read> vel: array<vec2<f32>>;
+@group(0) @binding(2) var<storage, read> dye_src: array<f32>;
+@group(0) @binding(3) var<storage, read_write> dye_dst: array<f32>;
+
+fn idx(x: u32, y: u32) -> u32 { return y * p.width + x; }
+fn clamp_xy(x: i32, y: i32) -> vec2<u32> {
+  let cx = u32(clamp(x, 0, i32(p.width) - 1));
+  let cy = u32(clamp(y, 0, i32(p.height) - 1));
+  return vec2<u32>(cx, cy);
+}
+
+fn sample_dye(pos: vec2<f32>) -> f32 {
+  let x = clamp(pos.x, 0.0, f32(p.width) - 1.001);
+  let y = clamp(pos.y, 0.0, f32(p.height) - 1.001);
+  let x0 = i32(floor(x));
+  let y0 = i32(floor(y));
+  let x1 = x0 + 1;
+  let y1 = y0 + 1;
+  let fx = fract(x);
+  let fy = fract(y);
+  let a = dye_src[idx(clamp_xy(x0, y0).x, clamp_xy(x0, y0).y)];
+  let b = dye_src[idx(clamp_xy(x1, y0).x, clamp_xy(x1, y0).y)];
+  let c = dye_src[idx(clamp_xy(x0, y1).x, clamp_xy(x0, y1).y)];
+  let d = dye_src[idx(clamp_xy(x1, y1).x, clamp_xy(x1, y1).y)];
+  return mix(mix(a, b, fx), mix(c, d, fx), fy);
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= p.width || gid.y >= p.height) { return; }
+  let id = idx(gid.x, gid.y);
+  let pos = vec2<f32>(f32(gid.x), f32(gid.y));
+  let back = pos - p.dt * vel[id];
+  dye_dst[id] = sample_dye(back);
+}
+"#;
+
+const FLUID_FADE_WGSL: &str = r#"
+struct Params {
+  width: u32,
+  height: u32,
+  jacobi_iters: u32,
+  _pad0: u32,
+  dt: f32,
+  fade: f32,
+  dye_radius: f32,
+  impulse: f32,
+};
+@group(0) @binding(0) var<uniform> p: Params;
+@group(0) @binding(1) var<storage, read> src: array<f32>;
+@group(0) @binding(2) var<storage, read_write> dst: array<f32>;
+
+fn idx(x: u32, y: u32) -> u32 { return y * p.width + x; }
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= p.width || gid.y >= p.height) { return; }
+  let uv = (vec2<f32>(f32(gid.x), f32(gid.y)) + vec2<f32>(0.5, 0.5)) / vec2<f32>(f32(p.width), f32(p.height));
+  let c = uv - vec2<f32>(0.5, 0.5);
+  let r = length(c);
+  let id = idx(gid.x, gid.y);
+  let source = select(0.0, 0.02, r <= p.dye_radius * 0.4);
+  dst[id] = src[id] * p.fade + source;
+}
+"#;

@@ -7,10 +7,14 @@
   <style>
     body { font-family: system-ui; background: #111; color: #eee; padding: 16px; }
     .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+    .pane-row { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+    .pane { display: flex; flex-direction: column; gap: 6px; }
+    .pane-title { font-size: 13px; color: #bbb; }
     label { font-size: 13px; color: #ccc; }
     input, select { background: #222; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 4px 6px; }
     pre { background: #1b1b1b; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
-    canvas { border: 1px solid #333; image-rendering: pixelated; image-rendering: crisp-edges; cursor: crosshair; }
+    canvas { border: 1px solid #333; image-rendering: pixelated; image-rendering: crisp-edges; }
+    #viscMap { cursor: crosshair; }
   </style>
 </head>
 <body>
@@ -20,7 +24,6 @@
     <button id="runBtn">Start GPU fluid sim</button>
     <button id="stopBtn">Stop</button>
     <button id="clearViscBtn">Reset viscosity map</button>
-    <label><input id="showVisc" type="checkbox" /> show viscosity overlay</label>
   </div>
 
   <div class="row">
@@ -39,13 +42,23 @@
   </div>
 
   <div class="row">
-    <strong>Paint viscosity map:</strong>
-    <label>brush size(px) <input id="brushSize" type="number" step="1" value="12" /></label>
-    <label>paint value (0..1) <input id="paintValue" type="number" step="0.05" value="0.85" /></label>
-    <span style="color:#aaa">LMB paint • RMB/Shift paint low-visc (0.05)</span>
+    <strong>Viscosity paint:</strong>
+    <label>pen width(px) <input id="brushSize" type="number" step="1" value="12" /></label>
+    <label>intensity (0..1) <input id="paintValue" type="number" step="0.05" value="0.85" /></label>
+    <span style="color:#aaa">Paint on right pane • Shift/RMB = low viscosity</span>
   </div>
 
-  <canvas id="view" width="512" height="512"></canvas>
+  <div class="pane-row">
+    <div class="pane">
+      <div class="pane-title">GPU fluid visualization</div>
+      <canvas id="view" width="512" height="512"></canvas>
+    </div>
+    <div class="pane">
+      <div class="pane-title">Viscosity map (paint here)</div>
+      <canvas id="viscMap" width="512" height="512"></canvas>
+    </div>
+  </div>
+
   <pre id="out">idle</pre>
   <script type="module" src="/gpu-lab.js"></script>
 </body>

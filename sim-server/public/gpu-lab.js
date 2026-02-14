@@ -2,9 +2,10 @@ const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
 const stopBtn = document.getElementById('stopBtn');
 const clearViscBtn = document.getElementById('clearViscBtn');
-const showViscEl = document.getElementById('showVisc');
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
+const viscCanvas = document.getElementById('viscMap');
+const viscCtx = viscCanvas.getContext('2d');
 
 const gridEl = document.getElementById('gridSize');
 const dtEl = document.getElementById('dt');
@@ -251,19 +252,39 @@ function uploadViscMap() {
   sim.device.queue.writeBuffer(sim.viscMapGpu, 0, sim.viscMapCpu);
 }
 
+function drawViscPane() {
+  if (!sim) return;
+  const n = sim.controls.n;
+  const img = viscCtx.createImageData(n, n);
+  for (let i = 0; i < sim.viscMapCpu.length; i++) {
+    const v = Math.max(0, Math.min(1, sim.viscMapCpu[i]));
+    const o = i * 4;
+    img.data[o] = v * 255;
+    img.data[o + 1] = (1 - v) * 180;
+    img.data[o + 2] = (1 - v) * 255;
+    img.data[o + 3] = 255;
+  }
+  const tmp = document.createElement('canvas');
+  tmp.width = n; tmp.height = n;
+  tmp.getContext('2d').putImageData(img, 0, 0);
+  viscCtx.clearRect(0, 0, viscCanvas.width, viscCanvas.height);
+  viscCtx.drawImage(tmp, 0, 0, n, n, 0, 0, viscCanvas.width, viscCanvas.height);
+}
+
 function resetViscMap() {
   if (!sim) return;
   sim.viscMapCpu.fill(0.5);
   uploadViscMap();
+  drawViscPane();
   log({ ok: true, msg: 'viscosity map reset' });
 }
 
 function paintAt(clientX, clientY, erase = false) {
   if (!sim) return;
-  const rect = canvas.getBoundingClientRect();
+  const rect = viscCanvas.getBoundingClientRect();
   const x = ((clientX - rect.left) / rect.width) * sim.controls.n;
   const y = ((clientY - rect.top) / rect.height) * sim.controls.n;
-  const r = Math.max(1, Number(brushSizeEl.value) || 12) * (sim.controls.n / canvas.width);
+  const r = Math.max(1, Number(brushSizeEl.value) || 12) * (sim.controls.n / viscCanvas.width);
   const value = erase ? 0.05 : Math.max(0, Math.min(1, Number(paintValueEl.value) || 0.85));
 
   const minX = Math.max(0, Math.floor(x - r));
@@ -284,15 +305,16 @@ function paintAt(clientX, clientY, erase = false) {
     }
   }
   uploadViscMap();
+  drawViscPane();
 }
 
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-canvas.addEventListener('mousedown', (e) => {
+viscCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+viscCanvas.addEventListener('mousedown', (e) => {
   painting = true;
   paintAt(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
 });
 window.addEventListener('mouseup', () => { painting = false; });
-canvas.addEventListener('mousemove', (e) => {
+viscCanvas.addEventListener('mousemove', (e) => {
   if (!painting) return;
   paintAt(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
 });
@@ -425,32 +447,25 @@ async function stepAndRender() {
     const img = ctx.createImageData(n, n);
     const px = img.data;
     let sum = 0;
-    const showVisc = showViscEl.checked;
     for (let i = 0; i < s.cells; i++) {
       const ri = Math.max(0, Math.min(255, r[i]));
       const gi = Math.max(0, Math.min(255, g[i]));
       const bi = Math.max(0, Math.min(255, b[i]));
       const o = i * 4;
-      if (showVisc) {
-        const v = Math.max(0, Math.min(1, s.viscMapCpu[i]));
-        px[o] = Math.max(ri, v * 255);
-        px[o + 1] = Math.max(gi, (1 - v) * 160);
-        px[o + 2] = Math.max(bi, (1 - v) * 220);
-      } else {
-        px[o] = ri;
-        px[o + 1] = gi;
-        px[o + 2] = bi;
-      }
+      px[o] = ri;
+      px[o + 1] = gi;
+      px[o + 2] = bi;
       px[o + 3] = 255;
       sum += ri + gi + bi;
     }
 
-    const scale = canvas.width / n;
     const tmp = document.createElement('canvas');
     tmp.width = n; tmp.height = n;
     tmp.getContext('2d').putImageData(img, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(tmp, 0, 0, n, n, 0, 0, n * scale, n * scale);
+    ctx.drawImage(tmp, 0, 0, n, n, 0, 0, canvas.width, canvas.height);
+
+    drawViscPane();
 
     const elapsed = (performance.now() - s.t0) / 1000;
     log({
@@ -463,7 +478,6 @@ async function stepAndRender() {
       viscosityScale: s.controls.viscosity,
       paintValue: Number(paintValueEl.value) || 0.85,
       brushSize: Number(brushSizeEl.value) || 12,
-      overlay: showVisc,
     });
   }
 
@@ -475,6 +489,7 @@ async function start() {
   if (running) return;
   running = true;
   sim = await initSim();
+  drawViscPane();
   log('starting live GPU fluid sim...');
   stepAndRender().catch((e) => {
     running = false;
@@ -490,4 +505,4 @@ function stop() {
 runBtn.addEventListener('click', () => start().catch((e) => log({ ok: false, error: String(e) })));
 stopBtn.addEventListener('click', stop);
 clearViscBtn.addEventListener('click', resetViscMap);
-log('ready: paint viscosity on canvas (LMB high, RMB/Shift low), then Start');
+log('ready: paint on right viscosity pane, then Start');

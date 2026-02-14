@@ -28,7 +28,9 @@ Response:
   "backend": "metal/wgpu",
   "n": 1024,
   "elapsed_ms": 113.1,
-  "sample": [1.0,2.0,11.0,1024.0]
+  "sample": [1.0,2.0,11.0,1024.0],
+  "mismatch_count": 0,
+  "max_abs_error": 0.0
 }
 ```
 

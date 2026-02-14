@@ -16,6 +16,8 @@ struct SmokeResponse {
     n: u32,
     elapsed_ms: f64,
     sample: [f32; 4],
+    mismatch_count: u32,
+    max_abs_error: f32,
 }
 
 #[repr(C)]
@@ -162,6 +164,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let mapped = slice.get_mapped_range();
     let out: &[f32] = bytemuck::cast_slice(&mapped);
     let sample = [out[0], out[1], out[10.min(len - 1)], out[len - 1]];
+
+    let mut mismatch_count = 0u32;
+    let mut max_abs_error = 0.0f32;
+    for (i, &v) in out.iter().enumerate() {
+        let expected = (i as f32) + 1.0;
+        let err = (v - expected).abs();
+        if err > 1e-5 {
+            mismatch_count += 1;
+        }
+        max_abs_error = max_abs_error.max(err);
+    }
+
     drop(mapped);
     readback.unmap();
 
@@ -171,5 +185,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         n,
         elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,
         sample,
+        mismatch_count,
+        max_abs_error,
     })
 }

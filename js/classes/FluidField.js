@@ -44,6 +44,9 @@ export class FluidField {
         this.totalActiveTiles = this.activeTileCols * this.activeTileRows;
         this.carrierTiles = this._createTileTracker(); // dye/creature/particle carriers -> full-res priority
         this.momentumTiles = this._createTileTracker(); // velocity-only regions -> lower-frequency priority
+        this._domainRowBuckets = Array.from({ length: this.size }, () => []);
+        this._domainTouchedRows = new Int32Array(this.size);
+        this._domainTouchedCount = 0;
         this.coarseMomentumBlockSize = 2; // phase A scaffold: 2x2 momentum-only macro blocks
         this.lastStepPerf = {
             totalMs: 0,
@@ -713,7 +716,16 @@ export class FluidField {
 
         const maxCell = this.size - 2;
         const pad = Math.max(1, this.activeTileSize);
-        const rows = new Map();
+
+        const buckets = this._domainRowBuckets;
+        const touchedRows = this._domainTouchedRows;
+        let touchedCount = 0;
+
+        const pushSpanForRow = (y, x0, x1) => {
+            const list = buckets[y];
+            if (list.length === 0) touchedRows[touchedCount++] = y;
+            list.push([x0, x1]);
+        };
 
         if (hasTracker) {
             for (let i = 0; i < tileMap.count; i++) {
@@ -726,11 +738,7 @@ export class FluidField {
                 const y0 = Math.max(1, (ty * this.activeTileSize) - pad);
                 const y1 = Math.min(maxCell, ((ty + 1) * this.activeTileSize) + pad);
 
-                for (let y = y0; y <= y1; y++) {
-                    const list = rows.get(y) || [];
-                    list.push([x0, x1]);
-                    rows.set(y, list);
-                }
+                for (let y = y0; y <= y1; y++) pushSpanForRow(y, x0, x1);
             }
         } else {
             for (const key of tileMap.keys()) {
@@ -752,15 +760,11 @@ export class FluidField {
                 const y0 = Math.max(1, (ty * this.activeTileSize) - pad);
                 const y1 = Math.min(maxCell, ((ty + 1) * this.activeTileSize) + pad);
 
-                for (let y = y0; y <= y1; y++) {
-                    const list = rows.get(y) || [];
-                    list.push([x0, x1]);
-                    rows.set(y, list);
-                }
+                for (let y = y0; y <= y1; y++) pushSpanForRow(y, x0, x1);
             }
         }
 
-        if (rows.size === 0) return null;
+        if (touchedCount === 0) return null;
 
         let xMin = Infinity;
         let yMin = Infinity;
@@ -768,7 +772,9 @@ export class FluidField {
         let yMax = -Infinity;
         const rowSpans = new Map();
 
-        for (const [y, spans] of rows.entries()) {
+        for (let i = 0; i < touchedCount; i++) {
+            const y = touchedRows[i];
+            const spans = buckets[y];
             spans.sort((a, b) => a[0] - b[0]);
             const merged = [];
             for (const span of spans) {
@@ -783,7 +789,10 @@ export class FluidField {
                 if (sx < xMin) xMin = sx;
                 if (ex > xMax) xMax = ex;
             }
+            spans.length = 0; // reuse bucket next call
         }
+
+        this._domainTouchedCount = touchedCount;
 
         if (!Number.isFinite(xMin) || !Number.isFinite(yMin) || !Number.isFinite(xMax) || !Number.isFinite(yMax)) {
             return null;

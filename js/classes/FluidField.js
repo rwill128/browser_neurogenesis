@@ -835,27 +835,41 @@ export class FluidField {
         this.seedMomentumTilesFromVelocityField();
         const seedMomentumMs = Date.now() - t0;
 
-        const carrierBounds = this._buildSparseDomainFromTiles(this.carrierTiles);
-
-        const momentumNonCarrierTiles = this._subtractTileMaps(this.momentumTiles, this.carrierTiles);
-        const expandedMomentumTiles = this._expandTileMap(momentumNonCarrierTiles, 1);
-        const momentumBounds = this._buildSparseDomainFromTiles(expandedMomentumTiles);
-
         const momentumEvery = Math.max(1, Math.floor(Number(config.FLUID_MOMENTUM_ONLY_STEP_EVERY_N_TICKS) || 10));
         const emptyEvery = Math.max(1, Math.floor(Number(config.FLUID_EMPTY_STEP_EVERY_N_TICKS) || 24));
         const tick = Math.max(0, Math.floor(Number(worldTick) || 0));
         const allowMomentumSolve = (tick % momentumEvery) === 0;
         const allowEmptySolve = (tick % emptyEvery) === 0;
 
-        let bounds = carrierBounds;
-        if (allowMomentumSolve) {
-            bounds = this._mergeDomains(bounds, momentumBounds);
+        // Build one active tile domain per tick, then compile spans once.
+        const activeMark = new Uint8Array(this.totalActiveTiles);
+        const activeTiles = [];
+        const addActiveTile = (tileId) => {
+            if (!Number.isFinite(tileId)) return;
+            const id = Math.floor(tileId);
+            if (id < 0 || id >= this.totalActiveTiles) return;
+            if (activeMark[id] !== 0) return;
+            activeMark[id] = 1;
+            activeTiles.push(id);
+        };
+
+        for (let i = 0; i < this.carrierTiles.count; i++) addActiveTile(this.carrierTiles.active[i]);
+
+        let expandedMomentumTiles = null;
+        if (allowMomentumSolve || allowEmptySolve) {
+            const momentumNonCarrierTiles = this._subtractTileMaps(this.momentumTiles, this.carrierTiles);
+            expandedMomentumTiles = this._expandTileMap(momentumNonCarrierTiles, 1);
+            if (allowMomentumSolve && expandedMomentumTiles && expandedMomentumTiles.count > 0) {
+                for (let i = 0; i < expandedMomentumTiles.count; i++) addActiveTile(expandedMomentumTiles.active[i]);
+            }
         }
+
         if (allowEmptySolve) {
-            const deepEmptyTiles = this._buildDeepEmptyTileMap(this.carrierTiles, expandedMomentumTiles);
-            const deepEmptyBounds = this._buildSparseDomainFromTiles(deepEmptyTiles);
-            bounds = this._mergeDomains(bounds, deepEmptyBounds);
+            const deepEmptyTiles = this._buildDeepEmptyTileMap(this.carrierTiles, expandedMomentumTiles || { count: 0, active: [] });
+            for (let i = 0; i < deepEmptyTiles.count; i++) addActiveTile(deepEmptyTiles.active[i]);
         }
+
+        let bounds = this._buildSparseDomainFromTiles({ count: activeTiles.length, active: activeTiles });
 
         if (!bounds) {
             this.lastStepPerf = {

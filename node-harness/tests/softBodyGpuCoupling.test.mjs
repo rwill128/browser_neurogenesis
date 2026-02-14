@@ -46,6 +46,7 @@ function makeShadowOnlyGpuFluid({ size = 48, dt = 1 / 60, scaleX = 1, scaleY = 1
   fluid.shadowDensityRNext = new Float32Array(cellCount).fill(0);
   fluid.shadowDensityGNext = new Float32Array(cellCount).fill(0);
   fluid.shadowDensityBNext = new Float32Array(cellCount).fill(0);
+  fluid._initShadowBackCompatViews();
   return fluid;
 }
 

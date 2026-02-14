@@ -21,6 +21,7 @@ function makeShadowOnlyField({ size = 32, dt = 1 / 30, scaleX = 1, scaleY = 1 } 
   f.shadowDensityRNext = new Float32Array(cells).fill(0);
   f.shadowDensityGNext = new Float32Array(cells).fill(0);
   f.shadowDensityBNext = new Float32Array(cells).fill(0);
+  f._initShadowBackCompatViews();
   f.gpuEnabled = false;
   return f;
 }
@@ -80,4 +81,23 @@ test('GPU fluid world-space sampling respects scaleX/scaleY near origin for coup
   assert.ok(sampled.vx > 3.0 && sampled.vy < -1.0, `expected world->grid mapping at scaled coord, got (${sampled.vx}, ${sampled.vy})`);
   assert.ok(Math.abs(wrongCell.vx) < 1e-6 && Math.abs(wrongCell.vy) < 1e-6,
     `expected world cell (4,3) to remain untouched under scaled mapping, got (${wrongCell.vx}, ${wrongCell.vy})`);
+});
+
+test('GPU shadow arrays are exposed through FluidField-compatible views for coupling consumers', () => {
+  const fluid = makeShadowOnlyField({ size: 32, dt: 0.1, scaleX: 1, scaleY: 1 });
+
+  fluid.addVelocity(12, 9, 2.4, -0.8);
+  fluid.addDensity(12, 9, 150, 90, 40, 65);
+
+  const idx = fluid.IX(12, 9);
+  assert.ok(fluid.Vx[idx] > 1.0 && fluid.Vy[idx] < -0.2, `expected Vx/Vy aliases to mirror shadow velocity at idx=${idx}`);
+  assert.ok(fluid.densityR[idx] > 30 && fluid.densityG[idx] > 15 && fluid.densityB[idx] > 8,
+    `expected density aliases to mirror shadow dye at idx=${idx}`);
+
+  fluid.step();
+
+  const idxAfter = fluid.IX(12, 9);
+  assert.equal(fluid.Vx, fluid.shadowVx, 'Vx alias should track swapped shadow velocity buffer');
+  assert.equal(fluid.densityR, fluid.shadowDensityR, 'densityR alias should track swapped shadow density buffer');
+  assert.ok(Math.abs(fluid.Vx[idxAfter]) > 1e-4, 'expected non-zero transported momentum after step');
 });

@@ -35,6 +35,8 @@ export class GPUFluidField {
         this.shadowDensityGNext = new Float32Array(cellCount).fill(0);
         this.shadowDensityBNext = new Float32Array(cellCount).fill(0);
 
+        this._initShadowBackCompatViews();
+
         // Placeholders for WebGL resources
         this.programs = {}; // To store shader programs (e.g., diffuse, advect, project_divergence, etc.)
         this.textures = {}; // To store textures (density, velocity - front and back for ping-pong)
@@ -195,6 +197,27 @@ export class GPUFluidField {
 
         // Store the promise for external awaiting if needed
         this._initPromise = this._asyncInit(canvas);
+    }
+
+    _initShadowBackCompatViews() {
+        const descriptors = {
+            Vx: { get: () => this.shadowVx },
+            Vy: { get: () => this.shadowVy },
+            Vx0: { get: () => this.shadowVxNext },
+            Vy0: { get: () => this.shadowVyNext },
+            densityR: { get: () => this.shadowDensityR },
+            densityG: { get: () => this.shadowDensityG },
+            densityB: { get: () => this.shadowDensityB },
+            densityR0: { get: () => this.shadowDensityRNext },
+            densityG0: { get: () => this.shadowDensityGNext },
+            densityB0: { get: () => this.shadowDensityBNext }
+        };
+
+        for (const [key, descriptor] of Object.entries(descriptors)) {
+            if (!Object.prototype.hasOwnProperty.call(this, key)) {
+                Object.defineProperty(this, key, descriptor);
+            }
+        }
     }
 
     async _asyncInit(canvas) {

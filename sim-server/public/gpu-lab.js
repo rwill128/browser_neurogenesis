@@ -4,31 +4,47 @@ const stopBtn = document.getElementById('stopBtn');
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
 
+const gridEl = document.getElementById('gridSize');
+const dtEl = document.getElementById('dt');
+const fadeEl = document.getElementById('fade');
+const viscosityEl = document.getElementById('viscosity');
+const impulseEl = document.getElementById('impulse');
+const radiusEl = document.getElementById('radius');
+
 function log(v) { out.textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2); }
 
-const N = 256;
-const CELLS = N * N;
-const BYTES = CELLS * 4;
 const WORKGROUP = 8;
 const JACOBI_ITERS = 20;
 
-function wg() { return Math.ceil(N / WORKGROUP); }
+function readControls() {
+  return {
+    n: Math.max(32, Number(gridEl.value) || 256),
+    dt: Number(dtEl.value) || 0.1,
+    fade: Number(fadeEl.value) || 0.996,
+    viscosity: Number(viscosityEl.value) || 0,
+    impulse: Number(impulseEl.value) || 7,
+    radius: Number(radiusEl.value) || 8,
+  };
+}
 
-function createBuffer(device, usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC) {
-  return device.createBuffer({ size: BYTES, usage });
+function createBuffer(device, bytes, usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC) {
+  return device.createBuffer({ size: bytes, usage });
 }
 
 function createUniformBuffer(device) {
-  return device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  return device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
 }
 
-function uploadUniforms(device, uniformBuffer, dt, fade) {
-  const a = new ArrayBuffer(16);
+function uploadUniforms(device, uniformBuffer, s) {
+  const a = new ArrayBuffer(32);
   const u32 = new Uint32Array(a);
   const f32 = new Float32Array(a);
-  u32[0] = N;
-  f32[1] = dt;
-  f32[2] = fade;
+  u32[0] = s.n;
+  f32[1] = s.dt;
+  f32[2] = s.fade;
+  f32[3] = s.impulse;
+  f32[4] = s.radius;
+  f32[5] = s.viscosity;
   device.queue.writeBuffer(uniformBuffer, 0, a);
 }
 
@@ -37,7 +53,11 @@ struct Params {
   n: u32,
   dt: f32,
   fade: f32,
-  _pad: f32,
+  impulse: f32,
+  radius: f32,
+  viscosity: f32,
+  _pad0: f32,
+  _pad1: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
 
@@ -77,8 +97,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let y = f32(gid.y);
   let px = x - p.dt * vx0[i];
   let py = y - p.dt * vy0[i];
-  vx1[i] = sampleBilinear(&vx0, px, py);
-  vy1[i] = sampleBilinear(&vy0, px, py);
+  let decay = 1.0 / (1.0 + 4.0 * p.viscosity * p.dt);
+  vx1[i] = sampleBilinear(&vx0, px, py) * decay;
+  vy1[i] = sampleBilinear(&vy0, px, py) * decay;
 }
 `;
 
@@ -184,8 +205,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let dy = f32(gid.y) - cy;
   let d2 = dx*dx + dy*dy;
   let i = idx(gid.x, gid.y);
-  if (d2 < 64.0) {
-    vx[i] = vx[i] + 7.0;
+  let r2 = p.radius * p.radius;
+  if (d2 < r2) {
+    vx[i] = vx[i] + p.impulse;
     vy[i] = vy[i] + 1.2 * sin(f32(i) * 0.0007);
     r[i] = 255.0;
     g[i] = 140.0;
@@ -212,25 +234,29 @@ let running = false;
 let sim = null;
 
 async function initSim() {
+  const controls = readControls();
   if (!navigator.gpu) throw new Error('WebGPU unavailable in browser');
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) throw new Error('No WebGPU adapter');
   const device = await adapter.requestDevice();
 
+  const cells = controls.n * controls.n;
+  const bytes = cells * 4;
+
   const uniform = createUniformBuffer(device);
-  uploadUniforms(device, uniform, 0.10, 0.996);
+  uploadUniforms(device, uniform, controls);
 
-  const vxA = createBuffer(device), vxB = createBuffer(device);
-  const vyA = createBuffer(device), vyB = createBuffer(device);
-  const div = createBuffer(device);
-  const pA = createBuffer(device), pB = createBuffer(device);
-  const rA = createBuffer(device), rB = createBuffer(device);
-  const gA = createBuffer(device), gB = createBuffer(device);
-  const bA = createBuffer(device), bB = createBuffer(device);
+  const vxA = createBuffer(device, bytes), vxB = createBuffer(device, bytes);
+  const vyA = createBuffer(device, bytes), vyB = createBuffer(device, bytes);
+  const div = createBuffer(device, bytes);
+  const pA = createBuffer(device, bytes), pB = createBuffer(device, bytes);
+  const rA = createBuffer(device, bytes), rB = createBuffer(device, bytes);
+  const gA = createBuffer(device, bytes), gB = createBuffer(device, bytes);
+  const bA = createBuffer(device, bytes), bB = createBuffer(device, bytes);
 
-  const readR = device.createBuffer({ size: BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-  const readG = device.createBuffer({ size: BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-  const readB = device.createBuffer({ size: BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const readR = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const readG = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const readB = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
 
   const inject = await createPipeline(device, injectWgsl);
   const advVel = await createPipeline(device, advectVelWgsl);
@@ -240,6 +266,7 @@ async function initSim() {
   const advDye = await createPipeline(device, advectDyeWgsl);
 
   return {
+    controls, cells, bytes,
     device, uniform,
     inject, advVel, divPipe, jacobiP, project, advDye,
     vx0: vxA, vx1: vxB, vy0: vyA, vy1: vyB,
@@ -250,22 +277,26 @@ async function initSim() {
   };
 }
 
+function workgroups(n) { return Math.ceil(n / WORKGROUP); }
+
 async function stepAndRender() {
   if (!running || !sim) return;
   const s = sim;
+  s.controls = readControls();
+  uploadUniforms(s.device, s.uniform, s.controls);
 
   const enc = s.device.createCommandEncoder();
 
   let pass = enc.beginComputePass();
   pass.setPipeline(s.inject.pipeline);
   pass.setBindGroup(0, s.inject.bg([s.uniform, s.vx0, s.vy0, s.rr0, s.gg0, s.bb0]));
-  pass.dispatchWorkgroups(wg(), wg());
+  pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
   pass.end();
 
   pass = enc.beginComputePass();
   pass.setPipeline(s.advVel.pipeline);
   pass.setBindGroup(0, s.advVel.bg([s.uniform, s.vx0, s.vy0, s.vx1, s.vy1]));
-  pass.dispatchWorkgroups(wg(), wg());
+  pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
   pass.end();
   [s.vx0, s.vx1] = [s.vx1, s.vx0];
   [s.vy0, s.vy1] = [s.vy1, s.vy0];
@@ -273,14 +304,14 @@ async function stepAndRender() {
   pass = enc.beginComputePass();
   pass.setPipeline(s.divPipe.pipeline);
   pass.setBindGroup(0, s.divPipe.bg([s.uniform, s.vx0, s.vy0, s.div]));
-  pass.dispatchWorkgroups(wg(), wg());
+  pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
   pass.end();
 
   for (let i = 0; i < JACOBI_ITERS; i++) {
     pass = enc.beginComputePass();
     pass.setPipeline(s.jacobiP.pipeline);
     pass.setBindGroup(0, s.jacobiP.bg([s.uniform, s.pr0, s.div, s.pr1]));
-    pass.dispatchWorkgroups(wg(), wg());
+    pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
     pass.end();
     [s.pr0, s.pr1] = [s.pr1, s.pr0];
   }
@@ -288,24 +319,23 @@ async function stepAndRender() {
   pass = enc.beginComputePass();
   pass.setPipeline(s.project.pipeline);
   pass.setBindGroup(0, s.project.bg([s.uniform, s.vx0, s.vy0, s.pr0]));
-  pass.dispatchWorkgroups(wg(), wg());
+  pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
   pass.end();
 
   pass = enc.beginComputePass();
   pass.setPipeline(s.advDye.pipeline);
   pass.setBindGroup(0, s.advDye.bg([s.uniform, s.vx0, s.vy0, s.rr0, s.gg0, s.bb0, s.rr1, s.gg1, s.bb1]));
-  pass.dispatchWorkgroups(wg(), wg());
+  pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
   pass.end();
   [s.rr0, s.rr1] = [s.rr1, s.rr0];
   [s.gg0, s.gg1] = [s.gg1, s.gg0];
   [s.bb0, s.bb1] = [s.bb1, s.bb0];
 
-  // Render every other frame to keep it responsive.
   const doReadback = (s.frame % 2) === 0;
   if (doReadback) {
-    enc.copyBufferToBuffer(s.rr0, 0, s.readR, 0, BYTES);
-    enc.copyBufferToBuffer(s.gg0, 0, s.readG, 0, BYTES);
-    enc.copyBufferToBuffer(s.bb0, 0, s.readB, 0, BYTES);
+    enc.copyBufferToBuffer(s.rr0, 0, s.readR, 0, s.bytes);
+    enc.copyBufferToBuffer(s.gg0, 0, s.readG, 0, s.bytes);
+    enc.copyBufferToBuffer(s.bb0, 0, s.readB, 0, s.bytes);
   }
 
   s.device.queue.submit([enc.finish()]);
@@ -322,10 +352,11 @@ async function stepAndRender() {
     const b = new Float32Array(s.readB.getMappedRange().slice(0));
     s.readR.unmap(); s.readG.unmap(); s.readB.unmap();
 
-    const img = ctx.createImageData(N, N);
+    const n = s.controls.n;
+    const img = ctx.createImageData(n, n);
     const px = img.data;
     let sum = 0;
-    for (let i = 0; i < CELLS; i++) {
+    for (let i = 0; i < s.cells; i++) {
       const ri = Math.max(0, Math.min(255, r[i]));
       const gi = Math.max(0, Math.min(255, g[i]));
       const bi = Math.max(0, Math.min(255, b[i]));
@@ -337,21 +368,26 @@ async function stepAndRender() {
       sum += ri + gi + bi;
     }
 
-    const scale = canvas.width / N;
+    const scale = canvas.width / n;
     const tmp = document.createElement('canvas');
-    tmp.width = N; tmp.height = N;
+    tmp.width = n; tmp.height = n;
     tmp.getContext('2d').putImageData(img, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(tmp, 0, 0, N, N, 0, 0, N * scale, N * scale);
+    ctx.drawImage(tmp, 0, 0, n, n, 0, 0, n * scale, n * scale);
 
     const elapsed = (performance.now() - s.t0) / 1000;
     log({
       ok: true,
       mode: 'live-fluid',
-      grid: N,
+      grid: n,
       frames: s.frame,
       fps: +(s.frame / Math.max(1e-6, elapsed)).toFixed(1),
-      dyeEnergy: +sum.toFixed(1)
+      dyeEnergy: +sum.toFixed(1),
+      dt: s.controls.dt,
+      fade: s.controls.fade,
+      viscosity: s.controls.viscosity,
+      impulse: s.controls.impulse,
+      radius: s.controls.radius,
     });
   }
 
@@ -362,7 +398,7 @@ async function stepAndRender() {
 async function start() {
   if (running) return;
   running = true;
-  if (!sim) sim = await initSim();
+  sim = await initSim();
   log('starting live GPU fluid sim...');
   stepAndRender().catch((e) => {
     running = false;
@@ -377,4 +413,4 @@ function stop() {
 
 runBtn.addEventListener('click', () => start().catch((e) => log({ ok: false, error: String(e) })));
 stopBtn.addEventListener('click', stop);
-log('ready: click "Start GPU fluid sim" to see live GPU fluid');
+log('ready: set controls and click "Start GPU fluid sim"');

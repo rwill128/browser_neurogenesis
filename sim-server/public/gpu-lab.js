@@ -760,7 +760,7 @@ function resolveSoftNodeVsSoftEdgeCollision(node, a, b, restitution = 0.12) {
   }
 }
 
-function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, vx, vy, thickness = 1.4, dyeKeep = 0.02) {
+function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, vx, vy, thickness = 1.4) {
   const minX = Math.max(0, Math.floor(Math.min(ax, bx) - thickness - 1));
   const maxX = Math.min(n - 1, Math.ceil(Math.max(ax, bx) + thickness + 1));
   const minY = Math.max(0, Math.floor(Math.min(ay, by) - thickness - 1));
@@ -770,6 +770,8 @@ function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, vx, vy,
   const el = Math.max(1e-6, Math.hypot(ex, ey));
   const nx = -ey / el;
   const ny = ex / el;
+  const tx = ex / el;
+  const ty = ey / el;
 
   for (let y = minY; y <= maxY; y++) {
     for (let x = minX; x <= maxX; x++) {
@@ -781,16 +783,25 @@ function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, vx, vy,
       const w = 1 - (d / Math.max(1e-6, thickness));
       const i = y * n + x;
 
-      // Remove dye across barrier strip (impermeable/absorbing edge behavior).
-      const keep = 1 - (1 - dyeKeep) * w;
-      r[i] *= keep;
-      g[i] *= keep;
-      b[i] *= keep;
-
-      // Remove normal flow component to behave like wall/slip boundary.
+      // Wall behavior: remove normal velocity, keep tangential flow (deflection, not absorption).
       const vn = vx[i] * nx + vy[i] * ny;
       vx[i] -= vn * nx * w;
       vy[i] -= vn * ny * w;
+
+      // Deflect dye along tangent rather than stripping it.
+      const vt = vx[i] * tx + vy[i] * ty;
+      const step = vt >= 0 ? 1 : -1;
+      const txi = Math.max(0, Math.min(n - 1, Math.round(x + tx * step)));
+      const tyi = Math.max(0, Math.min(n - 1, Math.round(y + ty * step)));
+      const ti = tyi * n + txi;
+      if (ti !== i) {
+        const move = 0.22 * w;
+        const dr = r[i] * move, dg = g[i] * move, db = b[i] * move;
+        r[i] -= dr; g[i] -= dg; b[i] -= db;
+        r[ti] = Math.min(255, r[ti] + dr);
+        g[ti] = Math.min(255, g[ti] + dg);
+        b[ti] = Math.min(255, b[ti] + db);
+      }
     }
   }
 }
@@ -810,7 +821,7 @@ function applyBodyEdgeFieldBarriers(sim, r, g, b, vx, vy) {
     for (let i = 0; i < sides; i++) {
       const a = verts[i];
       const b2 = verts[(i + 1) % sides];
-      applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, rigidThickness, 0.01);
+      applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, rigidThickness);
     }
   }
 
@@ -818,7 +829,7 @@ function applyBodyEdgeFieldBarriers(sim, r, g, b, vx, vy) {
   for (const [i, j, _rest, edgeSolid] of s.springs) {
     if (!edgeSolid) continue;
     const a = s.nodes[i], b2 = s.nodes[j];
-    applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, softThickness, 0.03);
+    applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, softThickness);
   }
 }
 

@@ -2,6 +2,7 @@ const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
 const stopBtn = document.getElementById('stopBtn');
 const clearViscBtn = document.getElementById('clearViscBtn');
+const fpsHud = document.getElementById('fpsHud');
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
 
@@ -1033,6 +1034,8 @@ async function stepAndRender() {
     drawBodiesOverlay(s);
 
     const elapsed = (performance.now() - s.t0) / 1000;
+    const fpsNow = +(s.frame / Math.max(1e-6, elapsed)).toFixed(1);
+    if (fpsHud) fpsHud.textContent = `FPS: ${fpsNow}`;
     const couplingAverages = summarizeCouplingTelemetry(s.couplingTelemetry);
     const couplingSnapshot = { ...couplingAverages, ...Object.fromEntries(Object.entries(couplingInstant || {}).map(([k,v]) => [k+'Now', +((v || 0).toFixed(4))])) };
     window.__gpuLabCoupling = couplingSnapshot;
@@ -1042,7 +1045,7 @@ async function stepAndRender() {
       mode: 'live-fluid',
       grid: n,
       frames: s.frame,
-      fps: +(s.frame / Math.max(1e-6, elapsed)).toFixed(1),
+      fps: fpsNow,
       dyeEnergy: +sum.toFixed(1),
       viscosityScale: s.controls.viscosity,
       massLight: s.controls.massLight,
@@ -1063,6 +1066,7 @@ async function stepAndRender() {
 async function start() {
   if (running) return;
   running = true;
+  if (fpsHud) fpsHud.textContent = 'FPS: --';
   sim = await initSim();
   log('starting live GPU fluid sim...');
   stepAndRender().catch((e) => {
@@ -1073,6 +1077,7 @@ async function start() {
 
 function stop() {
   running = false;
+  if (fpsHud) fpsHud.textContent = 'FPS: --';
   log('stopped');
 }
 

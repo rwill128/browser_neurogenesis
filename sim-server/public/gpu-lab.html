@@ -24,6 +24,7 @@
     <button id="runBtn">Start GPU fluid sim</button>
     <button id="stopBtn">Stop</button>
     <button id="clearViscBtn">Reset viscosity map</button>
+    <span id="fpsHud" style="margin-left:10px;color:#9fe3ff;font-family:ui-monospace,Menlo,monospace">FPS: --</span>
   </div>
 
   <div class="row">
@@ -32,8 +33,8 @@
         <option value="128">128</option>
         <option value="256" selected>256</option>
         <option value="512">512</option>
-        <option value="1024">1024 (big test)</option>
-        <option value="2048">2048 (big test)</option>
+        <option value="1024">1024</option>
+        <option value="2048">2048</option>
       </select>
     </label>
     <label>dt <input id="dt" type="number" step="0.005" value="0.035" /></label>

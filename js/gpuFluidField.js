@@ -557,6 +557,63 @@ export class GPUFluidField {
         return a * (1 - ty) + b * ty;
     }
 
+    _applyShadowVelocitySplat(centerCell, amountX, amountY, strength = 15) {
+        if (!centerCell) return;
+
+        const radiusCells = Math.max(0, Math.min(4, (Number(strength) || 0) / 12));
+        const radiusInt = Math.ceil(radiusCells);
+        const sigma = Math.max(0.25, radiusCells * 0.75 + 0.25);
+        const sigma2 = sigma * sigma;
+
+        const baseVx = Number(amountX) || 0;
+        const baseVy = Number(amountY) || 0;
+        for (let oy = -radiusInt; oy <= radiusInt; oy++) {
+            for (let ox = -radiusInt; ox <= radiusInt; ox++) {
+                const gx = centerCell.gx + ox;
+                const gy = centerCell.gy + oy;
+                if (gx < 0 || gy < 0 || gx >= this.size || gy >= this.size) continue;
+
+                const d2 = ox * ox + oy * oy;
+                if (d2 > radiusCells * radiusCells + 1e-6) continue;
+                const w = Math.exp(-d2 / (2 * sigma2));
+                const idx = gx + gy * this.size;
+                this.shadowVx[idx] = Math.max(-this.maxVelComponent, Math.min(this.maxVelComponent, this.shadowVx[idx] + baseVx * w));
+                this.shadowVy[idx] = Math.max(-this.maxVelComponent, Math.min(this.maxVelComponent, this.shadowVy[idx] + baseVy * w));
+            }
+        }
+    }
+
+    _applyShadowDensitySplat(centerCell, r, g, b, strength = 0) {
+        if (!centerCell) return;
+
+        const blend = Math.max(0, Math.min(1, (Number(strength) || 0) / 80));
+        const radiusCells = Math.max(0, Math.min(3, (Number(strength) || 0) / 60));
+        const radiusInt = Math.ceil(radiusCells);
+        const sigma = Math.max(0.2, radiusCells * 0.8 + 0.2);
+        const sigma2 = sigma * sigma;
+
+        const targetR = Number(r) || 0;
+        const targetG = Number(g) || 0;
+        const targetB = Number(b) || 0;
+
+        for (let oy = -radiusInt; oy <= radiusInt; oy++) {
+            for (let ox = -radiusInt; ox <= radiusInt; ox++) {
+                const gx = centerCell.gx + ox;
+                const gy = centerCell.gy + oy;
+                if (gx < 0 || gy < 0 || gx >= this.size || gy >= this.size) continue;
+
+                const d2 = ox * ox + oy * oy;
+                if (d2 > radiusCells * radiusCells + 1e-6) continue;
+                const w = Math.exp(-d2 / (2 * sigma2));
+                const localBlend = blend * w;
+                const idx = gx + gy * this.size;
+                this.shadowDensityR[idx] = Math.max(0, Math.min(255, this.shadowDensityR[idx] + (targetR - this.shadowDensityR[idx]) * localBlend));
+                this.shadowDensityG[idx] = Math.max(0, Math.min(255, this.shadowDensityG[idx] + (targetG - this.shadowDensityG[idx]) * localBlend));
+                this.shadowDensityB[idx] = Math.max(0, Math.min(255, this.shadowDensityB[idx] + (targetB - this.shadowDensityB[idx]) * localBlend));
+            }
+        }
+    }
+
     _advanceShadowFields() {
         const dt = Math.max(1e-6, Number(this.dt) || (1 / 60));
         const velDiffusion = Math.max(0, Math.min(0.25, (Number(this.viscosity) || 0.005) * 8));
@@ -831,13 +888,7 @@ export class GPUFluidField {
 
     addDensity(x, y, r, g, b, strength) {
         const shadowCell = this._toShadowGridCell(x, y, 'grid');
-        if (shadowCell) {
-            const idx = shadowCell.idx;
-            const blend = Math.max(0, Math.min(1, (Number(strength) || 0) / 80));
-            this.shadowDensityR[idx] = Math.max(0, Math.min(255, this.shadowDensityR[idx] + (Number(r) - this.shadowDensityR[idx]) * blend));
-            this.shadowDensityG[idx] = Math.max(0, Math.min(255, this.shadowDensityG[idx] + (Number(g) - this.shadowDensityG[idx]) * blend));
-            this.shadowDensityB[idx] = Math.max(0, Math.min(255, this.shadowDensityB[idx] + (Number(b) - this.shadowDensityB[idx]) * blend));
-        }
+        this._applyShadowDensitySplat(shadowCell, r, g, b, strength);
 
         if (!this.gpuEnabled) return;
 
@@ -896,13 +947,7 @@ export class GPUFluidField {
 
     addVelocity(x, y, amountX, amountY, strength = 15) { // Added strength for radius
         const shadowCell = this._toShadowGridCell(x, y, 'grid');
-        if (shadowCell) {
-            const idx = shadowCell.idx;
-            const vx = Number(amountX) || 0;
-            const vy = Number(amountY) || 0;
-            this.shadowVx[idx] = Math.max(-this.maxVelComponent, Math.min(this.maxVelComponent, this.shadowVx[idx] + vx));
-            this.shadowVy[idx] = Math.max(-this.maxVelComponent, Math.min(this.maxVelComponent, this.shadowVy[idx] + vy));
-        }
+        this._applyShadowVelocitySplat(shadowCell, amountX, amountY, strength);
 
         if (!this.gpuEnabled) return;
 

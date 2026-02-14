@@ -56,7 +56,8 @@ test('GPU fluid shadow path advects momentum to neighboring cells (current trans
 
   fluid.addVelocity(10, 10, 2.0, 0.0);
   const beforeNeighbor = fluid.getVelocityAtWorld(11, 10);
-  assert.equal(beforeNeighbor.vx, 0);
+  assert.ok(beforeNeighbor.vx > 0, `expected local splat radius to seed neighboring momentum, got ${beforeNeighbor.vx}`);
+  assert.ok(beforeNeighbor.vx < 2.0, `neighbor seed should remain weaker than source impulse, got ${beforeNeighbor.vx}`);
 
   fluid.step();
 

@@ -23,7 +23,9 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
     else if (t?.kind === 'soft') triByKind.soft.push(t);
   }
 
-  const rigidBuild = buildRigidExport(triByKind.rigid, nodes, options);
+  const rigidBuild = Array.isArray(mesh?.rigidPieces)
+    ? buildRigidExportFromCompilerPieces(mesh.rigidPieces, mesh.rigidWelds || [], nodes, options)
+    : buildRigidExport(triByKind.rigid, nodes, options);
   const softBuild = buildSoftExport(triByKind.soft, nodes, options);
   const hybridJoints = buildHybridExport({
     rigidComps: rigidBuild.components,
@@ -214,6 +216,66 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
   }
 
   return { rigid, soft, hybrid, rigidWelds };
+}
+
+function buildRigidExportFromCompilerPieces(rigidPieces, rigidWelds, nodes, options) {
+  const rigidBodies = [];
+  const components = [];
+  const pieceMap = new Map();
+
+  for (let i = 0; i < rigidPieces.length; i++) {
+    const rp = rigidPieces[i] || {};
+    const hull = (rp.hull || [])
+      .map((p) => ({ x: Number(p?.x) || 0, y: Number(p?.y) || 0 }));
+    if (hull.length < 3) continue;
+
+    const c = centroid(hull);
+    const r = Math.max(2.5, ...hull.map((p) => Math.hypot(p.x - c.x, p.y - c.y)));
+    const sides = hull.length;
+
+    const rigidIndex = rigidBodies.length;
+    pieceMap.set(i, rigidIndex);
+    rigidBodies.push({
+      id: rp.id || `rigid_${rigidIndex}`,
+      compoundId: rp.compoundId || `compound_${rigidIndex}`,
+      hull,
+      mass: finiteOr(Number(options.massHeavy), 5),
+      edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
+      edgeDyeMode: Array.from({ length: sides }, () => [...EDGE_DYE_DEFLECT_RGB]),
+      digestEnabled: false,
+      digestRGB: [1, 1, 1],
+    });
+
+    const sourceNodeIds = Array.isArray(rp.sourceNodeIds)
+      ? new Set(rp.sourceNodeIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && nodes[id]))
+      : new Set();
+
+    components.push({
+      index: rigidIndex,
+      nodeIds: sourceNodeIds,
+      radius: r,
+    });
+  }
+
+  const mappedWelds = [];
+  for (const w of (rigidWelds || [])) {
+    const a = pieceMap.get(Number(w?.a));
+    const b = pieceMap.get(Number(w?.b));
+    if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
+    const ra = rigidBodies[a];
+    const rb = rigidBodies[b];
+    if (!ra || !rb) continue;
+    mappedWelds.push({
+      a,
+      b,
+      a0: Math.max(0, Math.min(ra.hull.length - 1, Number(w?.a0) | 0)),
+      a1: Math.max(0, Math.min(ra.hull.length - 1, Number(w?.a1) | 0)),
+      b0: Math.max(0, Math.min(rb.hull.length - 1, Number(w?.b0) | 0)),
+      b1: Math.max(0, Math.min(rb.hull.length - 1, Number(w?.b1) | 0)),
+    });
+  }
+
+  return { rigidBodies, rigidWelds: mappedWelds, components };
 }
 
 function buildRigidExport(tris, nodes, options) {

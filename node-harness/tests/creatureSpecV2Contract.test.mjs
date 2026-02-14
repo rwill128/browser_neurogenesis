@@ -95,6 +95,20 @@ test('createCreatureSpecFromMesh emits rigid welds for concave rigid regions', (
   assert.ok(spec.rigidWelds.length >= 1);
 });
 
+test('createCreatureSpecFromMesh prefers compiler-provided rigid decomposition when present', () => {
+  const mesh = sampleMesh();
+  mesh.rigidPieces = [
+    { id: 'p0', compoundId: 'c0', hull: [{ x: 2, y: 2 }, { x: 6, y: 2 }, { x: 4, y: 4 }], sourceNodeIds: [0, 1, 2] },
+    { id: 'p1', compoundId: 'c0', hull: [{ x: 4, y: 4 }, { x: 6, y: 2 }, { x: 6, y: 6 }], sourceNodeIds: [1, 2, 3] },
+  ];
+  mesh.rigidWelds = [{ a: 0, b: 1, a0: 1, a1: 2, b0: 0, b1: 1 }];
+
+  const spec = createCreatureSpecFromMesh(mesh);
+  assert.equal(spec.rigidBodies.length, 2);
+  assert.equal(spec.rigidWelds.length, 1);
+  assert.equal(spec.rigidBodies[0].id, 'p0');
+});
+
 test('buildBodiesFromCreatureSpec ignores invalid joint references safely', () => {
   const spec = createCreatureSpecFromMesh(sampleMesh());
   spec.rigidWelds.push({ a: 999, b: 998, a0: 0, a1: 1, b0: 0, b1: 1 });

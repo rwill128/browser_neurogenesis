@@ -77,9 +77,49 @@ function drawMesh(mesh) {
     mctx.lineTo(c.x * sx, c.y * sy);
     mctx.closePath();
     mctx.fillStyle = tri.kind === 'rigid' ? 'rgba(255,90,90,0.18)' : 'rgba(90,130,255,0.18)';
-    mctx.strokeStyle = tri.kind === 'rigid' ? 'rgba(255,140,140,0.7)' : 'rgba(120,170,255,0.7)';
+    mctx.strokeStyle = tri.kind === 'rigid' ? 'rgba(255,140,140,0.55)' : 'rgba(120,170,255,0.55)';
     mctx.fill();
     mctx.stroke();
+  }
+
+  // Compiler-stage rigid decomposition preview (authoritative for export/import path).
+  if (Array.isArray(mesh.rigidPieces)) {
+    for (const p of mesh.rigidPieces) {
+      if (!p.hull?.length) continue;
+      mctx.beginPath();
+      for (let i = 0; i < p.hull.length; i++) {
+        const hp = p.hull[i];
+        const x = hp.x * sx;
+        const y = hp.y * sy;
+        if (i === 0) mctx.moveTo(x, y);
+        else mctx.lineTo(x, y);
+      }
+      mctx.closePath();
+      mctx.strokeStyle = 'rgba(255,220,130,0.95)';
+      mctx.lineWidth = 2;
+      mctx.stroke();
+      mctx.lineWidth = 1;
+    }
+  }
+
+  if (Array.isArray(mesh.rigidWelds) && Array.isArray(mesh.rigidPieces)) {
+    for (const w of mesh.rigidWelds) {
+      const a = mesh.rigidPieces[w.a];
+      const b = mesh.rigidPieces[w.b];
+      if (!a?.hull?.length || !b?.hull?.length) continue;
+      const a0 = a.hull[w.a0 % a.hull.length];
+      const a1 = a.hull[w.a1 % a.hull.length];
+      const b0 = b.hull[w.b0 % b.hull.length];
+      const b1 = b.hull[w.b1 % b.hull.length];
+      if (!a0 || !a1 || !b0 || !b1) continue;
+      const ma = { x: (a0.x + a1.x) * 0.5, y: (a0.y + a1.y) * 0.5 };
+      const mb = { x: (b0.x + b1.x) * 0.5, y: (b0.y + b1.y) * 0.5 };
+      mctx.strokeStyle = 'rgba(255,180,60,0.95)';
+      mctx.beginPath();
+      mctx.moveTo(ma.x * sx, ma.y * sy);
+      mctx.lineTo(mb.x * sx, mb.y * sy);
+      mctx.stroke();
+    }
   }
 
   out.textContent = JSON.stringify(mesh.meta, null, 2);

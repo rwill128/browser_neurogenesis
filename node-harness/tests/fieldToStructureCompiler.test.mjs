@@ -85,3 +85,35 @@ test('connectivity largest mode enforces single connected body across rigid+soft
   assert.ok(connected.meta.rigidTriangles > 0);
   assert.equal(connected.meta.softTriangles, 0);
 });
+
+test('compiler exposes rigid decomposition pieces and welds at compile time', () => {
+  const w = 24, h = 24;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+
+  // concave-ish rigid "L" shape
+  for (let y = 4; y <= 16; y++) for (let x = 4; x <= 9; x++) rigid[y * w + x] = 1;
+  for (let y = 12; y <= 16; y++) for (let x = 4; x <= 16; x++) rigid[y * w + x] = 1;
+
+  const mesh = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    threshold: 0.2,
+    density: 2,
+    connectivityMode: 'largest',
+  });
+
+  assert.ok(Array.isArray(mesh.rigidPieces));
+  assert.ok(Array.isArray(mesh.rigidWelds));
+  assert.ok(mesh.rigidPieces.length >= 1);
+  for (const p of mesh.rigidPieces) {
+    assert.ok(Array.isArray(p.hull));
+    assert.ok(p.hull.length >= 3);
+  }
+  for (const wld of mesh.rigidWelds) {
+    assert.ok(Number.isInteger(wld.a) && wld.a >= 0 && wld.a < mesh.rigidPieces.length);
+    assert.ok(Number.isInteger(wld.b) && wld.b >= 0 && wld.b < mesh.rigidPieces.length);
+  }
+});

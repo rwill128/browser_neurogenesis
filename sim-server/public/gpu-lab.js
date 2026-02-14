@@ -855,7 +855,8 @@ async function stepAndRender() {
   [s.gg0, s.gg1] = [s.gg1, s.gg0];
   [s.bb0, s.bb1] = [s.bb1, s.bb0];
 
-  const doReadback = (s.frame % 2) === 0;
+  // Read back every frame so body integration/render cadence stays coherent (avoids apparent doubling/jitter).
+  const doReadback = true;
   if (doReadback) {
     enc.copyBufferToBuffer(s.rr0, 0, s.readR, 0, s.bytes);
     enc.copyBufferToBuffer(s.gg0, 0, s.readG, 0, s.bytes);

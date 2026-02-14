@@ -449,6 +449,7 @@ let loopLastAt = Date.now();
 const MAX_STEPS_PER_LOOP_REALTIME = 200;
 const MAX_STEPS_PER_LOOP_MAX = 5000;
 const MAX_MODE_BATCH_WALL_MS = 25;
+const REALTIME_BATCH_WALL_MS = 8; // reserve event-loop time for status/snapshot RPC responsiveness
 const REALTIME_MAX_STEPS_PER_SEC = Number.POSITIVE_INFINITY;
 const REALTIME_MIN_STEP_INTERVAL_MS = 0;
 
@@ -490,7 +491,11 @@ function runLoop() {
     } else {
       accumulatorMs += elapsed;
       const dtMs = dt * 1000;
+      const realtimeBatchStart = Date.now();
       while (accumulatorMs >= dtMs && steps < MAX_STEPS_PER_LOOP_REALTIME) {
+        if ((Date.now() - realtimeBatchStart) >= REALTIME_BATCH_WALL_MS) {
+          break;
+        }
         const nowStep = Date.now();
         if (lastRealtimeStepAt && (nowStep - lastRealtimeStepAt) < REALTIME_MIN_STEP_INTERVAL_MS) {
           break;

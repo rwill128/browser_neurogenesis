@@ -982,7 +982,7 @@ async function refreshWorlds() {
   return data;
 }
 
-function connectStream({ worldId, mode = 'render', hz = 10 } = {}) {
+function connectStream({ worldId, mode = 'render', hz = 2 } = {}) {
   if (ws) {
     try { ws.close(); } catch {}
     ws = null;

@@ -703,8 +703,8 @@ parentPort.on('message', (msg) => {
           }
 
           if (!snapshot) {
-            const fresh = captureRenderFrameIfNeeded({ force: true });
-            snapshot = fresh || getLatestRenderFrame() || computeSnapshot('render');
+            // Archive-first policy: prefer already-buffered render frames; do not force fresh capture.
+            snapshot = getLatestRenderFrame() || captureRenderFrameIfNeeded({ force: true }) || computeSnapshot('render');
           }
         } else {
           snapshot = computeSnapshot(mode);
@@ -739,10 +739,8 @@ parentPort.on('message', (msg) => {
             }
           }
 
-          // No explicit historical request: force-capture a fresh frame so HTTP/WS render snapshots
-          // stay aligned with current simulation status even after idle frame-buffer periods.
-          const fresh = captureRenderFrameIfNeeded({ force: true });
-          const latest = fresh || getLatestRenderFrame() || computeSnapshot('render');
+          // Archive-first policy: return latest buffered frame by default; only seed one if empty.
+          const latest = getLatestRenderFrame() || captureRenderFrameIfNeeded({ force: true }) || computeSnapshot('render');
           perfAdd('snapshot', Date.now() - tSnap0);
           return reply(requestId, { ok: true, result: latest });
         }

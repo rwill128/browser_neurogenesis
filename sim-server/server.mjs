@@ -1734,13 +1734,13 @@ app.post('/api/control/setScenario', async (req, reply) => {
 });
 
 // --- WebSocket stream ---
-// ws://host/ws?world=w0&mode=render&hz=10
+// ws://host/ws?world=w0&mode=render&hz=2
 app.get('/ws', { websocket: true }, (socket, req) => {
   const url = new URL(req.url, 'http://localhost');
   const mode = url.searchParams.get('mode') || 'render';
   const worldId = url.searchParams.get('world') || DEFAULT_WORLD_ID;
-  const hzRaw = Number(url.searchParams.get('hz') || 10);
-  const hz = Number.isFinite(hzRaw) ? Math.max(1, Math.min(60, Math.floor(hzRaw))) : 10;
+  const hzRaw = Number(url.searchParams.get('hz') || 2);
+  const hz = Number.isFinite(hzRaw) ? Math.max(1, Math.min(30, Math.floor(hzRaw))) : 2;
   const intervalMs = Math.max(16, Math.floor(1000 / hz));
 
   let handle;

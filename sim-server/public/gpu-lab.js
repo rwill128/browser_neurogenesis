@@ -1282,14 +1282,14 @@ function stepBodiesAndInject(sim, vxField, vyField) {
         const dx = node.x - anchor.x;
         const dy = node.y - anchor.y;
         const d = Math.max(1e-6, Math.hypot(dx, dy));
-        const err = (d - rest) * 0.85;
+        const err = (d - rest) * 1.12;
         const nx = dx / d, ny = dy / d;
-        node.vx -= nx * err * 0.06;
-        node.vy -= ny * err * 0.06;
-        // Small reaction torque/force into rigid body for two-way feel.
-        rb.vx += nx * err * 0.008;
-        rb.vy += ny * err * 0.008;
-        rb.omega = (rb.omega || 0) + (nx * ny) * err * 0.0008;
+        node.vx -= nx * err * 0.09;
+        node.vy -= ny * err * 0.09;
+        // Slightly stronger reaction into rigid body for tighter compound behavior.
+        rb.vx += nx * err * 0.012;
+        rb.vy += ny * err * 0.012;
+        rb.omega = (rb.omega || 0) + (nx * ny) * err * 0.0012;
       }
     }
   }

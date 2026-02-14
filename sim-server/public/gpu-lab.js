@@ -276,6 +276,9 @@ async function createPipeline(device, code) {
 let running = false;
 let sim = null;
 let painting = false;
+let panning = false;
+let panLastX = 0;
+let panLastY = 0;
 
 function uploadViscMap() {
   if (!sim) return;
@@ -312,7 +315,8 @@ function drawViscosityOverlay() {
   const tmp = document.createElement('canvas');
   tmp.width = n; tmp.height = n;
   tmp.getContext('2d').putImageData(img, 0, 0);
-  ctx.drawImage(tmp, 0, 0, n, n, 0, 0, canvas.width, canvas.height);
+  const view = getCameraView(sim);
+  ctx.drawImage(tmp, view.x, view.y, view.w, view.h, 0, 0, canvas.width, canvas.height);
 }
 
 function resetViscMap() {
@@ -322,12 +326,52 @@ function resetViscMap() {
   log({ ok: true, msg: 'viscosity map reset' });
 }
 
+function clampCamera(s) {
+  const n = s.controls.n;
+  const cam = s.camera;
+  const minZoom = 1;
+  const maxZoom = Math.max(1, n / 64);
+  cam.zoom = Math.max(minZoom, Math.min(maxZoom, cam.zoom));
+  const halfW = n / (2 * cam.zoom);
+  const halfH = n / (2 * cam.zoom);
+  cam.x = Math.max(halfW, Math.min(n - halfW, cam.x));
+  cam.y = Math.max(halfH, Math.min(n - halfH, cam.y));
+}
+
+function getCameraView(s) {
+  clampCamera(s);
+  const n = s.controls.n;
+  const cam = s.camera;
+  const vw = n / cam.zoom;
+  const vh = n / cam.zoom;
+  return { x: cam.x - vw * 0.5, y: cam.y - vh * 0.5, w: vw, h: vh };
+}
+
+function screenToWorld(s, clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const nx = (clientX - rect.left) / Math.max(1, rect.width);
+  const ny = (clientY - rect.top) / Math.max(1, rect.height);
+  const v = getCameraView(s);
+  return {
+    x: v.x + nx * v.w,
+    y: v.y + ny * v.h,
+  };
+}
+
+function worldToScreen(s, wx, wy) {
+  const v = getCameraView(s);
+  const sx = ((wx - v.x) / v.w) * canvas.width;
+  const sy = ((wy - v.y) / v.h) * canvas.height;
+  return { x: sx, y: sy };
+}
+
 function paintAt(clientX, clientY, erase = false) {
   if (!sim) return;
-  const rect = canvas.getBoundingClientRect();
-  const x = ((clientX - rect.left) / rect.width) * sim.controls.n;
-  const y = ((clientY - rect.top) / rect.height) * sim.controls.n;
-  const r = Math.max(1, Number(brushSizeEl.value) || 12) * (sim.controls.n / canvas.width);
+  const p = screenToWorld(sim, clientX, clientY);
+  const x = p.x;
+  const y = p.y;
+  const view = getCameraView(sim);
+  const r = Math.max(1, Number(brushSizeEl.value) || 12) * (view.w / canvas.width);
   const value = erase ? 0.05 : Math.max(0, Math.min(1, Number(paintValueEl.value) || 0.85));
 
   const minX = Math.max(0, Math.floor(x - r));
@@ -352,14 +396,46 @@ function paintAt(clientX, clientY, erase = false) {
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('mousedown', (e) => {
+  if (!sim) return;
+  const panIntent = e.button === 1 || e.altKey || (e.button === 2 && !e.shiftKey);
+  if (panIntent) {
+    panning = true;
+    panLastX = e.clientX;
+    panLastY = e.clientY;
+    return;
+  }
   painting = true;
   paintAt(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
 });
-window.addEventListener('mouseup', () => { painting = false; });
+window.addEventListener('mouseup', () => { painting = false; panning = false; });
 canvas.addEventListener('mousemove', (e) => {
+  if (!sim) return;
+  if (panning) {
+    const dx = e.clientX - panLastX;
+    const dy = e.clientY - panLastY;
+    panLastX = e.clientX;
+    panLastY = e.clientY;
+    const view = getCameraView(sim);
+    sim.camera.x -= (dx / canvas.width) * view.w;
+    sim.camera.y -= (dy / canvas.height) * view.h;
+    clampCamera(sim);
+    return;
+  }
   if (!painting) return;
   paintAt(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
 });
+canvas.addEventListener('wheel', (e) => {
+  if (!sim) return;
+  e.preventDefault();
+  const before = screenToWorld(sim, e.clientX, e.clientY);
+  const zoomMul = e.deltaY < 0 ? 1.12 : (1 / 1.12);
+  sim.camera.zoom *= zoomMul;
+  clampCamera(sim);
+  const after = screenToWorld(sim, e.clientX, e.clientY);
+  sim.camera.x += before.x - after.x;
+  sim.camera.y += before.y - after.y;
+  clampCamera(sim);
+}, { passive: false });
 
 function sampleFieldBilinear(field, n, x, y) {
   const cx = Math.max(0, Math.min(n - 1.001, x));
@@ -794,9 +870,9 @@ function drawRegularPolygon(cx, cy, radius, sides, rotation = 0) {
 }
 
 function drawBodiesOverlay(sim) {
-  const n = sim.controls.n;
-  const sx = canvas.width / n;
   const smooth = 0.35;
+  const v = getCameraView(sim);
+  const pxPerWorld = canvas.width / v.w;
   ctx.save();
   ctx.lineWidth = 1.5;
   for (let i = 0; i < sim.bodies.rigid.length; i++) {
@@ -808,13 +884,14 @@ function drawBodiesOverlay(sim) {
       b._ry += (b.y - b._ry) * smooth;
       b._rtheta += ((b.theta || 0) - b._rtheta) * smooth;
     }
+    const sp = worldToScreen(sim, b._rx, b._ry);
     ctx.strokeStyle = '#ffffff';
     ctx.fillStyle = 'rgba(255,255,255,0.06)';
     ctx.beginPath();
     drawRegularPolygon(
-      b._rx * sx,
-      b._ry * sx,
-      b.r * sx,
+      sp.x,
+      sp.y,
+      b.r * pxPerWorld,
       i === 0 ? 3 : 4,
       (b._rtheta || 0) + (i === 0 ? -Math.PI * 0.5 : Math.PI * 0.25)
     );
@@ -833,23 +910,26 @@ function drawBodiesOverlay(sim) {
   ctx.strokeStyle = '#7ee0ff';
   for (const [i, j] of s.springs) {
     const a = s.nodes[i], b = s.nodes[j];
+    const pa = worldToScreen(sim, a._rx, a._ry);
+    const pb = worldToScreen(sim, b._rx, b._ry);
     ctx.beginPath();
-    ctx.moveTo(a._rx * sx, a._ry * sx);
-    ctx.lineTo(b._rx * sx, b._ry * sx);
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
     ctx.stroke();
   }
   for (const node of s.nodes) {
+    const p = worldToScreen(sim, node._rx, node._ry);
     ctx.fillStyle = '#00ffd0';
     ctx.beginPath();
-    ctx.arc(node._rx * sx, node._ry * sx, 2.2, 0, Math.PI * 2);
+    ctx.arc(p.x, p.y, Math.max(1.6, 2.2 * Math.max(1, sim.camera.zoom * 0.6)), 0, Math.PI * 2);
     ctx.fill();
   }
 
   ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
-  ctx.fillText('Rigid = white polygons', 10, canvas.height - 28);
+  ctx.fillText(`Rigid = white polygons | zoom ${sim.camera.zoom.toFixed(2)}x`, 10, canvas.height - 28);
   ctx.fillStyle = 'rgba(0,255,208,0.95)';
-  ctx.fillText('Soft = cyan spring mesh', 10, canvas.height - 12);
+  ctx.fillText('Soft = cyan spring mesh | Alt+drag/right-drag pan, wheel zoom', 10, canvas.height - 12);
   ctx.restore();
 }
 
@@ -902,6 +982,7 @@ async function initSim() {
     div, readR, readG, readB, readVx, readVy,
     bodies: initBodies(controls.n, controls),
     emitters: initEmitters(controls.n),
+    camera: { x: controls.n * 0.5, y: controls.n * 0.5, zoom: controls.n >= 1024 ? 1.8 : 1.0 },
     couplingTelemetry: [],
     frame: 0, t0: performance.now(),
   };
@@ -1029,8 +1110,9 @@ async function stepAndRender() {
     const tmp = document.createElement('canvas');
     tmp.width = n; tmp.height = n;
     tmp.getContext('2d').putImageData(img, 0, 0);
+    const view = getCameraView(s);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(tmp, 0, 0, n, n, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(tmp, view.x, view.y, view.w, view.h, 0, 0, canvas.width, canvas.height);
     drawViscosityOverlay();
     drawBodiesOverlay(s);
 

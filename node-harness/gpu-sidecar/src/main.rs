@@ -179,8 +179,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     drop(mapped);
     readback.unmap();
 
+    let ok = mismatch_count == 0 && max_abs_error <= 1e-5;
+
     Ok(SmokeResponse {
-        ok: true,
+        ok,
         backend: "metal/wgpu",
         n,
         elapsed_ms: t0.elapsed().as_secs_f64() * 1000.0,

@@ -473,6 +473,7 @@ function initBodies(n, controls) {
       r,
       sides,
       edgeDyeBlock,
+      digestEnabled: (i % 2) === 0,
       mass,
       theta: Math.random() * Math.PI * 2,
       omega: 0,
@@ -498,7 +499,16 @@ function initBodies(n, controls) {
     }
 
     for (const p of local) {
-      softNodes.push({ x: p.x, y: p.y, vx: 0, vy: 0, mass: controls.massSoft, r: 1.4 * scale * bodyScale, clusterId: c });
+      softNodes.push({
+        x: p.x,
+        y: p.y,
+        vx: 0,
+        vy: 0,
+        mass: controls.massSoft,
+        r: 1.4 * scale * bodyScale,
+        clusterId: c,
+        digestEnabled: (c % 2) === 0,
+      });
     }
 
     // Ring springs (solid edges: rigid bodies should collide with them).
@@ -1152,6 +1162,7 @@ function applyDigestiveCapture(sim, r, g, b) {
   let captured = 0;
 
   for (const rb of sim.bodies.rigid) {
+    if (!rb.digestEnabled) continue;
     const sides = Math.max(3, rb.sides || 4);
     const verts = [];
     for (let i = 0; i < sides; i++) {
@@ -1187,6 +1198,7 @@ function applyDigestiveCapture(sim, r, g, b) {
   }
   for (const nodes of clusters.values()) {
     if (nodes.length < 3) continue;
+    if (!nodes[0].digestEnabled) continue;
     let cx = 0, cy = 0;
     for (const n0 of nodes) { cx += n0.x; cy += n0.y; }
     cx /= nodes.length; cy /= nodes.length;

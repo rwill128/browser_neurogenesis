@@ -235,6 +235,7 @@ function computeStatus() {
       archivePostMsMax: Number(perf.archivePostMsMax.toFixed(3)),
       snapshotMsAvg: perfAvg(perf.snapshotMsTotal, perf.snapshotSamples),
       snapshotMsMax: Number(perf.snapshotMsMax.toFixed(3)),
+      latestStepBreakdown: world?.worldState?.lastStepTiming || null,
       samples: {
         step: perf.stepSamples,
         archiveSerialize: perf.archiveSerializeSamples,

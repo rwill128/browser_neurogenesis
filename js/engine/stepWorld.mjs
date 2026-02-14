@@ -962,6 +962,7 @@ function removeUnstableBodies(state, {
  * @returns {{removedCount:number,removedBodies:object[],currentAnyUnstable:boolean,spawnTelemetry:object,reproductionTelemetry:object,computeTelemetry:object,populations:{creatures:number,particles:number}}}
  */
 export function stepWorld(state, dt, options = {}) {
+  const tStep0 = Date.now();
   const {
     config,
     configViews = null,
@@ -988,11 +989,26 @@ export function stepWorld(state, dt, options = {}) {
     throw new Error('stepWorld requires options.config or options.configViews');
   }
 
+  const stepTiming = {
+    totalMs: 0,
+    newbornStabilizeMs: 0,
+    spatialGridMs: 0,
+    emittersMs: 0,
+    particlesMs: 0,
+    fluidMs: 0,
+    creatureUpdateMs: 0,
+    reproductionMs: 0,
+    telemetryMs: 0,
+    cleanupMs: 0,
+    floorMs: 0
+  };
+
   state.simulationStep = (Number(state.simulationStep) || 0) + 1;
   ensureInstabilityTelemetryState(state, maxRecentInstabilityDeaths);
 
   // One-time newborn stabilization pass for already-present creatures (initial population,
   // freshly loaded worlds, or externally inserted bodies).
+  let t0 = Date.now();
   for (const body of state.softBodyPopulation) {
     if (!body || body.isUnstable || body.__newbornStabilityApplied) continue;
     if (Number.isFinite(Number(body.ticksSinceBirth)) && Number(body.ticksSinceBirth) > 1) {
@@ -1007,12 +1023,19 @@ export function stepWorld(state, dt, options = {}) {
     body.__newbornStabilityApplied = true;
   }
 
-  updateSpatialGrid(state, runtimeConfig, constants);
+  stepTiming.newbornStabilizeMs += (Date.now() - t0);
 
+  t0 = Date.now();
+  updateSpatialGrid(state, runtimeConfig, constants);
+  stepTiming.spatialGridMs += (Date.now() - t0);
+
+  t0 = Date.now();
   if (applyEmitters) {
     applyVelocityEmitters(state, runtimeConfig);
   }
+  stepTiming.emittersMs += (Date.now() - t0);
 
+  t0 = Date.now();
   if (ParticleClass && state.fluidField) {
     if (maintainParticleFloor && state.particles.length < runtimeConfig.PARTICLE_POPULATION_FLOOR) {
       let particlesToSpawnToFloor = runtimeConfig.PARTICLE_POPULATION_FLOOR - state.particles.length;
@@ -1032,7 +1055,9 @@ export function stepWorld(state, dt, options = {}) {
       }
     }
   }
+  stepTiming.particlesMs += (Date.now() - t0);
 
+  t0 = Date.now();
   if (applySelectedPointPush) {
     maybeApplySelectedPointFluidPush(state, runtimeConfig);
   }
@@ -1050,6 +1075,7 @@ export function stepWorld(state, dt, options = {}) {
       state.fluidField.step(worldTick);
     }
   }
+  stepTiming.fluidMs += (Date.now() - t0);
 
   const creatureCeiling = runtimeConfig.CREATURE_POPULATION_CEILING;
   const canCreaturesReproduceGlobally = allowReproduction && state.softBodyPopulation.length < creatureCeiling;
@@ -1082,10 +1108,13 @@ export function stepWorld(state, dt, options = {}) {
   });
   state.lastComputeTelemetry = creatureExecutionPlan.telemetry;
 
+  const creatureLoopStart = Date.now();
   for (const body of creatureExecutionPlan.order) {
     if (!body || body.isUnstable) continue;
 
+    let tUpdate = Date.now();
     withRandomSource(rng, () => body.updateSelf(dt, state.fluidField));
+    stepTiming.creatureUpdateMs += (Date.now() - tUpdate);
     if (body.isUnstable) {
       currentAnyUnstable = true;
       continue;
@@ -1157,7 +1186,10 @@ export function stepWorld(state, dt, options = {}) {
       reproductionTelemetry.suppressedByPlacementOrOther += 1;
     }
   }
+  const creatureLoopMs = Date.now() - creatureLoopStart;
+  stepTiming.reproductionMs += Math.max(0, creatureLoopMs - stepTiming.creatureUpdateMs);
 
+  t0 = Date.now();
   if (newOffspring.length) {
     for (const child of newOffspring) {
       stabilizeNewbornBody(child, {
@@ -1170,7 +1202,9 @@ export function stepWorld(state, dt, options = {}) {
   }
 
   updateEdgeLengthTelemetry(state, runtimeConfig);
+  stepTiming.telemetryMs += (Date.now() - t0);
 
+  t0 = Date.now();
   removeDeadParticles(state, dt, rng);
 
   if (currentAnyUnstable && !runtimeConfig.isAnySoftBodyUnstable) {
@@ -1185,9 +1219,11 @@ export function stepWorld(state, dt, options = {}) {
     diagnosticEveryN: instabilityDiagnosticEveryN ?? runtimeConfig.INSTABILITY_DIAGNOSTIC_EVERY_N ?? 100,
     diagnosticReasons: instabilityDiagnosticReasons ?? runtimeConfig.INSTABILITY_DIAGNOSTIC_REASONS ?? null
   });
+  stepTiming.cleanupMs += (Date.now() - t0);
   const removedCount = removal.removedCount;
   const removedBodies = removal.removedBodies;
 
+  t0 = Date.now();
   if (maintainCreatureFloor && SoftBodyClass) {
     const neededToMaintainFloor = runtimeConfig.CREATURE_POPULATION_FLOOR - state.softBodyPopulation.length;
     if (neededToMaintainFloor > 0) {
@@ -1198,6 +1234,8 @@ export function stepWorld(state, dt, options = {}) {
       }
     }
   }
+  stepTiming.floorMs += (Date.now() - t0);
+  stepTiming.totalMs = Date.now() - tStep0;
 
   return {
     removedCount,
@@ -1210,6 +1248,7 @@ export function stepWorld(state, dt, options = {}) {
     },
     reproductionTelemetry,
     computeTelemetry: creatureExecutionPlan.telemetry,
+    stepTiming,
     populations: {
       creatures: state.softBodyPopulation.length,
       particles: state.particles.length

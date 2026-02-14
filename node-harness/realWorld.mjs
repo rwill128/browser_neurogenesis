@@ -358,6 +358,10 @@ export class RealWorld {
       creatureShuffleWithinIsland: this.stepBehavior.creatureShuffleWithinIsland
     });
 
+    if (stepResult && typeof stepResult.stepTiming === 'object') {
+      this.worldState.lastStepTiming = stepResult.stepTiming;
+    }
+
     this._syncAliasesFromWorldState();
     return stepResult;
   }

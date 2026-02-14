@@ -1916,15 +1916,30 @@ if (importSpecBtn && importSpecFile) {
     try {
       const text = await f.text();
       const spec = parseCreatureSpec(text);
-      if (sim) {
+      const targetN = readControls().n;
+
+      // Important: if a stale sim instance exists at a different grid,
+      // importing directly into it gets wiped by the next reinit.
+      const simMatchesTargetGrid = !!sim && sim.controls.n === targetN;
+
+      if (simMatchesTargetGrid) {
         const imported = buildBodiesFromCreatureSpec(spec, sim.controls.n, sim.controls);
         mergeBodiesIntoSim(sim.bodies, imported);
+        log({ ok: true, msg: 'CreatureSpec imported (appended)', name: spec.name || 'unnamed', grid: sim.controls.n });
       } else {
         pendingImportedSpecs.push(spec);
+        log({
+          ok: true,
+          msg: 'CreatureSpec queued for import on next start/reinit at selected grid',
+          name: spec.name || 'unnamed',
+          selectedGrid: targetN,
+          currentGrid: sim?.controls?.n ?? null,
+        });
       }
-      log({ ok: true, msg: 'CreatureSpec imported (appended)', name: spec.name || 'unnamed' });
     } catch (e) {
       log({ ok: false, error: `Import failed: ${String(e)}` });
+    } finally {
+      importSpecFile.value = '';
     }
   });
 }

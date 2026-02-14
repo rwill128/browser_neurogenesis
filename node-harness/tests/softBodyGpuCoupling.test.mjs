@@ -445,6 +445,74 @@ test('GPU coupling clamps injected fluid impulses per component and skips tiny j
   }
 });
 
+test('GPU coupling caps fluid carry displacement per step for soft and rigid-linked points', () => {
+  const cfgBackup = {
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED,
+    FLUID_CURRENT_STRENGTH_ON_BODY: config.FLUID_CURRENT_STRENGTH_ON_BODY,
+    BODY_FLUID_ENTRAINMENT_FACTOR: config.BODY_FLUID_ENTRAINMENT_FACTOR,
+    BODY_FLUID_CARRY_NEUTRAL_FACTOR: config.BODY_FLUID_CARRY_NEUTRAL_FACTOR,
+    BODY_FLUID_CARRY_RIGID_BOOST: config.BODY_FLUID_CARRY_RIGID_BOOST,
+    BODY_FLUID_COUPLING_MAX_REL_SPEED: config.BODY_FLUID_COUPLING_MAX_REL_SPEED,
+    BODY_FLUID_CARRY_MAX_DISPLACEMENT_PER_STEP: config.BODY_FLUID_CARRY_MAX_DISPLACEMENT_PER_STEP
+  };
+
+  try {
+    config.DYE_ECOLOGY_ENABLED = false;
+    config.FLUID_CURRENT_STRENGTH_ON_BODY = 1.0;
+    config.BODY_FLUID_ENTRAINMENT_FACTOR = 1.0;
+    config.BODY_FLUID_CARRY_NEUTRAL_FACTOR = 1.0;
+    config.BODY_FLUID_CARRY_RIGID_BOOST = 0.8;
+    config.BODY_FLUID_COUPLING_MAX_REL_SPEED = 4.0;
+    config.BODY_FLUID_CARRY_MAX_DISPLACEMENT_PER_STEP = 0.06;
+
+    const dt = 1 / 60;
+    const carryCap = config.BODY_FLUID_CARRY_MAX_DISPLACEMENT_PER_STEP;
+
+    const fluidSoft = makeGpuStyleFluid({ vx: 120, vy: 0 });
+    const softBody = new SoftBody(9401, 20, 20, null, false);
+    const softPoint = softBody.massPoints[0];
+    softPoint.nodeType = NodeType.EATER;
+    softPoint.movementType = MovementType.NEUTRAL;
+    softPoint.pos.x = 20;
+    softPoint.prevPos.x = 20;
+    softPoint.pos.y = 20;
+    softPoint.prevPos.y = 20;
+    softBody.massPoints = [softPoint];
+    softBody.springs = [];
+
+    softBody._performPhysicalUpdates(dt, fluidSoft);
+
+    const fluidRigid = makeGpuStyleFluid({ vx: 120, vy: 0 });
+    const rigidBody = new SoftBody(9402, 20, 20, null, false);
+    const rigidPoint = rigidBody.massPoints[0];
+    const anchorBody = new SoftBody(9403, 22, 20, null, false);
+    const anchorPoint = anchorBody.massPoints[0];
+
+    rigidPoint.nodeType = NodeType.EATER;
+    rigidPoint.movementType = MovementType.NEUTRAL;
+    rigidPoint.pos.x = 20;
+    rigidPoint.prevPos.x = 20;
+    rigidPoint.pos.y = 20;
+    rigidPoint.prevPos.y = 20;
+
+    anchorPoint.movementType = MovementType.FIXED;
+
+    rigidBody.massPoints = [rigidPoint, anchorPoint];
+    rigidBody.springs = [new Spring(rigidPoint, anchorPoint, 1, 0.1, 2, true)];
+
+    rigidBody._performPhysicalUpdates(dt, fluidRigid);
+
+    assert.ok(softBody.fluidCouplingCarryDisplacement <= carryCap + 1e-6,
+      `soft carry should be capped per step (soft=${softBody.fluidCouplingCarryDisplacement}, cap=${carryCap})`);
+    assert.ok(rigidBody.fluidCouplingCarryDisplacement <= carryCap + 1e-6,
+      `rigid carry should be capped per step (rigid=${rigidBody.fluidCouplingCarryDisplacement}, cap=${carryCap})`);
+    assert.ok(Number.isFinite(softBody.fluidCouplingCarryDisplacement) && Number.isFinite(rigidBody.fluidCouplingCarryDisplacement),
+      'carry telemetry should stay finite under extreme currents');
+  } finally {
+    Object.assign(config, cfgBackup);
+  }
+});
+
 test('GPU coupling sanitizes non-finite sampled world velocity before drag/feedback', () => {
   const cfgBackup = {
     DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED,

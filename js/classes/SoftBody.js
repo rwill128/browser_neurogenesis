@@ -4040,12 +4040,21 @@ export class SoftBody {
                         .mulInPlace(this.fluidCurrentStrength)
                         .mulInPlace(this.fluidEntrainment)
                         .mulInPlace(carryGate * rigidCarryGain);
+                    const carryCapPerStepRaw = Number(config.BODY_FLUID_CARRY_MAX_DISPLACEMENT_PER_STEP);
+                    const carryCapPerStep = Number.isFinite(carryCapPerStepRaw) && carryCapPerStepRaw > 0
+                        ? carryCapPerStepRaw
+                        : null;
+                    const carryMag = Math.hypot(this._tempVec2.x, this._tempVec2.y);
+                    if (carryCapPerStep !== null && carryMag > carryCapPerStep) {
+                        const carryScale = carryCapPerStep / Math.max(1e-12, carryMag);
+                        this._tempVec2.mulInPlace(carryScale);
+                    }
                     this._tempVec1.addInPlace(this._tempVec2);
                     point.prevPos.copyFrom(point.pos).subInPlace(this._tempVec1);
-                    const carryMag = Math.hypot(this._tempVec2.x, this._tempVec2.y);
-                    carryDisplacementAccum += carryMag;
-                    softCarryDisplacementAccum += carryMag * (1 - rigidMix);
-                    rigidCarryDisplacementAccum += carryMag * rigidMix;
+                    const appliedCarryMag = Math.hypot(this._tempVec2.x, this._tempVec2.y);
+                    carryDisplacementAccum += appliedCarryMag;
+                    softCarryDisplacementAccum += appliedCarryMag * (1 - rigidMix);
+                    rigidCarryDisplacementAccum += appliedCarryMag * rigidMix;
                 }
 
                 const dragCoeff = softDrag + (rigidDrag - softDrag) * rigidMix;

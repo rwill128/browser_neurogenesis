@@ -9,6 +9,20 @@ import {
 
 const CONTROLS = { massSoft: 0.6, massHeavy: 5.0 };
 
+function isConcave(poly) {
+  let hasPos = false;
+  let hasNeg = false;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const c = poly[(i + 2) % poly.length];
+    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+    if (cross > 1e-6) hasPos = true;
+    if (cross < -1e-6) hasNeg = true;
+  }
+  return hasPos && hasNeg;
+}
+
 function sampleMesh() {
   return {
     nodes: [
@@ -97,6 +111,32 @@ test('createCreatureSpecFromMesh keeps compiler concave decomposition fused as o
   assert.equal(spec.rigidWelds, undefined);
   assert.ok(Array.isArray(spec.rigidBodies[0].subHulls));
   assert.equal(spec.rigidBodies[0].subHulls.length, 2);
+});
+
+test('createCreatureSpecFromMesh preserves concave hull when compiler supplies single concave rigid piece', () => {
+  const mesh = sampleMesh();
+  mesh.rigidPieces = [
+    {
+      id: 'p0',
+      compoundId: 'c0',
+      hull: [
+        { x: 0, y: 0 },
+        { x: 6, y: 0 },
+        { x: 6, y: 2 },
+        { x: 2, y: 2 },
+        { x: 2, y: 6 },
+        { x: 0, y: 6 },
+      ],
+      sourceNodeIds: [0, 1, 2, 3],
+    },
+  ];
+
+  const spec = createCreatureSpecFromMesh(mesh);
+  assert.equal(spec.rigidBodies.length, 1);
+  assert.equal(spec.rigidWelds, undefined);
+  assert.equal(spec.rigidBodies[0].compoundId, 'c0');
+  assert.equal(spec.rigidBodies[0].hull.length, 6);
+  assert.ok(isConcave(spec.rigidBodies[0].hull));
 });
 
 test('createCreatureSpecFromMesh prefers compiler-provided rigid decomposition when present', () => {

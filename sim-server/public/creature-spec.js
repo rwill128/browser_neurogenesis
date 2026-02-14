@@ -240,7 +240,11 @@ function buildRigidExportFromCompilerPieces(rigidPieces, rigidWelds, nodes, opti
       for (const sid of p.sourceNodeIds) sourceNodeSet.add(sid);
     }
 
-    const outerHull = convexHull(allPoints);
+    // Preserve compiler-authored concavity when a compound already comes as a single contour piece.
+    // Only fall back to convex merge when multiple disjoint sub-hulls must be combined.
+    const outerHull = pieces.length === 1
+      ? pieces[0].hull.map((v) => ({ x: v.x, y: v.y }))
+      : convexHull(allPoints);
     if (outerHull.length < 3) continue;
 
     const c = centroid(outerHull);

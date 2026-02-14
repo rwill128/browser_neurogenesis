@@ -258,6 +258,7 @@ function buildRigidExportFromCompilerPieces(rigidPieces, rigidWelds, nodes, opti
   }
 
   const mappedWelds = [];
+  const weldSeen = new Set();
   for (const w of (rigidWelds || [])) {
     const a = pieceMap.get(Number(w?.a));
     const b = pieceMap.get(Number(w?.b));
@@ -265,6 +266,13 @@ function buildRigidExportFromCompilerPieces(rigidPieces, rigidWelds, nodes, opti
     const ra = rigidBodies[a];
     const rb = rigidBodies[b];
     if (!ra || !rb) continue;
+    // Guardrail: keep compiler welds within the same rigid compound only.
+    if ((ra.compoundId || '') !== (rb.compoundId || '')) continue;
+
+    const pairKey = a < b ? `${a}:${b}` : `${b}:${a}`;
+    if (weldSeen.has(pairKey)) continue;
+    weldSeen.add(pairKey);
+
     mappedWelds.push({
       a,
       b,

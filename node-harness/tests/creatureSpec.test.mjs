@@ -102,6 +102,36 @@ test('hybrid links anchor to nearest rigid hull edge for irregular rigid meshes'
   }
 });
 
+test('createCreatureSpecFromMesh sanitizes compiler welds (same-compound + dedupe)', () => {
+  const mesh = {
+    nodes: [
+      { id: 0, x: 0, y: 0, rigid: 1, soft: 0 },
+      { id: 1, x: 4, y: 0, rigid: 1, soft: 0 },
+      { id: 2, x: 4, y: 4, rigid: 1, soft: 0 },
+      { id: 3, x: 0, y: 4, rigid: 1, soft: 0 },
+    ],
+    triangles: [],
+    rigidPieces: [
+      { id: 'p0', compoundId: 'compound_A', hull: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 1, y: 2 }], sourceNodeIds: [0, 1, 2] },
+      { id: 'p1', compoundId: 'compound_A', hull: [{ x: 2, y: 0 }, { x: 4, y: 0 }, { x: 3, y: 2 }], sourceNodeIds: [1, 2, 3] },
+      { id: 'p2', compoundId: 'compound_B', hull: [{ x: 2, y: 2 }, { x: 4, y: 2 }, { x: 3, y: 4 }], sourceNodeIds: [1, 2, 3] },
+    ],
+    rigidWelds: [
+      { a: 0, b: 1, a0: 0, a1: 1, b0: 0, b1: 1 },
+      { a: 1, b: 0, a0: 1, a1: 2, b0: 1, b1: 2 }, // duplicate pair, reverse order
+      { a: 1, b: 2, a0: 0, a1: 1, b0: 0, b1: 1 }, // cross-compound, should be dropped
+      { a: 99, b: 0, a0: 0, a1: 1, b0: 0, b1: 1 }, // invalid index, should be dropped
+    ],
+    meta: { width: 8, height: 8 },
+  };
+
+  const spec = createCreatureSpecFromMesh(mesh);
+  assert.equal(spec.rigidBodies.length, 3);
+  assert.equal(spec.rigidWelds.length, 1);
+  assert.equal(spec.rigidWelds[0].a, 0);
+  assert.equal(spec.rigidWelds[0].b, 1);
+});
+
 test('hybrid links at rigid vertices choose a local incident edge (deterministic tie-break)', () => {
   const mesh = {
     nodes: [

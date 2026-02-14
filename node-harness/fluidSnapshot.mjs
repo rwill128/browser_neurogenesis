@@ -129,6 +129,9 @@ export function collectFluidSnapshot({
     fluidStepPerf: typeof fluidField.getLastStepPerf === 'function'
       ? fluidField.getLastStepPerf()
       : null,
+    activeTileDebug: typeof fluidField.getActiveTileDebugCells === 'function'
+      ? fluidField.getActiveTileDebugCells(30000)
+      : null,
     boundsWorld: {
       x: Number(x0.toFixed(3)),
       y: Number(y0.toFixed(3)),

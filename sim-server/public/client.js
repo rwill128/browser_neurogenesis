@@ -13,6 +13,7 @@ const runModeSelect = document.getElementById('runModeSelect');
 const setRunModeBtn = document.getElementById('setRunModeBtn');
 const fitBtn = document.getElementById('fitBtn');
 const showFluidVelocityToggle = document.getElementById('showFluidVelocityToggle');
+const showFluidActiveTilesToggle = document.getElementById('showFluidActiveTilesToggle');
 
 const prevCreatureBtn = document.getElementById('prevCreatureBtn');
 const nextCreatureBtn = document.getElementById('nextCreatureBtn');
@@ -56,6 +57,7 @@ function scheduleRender({ includePanels = false } = {}) {
 
 let creatureStatsMode = 'compact';
 let showFluidVelocityArrows = false;
+let showFluidActiveTilesOverlay = false;
 
 function syncCreatureStatsModeUI() {
   if (creatureStatsModeBtn) {
@@ -877,6 +879,27 @@ function drawSnapshot(snap, { includePanels = true } = {}) {
     }
   }
 
+  if (showFluidActiveTilesOverlay) {
+    const fluid = snap.fluid;
+    const debug = fluid?.activeTileDebug;
+    const cellW = Number(fluid?.worldCell?.width) || 0;
+    const cellH = Number(fluid?.worldCell?.height) || 0;
+    const tileSizeCells = Math.max(1, Math.floor(Number(debug?.tileSizeCells) || 1));
+    if (debug && Array.isArray(debug.cells) && cellW > 0 && cellH > 0) {
+      const tileW = cellW * tileSizeCells;
+      const tileH = cellH * tileSizeCells;
+      for (const t of debug.cells) {
+        const tx = Number(t.tx);
+        const ty = Number(t.ty);
+        if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+        const x = tx * tileW;
+        const y = ty * tileH;
+        ctx.fillStyle = t.kind === 'momentumOnly' ? 'rgba(80,200,255,0.14)' : 'rgba(255,165,0,0.10)';
+        ctx.fillRect(worldToScreenX(x), worldToScreenY(y), tileW * cam.zoom, tileH * cam.zoom);
+      }
+    }
+  }
+
   if (Array.isArray(snap.particles) && snap.particles.length) {
     for (const p of snap.particles) {
       const x = Number(p?.x);
@@ -1254,6 +1277,14 @@ if (showFluidVelocityToggle) {
   showFluidVelocityToggle.checked = showFluidVelocityArrows;
   showFluidVelocityToggle.addEventListener('change', () => {
     showFluidVelocityArrows = !!showFluidVelocityToggle.checked;
+    scheduleRender({ includePanels: false });
+  });
+}
+
+if (showFluidActiveTilesToggle) {
+  showFluidActiveTilesToggle.checked = showFluidActiveTilesOverlay;
+  showFluidActiveTilesToggle.addEventListener('change', () => {
+    showFluidActiveTilesOverlay = !!showFluidActiveTilesToggle.checked;
     scheduleRender({ includePanels: false });
   });
 }

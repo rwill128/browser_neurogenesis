@@ -258,6 +258,40 @@ export class FluidField {
         return { ...this.lastStepPerf };
     }
 
+    getActiveTileDebugCells(maxCells = 30000) {
+        const out = [];
+        const limit = Math.max(0, Math.floor(Number(maxCells) || 0));
+        const seen = new Set();
+
+        for (const key of this.carrierTiles.keys()) {
+            if (limit > 0 && out.length >= limit) break;
+            const parts = String(key).split(':');
+            if (parts.length !== 2) continue;
+            const tx = Number(parts[0]);
+            const ty = Number(parts[1]);
+            if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+            seen.add(key);
+            out.push({ tx, ty, kind: 'carrier' });
+        }
+
+        for (const key of this.momentumTiles.keys()) {
+            if (limit > 0 && out.length >= limit) break;
+            if (seen.has(key)) continue;
+            const parts = String(key).split(':');
+            if (parts.length !== 2) continue;
+            const tx = Number(parts[0]);
+            const ty = Number(parts[1]);
+            if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+            out.push({ tx, ty, kind: 'momentumOnly' });
+        }
+
+        return {
+            tileSizeCells: this.activeTileSize,
+            cells: out,
+            truncated: limit > 0 && out.length >= limit
+        };
+    }
+
     addDensity(x, y, emitterR, emitterG, emitterB, emissionStrength) {
         const idx = this.IX(x, y);
         this.markCarrierCell(x, y);

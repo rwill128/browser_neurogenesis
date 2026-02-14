@@ -240,6 +240,54 @@ const stmtDeleteArchivedChunksForWorld = db.prepare(`
   WHERE worldId = ?
 `);
 
+const stmtArchivedFrameBytesSum = db.prepare(`
+  SELECT COALESCE(SUM(bytes), 0) AS totalBytes
+  FROM archived_frames
+  WHERE worldId = ?
+`);
+
+const stmtArchivedChunkBytesSum = db.prepare(`
+  SELECT COALESCE(SUM(bytes), 0) AS totalBytes
+  FROM archived_frame_chunks
+  WHERE worldId = ?
+`);
+
+const stmtOldestArchivedFrame = db.prepare(`
+  SELECT tick, bytes
+  FROM archived_frames
+  WHERE worldId = ?
+  ORDER BY tick ASC
+  LIMIT 1
+`);
+
+const stmtOldestArchivedChunk = db.prepare(`
+  SELECT chunkStartTick, bytes
+  FROM archived_frame_chunks
+  WHERE worldId = ?
+  ORDER BY chunkStartTick ASC
+  LIMIT 1
+`);
+
+const stmtDeleteOldestArchivedFrame = db.prepare(`
+  DELETE FROM archived_frames
+  WHERE worldId = ? AND tick = (
+    SELECT tick FROM archived_frames
+    WHERE worldId = ?
+    ORDER BY tick ASC
+    LIMIT 1
+  )
+`);
+
+const stmtDeleteOldestArchivedChunk = db.prepare(`
+  DELETE FROM archived_frame_chunks
+  WHERE worldId = ? AND chunkStartTick = (
+    SELECT chunkStartTick FROM archived_frame_chunks
+    WHERE worldId = ?
+    ORDER BY chunkStartTick ASC
+    LIMIT 1
+  )
+`);
+
 const port = Math.floor(parseNum(arg('port', null), 8787));
 const initialScenarioName = arg('scenario', 'micro_repro_sustain');
 const initialSeed = (parseNum(arg('seed', null), 23) >>> 0);
@@ -253,6 +301,7 @@ const restoreLatest = hasFlag('restoreLatest')
 
 const DEFAULT_WORLD_ID = 'w0';
 const ARCHIVE_CHUNK_SIZE = 1000;
+const ARCHIVE_MAX_BYTES_PER_WORLD = 10 * 1024 * 1024 * 1024; // 10 GiB rolling archive budget.
 
 let nextRequestId = 1;
 const pendingChunkFramesByWorld = new Map();
@@ -293,6 +342,7 @@ class WorldHandle {
           const buf = getChunkBuffer(worldId, chunkStartTick);
           buf.push({ tick, frame });
           persistChunkIfReady(worldId, chunkStartTick);
+          enforceArchiveBudgetForWorld(worldId);
         } catch {
           // best effort persistence; keep simulation running even if archival write fails.
         }
@@ -411,6 +461,40 @@ function getChunkBuffer(worldId, chunkStartTick) {
 
 function clearChunkBuffersForWorld(worldId) {
   pendingChunkFramesByWorld.delete(worldId);
+}
+
+function getArchiveBytesForWorld(worldId) {
+  const frameBytes = Number(stmtArchivedFrameBytesSum.get(worldId)?.totalBytes) || 0;
+  const chunkBytes = Number(stmtArchivedChunkBytesSum.get(worldId)?.totalBytes) || 0;
+  return Math.max(0, frameBytes + chunkBytes);
+}
+
+function enforceArchiveBudgetForWorld(worldId, maxBytes = ARCHIVE_MAX_BYTES_PER_WORLD) {
+  const budget = Math.max(0, Math.floor(Number(maxBytes) || 0));
+  if (budget <= 0) return;
+
+  let total = getArchiveBytesForWorld(worldId);
+  let guard = 0;
+
+  while (total > budget && guard < 200000) {
+    guard += 1;
+
+    const oldestFrame = stmtOldestArchivedFrame.get(worldId);
+    const oldestChunk = stmtOldestArchivedChunk.get(worldId);
+
+    if (!oldestFrame && !oldestChunk) break;
+
+    const frameTick = oldestFrame ? Math.max(0, Math.floor(Number(oldestFrame.tick) || 0)) : Infinity;
+    const chunkTick = oldestChunk ? Math.max(0, Math.floor(Number(oldestChunk.chunkStartTick) || 0)) : Infinity;
+
+    if (frameTick <= chunkTick) {
+      stmtDeleteOldestArchivedFrame.run(worldId, worldId);
+    } else {
+      stmtDeleteOldestArchivedChunk.run(worldId, worldId);
+    }
+
+    total = getArchiveBytesForWorld(worldId);
+  }
 }
 
 function persistChunkIfReady(worldId, chunkStartTick) {

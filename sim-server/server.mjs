@@ -315,8 +315,20 @@ class WorldHandle {
       workerData: { id, scenario, seed }
     });
     this.pending = new Map();
+    this.messagePerf = {
+      rpcResultCount: 0,
+      rpcResultMsTotal: 0,
+      rpcResultMsMax: 0,
+      frameArchiveCount: 0,
+      frameArchiveMsTotal: 0,
+      frameArchiveMsMax: 0,
+      frameArchiveDeserializeMsTotal: 0,
+      frameArchiveDeserializeMsMax: 0,
+      frameArchiveBytesTotal: 0
+    };
 
     this.worker.on('message', (msg) => {
+      const tMsg0 = Date.now();
       if (!msg || typeof msg !== 'object') return;
       if (msg.type === 'rpcResult') {
         const { requestId, ok, result, error } = msg;
@@ -325,6 +337,11 @@ class WorldHandle {
         this.pending.delete(requestId);
         if (ok) pending.resolve(result);
         else pending.reject(new Error(error || 'rpc error'));
+
+        const dt = Date.now() - tMsg0;
+        this.messagePerf.rpcResultCount += 1;
+        this.messagePerf.rpcResultMsTotal += dt;
+        this.messagePerf.rpcResultMsMax = Math.max(this.messagePerf.rpcResultMsMax, dt);
         return;
       }
 
@@ -335,7 +352,13 @@ class WorldHandle {
 
           let frame = null;
           if (msg.frameBuf) {
-            frame = v8Deserialize(Buffer.from(msg.frameBuf));
+            const tDes0 = Date.now();
+            const buf = Buffer.from(msg.frameBuf);
+            this.messagePerf.frameArchiveBytesTotal += buf.byteLength;
+            frame = v8Deserialize(buf);
+            const desMs = Date.now() - tDes0;
+            this.messagePerf.frameArchiveDeserializeMsTotal += desMs;
+            this.messagePerf.frameArchiveDeserializeMsMax = Math.max(this.messagePerf.frameArchiveDeserializeMsMax, desMs);
           } else if (msg.frame && typeof msg.frame === 'object') {
             frame = msg.frame;
           }
@@ -350,6 +373,11 @@ class WorldHandle {
           enforceArchiveBudgetForWorld(worldId);
         } catch {
           // best effort persistence; keep simulation running even if archival write fails.
+        } finally {
+          const dt = Date.now() - tMsg0;
+          this.messagePerf.frameArchiveCount += 1;
+          this.messagePerf.frameArchiveMsTotal += dt;
+          this.messagePerf.frameArchiveMsMax = Math.max(this.messagePerf.frameArchiveMsMax, dt);
         }
       }
     });
@@ -387,6 +415,26 @@ class WorldHandle {
         pending.reject(new Error(`rpc timeout: ${method}`));
       }, 5000);
     });
+  }
+
+  getMessagePerfSummary() {
+    const p = this.messagePerf;
+    const avg = (total, count) => (count > 0 ? Number((total / count).toFixed(3)) : 0);
+    return {
+      rpcResult: {
+        count: p.rpcResultCount,
+        avgMs: avg(p.rpcResultMsTotal, p.rpcResultCount),
+        maxMs: Number(p.rpcResultMsMax.toFixed(3))
+      },
+      frameArchive: {
+        count: p.frameArchiveCount,
+        avgMs: avg(p.frameArchiveMsTotal, p.frameArchiveCount),
+        maxMs: Number(p.frameArchiveMsMax.toFixed(3)),
+        deserializeAvgMs: avg(p.frameArchiveDeserializeMsTotal, p.frameArchiveCount),
+        deserializeMaxMs: Number(p.frameArchiveDeserializeMsMax.toFixed(3)),
+        avgBytes: p.frameArchiveCount > 0 ? Math.round(p.frameArchiveBytesTotal / p.frameArchiveCount) : 0
+      }
+    };
   }
 
   async terminate() {
@@ -1310,9 +1358,15 @@ app.delete('/api/worlds/:id', async (req, reply) => {
 
 app.get('/api/worlds/:id/status', async (req, reply) => {
   try {
-    const status = await getWorldOrThrow(req.params.id).rpc('getStatus');
+    const handle = getWorldOrThrow(req.params.id);
+    const status = await handle.rpc('getStatus');
     const verbose = String(req.query?.verbose || '').trim().toLowerCase();
-    if (verbose === '1' || verbose === 'true' || verbose === 'full') return status;
+    if (verbose === '1' || verbose === 'true' || verbose === 'full') {
+      if (status && typeof status === 'object') {
+        status.serverMessagePerf = handle.getMessagePerfSummary();
+      }
+      return status;
+    }
 
     // Default compact status for lower JSON serialization overhead on hot polling paths.
     if (status && typeof status === 'object') {

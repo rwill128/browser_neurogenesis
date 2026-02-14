@@ -29,6 +29,29 @@ export class FluidField {
         this._linSolveEffectiveCRecip = new Float32Array(this.size * this.size);
 
         this.iterations = 4; 
+
+        /**
+         * Active-tile tracking scaffold (phase 1 for sparse fluid architecture).
+         *
+         * This does not yet restrict solver compute to active tiles; it tracks spatial activity so
+         * we can quantify sparsity and progressively migrate solver work to active regions.
+         */
+        this.activeTileSize = Math.max(8, Math.floor(Number(config.FLUID_ACTIVE_TILE_SIZE_CELLS) || 32));
+        this.activeTileHalo = Math.max(0, Math.floor(Number(config.FLUID_ACTIVE_TILE_HALO_TILES) || 1));
+        this.activeTileTtlMax = Math.max(1, Math.floor(Number(config.FLUID_ACTIVE_TILE_TTL_STEPS) || 12));
+        this.activeTileCols = Math.max(1, Math.ceil(this.size / this.activeTileSize));
+        this.activeTileRows = Math.max(1, Math.ceil(this.size / this.activeTileSize));
+        this.activeTiles = new Map(); // key: "tx:ty" => remaining ttl steps
+        this.activeTilesTouchedThisStep = new Set();
+        this.lastActiveTileTelemetry = {
+            activeTiles: 0,
+            totalTiles: this.activeTileCols * this.activeTileRows,
+            activePct: 0,
+            touchedTiles: 0,
+            sleepingTiles: 0,
+            wakes: 0,
+            carried: 0
+        };
     }
 
     IX(x, y) {
@@ -42,8 +65,83 @@ export class FluidField {
         return Math.floor(x) + Math.floor(y) * this.size;
     }
 
+    _tileKey(tx, ty) {
+        return `${tx}:${ty}`;
+    }
+
+    _markActiveTileByCoord(tx, ty) {
+        if (!Number.isFinite(tx) || !Number.isFinite(ty)) return;
+        const clampedTx = Math.max(0, Math.min(this.activeTileCols - 1, Math.floor(tx)));
+        const clampedTy = Math.max(0, Math.min(this.activeTileRows - 1, Math.floor(ty)));
+        const key = this._tileKey(clampedTx, clampedTy);
+        const prev = Number(this.activeTiles.get(key) || 0);
+        this.activeTiles.set(key, Math.max(prev, this.activeTileTtlMax));
+        this.activeTilesTouchedThisStep.add(key);
+    }
+
+    /**
+     * Mark activity around a fluid-grid cell (gx,gy), including halo tiles.
+     */
+    markActiveCell(gx, gy) {
+        const tx = Math.floor((Math.max(0, Math.min(this.size - 1, Math.floor(gx))) / this.activeTileSize));
+        const ty = Math.floor((Math.max(0, Math.min(this.size - 1, Math.floor(gy))) / this.activeTileSize));
+        for (let oy = -this.activeTileHalo; oy <= this.activeTileHalo; oy++) {
+            for (let ox = -this.activeTileHalo; ox <= this.activeTileHalo; ox++) {
+                this._markActiveTileByCoord(tx + ox, ty + oy);
+            }
+        }
+    }
+
+    /**
+     * Seed activity around creature centers before each fluid step.
+     */
+    seedActiveTilesFromBodies(bodies) {
+        if (!Array.isArray(bodies) || bodies.length === 0) return;
+        for (const b of bodies) {
+            if (!b || b.isUnstable) continue;
+            const c = typeof b.getAveragePosition === 'function' ? b.getAveragePosition() : null;
+            if (!c) continue;
+            const gx = Math.floor((Number(c.x) || 0) / Math.max(1e-6, this.scaleX));
+            const gy = Math.floor((Number(c.y) || 0) / Math.max(1e-6, this.scaleY));
+            this.markActiveCell(gx, gy);
+        }
+    }
+
+    _finalizeActiveTileTelemetry() {
+        let sleepingTiles = 0;
+        let carried = 0;
+        for (const [key, ttlRaw] of Array.from(this.activeTiles.entries())) {
+            const ttl = Math.max(0, Math.floor(Number(ttlRaw) || 0) - 1);
+            if (ttl <= 0) {
+                this.activeTiles.delete(key);
+                sleepingTiles += 1;
+            } else {
+                this.activeTiles.set(key, ttl);
+                carried += 1;
+            }
+        }
+
+        const totalTiles = Math.max(1, this.activeTileCols * this.activeTileRows);
+        const activeTiles = this.activeTiles.size;
+        this.lastActiveTileTelemetry = {
+            activeTiles,
+            totalTiles,
+            activePct: activeTiles / totalTiles,
+            touchedTiles: this.activeTilesTouchedThisStep.size,
+            sleepingTiles,
+            wakes: Math.max(0, this.activeTilesTouchedThisStep.size - carried),
+            carried
+        };
+        this.activeTilesTouchedThisStep.clear();
+    }
+
+    getActiveTileTelemetry() {
+        return { ...this.lastActiveTileTelemetry };
+    }
+
     addDensity(x, y, emitterR, emitterG, emitterB, emissionStrength) {
         const idx = this.IX(x, y);
+        this.markActiveCell(x, y);
         const normalizedEmissionEffect = (emissionStrength / 50.0) * config.DYE_PULL_RATE;
         this.densityR[idx] = Math.max(0, Math.min(255, this.densityR[idx] + (emitterR - this.densityR[idx]) * normalizedEmissionEffect));
         this.densityG[idx] = Math.max(0, Math.min(255, this.densityG[idx] + (emitterG - this.densityG[idx]) * normalizedEmissionEffect));
@@ -52,6 +150,7 @@ export class FluidField {
 
     addVelocity(x, y, amountX, amountY) {
         const idx = this.IX(x, y);
+        this.markActiveCell(x, y);
         this.Vx[idx] = Math.max(-this.maxVelComponent, Math.min(this.Vx[idx] + amountX, this.maxVelComponent));
         this.Vy[idx] = Math.max(-this.maxVelComponent, Math.min(this.Vy[idx] + amountY, this.maxVelComponent));
     }
@@ -296,6 +395,7 @@ export class FluidField {
             this.densityG[i] = Math.max(0, this.densityG[i] - config.FLUID_FADE_RATE * 255 * this.dt);
             this.densityB[i] = Math.max(0, this.densityB[i] - config.FLUID_FADE_RATE * 255 * this.dt);
         }
+        this._finalizeActiveTileTelemetry();
     }
 
     draw(ctxToDrawOn, viewportCanvasWidth, viewportCanvasHeight, viewOffsetXWorld, viewOffsetYWorld, currentZoom) {

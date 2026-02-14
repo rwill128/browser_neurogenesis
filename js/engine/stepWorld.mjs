@@ -1040,6 +1040,10 @@ export function stepWorld(state, dt, options = {}) {
   applyLandscapeDyeEmitters(state, runtimeConfig, dt, rng);
 
   if (state.fluidField) {
+    if (typeof state.fluidField.seedActiveTilesFromBodies === 'function') {
+      state.fluidField.seedActiveTilesFromBodies(state.softBodyPopulation);
+    }
+
     const fluidStepEvery = Math.max(1, Math.floor(Number(runtimeConfig.FLUID_STEP_EVERY_N_TICKS) || 1));
     const worldTick = Math.max(0, Math.floor(Number(state.tick) || 0));
     if ((worldTick % fluidStepEvery) === 0) {

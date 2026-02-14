@@ -350,6 +350,9 @@ function captureRenderFrameIfNeeded({ force = false, includeArchive = false } = 
 }
 
 function archiveCurrentStepFrame() {
+  const tick = Number(world?.tick) || 0;
+  if (tick > 0 && (tick % FRAME_CAPTURE_STEP_STRIDE) !== 0) return null;
+
   const frame = captureRenderFrameIfNeeded({ force: true, includeArchive: true });
   if (frame) {
     parentPort.postMessage({

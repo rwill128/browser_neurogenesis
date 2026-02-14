@@ -695,30 +695,16 @@ export class FluidField {
         return out;
     }
 
-    _buildDeepEmptyTileMap(carrierTiles, momentumTiles, momentumNeighborRadius = 1) {
+    _buildDeepEmptyTileMap(tier1Tiles, tier2Tiles) {
         const out = new Map();
-        const r = Math.max(0, Math.floor(Number(momentumNeighborRadius) || 0));
-        const hasCarrier = (k) => carrierTiles && carrierTiles.has && carrierTiles.has(k);
-        const hasMomentum = (k) => momentumTiles && momentumTiles.has && momentumTiles.has(k);
+        const hasTier1 = (k) => tier1Tiles && tier1Tiles.has && tier1Tiles.has(k);
+        const hasTier2 = (k) => tier2Tiles && tier2Tiles.has && tier2Tiles.has(k);
 
         for (let ty = 0; ty < this.activeTileRows; ty++) {
             for (let tx = 0; tx < this.activeTileCols; tx++) {
                 const key = `${tx}:${ty}`;
-                if (hasCarrier(key) || hasMomentum(key)) continue;
-
-                let nearMomentum = false;
-                for (let oy = -r; oy <= r && !nearMomentum; oy++) {
-                    for (let ox = -r; ox <= r; ox++) {
-                        const nx = tx + ox;
-                        const ny = ty + oy;
-                        if (nx < 0 || ny < 0 || nx >= this.activeTileCols || ny >= this.activeTileRows) continue;
-                        if (hasMomentum(`${nx}:${ny}`)) {
-                            nearMomentum = true;
-                            break;
-                        }
-                    }
-                }
-                if (!nearMomentum) out.set(key, this.activeTileTtlMax);
+                if (hasTier1(key) || hasTier2(key)) continue;
+                out.set(key, this.activeTileTtlMax);
             }
         }
         return out;
@@ -747,7 +733,7 @@ export class FluidField {
             bounds = this._mergeDomains(bounds, momentumBounds);
         }
         if (allowEmptySolve) {
-            const deepEmptyTiles = this._buildDeepEmptyTileMap(this.carrierTiles, this.momentumTiles, 1);
+            const deepEmptyTiles = this._buildDeepEmptyTileMap(this.carrierTiles, expandedMomentumTiles);
             const deepEmptyBounds = this._buildSparseDomainFromTiles(deepEmptyTiles);
             bounds = this._mergeDomains(bounds, deepEmptyBounds);
         }

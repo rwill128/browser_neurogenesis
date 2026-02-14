@@ -406,7 +406,8 @@ test('GPU coupling clamps injected fluid impulses per component and skips tiny j
     BODY_FLUID_IMPULSE_COMPONENT_CAP: config.BODY_FLUID_IMPULSE_COMPONENT_CAP,
     SWIMMER_TO_FLUID_IMPULSE_COMPONENT_CAP: config.SWIMMER_TO_FLUID_IMPULSE_COMPONENT_CAP,
     JET_TO_FLUID_IMPULSE_COMPONENT_CAP: config.JET_TO_FLUID_IMPULSE_COMPONENT_CAP,
-    BODY_FLUID_MIN_IMPULSE_EPSILON: config.BODY_FLUID_MIN_IMPULSE_EPSILON
+    BODY_FLUID_MIN_IMPULSE_EPSILON: config.BODY_FLUID_MIN_IMPULSE_EPSILON,
+    BODY_FLUID_CAP_VECTOR_MAGNITUDE: config.BODY_FLUID_CAP_VECTOR_MAGNITUDE
   };
 
   try {
@@ -415,6 +416,7 @@ test('GPU coupling clamps injected fluid impulses per component and skips tiny j
     config.SWIMMER_TO_FLUID_IMPULSE_COMPONENT_CAP = 0.2;
     config.JET_TO_FLUID_IMPULSE_COMPONENT_CAP = 0.15;
     config.BODY_FLUID_MIN_IMPULSE_EPSILON = 0.05;
+    config.BODY_FLUID_CAP_VECTOR_MAGNITUDE = true;
 
     const fluid = makeGpuStyleFluid({ vx: 0, vy: 0 });
     const body = new SoftBody(9302, 240, 160, null, false);
@@ -424,8 +426,8 @@ test('GPU coupling clamps injected fluid impulses per component and skips tiny j
     p.pos.x = 240;
     p.prevPos.x = -250;
     p.pos.y = 160;
-    p.prevPos.y = 160;
-    p.swimmerActuation = { magnitude: 9.0, angle: Math.PI / 6 };
+    p.prevPos.y = -330;
+    p.swimmerActuation = { magnitude: 9.0, angle: Math.PI / 4 };
 
     body.massPoints = [p];
     body.springs = [];
@@ -437,6 +439,8 @@ test('GPU coupling clamps injected fluid impulses per component and skips tiny j
       assert.ok(Number.isFinite(call.amountX) && Number.isFinite(call.amountY), 'injection should stay finite');
       assert.ok(Math.abs(call.amountX) <= 0.35 + 1e-6, `amountX should be clamped, got ${call.amountX}`);
       assert.ok(Math.abs(call.amountY) <= 0.35 + 1e-6, `amountY should be clamped, got ${call.amountY}`);
+      assert.ok(Math.hypot(call.amountX, call.amountY) <= 0.35 + 1e-6,
+        `combined vector impulse should be capped, got (${call.amountX}, ${call.amountY})`);
       assert.ok(Math.abs(call.amountX) + Math.abs(call.amountY) >= 0.05,
         `tiny impulses should be skipped, got (${call.amountX}, ${call.amountY})`);
     }

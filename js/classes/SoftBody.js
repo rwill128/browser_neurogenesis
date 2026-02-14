@@ -3951,6 +3951,7 @@ export class SoftBody {
                 ? Math.max(0.05, Number(config.JET_TO_FLUID_IMPULSE_COMPONENT_CAP))
                 : baseImpulseCap;
             const minImpulseEpsilon = Math.max(0, Number(config.BODY_FLUID_MIN_IMPULSE_EPSILON) || 1e-4);
+            const capImpulseVectorMagnitude = config.BODY_FLUID_CAP_VECTOR_MAGNITUDE === true;
 
             const clampImpulseComponent = (value, cap) => {
                 const n = Number(value);
@@ -3960,8 +3961,14 @@ export class SoftBody {
 
             const addFluidVelocitySafe = (gx, gy, amountX, amountY, cap = baseImpulseCap) => {
                 if (!Number.isFinite(Number(gx)) || !Number.isFinite(Number(gy))) return { x: 0, y: 0 };
-                const safeX = clampImpulseComponent(amountX, cap);
-                const safeY = clampImpulseComponent(amountY, cap);
+                let safeX = clampImpulseComponent(amountX, cap);
+                let safeY = clampImpulseComponent(amountY, cap);
+                const safeMag = Math.hypot(safeX, safeY);
+                if (capImpulseVectorMagnitude && safeMag > cap && safeMag > 1e-12) {
+                    const scale = cap / safeMag;
+                    safeX *= scale;
+                    safeY *= scale;
+                }
                 if (Math.abs(safeX) + Math.abs(safeY) < minImpulseEpsilon) return { x: 0, y: 0 };
                 fluidFieldRef.addVelocity(gx, gy, safeX, safeY);
                 return { x: safeX, y: safeY };

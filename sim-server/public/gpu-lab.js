@@ -34,6 +34,7 @@ function log(v) { out.textContent = typeof v === 'string' ? v : JSON.stringify(v
 
 const WORKGROUP = 8;
 const JACOBI_ITERS = 20;
+const SOFT_SPRING_STIFFNESS_DEFAULT = 3.0; // requested stronger default baseline
 
 const EDGE_BODY_MODE = {
   PASS: 0,
@@ -1213,8 +1214,9 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       const d = Math.max(1e-6, Math.hypot(dx, dy));
       const err = (d - rest) * 0.68;
       const nx = dx / d, ny = dy / d;
-      a.vx += nx * err * 0.034; a.vy += ny * err * 0.034;
-      b.vx -= nx * err * 0.034; b.vy -= ny * err * 0.034;
+      const springGain = 0.034 * SOFT_SPRING_STIFFNESS_DEFAULT;
+      a.vx += nx * err * springGain; a.vy += ny * err * springGain;
+      b.vx -= nx * err * springGain; b.vy -= ny * err * springGain;
     }
 
     // Rigid-rigid weld constraints for compound rigid shapes.

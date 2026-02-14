@@ -777,7 +777,18 @@ function workgroups(n) { return Math.ceil(n / WORKGROUP); }
 async function stepAndRender() {
   if (!running || !sim) return;
   const s = sim;
-  s.controls = { ...s.controls, ...readControls() };
+  const uiControls = readControls();
+
+  // Grid-size changes require full GPU buffer reallocation; hot-swapping n causes dimension mismatches.
+  if (uiControls.n !== s.controls.n) {
+    running = false;
+    sim = null;
+    log({ ok: true, msg: `reinitializing for grid ${uiControls.n}` });
+    await start();
+    return;
+  }
+
+  s.controls = { ...s.controls, ...uiControls, n: s.controls.n };
   uploadUniforms(s.device, s.uniform, s.controls);
 
   const enc = s.device.createCommandEncoder();

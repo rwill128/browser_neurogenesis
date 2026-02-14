@@ -277,6 +277,31 @@ function nearestRigidEdgeForPoint(rb, px, py) {
   if (!verts.length) return { vA: 0, vB: 0 };
   if (verts.length === 1) return { vA: 0, vB: 0 };
 
+  // Guardrail: when a shared soft node lies directly on a rigid vertex,
+  // tie-break deterministically to one of that vertex's local edges
+  // instead of whichever segment appears first in the scan.
+  let nearestVertex = 0;
+  let nearestVertexD2 = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < verts.length; i++) {
+    const dx = px - verts[i].x;
+    const dy = py - verts[i].y;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < nearestVertexD2) {
+      nearestVertexD2 = d2;
+      nearestVertex = i;
+    }
+  }
+  if (nearestVertexD2 <= 1e-6) {
+    const n = verts.length;
+    const prev = (nearestVertex - 1 + n) % n;
+    const next = (nearestVertex + 1) % n;
+    const prevLen2 = (verts[nearestVertex].x - verts[prev].x) ** 2 + (verts[nearestVertex].y - verts[prev].y) ** 2;
+    const nextLen2 = (verts[nearestVertex].x - verts[next].x) ** 2 + (verts[nearestVertex].y - verts[next].y) ** 2;
+    return nextLen2 <= prevLen2
+      ? { vA: nearestVertex, vB: next }
+      : { vA: prev, vB: nearestVertex };
+  }
+
   let bestIdx = 0;
   let bestD2 = Number.POSITIVE_INFINITY;
   for (let i = 0; i < verts.length; i++) {

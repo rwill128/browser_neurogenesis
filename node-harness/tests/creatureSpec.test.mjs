@@ -87,3 +87,43 @@ test('hybrid links anchor to nearest rigid hull edge for irregular rigid meshes'
     assert.ok(h.restB < 110, `restB too large: ${h.restB}`);
   }
 });
+
+test('hybrid links at rigid vertices choose a local incident edge (deterministic tie-break)', () => {
+  const mesh = {
+    nodes: [
+      { id: 0, x: 0, y: 0, rigid: 1, soft: 0 },
+      { id: 1, x: 40, y: 0, rigid: 1, soft: 1 }, // shared rigid vertex
+      { id: 2, x: 40, y: 3, rigid: 1, soft: 0 },
+      { id: 3, x: 0, y: 12, rigid: 1, soft: 0 },
+      { id: 4, x: 48, y: 6, rigid: 0, soft: 1 },
+    ],
+    triangles: [
+      { kind: 'rigid', a: 0, b: 1, c: 2 },
+      { kind: 'rigid', a: 0, b: 2, c: 3 },
+      { kind: 'soft', a: 1, b: 2, c: 4 },
+    ],
+    meta: { width: 48, height: 12 },
+  };
+
+  const bodies = buildBodiesFromCreatureSpec(createCreatureSpecFromMesh(mesh), 256, { massSoft: 0.6, massHeavy: 5.0 });
+  assert.equal(bodies.rigid.length, 1);
+
+  const sharedVertexLink = bodies.hybrid.find((h) => Math.min(h.restA, h.restB) <= 0.81);
+  assert.ok(sharedVertexLink, 'expected a hybrid link pinned on/near a rigid vertex');
+
+  const rb = bodies.rigid[sharedVertexLink.rigidIndex];
+  const verts = rb.verticesLocal.map((v) => ({ x: rb.x + v.x, y: rb.y + v.y }));
+  const n = verts.length;
+
+  const vertexIdx = sharedVertexLink.restA <= sharedVertexLink.restB ? sharedVertexLink.vertexA : sharedVertexLink.vertexB;
+  const otherIdx = sharedVertexLink.restA <= sharedVertexLink.restB ? sharedVertexLink.vertexB : sharedVertexLink.vertexA;
+  const prevIdx = (vertexIdx - 1 + n) % n;
+  const nextIdx = (vertexIdx + 1) % n;
+
+  const edgeLen = (i, j) => Math.hypot(verts[i].x - verts[j].x, verts[i].y - verts[j].y);
+  const shortestIncident = Math.min(edgeLen(vertexIdx, prevIdx), edgeLen(vertexIdx, nextIdx));
+  const chosenLen = edgeLen(vertexIdx, otherIdx);
+
+  assert.ok(chosenLen <= shortestIncident + 1e-6,
+    `expected local tie-break edge (chosen=${chosenLen}, shortestIncident=${shortestIncident})`);
+});

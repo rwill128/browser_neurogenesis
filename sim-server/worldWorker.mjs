@@ -446,11 +446,11 @@ function getArchivedFramesRange(startTick, endTick, stride = 1) {
 // Fixed-step simulation loop: realtime pacing (default) or max-throughput mode.
 const LOOP_WALL_MS = 10;
 let loopLastAt = Date.now();
-const MAX_STEPS_PER_LOOP_REALTIME = 50;
+const MAX_STEPS_PER_LOOP_REALTIME = 5000;
 const MAX_STEPS_PER_LOOP_MAX = 5000;
 const MAX_MODE_BATCH_WALL_MS = 25;
-const REALTIME_MAX_STEPS_PER_SEC = 20;
-const REALTIME_MIN_STEP_INTERVAL_MS = Math.max(1, Math.floor(1000 / REALTIME_MAX_STEPS_PER_SEC));
+const REALTIME_MAX_STEPS_PER_SEC = Number.POSITIVE_INFINITY;
+const REALTIME_MIN_STEP_INTERVAL_MS = 0;
 
 function scheduleNextLoop() {
   if (runMode === RUN_MODE_MAX) {

@@ -355,11 +355,35 @@ export class FluidField {
         this.densityB[idx] = Math.max(0, Math.min(255, this.densityB[idx] + (emitterB - this.densityB[idx]) * normalizedEmissionEffect));
     }
 
+    _finiteOrZero(value) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : 0;
+    }
+
+    _clampVelocityComponent(value) {
+        const safeMax = Math.max(0, Number(this.maxVelComponent) || 0);
+        const v = this._finiteOrZero(value);
+        return Math.max(-safeMax, Math.min(v, safeMax));
+    }
+
     addVelocity(x, y, amountX, amountY) {
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+        const ax = this._finiteOrZero(amountX);
+        const ay = this._finiteOrZero(amountY);
+        if (Math.abs(ax) <= 1e-9 && Math.abs(ay) <= 1e-9) return;
+
         const idx = this.IX(x, y);
+        const baseX = this._clampVelocityComponent(this.Vx[idx]);
+        const baseY = this._clampVelocityComponent(this.Vy[idx]);
+        const nextX = this._clampVelocityComponent(baseX + ax);
+        const nextY = this._clampVelocityComponent(baseY + ay);
+
+        if (Math.abs(nextX - baseX) <= 1e-12 && Math.abs(nextY - baseY) <= 1e-12) return;
+
         this.markMomentumCell(x, y);
-        this.Vx[idx] = Math.max(-this.maxVelComponent, Math.min(this.Vx[idx] + amountX, this.maxVelComponent));
-        this.Vy[idx] = Math.max(-this.maxVelComponent, Math.min(this.Vy[idx] + amountY, this.maxVelComponent));
+        this.Vx[idx] = nextX;
+        this.Vy[idx] = nextY;
     }
 
     clampVelocityComponents(arr) {
@@ -667,21 +691,26 @@ export class FluidField {
         const NMinus1 = N - 1;
         const NMinus2 = N - 2;
 
+        const sanitizeBoundary = (value) => {
+            if (b === 1 || b === 2) return this._clampVelocityComponent(value);
+            return this._finiteOrZero(value);
+        };
+
         if (this.useWrapping) {
             for (let i = 1; i < NMinus1; i++) {
-                x_arr[i] = x_arr[i + NMinus2 * N];
-                x_arr[i + NMinus1 * N] = x_arr[i + N];
+                x_arr[i] = sanitizeBoundary(x_arr[i + NMinus2 * N]);
+                x_arr[i + NMinus1 * N] = sanitizeBoundary(x_arr[i + N]);
             }
             for (let j = 1; j < NMinus1; j++) {
                 const row = j * N;
-                x_arr[row] = x_arr[row + NMinus2];
-                x_arr[row + NMinus1] = x_arr[row + 1];
+                x_arr[row] = sanitizeBoundary(x_arr[row + NMinus2]);
+                x_arr[row + NMinus1] = sanitizeBoundary(x_arr[row + 1]);
             }
 
-            x_arr[0] = 0.5 * (x_arr[1] + x_arr[N]);
-            x_arr[NMinus1 * N] = 0.5 * (x_arr[NMinus1 * N + 1] + x_arr[NMinus2 * N]);
-            x_arr[NMinus1] = 0.5 * (x_arr[NMinus2] + x_arr[NMinus1 + N]);
-            x_arr[N * N - 1] = 0.5 * (x_arr[N * N - 2] + x_arr[N * (NMinus1 - 1) + NMinus1]);
+            x_arr[0] = sanitizeBoundary(0.5 * (x_arr[1] + x_arr[N]));
+            x_arr[NMinus1 * N] = sanitizeBoundary(0.5 * (x_arr[NMinus1 * N + 1] + x_arr[NMinus2 * N]));
+            x_arr[NMinus1] = sanitizeBoundary(0.5 * (x_arr[NMinus2] + x_arr[NMinus1 + N]));
+            x_arr[N * N - 1] = sanitizeBoundary(0.5 * (x_arr[N * N - 2] + x_arr[N * (NMinus1 - 1) + NMinus1]));
             return;
         }
 
@@ -689,21 +718,21 @@ export class FluidField {
         const invertX = b === 1;
 
         for (let i = 1; i < NMinus1; i++) {
-            x_arr[i] = invertY ? -x_arr[i + N] : x_arr[i + N];
+            x_arr[i] = sanitizeBoundary(invertY ? -x_arr[i + N] : x_arr[i + N]);
             const bottomIdx = i + NMinus1 * N;
-            x_arr[bottomIdx] = invertY ? -x_arr[i + NMinus2 * N] : x_arr[i + NMinus2 * N];
+            x_arr[bottomIdx] = sanitizeBoundary(invertY ? -x_arr[i + NMinus2 * N] : x_arr[i + NMinus2 * N]);
         }
         for (let j = 1; j < NMinus1; j++) {
             const row = j * N;
-            x_arr[row] = invertX ? -x_arr[row + 1] : x_arr[row + 1];
+            x_arr[row] = sanitizeBoundary(invertX ? -x_arr[row + 1] : x_arr[row + 1]);
             const rightIdx = row + NMinus1;
-            x_arr[rightIdx] = invertX ? -x_arr[row + NMinus2] : x_arr[row + NMinus2];
+            x_arr[rightIdx] = sanitizeBoundary(invertX ? -x_arr[row + NMinus2] : x_arr[row + NMinus2]);
         }
 
-        x_arr[0] = 0.5 * (x_arr[1] + x_arr[N]);
-        x_arr[NMinus1] = 0.5 * (x_arr[NMinus2] + x_arr[NMinus1 + N]);
-        x_arr[NMinus1 * N] = 0.5 * (x_arr[NMinus1 * N + 1] + x_arr[NMinus2 * N]);
-        x_arr[N * N - 1] = 0.5 * (x_arr[N * N - 2] + x_arr[N * (NMinus1 - 1) + NMinus1]);
+        x_arr[0] = sanitizeBoundary(0.5 * (x_arr[1] + x_arr[N]));
+        x_arr[NMinus1] = sanitizeBoundary(0.5 * (x_arr[NMinus2] + x_arr[NMinus1 + N]));
+        x_arr[NMinus1 * N] = sanitizeBoundary(0.5 * (x_arr[NMinus1 * N + 1] + x_arr[NMinus2 * N]));
+        x_arr[N * N - 1] = sanitizeBoundary(0.5 * (x_arr[N * N - 2] + x_arr[N * (NMinus1 - 1) + NMinus1]));
     }
 
     /**

@@ -71,6 +71,53 @@ let lastFrameCaptureTick = -1;
 let frameBufferLastAccessAt = 0;
 let lastRealtimeStepAt = 0;
 
+const perf = {
+  stepSamples: 0,
+  stepMsTotal: 0,
+  stepMsMax: 0,
+  archiveSerializeSamples: 0,
+  archiveSerializeMsTotal: 0,
+  archiveSerializeMsMax: 0,
+  archivePostSamples: 0,
+  archivePostMsTotal: 0,
+  archivePostMsMax: 0,
+  snapshotSamples: 0,
+  snapshotMsTotal: 0,
+  snapshotMsMax: 0
+};
+
+function perfAdd(kind, ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value) || value < 0) return;
+  if (kind === 'step') {
+    perf.stepSamples += 1;
+    perf.stepMsTotal += value;
+    perf.stepMsMax = Math.max(perf.stepMsMax, value);
+    return;
+  }
+  if (kind === 'archiveSerialize') {
+    perf.archiveSerializeSamples += 1;
+    perf.archiveSerializeMsTotal += value;
+    perf.archiveSerializeMsMax = Math.max(perf.archiveSerializeMsMax, value);
+    return;
+  }
+  if (kind === 'archivePost') {
+    perf.archivePostSamples += 1;
+    perf.archivePostMsTotal += value;
+    perf.archivePostMsMax = Math.max(perf.archivePostMsMax, value);
+    return;
+  }
+  if (kind === 'snapshot') {
+    perf.snapshotSamples += 1;
+    perf.snapshotMsTotal += value;
+    perf.snapshotMsMax = Math.max(perf.snapshotMsMax, value);
+  }
+}
+
+function perfAvg(total, samples) {
+  return samples > 0 ? Number((total / samples).toFixed(3)) : 0;
+}
+
 function resetWorld(nextScenarioName, nextSeed) {
   const s = String(nextScenarioName || '').trim();
   if (!s || !(s in scenarioDefs)) {
@@ -127,6 +174,19 @@ function resetWorld(nextScenarioName, nextSeed) {
   lastFrameCaptureTick = -1;
   frameBufferLastAccessAt = 0;
 
+  perf.stepSamples = 0;
+  perf.stepMsTotal = 0;
+  perf.stepMsMax = 0;
+  perf.archiveSerializeSamples = 0;
+  perf.archiveSerializeMsTotal = 0;
+  perf.archiveSerializeMsMax = 0;
+  perf.archivePostSamples = 0;
+  perf.archivePostMsTotal = 0;
+  perf.archivePostMsMax = 0;
+  perf.snapshotSamples = 0;
+  perf.snapshotMsTotal = 0;
+  perf.snapshotMsMax = 0;
+
   // Seed tick-0 frame so history is addressable from frame 0.
   archiveCurrentStepFrame();
 }
@@ -165,6 +225,22 @@ function computeStatus() {
       archiveFrames: frameArchive.length,
       archiveOldestTick: frameArchive.length ? Number(frameArchive[0]?.tick || 0) : null,
       archiveLatestTick: frameArchive.length ? Number(frameArchive[frameArchive.length - 1]?.tick || 0) : null
+    },
+    workerPerf: {
+      stepMsAvg: perfAvg(perf.stepMsTotal, perf.stepSamples),
+      stepMsMax: Number(perf.stepMsMax.toFixed(3)),
+      archiveSerializeMsAvg: perfAvg(perf.archiveSerializeMsTotal, perf.archiveSerializeSamples),
+      archiveSerializeMsMax: Number(perf.archiveSerializeMsMax.toFixed(3)),
+      archivePostMsAvg: perfAvg(perf.archivePostMsTotal, perf.archivePostSamples),
+      archivePostMsMax: Number(perf.archivePostMsMax.toFixed(3)),
+      snapshotMsAvg: perfAvg(perf.snapshotMsTotal, perf.snapshotSamples),
+      snapshotMsMax: Number(perf.snapshotMsMax.toFixed(3)),
+      samples: {
+        step: perf.stepSamples,
+        archiveSerialize: perf.archiveSerializeSamples,
+        archivePost: perf.archivePostSamples,
+        snapshot: perf.snapshotSamples
+      }
     }
   };
 }
@@ -398,14 +474,18 @@ function archiveCurrentStepFrame() {
   const frame = captureRenderFrameIfNeeded({ force: true, includeArchive: true });
   if (frame) {
     const lean = buildLeanArchiveFrame(frame);
+    const tSer0 = Date.now();
     const wire = v8Serialize(lean);
+    perfAdd('archiveSerialize', Date.now() - tSer0);
     const ab = wire.buffer.slice(wire.byteOffset, wire.byteOffset + wire.byteLength);
+    const tPost0 = Date.now();
     parentPort.postMessage({
       type: 'frameArchive',
       worldId: id,
       tick: Number(frame.tick) || 0,
       frameBuf: ab
     }, [ab]);
+    perfAdd('archivePost', Date.now() - tPost0);
   }
   return frame;
 }
@@ -529,7 +609,9 @@ function runLoop() {
     if (runMode === RUN_MODE_MAX) {
       const batchStart = Date.now();
       while (steps < MAX_STEPS_PER_LOOP_MAX && (Date.now() - batchStart) < MAX_MODE_BATCH_WALL_MS) {
+        const tStep = Date.now();
         world.step(dt);
+        perfAdd('step', Date.now() - tStep);
         archiveCurrentStepFrame();
         steps += 1;
       }
@@ -545,7 +627,9 @@ function runLoop() {
         if (lastRealtimeStepAt && (nowStep - lastRealtimeStepAt) < REALTIME_MIN_STEP_INTERVAL_MS) {
           break;
         }
+        const tStep = Date.now();
         world.step(dt);
+        perfAdd('step', Date.now() - tStep);
         archiveCurrentStepFrame();
         accumulatorMs -= dtMs;
         steps += 1;
@@ -598,6 +682,7 @@ parentPort.on('message', (msg) => {
       }
 
       if (method === 'getSnapshot') {
+        const tSnap0 = Date.now();
         const mode = String(args?.mode || 'render');
 
         if (mode === 'render') {
@@ -606,23 +691,32 @@ parentPort.on('message', (msg) => {
           const requestedSeq = args?.frameSeq;
           if (requestedSeq !== undefined && requestedSeq !== null && requestedSeq !== '') {
             const bySeq = getRenderFrameBySeq(requestedSeq);
-            if (bySeq) return reply(requestId, { ok: true, result: bySeq });
+            if (bySeq) {
+              perfAdd('snapshot', Date.now() - tSnap0);
+              return reply(requestId, { ok: true, result: bySeq });
+            }
           }
 
           const requestedOffset = args?.frameOffset;
           if (requestedOffset !== undefined && requestedOffset !== null && requestedOffset !== '') {
             const byOffset = getRenderFrameByOffset(requestedOffset);
-            if (byOffset) return reply(requestId, { ok: true, result: byOffset });
+            if (byOffset) {
+              perfAdd('snapshot', Date.now() - tSnap0);
+              return reply(requestId, { ok: true, result: byOffset });
+            }
           }
 
           // No explicit historical request: force-capture a fresh frame so HTTP/WS render snapshots
           // stay aligned with current simulation status even after idle frame-buffer periods.
           const fresh = captureRenderFrameIfNeeded({ force: true });
           const latest = fresh || getLatestRenderFrame() || computeSnapshot('render');
+          perfAdd('snapshot', Date.now() - tSnap0);
           return reply(requestId, { ok: true, result: latest });
         }
 
-        return reply(requestId, { ok: true, result: computeSnapshot(mode) });
+        const result = computeSnapshot(mode);
+        perfAdd('snapshot', Date.now() - tSnap0);
+        return reply(requestId, { ok: true, result });
       }
 
       if (method === 'getFrameTimeline') {

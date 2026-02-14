@@ -9,7 +9,6 @@ const modeEl = document.getElementById('paintMode');
 const brushEl = document.getElementById('brush');
 const densityEl = document.getElementById('density');
 const thresholdEl = document.getElementById('threshold');
-const showTrianglesEl = document.getElementById('showTriangles');
 const clearBtn = document.getElementById('clearBtn');
 const compileBtn = document.getElementById('compileBtn');
 const exportBtn = document.getElementById('exportBtn');
@@ -70,19 +69,19 @@ function drawMesh(mesh) {
   const sx = meshCanvas.width / W;
   const sy = meshCanvas.height / H;
 
-  if (showTrianglesEl?.checked) {
-    for (const tri of mesh.triangles) {
-      const a = mesh.nodes[tri.a], b = mesh.nodes[tri.b], c = mesh.nodes[tri.c];
-      mctx.beginPath();
-      mctx.moveTo(a.x * sx, a.y * sy);
-      mctx.lineTo(b.x * sx, b.y * sy);
-      mctx.lineTo(c.x * sx, c.y * sy);
-      mctx.closePath();
-      mctx.fillStyle = tri.kind === 'rigid' ? 'rgba(255,90,90,0.18)' : 'rgba(90,130,255,0.18)';
-      mctx.strokeStyle = tri.kind === 'rigid' ? 'rgba(255,140,140,0.55)' : 'rgba(120,170,255,0.55)';
-      mctx.fill();
-      mctx.stroke();
-    }
+  // Soft-body debug mesh stays visible; rigid now renders via contour hull only.
+  for (const tri of mesh.triangles) {
+    if (tri.kind !== 'soft') continue;
+    const a = mesh.nodes[tri.a], b = mesh.nodes[tri.b], c = mesh.nodes[tri.c];
+    mctx.beginPath();
+    mctx.moveTo(a.x * sx, a.y * sy);
+    mctx.lineTo(b.x * sx, b.y * sy);
+    mctx.lineTo(c.x * sx, c.y * sy);
+    mctx.closePath();
+    mctx.fillStyle = 'rgba(90,130,255,0.18)';
+    mctx.strokeStyle = 'rgba(120,170,255,0.55)';
+    mctx.fill();
+    mctx.stroke();
   }
 
   // Compiler-stage rigid decomposition preview (authoritative for export/import path).
@@ -146,7 +145,6 @@ function compileNow() {
 paintCanvas.addEventListener('mousedown', (e) => { painting = true; paint(e.clientX, e.clientY); });
 window.addEventListener('mouseup', () => { painting = false; });
 paintCanvas.addEventListener('mousemove', (e) => { if (painting) paint(e.clientX, e.clientY); });
-showTrianglesEl?.addEventListener('change', () => { if (lastMesh) drawMesh(lastMesh); });
 clearBtn.addEventListener('click', () => { rigid.fill(0); soft.fill(0); drawFields(); compileNow(); });
 compileBtn.addEventListener('click', compileNow);
 

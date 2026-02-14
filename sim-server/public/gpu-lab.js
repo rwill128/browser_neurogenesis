@@ -487,6 +487,7 @@ function initBodies(n, controls) {
       return [EDGE_DYE_MODE.ABSORB, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.PASS];
     });
     const edgeBodyMode = Array.from({ length: sides }, (_, ei) => ((ei + i) % 2 === 0) ? EDGE_BODY_MODE.BLOCK : EDGE_BODY_MODE.PASS);
+    const digestRGB = (i % 3 === 0) ? [1, 0.2, 0.2] : ((i % 3 === 1) ? [0.2, 1, 0.2] : [0.2, 0.2, 1]);
     rigid.push({
       x: n * (0.15 + 0.7 * ((t + Math.random() * 0.1) % 1)),
       y: n * (0.2 + 0.6 * Math.random()),
@@ -497,6 +498,7 @@ function initBodies(n, controls) {
       edgeDyeMode,
       edgeBodyMode,
       digestEnabled: (i % 2) === 0,
+      digestRGB,
       mass,
       theta: Math.random() * Math.PI * 2,
       omega: 0,
@@ -521,6 +523,7 @@ function initBodies(n, controls) {
       local.push({ x: cx + Math.cos(a) * radius, y: cy + Math.sin(a) * radius });
     }
 
+    const clusterDigestRGB = (c % 3 === 0) ? [1, 0.15, 0.15] : ((c % 3 === 1) ? [0.15, 1, 0.15] : [0.15, 0.15, 1]);
     for (const p of local) {
       softNodes.push({
         x: p.x,
@@ -531,6 +534,7 @@ function initBodies(n, controls) {
         r: 1.4 * scale * bodyScale,
         clusterId: c,
         digestEnabled: (c % 2) === 0,
+        digestRGB: clusterDigestRGB,
       });
     }
 
@@ -1231,6 +1235,7 @@ function applyDigestiveCapture(sim, r, g, b) {
 
   for (const rb of sim.bodies.rigid) {
     if (!rb.digestEnabled) continue;
+    const dig = rb.digestRGB || [1, 1, 1];
     const sides = Math.max(3, rb.sides || 4);
     const verts = [];
     for (let i = 0; i < sides; i++) {
@@ -1249,9 +1254,9 @@ function applyDigestiveCapture(sim, r, g, b) {
       for (let x = minX; x <= maxX; x++) {
         if (!pointInPolygon(x + 0.5, y + 0.5, verts)) continue;
         const i = y * n + x;
-        const takeR = r[i] * rigidCapture;
-        const takeG = g[i] * rigidCapture;
-        const takeB = b[i] * rigidCapture;
+        const takeR = r[i] * rigidCapture * dig[0];
+        const takeG = g[i] * rigidCapture * dig[1];
+        const takeB = b[i] * rigidCapture * dig[2];
         r[i] -= takeR; g[i] -= takeG; b[i] -= takeB;
         captured += takeR + takeG + takeB;
       }
@@ -1267,6 +1272,7 @@ function applyDigestiveCapture(sim, r, g, b) {
   for (const nodes of clusters.values()) {
     if (nodes.length < 3) continue;
     if (!nodes[0].digestEnabled) continue;
+    const dig = nodes[0].digestRGB || [1, 1, 1];
     let cx = 0, cy = 0;
     for (const n0 of nodes) { cx += n0.x; cy += n0.y; }
     cx /= nodes.length; cy /= nodes.length;
@@ -1287,9 +1293,9 @@ function applyDigestiveCapture(sim, r, g, b) {
       for (let x = minX; x <= maxX; x++) {
         if (!pointInPolygon(x + 0.5, y + 0.5, verts)) continue;
         const i = y * n + x;
-        const takeR = r[i] * softCapture;
-        const takeG = g[i] * softCapture;
-        const takeB = b[i] * softCapture;
+        const takeR = r[i] * softCapture * dig[0];
+        const takeG = g[i] * softCapture * dig[1];
+        const takeB = b[i] * softCapture * dig[2];
         r[i] -= takeR; g[i] -= takeG; b[i] -= takeB;
         captured += takeR + takeG + takeB;
       }

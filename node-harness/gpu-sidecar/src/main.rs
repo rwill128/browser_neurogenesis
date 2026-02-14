@@ -124,8 +124,8 @@ struct Params {
     fade: f32,
     dye_radius: f32,
     impulse: f32,
-    _pad1: f32,
-    _pad2: f32,
+    inv_dx: f32,
+    inv_dy: f32,
     _pad3: f32,
 }
 
@@ -252,8 +252,8 @@ async fn run_fluid_init(
         fade: default_fade(),
         dye_radius,
         impulse,
-        _pad1: 0.0,
-        _pad2: 0.0,
+        inv_dx: width as f32,
+        inv_dy: height as f32,
         _pad3: 0.0,
     };
 
@@ -355,8 +355,8 @@ async fn run_fluid_step(
         fade,
         dye_radius,
         impulse,
-        _pad1: 0.0,
-        _pad2: 0.0,
+        inv_dx: width as f32,
+        inv_dy: height as f32,
         _pad3: 0.0,
     };
 
@@ -938,7 +938,7 @@ async fn run_fluid_step(
             let vr = vel[y * w + xp][0];
             let vb = vel[ym * w + x][1];
             let vt = vel[yp * w + x][1];
-            let d = 0.5 * ((vr - vl) + (vt - vb));
+            let d = 0.5 * ((vr - vl) * (width as f32) + (vt - vb) * (height as f32));
             let ad = d.abs();
             sum_div += ad;
             max_div = max_div.max(ad);
@@ -1068,8 +1068,8 @@ async fn run_smoke(n: u32) -> Result<SmokeResponse> {
             fade: 0.0,
             dye_radius: 0.0,
             impulse: 0.0,
-            _pad1: 0.0,
-            _pad2: 0.0,
+            inv_dx: n as f32,
+            inv_dy: 1.0,
             _pad3: 0.0,
         }),
     );
@@ -1088,8 +1088,8 @@ struct Params {
   fade: f32,
   dye_radius: f32,
   impulse: f32,
-  _pad1: f32,
-  _pad2: f32,
+  inv_dx: f32,
+  inv_dy: f32,
   _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
@@ -1187,8 +1187,8 @@ struct Params {
   fade: f32,
   dye_radius: f32,
   impulse: f32,
-  _pad1: f32,
-  _pad2: f32,
+  inv_dx: f32,
+  inv_dy: f32,
   _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
@@ -1221,8 +1221,8 @@ struct Params {
   fade: f32,
   dye_radius: f32,
   impulse: f32,
-  _pad1: f32,
-  _pad2: f32,
+  inv_dx: f32,
+  inv_dy: f32,
   _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
@@ -1294,8 +1294,8 @@ struct Params {
   fade: f32,
   dye_radius: f32,
   impulse: f32,
-  _pad1: f32,
-  _pad2: f32,
+  inv_dx: f32,
+  inv_dy: f32,
   _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
@@ -1339,8 +1339,8 @@ struct Params {
   fade: f32,
   dye_radius: f32,
   impulse: f32,
-  _pad1: f32,
-  _pad2: f32,
+  inv_dx: f32,
+  inv_dy: f32,
   _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
@@ -1366,7 +1366,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let vr = vel[idx(c(x + 1, p.width), c(y, p.height))].x;
   let vb = vel[idx(c(x, p.width), c(y - 1, p.height))].y;
   let vt = vel[idx(c(x, p.width), c(y + 1, p.height))].y;
-  div[idx(gid.x, gid.y)] = 0.5 * ((vr - vl) + (vt - vb));
+  div[idx(gid.x, gid.y)] = 0.5 * ((vr - vl) * p.inv_dx + (vt - vb) * p.inv_dy);
 }
 "#;
 
@@ -1381,8 +1381,8 @@ struct Params {
   fade: f32,
   dye_radius: f32,
   impulse: f32,
-  _pad1: f32,
-  _pad2: f32,
+  inv_dx: f32,
+  inv_dy: f32,
   _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
@@ -1410,7 +1410,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let pb = p_in[idx(c(x, p.width), c(y - 1, p.height))];
   let pt = p_in[idx(c(x, p.width), c(y + 1, p.height))];
   let d = div[idx(gid.x, gid.y)];
-  p_out[idx(gid.x, gid.y)] = (pl + pr + pb + pt - d) * 0.25;
+  let idx2 = p.inv_dx * p.inv_dx;
+  let idy2 = p.inv_dy * p.inv_dy;
+  let denom = 2.0 * (idx2 + idy2);
+  p_out[idx(gid.x, gid.y)] = ((pl + pr) * idx2 + (pb + pt) * idy2 - d) / max(denom, 1e-6);
 }
 "#;
 
@@ -1425,8 +1428,8 @@ struct Params {
   fade: f32,
   dye_radius: f32,
   impulse: f32,
-  _pad1: f32,
-  _pad2: f32,
+  inv_dx: f32,
+  inv_dy: f32,
   _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
@@ -1446,7 +1449,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let pr = pressure[idx(c(x + 1, p.width), c(y, p.height))];
   let pb = pressure[idx(c(x, p.width), c(y - 1, p.height))];
   let pt = pressure[idx(c(x, p.width), c(y + 1, p.height))];
-  let grad = vec2<f32>(pr - pl, pt - pb) * 0.5;
+  let grad = vec2<f32>((pr - pl) * 0.5 * p.inv_dx, (pt - pb) * 0.5 * p.inv_dy);
 
   let edge = gid.x == 0u || gid.y == 0u || gid.x == (p.width - 1u) || gid.y == (p.height - 1u);
   out_vel[idx(gid.x, gid.y)] = select(vel[idx(gid.x, gid.y)] - grad, vec2<f32>(0.0, 0.0), edge);
@@ -1464,8 +1467,8 @@ struct Params {
   fade: f32,
   dye_radius: f32,
   impulse: f32,
-  _pad1: f32,
-  _pad2: f32,
+  inv_dx: f32,
+  inv_dy: f32,
   _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
@@ -1520,8 +1523,8 @@ struct Params {
   fade: f32,
   dye_radius: f32,
   impulse: f32,
-  _pad1: f32,
-  _pad2: f32,
+  inv_dx: f32,
+  inv_dy: f32,
   _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;

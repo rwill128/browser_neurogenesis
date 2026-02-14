@@ -46,12 +46,39 @@ Track rolling balances over windows (e.g., 30s, 120s) to estimate carrying capac
 - Energy store with min/max and reserve buffer.
 - If below starvation thresholds for sustained interval, degrade function first (reduced actuation) before death.
 
-### 4.4 Reproduction rule (time-integrated)
-Reproduction eligibility should require all of:
-1. `energy > reserve + reproduction_cost`
-2. `rolling_surplus(T) > surplus_threshold` over window `T` (not a single frame)
-3. cooldown satisfied
-4. local ecological condition sane (optional: local resource floor / crowding cap)
+### 4.4 Reproduction rule (time-integrated, implementation-targeted)
+Define per-organism instantaneous net flux:
+- `S(t) = I(t) - M(t) - A(t) - G(t)`
+  - `I(t)`: selective digestion intake (respecting existing `digestRGB` / affinity channels)
+  - `M(t)`: maintenance (size/mass + optional morphology complexity term)
+  - `A(t)`: actuation/motion/deformation expenditure
+  - `G(t)`: growth-plan spend (0 if no growth event active)
+
+Define EMA surplus over horizon `T_s`:
+- `S_ema(t) = α_s * S(t) + (1-α_s) * S_ema(t-Δt)`
+- `α_s = 1 - exp(-Δt / T_s)`
+
+Define reserve-aware reproducible energy:
+- `E_free(t) = E_store(t) - E_reserve_min`
+- `E_spawn_need = E_offspring_seed + E_spawn_overhead`
+
+Reproduction eligibility requires all conditions true for a hold interval `T_hold`:
+1. **Energy sufficiency:** `E_free(t) >= E_spawn_need`
+2. **Sustained surplus:** `S_ema(t) >= S_thresh` continuously for `T_hold`
+3. **No debt trend:** `dE_store/dt` EMA over `T_s` is non-negative
+4. **Cooldown:** `t - t_last_spawn >= T_cooldown`
+5. **Local ecology gate:** local edible dye concentration above floor and local crowding below cap
+
+Spawn accounting (must be conservative):
+- Parent update at spawn: `E_store_parent -= (E_spawn_need + E_lineage_tax)`
+- Offspring init: `E_store_child = E_offspring_seed`
+- `E_spawn_overhead + E_lineage_tax` is removed from metabolizable pool (entropy/inefficiency sink)
+
+Suggested starter ranges (tunable):
+- `T_s`: 20-60 s
+- `T_hold`: 5-15 s
+- `S_thresh`: 0.5-2.0x median maintenance flux
+- `T_cooldown`: 10-45 s
 
 ## 5) Carrying capacity and population regulation
 Use resource budget instead of ad hoc caps:
@@ -71,11 +98,31 @@ Use resource budget instead of ad hoc caps:
    - enables asymmetric drag layouts as an evolvable behavior axis.
 5. **Morphological traits**: topology templates, edge types, growth sequence controls.
 
-### 6.2 Mutation/drift model
-- Point mutations for scalar parameters.
-- Structural mutations for topology/edge-type changes.
-- Drift + occasional larger jumps.
-- Keep mutation rates adaptive but bounded.
+### 6.2 Mutation/drift model (bounded + testable)
+Let each offspring receive mutations from three channels:
+1. **Scalar point mutation** (continuous traits: drag, permeability, affinity, gains)
+2. **Discrete state mutation** (edge dye/body enum modes, actuator type switches)
+3. **Structural mutation** (node/edge add/remove, growth-plan step edits)
+
+Per-birth mutation budget:
+- Sample `B_mut ~ Poisson(λ_mut)` and allocate events across channels via fixed weights.
+- Enforce `B_mut <= B_max` to avoid burst instability.
+
+Scalar mutation rule:
+- `x' = clamp(x + Normal(0, σ_x), x_min, x_max)`
+- Optional multiplicative form for strictly positive traits: `x' = clamp(x * exp(Normal(0, σ_logx)), x_min, x_max)`
+
+Discrete mutation rule:
+- Transition only through allowed adjacency map (no invalid enum jumps).
+- Example: `edge dye mode` can only mutate among explicitly supported simulation enums.
+
+Structural mutation safeguards:
+- Reject edits violating topology invariants (min connectivity, non-self-intersection constraints if used).
+- Apply at most one major structural edit per birth unless lineage health score is high.
+
+Adaptive drift (slow exploration):
+- Lineage-local `σ` drifts by small log-random walk every `N_gen` generations, bounded in `[σ_min, σ_max]`.
+- If lineage extinction risk rises (persistent negative surplus), bias toward conservative `σ` reduction.
 
 ## 7) Local drag/friction granularity (new core evolvable axis)
 
@@ -122,15 +169,39 @@ For each scenario, track survival, reproduction, lineage persistence, diversity,
 - Resource depletion maps and recovery rates
 - Morphology complexity vs fitness proxies
 
-## 10) Open questions for refinement
+## 10) Acceptance criteria (design validation checklist)
+
+### 10.1 Energy accounting invariants
+- [ ] For every step, computed flux terms satisfy:
+  `ΔE_internal_total ≈ E_capture_total - E_maint_total - E_actuation_total - E_repro_total - E_growth_total`
+  within numerical tolerance `ε_balance`.
+- [ ] No organism can increase `E_store` when `I(t)=0` and all costs are non-negative.
+- [ ] Spawn event conserves accounting exactly per Section 4.4 parent/child updates.
+
+### 10.2 Sustained-surplus reproduction gating
+- [ ] Synthetic pulse test: one short intake spike that raises instantaneous energy but not `S_ema` for `T_hold` must **not** permit spawn.
+- [ ] Synthetic sustained test: constant positive surplus over `T_hold` with cooldown satisfied must permit spawn.
+- [ ] Cooldown test: second spawn attempt before `T_cooldown` must fail even with surplus.
+
+### 10.3 Mutation/drift safety and expressivity
+- [ ] 1000-birth fuzz run yields zero invalid enum states for edge/body material modes.
+- [ ] Scalar traits remain within declared bounds after mutation.
+- [ ] Structural mutation never breaks required topology invariants.
+- [ ] Drift adaptation never sets `σ` outside `[σ_min, σ_max]`.
+
+### 10.4 Chemofluid consistency checks
+- [ ] Selective digestion uses existing channel semantics (`digestRGB` / affinity) with no bypass path.
+- [ ] Local drag traits are read at node-level (soft) and edge-level (rigid) in force integration.
+- [ ] Emitter-driven resource intake remains dependent on local dye concentration and body/edge interaction modes.
+
+## 11) Open questions for refinement
 1. Should energy be organism-level only, or distributed per node/organ compartment?
 2. How strong should coupling be between morphology complexity and maintenance cost?
 3. Do we introduce explicit toxicity channels now or later?
 4. What minimal genome representation gives expressive power without combinatorial blowup?
-5. Which invariants must always hold to prevent non-physical exploits?
+5. Should `E_lineage_tax` be constant or ecology-adaptive to stabilize booms?
 
-## 11) Next design-only refinement pass
-- Formalize equations for rolling surplus/reproduction eligibility.
-- Define initial parameter priors and safe ranges.
-- Draft genome schema v0 (JSON-like).
-- Define acceptance criteria before implementation begins.
+## 12) Next design-only refinement pass
+- Draft genome schema v0 (JSON-like) including enum adjacency maps and mutation budget fields.
+- Define benchmark fixtures for the acceptance tests in Section 10.
+- Choose initial default constants (`T_s`, `T_hold`, `S_thresh`, `λ_mut`, `σ` bounds) for first calibration sweep.

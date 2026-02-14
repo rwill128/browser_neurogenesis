@@ -604,6 +604,7 @@ function renderPanels(worldId) {
   } else {
     const fs = selected.fullStats || {};
     const growth = fs.growth || {};
+    const growthProgram = growth.program || {};
     const repro = fs.reproductionSuppression || {};
     const costs = fs.energyCostsByType || {};
     const gains = fs.energyGains || {};
@@ -678,6 +679,14 @@ function renderPanels(worldId) {
       ['growth.supp.noCapacity', growth.suppressedByNoCapacity],
       ['growth.supp.chanceRoll', growth.suppressedByChanceRoll],
       ['growth.supp.placement', growth.suppressedByPlacement],
+      ['growth.program.novelty', growthProgram.noveltyScore],
+      ['growth.program.ip', growthProgram.ip],
+      ['growth.program.halted', growthProgram.halted],
+      ['growth.program.executed', growthProgram.executed],
+      ['growth.program.wait', growthProgram.waitRemaining],
+      ['growth.program.backJumps', growthProgram.backwardsJumpsInWindow],
+      ['growth.program.regs', JSON.stringify(growthProgram.regs || [])],
+      ['growth.program.ops', JSON.stringify(growthProgram.opCounts || {})],
 
       ['@@Topology'],
       ['topology.version', topo.nnTopologyVersion],

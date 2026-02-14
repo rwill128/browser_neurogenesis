@@ -3147,11 +3147,12 @@ export class SoftBody {
 
                 const selected = selectWeightedTemplate(templates);
 
-                // If starting from single-triangle template, randomly extrude up to 4 more edge-sharing triangles.
-                if (selected?.name === 'triangle') {
+                // Add edge-sharing triangle extrusions on startup for broader initial morphology diversity.
+                {
                     const pts = selected.points.map((p) => ({ x: Number(p.x) || 0, y: Number(p.y) || 0 }));
                     const tris = selected.triangles.map((t) => t.slice(0, 3));
-                    const extra = Math.floor(Math.random() * 5); // 0..4 => total 1..5 triangles
+                    const maxExtra = selected?.name === 'triangle' ? 4 : 2;
+                    const extra = Math.floor(Math.random() * (maxExtra + 1));
                     for (let n = 0; n < extra; n++) {
                         const edgeUse = new Map();
                         for (const tri of tris) {
@@ -3185,13 +3186,15 @@ export class SoftBody {
                             { x: mx + nx * h, y: my + ny * h },
                             { x: mx - nx * h, y: my - ny * h }
                         ];
-                        let pick = candidates[0];
-                        let best = -Infinity;
-                        for (const c of candidates) {
-                            const score = Math.hypot(c.x, c.y) + (Math.random() * 0.01);
-                            if (score > best) {
-                                best = score;
-                                pick = c;
+                        let pick = candidates[Math.random() < 0.5 ? 0 : 1];
+                        if (Math.random() < 0.65) {
+                            let best = -Infinity;
+                            for (const c of candidates) {
+                                const score = Math.hypot(c.x, c.y) + (Math.random() * 0.01);
+                                if (score > best) {
+                                    best = score;
+                                    pick = c;
+                                }
                             }
                         }
                         const ci = pts.length;

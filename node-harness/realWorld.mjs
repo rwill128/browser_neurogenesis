@@ -475,7 +475,17 @@ export class RealWorld {
             suppressedByMaxPoints: Number(b.growthSuppressedByMaxPoints || 0),
             suppressedByNoCapacity: Number(b.growthSuppressedByNoCapacity || 0),
             suppressedByChanceRoll: Number(b.growthSuppressedByChanceRoll || 0),
-            suppressedByPlacement: Number(b.growthSuppressedByPlacement || 0)
+            suppressedByPlacement: Number(b.growthSuppressedByPlacement || 0),
+            program: {
+              noveltyScore: round(b.growthProgramNoveltyScore, 5),
+              ip: Number.isFinite(Number(b.growthProgramState?.ip)) ? Number(b.growthProgramState.ip) : null,
+              halted: Boolean(b.growthProgramState?.halted),
+              executed: Number.isFinite(Number(b.growthProgramState?.executed)) ? Number(b.growthProgramState.executed) : 0,
+              waitRemaining: Number.isFinite(Number(b.growthProgramState?.waitRemaining)) ? Number(b.growthProgramState.waitRemaining) : 0,
+              backwardsJumpsInWindow: Number.isFinite(Number(b.growthProgramState?.backwardsJumpsInWindow)) ? Number(b.growthProgramState.backwardsJumpsInWindow) : 0,
+              regs: Array.isArray(b.growthProgramState?.regs) ? b.growthProgramState.regs.slice(0, 4).map((v) => Number(v) || 0) : [0, 0, 0, 0],
+              opCounts: b.growthProgramState?.opCounts || {}
+            }
           },
           topology: {
             nnTopologyVersion: Number(b.nnTopologyVersion || 0),

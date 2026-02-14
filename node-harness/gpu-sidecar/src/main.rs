@@ -23,6 +23,8 @@ enum Request {
         steps: u32,
         #[serde(default = "default_dt")]
         dt: f32,
+        #[serde(default = "default_viscosity")]
+        viscosity: f32,
         #[serde(default = "default_fade")]
         fade: f32,
         #[serde(default = "default_jacobi")]
@@ -36,6 +38,7 @@ enum Request {
 
 fn default_steps() -> u32 { 1 }
 fn default_dt() -> f32 { 0.1 }
+fn default_viscosity() -> f32 { 0.0002 }
 fn default_fade() -> f32 { 0.995 }
 fn default_jacobi() -> u32 { 30 }
 fn default_dye_radius() -> f32 { 0.15 }
@@ -94,9 +97,13 @@ struct Params {
     jacobi_iters: u32,
     _pad0: u32,
     dt: f32,
+    viscosity: f32,
     fade: f32,
     dye_radius: f32,
     impulse: f32,
+    _pad1: f32,
+    _pad2: f32,
+    _pad3: f32,
 }
 
 fn main() {
@@ -152,6 +159,7 @@ fn run() -> Result<()> {
             height,
             steps,
             dt,
+            viscosity,
             fade,
             jacobi_iters,
             dye_radius,
@@ -162,6 +170,7 @@ fn run() -> Result<()> {
                 height.max(16),
                 steps.max(1),
                 dt.max(1e-4),
+                viscosity.max(0.0),
                 fade.clamp(0.8, 1.0),
                 jacobi_iters.clamp(5, 120),
                 dye_radius,
@@ -202,9 +211,13 @@ async fn run_fluid_init(width: u32, height: u32, dye_radius: f32, impulse: f32) 
         jacobi_iters: 0,
         _pad0: 0,
         dt: default_dt(),
+        viscosity: default_viscosity(),
         fade: default_fade(),
         dye_radius,
         impulse,
+        _pad1: 0.0,
+        _pad2: 0.0,
+        _pad3: 0.0,
     };
 
     let params_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -275,6 +288,7 @@ async fn run_fluid_step(
     height: u32,
     steps: u32,
     dt: f32,
+    viscosity: f32,
     fade: f32,
     jacobi_iters: u32,
     dye_radius: f32,
@@ -290,9 +304,13 @@ async fn run_fluid_step(
         jacobi_iters,
         _pad0: 0,
         dt,
+        viscosity,
         fade,
         dye_radius,
         impulse,
+        _pad1: 0.0,
+        _pad2: 0.0,
+        _pad3: 0.0,
     };
 
     let params_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -661,9 +679,13 @@ async fn run_smoke(n: u32) -> Result<SmokeResponse> {
             jacobi_iters: 0,
             _pad0: 0,
             dt: 0.0,
+            viscosity: 0.0,
             fade: 0.0,
             dye_radius: 0.0,
             impulse: 0.0,
+            _pad1: 0.0,
+            _pad2: 0.0,
+            _pad3: 0.0,
         }),
     );
 
@@ -677,9 +699,13 @@ struct Params {
   jacobi_iters: u32,
   _pad0: u32,
   dt: f32,
+  viscosity: f32,
   fade: f32,
   dye_radius: f32,
   impulse: f32,
+  _pad1: f32,
+  _pad2: f32,
+  _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
 @group(0) @binding(1) var<storage, read_write> data: array<f32>;
@@ -772,9 +798,13 @@ struct Params {
   jacobi_iters: u32,
   _pad0: u32,
   dt: f32,
+  viscosity: f32,
   fade: f32,
   dye_radius: f32,
   impulse: f32,
+  _pad1: f32,
+  _pad2: f32,
+  _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
 @group(0) @binding(1) var<storage, read_write> vel: array<vec2<f32>>;
@@ -802,9 +832,13 @@ struct Params {
   jacobi_iters: u32,
   _pad0: u32,
   dt: f32,
+  viscosity: f32,
   fade: f32,
   dye_radius: f32,
   impulse: f32,
+  _pad1: f32,
+  _pad2: f32,
+  _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
 @group(0) @binding(1) var<storage, read> src: array<vec2<f32>>;
@@ -846,8 +880,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let v = src[id];
   let back = pos - p.dt * v;
 
-  // Semi-Lagrangian advection + sustained center forcing so flow does real work over many steps.
-  var v_next = sample_vel(back) * 0.999;
+  // Semi-Lagrangian advection + simple viscosity damping.
+  let visc_decay = 1.0 / (1.0 + 4.0 * p.viscosity * p.dt);
+  var v_next = sample_vel(back) * visc_decay;
   let center = vec2<f32>(f32(p.width) * 0.5, f32(p.height) * 0.5);
   let rel = pos - center;
   let r = length(rel) / max(f32(min(p.width, p.height)), 1.0);
@@ -868,9 +903,13 @@ struct Params {
   jacobi_iters: u32,
   _pad0: u32,
   dt: f32,
+  viscosity: f32,
   fade: f32,
   dye_radius: f32,
   impulse: f32,
+  _pad1: f32,
+  _pad2: f32,
+  _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
 @group(0) @binding(1) var<storage, read> vel: array<vec2<f32>>;
@@ -899,9 +938,13 @@ struct Params {
   jacobi_iters: u32,
   _pad0: u32,
   dt: f32,
+  viscosity: f32,
   fade: f32,
   dye_radius: f32,
   impulse: f32,
+  _pad1: f32,
+  _pad2: f32,
+  _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
 @group(0) @binding(1) var<storage, read> p_in: array<f32>;
@@ -932,9 +975,13 @@ struct Params {
   jacobi_iters: u32,
   _pad0: u32,
   dt: f32,
+  viscosity: f32,
   fade: f32,
   dye_radius: f32,
   impulse: f32,
+  _pad1: f32,
+  _pad2: f32,
+  _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
 @group(0) @binding(1) var<storage, read> vel: array<vec2<f32>>;
@@ -967,9 +1014,13 @@ struct Params {
   jacobi_iters: u32,
   _pad0: u32,
   dt: f32,
+  viscosity: f32,
   fade: f32,
   dye_radius: f32,
   impulse: f32,
+  _pad1: f32,
+  _pad2: f32,
+  _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
 @group(0) @binding(1) var<storage, read> vel: array<vec2<f32>>;
@@ -1016,9 +1067,13 @@ struct Params {
   jacobi_iters: u32,
   _pad0: u32,
   dt: f32,
+  viscosity: f32,
   fade: f32,
   dye_radius: f32,
   impulse: f32,
+  _pad1: f32,
+  _pad2: f32,
+  _pad3: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
 @group(0) @binding(1) var<storage, read> src: array<f32>;

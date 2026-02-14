@@ -3889,17 +3889,45 @@ export class SoftBody {
         });
 
         if (fluidFieldRef) {
-            for (let point of this.massPoints) {
-                const fluidGridX = Math.floor(point.pos.x / fluidFieldRef.scaleX);
-                const fluidGridY = Math.floor(point.pos.y / fluidFieldRef.scaleY);
+            const safeScaleX = Math.max(1e-6, Number(fluidFieldRef.scaleX) || 1);
+            const safeScaleY = Math.max(1e-6, Number(fluidFieldRef.scaleY) || 1);
+            const hasIX = typeof fluidFieldRef.IX === 'function';
+            const getFluidVelocityAt = (point, idx) => {
+                if (Number.isInteger(idx) && fluidFieldRef.Vx && fluidFieldRef.Vy && idx >= 0 && idx < fluidFieldRef.Vx.length) {
+                    return { vx: Number(fluidFieldRef.Vx[idx]) || 0, vy: Number(fluidFieldRef.Vy[idx]) || 0 };
+                }
+                if (typeof fluidFieldRef.getVelocityAtWorld === 'function') {
+                    const sampled = fluidFieldRef.getVelocityAtWorld(point.pos.x, point.pos.y);
+                    return { vx: Number(sampled?.vx) || 0, vy: Number(sampled?.vy) || 0 };
+                }
+                return { vx: 0, vy: 0 };
+            };
 
+            const rigidSpringCount = new Map();
+            const springCount = new Map();
+            for (const spring of this.springs) {
+                if (!spring || !spring.p1 || !spring.p2) continue;
+                springCount.set(spring.p1, (springCount.get(spring.p1) || 0) + 1);
+                springCount.set(spring.p2, (springCount.get(spring.p2) || 0) + 1);
+                if (spring.isRigid) {
+                    rigidSpringCount.set(spring.p1, (rigidSpringCount.get(spring.p1) || 0) + 1);
+                    rigidSpringCount.set(spring.p2, (rigidSpringCount.get(spring.p2) || 0) + 1);
+                }
+            }
+
+            const softDrag = Math.max(0, Number(config.BODY_FLUID_DRAG_COEFF_SOFT) || 0.5);
+            const rigidDrag = Math.max(0, Number(config.BODY_FLUID_DRAG_COEFF_RIGID) || 1.0);
+            const softFeedback = Math.max(0, Number(config.BODY_TO_FLUID_FEEDBACK_SOFT) || 0.02);
+            const rigidFeedback = Math.max(0, Number(config.BODY_TO_FLUID_FEEDBACK_RIGID) || 0.06);
+            const swimmerFeedback = Math.max(0, Number(config.SWIMMER_TO_FLUID_FEEDBACK) || 0.25);
+
+            for (let point of this.massPoints) {
+                const fluidGridX = Math.floor(point.pos.x / safeScaleX);
+                const fluidGridY = Math.floor(point.pos.y / safeScaleY);
                 if (!isFinite(fluidGridX) || !isFinite(fluidGridY)) continue;
 
-                const idx = fluidFieldRef.IX(fluidGridX, fluidGridY);
-                // Check index validity once, for all interactions.
-                // Assuming Vx, Vy, density arrays all have the same length.
-                if (idx < 0 || idx >= (fluidFieldRef.Vx ? fluidFieldRef.Vx.length : (fluidFieldRef.textures.velocityPing ? fluidFieldRef.size * fluidFieldRef.size : 0))) continue;
-
+                const idx = hasIX ? fluidFieldRef.IX(fluidGridX, fluidGridY) : null;
+                const fluidVel = getFluidVelocityAt(point, idx);
 
                 // --- Fluid Interactions (should occur even if fixed) ---
                 if (point.nodeType === NodeType.EMITTER) {
@@ -3910,10 +3938,7 @@ export class SoftBody {
                 if (point.nodeType === NodeType.JET) {
                     const exertion = (point.currentExertionLevel || 0) * this._getNodeSenescenceScale(point);
                     if (exertion > 0.01) {
-                        const currentFluidVelX = fluidFieldRef.Vx ? fluidFieldRef.Vx[idx] : 0; // Placeholder for GPU
-                        const currentFluidVelY = fluidFieldRef.Vy ? fluidFieldRef.Vy[idx] : 0; // Placeholder for GPU
-                        const currentFluidSpeedSq = currentFluidVelX ** 2 + currentFluidVelY ** 2;
-
+                        const currentFluidSpeedSq = fluidVel.vx ** 2 + fluidVel.vy ** 2;
                         if (currentFluidSpeedSq < point.maxEffectiveJetVelocity ** 2) {
                             const finalMagnitude = point.jetData.currentMagnitude * jetDyeScale;
                             const angle = point.jetData.currentAngle;
@@ -3928,7 +3953,11 @@ export class SoftBody {
                     const magnitude = Math.max(0, (Number(point.swimmerActuation?.magnitude) || 0) * this._getNodeSenescenceScale(point) * swimmerDyeScale);
                     const angle = Number(point.swimmerActuation?.angle) || 0;
                     if (magnitude > 0.0001) {
-                        point.applyForce(new Vec2(Math.cos(angle) * (magnitude / dt), Math.sin(angle) * (magnitude / dt)));
+                        const swimForceX = Math.cos(angle) * (magnitude / Math.max(dt, 1e-6));
+                        const swimForceY = Math.sin(angle) * (magnitude / Math.max(dt, 1e-6));
+                        point.applyForce(new Vec2(swimForceX, swimForceY));
+                        // Active swimmer impulse pushes fluid in the opposite direction.
+                        fluidFieldRef.addVelocity(fluidGridX, fluidGridY, -Math.cos(angle) * magnitude * swimmerFeedback, -Math.sin(angle) * magnitude * swimmerFeedback);
                     }
                 }
 
@@ -3936,16 +3965,36 @@ export class SoftBody {
                 if (point.isFixed) continue;
 
                 if (point.movementType === MovementType.FLOATING) {
-                    const rawFluidVx = fluidFieldRef.Vx ? fluidFieldRef.Vx[idx] : 0;
-                    const rawFluidVy = fluidFieldRef.Vy ? fluidFieldRef.Vy[idx] : 0;
                     this._tempVec1.copyFrom(point.pos).subInPlace(point.prevPos).mulInPlace(1.0 - this.fluidEntrainment);
-                    this._tempVec2.x = rawFluidVx * fluidFieldRef.scaleX * dt;
-                    this._tempVec2.y = rawFluidVy * fluidFieldRef.scaleY * dt;
+                    this._tempVec2.x = fluidVel.vx * safeScaleX * dt;
+                    this._tempVec2.y = fluidVel.vy * safeScaleY * dt;
                     this._tempVec2.mulInPlace(this.fluidCurrentStrength).mulInPlace(this.fluidEntrainment);
                     this._tempVec1.addInPlace(this._tempVec2);
-
                     point.prevPos.copyFrom(point.pos).subInPlace(this._tempVec1);
                 }
+
+                const totalSprings = springCount.get(point) || 0;
+                const rigidMix = totalSprings > 0 ? Math.min(1, (rigidSpringCount.get(point) || 0) / totalSprings) : 0;
+                const dragCoeff = softDrag + (rigidDrag - softDrag) * rigidMix;
+                const feedbackCoeff = softFeedback + (rigidFeedback - softFeedback) * rigidMix;
+
+                const bodyVx = (point.pos.x - point.prevPos.x) / Math.max(dt, 1e-6);
+                const bodyVy = (point.pos.y - point.prevPos.y) / Math.max(dt, 1e-6);
+                const fluidWorldVx = fluidVel.vx * safeScaleX;
+                const fluidWorldVy = fluidVel.vy * safeScaleY;
+                const relVx = bodyVx - fluidWorldVx;
+                const relVy = bodyVy - fluidWorldVy;
+
+                // Fluid->body drag/carry term (two-way half #1).
+                point.applyForce(new Vec2(-relVx * dragCoeff, -relVy * dragCoeff));
+
+                // Body->fluid feedback term (two-way half #2): moving mass pushes local fluid.
+                fluidFieldRef.addVelocity(
+                    fluidGridX,
+                    fluidGridY,
+                    relVx * feedbackCoeff / safeScaleX,
+                    relVy * feedbackCoeff / safeScaleY
+                );
             }
         }
 

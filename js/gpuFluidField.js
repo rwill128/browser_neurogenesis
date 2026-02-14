@@ -21,6 +21,15 @@ export class GPUFluidField {
         this.maxVelComponent = MAX_FLUID_VELOCITY_COMPONENT; // Ensure this is defined or passed
         this.iterations = 4; // Standard solver iterations
 
+        // CPU shadow fields for gameplay coupling queries (body<->fluid) while simulation runs on GPU.
+        // These are updated by impulses and lightly decayed each step to keep deterministic, non-random sampling.
+        const cellCount = this.size * this.size;
+        this.shadowVx = new Float32Array(cellCount).fill(0);
+        this.shadowVy = new Float32Array(cellCount).fill(0);
+        this.shadowDensityR = new Float32Array(cellCount).fill(0);
+        this.shadowDensityG = new Float32Array(cellCount).fill(0);
+        this.shadowDensityB = new Float32Array(cellCount).fill(0);
+
         // Placeholders for WebGL resources
         this.programs = {}; // To store shader programs (e.g., diffuse, advect, project_divergence, etc.)
         this.textures = {}; // To store textures (density, velocity - front and back for ping-pong)
@@ -490,8 +499,39 @@ export class GPUFluidField {
         }
     }
 
+    _toShadowGridCell(x, y) {
+        const rawX = Number(x);
+        const rawY = Number(y);
+        if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) return null;
+
+        // Accept both grid coordinates (common CPU call sites) and world coordinates.
+        const gx = (rawX <= this.size && rawY <= this.size)
+            ? Math.floor(rawX)
+            : Math.floor(rawX / Math.max(1e-6, this.scaleX));
+        const gy = (rawX <= this.size && rawY <= this.size)
+            ? Math.floor(rawY)
+            : Math.floor(rawY / Math.max(1e-6, this.scaleY));
+
+        const clampedX = Math.max(0, Math.min(this.size - 1, gx));
+        const clampedY = Math.max(0, Math.min(this.size - 1, gy));
+        return { gx: clampedX, gy: clampedY, idx: clampedX + clampedY * this.size };
+    }
+
+    _decayShadowFields() {
+        const velDecay = Math.max(0, Math.min(1, 1 - this.dt * 2.0));
+        const densityDecay = Math.max(0, Math.min(1, 1 - this.dt * 1.5));
+        for (let i = 0; i < this.shadowVx.length; i++) {
+            this.shadowVx[i] *= velDecay;
+            this.shadowVy[i] *= velDecay;
+            this.shadowDensityR[i] *= densityDecay;
+            this.shadowDensityG[i] *= densityDecay;
+            this.shadowDensityB[i] *= densityDecay;
+        }
+    }
+
     // --- Public API (matching CPU version where possible) ---
     step() {
+        this._decayShadowFields();
         if (!this.gpuEnabled) {
             return;
         }
@@ -703,6 +743,15 @@ export class GPUFluidField {
     }
 
     addDensity(x, y, r, g, b, strength) {
+        const shadowCell = this._toShadowGridCell(x, y);
+        if (shadowCell) {
+            const idx = shadowCell.idx;
+            const blend = Math.max(0, Math.min(1, (Number(strength) || 0) / 80));
+            this.shadowDensityR[idx] = Math.max(0, Math.min(255, this.shadowDensityR[idx] + (Number(r) - this.shadowDensityR[idx]) * blend));
+            this.shadowDensityG[idx] = Math.max(0, Math.min(255, this.shadowDensityG[idx] + (Number(g) - this.shadowDensityG[idx]) * blend));
+            this.shadowDensityB[idx] = Math.max(0, Math.min(255, this.shadowDensityB[idx] + (Number(b) - this.shadowDensityB[idx]) * blend));
+        }
+
         if (!this.gpuEnabled) return;
 
         if (this.device) { // WebGPU Path
@@ -759,6 +808,15 @@ export class GPUFluidField {
     }
 
     addVelocity(x, y, amountX, amountY, strength = 15) { // Added strength for radius
+        const shadowCell = this._toShadowGridCell(x, y);
+        if (shadowCell) {
+            const idx = shadowCell.idx;
+            const vx = Number(amountX) || 0;
+            const vy = Number(amountY) || 0;
+            this.shadowVx[idx] = Math.max(-this.maxVelComponent, Math.min(this.maxVelComponent, this.shadowVx[idx] + vx));
+            this.shadowVy[idx] = Math.max(-this.maxVelComponent, Math.min(this.maxVelComponent, this.shadowVy[idx] + vy));
+        }
+
         if (!this.gpuEnabled) return;
 
         if (this.device) { // WebGPU Path
@@ -886,6 +944,12 @@ export class GPUFluidField {
     }
 
     clear() {
+        this.shadowVx.fill(0);
+        this.shadowVy.fill(0);
+        this.shadowDensityR.fill(0);
+        this.shadowDensityG.fill(0);
+        this.shadowDensityB.fill(0);
+
         if (!this.gpuEnabled) return;
 
         if (this.device) { // WebGPU Path
@@ -937,20 +1001,19 @@ export class GPUFluidField {
         }
     }
 
-    // --- NEW PLACEHOLDER DATA ACCESS METHODS ---
+    // --- Coupling-oriented CPU shadow sampling methods ---
     getDensityAtWorld(worldX, worldY) {
-        if (!this.gpuEnabled || !this.device) return [0,0,0,0]; // r,g,b,a - default transparent black
-        // TODO WebGPU: Implement proper texture readback or sampling via compute shader for accurate data.
-        // For now, return a dummy value.
-        // console.warn("GPUFluidField.getDensityAtWorld() is a placeholder.");
-        return [Math.random()*5, Math.random()*5, Math.random()*5, 0.1]; // Slight random color for testing
+        const cell = this._toShadowGridCell(worldX, worldY);
+        if (!cell) return [0, 0, 0, 0];
+        const idx = cell.idx;
+        return [this.shadowDensityR[idx], this.shadowDensityG[idx], this.shadowDensityB[idx], 1.0];
     }
 
     getVelocityAtWorld(worldX, worldY) {
-        if (!this.gpuEnabled || !this.device) return {vx: 0, vy: 0};
-        // TODO WebGPU: Implement proper texture readback or sampling.
-        // console.warn("GPUFluidField.getVelocityAtWorld() is a placeholder.");
-        return {vx: (Math.random()-0.5)*0.1, vy: (Math.random()-0.5)*0.1 }; // Slight random velocity
+        const cell = this._toShadowGridCell(worldX, worldY);
+        if (!cell) return { vx: 0, vy: 0 };
+        const idx = cell.idx;
+        return { vx: this.shadowVx[idx], vy: this.shadowVy[idx] };
     }
 
     // For nutrient, light, viscosity, these are currently global CPU arrays.

@@ -35,6 +35,9 @@ function log(v) { out.textContent = typeof v === 'string' ? v : JSON.stringify(v
 const WORKGROUP = 8;
 const JACOBI_ITERS = 20;
 const SOFT_SPRING_STIFFNESS_DEFAULT = 3.0; // requested stronger default baseline
+const SOFT_XPBD_ITERS = 10;
+const SOFT_XPBD_BASE_COMPLIANCE = 0.0012;
+const SOFT_INTEGRATION_SCALE = 24;
 
 const EDGE_BODY_MODE = {
   PASS: 0,
@@ -1062,6 +1065,51 @@ function enforceFluidEdgeBoundariesCpu(vxField, vyField, n) {
   }
 }
 
+function applySoftSpringsXPBDVelocity(s, dtPos, stiffnessScale, lambdaCache) {
+  if (!s?.nodes?.length || !s?.springs?.length) return;
+  const alpha = (SOFT_XPBD_BASE_COMPLIANCE / Math.max(0.2, stiffnessScale)) / Math.max(1e-8, dtPos * dtPos);
+
+  for (let iter = 0; iter < SOFT_XPBD_ITERS; iter++) {
+    for (let si = 0; si < s.springs.length; si++) {
+      const [i, j, rest] = s.springs[si];
+      const a = s.nodes[i];
+      const b = s.nodes[j];
+      if (!a || !b) continue;
+
+      const ax = a.x + a.vx * dtPos;
+      const ay = a.y + a.vy * dtPos;
+      const bx = b.x + b.vx * dtPos;
+      const by = b.y + b.vy * dtPos;
+
+      const dx = bx - ax;
+      const dy = by - ay;
+      const d = Math.max(1e-6, Math.hypot(dx, dy));
+      const nx = dx / d;
+      const ny = dy / d;
+      const C = d - rest;
+
+      const wA = 1 / Math.max(0.02, a.mass || 1);
+      const wB = 1 / Math.max(0.02, b.mass || 1);
+      const wSum = wA + wB;
+      if (wSum <= 1e-9) continue;
+
+      const lambdaPrev = lambdaCache[si] || 0;
+      const dl = (-C - alpha * lambdaPrev) / (wSum + alpha);
+      lambdaCache[si] = lambdaPrev + dl;
+
+      const corrAx = -wA * dl * nx;
+      const corrAy = -wA * dl * ny;
+      const corrBx = wB * dl * nx;
+      const corrBy = wB * dl * ny;
+
+      a.vx += corrAx / dtPos;
+      a.vy += corrAy / dtPos;
+      b.vx += corrBx / dtPos;
+      b.vy += corrBy / dtPos;
+    }
+  }
+}
+
 function stepBodiesAndInject(sim, vxField, vyField) {
   const n = sim.controls.n;
   const dt = sim.controls.dt;
@@ -1207,18 +1255,15 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     softCarryTransfer += Math.hypot(carryX, carryY);
   }
 
-  for (let iter = 0; iter < 7; iter++) {
-    for (const [i, j, rest] of s.springs) {
-      const a = s.nodes[i], b = s.nodes[j];
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const d = Math.max(1e-6, Math.hypot(dx, dy));
-      const err = (d - rest) * 0.68;
-      const nx = dx / d, ny = dy / d;
-      const springGain = 0.034 * SOFT_SPRING_STIFFNESS_DEFAULT;
-      a.vx += nx * err * springGain; a.vy += ny * err * springGain;
-      b.vx -= nx * err * springGain; b.vy -= ny * err * springGain;
-    }
+  const dtPos = Math.max(1e-4, dt * SOFT_INTEGRATION_SCALE);
+  if (!sim.softXPBDLambda || sim.softXPBDLambda.length !== s.springs.length) {
+    sim.softXPBDLambda = new Float32Array(s.springs.length);
+  } else {
+    sim.softXPBDLambda.fill(0);
+  }
+  applySoftSpringsXPBDVelocity(s, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT, sim.softXPBDLambda);
 
+  for (let iter = 0; iter < 7; iter++) {
     // Rigid-rigid weld constraints for compound rigid shapes.
     applyRigidWeldConstraints({
       rigid: bodies.rigid,
@@ -1251,8 +1296,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   }
 
   for (const node of s.nodes) {
-    node.x = node.x + node.vx * dt * 24;
-    node.y = node.y + node.vy * dt * 24;
+    node.x = node.x + node.vx * dt * SOFT_INTEGRATION_SCALE;
+    node.y = node.y + node.vy * dt * SOFT_INTEGRATION_SCALE;
     applyBounceBoundary(node, n, 0.78);
   }
 

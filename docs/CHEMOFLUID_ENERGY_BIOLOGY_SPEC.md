@@ -194,7 +194,53 @@ On execute:
 - `E_operational_buffer`: 0.5-1.5x instantaneous maintenance
 - `growth_cooldown`: 3-10 s between steps
 
-## 8) Evaluation scenarios (for future implementation)
+## 9) Actuator taxonomy and expenditure model (refinement)
+
+### 8.1 Supported actuator classes (design-level)
+Actuators should be explicit genome-addressable enums to avoid hidden behavior channels:
+- `none`: passive body, no active thrust.
+- `edge_undulation`: periodic edge deformation producing propulsion via fluid coupling.
+- `volume_pulse`: body expansion/contraction cycle, thrust from asymmetric drag/permeability.
+- `jet_emitter`: directional dye/mass ejection for impulse-like motion (high burst cost).
+- `ciliary_band` (future-capable): distributed low-amplitude surface actuation with strong maintenance overhead.
+
+Each actuator instance must declare:
+- `actuator_type` (enum)
+- `gain` (amplitude/intensity)
+- `duty_cycle` (active fraction over period)
+- `phase` (for multi-actuator coordination)
+- `orientation_ref` (edge index / local frame)
+
+### 8.2 Actuation energy model (accounting-compatible)
+For organism `o`, instantaneous actuation spend:
+`A_o(t) = Σ_k A_k(t)` over active actuators `k`.
+
+Per-actuator spend is decomposed:
+`A_k(t) = C_idle(type_k) * duty_k(t) + C_work(type_k) * W_k(t)`
+where:
+- `C_idle`: baseline energetic overhead when actuator is enabled.
+- `W_k(t)`: physics work proxy (e.g., absolute impulse, deformation rate integral, or ejected mass * speed proxy), implementation-chosen but fixed per actuator class.
+- `C_work`: converts work proxy units into metabolizable energy spend.
+
+Hard constraints:
+1. `A_k(t) >= 0` always.
+2. If actuator is inactive and no deformation/ejection occurs, `A_k(t)=0`.
+3. `A_o(t)` must be included in Section 4.4 surplus exactly once (no double-count with maintenance).
+
+### 8.3 Performance/efficiency coupling
+Define actuator efficiency trait `η_k ∈ [η_min, η_max]` that scales effective propulsion but not free energy:
+- Effective thrust proxy: `T_eff_k = η_k * T_cmd_k`
+- Cost side remains non-decreasing with command magnitude.
+
+Recommended anti-exploit rule:
+- For any actuator class, net displacement gain from increasing command should show diminishing returns beyond class-specific knee `u_knee`, while energy spend continues rising.
+
+### 8.4 Compatibility with current chemofluid mechanics
+- `edge_undulation` and `ciliary_band` interact with local drag traits (node-level soft / edge-level rigid) exactly as in Section 7.
+- `jet_emitter` cannot bypass selective digestion: expelled material is not counted as intake and cannot be re-counted as immediate self-digestion without transport delay.
+- Body/edge dye mode enums remain authoritative for pass/deflect/absorb behavior during actuation.
+
+## 10) Evaluation scenarios (for future implementation)
 Create fixed scenario suite for meaningful comparisons:
 1. Uniform field + sparse emitters
 2. High-shear channels
@@ -204,7 +250,7 @@ Create fixed scenario suite for meaningful comparisons:
 
 For each scenario, track survival, reproduction, lineage persistence, diversity, and energy efficiency.
 
-## 9) Metrics to report continuously
+## 11) Metrics to report continuously
 - Population + lineage diversity
 - Energy intake/outgo by channel
 - Rolling surplus distribution
@@ -212,46 +258,53 @@ For each scenario, track survival, reproduction, lineage persistence, diversity,
 - Resource depletion maps and recovery rates
 - Morphology complexity vs fitness proxies
 
-## 10) Acceptance criteria (design validation checklist)
+## 12) Acceptance criteria (design validation checklist)
 
-### 10.1 Energy accounting invariants
+### 12.1 Energy accounting invariants
 - [ ] For every step, computed flux terms satisfy:
   `ΔE_internal_total ≈ E_capture_total - E_maint_total - E_actuation_total - E_repro_total - E_growth_total`
   within numerical tolerance `ε_balance`.
 - [ ] No organism can increase `E_store` when `I(t)=0` and all costs are non-negative.
 - [ ] Spawn event conserves accounting exactly per Section 4.4 parent/child updates.
 
-### 10.2 Sustained-surplus reproduction gating
+### 12.2 Sustained-surplus reproduction gating
 - [ ] Synthetic pulse test: one short intake spike that raises instantaneous energy but not `S_ema` for `T_hold` must **not** permit spawn.
 - [ ] Synthetic sustained test: constant positive surplus over `T_hold` with cooldown satisfied must permit spawn.
 - [ ] Cooldown test: second spawn attempt before `T_cooldown` must fail even with surplus.
 
-### 10.3 Mutation/drift safety and expressivity
+### 12.3 Mutation/drift safety and expressivity
 - [ ] 1000-birth fuzz run yields zero invalid enum states for edge/body material modes.
 - [ ] Scalar traits remain within declared bounds after mutation.
 - [ ] Structural mutation never breaks required topology invariants.
 - [ ] Drift adaptation never sets `σ` outside `[σ_min, σ_max]`.
 
-### 10.4 Growth-plan logic and gating checks
+### 12.4 Growth-plan logic and gating checks
 - [ ] Growth step cannot execute unless energy + sustained-surplus gates in Section 8.2 are simultaneously satisfied.
 - [ ] Reservation accounting test: when a step reserves `cost_energy`, that amount is unavailable to reproduction gating until released or spent.
 - [ ] Rollback test matrix (`skip/retry_later/abort_plan`) preserves energy (no hidden gain/loss) and advances/halts stage as specified.
 - [ ] Starvation interrupt test: entering starvation mode pauses growth and releases pending reservation within one simulation step.
 - [ ] Plan mutation validity test: mutated plans never exceed `P_max`, never reference invalid actuator/material enums, and always retain at least one viable minimal morphology path.
 
-### 10.5 Chemofluid consistency checks
+### 12.5 Chemofluid consistency checks
 - [ ] Selective digestion uses existing channel semantics (`digestRGB` / affinity) with no bypass path.
 - [ ] Local drag traits are read at node-level (soft) and edge-level (rigid) in force integration.
 - [ ] Emitter-driven resource intake remains dependent on local dye concentration and body/edge interaction modes.
 
-## 11) Open questions for refinement
+### 12.6 Actuator taxonomy/accounting checks
+- [ ] All actuator instances in genomes validate against the supported enum set (`none`, `edge_undulation`, `volume_pulse`, `jet_emitter`, optional `ciliary_band` if enabled).
+- [ ] For each actuator class, zero-command test yields `A_k(t)=0` and no propulsion impulse.
+- [ ] Monotonic-cost test: increasing command magnitude over a fixture trajectory does not reduce total actuation spend.
+- [ ] No-double-count test: per-step `E_actuation_total` equals the sum of actuator spends and is not also included in maintenance.
+- [ ] Jet recapture delay test: ejected material cannot be digested by the same organism in the same simulation step.
+
+## 13) Open questions for refinement
 1. Should energy be organism-level only, or distributed per node/organ compartment?
 2. How strong should coupling be between morphology complexity and maintenance cost?
 3. Do we introduce explicit toxicity channels now or later?
 4. What minimal genome representation gives expressive power without combinatorial blowup?
 5. Should `E_lineage_tax` be constant or ecology-adaptive to stabilize booms?
 
-## 12) Next design-only refinement pass
+## 14) Next design-only refinement pass
 - Draft genome schema v0 (JSON-like) including enum adjacency maps and mutation budget fields.
-- Define benchmark fixtures for the acceptance tests in Section 10.
+- Define benchmark fixtures for the acceptance tests in Section 12.
 - Choose initial default constants (`T_s`, `T_hold`, `S_thresh`, `λ_mut`, `σ` bounds) for first calibration sweep.

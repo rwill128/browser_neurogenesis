@@ -523,6 +523,8 @@ function initEmitters(n) {
       cg: c[1],
       cb: c[2],
       strength: n >= 2048 ? 1.6 : 1.2,
+      spin: (Math.random() < 0.5 ? -1 : 1) * (0.45 + Math.random() * 0.55),
+      swirlJitter: Math.random() * Math.PI * 2,
     });
   }
   return emitters;
@@ -542,19 +544,26 @@ function applyEmitters(sim, r, g, b, vx, vy) {
     const maxX = Math.min(n - 1, Math.ceil(e.x + e.r));
     const minY = Math.max(0, Math.floor(e.y - e.r));
     const maxY = Math.min(n - 1, Math.ceil(e.y + e.r));
+    const pulse = 0.75 + 0.25 * Math.sin(sim.frame * 0.03 + e.swirlJitter);
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
         const dx = x - e.x;
         const dy = y - e.y;
         const d = Math.hypot(dx, dy);
         if (d > e.r) continue;
-        const w = (1 - d / e.r) * e.strength;
+        const nd = d / Math.max(1e-6, e.r);
+        const w = (1 - nd) * e.strength * pulse;
         const i = y * n + x;
         r[i] = Math.min(255, r[i] + e.cr * 0.03 * w);
         g[i] = Math.min(255, g[i] + e.cg * 0.03 * w);
         b[i] = Math.min(255, b[i] + e.cb * 0.03 * w);
-        vx[i] += e.vx * 0.03 * w;
-        vy[i] += e.vy * 0.03 * w;
+
+        const tx = d > 1e-6 ? (-dy / d) : 0;
+        const ty = d > 1e-6 ? (dx / d) : 0;
+        const swirlProfile = (1 - nd) * (0.35 + 0.65 * nd);
+        const swirl = e.spin * 0.11 * swirlProfile;
+        vx[i] += (e.vx * 0.028 + tx * swirl) * w;
+        vy[i] += (e.vy * 0.028 + ty * swirl) * w;
       }
     }
   }

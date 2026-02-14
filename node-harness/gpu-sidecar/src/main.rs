@@ -836,6 +836,12 @@ fn sample_vel(pos: vec2<f32>) -> vec2<f32> {
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (gid.x >= p.width || gid.y >= p.height) { return; }
   let id = idx(gid.x, gid.y);
+  let edge = gid.x == 0u || gid.y == 0u || gid.x == (p.width - 1u) || gid.y == (p.height - 1u);
+  if (edge) {
+    dst[id] = vec2<f32>(0.0, 0.0);
+    return;
+  }
+
   let pos = vec2<f32>(f32(gid.x), f32(gid.y));
   let v = src[id];
   let back = pos - p.dt * v;

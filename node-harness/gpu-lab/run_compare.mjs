@@ -1,5 +1,6 @@
 import { createCpuBackend } from './cpu_ref.mjs';
-import { createGpuBackend } from './gpu_stub.mjs';
+import { createGpuBackend as createGpuStubBackend } from './gpu_stub.mjs';
+import { createGpuBackend as createGpuWebGpuBackend } from './gpu_webgpu.mjs';
 import { snapshotMetrics } from './schema.mjs';
 
 const cfg = {
@@ -35,12 +36,25 @@ function runCpu() {
   return { backend: cpu.name, sps: (cfg.steps / elapsed) * 1000, elapsedMs: elapsed, metrics };
 }
 
+async function runGpuWebGpu() {
+  const gpu = await createGpuWebGpuBackend(cfg);
+  if (!gpu.available) return { backend: gpu.name, available: false, reason: gpu.reason };
+  const t0 = nowMs();
+  for (let i = 0; i < cfg.steps; i++) gpu.step(null, cfg);
+  const elapsed = nowMs() - t0;
+  gpu.dispose();
+  return { backend: gpu.name, available: true, sps: (cfg.steps / Math.max(1e-9, elapsed)) * 1000, elapsedMs: elapsed };
+}
+
 function runGpuStub() {
-  const gpu = createGpuBackend();
+  const gpu = createGpuStubBackend();
   const t0 = nowMs();
   for (let i = 0; i < cfg.steps; i++) gpu.step(null, cfg);
   const elapsed = nowMs() - t0;
   return { backend: gpu.name, sps: (cfg.steps / Math.max(1e-9, elapsed)) * 1000, elapsedMs: elapsed };
 }
 
-console.log(JSON.stringify({ cfg, cpu: runCpu(), gpu: runGpuStub() }, null, 2));
+const cpu = runCpu();
+const gpuStub = runGpuStub();
+const gpuWebGpu = await runGpuWebGpu();
+console.log(JSON.stringify({ cfg, cpu, gpuStub, gpuWebGpu }, null, 2));

@@ -499,18 +499,18 @@ function initBodies(n, controls) {
       softNodes.push({ x: p.x, y: p.y, vx: 0, vy: 0, mass: controls.massSoft, r: 1.4 * scale * bodyScale });
     }
 
-    // Ring springs
+    // Ring springs (solid edges: rigid bodies should collide with them).
     for (let i = 0; i < nodeCount; i++) {
       const j = (i + 1) % nodeCount;
       const a = local[i], b = local[j];
-      springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y))]);
+      springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 1]);
     }
-    // Cross/diagonal springs for shape retention
+    // Cross/diagonal springs for shape retention (internal, non-solid by default).
     for (let i = 0; i < nodeCount; i++) {
       const j = (i + 2) % nodeCount;
       if (i < j || nodeCount <= 4) {
         const a = local[i], b = local[j];
-        springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y))]);
+        springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 0]);
       }
     }
     // Opposite braces for even polygons (especially hex) to prevent skew collapse.
@@ -518,7 +518,7 @@ function initBodies(n, controls) {
       for (let i = 0; i < nodeCount / 2; i++) {
         const j = (i + nodeCount / 2) % nodeCount;
         const a = local[i], b = local[j];
-        springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y))]);
+        springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 0]);
       }
     }
   }
@@ -675,6 +675,49 @@ function resolveCircleCollision(a, b, restitution = 0.35) {
   a.vy -= iy * invA;
   b.vx += ix * invB;
   b.vy += iy * invB;
+}
+
+function resolveRigidVsSoftEdgeCollision(rigid, a, b, restitution = 0.28) {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const ab2 = abx * abx + aby * aby;
+  if (ab2 < 1e-8) return;
+
+  const apx = rigid.x - a.x;
+  const apy = rigid.y - a.y;
+  const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / ab2));
+  const qx = a.x + abx * t;
+  const qy = a.y + aby * t;
+  let nx = rigid.x - qx;
+  let ny = rigid.y - qy;
+  let dist = Math.hypot(nx, ny);
+  const minDist = Math.max(0.8, rigid.r || 1);
+  if (dist >= minDist) return;
+
+  if (dist < 1e-6) {
+    const invLen = 1 / Math.max(1e-6, Math.hypot(-aby, abx));
+    nx = -aby * invLen;
+    ny = abx * invLen;
+    dist = 1e-6;
+  } else {
+    nx /= dist;
+    ny /= dist;
+  }
+
+  const penetration = minDist - dist;
+  rigid.x += nx * penetration * 0.92;
+  rigid.y += ny * penetration * 0.92;
+
+  const edgeVx = (a.vx + b.vx) * 0.5;
+  const edgeVy = (a.vy + b.vy) * 0.5;
+  const rvx = rigid.vx - edgeVx;
+  const rvy = rigid.vy - edgeVy;
+  const vn = rvx * nx + rvy * ny;
+  if (vn < 0) {
+    const j = -(1 + restitution) * vn;
+    rigid.vx += nx * j;
+    rigid.vy += ny * j;
+  }
 }
 
 function enforceFluidEdgeBoundariesCpu(vxField, vyField, n) {
@@ -858,6 +901,10 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     for (const rb of bodies.rigid) {
       for (const sn of s.nodes) {
         resolveCircleCollision(rb, sn, 0.35);
+      }
+      for (const [i, j, _rest, edgeSolid] of s.springs) {
+        if (!edgeSolid) continue;
+        resolveRigidVsSoftEdgeCollision(rb, s.nodes[i], s.nodes[j], 0.3);
       }
     }
     for (let i = 0; i < s.nodes.length; i++) {

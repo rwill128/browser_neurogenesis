@@ -1262,9 +1262,10 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       }
     }
     for (const rb of bodies.rigid) {
-      const rbVerts = rigidVerticesWorld(rb);
       for (const sn of s.nodes) {
-        resolveRigidVsSoftNodeCollision(rb, sn, rbVerts, 0.32);
+        // Recompute rigid polygon from latest body state per-contact;
+        // stale hull snapshots caused missed/odd contacts after position updates.
+        resolveRigidVsSoftNodeCollision(rb, sn, null, 0.32);
       }
       for (const [i, j, _rest, edgeBodyMode] of s.springs) {
         if (edgeBodyMode !== EDGE_BODY_MODE.BLOCK) continue;
@@ -1287,6 +1288,15 @@ function stepBodiesAndInject(sim, vxField, vyField) {
         resolveSoftNodeVsSoftEdgeCollision(node, a, b, 0.12);
       }
     }
+
+    // Re-run rigid-rigid contacts after rigid-soft pushes to avoid late interpenetration.
+    for (let i = 0; i < bodies.rigid.length; i++) {
+      for (let j = i + 1; j < bodies.rigid.length; j++) {
+        if (rigidWeldPairSet.has(`${i}:${j}`)) continue;
+        resolveCircleCollision(bodies.rigid[i], bodies.rigid[j], 0.45);
+      }
+    }
+
     for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
     for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
   }

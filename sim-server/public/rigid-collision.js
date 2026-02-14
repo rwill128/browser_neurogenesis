@@ -157,7 +157,7 @@ export function resolveRigidVsSoftNodeCollision(rigid, node, vertsInput, restitu
   const invRigid = 1 / mRigid;
   const invSum = invNode + invRigid;
 
-  const corr = penetration / Math.max(EPS, invSum);
+  const corr = (penetration / Math.max(EPS, invSum)) * 0.82;
   node.x += nx * corr * invNode;
   node.y += ny * corr * invNode;
   rigid.x -= nx * corr * invRigid;

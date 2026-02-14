@@ -390,6 +390,15 @@ async fn run_fluid_step(
             wgpu::BindGroupEntry { binding: 2, resource: div.as_entire_binding() },
         ],
     });
+    let bg_div_from_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-div-from-a"),
+        layout: &divergence_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: div.as_entire_binding() },
+        ],
+    });
     let bg_jacobi_ab = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bg-jacobi-ab"),
         layout: &jacobi_pipeline.get_bind_group_layout(0),
@@ -428,6 +437,26 @@ async fn run_fluid_step(
             wgpu::BindGroupEntry { binding: 1, resource: vel_b.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 2, resource: pressure_b.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 3, resource: vel_a.as_entire_binding() },
+        ],
+    });
+    let bg_project_cleanup_from_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-project-cleanup-from-a"),
+        layout: &project_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: pressure_a.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: vel_b.as_entire_binding() },
+        ],
+    });
+    let bg_project_cleanup_from_b = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-project-cleanup-from-b"),
+        layout: &project_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: pressure_b.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: vel_b.as_entire_binding() },
         ],
     });
     let bg_advect_dye = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -498,6 +527,40 @@ async fn run_fluid_step(
             pass.set_bind_group(0, if jacobi_iters % 2 == 0 { &bg_project_from_a } else { &bg_project_from_b }, &[]);
             pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
         }
+
+        // one extra pressure-projection cleanup pass from the projected field
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&divergence_pipeline);
+            pass.set_bind_group(0, &bg_div_from_a, &[]);
+            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        }
+
+        encoder.clear_buffer(&pressure_a, 0, None);
+        for i in 0..jacobi_iters {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&jacobi_pipeline);
+            pass.set_bind_group(0, if i % 2 == 0 { &bg_jacobi_ab } else { &bg_jacobi_ba }, &[]);
+            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        }
+
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&project_pipeline);
+            pass.set_bind_group(
+                0,
+                if jacobi_iters % 2 == 0 {
+                    &bg_project_cleanup_from_a
+                } else {
+                    &bg_project_cleanup_from_b
+                },
+                &[],
+            );
+            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        }
+
+        // keep velocity in vel_a for next step and for dye advection.
+        encoder.copy_buffer_to_buffer(&vel_b, 0, &vel_a, 0, (cells * std::mem::size_of::<[f32; 2]>()) as u64);
 
         // dye advection
         {

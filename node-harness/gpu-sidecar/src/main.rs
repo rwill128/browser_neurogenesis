@@ -784,7 +784,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let pos = vec2<f32>(f32(gid.x), f32(gid.y));
   let v = src[id];
   let back = pos - p.dt * v;
-  dst[id] = sample_vel(back);
+
+  // Semi-Lagrangian advection + sustained center forcing so flow does real work over many steps.
+  var v_next = sample_vel(back) * 0.999;
+  let center = vec2<f32>(f32(p.width) * 0.5, f32(p.height) * 0.5);
+  let rel = pos - center;
+  let r = length(rel) / max(f32(min(p.width, p.height)), 1.0);
+  if (r <= p.dye_radius) {
+    let tangential = normalize(vec2<f32>(-rel.y, rel.x) + vec2<f32>(1e-4, 0.0));
+    let falloff = 1.0 - r / max(p.dye_radius, 1e-3);
+    v_next = v_next + tangential * (p.impulse * p.dt * falloff);
+  }
+
+  dst[id] = v_next;
 }
 "#;
 

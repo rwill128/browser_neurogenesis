@@ -1477,6 +1477,41 @@ function drawRegularPolygon(cx, cy, radius, sides, rotation = 0) {
   ctx.closePath();
 }
 
+function getBodiesBounds(bodies) {
+  if (!bodies) return null;
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  const includePoint = (x, y) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  };
+
+  for (const rb of bodies.rigid || []) {
+    const verts = rigidVerticesWorld(rb);
+    for (const p of verts) includePoint(p.x, p.y);
+  }
+  for (const n of bodies.soft?.nodes || []) includePoint(n.x, n.y);
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) return null;
+  return { minX, minY, maxX, maxY, cx: (minX + maxX) * 0.5, cy: (minY + maxY) * 0.5 };
+}
+
+function focusCameraOnBodies(sim, bodies) {
+  if (!sim || !bodies) return;
+  const b = getBodiesBounds(bodies);
+  if (!b) return;
+  sim.camera.x = b.cx;
+  sim.camera.y = b.cy;
+  // Keep current zoom but clamp camera into world bounds.
+  clampCamera(sim);
+}
+
 function mergeBodiesIntoSim(target, incoming) {
   if (!target || !incoming) return;
   target.rigid = target.rigid || [];
@@ -1879,10 +1914,13 @@ async function start() {
   sim = await initSim();
   applyScenarioPreset(sim, scenarioPresetEl?.value || 'baseline');
   if (pendingImportedSpecs.length) {
+    let lastImported = null;
     for (const spec of pendingImportedSpecs) {
       const imported = buildBodiesFromCreatureSpec(spec, sim.controls.n, sim.controls);
       mergeBodiesIntoSim(sim.bodies, imported);
+      lastImported = imported;
     }
+    if (lastImported) focusCameraOnBodies(sim, lastImported);
     pendingImportedSpecs = [];
   }
   log('starting live GPU fluid sim...');
@@ -1925,7 +1963,15 @@ if (importSpecBtn && importSpecFile) {
       if (simMatchesTargetGrid) {
         const imported = buildBodiesFromCreatureSpec(spec, sim.controls.n, sim.controls);
         mergeBodiesIntoSim(sim.bodies, imported);
-        log({ ok: true, msg: 'CreatureSpec imported (appended)', name: spec.name || 'unnamed', grid: sim.controls.n });
+        focusCameraOnBodies(sim, imported);
+        log({
+          ok: true,
+          msg: 'CreatureSpec imported (appended)',
+          name: spec.name || 'unnamed',
+          grid: sim.controls.n,
+          rigidAdded: imported.rigid?.length || 0,
+          softNodesAdded: imported.soft?.nodes?.length || 0,
+        });
       } else {
         pendingImportedSpecs.push(spec);
         log({

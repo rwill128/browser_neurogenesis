@@ -540,7 +540,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     b.vy *= linDamp;
     b.omega *= angDamp;
 
-    const bMax = 3.2;
+    const bMaxBase = 3.2;
+    const bMax = Math.max(0.45, bMaxBase / (1 + 0.28 * centerHoney));
     const bMag = Math.hypot(b.vx, b.vy);
     if (bMag > bMax) {
       b.vx = (b.vx / bMag) * bMax;
@@ -576,7 +577,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const nodeDamp = Math.max(0.70, 1.0 - 0.02 * honey);
     node.vx *= nodeDamp;
     node.vy *= nodeDamp;
-    const nMax = 2.8;
+    const nMaxBase = 2.8;
+    const nMax = Math.max(0.35, nMaxBase / (1 + 0.32 * honey));
     const nMag = Math.hypot(node.vx, node.vy);
     if (nMag > nMax) {
       node.vx = (node.vx / nMag) * nMax;

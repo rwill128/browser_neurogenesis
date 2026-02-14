@@ -27,6 +27,18 @@ export function normalizeEdgeDyeModeRGB(mode) {
   return [c, c, c];
 }
 
+export function normalizePermeabilityRGB(mode) {
+  if (Array.isArray(mode)) {
+    return [
+      Number(mode[0]) > 0 ? 1 : 0,
+      Number(mode[1]) > 0 ? 1 : 0,
+      Number(mode[2]) > 0 ? 1 : 0,
+    ];
+  }
+  const c = Number(mode) > 0 ? 1 : 0;
+  return [c, c, c];
+}
+
 export function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, vx, vy, thickness = 1.4, dyeMode = EDGE_DYE_MODE.DEFLECT, bodyMode = EDGE_BODY_MODE.BLOCK) {
   const minX = Math.max(0, Math.floor(Math.min(ax, bx) - thickness - 1));
   const maxX = Math.min(n - 1, Math.ceil(Math.max(ax, bx) + thickness + 1));
@@ -89,7 +101,13 @@ export function applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVertices
     const verts = rigidVerticesWorld(rb);
     const sides = verts.length;
     for (let i = 0; i < sides; i++) {
-      const dyeModeRGB = normalizeEdgeDyeModeRGB(!rb.edgeDyeMode ? EDGE_DYE_MODE.DEFLECT : rb.edgeDyeMode[i]);
+      const rawModeRGB = normalizeEdgeDyeModeRGB(!rb.edgeDyeMode ? EDGE_DYE_MODE.DEFLECT : rb.edgeDyeMode[i]);
+      const permeabilityRGB = normalizePermeabilityRGB(!rb.edgePermeabilityRGB ? [0, 0, 0] : rb.edgePermeabilityRGB[i]);
+      const dyeModeRGB = [0, 0, 0].map((_, ci) => {
+        if (permeabilityRGB[ci] > 0) return EDGE_DYE_MODE.PASS;
+        // If impermeable, preserve ABSORB semantics when explicitly requested; otherwise DEFLECT.
+        return rawModeRGB[ci] === EDGE_DYE_MODE.ABSORB ? EDGE_DYE_MODE.ABSORB : EDGE_DYE_MODE.DEFLECT;
+      });
       const bodyMode = !rb.edgeBodyMode ? EDGE_BODY_MODE.BLOCK : Number(rb.edgeBodyMode[i]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK;
       if (bodyMode === EDGE_BODY_MODE.PASS
         && dyeModeRGB[0] === EDGE_DYE_MODE.PASS

@@ -510,7 +510,9 @@ function initBodies(n, controls) {
       return [EDGE_DYE_MODE.ABSORB, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.PASS];
     });
     const edgeBodyMode = Array.from({ length: sides }, (_, ei) => ((ei + i) % 2 === 0) ? EDGE_BODY_MODE.BLOCK : EDGE_BODY_MODE.PASS);
+    const edgePermeabilityRGB = Array.from({ length: sides }, () => [0, 0, 0]);
     const digestRGB = (i % 3 === 0) ? [1, 0.2, 0.2] : ((i % 3 === 1) ? [0.2, 1, 0.2] : [0.2, 0.2, 1]);
+    const consumeDyeRGB = (i % 2) === 0 ? [1, 1, 1] : [0, 0, 0];
     rigid.push({
       x: n * (0.15 + 0.7 * ((t + Math.random() * 0.1) % 1)),
       y: n * (0.2 + 0.6 * Math.random()),
@@ -520,8 +522,10 @@ function initBodies(n, controls) {
       sides,
       edgeDyeMode,
       edgeBodyMode,
+      edgePermeabilityRGB,
       digestEnabled: (i % 2) === 0,
       digestRGB,
+      consumeDyeRGB,
       mass,
       theta: Math.random() * Math.PI * 2,
       omega: 0,
@@ -1384,6 +1388,11 @@ function pointInPolygon(x, y, verts) {
   return inside;
 }
 
+function normalizeBinaryRGB(v) {
+  if (!Array.isArray(v) || v.length < 3) return [0, 0, 0];
+  return [Number(v[0]) > 0 ? 1 : 0, Number(v[1]) > 0 ? 1 : 0, Number(v[2]) > 0 ? 1 : 0];
+}
+
 function applyDigestiveCapture(sim, r, g, b) {
   const n = sim.controls.n;
   const rigidCapture = 0.055;
@@ -1391,7 +1400,8 @@ function applyDigestiveCapture(sim, r, g, b) {
   let captured = 0;
 
   for (const rb of sim.bodies.rigid) {
-    if (!rb.digestEnabled) continue;
+    const consumeMask = normalizeBinaryRGB(rb.consumeDyeRGB || (rb.digestEnabled ? [1, 1, 1] : [0, 0, 0]));
+    if (consumeMask[0] === 0 && consumeMask[1] === 0 && consumeMask[2] === 0) continue;
     const dig = rb.digestRGB || [1, 1, 1];
     const verts = rigidVerticesWorld(rb);
     let minX = n - 1, minY = n - 1, maxX = 0, maxY = 0;
@@ -1406,9 +1416,9 @@ function applyDigestiveCapture(sim, r, g, b) {
       for (let x = minX; x <= maxX; x++) {
         if (!pointInPolygon(x + 0.5, y + 0.5, verts)) continue;
         const i = y * n + x;
-        const takeR = r[i] * rigidCapture * dig[0];
-        const takeG = g[i] * rigidCapture * dig[1];
-        const takeB = b[i] * rigidCapture * dig[2];
+        const takeR = r[i] * rigidCapture * dig[0] * consumeMask[0];
+        const takeG = g[i] * rigidCapture * dig[1] * consumeMask[1];
+        const takeB = b[i] * rigidCapture * dig[2] * consumeMask[2];
         r[i] -= takeR; g[i] -= takeG; b[i] -= takeB;
         captured += takeR + takeG + takeB;
       }

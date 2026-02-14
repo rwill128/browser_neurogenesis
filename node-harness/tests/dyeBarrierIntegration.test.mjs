@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EDGE_DYE_MODE, EDGE_BODY_MODE, normalizeEdgeDyeModeRGB, applyBodyEdgeFieldBarriers } from '../../sim-server/public/dye-barrier.js';
+import { EDGE_DYE_MODE, EDGE_BODY_MODE, normalizeEdgeDyeModeRGB, normalizePermeabilityRGB, applyBodyEdgeFieldBarriers } from '../../sim-server/public/dye-barrier.js';
 
 function rigidVerticesWorld(rb) {
   if (!rb?.verticesLocal?.length) return [];
@@ -15,6 +15,11 @@ function rigidVerticesWorld(rb) {
 test('normalizeEdgeDyeModeRGB clamps invalid channels to DEFLECT', () => {
   const m = normalizeEdgeDyeModeRGB([99, -2, Number.NaN]);
   assert.deepEqual(m, [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT]);
+});
+
+test('normalizePermeabilityRGB clamps to binary channel mask', () => {
+  const m = normalizePermeabilityRGB([1, 0, -3]);
+  assert.deepEqual(m, [1, 0, 0]);
 });
 
 test('applyBodyEdgeFieldBarriers applies PASS/DEFLECT/ABSORB channel behavior on soft edge', () => {
@@ -95,4 +100,61 @@ test('BLOCK edge mode still deflects fluid velocity when dye channels are PASS',
   applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld });
 
   assert.ok(Math.abs(vy[i]) < 2.0, `normal velocity should be reduced by BLOCK body barrier, got vy=${vy[i]}`);
+});
+
+test('rigid edge permeability RGB overrides channel pass/blocked behavior', () => {
+  const n = 24;
+  const size = n * n;
+  const r = new Float32Array(size);
+  const g = new Float32Array(size);
+  const b = new Float32Array(size);
+  const vx = new Float32Array(size);
+  const vy = new Float32Array(size);
+
+  const i = 12 * n + 12;
+  const ti = 12 * n + 13;
+  r[i] = 120;
+  g[i] = 120;
+  b[i] = 120;
+  vx[i] = 1.0;
+  vy[i] = 0.0;
+
+  const sim = {
+    controls: { n },
+    bodies: {
+      rigid: [
+        {
+          x: 12,
+          y: 12,
+          theta: 0,
+          verticesLocal: [
+            { x: -4, y: 0 },
+            { x: 4, y: 0 },
+            { x: 4, y: 5 },
+            { x: -4, y: 5 },
+          ],
+          edgeBodyMode: [EDGE_BODY_MODE.BLOCK, EDGE_BODY_MODE.BLOCK, EDGE_BODY_MODE.BLOCK, EDGE_BODY_MODE.BLOCK],
+          edgeDyeMode: [
+            [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT],
+            [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT],
+            [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT],
+            [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT],
+          ],
+          edgePermeabilityRGB: [
+            [1, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+          ],
+        },
+      ],
+      soft: { nodes: [], springs: [] },
+    },
+  };
+
+  applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld });
+
+  assert.ok(Math.abs(r[i] - 120) < 1e-6, 'permeable red channel should PASS unchanged');
+  assert.ok(g[i] < 120, 'impermeable green channel should be blocked/deflected');
+  assert.ok(g[ti] > 0, 'impermeable green channel should deflect tangentially');
 });

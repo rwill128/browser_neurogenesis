@@ -123,8 +123,10 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
       subPolysLocal,
       edgeDyeMode: normalizeEdgeDyeModeList(rb.edgeDyeMode, sides),
       edgeBodyMode: normalizeEdgeBodyModeList(rb.edgeBodyMode, sides),
+      edgePermeabilityRGB: normalizeEdgePermeabilityList(rb.edgePermeabilityRGB, sides),
       digestEnabled: !!rb.digestEnabled,
       digestRGB: normalizeRGB(rb.digestRGB),
+      consumeDyeRGB: normalizeBinaryRGB(rb.consumeDyeRGB ?? (rb.digestEnabled ? [1, 1, 1] : [0, 0, 0])),
       mass,
       theta: 0,
       omega: 0,
@@ -260,8 +262,10 @@ function buildRigidExportFromCompilerPieces(rigidPieces, rigidWelds, nodes, opti
       mass: finiteOr(Number(options.massHeavy), 5),
       edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
       edgeDyeMode: Array.from({ length: sides }, () => [...EDGE_DYE_DEFLECT_RGB]),
+      edgePermeabilityRGB: Array.from({ length: sides }, () => [0, 0, 0]),
       digestEnabled: false,
       digestRGB: [1, 1, 1],
+      consumeDyeRGB: [0, 0, 0],
     });
 
     components.push({
@@ -316,8 +320,10 @@ function buildRigidExport(tris, nodes, options) {
         mass: finiteOr(Number(options.massHeavy), 5),
         edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
         edgeDyeMode: Array.from({ length: sides }, () => [...EDGE_DYE_DEFLECT_RGB]),
+        edgePermeabilityRGB: Array.from({ length: sides }, () => [0, 0, 0]),
         digestEnabled: false,
         digestRGB: [1, 1, 1],
+        consumeDyeRGB: [0, 0, 0],
       });
 
       components.push({
@@ -724,6 +730,11 @@ function normalizeEdgeDyeModeList(list, count) {
   return Array.from({ length: count }, (_, i) => normalizeEdgeDyeMode(list[i % list.length]));
 }
 
+function normalizeEdgePermeabilityList(list, count) {
+  if (!Array.isArray(list) || !list.length) return Array.from({ length: count }, () => [0, 0, 0]);
+  return Array.from({ length: count }, (_, i) => normalizeBinaryRGB(list[i % list.length]));
+}
+
 function normalizeEdgeBodyMode(v) {
   return Number(v) === EDGE_BODY_BLOCK ? EDGE_BODY_BLOCK : 0;
 }
@@ -749,6 +760,15 @@ function normalizeEdgeDyeModeChannel(v) {
   if (!Number.isFinite(n)) return EDGE_DYE_DEFLECT;
   if (n === EDGE_DYE_PASS || n === EDGE_DYE_DEFLECT || n === EDGE_DYE_ABSORB) return n;
   return EDGE_DYE_DEFLECT;
+}
+
+function normalizeBinaryRGB(v) {
+  if (!Array.isArray(v) || v.length < 3) return [0, 0, 0];
+  return [
+    Number(v[0]) > 0 ? 1 : 0,
+    Number(v[1]) > 0 ? 1 : 0,
+    Number(v[2]) > 0 ? 1 : 0,
+  ];
 }
 
 function normalizeRGB(v) {

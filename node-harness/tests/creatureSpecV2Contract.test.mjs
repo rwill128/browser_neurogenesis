@@ -190,6 +190,22 @@ test('buildBodiesFromCreatureSpec clamps unknown edge dye modes to DEFLECT guard
   assert.deepEqual(softSpringMode, [1, 1, 2]);
 });
 
+test('buildBodiesFromCreatureSpec preserves rigid per-edge permeability and interior consume-dye masks', () => {
+  const spec = createCreatureSpecFromMesh(sampleMesh());
+  spec.rigidBodies[0].edgePermeabilityRGB = [
+    [1, 0, 1],
+    [0, 0, 0],
+    [2, -1, 0],
+  ];
+  spec.rigidBodies[0].consumeDyeRGB = [1, 0, 2];
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+  assert.deepEqual(bodies.rigid[0].edgePermeabilityRGB[0], [1, 0, 1]);
+  assert.deepEqual(bodies.rigid[0].edgePermeabilityRGB[1], [0, 0, 0]);
+  assert.deepEqual(bodies.rigid[0].edgePermeabilityRGB[2], [1, 0, 0]);
+  assert.deepEqual(bodies.rigid[0].consumeDyeRGB, [1, 0, 1]);
+});
+
 test('createCreatureSpecFromMesh preserves optional authoring field payload', () => {
   const w = 16;
   const rigidField = new Float32Array(w * w);

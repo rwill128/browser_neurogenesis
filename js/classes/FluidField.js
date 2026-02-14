@@ -86,7 +86,17 @@ export class FluidField {
     }
 
     _tileKey(tx, ty) {
-        return `${tx}:${ty}`;
+        const x = Math.max(0, Math.min(this.activeTileCols - 1, Math.floor(tx)));
+        const y = Math.max(0, Math.min(this.activeTileRows - 1, Math.floor(ty)));
+        return y * this.activeTileCols + x;
+    }
+
+    _tileTx(tileId) {
+        return tileId % this.activeTileCols;
+    }
+
+    _tileTy(tileId) {
+        return Math.floor(tileId / this.activeTileCols);
     }
 
     _markTileByCoord(tileMap, touchedSet, tx, ty) {
@@ -199,13 +209,11 @@ export class FluidField {
         const blocks = new Set();
         for (const key of this.momentumTiles.keys()) {
             if (this.carrierTiles.has(key)) continue;
-            const [txRaw, tyRaw] = String(key).split(':');
-            const tx = Math.floor(Number(txRaw));
-            const ty = Math.floor(Number(tyRaw));
-            if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+            const tx = this._tileTx(key);
+            const ty = this._tileTy(key);
             const bx = Math.floor(tx / blockSize);
             const by = Math.floor(ty / blockSize);
-            blocks.add(`${bx}:${by}`);
+            blocks.add(this._tileKey(bx, by));
         }
 
         const coarseMomentumBlockCount = blocks.size;
@@ -265,11 +273,8 @@ export class FluidField {
 
         for (const key of this.carrierTiles.keys()) {
             if (limit > 0 && out.length >= limit) break;
-            const parts = String(key).split(':');
-            if (parts.length !== 2) continue;
-            const tx = Number(parts[0]);
-            const ty = Number(parts[1]);
-            if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+            const tx = this._tileTx(key);
+            const ty = this._tileTy(key);
             seen.add(key);
             out.push({ tx, ty, kind: 'carrier' });
         }
@@ -277,11 +282,8 @@ export class FluidField {
         for (const key of this.momentumTiles.keys()) {
             if (limit > 0 && out.length >= limit) break;
             if (seen.has(key)) continue;
-            const parts = String(key).split(':');
-            if (parts.length !== 2) continue;
-            const tx = Number(parts[0]);
-            const ty = Number(parts[1]);
-            if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+            const tx = this._tileTx(key);
+            const ty = this._tileTy(key);
             out.push({ tx, ty, kind: 'momentumOnly' });
         }
 
@@ -577,10 +579,18 @@ export class FluidField {
         const rows = new Map();
 
         for (const key of tileMap.keys()) {
-            const [txRaw, tyRaw] = String(key).split(':');
-            const tx = Math.floor(Number(txRaw));
-            const ty = Math.floor(Number(tyRaw));
-            if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+            let tx;
+            let ty;
+            if (typeof key === 'string') {
+                const parts = key.split(':');
+                if (parts.length !== 2) continue;
+                tx = Math.floor(Number(parts[0]));
+                ty = Math.floor(Number(parts[1]));
+                if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+            } else {
+                tx = this._tileTx(Number(key));
+                ty = this._tileTy(Number(key));
+            }
 
             const x0 = Math.max(1, (tx * this.activeTileSize) - pad);
             const x1 = Math.min(maxCell, ((tx + 1) * this.activeTileSize) + pad);
@@ -668,17 +678,14 @@ export class FluidField {
 
         const expanded = new Map();
         for (const key of tileMap.keys()) {
-            const parts = String(key).split(':');
-            if (parts.length !== 2) continue;
-            const tx = Number(parts[0]);
-            const ty = Number(parts[1]);
-            if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+            const tx = this._tileTx(key);
+            const ty = this._tileTy(key);
 
             for (let oy = -halo; oy <= halo; oy++) {
                 for (let ox = -halo; ox <= halo; ox++) {
                     const nx = Math.max(0, Math.min(this.activeTileCols - 1, tx + ox));
                     const ny = Math.max(0, Math.min(this.activeTileRows - 1, ty + oy));
-                    expanded.set(`${nx}:${ny}`, this.activeTileTtlMax);
+                    expanded.set(this._tileKey(nx, ny), this.activeTileTtlMax);
                 }
             }
         }
@@ -702,7 +709,7 @@ export class FluidField {
 
         for (let ty = 0; ty < this.activeTileRows; ty++) {
             for (let tx = 0; tx < this.activeTileCols; tx++) {
-                const key = `${tx}:${ty}`;
+                const key = this._tileKey(tx, ty);
                 if (hasTier1(key) || hasTier2(key)) continue;
                 out.set(key, this.activeTileTtlMax);
             }

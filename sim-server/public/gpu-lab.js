@@ -37,6 +37,11 @@ const EDGE_BODY_MODE = {
   BLOCK: 1,
 };
 
+function normalizeEdgeDyeModeRGB(mode) {
+  if (Array.isArray(mode)) return mode;
+  return [mode, mode, mode];
+}
+
 function readControls() {
   return {
     n: Math.max(32, Number(gridEl.value) || 256),
@@ -476,10 +481,10 @@ function initBodies(n, controls) {
     const sides = rigidShapeCycle[i % rigidShapeCycle.length];
     const r = ((i % 2 === 0) ? 5 : 6) * scale * bodyScale * (sides >= 5 ? 0.95 : 1.0);
     const edgeDyeMode = Array.from({ length: sides }, (_, ei) => {
-      const m = (ei + i) % 3;
-      if (m === 0) return EDGE_DYE_MODE.DEFLECT;
-      if (m === 1) return EDGE_DYE_MODE.PASS;
-      return EDGE_DYE_MODE.ABSORB;
+      const phase = (ei + i) % 3;
+      if (phase === 0) return [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.ABSORB];
+      if (phase === 1) return [EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.ABSORB, EDGE_DYE_MODE.DEFLECT];
+      return [EDGE_DYE_MODE.ABSORB, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.PASS];
     });
     const edgeBodyMode = Array.from({ length: sides }, (_, ei) => ((ei + i) % 2 === 0) ? EDGE_BODY_MODE.BLOCK : EDGE_BODY_MODE.PASS);
     rigid.push({
@@ -534,8 +539,10 @@ function initBodies(n, controls) {
       const j = (i + 1) % nodeCount;
       const a = local[i], b = local[j];
       const ringDyeMode = ((i + c) % 3 === 0)
-        ? EDGE_DYE_MODE.DEFLECT
-        : (((i + c) % 3 === 1) ? EDGE_DYE_MODE.PASS : EDGE_DYE_MODE.ABSORB);
+        ? [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.ABSORB]
+        : (((i + c) % 3 === 1)
+            ? [EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.ABSORB, EDGE_DYE_MODE.DEFLECT]
+            : [EDGE_DYE_MODE.ABSORB, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.PASS]);
       springs.push([
         base + i,
         base + j,
@@ -554,7 +561,7 @@ function initBodies(n, controls) {
           base + j,
           Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)),
           EDGE_BODY_MODE.PASS,
-          EDGE_DYE_MODE.PASS,
+          [EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS],
         ]);
       }
     }
@@ -568,7 +575,7 @@ function initBodies(n, controls) {
           base + j,
           Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)),
           EDGE_BODY_MODE.PASS,
-          EDGE_DYE_MODE.PASS,
+          [EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS],
         ]);
       }
     }
@@ -582,7 +589,7 @@ function initBodies(n, controls) {
           base + j,
           Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)),
           EDGE_BODY_MODE.PASS,
-          EDGE_DYE_MODE.PASS,
+          [EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS],
         ]);
       }
     }
@@ -848,30 +855,32 @@ function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, vx, vy,
       const w = 1 - (d / Math.max(1e-6, thickness));
       const i = y * n + x;
 
-      if (dyeMode !== EDGE_DYE_MODE.PASS) {
+      const modeRGB = normalizeEdgeDyeModeRGB(dyeMode);
+      if (modeRGB[0] !== EDGE_DYE_MODE.PASS || modeRGB[1] !== EDGE_DYE_MODE.PASS || modeRGB[2] !== EDGE_DYE_MODE.PASS) {
         // Wall behavior: remove normal velocity, keep tangential flow.
         const vn = vx[i] * nx + vy[i] * ny;
         vx[i] -= vn * nx * w;
         vy[i] -= vn * ny * w;
       }
 
-      if (dyeMode === EDGE_DYE_MODE.DEFLECT) {
-        const vt = vx[i] * tx + vy[i] * ty;
-        const step = vt >= 0 ? 1 : -1;
-        const txi = Math.max(0, Math.min(n - 1, Math.round(x + tx * step)));
-        const tyi = Math.max(0, Math.min(n - 1, Math.round(y + ty * step)));
-        const ti = tyi * n + txi;
-        if (ti !== i) {
-          const move = 0.22 * w;
-          const dr = r[i] * move, dg = g[i] * move, db = b[i] * move;
-          r[i] -= dr; g[i] -= dg; b[i] -= db;
-          r[ti] = Math.min(255, r[ti] + dr);
-          g[ti] = Math.min(255, g[ti] + dg);
-          b[ti] = Math.min(255, b[ti] + db);
+      const vt = vx[i] * tx + vy[i] * ty;
+      const step = vt >= 0 ? 1 : -1;
+      const txi = Math.max(0, Math.min(n - 1, Math.round(x + tx * step)));
+      const tyi = Math.max(0, Math.min(n - 1, Math.round(y + ty * step)));
+      const ti = tyi * n + txi;
+      const channels = [r, g, b];
+      for (let ci = 0; ci < 3; ci++) {
+        const mode = modeRGB[ci];
+        if (mode === EDGE_DYE_MODE.DEFLECT) {
+          if (ti !== i) {
+            const move = 0.22 * w;
+            const dch = channels[ci][i] * move;
+            channels[ci][i] -= dch;
+            channels[ci][ti] = Math.min(255, channels[ci][ti] + dch);
+          }
+        } else if (mode === EDGE_DYE_MODE.ABSORB) {
+          channels[ci][i] *= (1 - 0.9 * w);
         }
-      } else if (dyeMode === EDGE_DYE_MODE.ABSORB) {
-        const keep = 1 - 0.9 * w;
-        r[i] *= keep; g[i] *= keep; b[i] *= keep;
       }
     }
   }
@@ -890,19 +899,20 @@ function applyBodyEdgeFieldBarriers(sim, r, g, b, vx, vy) {
       verts.push({ x: rb.x + Math.cos(a) * rb.r, y: rb.y + Math.sin(a) * rb.r });
     }
     for (let i = 0; i < sides; i++) {
-      const dyeMode = !rb.edgeDyeMode ? EDGE_DYE_MODE.DEFLECT : rb.edgeDyeMode[i];
-      if (dyeMode === EDGE_DYE_MODE.PASS) continue;
+      const dyeModeRGB = normalizeEdgeDyeModeRGB(!rb.edgeDyeMode ? EDGE_DYE_MODE.DEFLECT : rb.edgeDyeMode[i]);
+      if (dyeModeRGB[0] === EDGE_DYE_MODE.PASS && dyeModeRGB[1] === EDGE_DYE_MODE.PASS && dyeModeRGB[2] === EDGE_DYE_MODE.PASS) continue;
       const a = verts[i];
       const b2 = verts[(i + 1) % sides];
-      applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, rigidThickness, dyeMode);
+      applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, rigidThickness, dyeModeRGB);
     }
   }
 
   const s = sim.bodies.soft;
   for (const [i, j, _rest, edgeBodyMode, edgeDyeMode] of s.springs) {
-    if (edgeDyeMode === EDGE_DYE_MODE.PASS) continue;
+    const dyeModeRGB = normalizeEdgeDyeModeRGB(edgeDyeMode);
+    if (dyeModeRGB[0] === EDGE_DYE_MODE.PASS && dyeModeRGB[1] === EDGE_DYE_MODE.PASS && dyeModeRGB[2] === EDGE_DYE_MODE.PASS) continue;
     const a = s.nodes[i], b2 = s.nodes[j];
-    applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, softThickness, edgeDyeMode);
+    applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, softThickness, dyeModeRGB);
   }
 }
 
@@ -1289,6 +1299,16 @@ function applyDigestiveCapture(sim, r, g, b) {
   sim.digestiveCapture = (sim.digestiveCapture || 0) * 0.97 + captured * 0.03;
 }
 
+function edgeModeColor(modeRGB, blocked) {
+  const m = normalizeEdgeDyeModeRGB(modeRGB);
+  const key = `${m[0]}-${m[1]}-${m[2]}`;
+  if (!blocked) return 'rgba(90,180,190,0.35)';
+  if (key === `${EDGE_DYE_MODE.PASS}-${EDGE_DYE_MODE.PASS}-${EDGE_DYE_MODE.PASS}`) return 'rgba(120,150,255,0.95)';
+  if (key === `${EDGE_DYE_MODE.DEFLECT}-${EDGE_DYE_MODE.DEFLECT}-${EDGE_DYE_MODE.DEFLECT}`) return '#ffffff';
+  if (key === `${EDGE_DYE_MODE.ABSORB}-${EDGE_DYE_MODE.ABSORB}-${EDGE_DYE_MODE.ABSORB}`) return 'rgba(255,180,70,0.95)';
+  return 'rgba(210,120,255,0.95)';
+}
+
 function drawRegularPolygon(cx, cy, radius, sides, rotation = 0) {
   const n = Math.max(3, sides | 0);
   for (let i = 0; i < n; i++) {
@@ -1333,9 +1353,8 @@ function drawBodiesOverlay(sim) {
       const a = verts[ei];
       const b2 = verts[(ei + 1) % sides];
       const dyeMode = !b.edgeDyeMode ? EDGE_DYE_MODE.DEFLECT : b.edgeDyeMode[ei];
-      if (dyeMode === EDGE_DYE_MODE.PASS) ctx.strokeStyle = 'rgba(120,150,255,0.95)';
-      else if (dyeMode === EDGE_DYE_MODE.DEFLECT) ctx.strokeStyle = '#ffffff';
-      else ctx.strokeStyle = 'rgba(255,180,70,0.95)';
+      const bodyMode = !b.edgeBodyMode ? EDGE_BODY_MODE.BLOCK : b.edgeBodyMode[ei];
+      ctx.strokeStyle = edgeModeColor(dyeMode, bodyMode === EDGE_BODY_MODE.BLOCK);
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b2.x, b2.y);
@@ -1380,14 +1399,13 @@ function drawBodiesOverlay(sim) {
     const a = s.nodes[i], b = s.nodes[j];
     const pa = worldToScreen(sim, a._rx, a._ry);
     const pb = worldToScreen(sim, b._rx, b._ry);
-    if (edgeBodyMode !== EDGE_BODY_MODE.BLOCK) {
-      ctx.strokeStyle = 'rgba(90,180,190,0.35)';
-    } else if (edgeDyeMode === EDGE_DYE_MODE.PASS) {
-      ctx.strokeStyle = 'rgba(120,150,255,0.95)';
-    } else if (edgeDyeMode === EDGE_DYE_MODE.DEFLECT) {
+    const baseColor = edgeModeColor(edgeDyeMode, edgeBodyMode === EDGE_BODY_MODE.BLOCK);
+    // Keep blocked+deflect soft perimeter cyan-ish for readability.
+    const m = normalizeEdgeDyeModeRGB(edgeDyeMode);
+    if (edgeBodyMode === EDGE_BODY_MODE.BLOCK && m[0] === EDGE_DYE_MODE.DEFLECT && m[1] === EDGE_DYE_MODE.DEFLECT && m[2] === EDGE_DYE_MODE.DEFLECT) {
       ctx.strokeStyle = '#00ffd0';
     } else {
-      ctx.strokeStyle = 'rgba(255,180,70,0.95)';
+      ctx.strokeStyle = baseColor;
     }
     ctx.beginPath();
     ctx.moveTo(pa.x, pa.y);
@@ -1404,7 +1422,7 @@ function drawBodiesOverlay(sim) {
 
   ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
-  ctx.fillText(`Dye edges: DEFLECT=white/cyan, PASS=blue, ABSORB=amber | zoom ${sim.camera.zoom.toFixed(2)}x`, 10, canvas.height - 28);
+  ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, ABSORB=amber, MIXED=violet | zoom ${sim.camera.zoom.toFixed(2)}x`, 10, canvas.height - 28);
   ctx.fillStyle = 'rgba(0,255,208,0.95)';
   ctx.fillText('Body edges: BLOCK (bright) vs PASS (dim) | digest ON=magenta fill | Alt+drag/right-drag pan, wheel zoom', 10, canvas.height - 12);
   ctx.restore();

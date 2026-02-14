@@ -197,20 +197,28 @@ function updateHistoryUi(worldId) {
   const meta = getFrameBufferMeta(worldId);
   const oldestTick = Number.isFinite(Number(meta.archiveOldestTick)) ? Math.max(0, Math.floor(Number(meta.archiveOldestTick))) : 0;
   const latestTick = Number.isFinite(Number(meta.archiveLatestTick)) ? Math.max(oldestTick, Math.floor(Number(meta.archiveLatestTick))) : oldestTick;
+  const archiveFrames = Math.max(1, Math.floor(Number(meta.archiveFrames) || 1));
 
   const scrubTick = getScrubTick(worldId);
   const isLive = (scrubTick === null) || scrubTick >= latestTick;
   const safeTick = isLive ? latestTick : Math.max(oldestTick, Math.min(latestTick, scrubTick));
   if (!isLive) scrubTickByWorld.set(worldId, safeTick);
 
-  historySliderEl.min = String(oldestTick);
-  historySliderEl.max = String(latestTick);
-  historySliderEl.value = String(safeTick);
+  const stepStride = Math.max(1, Math.floor(Number(meta.stepStride) || 1));
+  const toFrameIndex = (tick) => {
+    const t = Math.max(oldestTick, Math.min(latestTick, Math.floor(Number(tick) || oldestTick)));
+    return Math.max(0, Math.min(archiveFrames - 1, Math.round((t - oldestTick) / stepStride)));
+  };
+
+  historySliderEl.min = '0';
+  historySliderEl.max = String(Math.max(0, archiveFrames - 1));
+  historySliderEl.value = String(toFrameIndex(safeTick));
 
   if (isLive) {
-    historyInfoEl.textContent = `live @ tick ${latestTick} · archive ${meta.archiveFrames || 0} frame(s)`;
+    historyInfoEl.textContent = `live @ tick ${latestTick} · archive ${archiveFrames} frame(s)`;
   } else {
-    historyInfoEl.textContent = `tick ${safeTick} (latest ${latestTick}) · archive ${meta.archiveFrames || 0} frame(s)`;
+    const frameIdx = toFrameIndex(safeTick);
+    historyInfoEl.textContent = `frame ${frameIdx}/${Math.max(0, archiveFrames - 1)} · tick ${safeTick} (latest ${latestTick})`;
   }
 }
 
@@ -1108,7 +1116,17 @@ function toggleFollowSelected() {
 
 historySliderEl?.addEventListener('input', () => {
   if (!currentWorldId) return;
-  const nextTick = Math.max(0, Math.floor(Number(historySliderEl.value) || 0));
+  const meta = getFrameBufferMeta(currentWorldId);
+  const oldestTick = Number.isFinite(Number(meta.archiveOldestTick)) ? Math.max(0, Math.floor(Number(meta.archiveOldestTick))) : 0;
+  const latestTick = Number.isFinite(Number(meta.archiveLatestTick)) ? Math.max(oldestTick, Math.floor(Number(meta.archiveLatestTick))) : oldestTick;
+  const archiveFrames = Math.max(1, Math.floor(Number(meta.archiveFrames) || 1));
+  const frameIdx = Math.max(0, Math.min(archiveFrames - 1, Math.floor(Number(historySliderEl.value) || 0)));
+  const stepStride = Math.max(1, Math.floor(Number(meta.stepStride) || 1));
+
+  const nextTick = archiveFrames <= 1
+    ? latestTick
+    : Math.max(oldestTick, Math.min(latestTick, oldestTick + (frameIdx * stepStride)));
+
   setScrubTick(currentWorldId, nextTick);
 });
 

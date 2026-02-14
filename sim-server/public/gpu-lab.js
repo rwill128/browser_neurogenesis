@@ -1254,12 +1254,20 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     applyBounceBoundary(node, n, 0.78);
   }
 
+  const rigidContactDebug = [];
+
   // Body-body collisions: rigid↔rigid, rigid↔soft, soft↔soft
   for (let iter = 0; iter < 2; iter++) {
     for (let i = 0; i < bodies.rigid.length; i++) {
       for (let j = i + 1; j < bodies.rigid.length; j++) {
         if (rigidWeldPairSet.has(`${i}:${j}`)) continue;
-        resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32);
+        resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
+          contacts: rigidContactDebug,
+          aIndex: i,
+          bIndex: j,
+          iter,
+          phase: 'pre-soft',
+        });
       }
     }
     for (const rb of bodies.rigid) {
@@ -1294,13 +1302,21 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     for (let i = 0; i < bodies.rigid.length; i++) {
       for (let j = i + 1; j < bodies.rigid.length; j++) {
         if (rigidWeldPairSet.has(`${i}:${j}`)) continue;
-        resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32);
+        resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
+          contacts: rigidContactDebug,
+          aIndex: i,
+          bIndex: j,
+          iter,
+          phase: 'post-soft',
+        });
       }
     }
 
     for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
     for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
   }
+
+  sim.lastRigidContacts = rigidContactDebug.length > 64 ? rigidContactDebug.slice(0, 64) : rigidContactDebug;
 
   let injectedMomentum = 0;
   const injectPoint = (px, py, pvx, pvy, localFluidX, localFluidY, mass, rad=3.0, swimInjectX = 0, swimInjectY = 0) => {
@@ -1768,10 +1784,21 @@ function drawBodiesOverlay(sim) {
     ctx.beginPath(); ctx.moveTo(pB.x, pB.y); ctx.lineTo(pN.x, pN.y); ctx.stroke();
   }
 
+  if (collisionDebug && Array.isArray(sim.lastRigidContacts)) {
+    ctx.fillStyle = 'rgba(255,90,90,0.95)';
+    for (const c of sim.lastRigidContacts.slice(0, 24)) {
+      if (!Array.isArray(c.contact) || c.contact.length < 2) continue;
+      const p = worldToScreen(sim, c.contact[0], c.contact[1]);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 2.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
   ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
   const collisionDebugSuffix = collisionDebug
-    ? ` | solver hull debug ON (concave ${concaveCount}/${sim.bodies.rigid.length})`
+    ? ` | solver hull debug ON (concave ${concaveCount}/${sim.bodies.rigid.length}, contacts ${(sim.lastRigidContacts || []).length})`
     : '';
   ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, ABSORB=amber, MIXED=violet | zoom ${sim.camera.zoom.toFixed(2)}x${collisionDebugSuffix}`, 10, canvas.height - 28);
   ctx.fillStyle = 'rgba(0,255,208,0.95)';
@@ -1972,7 +1999,9 @@ async function stepAndRender() {
     if (fpsHud) fpsHud.textContent = `FPS: ${fpsNow}`;
     const couplingAverages = summarizeCouplingTelemetry(s.couplingTelemetry);
     const couplingSnapshot = { ...couplingAverages, ...Object.fromEntries(Object.entries(couplingInstant || {}).map(([k,v]) => [k+'Now', +((v || 0).toFixed(4))])) };
+    const rigidContacts = Array.isArray(s.lastRigidContacts) ? s.lastRigidContacts : [];
     window.__gpuLabCoupling = couplingSnapshot;
+    window.__gpuLabRigidContacts = rigidContacts;
 
     log({
       ok: true,
@@ -1991,6 +2020,8 @@ async function stepAndRender() {
       brushSize: Number(brushSizeEl.value) || 12,
       digestiveCapture: +((s.digestiveCapture || 0).toFixed(2)),
       coupling: couplingSnapshot,
+      rigidContactCount: rigidContacts.length,
+      rigidContactPairs: (showCollisionHullEl?.checked ? rigidContacts.slice(0, 8) : undefined),
     });
   }
 

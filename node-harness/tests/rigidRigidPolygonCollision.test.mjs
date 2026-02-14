@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveRigidVsRigidPolygonCollision } from '../../sim-server/public/rigid-collision.js';
+import { resolveRigidVsRigidPolygonCollision, getRigidCollisionPolysWorld, rigidVerticesWorld, pointInPolygonInclusive } from '../../sim-server/public/rigid-collision.js';
 
 function makeConcaveL(x, y) {
   return {
@@ -81,4 +81,49 @@ test('rigid-rigid polygon collision keeps finite state under high-speed impact',
   }
   assert.ok(Math.abs(a.vx) < 80, `guardrail should bound extreme velocity response, got ${a.vx}`);
   assert.ok(Math.abs(b.vx) < 80, `guardrail should bound extreme velocity response, got ${b.vx}`);
+});
+
+test('rigid-rigid polygon collision: no force when bodies are clearly separated', () => {
+  const a = makeConcaveL(20, 20);
+  const b = makeBox(58, 20, 3);
+  a.vx = 0.7;
+  b.vx = -0.3;
+
+  const ax = a.x; const ay = a.y;
+  const bx = b.x; const by = b.y;
+  const avx = a.vx; const bvx = b.vx;
+
+  const hit = resolveRigidVsRigidPolygonCollision(a, b, 0.3);
+  assert.equal(hit, false, 'separated bodies must not collide');
+  assert.equal(a.x, ax);
+  assert.equal(a.y, ay);
+  assert.equal(b.x, bx);
+  assert.equal(b.y, by);
+  assert.equal(a.vx, avx);
+  assert.equal(b.vx, bvx);
+});
+
+test('rigid-rigid proxy decomposition stays inside concave hull and logs triggering proxy pair', () => {
+  const a = makeConcaveL(32, 32);
+  const b = makeBox(26, 26, 2.5);
+
+  const hullA = rigidVerticesWorld(a);
+  const polysA = getRigidCollisionPolysWorld(a);
+  for (const poly of polysA) {
+    let cx = 0; let cy = 0;
+    for (const p of poly) { cx += p.x; cy += p.y; }
+    cx /= Math.max(1, poly.length);
+    cy /= Math.max(1, poly.length);
+    assert.equal(pointInPolygonInclusive(cx, cy, hullA), true, 'proxy centroid should remain inside source concave hull');
+  }
+
+  const debug = { contacts: [], aIndex: 3, bIndex: 7, iter: 0, phase: 'test' };
+  const hit = resolveRigidVsRigidPolygonCollision(a, b, 0.3, debug);
+  assert.equal(hit, true, 'expected overlap for proxy-pair logging case');
+  assert.ok(debug.contacts.length >= 1, 'expected proxy contact log entry');
+  const c = debug.contacts[0];
+  assert.equal(c.a, 3);
+  assert.equal(c.b, 7);
+  assert.ok(Number.isInteger(c.proxyA) && c.proxyA >= 0);
+  assert.ok(Number.isInteger(c.proxyB) && c.proxyB >= 0);
 });

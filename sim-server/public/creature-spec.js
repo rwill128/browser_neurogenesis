@@ -190,12 +190,19 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
 
     const rb = rigid[rigidIndex];
     const edgeA = Math.max(0, Math.min(rb.sides - 1, Number(j.edgeA) | 0));
-    const edgeB = Math.max(0, Math.min(rb.sides - 1, Number(j.edgeB) | 0));
+    let edgeB = Math.max(0, Math.min(rb.sides - 1, Number(j.edgeB) | 0));
+    // Guardrail: avoid degenerate hybrid constraints that pin both rest links
+    // to the same rigid vertex (can inject solver jitter under fluid load).
+    if (rb.sides > 1 && edgeA === edgeB) edgeB = (edgeA + 1) % rb.sides;
+
     const aPos = rigidVertexWorld(rb, edgeA);
     const bPos = rigidVertexWorld(rb, edgeB);
     const p = soft.nodes[globalSoft];
-    const restA = Math.max(0.8, finiteOr(Number(j.restA), Math.hypot(p.x - aPos.x, p.y - aPos.y) / Math.max(1e-6, sRest)) * sRest);
-    const restB = Math.max(0.8, finiteOr(Number(j.restB), Math.hypot(p.x - bPos.x, p.y - bPos.y) / Math.max(1e-6, sRest)) * sRest);
+
+    const defaultRestA = Math.hypot(p.x - aPos.x, p.y - aPos.y);
+    const defaultRestB = Math.hypot(p.x - bPos.x, p.y - bPos.y);
+    const restA = Math.max(0.8, finiteOr(Number(j.restA), defaultRestA));
+    const restB = Math.max(0.8, finiteOr(Number(j.restB), defaultRestB));
 
     hybrid.push({
       rigidIndex,

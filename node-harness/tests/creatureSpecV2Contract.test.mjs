@@ -239,6 +239,24 @@ test('buildBodiesFromCreatureSpec preserves rigid per-edge permeability and inte
   assert.deepEqual(bodies.rigid[0].consumeDyeRGB, [1, 0, 1]);
 });
 
+test('buildBodiesFromCreatureSpec de-degenerates hybrid joints when edgeA=edgeB', () => {
+  const spec = createCreatureSpecFromMesh(sampleMesh());
+  const j = spec.hybridJoints[0];
+  assert.ok(j, 'sampleMesh should produce at least one hybrid joint');
+
+  j.edgeA = 1;
+  j.edgeB = 1;
+  j.restA = Number.NaN;
+  j.restB = Number.NaN;
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+  const h = bodies.hybrid[0];
+  assert.ok(h, 'expected at least one built hybrid joint');
+  assert.notEqual(h.vertexA, h.vertexB, 'hybrid joint should span two rigid vertices');
+  assert.ok(Number.isFinite(h.restA) && h.restA >= 0.8);
+  assert.ok(Number.isFinite(h.restB) && h.restB >= 0.8);
+});
+
 test('createCreatureSpecFromMesh preserves optional authoring field payload', () => {
   const w = 16;
   const rigidField = new Float32Array(w * w);

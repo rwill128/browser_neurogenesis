@@ -323,6 +323,91 @@ function triangulateEarClip(polyInput) {
   return tris;
 }
 
+function triangleAreaAbs(tri) {
+  const [a, b, c] = tri;
+  return Math.abs((a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y)) * 0.5);
+}
+
+function triangleAspectRatio(tri) {
+  const d = (p, q) => Math.hypot((q.x - p.x), (q.y - p.y));
+  const l0 = d(tri[0], tri[1]);
+  const l1 = d(tri[1], tri[2]);
+  const l2 = d(tri[2], tri[0]);
+  const maxL = Math.max(l0, l1, l2);
+  const minL = Math.max(EPS, Math.min(l0, l1, l2));
+  return maxL / minL;
+}
+
+function triangleCentroid(tri) {
+  return {
+    x: (tri[0].x + tri[1].x + tri[2].x) / 3,
+    y: (tri[0].y + tri[1].y + tri[2].y) / 3,
+  };
+}
+
+function orientation(a, b, c) {
+  const v = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  if (Math.abs(v) <= 1e-8) return 0;
+  return v > 0 ? 1 : -1;
+}
+
+function pointsNear(a, b, eps = 1e-6) {
+  return Math.abs(a.x - b.x) <= eps && Math.abs(a.y - b.y) <= eps;
+}
+
+function sharesEndpoint(a, b, c, d) {
+  return pointsNear(a, c) || pointsNear(a, d) || pointsNear(b, c) || pointsNear(b, d);
+}
+
+function onSegment(a, b, p) {
+  return pointOnSegment(p.x, p.y, a.x, a.y, b.x, b.y, 1e-6);
+}
+
+function segmentsIntersect(a, b, c, d) {
+  const o1 = orientation(a, b, c);
+  const o2 = orientation(a, b, d);
+  const o3 = orientation(c, d, a);
+  const o4 = orientation(c, d, b);
+
+  if (o1 !== o2 && o3 !== o4) return true;
+  if (o1 === 0 && onSegment(a, b, c)) return true;
+  if (o2 === 0 && onSegment(a, b, d)) return true;
+  if (o3 === 0 && onSegment(c, d, a)) return true;
+  if (o4 === 0 && onSegment(c, d, b)) return true;
+  return false;
+}
+
+function isProxyTriangleValid(tri, sourcePoly, maxAspect = 14) {
+  if (!Array.isArray(tri) || tri.length !== 3) return false;
+  const area = triangleAreaAbs(tri);
+  if (!(area > 1e-5)) return false;
+
+  const aspect = triangleAspectRatio(tri);
+  if (!Number.isFinite(aspect) || aspect > maxAspect) return false;
+
+  const centroid = triangleCentroid(tri);
+  if (!pointInPolygonInclusive(centroid.x, centroid.y, sourcePoly)) return false;
+
+  const mids = [
+    { x: (tri[0].x + tri[1].x) * 0.5, y: (tri[0].y + tri[1].y) * 0.5 },
+    { x: (tri[1].x + tri[2].x) * 0.5, y: (tri[1].y + tri[2].y) * 0.5 },
+    { x: (tri[2].x + tri[0].x) * 0.5, y: (tri[2].y + tri[0].y) * 0.5 },
+  ];
+  if (!mids.every((m) => pointInPolygonInclusive(m.x, m.y, sourcePoly))) return false;
+
+  const triEdges = [[tri[0], tri[1]], [tri[1], tri[2]], [tri[2], tri[0]]];
+  for (const [ta, tb] of triEdges) {
+    for (let i = 0; i < sourcePoly.length; i++) {
+      const pa = sourcePoly[i];
+      const pb = sourcePoly[(i + 1) % sourcePoly.length];
+      if (sharesEndpoint(ta, tb, pa, pb)) continue;
+      if (segmentsIntersect(ta, tb, pa, pb)) return false;
+    }
+  }
+
+  return true;
+}
+
 function buildCollisionPolysLocal(body) {
   const basePolys = Array.isArray(body?.subPolysLocal) && body.subPolysLocal.length
     ? body.subPolysLocal
@@ -334,9 +419,30 @@ function buildCollisionPolysLocal(body) {
     const clean = ensureCCW(poly);
     if (isConvexPolygon(clean)) {
       out.push(clean);
-    } else {
-      for (const tri of triangulateEarClip(clean)) out.push(tri);
+      continue;
     }
+
+    const rawTris = triangulateEarClip(clean);
+    const valid = rawTris
+      .map((tri) => ensureCCW(tri))
+      .filter((tri) => isProxyTriangleValid(tri, clean));
+
+    // Fallback safety: if strict filter rejects everything, keep only triangles whose centroid+edge mids stay inside.
+    const fallback = rawTris
+      .map((tri) => ensureCCW(tri))
+      .filter((tri) => {
+        const c = triangleCentroid(tri);
+        if (!pointInPolygonInclusive(c.x, c.y, clean)) return false;
+        const mids = [
+          { x: (tri[0].x + tri[1].x) * 0.5, y: (tri[0].y + tri[1].y) * 0.5 },
+          { x: (tri[1].x + tri[2].x) * 0.5, y: (tri[1].y + tri[2].y) * 0.5 },
+          { x: (tri[2].x + tri[0].x) * 0.5, y: (tri[2].y + tri[0].y) * 0.5 },
+        ];
+        return mids.every((m) => pointInPolygonInclusive(m.x, m.y, clean));
+      });
+
+    const chosen = valid.length ? valid : fallback;
+    for (const tri of chosen) out.push(tri);
   }
   return out;
 }
@@ -441,18 +547,20 @@ function supportPoint(poly, nx, ny) {
   return best;
 }
 
-export function resolveRigidVsRigidPolygonCollision(a, b, restitution = 0.3) {
+export function resolveRigidVsRigidPolygonCollision(a, b, restitution = 0.3, debugInfo = null) {
   const polysA = getRigidCollisionPolysWorld(a);
   const polysB = getRigidCollisionPolysWorld(b);
   if (!polysA.length || !polysB.length) return false;
 
   let best = null;
-  for (const pa of polysA) {
-    for (const pb of polysB) {
+  for (let ai = 0; ai < polysA.length; ai++) {
+    const pa = polysA[ai];
+    for (let bi = 0; bi < polysB.length; bi++) {
+      const pb = polysB[bi];
       const sat = satConvexCollision(pa, pb);
       if (!sat) continue;
       if (!best || sat.overlap < best.overlap) {
-        best = { ...sat, pa, pb };
+        best = { ...sat, pa, pb, ai, bi };
       }
     }
   }
@@ -487,7 +595,28 @@ export function resolveRigidVsRigidPolygonCollision(a, b, restitution = 0.3) {
   const rvx = vbX - vaX;
   const rvy = vbY - vaY;
   const vn = rvx * best.nx + rvy * best.ny;
-  if (vn >= 0) return true;
+
+  const appendDebug = (jVal = 0) => {
+    if (!debugInfo || !Array.isArray(debugInfo.contacts)) return;
+    debugInfo.contacts.push({
+      a: Number.isInteger(debugInfo.aIndex) ? debugInfo.aIndex : -1,
+      b: Number.isInteger(debugInfo.bIndex) ? debugInfo.bIndex : -1,
+      proxyA: best.ai,
+      proxyB: best.bi,
+      overlap: +best.overlap.toFixed(4),
+      normal: [ +best.nx.toFixed(4), +best.ny.toFixed(4) ],
+      contact: [ +cx.toFixed(3), +cy.toFixed(3) ],
+      vn: +vn.toFixed(4),
+      j: +jVal.toFixed(4),
+      phase: debugInfo.phase || 'main',
+      iter: Number.isInteger(debugInfo.iter) ? debugInfo.iter : -1,
+    });
+  };
+
+  if (vn >= 0) {
+    appendDebug(0);
+    return true;
+  }
 
   const invIA = 1 / Math.max(0.05, a.inertia || (0.5 * ma * Math.max(1, a.r || 1) ** 2));
   const invIB = 1 / Math.max(0.05, b.inertia || (0.5 * mb * Math.max(1, b.r || 1) ** 2));
@@ -507,5 +636,6 @@ export function resolveRigidVsRigidPolygonCollision(a, b, restitution = 0.3) {
   b.vy = (b.vy || 0) + jy * invB;
   a.omega = (a.omega || 0) - (rax * jy - ray * jx) * invIA;
   b.omega = (b.omega || 0) + (rbx * jy - rby * jx) * invIB;
+  appendDebug(j);
   return true;
 }

@@ -195,3 +195,317 @@ export function resolveRigidVsSoftNodeCollision(rigid, node, vertsInput, restitu
   rigid.omega = (rigid.omega || 0) - (rx * jy - ry * jx) * invInertia;
   return true;
 }
+
+function rigidVerticesLocalFallback(body) {
+  const sides = Math.max(3, body?.sides || 3);
+  const rot = (sides === 3 ? -Math.PI * 0.5 : Math.PI * 0.25);
+  const r = Math.max(1, body?.r || 1);
+  const verts = [];
+  for (let i = 0; i < sides; i++) {
+    const a = rot + (i / sides) * Math.PI * 2;
+    verts.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+  }
+  return verts;
+}
+
+function signedArea(poly) {
+  let s = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i];
+    const q = poly[(i + 1) % poly.length];
+    s += p.x * q.y - q.x * p.y;
+  }
+  return s * 0.5;
+}
+
+function ensureCCW(poly) {
+  if (!Array.isArray(poly)) return [];
+  if (poly.length < 3) return poly.map((p) => ({ x: p.x, y: p.y }));
+  const out = poly.map((p) => ({ x: p.x, y: p.y }));
+  if (signedArea(out) < 0) out.reverse();
+  return out;
+}
+
+function isConvexPolygon(poly) {
+  if (!Array.isArray(poly) || poly.length < 4) return true;
+  let sign = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const c = poly[(i + 2) % poly.length];
+    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+    if (Math.abs(cross) <= 1e-7) continue;
+    const s = cross > 0 ? 1 : -1;
+    if (sign === 0) sign = s;
+    else if (sign !== s) return false;
+  }
+  return true;
+}
+
+function pointInTriangle(px, py, a, b, c) {
+  const v0x = c.x - a.x;
+  const v0y = c.y - a.y;
+  const v1x = b.x - a.x;
+  const v1y = b.y - a.y;
+  const v2x = px - a.x;
+  const v2y = py - a.y;
+
+  const dot00 = v0x * v0x + v0y * v0y;
+  const dot01 = v0x * v1x + v0y * v1y;
+  const dot02 = v0x * v2x + v0y * v2y;
+  const dot11 = v1x * v1x + v1y * v1y;
+  const dot12 = v1x * v2x + v1y * v2y;
+
+  const invDen = 1 / Math.max(EPS, dot00 * dot11 - dot01 * dot01);
+  const u = (dot11 * dot02 - dot01 * dot12) * invDen;
+  const v = (dot00 * dot12 - dot01 * dot02) * invDen;
+  return u >= -1e-6 && v >= -1e-6 && (u + v) <= 1 + 1e-6;
+}
+
+function triangulateEarClip(polyInput) {
+  const poly = ensureCCW(polyInput);
+  if (poly.length < 3) return [];
+  if (poly.length === 3) return [poly];
+
+  const indices = Array.from({ length: poly.length }, (_, i) => i);
+  const tris = [];
+  let guard = poly.length * poly.length;
+
+  while (indices.length > 3 && guard-- > 0) {
+    let clipped = false;
+    for (let ii = 0; ii < indices.length; ii++) {
+      const i0 = indices[(ii - 1 + indices.length) % indices.length];
+      const i1 = indices[ii];
+      const i2 = indices[(ii + 1) % indices.length];
+      const a = poly[i0];
+      const b = poly[i1];
+      const c = poly[i2];
+
+      const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+      if (cross <= 1e-7) continue;
+
+      let contains = false;
+      for (let jj = 0; jj < indices.length; jj++) {
+        const k = indices[jj];
+        if (k === i0 || k === i1 || k === i2) continue;
+        const p = poly[k];
+        if (pointInTriangle(p.x, p.y, a, b, c)) {
+          contains = true;
+          break;
+        }
+      }
+      if (contains) continue;
+
+      tris.push([a, b, c].map((p) => ({ x: p.x, y: p.y })));
+      indices.splice(ii, 1);
+      clipped = true;
+      break;
+    }
+
+    if (!clipped) break;
+  }
+
+  if (indices.length === 3) {
+    tris.push(indices.map((idx) => ({ x: poly[idx].x, y: poly[idx].y })));
+  }
+
+  if (!tris.length) {
+    // Fallback fan triangulation (guardrail for degenerate cases).
+    for (let i = 1; i < poly.length - 1; i++) {
+      tris.push([
+        { x: poly[0].x, y: poly[0].y },
+        { x: poly[i].x, y: poly[i].y },
+        { x: poly[i + 1].x, y: poly[i + 1].y },
+      ]);
+    }
+  }
+
+  return tris;
+}
+
+function buildCollisionPolysLocal(body) {
+  const basePolys = Array.isArray(body?.subPolysLocal) && body.subPolysLocal.length
+    ? body.subPolysLocal
+    : [Array.isArray(body?.verticesLocal) && body.verticesLocal.length >= 3 ? body.verticesLocal : rigidVerticesLocalFallback(body)];
+
+  const out = [];
+  for (const poly of basePolys) {
+    if (!Array.isArray(poly) || poly.length < 3) continue;
+    const clean = ensureCCW(poly);
+    if (isConvexPolygon(clean)) {
+      out.push(clean);
+    } else {
+      for (const tri of triangulateEarClip(clean)) out.push(tri);
+    }
+  }
+  return out;
+}
+
+function bodyCollisionPolysLocal(body) {
+  if (!body) return [];
+  if (!Array.isArray(body._collisionPolysLocal) || body._collisionPolysLocal.length === 0) {
+    body._collisionPolysLocal = buildCollisionPolysLocal(body);
+  }
+  return body._collisionPolysLocal;
+}
+
+export function getRigidCollisionPolysWorld(body) {
+  const polysLocal = bodyCollisionPolysLocal(body);
+  const c = Math.cos(body?.theta || 0);
+  const s = Math.sin(body?.theta || 0);
+  const bx = body?.x || 0;
+  const by = body?.y || 0;
+  return polysLocal.map((poly) => poly.map((v) => ({
+    x: bx + v.x * c - v.y * s,
+    y: by + v.x * s + v.y * c,
+  })));
+}
+
+function polygonCenter(poly) {
+  let sx = 0;
+  let sy = 0;
+  for (const p of poly) {
+    sx += p.x;
+    sy += p.y;
+  }
+  const k = 1 / Math.max(1, poly.length);
+  return { x: sx * k, y: sy * k };
+}
+
+function projectOnAxis(poly, nx, ny) {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  for (const p of poly) {
+    const d = p.x * nx + p.y * ny;
+    if (d < min) min = d;
+    if (d > max) max = d;
+  }
+  return { min, max };
+}
+
+function satConvexCollision(polyA, polyB) {
+  let minOverlap = Number.POSITIVE_INFINITY;
+  let bestNx = 0;
+  let bestNy = 0;
+
+  const checkAxes = (poly) => {
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i];
+      const b = poly[(i + 1) % poly.length];
+      const ex = b.x - a.x;
+      const ey = b.y - a.y;
+      const len = Math.hypot(ex, ey);
+      if (len < 1e-8) continue;
+      const nx = -ey / len;
+      const ny = ex / len;
+
+      const pa = projectOnAxis(polyA, nx, ny);
+      const pb = projectOnAxis(polyB, nx, ny);
+      const overlap = Math.min(pa.max, pb.max) - Math.max(pa.min, pb.min);
+      if (overlap <= 0) return false;
+      if (overlap < minOverlap) {
+        minOverlap = overlap;
+        bestNx = nx;
+        bestNy = ny;
+      }
+    }
+    return true;
+  };
+
+  if (!checkAxes(polyA)) return null;
+  if (!checkAxes(polyB)) return null;
+
+  const ca = polygonCenter(polyA);
+  const cb = polygonCenter(polyB);
+  const toBx = cb.x - ca.x;
+  const toBy = cb.y - ca.y;
+  if (toBx * bestNx + toBy * bestNy < 0) {
+    bestNx = -bestNx;
+    bestNy = -bestNy;
+  }
+
+  return { overlap: minOverlap, nx: bestNx, ny: bestNy };
+}
+
+function supportPoint(poly, nx, ny) {
+  let best = poly[0];
+  let bestD = best.x * nx + best.y * ny;
+  for (let i = 1; i < poly.length; i++) {
+    const p = poly[i];
+    const d = p.x * nx + p.y * ny;
+    if (d > bestD) {
+      bestD = d;
+      best = p;
+    }
+  }
+  return best;
+}
+
+export function resolveRigidVsRigidPolygonCollision(a, b, restitution = 0.3) {
+  const polysA = getRigidCollisionPolysWorld(a);
+  const polysB = getRigidCollisionPolysWorld(b);
+  if (!polysA.length || !polysB.length) return false;
+
+  let best = null;
+  for (const pa of polysA) {
+    for (const pb of polysB) {
+      const sat = satConvexCollision(pa, pb);
+      if (!sat) continue;
+      if (!best || sat.overlap < best.overlap) {
+        best = { ...sat, pa, pb };
+      }
+    }
+  }
+  if (!best) return false;
+
+  const ma = Math.max(0.05, a.mass || 1);
+  const mb = Math.max(0.05, b.mass || 1);
+  const invA = 1 / ma;
+  const invB = 1 / mb;
+  const invSum = invA + invB;
+
+  const correction = (best.overlap / Math.max(EPS, invSum)) * 0.78;
+  a.x -= best.nx * correction * invA;
+  a.y -= best.ny * correction * invA;
+  b.x += best.nx * correction * invB;
+  b.y += best.ny * correction * invB;
+
+  const sa = supportPoint(best.pa, best.nx, best.ny);
+  const sb = supportPoint(best.pb, -best.nx, -best.ny);
+  const cx = (sa.x + sb.x) * 0.5;
+  const cy = (sa.y + sb.y) * 0.5;
+
+  const rax = cx - a.x;
+  const ray = cy - a.y;
+  const rbx = cx - b.x;
+  const rby = cy - b.y;
+
+  const vaX = (a.vx || 0) - (a.omega || 0) * ray;
+  const vaY = (a.vy || 0) + (a.omega || 0) * rax;
+  const vbX = (b.vx || 0) - (b.omega || 0) * rby;
+  const vbY = (b.vy || 0) + (b.omega || 0) * rbx;
+  const rvx = vbX - vaX;
+  const rvy = vbY - vaY;
+  const vn = rvx * best.nx + rvy * best.ny;
+  if (vn >= 0) return true;
+
+  const invIA = 1 / Math.max(0.05, a.inertia || (0.5 * ma * Math.max(1, a.r || 1) ** 2));
+  const invIB = 1 / Math.max(0.05, b.inertia || (0.5 * mb * Math.max(1, b.r || 1) ** 2));
+  const raN = rax * best.ny - ray * best.nx;
+  const rbN = rbx * best.ny - rby * best.nx;
+  const denom = invA + invB + (raN * raN) * invIA + (rbN * rbN) * invIB;
+  const rawJ = (-(1 + restitution) * vn) / Math.max(EPS, denom);
+  const maxImpactSpeed = 24;
+  const maxJ = ((1 + restitution) * Math.min(maxImpactSpeed, Math.abs(vn))) / Math.max(EPS, denom);
+  const j = Math.max(-maxJ, Math.min(maxJ, rawJ));
+
+  const jx = j * best.nx;
+  const jy = j * best.ny;
+  a.vx = (a.vx || 0) - jx * invA;
+  a.vy = (a.vy || 0) - jy * invA;
+  b.vx = (b.vx || 0) + jx * invB;
+  b.vy = (b.vy || 0) + jy * invB;
+  a.omega = (a.omega || 0) - (rax * jy - ray * jx) * invIA;
+  b.omega = (b.omega || 0) + (rbx * jy - rby * jx) * invIB;
+  return true;
+}

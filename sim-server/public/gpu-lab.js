@@ -1,7 +1,7 @@
 import { parseCreatureSpec, buildBodiesFromCreatureSpec } from '/creature-spec.js';
 import { applyRigidWeldConstraints, buildRigidWeldPairSet } from '/rigid-weld.js';
 import { EDGE_DYE_MODE, normalizeEdgeDyeModeRGB, applyBodyEdgeFieldBarriers } from '/dye-barrier.js';
-import { resolveRigidVsSoftNodeCollision } from '/rigid-collision.js';
+import { resolveRigidVsSoftNodeCollision, resolveRigidVsRigidPolygonCollision, getRigidCollisionPolysWorld } from '/rigid-collision.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -1259,7 +1259,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     for (let i = 0; i < bodies.rigid.length; i++) {
       for (let j = i + 1; j < bodies.rigid.length; j++) {
         if (rigidWeldPairSet.has(`${i}:${j}`)) continue;
-        resolveCircleCollision(bodies.rigid[i], bodies.rigid[j], 0.45);
+        resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32);
       }
     }
     for (const rb of bodies.rigid) {
@@ -1294,7 +1294,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     for (let i = 0; i < bodies.rigid.length; i++) {
       for (let j = i + 1; j < bodies.rigid.length; j++) {
         if (rigidWeldPairSet.has(`${i}:${j}`)) continue;
-        resolveCircleCollision(bodies.rigid[i], bodies.rigid[j], 0.45);
+        resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32);
       }
     }
 
@@ -1593,7 +1593,6 @@ function isConcavePolygon(verts) {
 function drawBodiesOverlay(sim) {
   const smooth = 0.35;
   const v = getCameraView(sim);
-  const pxPerWorld = canvas.width / v.w;
   const collisionDebug = !!showCollisionHullEl?.checked;
   let concaveCount = 0;
 
@@ -1651,12 +1650,21 @@ function drawBodiesOverlay(sim) {
       ctx.closePath();
       ctx.stroke();
 
-      // Broad-phase rigid-rigid collision proxy currently still uses body radius.
-      const c = worldToScreen(sim, b.x, b.y);
-      ctx.strokeStyle = 'rgba(255,90,90,0.85)';
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, Math.max(1, b.r * pxPerWorld), 0, Math.PI * 2);
-      ctx.stroke();
+      // Solver convex proxies used by rigid-rigid polygon collisions.
+      const proxyPolys = getRigidCollisionPolysWorld(b);
+      ctx.strokeStyle = 'rgba(255,170,70,0.9)';
+      for (const poly of proxyPolys) {
+        const ps = poly.map((pp) => worldToScreen(sim, pp.x, pp.y));
+        if (ps.length < 3) continue;
+        ctx.beginPath();
+        for (let k = 0; k < ps.length; k++) {
+          const p = ps[k];
+          if (k === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
       ctx.setLineDash([]);
 
       for (const p of solverVerts) {
@@ -1768,7 +1776,7 @@ function drawBodiesOverlay(sim) {
   ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, ABSORB=amber, MIXED=violet | zoom ${sim.camera.zoom.toFixed(2)}x${collisionDebugSuffix}`, 10, canvas.height - 28);
   ctx.fillStyle = 'rgba(0,255,208,0.95)';
   const line2 = collisionDebug
-    ? 'Body edges: BLOCK (bright) vs PASS (dim) | dashed green/cyan=solver hull, dashed red=circle broad-phase | Alt+drag/right-drag pan, wheel zoom'
+    ? 'Body edges: BLOCK (bright) vs PASS (dim) | dashed green/cyan=solver hull, dashed amber=rigid-rigid convex proxies | Alt+drag/right-drag pan, wheel zoom'
     : 'Body edges: BLOCK (bright) vs PASS (dim) | hybrid links=magenta | Alt+drag/right-drag pan, wheel zoom';
   ctx.fillText(line2, 10, canvas.height - 12);
   ctx.restore();

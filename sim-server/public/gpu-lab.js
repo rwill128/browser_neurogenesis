@@ -1259,7 +1259,7 @@ function drawBodiesOverlay(sim) {
       b._rtheta += ((b.theta || 0) - b._rtheta) * smooth;
     }
     const sp = worldToScreen(sim, b._rx, b._ry);
-    ctx.fillStyle = b.digestEnabled ? 'rgba(255, 90, 120, 0.16)' : 'rgba(255,255,255,0.06)';
+    ctx.fillStyle = b.digestEnabled ? 'rgba(255, 90, 120, 0.22)' : 'rgba(255,255,255,0.06)';
     ctx.beginPath();
     const sides = Math.max(3, b.sides || (i === 0 ? 3 : 4));
     const rot = (b._rtheta || 0) + (sides === 3 ? -Math.PI * 0.5 : Math.PI * 0.25);
@@ -1306,7 +1306,7 @@ function drawBodiesOverlay(sim) {
     const ordered = [...nodes]
       .map((p) => ({ x: p._rx, y: p._ry, a: Math.atan2(p._ry - cy, p._rx - cx) }))
       .sort((a, b2) => a.a - b2.a);
-    ctx.fillStyle = 'rgba(255, 80, 140, 0.14)';
+    ctx.fillStyle = 'rgba(255, 80, 140, 0.2)';
     ctx.beginPath();
     for (let i = 0; i < ordered.length; i++) {
       const p = worldToScreen(sim, ordered[i].x, ordered[i].y);

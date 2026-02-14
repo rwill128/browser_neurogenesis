@@ -29,6 +29,11 @@ export class GPUFluidField {
         this.shadowDensityR = new Float32Array(cellCount).fill(0);
         this.shadowDensityG = new Float32Array(cellCount).fill(0);
         this.shadowDensityB = new Float32Array(cellCount).fill(0);
+        this.shadowVxNext = new Float32Array(cellCount).fill(0);
+        this.shadowVyNext = new Float32Array(cellCount).fill(0);
+        this.shadowDensityRNext = new Float32Array(cellCount).fill(0);
+        this.shadowDensityGNext = new Float32Array(cellCount).fill(0);
+        this.shadowDensityBNext = new Float32Array(cellCount).fill(0);
 
         // Placeholders for WebGL resources
         this.programs = {}; // To store shader programs (e.g., diffuse, advect, project_divergence, etc.)
@@ -529,9 +534,91 @@ export class GPUFluidField {
         }
     }
 
+    _sampleShadowBilinear(field, x, y) {
+        const max = this.size - 1;
+        const xClamped = Math.max(0, Math.min(max, x));
+        const yClamped = Math.max(0, Math.min(max, y));
+
+        const x0 = Math.floor(xClamped);
+        const y0 = Math.floor(yClamped);
+        const x1 = Math.min(max, x0 + 1);
+        const y1 = Math.min(max, y0 + 1);
+
+        const tx = xClamped - x0;
+        const ty = yClamped - y0;
+
+        const idx00 = x0 + y0 * this.size;
+        const idx10 = x1 + y0 * this.size;
+        const idx01 = x0 + y1 * this.size;
+        const idx11 = x1 + y1 * this.size;
+
+        const a = field[idx00] * (1 - tx) + field[idx10] * tx;
+        const b = field[idx01] * (1 - tx) + field[idx11] * tx;
+        return a * (1 - ty) + b * ty;
+    }
+
+    _advanceShadowFields() {
+        const dt = Math.max(1e-6, Number(this.dt) || (1 / 60));
+        const velDiffusion = Math.max(0, Math.min(0.25, (Number(this.viscosity) || 0.005) * 8));
+        const densityDiffusion = Math.max(0, Math.min(0.25, (Number(this.diffusion) || 0.01) * 8));
+
+        for (let gy = 0; gy < this.size; gy++) {
+            for (let gx = 0; gx < this.size; gx++) {
+                const idx = gx + gy * this.size;
+                const vx = this.shadowVx[idx];
+                const vy = this.shadowVy[idx];
+
+                const prevX = gx - vx * dt;
+                const prevY = gy - vy * dt;
+
+                this.shadowVxNext[idx] = this._sampleShadowBilinear(this.shadowVx, prevX, prevY);
+                this.shadowVyNext[idx] = this._sampleShadowBilinear(this.shadowVy, prevX, prevY);
+                this.shadowDensityRNext[idx] = this._sampleShadowBilinear(this.shadowDensityR, prevX, prevY);
+                this.shadowDensityGNext[idx] = this._sampleShadowBilinear(this.shadowDensityG, prevX, prevY);
+                this.shadowDensityBNext[idx] = this._sampleShadowBilinear(this.shadowDensityB, prevX, prevY);
+            }
+        }
+
+        if (velDiffusion > 0 || densityDiffusion > 0) {
+            for (let gy = 1; gy < this.size - 1; gy++) {
+                for (let gx = 1; gx < this.size - 1; gx++) {
+                    const idx = gx + gy * this.size;
+                    const up = idx - this.size;
+                    const down = idx + this.size;
+                    const left = idx - 1;
+                    const right = idx + 1;
+
+                    if (velDiffusion > 0) {
+                        const vxNbr = 0.25 * (this.shadowVxNext[up] + this.shadowVxNext[down] + this.shadowVxNext[left] + this.shadowVxNext[right]);
+                        const vyNbr = 0.25 * (this.shadowVyNext[up] + this.shadowVyNext[down] + this.shadowVyNext[left] + this.shadowVyNext[right]);
+                        this.shadowVxNext[idx] = this.shadowVxNext[idx] * (1 - velDiffusion) + vxNbr * velDiffusion;
+                        this.shadowVyNext[idx] = this.shadowVyNext[idx] * (1 - velDiffusion) + vyNbr * velDiffusion;
+                    }
+
+                    if (densityDiffusion > 0) {
+                        const rNbr = 0.25 * (this.shadowDensityRNext[up] + this.shadowDensityRNext[down] + this.shadowDensityRNext[left] + this.shadowDensityRNext[right]);
+                        const gNbr = 0.25 * (this.shadowDensityGNext[up] + this.shadowDensityGNext[down] + this.shadowDensityGNext[left] + this.shadowDensityGNext[right]);
+                        const bNbr = 0.25 * (this.shadowDensityBNext[up] + this.shadowDensityBNext[down] + this.shadowDensityBNext[left] + this.shadowDensityBNext[right]);
+                        this.shadowDensityRNext[idx] = this.shadowDensityRNext[idx] * (1 - densityDiffusion) + rNbr * densityDiffusion;
+                        this.shadowDensityGNext[idx] = this.shadowDensityGNext[idx] * (1 - densityDiffusion) + gNbr * densityDiffusion;
+                        this.shadowDensityBNext[idx] = this.shadowDensityBNext[idx] * (1 - densityDiffusion) + bNbr * densityDiffusion;
+                    }
+                }
+            }
+        }
+
+        [this.shadowVx, this.shadowVxNext] = [this.shadowVxNext, this.shadowVx];
+        [this.shadowVy, this.shadowVyNext] = [this.shadowVyNext, this.shadowVy];
+        [this.shadowDensityR, this.shadowDensityRNext] = [this.shadowDensityRNext, this.shadowDensityR];
+        [this.shadowDensityG, this.shadowDensityGNext] = [this.shadowDensityGNext, this.shadowDensityG];
+        [this.shadowDensityB, this.shadowDensityBNext] = [this.shadowDensityBNext, this.shadowDensityB];
+
+        this._decayShadowFields();
+    }
+
     // --- Public API (matching CPU version where possible) ---
     step() {
-        this._decayShadowFields();
+        this._advanceShadowFields();
         if (!this.gpuEnabled) {
             return;
         }

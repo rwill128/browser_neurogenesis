@@ -16,6 +16,11 @@ function makeShadowOnlyField({ size = 32, dt = 1 / 30, scaleX = 1, scaleY = 1 } 
   f.shadowDensityR = new Float32Array(cells).fill(0);
   f.shadowDensityG = new Float32Array(cells).fill(0);
   f.shadowDensityB = new Float32Array(cells).fill(0);
+  f.shadowVxNext = new Float32Array(cells).fill(0);
+  f.shadowVyNext = new Float32Array(cells).fill(0);
+  f.shadowDensityRNext = new Float32Array(cells).fill(0);
+  f.shadowDensityGNext = new Float32Array(cells).fill(0);
+  f.shadowDensityBNext = new Float32Array(cells).fill(0);
   f.gpuEnabled = false;
   return f;
 }
@@ -44,4 +49,20 @@ test('GPU fluid shadow path stores density splats for emitter/body sampling', ()
   assert.ok(density[0] > 100);
   assert.ok(density[1] > 40);
   assert.ok(density[2] > 20);
+});
+
+test('GPU fluid shadow path advects momentum to neighboring cells (current transport)', () => {
+  const fluid = makeShadowOnlyField({ size: 32, dt: 0.2, scaleX: 1, scaleY: 1 });
+
+  fluid.addVelocity(10, 10, 2.0, 0.0);
+  const beforeNeighbor = fluid.getVelocityAtWorld(11, 10);
+  assert.equal(beforeNeighbor.vx, 0);
+
+  fluid.step();
+
+  const sourceAfter = fluid.getVelocityAtWorld(10, 10);
+  const neighborAfter = fluid.getVelocityAtWorld(11, 10);
+
+  assert.ok(neighborAfter.vx > 1e-4, `expected downstream transported velocity, got ${neighborAfter.vx}`);
+  assert.ok(sourceAfter.vx < 2.0, `expected source to diffuse/advect, got ${sourceAfter.vx}`);
 });

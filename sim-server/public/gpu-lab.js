@@ -760,6 +760,68 @@ function resolveSoftNodeVsSoftEdgeCollision(node, a, b, restitution = 0.12) {
   }
 }
 
+function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, vx, vy, thickness = 1.4, dyeKeep = 0.02) {
+  const minX = Math.max(0, Math.floor(Math.min(ax, bx) - thickness - 1));
+  const maxX = Math.min(n - 1, Math.ceil(Math.max(ax, bx) + thickness + 1));
+  const minY = Math.max(0, Math.floor(Math.min(ay, by) - thickness - 1));
+  const maxY = Math.min(n - 1, Math.ceil(Math.max(ay, by) + thickness + 1));
+  const ex = bx - ax;
+  const ey = by - ay;
+  const el = Math.max(1e-6, Math.hypot(ex, ey));
+  const nx = -ey / el;
+  const ny = ex / el;
+
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const cp = closestPointOnSegment(x + 0.5, y + 0.5, ax, ay, bx, by);
+      const dx = (x + 0.5) - cp.x;
+      const dy = (y + 0.5) - cp.y;
+      const d = Math.hypot(dx, dy);
+      if (d > thickness) continue;
+      const w = 1 - (d / Math.max(1e-6, thickness));
+      const i = y * n + x;
+
+      // Remove dye across barrier strip (impermeable/absorbing edge behavior).
+      const keep = 1 - (1 - dyeKeep) * w;
+      r[i] *= keep;
+      g[i] *= keep;
+      b[i] *= keep;
+
+      // Remove normal flow component to behave like wall/slip boundary.
+      const vn = vx[i] * nx + vy[i] * ny;
+      vx[i] -= vn * nx * w;
+      vy[i] -= vn * ny * w;
+    }
+  }
+}
+
+function applyBodyEdgeFieldBarriers(sim, r, g, b, vx, vy) {
+  const n = sim.controls.n;
+  const softThickness = Math.max(1.2, 1.1 * (n / 256));
+  const rigidThickness = Math.max(1.4, 1.2 * (n / 256));
+
+  for (const rb of sim.bodies.rigid) {
+    const sides = Math.max(3, rb.sides || 4);
+    const verts = [];
+    for (let i = 0; i < sides; i++) {
+      const a = (rb.theta || 0) + (i / sides) * Math.PI * 2;
+      verts.push({ x: rb.x + Math.cos(a) * rb.r, y: rb.y + Math.sin(a) * rb.r });
+    }
+    for (let i = 0; i < sides; i++) {
+      const a = verts[i];
+      const b2 = verts[(i + 1) % sides];
+      applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, rigidThickness, 0.01);
+    }
+  }
+
+  const s = sim.bodies.soft;
+  for (const [i, j, _rest, edgeSolid] of s.springs) {
+    if (!edgeSolid) continue;
+    const a = s.nodes[i], b2 = s.nodes[j];
+    applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, softThickness, 0.03);
+  }
+}
+
 function enforceFluidEdgeBoundariesCpu(vxField, vyField, n) {
   const last = n - 1;
   for (let x = 0; x < n; x++) {
@@ -1283,6 +1345,7 @@ async function stepAndRender() {
     // Rigid + soft coupling: carry/drag from flow + two-way pushback/swim impulses.
     const couplingInstant = stepBodiesAndInject(s, vx, vy);
     applyEmitters(s, r, g, b, vx, vy);
+    applyBodyEdgeFieldBarriers(s, r, g, b, vx, vy);
     enforceFluidEdgeBoundariesCpu(vx, vy, s.controls.n);
     s.device.queue.writeBuffer(s.vx0, 0, vx);
     s.device.queue.writeBuffer(s.vy0, 0, vy);

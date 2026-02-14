@@ -359,3 +359,43 @@ test('GPU shadow fluid path shows two-way coupling for soft vs rigid bodies with
     Object.assign(config, cfgBackup);
   }
 });
+
+test('GPU coupling clamps extreme relative body-fluid velocity spikes before feedback injection', () => {
+  const cfgBackup = {
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED,
+    BODY_TO_FLUID_FEEDBACK_SOFT: config.BODY_TO_FLUID_FEEDBACK_SOFT,
+    BODY_FLUID_DRAG_COEFF_SOFT: config.BODY_FLUID_DRAG_COEFF_SOFT,
+    BODY_FLUID_COUPLING_MAX_REL_SPEED: config.BODY_FLUID_COUPLING_MAX_REL_SPEED
+  };
+
+  try {
+    config.DYE_ECOLOGY_ENABLED = false;
+    config.BODY_TO_FLUID_FEEDBACK_SOFT = 1.0;
+    config.BODY_FLUID_DRAG_COEFF_SOFT = 1.0;
+    config.BODY_FLUID_COUPLING_MAX_REL_SPEED = 20;
+
+    const fluid = makeGpuStyleFluid({ vx: 0, vy: 0 });
+    const body = new SoftBody(9301, 200, 200, null, false);
+    const p = body.massPoints[0];
+    p.nodeType = NodeType.EATER;
+    p.movementType = MovementType.NEUTRAL;
+    p.pos.x = 200;
+    p.prevPos.x = -1000;
+    p.pos.y = 200;
+    p.prevPos.y = 200;
+
+    body.massPoints = [p];
+    body.springs = [];
+
+    body._performPhysicalUpdates(1 / 60, fluid);
+
+    const feedbackCall = fluid.calls.find((c) => c.amountX > 0) || fluid.calls[0];
+    assert.ok(feedbackCall, 'expected at least one body->fluid feedback call');
+    assert.ok(Math.abs(feedbackCall.amountX) <= 20 + 1e-6,
+      `expected feedback impulse clamp to max relative speed, got ${feedbackCall.amountX}`);
+    assert.ok(body.fluidCouplingDragForce <= 20 + 1e-6,
+      `expected drag telemetry clamp, got ${body.fluidCouplingDragForce}`);
+  } finally {
+    Object.assign(config, cfgBackup);
+  }
+});

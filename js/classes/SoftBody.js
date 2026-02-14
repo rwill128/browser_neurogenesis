@@ -542,6 +542,7 @@ export class SoftBody {
         // Temporary vectors for calculations to reduce allocations
         this._tempVec1 = new Vec2();
         this._tempVec2 = new Vec2();
+        this._tempVec3 = new Vec2();
     }
 
     calculateCurrentMaxEnergy() {
@@ -3907,11 +3908,15 @@ export class SoftBody {
             const hasIX = typeof fluidFieldRef.IX === 'function';
             const getFluidVelocityAt = (point, idx) => {
                 if (Number.isInteger(idx) && fluidFieldRef.Vx && fluidFieldRef.Vy && idx >= 0 && idx < fluidFieldRef.Vx.length) {
-                    return { vx: Number(fluidFieldRef.Vx[idx]) || 0, vy: Number(fluidFieldRef.Vy[idx]) || 0 };
+                    const vx = Number(fluidFieldRef.Vx[idx]);
+                    const vy = Number(fluidFieldRef.Vy[idx]);
+                    return { vx: Number.isFinite(vx) ? vx : 0, vy: Number.isFinite(vy) ? vy : 0 };
                 }
                 if (typeof fluidFieldRef.getVelocityAtWorld === 'function') {
                     const sampled = fluidFieldRef.getVelocityAtWorld(point.pos.x, point.pos.y);
-                    return { vx: Number(sampled?.vx) || 0, vy: Number(sampled?.vy) || 0 };
+                    const vx = Number(sampled?.vx);
+                    const vy = Number(sampled?.vy);
+                    return { vx: Number.isFinite(vx) ? vx : 0, vy: Number.isFinite(vy) ? vy : 0 };
                 }
                 return { vx: 0, vy: 0 };
             };
@@ -3935,6 +3940,7 @@ export class SoftBody {
             const swimmerFeedback = Math.max(0, Number(config.SWIMMER_TO_FLUID_FEEDBACK) || 0.25);
             const neutralCarryFactor = Math.max(0, Number(config.BODY_FLUID_CARRY_NEUTRAL_FACTOR) || 0.18);
             const rigidCarryBoost = Math.max(0, Number(config.BODY_FLUID_CARRY_RIGID_BOOST) || 0.35);
+            const couplingMaxRelativeSpeed = Math.max(5, Number(config.BODY_FLUID_COUPLING_MAX_REL_SPEED) || 120);
 
             let carryDisplacementAccum = 0;
             let softCarryDisplacementAccum = 0;
@@ -4024,21 +4030,37 @@ export class SoftBody {
                 const bodyVy = (point.pos.y - point.prevPos.y) / Math.max(dt, 1e-6);
                 const fluidWorldVx = fluidVel.vx * safeScaleX;
                 const fluidWorldVy = fluidVel.vy * safeScaleY;
-                const relVx = bodyVx - fluidWorldVx;
-                const relVy = bodyVy - fluidWorldVy;
+                let relVx = bodyVx - fluidWorldVx;
+                let relVy = bodyVy - fluidWorldVy;
+                if (!Number.isFinite(relVx) || !Number.isFinite(relVy)) {
+                    relVx = 0;
+                    relVy = 0;
+                } else {
+                    const relMagSq = relVx * relVx + relVy * relVy;
+                    const relCapSq = couplingMaxRelativeSpeed * couplingMaxRelativeSpeed;
+                    if (relMagSq > relCapSq) {
+                        const scale = couplingMaxRelativeSpeed / Math.sqrt(Math.max(1e-12, relMagSq));
+                        relVx *= scale;
+                        relVy *= scale;
+                    }
+                }
 
                 // Fluid->body drag/carry term (two-way half #1).
                 const dragForceX = -relVx * dragCoeff;
                 const dragForceY = -relVy * dragCoeff;
-                point.applyForce(new Vec2(dragForceX, dragForceY));
+                this._tempVec3.x = Number.isFinite(dragForceX) ? dragForceX : 0;
+                this._tempVec3.y = Number.isFinite(dragForceY) ? dragForceY : 0;
+                point.applyForce(this._tempVec3);
                 const dragMag = Math.hypot(dragForceX, dragForceY);
                 dragForceAccum += dragMag;
                 softDragForceAccum += dragMag * (1 - rigidMix);
                 rigidDragForceAccum += dragMag * rigidMix;
 
                 // Body->fluid feedback term (two-way half #2): moving mass pushes local fluid.
-                const feedbackX = relVx * feedbackCoeff / safeScaleX;
-                const feedbackY = relVy * feedbackCoeff / safeScaleY;
+                const rawFeedbackX = relVx * feedbackCoeff / safeScaleX;
+                const rawFeedbackY = relVy * feedbackCoeff / safeScaleY;
+                const feedbackX = Number.isFinite(rawFeedbackX) ? rawFeedbackX : 0;
+                const feedbackY = Number.isFinite(rawFeedbackY) ? rawFeedbackY : 0;
                 fluidFieldRef.addVelocity(
                     fluidGridX,
                     fluidGridY,

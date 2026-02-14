@@ -141,3 +141,21 @@ test('GPU shadow boundary damping preserves interior dynamics while reducing edg
   assert.ok(interiorAfter > edgeAfter * 0.6,
     `interior should not collapse relative to edge (${interiorAfter} vs ${edgeAfter})`);
 });
+
+test('GPU world-space sampling sanitizes corrupted shadow NaN/Inf values', () => {
+  const fluid = makeShadowOnlyField({ size: 24, dt: 0.1, scaleX: 1, scaleY: 1 });
+  fluid.maxVelComponent = 2.5;
+
+  const idx = fluid.IX(6, 6);
+  fluid.shadowVx[idx] = Infinity;
+  fluid.shadowVy[idx] = NaN;
+  fluid.shadowDensityR[idx] = Infinity;
+  fluid.shadowDensityG[idx] = -Infinity;
+  fluid.shadowDensityB[idx] = NaN;
+
+  const vel = fluid.getVelocityAtWorld(6, 6);
+  const density = fluid.getDensityAtWorld(6, 6);
+
+  assert.deepEqual(vel, { vx: 0, vy: 0 }, 'velocity queries should sanitize non-finite shadow values');
+  assert.deepEqual(density, [0, 0, 0, 1], 'density queries should sanitize non-finite shadow values');
+});

@@ -1223,14 +1223,27 @@ export class GPUFluidField {
         const cell = this._toShadowGridCell(worldX, worldY, 'world');
         if (!cell) return [0, 0, 0, 0];
         const idx = cell.idx;
-        return [this.shadowDensityR[idx], this.shadowDensityG[idx], this.shadowDensityB[idx], 1.0];
+        const r = Number(this.shadowDensityR[idx]);
+        const g = Number(this.shadowDensityG[idx]);
+        const b = Number(this.shadowDensityB[idx]);
+        return [
+            Number.isFinite(r) ? Math.max(0, Math.min(255, r)) : 0,
+            Number.isFinite(g) ? Math.max(0, Math.min(255, g)) : 0,
+            Number.isFinite(b) ? Math.max(0, Math.min(255, b)) : 0,
+            1.0
+        ];
     }
 
     getVelocityAtWorld(worldX, worldY) {
         const cell = this._toShadowGridCell(worldX, worldY, 'world');
         if (!cell) return { vx: 0, vy: 0 };
         const idx = cell.idx;
-        return { vx: this.shadowVx[idx], vy: this.shadowVy[idx] };
+        const vx = Number(this.shadowVx[idx]);
+        const vy = Number(this.shadowVy[idx]);
+        return {
+            vx: Number.isFinite(vx) ? Math.max(-this.maxVelComponent, Math.min(this.maxVelComponent, vx)) : 0,
+            vy: Number.isFinite(vy) ? Math.max(-this.maxVelComponent, Math.min(this.maxVelComponent, vy)) : 0
+        };
     }
 
     // For nutrient, light, viscosity, these are currently global CPU arrays.

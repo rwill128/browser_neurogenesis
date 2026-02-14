@@ -60,18 +60,16 @@ test('connectivity largest mode drops disconnected islands', () => {
   assert.equal(connected.meta.keptComponents, 1);
 });
 
-test('connectivity largest mode keeps dominant rigid and dominant soft components independently', () => {
+test('connectivity largest mode enforces single connected body across rigid+soft', () => {
   const w = 28, h = 20;
   const rigid = new Float32Array(w * h);
   const soft = new Float32Array(w * h);
 
   // dominant rigid component
-  for (let y = 2; y <= 8; y++) for (let x = 2; x <= 8; x++) rigid[y * w + x] = 1;
-  // tiny rigid island that should be culled
-  for (let y = 14; y <= 15; y++) for (let x = 3; x <= 4; x++) rigid[y * w + x] = 1;
+  for (let y = 2; y <= 10; y++) for (let x = 2; x <= 12; x++) rigid[y * w + x] = 1;
 
-  // dominant soft component, disconnected from rigid
-  for (let y = 3; y <= 10; y++) for (let x = 18; x <= 25; x++) soft[y * w + x] = 1;
+  // disconnected soft component should be dropped under strict single-body policy
+  for (let y = 3; y <= 10; y++) for (let x = 20; x <= 25; x++) soft[y * w + x] = 1;
 
   const connected = compileFieldToMesh({
     width: w,
@@ -83,7 +81,7 @@ test('connectivity largest mode keeps dominant rigid and dominant soft component
     connectivityMode: 'largest',
   });
 
+  assert.equal(connected.meta.keptComponents, 1);
   assert.ok(connected.meta.rigidTriangles > 0);
-  assert.ok(connected.meta.softTriangles > 0);
-  assert.equal(connected.meta.keptComponents, 2);
+  assert.equal(connected.meta.softTriangles, 0);
 });

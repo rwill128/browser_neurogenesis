@@ -19,7 +19,7 @@ export function compileFieldToMesh({
   permeabilityField = null,
   threshold = 0.35,
   density = 1,
-  connectivityMode = 'none', // none | largest
+  connectivityMode = 'none', // none | largest (strict single connected body)
   minComponentTriangles = 0,
 }) {
   const step = Math.max(1, density | 0);
@@ -91,31 +91,15 @@ function enforceConnectivity({ triangles, mode = 'none', minComponentTriangles =
     return { triangles, componentCount: triangles.length ? 1 : 0, keptComponents: triangles.length ? 1 : 0 };
   }
 
-  // Keep connectivity decomposition material-aware so rigid and soft lattices
-  // do not erase one another when disconnected in the paint field.
-  const groups = new Map();
-  for (let i = 0; i < triangles.length; i++) {
-    const kind = triangles[i].kind || 'unknown';
-    if (!groups.has(kind)) groups.set(kind, []);
-    groups.get(kind).push(i);
-  }
+  const allIndices = triangles.map((_, i) => i);
+  const components = collectTriangleComponents(triangles, allIndices);
 
-  const keepSet = new Set();
-  let componentCount = 0;
-  let keptComponents = 0;
-
-  for (const indices of groups.values()) {
-    const components = collectTriangleComponents(triangles, indices);
-    componentCount += components.length;
-    const keep = pickComponentsToKeep(components, mode, minComponentTriangles);
-    keptComponents += keep.length;
-    for (const comp of keep) {
-      for (const triIdx of comp) keepSet.add(triIdx);
-    }
-  }
-
+  // Strict policy: creature topology must be a single connected body.
+  // Keep exactly the largest connected component when connectivity mode is enabled.
+  const keep = pickComponentsToKeep(components, mode, minComponentTriangles);
+  const keepSet = new Set(keep.flat());
   const keptTriangles = triangles.filter((_, idx) => keepSet.has(idx));
-  return { triangles: keptTriangles, componentCount, keptComponents };
+  return { triangles: keptTriangles, componentCount: components.length, keptComponents: keep.length };
 }
 
 function collectTriangleComponents(triangles, indices) {
@@ -158,9 +142,6 @@ function collectTriangleComponents(triangles, indices) {
 function pickComponentsToKeep(components, mode, minComponentTriangles) {
   if (!components.length) return [];
   if (mode === 'largest') {
-    if (minComponentTriangles > 0) {
-      return components.filter((c, idx) => idx === 0 || c.length >= minComponentTriangles);
-    }
     return [components[0]];
   }
   return components;

@@ -1159,10 +1159,13 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   for (const node of bodies.soft.nodes) node.mass = sim.controls.massSoft;
 
   const softCentroidBefore = computeSoftCentroid(bodies.soft.nodes);
-  const rigidCenterBefore = {
-    x: (bodies.rigid[0].x + bodies.rigid[1].x) * 0.5,
-    y: (bodies.rigid[0].y + bodies.rigid[1].y) * 0.5,
+  const computeRigidCenter = (arr) => {
+    if (!arr.length) return { x: 0, y: 0 };
+    let sx = 0, sy = 0;
+    for (const r of arr) { sx += r.x; sy += r.y; }
+    return { x: sx / arr.length, y: sy / arr.length };
   };
+  const rigidCenterBefore = computeRigidCenter(bodies.rigid);
 
   let rigidCarryTransfer = 0;
   let softCarryTransfer = 0;
@@ -1382,10 +1385,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   }
 
   const softCentroidAfter = computeSoftCentroid(s.nodes);
-  const rigidCenterAfter = {
-    x: (bodies.rigid[0].x + bodies.rigid[1].x) * 0.5,
-    y: (bodies.rigid[0].y + bodies.rigid[1].y) * 0.5,
-  };
+  const rigidCenterAfter = computeRigidCenter(bodies.rigid);
 
   const metrics = {
     rigidCenterDelta: Math.hypot(rigidCenterAfter.x - rigidCenterBefore.x, rigidCenterAfter.y - rigidCenterBefore.y),

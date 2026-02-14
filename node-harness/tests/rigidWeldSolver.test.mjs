@@ -41,6 +41,39 @@ test('buildRigidWeldPairSet normalizes ordering and deduplicates', () => {
   assert.ok(set.has('2:5'));
 });
 
+test('applyRigidWeldConstraints limits first-step correction for far-separated bodies (guardrail)', () => {
+  const bodies = {
+    rigid: [
+      {
+        x: 0, y: 0, vx: 0, vy: 0, theta: 0, omega: 0,
+        verticesLocal: [{ x: -1, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }],
+      },
+      {
+        x: 120, y: 0, vx: 0, vy: 0, theta: 0, omega: 0,
+        verticesLocal: [{ x: -1, y: 0 }, { x: 1, y: 0 }, { x: 0, y: -1 }],
+      },
+    ],
+    rigidWelds: [
+      { a: 0, b: 1, a0: 1, a1: 2, b0: 0, b1: 2 },
+    ],
+  };
+
+  applyRigidWeldConstraints({
+    rigid: bodies.rigid,
+    rigidWelds: bodies.rigidWelds,
+    rigidVertexWorld,
+    stiffness: 0.06,
+    errorScale: 0.95,
+    maxPairError: 2.5,
+  });
+
+  // Two welded vertex pairs should each contribute at most stiffness*maxPairError.
+  const maxExpectedDelta = 2 * 0.06 * 2.5 + 1e-9;
+  assert.ok(Math.abs(bodies.rigid[0].vx) <= maxExpectedDelta);
+  assert.ok(Math.abs(bodies.rigid[1].vx) <= maxExpectedDelta);
+  assert.ok(Number.isFinite(bodies.rigid[0].omega) && Number.isFinite(bodies.rigid[1].omega));
+});
+
 test('applyRigidWeldConstraints pulls welded rigid pieces together over steps', () => {
   const bodies = {
     rigid: [

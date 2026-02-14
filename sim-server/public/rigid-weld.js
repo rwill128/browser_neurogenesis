@@ -11,8 +11,10 @@ export function buildRigidWeldPairSet(rigidWelds) {
   return set;
 }
 
-export function applyRigidWeldConstraints({ rigid, rigidWelds, rigidVertexWorld, stiffness = 0.06, errorScale = 0.95, torqueScale = 0.0009 }) {
+export function applyRigidWeldConstraints({ rigid, rigidWelds, rigidVertexWorld, stiffness = 0.06, errorScale = 0.95, torqueScale = 0.0009, maxPairError = 2.5 }) {
   if (!Array.isArray(rigid) || !Array.isArray(rigidWelds) || typeof rigidVertexWorld !== 'function') return;
+
+  const boundedMaxPairError = Math.max(0.05, Number.isFinite(maxPairError) ? maxPairError : 2.5);
 
   for (const w of rigidWelds) {
     const ra = rigid[w?.a];
@@ -29,7 +31,7 @@ export function applyRigidWeldConstraints({ rigid, rigidWelds, rigidVertexWorld,
       const dx = pb.x - pa.x;
       const dy = pb.y - pa.y;
       const d = Math.max(1e-6, Math.hypot(dx, dy));
-      const err = d * errorScale;
+      const err = Math.min(d * errorScale, boundedMaxPairError);
       const nx = dx / d;
       const ny = dy / d;
 

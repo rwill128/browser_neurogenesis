@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EDGE_DYE_MODE, normalizeEdgeDyeModeRGB, applyBodyEdgeFieldBarriers } from '../../sim-server/public/dye-barrier.js';
+import { EDGE_DYE_MODE, EDGE_BODY_MODE, normalizeEdgeDyeModeRGB, applyBodyEdgeFieldBarriers } from '../../sim-server/public/dye-barrier.js';
 
 function rigidVerticesWorld(rb) {
   if (!rb?.verticesLocal?.length) return [];
@@ -47,7 +47,7 @@ test('applyBodyEdgeFieldBarriers applies PASS/DEFLECT/ABSORB channel behavior on
           { x: 11, y: 8 },
         ],
         springs: [
-          [0, 1, 6, 1, [EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.ABSORB]],
+          [0, 1, 6, EDGE_BODY_MODE.BLOCK, [EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.ABSORB]],
         ],
       },
     },
@@ -59,4 +59,40 @@ test('applyBodyEdgeFieldBarriers applies PASS/DEFLECT/ABSORB channel behavior on
   assert.ok(g[i] < 100, `DEFLECT channel should lose local dye, got ${g[i]}`);
   assert.ok(g[ti] > 0, `DEFLECT channel should move dye tangentially, got target ${g[ti]}`);
   assert.ok(b[i] < g[i], `ABSORB channel should attenuate more strongly than DEFLECT, b=${b[i]} g=${g[i]}`);
+});
+
+test('BLOCK edge mode still deflects fluid velocity when dye channels are PASS', () => {
+  const n = 16;
+  const size = n * n;
+  const r = new Float32Array(size);
+  const g = new Float32Array(size);
+  const b = new Float32Array(size);
+  const vx = new Float32Array(size);
+  const vy = new Float32Array(size);
+
+  const x = 8;
+  const y = 8;
+  const i = y * n + x;
+  vx[i] = 0.0;
+  vy[i] = 2.0; // normal to horizontal edge
+
+  const sim = {
+    controls: { n },
+    bodies: {
+      rigid: [],
+      soft: {
+        nodes: [
+          { x: 5, y: 8 },
+          { x: 11, y: 8 },
+        ],
+        springs: [
+          [0, 1, 6, EDGE_BODY_MODE.BLOCK, [EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS]],
+        ],
+      },
+    },
+  };
+
+  applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld });
+
+  assert.ok(Math.abs(vy[i]) < 2.0, `normal velocity should be reduced by BLOCK body barrier, got vy=${vy[i]}`);
 });

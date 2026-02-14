@@ -4,6 +4,11 @@ export const EDGE_DYE_MODE = {
   ABSORB: 2,
 };
 
+export const EDGE_BODY_MODE = {
+  PASS: 0,
+  BLOCK: 1,
+};
+
 export function normalizeEdgeDyeModeChannel(mode) {
   const n = Number(mode);
   if (n === EDGE_DYE_MODE.PASS || n === EDGE_DYE_MODE.DEFLECT || n === EDGE_DYE_MODE.ABSORB) return n;
@@ -22,7 +27,7 @@ export function normalizeEdgeDyeModeRGB(mode) {
   return [c, c, c];
 }
 
-export function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, vx, vy, thickness = 1.4, dyeMode = EDGE_DYE_MODE.DEFLECT) {
+export function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, vx, vy, thickness = 1.4, dyeMode = EDGE_DYE_MODE.DEFLECT, bodyMode = EDGE_BODY_MODE.BLOCK) {
   const minX = Math.max(0, Math.floor(Math.min(ax, bx) - thickness - 1));
   const maxX = Math.min(n - 1, Math.ceil(Math.max(ax, bx) + thickness + 1));
   const minY = Math.max(0, Math.floor(Math.min(ay, by) - thickness - 1));
@@ -46,7 +51,7 @@ export function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, 
       const i = y * n + x;
 
       const modeRGB = normalizeEdgeDyeModeRGB(dyeMode);
-      if (modeRGB[0] !== EDGE_DYE_MODE.PASS || modeRGB[1] !== EDGE_DYE_MODE.PASS || modeRGB[2] !== EDGE_DYE_MODE.PASS) {
+      if (bodyMode === EDGE_BODY_MODE.BLOCK) {
         const vn = vx[i] * nx + vy[i] * ny;
         vx[i] -= vn * nx * w;
         vy[i] -= vn * ny * w;
@@ -85,19 +90,27 @@ export function applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVertices
     const sides = verts.length;
     for (let i = 0; i < sides; i++) {
       const dyeModeRGB = normalizeEdgeDyeModeRGB(!rb.edgeDyeMode ? EDGE_DYE_MODE.DEFLECT : rb.edgeDyeMode[i]);
-      if (dyeModeRGB[0] === EDGE_DYE_MODE.PASS && dyeModeRGB[1] === EDGE_DYE_MODE.PASS && dyeModeRGB[2] === EDGE_DYE_MODE.PASS) continue;
+      const bodyMode = !rb.edgeBodyMode ? EDGE_BODY_MODE.BLOCK : Number(rb.edgeBodyMode[i]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK;
+      if (bodyMode === EDGE_BODY_MODE.PASS
+        && dyeModeRGB[0] === EDGE_DYE_MODE.PASS
+        && dyeModeRGB[1] === EDGE_DYE_MODE.PASS
+        && dyeModeRGB[2] === EDGE_DYE_MODE.PASS) continue;
       const a = verts[i];
       const b2 = verts[(i + 1) % sides];
-      applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, rigidThickness, dyeModeRGB);
+      applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, rigidThickness, dyeModeRGB, bodyMode);
     }
   }
 
   const s = sim.bodies.soft;
-  for (const [i, j, _rest, _edgeBodyMode, edgeDyeMode] of (s?.springs || [])) {
+  for (const [i, j, _rest, edgeBodyMode, edgeDyeMode] of (s?.springs || [])) {
     const dyeModeRGB = normalizeEdgeDyeModeRGB(edgeDyeMode);
-    if (dyeModeRGB[0] === EDGE_DYE_MODE.PASS && dyeModeRGB[1] === EDGE_DYE_MODE.PASS && dyeModeRGB[2] === EDGE_DYE_MODE.PASS) continue;
+    const bodyMode = Number(edgeBodyMode) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK;
+    if (bodyMode === EDGE_BODY_MODE.PASS
+      && dyeModeRGB[0] === EDGE_DYE_MODE.PASS
+      && dyeModeRGB[1] === EDGE_DYE_MODE.PASS
+      && dyeModeRGB[2] === EDGE_DYE_MODE.PASS) continue;
     const a = s.nodes[i], b2 = s.nodes[j];
-    applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, softThickness, dyeModeRGB);
+    applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, softThickness, dyeModeRGB, bodyMode);
   }
 }
 

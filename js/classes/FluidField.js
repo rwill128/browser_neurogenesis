@@ -390,13 +390,24 @@ export class FluidField {
         const yMax = domainLike ? Math.max(yMin, Math.min(maxCell, Math.floor(domainLike.yMax))) : maxCell;
         const rowSpans = new Map();
         for (let y = yMin; y <= yMax; y++) rowSpans.set(y, [[xMin, xMax]]);
-        return { rowSpans, xMin, xMax, yMin, yMax };
+        return { rowSpans, xMin, xMax, yMin, yMax, _compiledRows: null };
+    }
+
+    _compileDomain(domainLike) {
+        const domain = this._normalizeDomain(domainLike);
+        if (Array.isArray(domain._compiledRows)) return domain;
+        const rows = [];
+        for (const [y, spans] of domain.rowSpans.entries()) rows.push([y, spans]);
+        domain._compiledRows = rows;
+        return domain;
     }
 
     _forEachDomainSpan(domainLike, fn) {
-        const domain = this._normalizeDomain(domainLike);
-        for (const [y, spans] of domain.rowSpans.entries()) {
-            for (const span of spans) {
+        const domain = this._compileDomain(domainLike);
+        for (let r = 0; r < domain._compiledRows.length; r++) {
+            const [y, spans] = domain._compiledRows[r];
+            for (let s = 0; s < spans.length; s++) {
+                const span = spans[s];
                 fn(y, span[0], span[1]);
             }
         }
@@ -404,7 +415,7 @@ export class FluidField {
 
     lin_solve(b, x, x0, a_global_param, c_global_param, field_type, base_diff_rate, dt_param, bounds = null) {
         const N = this.size;
-        const domain = this._normalizeDomain(bounds);
+        const domain = this._compileDomain(bounds);
         const cRecipGlobal = 1.0 / c_global_param;
         const solverIterations = this._getSolverIterationsForField(field_type);
 
@@ -413,7 +424,8 @@ export class FluidField {
 
         if (!viscosityField) {
             for (let k_iter = 0; k_iter < solverIterations; k_iter++) {
-                for (const [j, spans] of domain.rowSpans.entries()) {
+                for (let r = 0; r < domain._compiledRows.length; r++) {
+                    const [j, spans] = domain._compiledRows[r];
                     for (let s = 0; s < spans.length; s++) {
                         const span = spans[s];
                         let idx = j * N + span[0];
@@ -438,7 +450,8 @@ export class FluidField {
         const effectiveCRecipByIdx = this._linSolveEffectiveCRecip;
 
         // Build local coefficients once; reuse across all Gauss-Seidel iterations in this solve.
-        for (const [j, spans] of domain.rowSpans.entries()) {
+        for (let r = 0; r < domain._compiledRows.length; r++) {
+            const [j, spans] = domain._compiledRows[r];
             for (let s = 0; s < spans.length; s++) {
                 const span = spans[s];
                 let idx = j * N + span[0];
@@ -458,7 +471,8 @@ export class FluidField {
         }
 
         for (let k_iter = 0; k_iter < solverIterations; k_iter++) {
-            for (const [j, spans] of domain.rowSpans.entries()) {
+            for (let r = 0; r < domain._compiledRows.length; r++) {
+                const [j, spans] = domain._compiledRows[r];
                 for (let s = 0; s < spans.length; s++) {
                     const span = spans[s];
                     let idx = j * N + span[0];
@@ -482,9 +496,10 @@ export class FluidField {
 
     project(velocX_in_out, velocY_in_out, p_temp, div_temp, bounds = null) {
         const N = this.size;
-        const domain = this._normalizeDomain(bounds);
+        const domain = this._compileDomain(bounds);
 
-        for (const [j, spans] of domain.rowSpans.entries()) {
+        for (let r = 0; r < domain._compiledRows.length; r++) {
+            const [j, spans] = domain._compiledRows[r];
             for (let s = 0; s < spans.length; s++) {
                 const span = spans[s];
                 let idx = j * N + span[0];
@@ -501,7 +516,8 @@ export class FluidField {
         this.set_bnd(0, p_temp);
         this.lin_solve(0, p_temp, div_temp, 1, 4, 'pressure', 0, 0, bounds);
 
-        for (const [j, spans] of domain.rowSpans.entries()) {
+        for (let r = 0; r < domain._compiledRows.length; r++) {
+            const [j, spans] = domain._compiledRows[r];
             for (let s = 0; s < spans.length; s++) {
                 const span = spans[s];
                 let idx = j * N + span[0];
@@ -520,11 +536,12 @@ export class FluidField {
 
     advect(b, d_out, d_in, velocX_source, velocY_source, dt, bounds = null) {
         const N = this.size;
-        const domain = this._normalizeDomain(bounds);
+        const domain = this._compileDomain(bounds);
         const dtx_scaled = dt * N;
         const dty_scaled = dt * N;
 
-        for (const [j_cell, spans] of domain.rowSpans.entries()) {
+        for (let r = 0; r < domain._compiledRows.length; r++) {
+            const [j_cell, spans] = domain._compiledRows[r];
             for (let s = 0; s < spans.length; s++) {
                 const span = spans[s];
                 let current_idx = j_cell * N + span[0];
@@ -854,6 +871,8 @@ export class FluidField {
             this._finalizeActiveTileTelemetry();
             return;
         }
+
+        bounds = this._compileDomain(bounds);
 
         t0 = Date.now();
         this.diffuse(1, this.Vx0, this.Vx, this.viscosity, this.dt, 'velX', bounds);

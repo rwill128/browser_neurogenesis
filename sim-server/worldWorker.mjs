@@ -349,6 +349,47 @@ function captureRenderFrameIfNeeded({ force = false, includeArchive = false } = 
   return frame;
 }
 
+function buildLeanArchiveFrame(frame) {
+  if (!frame || typeof frame !== 'object') return frame;
+
+  const creatures = Array.isArray(frame.creatures)
+    ? frame.creatures.map((c) => {
+        if (!c || typeof c !== 'object') return c;
+        const out = {
+          id: c.id,
+          energy: c.energy,
+          center: c.center,
+          nodeTypeCounts: c.nodeTypeCounts,
+          vertices: c.vertices,
+          springs: c.springs
+        };
+        if (frame.__richStats === true) {
+          out.fullStats = c.fullStats;
+          out.actuationTelemetry = c.actuationTelemetry;
+        }
+        return out;
+      })
+    : [];
+
+  return {
+    id: frame.id,
+    scenario: frame.scenario,
+    tick: frame.tick,
+    time: frame.time,
+    seed: frame.seed,
+    world: frame.world,
+    populations: frame.populations,
+    worldStats: frame.worldStats,
+    instabilityTelemetry: frame.instabilityTelemetry,
+    mutationStats: frame.mutationStats,
+    fluid: frame.fluid,
+    creatures,
+    __frameSeq: frame.__frameSeq,
+    __capturedAtIso: frame.__capturedAtIso,
+    __richStats: frame.__richStats === true
+  };
+}
+
 function archiveCurrentStepFrame() {
   const tick = Number(world?.tick) || 0;
   if (tick > 0 && (tick % FRAME_CAPTURE_STEP_STRIDE) !== 0) return null;
@@ -359,7 +400,7 @@ function archiveCurrentStepFrame() {
       type: 'frameArchive',
       worldId: id,
       tick: Number(frame.tick) || 0,
-      frame
+      frame: buildLeanArchiveFrame(frame)
     });
   }
   return frame;

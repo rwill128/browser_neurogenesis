@@ -257,6 +257,23 @@ test('buildBodiesFromCreatureSpec de-degenerates hybrid joints when edgeA=edgeB'
   assert.ok(Number.isFinite(h.restB) && h.restB >= 0.8);
 });
 
+test('buildBodiesFromCreatureSpec clamps oversized hybrid rest lengths', () => {
+  const spec = createCreatureSpecFromMesh(sampleMesh());
+  const j = spec.hybridJoints[0];
+  assert.ok(j, 'sampleMesh should produce at least one hybrid joint');
+
+  j.restA = 1e6;
+  j.restB = 1e6;
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+  const h = bodies.hybrid[0];
+  const rb = bodies.rigid[h.rigidIndex];
+  const maxRest = Math.max(6, rb.r * 1.5);
+
+  assert.ok(h.restA <= maxRest + 1e-9);
+  assert.ok(h.restB <= maxRest + 1e-9);
+});
+
 test('createCreatureSpecFromMesh preserves optional authoring field payload', () => {
   const w = 16;
   const rigidField = new Float32Array(w * w);

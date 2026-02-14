@@ -201,8 +201,9 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
 
     const defaultRestA = Math.hypot(p.x - aPos.x, p.y - aPos.y);
     const defaultRestB = Math.hypot(p.x - bPos.x, p.y - bPos.y);
-    const restA = Math.max(0.8, finiteOr(Number(j.restA), defaultRestA));
-    const restB = Math.max(0.8, finiteOr(Number(j.restB), defaultRestB));
+    const maxRest = Math.max(6, rb.r * 1.5);
+    const restA = Math.min(maxRest, Math.max(0.8, finiteOr(Number(j.restA), defaultRestA)));
+    const restB = Math.min(maxRest, Math.max(0.8, finiteOr(Number(j.restB), defaultRestB)));
 
     hybrid.push({
       rigidIndex,

@@ -61,7 +61,7 @@ let crash = null;
 // Render-frame buffering for UI decoupling:
 // simulation advances independently, clients consume recent cached frames.
 const FRAME_HISTORY_MAX = 100;
-const FRAME_CAPTURE_STEP_STRIDE = 10;
+const FRAME_CAPTURE_STEP_STRIDE = 50;
 const FRAME_BUFFER_IDLE_MS = 30_000;
 const ARCHIVE_RICH_STATS_EVERY_N_TICKS = 1000;
 let frameHistory = [];

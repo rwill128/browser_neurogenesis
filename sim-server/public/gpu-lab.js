@@ -491,7 +491,7 @@ function initBodies(n, controls) {
 
     const local = [];
     for (let i = 0; i < nodeCount; i++) {
-      const a = (i / nodeCount) * Math.PI * 2 + Math.random() * 0.22;
+      const a = (i / nodeCount) * Math.PI * 2;
       local.push({ x: cx + Math.cos(a) * radius, y: cy + Math.sin(a) * radius });
     }
 
@@ -509,6 +509,14 @@ function initBodies(n, controls) {
     for (let i = 0; i < nodeCount; i++) {
       const j = (i + 2) % nodeCount;
       if (i < j || nodeCount <= 4) {
+        const a = local[i], b = local[j];
+        springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y))]);
+      }
+    }
+    // Opposite braces for even polygons (especially hex) to prevent skew collapse.
+    if (nodeCount % 2 === 0) {
+      for (let i = 0; i < nodeCount / 2; i++) {
+        const j = (i + nodeCount / 2) % nodeCount;
         const a = local[i], b = local[j];
         springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y))]);
       }

@@ -510,6 +510,8 @@ export class RealWorld {
           fluidCoupling: {
             carryDisplacement: round(b.fluidCouplingCarryDisplacement, 6),
             dragForce: round(b.fluidCouplingDragForce, 6),
+            softDragForce: round(b.fluidCouplingSoftDragForce, 6),
+            rigidDragForce: round(b.fluidCouplingRigidDragForce, 6),
             bodyToFluidImpulse: round(b.fluidCouplingBodyToFluidImpulse, 6),
             swimToFluidImpulse: round(b.fluidCouplingSwimToFluidImpulse, 6),
             softFeedbackImpulse: round(b.fluidCouplingSoftFeedbackImpulse, 6),

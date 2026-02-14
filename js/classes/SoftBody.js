@@ -172,6 +172,8 @@ export class SoftBody {
         // Fluid coupling telemetry (new): explicit two-way coupling observability for GPU shadow path and CPU path.
         this.fluidCouplingCarryDisplacement = 0;
         this.fluidCouplingDragForce = 0;
+        this.fluidCouplingSoftDragForce = 0;
+        this.fluidCouplingRigidDragForce = 0;
         this.fluidCouplingBodyToFluidImpulse = 0;
         this.fluidCouplingSwimToFluidImpulse = 0;
         this.fluidCouplingSoftFeedbackImpulse = 0;
@@ -3932,6 +3934,8 @@ export class SoftBody {
 
             let carryDisplacementAccum = 0;
             let dragForceAccum = 0;
+            let softDragForceAccum = 0;
+            let rigidDragForceAccum = 0;
             let bodyToFluidImpulseAccum = 0;
             let swimToFluidImpulseAccum = 0;
             let softFeedbackImpulseAccum = 0;
@@ -4010,7 +4014,10 @@ export class SoftBody {
                 const dragForceX = -relVx * dragCoeff;
                 const dragForceY = -relVy * dragCoeff;
                 point.applyForce(new Vec2(dragForceX, dragForceY));
-                dragForceAccum += Math.hypot(dragForceX, dragForceY);
+                const dragMag = Math.hypot(dragForceX, dragForceY);
+                dragForceAccum += dragMag;
+                softDragForceAccum += dragMag * (1 - rigidMix);
+                rigidDragForceAccum += dragMag * rigidMix;
 
                 // Body->fluid feedback term (two-way half #2): moving mass pushes local fluid.
                 const feedbackX = relVx * feedbackCoeff / safeScaleX;
@@ -4030,6 +4037,8 @@ export class SoftBody {
 
             this.fluidCouplingCarryDisplacement = carryDisplacementAccum;
             this.fluidCouplingDragForce = dragForceAccum;
+            this.fluidCouplingSoftDragForce = softDragForceAccum;
+            this.fluidCouplingRigidDragForce = rigidDragForceAccum;
             this.fluidCouplingBodyToFluidImpulse = bodyToFluidImpulseAccum;
             this.fluidCouplingSwimToFluidImpulse = swimToFluidImpulseAccum;
             this.fluidCouplingSoftFeedbackImpulse = softFeedbackImpulseAccum;
@@ -4038,6 +4047,8 @@ export class SoftBody {
         } else {
             this.fluidCouplingCarryDisplacement = 0;
             this.fluidCouplingDragForce = 0;
+            this.fluidCouplingSoftDragForce = 0;
+            this.fluidCouplingRigidDragForce = 0;
             this.fluidCouplingBodyToFluidImpulse = 0;
             this.fluidCouplingSwimToFluidImpulse = 0;
             this.fluidCouplingSoftFeedbackImpulse = 0;

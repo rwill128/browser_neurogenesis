@@ -78,10 +78,10 @@ test('rigid-coupled point injects stronger feedback than soft-coupled point', ()
     config.DYE_ECOLOGY_ENABLED = false;
     config.BODY_TO_FLUID_FEEDBACK_SOFT = 0.01;
     config.BODY_TO_FLUID_FEEDBACK_RIGID = 0.09;
-    config.BODY_FLUID_DRAG_COEFF_SOFT = 0;
-    config.BODY_FLUID_DRAG_COEFF_RIGID = 0;
+    config.BODY_FLUID_DRAG_COEFF_SOFT = 0.2;
+    config.BODY_FLUID_DRAG_COEFF_RIGID = 1.0;
 
-    const fluidSoft = makeGpuStyleFluid({ vx: 0, vy: 0 });
+    const fluidSoft = makeGpuStyleFluid({ vx: 0.4, vy: 0 });
     const softBody = new SoftBody(9102, 20, 20, null, false);
     const softPoint = softBody.massPoints[0];
     softPoint.nodeType = NodeType.EATER;
@@ -96,7 +96,7 @@ test('rigid-coupled point injects stronger feedback than soft-coupled point', ()
     softBody._performPhysicalUpdates(1 / 60, fluidSoft);
     const softInjection = Math.abs(fluidSoft.calls[0]?.amountX || 0);
 
-    const fluidRigid = makeGpuStyleFluid({ vx: 0, vy: 0 });
+    const fluidRigid = makeGpuStyleFluid({ vx: 0.4, vy: 0 });
     const rigidBody = new SoftBody(9103, 60, 60, null, false);
     const rigidPoint = rigidBody.massPoints[0];
     const anchorBody = new SoftBody(9104, 62, 60, null, false);
@@ -121,6 +121,8 @@ test('rigid-coupled point injects stronger feedback than soft-coupled point', ()
     assert.ok(rigidInjection > softInjection * 2, `expected rigid feedback > soft (rigid=${rigidInjection}, soft=${softInjection})`);
     assert.ok(rigidBody.fluidCouplingRigidFeedbackImpulse > softBody.fluidCouplingSoftFeedbackImpulse * 2,
       `expected rigid-weighted telemetry > soft-weighted telemetry (rigid=${rigidBody.fluidCouplingRigidFeedbackImpulse}, soft=${softBody.fluidCouplingSoftFeedbackImpulse})`);
+    assert.ok(rigidBody.fluidCouplingRigidDragForce > softBody.fluidCouplingSoftDragForce * 2,
+      `expected rigid drag telemetry > soft drag telemetry (rigid=${rigidBody.fluidCouplingRigidDragForce}, soft=${softBody.fluidCouplingSoftDragForce})`);
   } finally {
     Object.assign(config, cfgBackup);
   }

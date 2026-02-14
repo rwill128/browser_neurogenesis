@@ -281,13 +281,32 @@ export class FluidField {
         return fallback;
     }
 
+    _normalizeDomain(domainLike) {
+        const N = this.size;
+        const maxCell = N - 2;
+        if (domainLike && domainLike.rowSpans instanceof Map) return domainLike;
+
+        const xMin = domainLike ? Math.max(1, Math.min(maxCell, Math.floor(domainLike.xMin))) : 1;
+        const xMax = domainLike ? Math.max(xMin, Math.min(maxCell, Math.floor(domainLike.xMax))) : maxCell;
+        const yMin = domainLike ? Math.max(1, Math.min(maxCell, Math.floor(domainLike.yMin))) : 1;
+        const yMax = domainLike ? Math.max(yMin, Math.min(maxCell, Math.floor(domainLike.yMax))) : maxCell;
+        const rowSpans = new Map();
+        for (let y = yMin; y <= yMax; y++) rowSpans.set(y, [[xMin, xMax]]);
+        return { rowSpans, xMin, xMax, yMin, yMax };
+    }
+
+    _forEachDomainSpan(domainLike, fn) {
+        const domain = this._normalizeDomain(domainLike);
+        for (const [y, spans] of domain.rowSpans.entries()) {
+            for (const span of spans) {
+                fn(y, span[0], span[1]);
+            }
+        }
+    }
+
     lin_solve(b, x, x0, a_global_param, c_global_param, field_type, base_diff_rate, dt_param, bounds = null) {
         const N = this.size;
-        const NMinus1 = N - 1;
-        const xMin = bounds ? Math.max(1, Math.min(NMinus1 - 1, Math.floor(bounds.xMin))) : 1;
-        const xMax = bounds ? Math.max(xMin, Math.min(NMinus1 - 1, Math.floor(bounds.xMax))) : (NMinus1 - 1);
-        const yMin = bounds ? Math.max(1, Math.min(NMinus1 - 1, Math.floor(bounds.yMin))) : 1;
-        const yMax = bounds ? Math.max(yMin, Math.min(NMinus1 - 1, Math.floor(bounds.yMax))) : (NMinus1 - 1);
+        const domain = this._normalizeDomain(bounds);
         const cRecipGlobal = 1.0 / c_global_param;
         const solverIterations = this._getSolverIterationsForField(field_type);
 
@@ -296,14 +315,14 @@ export class FluidField {
 
         if (!viscosityField) {
             for (let k_iter = 0; k_iter < solverIterations; k_iter++) {
-                for (let j = yMin; j <= yMax; j++) {
-                    let idx = j * N + xMin;
-                    const rowEnd = j * N + xMax + 1;
+                this._forEachDomainSpan(domain, (j, xStart, xEnd) => {
+                    let idx = j * N + xStart;
+                    const rowEnd = j * N + xEnd + 1;
                     while (idx < rowEnd) {
                         x[idx] = (x0[idx] + a_global_param * (x[idx + 1] + x[idx - 1] + x[idx + N] + x[idx - N])) * cRecipGlobal;
                         idx++;
                     }
-                }
+                });
                 this.set_bnd(b, x);
             }
             return;
@@ -318,9 +337,9 @@ export class FluidField {
         const effectiveCRecipByIdx = this._linSolveEffectiveCRecip;
 
         // Build local coefficients once; reuse across all Gauss-Seidel iterations in this solve.
-        for (let j = yMin; j <= yMax; j++) {
-            let idx = j * N + xMin;
-            const rowEnd = j * N + xMax + 1;
+        this._forEachDomainSpan(domain, (j, xStart, xEnd) => {
+            let idx = j * N + xStart;
+            const rowEnd = j * N + xEnd + 1;
             while (idx < rowEnd) {
                 let localMultiplier = viscosityField[idx];
                 if (!Number.isFinite(localMultiplier)) localMultiplier = 1;
@@ -332,19 +351,19 @@ export class FluidField {
                 effectiveCRecipByIdx[idx] = 1.0 / (1 + 4 * effectiveA);
                 idx++;
             }
-        }
+        });
 
         for (let k_iter = 0; k_iter < solverIterations; k_iter++) {
-            for (let j = yMin; j <= yMax; j++) {
-                let idx = j * N + xMin;
-                const rowEnd = j * N + xMax + 1;
+            this._forEachDomainSpan(domain, (j, xStart, xEnd) => {
+                let idx = j * N + xStart;
+                const rowEnd = j * N + xEnd + 1;
                 while (idx < rowEnd) {
                     const effectiveA = effectiveAByIdx[idx];
                     const effectiveCRecip = effectiveCRecipByIdx[idx];
                     x[idx] = (x0[idx] + effectiveA * (x[idx + 1] + x[idx - 1] + x[idx + N] + x[idx - N])) * effectiveCRecip;
                     idx++;
                 }
-            }
+            });
             this.set_bnd(b, x);
         }
     }
@@ -356,35 +375,31 @@ export class FluidField {
 
     project(velocX_in_out, velocY_in_out, p_temp, div_temp, bounds = null) {
         const N = this.size;
-        const NMinus1 = N - 1;
-        const xMin = bounds ? Math.max(1, Math.min(NMinus1 - 1, Math.floor(bounds.xMin))) : 1;
-        const xMax = bounds ? Math.max(xMin, Math.min(NMinus1 - 1, Math.floor(bounds.xMax))) : (NMinus1 - 1);
-        const yMin = bounds ? Math.max(1, Math.min(NMinus1 - 1, Math.floor(bounds.yMin))) : 1;
-        const yMax = bounds ? Math.max(yMin, Math.min(NMinus1 - 1, Math.floor(bounds.yMax))) : (NMinus1 - 1);
+        const domain = this._normalizeDomain(bounds);
 
-        for (let j = yMin; j <= yMax; j++) {
-            let idx = j * N + xMin;
-            const rowEnd = j * N + xMax + 1;
+        this._forEachDomainSpan(domain, (j, xStart, xEnd) => {
+            let idx = j * N + xStart;
+            const rowEnd = j * N + xEnd + 1;
             while (idx < rowEnd) {
                 div_temp[idx] = -0.5 * (velocX_in_out[idx + 1] - velocX_in_out[idx - 1] + velocY_in_out[idx + N] - velocY_in_out[idx - N]) / N;
                 p_temp[idx] = 0;
                 idx++;
             }
-        }
+        });
 
         this.set_bnd(0, div_temp);
         this.set_bnd(0, p_temp);
         this.lin_solve(0, p_temp, div_temp, 1, 4, 'pressure', 0, 0, bounds);
 
-        for (let j = yMin; j <= yMax; j++) {
-            let idx = j * N + xMin;
-            const rowEnd = j * N + xMax + 1;
+        this._forEachDomainSpan(domain, (j, xStart, xEnd) => {
+            let idx = j * N + xStart;
+            const rowEnd = j * N + xEnd + 1;
             while (idx < rowEnd) {
                 velocX_in_out[idx] -= 0.5 * (p_temp[idx + 1] - p_temp[idx - 1]) * N;
                 velocY_in_out[idx] -= 0.5 * (p_temp[idx + N] - p_temp[idx - N]) * N;
                 idx++;
             }
-        }
+        });
 
         this.set_bnd(1, velocX_in_out);
         this.set_bnd(2, velocY_in_out);
@@ -392,19 +407,15 @@ export class FluidField {
 
     advect(b, d_out, d_in, velocX_source, velocY_source, dt, bounds = null) {
         const N = this.size;
-        const NMinus1 = N - 1;
-        const xMin = bounds ? Math.max(1, Math.min(NMinus1 - 1, Math.floor(bounds.xMin))) : 1;
-        const xMax = bounds ? Math.max(xMin, Math.min(NMinus1 - 1, Math.floor(bounds.xMax))) : (NMinus1 - 1);
-        const yMin = bounds ? Math.max(1, Math.min(NMinus1 - 1, Math.floor(bounds.yMin))) : 1;
-        const yMax = bounds ? Math.max(yMin, Math.min(NMinus1 - 1, Math.floor(bounds.yMax))) : (NMinus1 - 1);
+        const domain = this._normalizeDomain(bounds);
         const dtx_scaled = dt * N;
         const dty_scaled = dt * N;
 
-        for (let j_cell = yMin; j_cell <= yMax; j_cell++) {
-            let current_idx = j_cell * N + xMin;
-            const rowEnd = j_cell * N + xMax + 1;
+        this._forEachDomainSpan(domain, (j_cell, xStart, xEnd) => {
+            let current_idx = j_cell * N + xStart;
+            const rowEnd = j_cell * N + xEnd + 1;
 
-            for (let i_cell = 1; current_idx < rowEnd; i_cell++, current_idx++) {
+            for (let i_cell = xStart; current_idx < rowEnd; i_cell++, current_idx++) {
                 let x = i_cell - (dtx_scaled * velocX_source[current_idx]);
                 let y = j_cell - (dty_scaled * velocY_source[current_idx]);
 
@@ -441,7 +452,7 @@ export class FluidField {
                 d_out[current_idx] = s0 * (t0 * d_in[idx00] + t1 * d_in[idx01]) +
                                      s1 * (t0 * d_in[idx10] + t1 * d_in[idx11]);
             }
-        }
+        });
 
         this.set_bnd(b, d_out);
     }
@@ -491,58 +502,109 @@ export class FluidField {
     }
 
     /**
-     * Compute active-cell bounds from a tile map (with safety halo).
+     * Build a sparse cell-domain from active tiles (row -> merged [x0,x1] spans).
      */
-    _getActiveCellBounds(tileMap) {
+    _buildSparseDomainFromTiles(tileMap) {
         if (!tileMap || tileMap.size === 0) return null;
+        const maxCell = this.size - 2;
+        const pad = Math.max(1, this.activeTileSize);
+        const rows = new Map();
 
-        let minTx = Infinity;
-        let minTy = Infinity;
-        let maxTx = -Infinity;
-        let maxTy = -Infinity;
         for (const key of tileMap.keys()) {
             const [txRaw, tyRaw] = String(key).split(':');
             const tx = Math.floor(Number(txRaw));
             const ty = Math.floor(Number(tyRaw));
             if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
-            if (tx < minTx) minTx = tx;
-            if (ty < minTy) minTy = ty;
-            if (tx > maxTx) maxTx = tx;
-            if (ty > maxTy) maxTy = ty;
+
+            const x0 = Math.max(1, (tx * this.activeTileSize) - pad);
+            const x1 = Math.min(maxCell, ((tx + 1) * this.activeTileSize) + pad);
+            const y0 = Math.max(1, (ty * this.activeTileSize) - pad);
+            const y1 = Math.min(maxCell, ((ty + 1) * this.activeTileSize) + pad);
+
+            for (let y = y0; y <= y1; y++) {
+                const list = rows.get(y) || [];
+                list.push([x0, x1]);
+                rows.set(y, list);
+            }
         }
-        if (!Number.isFinite(minTx) || !Number.isFinite(minTy) || !Number.isFinite(maxTx) || !Number.isFinite(maxTy)) {
+
+        if (rows.size === 0) return null;
+
+        let xMin = Infinity;
+        let yMin = Infinity;
+        let xMax = -Infinity;
+        let yMax = -Infinity;
+        const rowSpans = new Map();
+
+        for (const [y, spans] of rows.entries()) {
+            spans.sort((a, b) => a[0] - b[0]);
+            const merged = [];
+            for (const span of spans) {
+                const last = merged[merged.length - 1];
+                if (!last || span[0] > (last[1] + 1)) merged.push([span[0], span[1]]);
+                else last[1] = Math.max(last[1], span[1]);
+            }
+            rowSpans.set(y, merged);
+            if (y < yMin) yMin = y;
+            if (y > yMax) yMax = y;
+            for (const [sx, ex] of merged) {
+                if (sx < xMin) xMin = sx;
+                if (ex > xMax) xMax = ex;
+            }
+        }
+
+        if (!Number.isFinite(xMin) || !Number.isFinite(yMin) || !Number.isFinite(xMax) || !Number.isFinite(yMax)) {
             return null;
         }
 
-        const pad = Math.max(1, this.activeTileSize);
-        const xMin = Math.max(1, (minTx * this.activeTileSize) - pad);
-        const yMin = Math.max(1, (minTy * this.activeTileSize) - pad);
-        const xMax = Math.min(this.size - 2, ((maxTx + 1) * this.activeTileSize) + pad);
-        const yMax = Math.min(this.size - 2, ((maxTy + 1) * this.activeTileSize) + pad);
-        return { xMin, yMin, xMax, yMax };
+        return { rowSpans, xMin, yMin, xMax, yMax };
     }
 
-    _mergeBounds(a, b) {
+    _mergeDomains(a, b) {
         if (!a) return b || null;
         if (!b) return a || null;
-        return {
-            xMin: Math.min(a.xMin, b.xMin),
-            yMin: Math.min(a.yMin, b.yMin),
-            xMax: Math.max(a.xMax, b.xMax),
-            yMax: Math.max(a.yMax, b.yMax)
+        const rows = new Map();
+
+        const pushSpans = (domain) => {
+            for (const [y, spans] of domain.rowSpans.entries()) {
+                const list = rows.get(y) || [];
+                for (const s of spans) list.push([s[0], s[1]]);
+                rows.set(y, list);
+            }
         };
+        pushSpans(this._normalizeDomain(a));
+        pushSpans(this._normalizeDomain(b));
+
+        const mergedDomain = { rowSpans: new Map(), xMin: Infinity, yMin: Infinity, xMax: -Infinity, yMax: -Infinity };
+        for (const [y, spans] of rows.entries()) {
+            spans.sort((s1, s2) => s1[0] - s2[0]);
+            const merged = [];
+            for (const span of spans) {
+                const last = merged[merged.length - 1];
+                if (!last || span[0] > (last[1] + 1)) merged.push([span[0], span[1]]);
+                else last[1] = Math.max(last[1], span[1]);
+            }
+            mergedDomain.rowSpans.set(y, merged);
+            mergedDomain.yMin = Math.min(mergedDomain.yMin, y);
+            mergedDomain.yMax = Math.max(mergedDomain.yMax, y);
+            for (const [sx, ex] of merged) {
+                mergedDomain.xMin = Math.min(mergedDomain.xMin, sx);
+                mergedDomain.xMax = Math.max(mergedDomain.xMax, ex);
+            }
+        }
+        return mergedDomain;
     }
 
     step(worldTick = 0) {
         this.seedMomentumTilesFromVelocityField();
-        const carrierBounds = this._getActiveCellBounds(this.carrierTiles);
-        const momentumBounds = this._getActiveCellBounds(this.momentumTiles);
+        const carrierBounds = this._buildSparseDomainFromTiles(this.carrierTiles);
+        const momentumBounds = this._buildSparseDomainFromTiles(this.momentumTiles);
         const momentumEvery = Math.max(1, Math.floor(Number(config.FLUID_MOMENTUM_ONLY_STEP_EVERY_N_TICKS) || 10));
         const allowMomentumSolve = (Math.max(0, Math.floor(Number(worldTick) || 0)) % momentumEvery) === 0;
 
         // Carrier region runs every fluid step; momentum-only region is folded in at reduced cadence.
         const bounds = allowMomentumSolve
-            ? this._mergeBounds(carrierBounds, momentumBounds)
+            ? this._mergeDomains(carrierBounds, momentumBounds)
             : carrierBounds;
 
         if (!bounds) {
@@ -568,20 +630,16 @@ export class FluidField {
         this.advect(0, this.densityB, this.densityB0, this.Vx, this.Vy, this.dt, bounds);
 
         if (bounds) {
-            const x0 = Math.max(0, Math.floor(bounds.xMin));
-            const x1 = Math.min(this.size - 1, Math.floor(bounds.xMax));
-            const y0 = Math.max(0, Math.floor(bounds.yMin));
-            const y1 = Math.min(this.size - 1, Math.floor(bounds.yMax));
-            for (let y = y0; y <= y1; y++) {
-                let idx = y * this.size + x0;
-                const rowEnd = y * this.size + x1 + 1;
+            this._forEachDomainSpan(bounds, (y, xStart, xEnd) => {
+                let idx = y * this.size + xStart;
+                const rowEnd = y * this.size + xEnd + 1;
                 while (idx < rowEnd) {
                     this.densityR[idx] = Math.max(0, this.densityR[idx] - config.FLUID_FADE_RATE * 255 * this.dt);
                     this.densityG[idx] = Math.max(0, this.densityG[idx] - config.FLUID_FADE_RATE * 255 * this.dt);
                     this.densityB[idx] = Math.max(0, this.densityB[idx] - config.FLUID_FADE_RATE * 255 * this.dt);
                     idx++;
                 }
-            }
+            });
         } else {
             for (let i = 0; i < this.densityR.length; i++) {
                 this.densityR[i] = Math.max(0, this.densityR[i] - config.FLUID_FADE_RATE * 255 * this.dt);

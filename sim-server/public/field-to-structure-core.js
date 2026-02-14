@@ -67,7 +67,15 @@ export function compileFieldToMesh({
   }
 
   const filtered = enforceConnectivity({ triangles, mode: connectivityMode, minComponentTriangles });
-  const rigidDecomp = decomposeRigidTriangles(filtered.triangles, nodes);
+  const rigidDecomp = extractRigidContoursFromField({
+    width,
+    height,
+    rigidField,
+    threshold,
+    cellSize: step,
+    nodes,
+    keptTriangles: filtered.triangles,
+  });
 
   return {
     nodes,
@@ -147,6 +155,252 @@ function pickComponentsToKeep(components, mode, minComponentTriangles) {
   if (!components.length) return [];
   if (mode === 'largest') return [components[0]];
   return components;
+}
+
+function extractRigidContoursFromField({ width, height, rigidField, threshold, cellSize, nodes, keptTriangles }) {
+  const step = Math.max(1, cellSize | 0);
+  const cols = Math.max(1, Math.ceil(width / step));
+  const rows = Math.max(1, Math.ceil(height / step));
+
+  const mask = new Uint8Array(cols * rows);
+  const mIdx = (x, y) => y * cols + x;
+
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const sx = Math.min(width - 0.501, x * step + step * 0.5);
+      const sy = Math.min(height - 0.501, y * step + step * 0.5);
+      const rv = sampleBilinear(rigidField, width, height, sx, sy);
+      if (rv >= threshold) mask[mIdx(x, y)] = 1;
+    }
+  }
+
+  const components = collectMaskComponents(mask, cols, rows);
+  if (!components.length) return { pieces: [], welds: [] };
+
+  const keptRigidNodeIds = new Set();
+  for (const t of keptTriangles || []) {
+    if (t.kind !== 'rigid') continue;
+    keptRigidNodeIds.add(t.a);
+    keptRigidNodeIds.add(t.b);
+    keptRigidNodeIds.add(t.c);
+  }
+
+  const pieces = [];
+  for (let ci = 0; ci < components.length; ci++) {
+    const cellSet = components[ci];
+    const loops = traceComponentLoops(cellSet, step);
+    if (!loops.length) continue;
+
+    let bestLoop = loops[0];
+    let bestArea = Math.abs(signedPolygonArea(bestLoop));
+    for (let i = 1; i < loops.length; i++) {
+      const loop = loops[i];
+      const area = Math.abs(signedPolygonArea(loop));
+      if (area > bestArea) {
+        bestArea = area;
+        bestLoop = loop;
+      }
+    }
+
+    let hull = simplifyCollinear(bestLoop);
+    hull = simplifyDouglasPeucker(hull, Math.max(0.75, step * 0.42));
+    hull = simplifyCollinear(hull);
+
+    if (hull.length < 3) continue;
+    if (signedPolygonArea(hull) < 0) hull = [...hull].reverse();
+
+    const sourceNodeIds = [];
+    for (const n of nodes) {
+      if (!Number.isFinite(n?.x) || !Number.isFinite(n?.y)) continue;
+      if ((Number(n.rigid) || 0) < threshold * 0.75) continue;
+      if (!pointInPolygon(n.x, n.y, hull)) continue;
+      sourceNodeIds.push(n.id);
+    }
+
+    if (keptRigidNodeIds.size > 0) {
+      const touchesKeptRigid = sourceNodeIds.some((id) => keptRigidNodeIds.has(id));
+      if (!touchesKeptRigid) continue;
+    }
+
+    pieces.push({
+      id: `rigid_piece_${pieces.length}`,
+      compoundId: `rigid_compound_${ci}`,
+      hull,
+      sourceNodeIds,
+    });
+  }
+
+  return { pieces, welds: [] };
+}
+
+function collectMaskComponents(mask, cols, rows) {
+  const comps = [];
+  const seen = new Uint8Array(mask.length);
+  const idx = (x, y) => y * cols + x;
+
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const start = idx(x, y);
+      if (!mask[start] || seen[start]) continue;
+      const stack = [[x, y]];
+      seen[start] = 1;
+      const cells = new Set();
+
+      while (stack.length) {
+        const [cx, cy] = stack.pop();
+        cells.add(`${cx},${cy}`);
+        const n4 = [[cx - 1, cy], [cx + 1, cy], [cx, cy - 1], [cx, cy + 1]];
+        for (const [nx, ny] of n4) {
+          if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+          const ni = idx(nx, ny);
+          if (!mask[ni] || seen[ni]) continue;
+          seen[ni] = 1;
+          stack.push([nx, ny]);
+        }
+      }
+
+      if (cells.size) comps.push(cells);
+    }
+  }
+
+  comps.sort((a, b) => b.size - a.size);
+  return comps;
+}
+
+function traceComponentLoops(cellSet, step) {
+  const edgeMap = new Map();
+  const addEdge = (x0, y0, x1, y1) => {
+    const p0 = `${x0},${y0}`;
+    const p1 = `${x1},${y1}`;
+    if (!edgeMap.has(p0)) edgeMap.set(p0, []);
+    edgeMap.get(p0).push({ from: p0, to: p1 });
+  };
+
+  const hasCell = (x, y) => cellSet.has(`${x},${y}`);
+
+  for (const key of cellSet) {
+    const [cx, cy] = key.split(',').map((v) => Number(v));
+    const x0 = cx * step;
+    const y0 = cy * step;
+    const x1 = x0 + step;
+    const y1 = y0 + step;
+
+    if (!hasCell(cx, cy - 1)) addEdge(x0, y0, x1, y0); // top
+    if (!hasCell(cx + 1, cy)) addEdge(x1, y0, x1, y1); // right
+    if (!hasCell(cx, cy + 1)) addEdge(x1, y1, x0, y1); // bottom
+    if (!hasCell(cx - 1, cy)) addEdge(x0, y1, x0, y0); // left
+  }
+
+  const loops = [];
+  while (true) {
+    const startEntry = [...edgeMap.entries()].find(([, arr]) => arr.length > 0);
+    if (!startEntry) break;
+
+    let [start] = startEntry;
+    let current = start;
+    const loop = [];
+    const guard = edgeMap.size * 8 + 64;
+    let steps = 0;
+
+    while (steps++ < guard) {
+      const outgoing = edgeMap.get(current);
+      if (!outgoing || outgoing.length === 0) break;
+      const edge = outgoing.pop();
+      const [x, y] = edge.from.split(',').map((v) => Number(v));
+      loop.push({ x, y });
+      current = edge.to;
+      if (current === start) break;
+    }
+
+    if (loop.length >= 3) loops.push(loop);
+  }
+
+  return loops;
+}
+
+function signedPolygonArea(poly) {
+  if (!poly || poly.length < 3) return 0;
+  let s = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i];
+    const q = poly[(i + 1) % poly.length];
+    s += p.x * q.y - q.x * p.y;
+  }
+  return s * 0.5;
+}
+
+function simplifyCollinear(poly) {
+  if (!poly || poly.length < 3) return poly || [];
+  const out = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[(i - 1 + poly.length) % poly.length];
+    const b = poly[i];
+    const c = poly[(i + 1) % poly.length];
+    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+    if (Math.abs(cross) <= 1e-6) continue;
+    out.push(b);
+  }
+  return out.length >= 3 ? out : poly;
+}
+
+function simplifyDouglasPeucker(poly, epsilon) {
+  if (!poly || poly.length < 4) return poly || [];
+  const open = [...poly, poly[0]];
+  const keep = new Uint8Array(open.length);
+  keep[0] = 1;
+  keep[open.length - 1] = 1;
+
+  const stack = [[0, open.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    let maxDist = -1;
+    let maxIdx = -1;
+    const p0 = open[a];
+    const p1 = open[b];
+    for (let i = a + 1; i < b; i++) {
+      const d = pointSegmentDistance(open[i], p0, p1);
+      if (d > maxDist) {
+        maxDist = d;
+        maxIdx = i;
+      }
+    }
+    if (maxDist > epsilon && maxIdx > a && maxIdx < b) {
+      keep[maxIdx] = 1;
+      stack.push([a, maxIdx], [maxIdx, b]);
+    }
+  }
+
+  const simplified = [];
+  for (let i = 0; i < open.length - 1; i++) {
+    if (keep[i]) simplified.push(open[i]);
+  }
+  return simplified.length >= 3 ? simplified : poly;
+}
+
+function pointSegmentDistance(p, a, b) {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const apx = p.x - a.x;
+  const apy = p.y - a.y;
+  const den = Math.max(1e-9, abx * abx + aby * aby);
+  const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / den));
+  const cx = a.x + abx * t;
+  const cy = a.y + aby * t;
+  return Math.hypot(p.x - cx, p.y - cy);
+}
+
+function pointInPolygon(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x;
+    const yi = poly[i].y;
+    const xj = poly[j].x;
+    const yj = poly[j].y;
+    const intersect = ((yi > py) !== (yj > py))
+      && (px < ((xj - xi) * (py - yi)) / Math.max(1e-9, (yj - yi)) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }
 
 function decomposeRigidTriangles(triangles, nodes) {

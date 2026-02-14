@@ -651,8 +651,8 @@ async fn run_fluid_step(
             },
         ],
     });
-    let bg_advect_dye = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("bg-advect-dye"),
+    let bg_advect_dye_from_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-advect-dye-from-a"),
         layout: &advect_dye_pipeline.get_bind_group_layout(0),
         entries: &[
             wgpu::BindGroupEntry {
@@ -662,6 +662,28 @@ async fn run_fluid_step(
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: vel_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: dye_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: dye_b.as_entire_binding(),
+            },
+        ],
+    });
+    let bg_advect_dye_from_b = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-advect-dye-from-b"),
+        layout: &advect_dye_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: vel_b.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -698,6 +720,7 @@ async fn run_fluid_step(
     let wg_y = height.div_ceil(8);
     let passes_per_step = 8u32 + jacobi_iters.saturating_mul(projection_passes.max(1));
     let steps_per_submit = (2048u32 / passes_per_step.max(1)).clamp(4, 24);
+    let mut final_vel_is_a = true;
 
     while remaining > 0 {
         let batch_steps = remaining.min(steps_per_submit);
@@ -784,12 +807,13 @@ async fn run_fluid_step(
             }
 
             // optional additional projection passes to tighten incompressibility.
-            // pass 0 above leaves velocity in vel_a, then each extra pass goes a->b and copies back to a.
+            // Keep velocity ping-ponging between A/B without explicit buffer copies.
+            let mut vel_in_a = true;
             for _ in 1..projection_passes {
                 {
                     let mut pass = encoder.begin_compute_pass(&Default::default());
                     pass.set_pipeline(&divergence_pipeline);
-                    pass.set_bind_group(0, &bg_div_from_a, &[]);
+                    pass.set_bind_group(0, if vel_in_a { &bg_div_from_a } else { &bg_div }, &[]);
                     pass.dispatch_workgroups(wg_x, wg_y, 1);
                 }
 
@@ -814,30 +838,39 @@ async fn run_fluid_step(
                     pass.set_pipeline(&project_pipeline);
                     pass.set_bind_group(
                         0,
-                        if jacobi_iters % 2 == 0 {
-                            &bg_project_cleanup_from_a
+                        if vel_in_a {
+                            if jacobi_iters % 2 == 0 {
+                                &bg_project_cleanup_from_a
+                            } else {
+                                &bg_project_cleanup_from_b
+                            }
+                        } else if jacobi_iters % 2 == 0 {
+                            &bg_project_from_a
                         } else {
-                            &bg_project_cleanup_from_b
+                            &bg_project_from_b
                         },
                         &[],
                     );
                     pass.dispatch_workgroups(wg_x, wg_y, 1);
                 }
 
-                encoder.copy_buffer_to_buffer(
-                    &vel_b,
-                    0,
-                    &vel_a,
-                    0,
-                    (cells * std::mem::size_of::<[f32; 2]>()) as u64,
-                );
+                vel_in_a = !vel_in_a;
             }
+            final_vel_is_a = vel_in_a;
 
             // dye advection
             {
                 let mut pass = encoder.begin_compute_pass(&Default::default());
                 pass.set_pipeline(&advect_dye_pipeline);
-                pass.set_bind_group(0, &bg_advect_dye, &[]);
+                pass.set_bind_group(
+                    0,
+                    if vel_in_a {
+                        &bg_advect_dye_from_a
+                    } else {
+                        &bg_advect_dye_from_b
+                    },
+                    &[],
+                );
                 pass.dispatch_workgroups(wg_x, wg_y, 1);
             }
 
@@ -857,7 +890,7 @@ async fn run_fluid_step(
     {
         let mut encoder = device.create_command_encoder(&Default::default());
         encoder.copy_buffer_to_buffer(
-            &vel_a,
+            if final_vel_is_a { &vel_a } else { &vel_b },
             0,
             &vel_read,
             0,

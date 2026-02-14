@@ -575,9 +575,19 @@ export class GPUFluidField {
         const idx01 = x0 + y1 * this.size;
         const idx11 = x1 + y1 * this.size;
 
-        const a = field[idx00] * (1 - tx) + field[idx10] * tx;
-        const b = field[idx01] * (1 - tx) + field[idx11] * tx;
-        return a * (1 - ty) + b * ty;
+        const s00 = Number(field[idx00]);
+        const s10 = Number(field[idx10]);
+        const s01 = Number(field[idx01]);
+        const s11 = Number(field[idx11]);
+        const v00 = Number.isFinite(s00) ? s00 : 0;
+        const v10 = Number.isFinite(s10) ? s10 : 0;
+        const v01 = Number.isFinite(s01) ? s01 : 0;
+        const v11 = Number.isFinite(s11) ? s11 : 0;
+
+        const a = v00 * (1 - tx) + v10 * tx;
+        const b = v01 * (1 - tx) + v11 * tx;
+        const sampled = a * (1 - ty) + b * ty;
+        return Number.isFinite(sampled) ? sampled : 0;
     }
 
     _applyShadowVelocitySplat(centerCell, amountX, amountY, strength = 15) {
@@ -661,6 +671,9 @@ export class GPUFluidField {
         const shadowDensityGNext = this.shadowDensityGNext;
         const shadowDensityBNext = this.shadowDensityBNext;
 
+        let hasActiveFlow = false;
+        const activityVelEpsilon = 5e-4;
+        const activityDyeEpsilon = 5e-2;
         for (let gy = 0; gy < this.size; gy++) {
             for (let gx = 0; gx < this.size; gx++) {
                 const idx = gx + gy * this.size;
@@ -674,15 +687,27 @@ export class GPUFluidField {
                 const prevX = gx - backX;
                 const prevY = gy - backY;
 
-                shadowVxNext[idx] = this._sampleShadowBilinear(shadowVx, prevX, prevY);
-                shadowVyNext[idx] = this._sampleShadowBilinear(shadowVy, prevX, prevY);
-                shadowDensityRNext[idx] = this._sampleShadowBilinear(shadowDensityR, prevX, prevY);
-                shadowDensityGNext[idx] = this._sampleShadowBilinear(shadowDensityG, prevX, prevY);
-                shadowDensityBNext[idx] = this._sampleShadowBilinear(shadowDensityB, prevX, prevY);
+                const nextVx = this._sampleShadowBilinear(shadowVx, prevX, prevY);
+                const nextVy = this._sampleShadowBilinear(shadowVy, prevX, prevY);
+                const nextR = this._sampleShadowBilinear(shadowDensityR, prevX, prevY);
+                const nextG = this._sampleShadowBilinear(shadowDensityG, prevX, prevY);
+                const nextB = this._sampleShadowBilinear(shadowDensityB, prevX, prevY);
+
+                shadowVxNext[idx] = Number.isFinite(nextVx) ? Math.max(-maxVel, Math.min(maxVel, nextVx)) : 0;
+                shadowVyNext[idx] = Number.isFinite(nextVy) ? Math.max(-maxVel, Math.min(maxVel, nextVy)) : 0;
+                shadowDensityRNext[idx] = Number.isFinite(nextR) ? Math.max(0, Math.min(255, nextR)) : 0;
+                shadowDensityGNext[idx] = Number.isFinite(nextG) ? Math.max(0, Math.min(255, nextG)) : 0;
+                shadowDensityBNext[idx] = Number.isFinite(nextB) ? Math.max(0, Math.min(255, nextB)) : 0;
+
+                if (!hasActiveFlow) {
+                    const speedProxy = Math.abs(shadowVxNext[idx]) + Math.abs(shadowVyNext[idx]);
+                    const dyeProxy = shadowDensityRNext[idx] + shadowDensityGNext[idx] + shadowDensityBNext[idx];
+                    hasActiveFlow = speedProxy > activityVelEpsilon || dyeProxy > activityDyeEpsilon;
+                }
             }
         }
 
-        if (velDiffusion > 0 || densityDiffusion > 0) {
+        if (hasActiveFlow && (velDiffusion > 0 || densityDiffusion > 0)) {
             for (let gy = 1; gy < this.size - 1; gy++) {
                 for (let gx = 1; gx < this.size - 1; gx++) {
                     const idx = gx + gy * this.size;
@@ -715,21 +740,25 @@ export class GPUFluidField {
             }
         }
 
+        const dampBoundary = (idx) => {
+            const vx = Number(shadowVxNext[idx]);
+            const vy = Number(shadowVyNext[idx]);
+            const dampedVx = Number.isFinite(vx) ? vx * 0.7 : 0;
+            const dampedVy = Number.isFinite(vy) ? vy * 0.7 : 0;
+            shadowVxNext[idx] = Math.max(-maxVel, Math.min(maxVel, dampedVx));
+            shadowVyNext[idx] = Math.max(-maxVel, Math.min(maxVel, dampedVy));
+        };
         for (let gx = 0; gx < this.size; gx++) {
             const top = gx;
             const bottom = gx + (this.size - 1) * this.size;
-            shadowVxNext[top] *= 0.7;
-            shadowVyNext[top] *= 0.7;
-            shadowVxNext[bottom] *= 0.7;
-            shadowVyNext[bottom] *= 0.7;
+            dampBoundary(top);
+            dampBoundary(bottom);
         }
         for (let gy = 0; gy < this.size; gy++) {
             const left = gy * this.size;
             const right = left + (this.size - 1);
-            shadowVxNext[left] *= 0.7;
-            shadowVyNext[left] *= 0.7;
-            shadowVxNext[right] *= 0.7;
-            shadowVyNext[right] *= 0.7;
+            dampBoundary(left);
+            dampBoundary(right);
         }
 
         [this.shadowVx, this.shadowVxNext] = [shadowVxNext, shadowVx];

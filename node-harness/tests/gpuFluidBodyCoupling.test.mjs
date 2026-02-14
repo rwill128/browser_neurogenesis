@@ -159,3 +159,43 @@ test('GPU world-space sampling sanitizes corrupted shadow NaN/Inf values', () =>
   assert.deepEqual(vel, { vx: 0, vy: 0 }, 'velocity queries should sanitize non-finite shadow values');
   assert.deepEqual(density, [0, 0, 0, 1], 'density queries should sanitize non-finite shadow values');
 });
+
+test('GPU shadow advection prevents NaN/Inf contamination from spreading through bilinear samples', () => {
+  const fluid = makeShadowOnlyField({ size: 28, dt: 0.2, scaleX: 1, scaleY: 1 });
+  fluid.maxVelComponent = 4;
+
+  fluid.addVelocity(14, 14, 2.2, 0.6, 16);
+  fluid.addDensity(14, 14, 180, 40, 20, 60);
+
+  const corruptIdx = fluid.IX(15, 14);
+  fluid.shadowVx[corruptIdx] = NaN;
+  fluid.shadowVy[corruptIdx] = Infinity;
+  fluid.shadowDensityR[corruptIdx] = NaN;
+
+  fluid.step();
+
+  for (let y = 13; y <= 15; y++) {
+    for (let x = 13; x <= 16; x++) {
+      const sampled = fluid.getVelocityAtWorld(x, y);
+      const dye = fluid.getDensityAtWorld(x, y);
+      assert.ok(Number.isFinite(sampled.vx) && Number.isFinite(sampled.vy), `velocity at (${x},${y}) should stay finite`);
+      assert.ok(Number.isFinite(dye[0]) && Number.isFinite(dye[1]) && Number.isFinite(dye[2]), `density at (${x},${y}) should stay finite`);
+    }
+  }
+});
+
+test('GPU shadow idle step keeps quiescent fields near-zero while preserving boundary finite guards', () => {
+  const fluid = makeShadowOnlyField({ size: 20, dt: 0.1, scaleX: 1, scaleY: 1 });
+  fluid.maxVelComponent = 2;
+
+  const edgeIdx = fluid.IX(0, 10);
+  fluid.shadowVx[edgeIdx] = Infinity;
+  fluid.shadowVy[edgeIdx] = -Infinity;
+
+  fluid.step();
+
+  const edge = fluid.getVelocityAtWorld(0, 10);
+  const center = fluid.getVelocityAtWorld(10, 10);
+  assert.deepEqual(edge, { vx: 0, vy: 0 }, 'edge guard should sanitize non-finite boundary velocity');
+  assert.ok(Math.abs(center.vx) < 1e-6 && Math.abs(center.vy) < 1e-6, 'idle interior should remain near zero');
+});

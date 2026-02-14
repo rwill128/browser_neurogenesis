@@ -399,3 +399,82 @@ test('GPU coupling clamps extreme relative body-fluid velocity spikes before fee
     Object.assign(config, cfgBackup);
   }
 });
+
+test('GPU coupling clamps injected fluid impulses per component and skips tiny jitter injections', () => {
+  const cfgBackup = {
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED,
+    BODY_FLUID_IMPULSE_COMPONENT_CAP: config.BODY_FLUID_IMPULSE_COMPONENT_CAP,
+    SWIMMER_TO_FLUID_IMPULSE_COMPONENT_CAP: config.SWIMMER_TO_FLUID_IMPULSE_COMPONENT_CAP,
+    JET_TO_FLUID_IMPULSE_COMPONENT_CAP: config.JET_TO_FLUID_IMPULSE_COMPONENT_CAP,
+    BODY_FLUID_MIN_IMPULSE_EPSILON: config.BODY_FLUID_MIN_IMPULSE_EPSILON
+  };
+
+  try {
+    config.DYE_ECOLOGY_ENABLED = false;
+    config.BODY_FLUID_IMPULSE_COMPONENT_CAP = 0.35;
+    config.SWIMMER_TO_FLUID_IMPULSE_COMPONENT_CAP = 0.2;
+    config.JET_TO_FLUID_IMPULSE_COMPONENT_CAP = 0.15;
+    config.BODY_FLUID_MIN_IMPULSE_EPSILON = 0.05;
+
+    const fluid = makeGpuStyleFluid({ vx: 0, vy: 0 });
+    const body = new SoftBody(9302, 240, 160, null, false);
+    const p = body.massPoints[0];
+    p.nodeType = NodeType.SWIMMER;
+    p.movementType = MovementType.FLOATING;
+    p.pos.x = 240;
+    p.prevPos.x = -250;
+    p.pos.y = 160;
+    p.prevPos.y = 160;
+    p.swimmerActuation = { magnitude: 9.0, angle: Math.PI / 6 };
+
+    body.massPoints = [p];
+    body.springs = [];
+
+    body._performPhysicalUpdates(1 / 60, fluid);
+
+    assert.ok(fluid.calls.length > 0, 'expected clamped fluid injection calls');
+    for (const call of fluid.calls) {
+      assert.ok(Number.isFinite(call.amountX) && Number.isFinite(call.amountY), 'injection should stay finite');
+      assert.ok(Math.abs(call.amountX) <= 0.35 + 1e-6, `amountX should be clamped, got ${call.amountX}`);
+      assert.ok(Math.abs(call.amountY) <= 0.35 + 1e-6, `amountY should be clamped, got ${call.amountY}`);
+      assert.ok(Math.abs(call.amountX) + Math.abs(call.amountY) >= 0.05,
+        `tiny impulses should be skipped, got (${call.amountX}, ${call.amountY})`);
+    }
+  } finally {
+    Object.assign(config, cfgBackup);
+  }
+});
+
+test('GPU coupling sanitizes non-finite sampled world velocity before drag/feedback', () => {
+  const cfgBackup = {
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED,
+    BODY_FLUID_IMPULSE_COMPONENT_CAP: config.BODY_FLUID_IMPULSE_COMPONENT_CAP
+  };
+
+  try {
+    config.DYE_ECOLOGY_ENABLED = false;
+    config.BODY_FLUID_IMPULSE_COMPONENT_CAP = 0.5;
+
+    const fluid = makeGpuStyleFluid({ vx: Number.POSITIVE_INFINITY, vy: Number.NaN });
+    const body = new SoftBody(9303, 80, 90, null, false);
+    const p = body.massPoints[0];
+    p.nodeType = NodeType.EATER;
+    p.movementType = MovementType.NEUTRAL;
+    p.pos.x = 80;
+    p.prevPos.x = 70;
+    p.pos.y = 90;
+    p.prevPos.y = 90;
+
+    body.massPoints = [p];
+    body.springs = [];
+
+    body._performPhysicalUpdates(1 / 60, fluid);
+
+    assert.equal(body.isUnstable, false);
+    assert.ok(Number.isFinite(body.fluidCouplingDragForce), `drag telemetry should stay finite, got ${body.fluidCouplingDragForce}`);
+    assert.ok(Number.isFinite(body.fluidCouplingBodyToFluidImpulse), `feedback telemetry should stay finite, got ${body.fluidCouplingBodyToFluidImpulse}`);
+    assert.ok(fluid.calls.every((c) => Number.isFinite(c.amountX) && Number.isFinite(c.amountY)), 'fluid injection should never receive NaN/Inf');
+  } finally {
+    Object.assign(config, cfgBackup);
+  }
+});

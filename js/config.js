@@ -291,6 +291,12 @@ const config = {
     BODY_FLUID_CARRY_NEUTRAL_FACTOR: 0.18,
     // Rigid-linked points receive a mild carry gain to keep rigid frame advection visible in strong currents.
     BODY_FLUID_CARRY_RIGID_BOOST: 0.35,
+    // Coupling guardrails: component-wise clamp before body->fluid impulse injection.
+    // Defaults track fluid max velocity so extreme forces are bounded without flattening regular dynamics.
+    BODY_FLUID_IMPULSE_COMPONENT_CAP: 10.0,
+    SWIMMER_TO_FLUID_IMPULSE_COMPONENT_CAP: 10.0,
+    JET_TO_FLUID_IMPULSE_COMPONENT_CAP: 10.0,
+    BODY_FLUID_MIN_IMPULSE_EPSILON: 0.0001,
     FLUID_CURRENT_STRENGTH_ON_BODY: 19.7,
     SOFT_BODY_PUSH_STRENGTH: 0.10,
     BODY_REPULSION_STRENGTH: 100.0,

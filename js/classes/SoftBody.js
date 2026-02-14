@@ -3941,6 +3941,31 @@ export class SoftBody {
             const neutralCarryFactor = Math.max(0, Number(config.BODY_FLUID_CARRY_NEUTRAL_FACTOR) || 0.18);
             const rigidCarryBoost = Math.max(0, Number(config.BODY_FLUID_CARRY_RIGID_BOOST) || 0.35);
             const couplingMaxRelativeSpeed = Math.max(5, Number(config.BODY_FLUID_COUPLING_MAX_REL_SPEED) || 120);
+            const baseImpulseCap = Number.isFinite(Number(config.BODY_FLUID_IMPULSE_COMPONENT_CAP))
+                ? Math.max(0.05, Number(config.BODY_FLUID_IMPULSE_COMPONENT_CAP))
+                : Math.max(0.05, Number(fluidFieldRef.maxVelComponent) || 10);
+            const swimmerImpulseCap = Number.isFinite(Number(config.SWIMMER_TO_FLUID_IMPULSE_COMPONENT_CAP))
+                ? Math.max(0.05, Number(config.SWIMMER_TO_FLUID_IMPULSE_COMPONENT_CAP))
+                : baseImpulseCap;
+            const jetImpulseCap = Number.isFinite(Number(config.JET_TO_FLUID_IMPULSE_COMPONENT_CAP))
+                ? Math.max(0.05, Number(config.JET_TO_FLUID_IMPULSE_COMPONENT_CAP))
+                : baseImpulseCap;
+            const minImpulseEpsilon = Math.max(0, Number(config.BODY_FLUID_MIN_IMPULSE_EPSILON) || 1e-4);
+
+            const clampImpulseComponent = (value, cap) => {
+                const n = Number(value);
+                if (!Number.isFinite(n)) return 0;
+                return Math.max(-cap, Math.min(cap, n));
+            };
+
+            const addFluidVelocitySafe = (gx, gy, amountX, amountY, cap = baseImpulseCap) => {
+                if (!Number.isFinite(Number(gx)) || !Number.isFinite(Number(gy))) return { x: 0, y: 0 };
+                const safeX = clampImpulseComponent(amountX, cap);
+                const safeY = clampImpulseComponent(amountY, cap);
+                if (Math.abs(safeX) + Math.abs(safeY) < minImpulseEpsilon) return { x: 0, y: 0 };
+                fluidFieldRef.addVelocity(gx, gy, safeX, safeY);
+                return { x: safeX, y: safeY };
+            };
 
             let carryDisplacementAccum = 0;
             let softCarryDisplacementAccum = 0;
@@ -3980,7 +4005,7 @@ export class SoftBody {
                             const angle = point.jetData.currentAngle;
                             const appliedForceX = finalMagnitude * Math.cos(angle);
                             const appliedForceY = finalMagnitude * Math.sin(angle);
-                            fluidFieldRef.addVelocity(fluidGridX, fluidGridY, appliedForceX, appliedForceY);
+                            addFluidVelocitySafe(fluidGridX, fluidGridY, appliedForceX, appliedForceY, jetImpulseCap);
                         }
                     }
                 }
@@ -3995,8 +4020,8 @@ export class SoftBody {
                         const swimImpulseX = -Math.cos(angle) * magnitude * swimmerFeedback;
                         const swimImpulseY = -Math.sin(angle) * magnitude * swimmerFeedback;
                         // Active swimmer impulse pushes fluid in the opposite direction.
-                        fluidFieldRef.addVelocity(fluidGridX, fluidGridY, swimImpulseX, swimImpulseY);
-                        swimToFluidImpulseAccum += Math.hypot(swimImpulseX, swimImpulseY);
+                        const swimImpulse = addFluidVelocitySafe(fluidGridX, fluidGridY, swimImpulseX, swimImpulseY, swimmerImpulseCap);
+                        swimToFluidImpulseAccum += Math.hypot(swimImpulse.x, swimImpulse.y);
                     }
                 }
 
@@ -4061,13 +4086,14 @@ export class SoftBody {
                 const rawFeedbackY = relVy * feedbackCoeff / safeScaleY;
                 const feedbackX = Number.isFinite(rawFeedbackX) ? rawFeedbackX : 0;
                 const feedbackY = Number.isFinite(rawFeedbackY) ? rawFeedbackY : 0;
-                fluidFieldRef.addVelocity(
+                const feedbackImpulse = addFluidVelocitySafe(
                     fluidGridX,
                     fluidGridY,
                     feedbackX,
-                    feedbackY
+                    feedbackY,
+                    baseImpulseCap
                 );
-                const feedbackMag = Math.hypot(feedbackX, feedbackY);
+                const feedbackMag = Math.hypot(feedbackImpulse.x, feedbackImpulse.y);
                 bodyToFluidImpulseAccum += feedbackMag;
                 softFeedbackImpulseAccum += feedbackMag * (1 - rigidMix);
                 rigidFeedbackImpulseAccum += feedbackMag * rigidMix;

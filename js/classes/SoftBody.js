@@ -171,6 +171,8 @@ export class SoftBody {
 
         // Fluid coupling telemetry (new): explicit two-way coupling observability for GPU shadow path and CPU path.
         this.fluidCouplingCarryDisplacement = 0;
+        this.fluidCouplingSoftCarryDisplacement = 0;
+        this.fluidCouplingRigidCarryDisplacement = 0;
         this.fluidCouplingDragForce = 0;
         this.fluidCouplingSoftDragForce = 0;
         this.fluidCouplingRigidDragForce = 0;
@@ -3931,8 +3933,12 @@ export class SoftBody {
             const softFeedback = Math.max(0, Number(config.BODY_TO_FLUID_FEEDBACK_SOFT) || 0.02);
             const rigidFeedback = Math.max(0, Number(config.BODY_TO_FLUID_FEEDBACK_RIGID) || 0.06);
             const swimmerFeedback = Math.max(0, Number(config.SWIMMER_TO_FLUID_FEEDBACK) || 0.25);
+            const neutralCarryFactor = Math.max(0, Number(config.BODY_FLUID_CARRY_NEUTRAL_FACTOR) || 0.18);
+            const rigidCarryBoost = Math.max(0, Number(config.BODY_FLUID_CARRY_RIGID_BOOST) || 0.35);
 
             let carryDisplacementAccum = 0;
+            let softCarryDisplacementAccum = 0;
+            let rigidCarryDisplacementAccum = 0;
             let dragForceAccum = 0;
             let softDragForceAccum = 0;
             let rigidDragForceAccum = 0;
@@ -3949,6 +3955,9 @@ export class SoftBody {
 
                 const idx = hasIX ? fluidFieldRef.IX(fluidGridX, fluidGridY) : null;
                 const fluidVel = getFluidVelocityAt(point, idx);
+
+                const totalSprings = springCount.get(point) || 0;
+                const rigidMix = totalSprings > 0 ? Math.min(1, (rigidSpringCount.get(point) || 0) / totalSprings) : 0;
 
                 // --- Fluid Interactions (should occur even if fixed) ---
                 if (point.nodeType === NodeType.EMITTER) {
@@ -3988,18 +3997,26 @@ export class SoftBody {
                 // --- Physics Updates for Mobile Points Only ---
                 if (point.isFixed) continue;
 
-                if (point.movementType === MovementType.FLOATING) {
+                const carryGate = point.movementType === MovementType.FLOATING
+                    ? 1
+                    : (point.movementType === MovementType.NEUTRAL ? neutralCarryFactor : 0);
+                if (carryGate > 0) {
+                    const rigidCarryGain = 1 + (rigidMix * rigidCarryBoost);
                     this._tempVec1.copyFrom(point.pos).subInPlace(point.prevPos).mulInPlace(1.0 - this.fluidEntrainment);
                     this._tempVec2.x = fluidVel.vx * safeScaleX * dt;
                     this._tempVec2.y = fluidVel.vy * safeScaleY * dt;
-                    this._tempVec2.mulInPlace(this.fluidCurrentStrength).mulInPlace(this.fluidEntrainment);
+                    this._tempVec2
+                        .mulInPlace(this.fluidCurrentStrength)
+                        .mulInPlace(this.fluidEntrainment)
+                        .mulInPlace(carryGate * rigidCarryGain);
                     this._tempVec1.addInPlace(this._tempVec2);
                     point.prevPos.copyFrom(point.pos).subInPlace(this._tempVec1);
-                    carryDisplacementAccum += Math.hypot(this._tempVec2.x, this._tempVec2.y);
+                    const carryMag = Math.hypot(this._tempVec2.x, this._tempVec2.y);
+                    carryDisplacementAccum += carryMag;
+                    softCarryDisplacementAccum += carryMag * (1 - rigidMix);
+                    rigidCarryDisplacementAccum += carryMag * rigidMix;
                 }
 
-                const totalSprings = springCount.get(point) || 0;
-                const rigidMix = totalSprings > 0 ? Math.min(1, (rigidSpringCount.get(point) || 0) / totalSprings) : 0;
                 const dragCoeff = softDrag + (rigidDrag - softDrag) * rigidMix;
                 const feedbackCoeff = softFeedback + (rigidFeedback - softFeedback) * rigidMix;
 
@@ -4036,6 +4053,8 @@ export class SoftBody {
             }
 
             this.fluidCouplingCarryDisplacement = carryDisplacementAccum;
+            this.fluidCouplingSoftCarryDisplacement = softCarryDisplacementAccum;
+            this.fluidCouplingRigidCarryDisplacement = rigidCarryDisplacementAccum;
             this.fluidCouplingDragForce = dragForceAccum;
             this.fluidCouplingSoftDragForce = softDragForceAccum;
             this.fluidCouplingRigidDragForce = rigidDragForceAccum;
@@ -4046,6 +4065,8 @@ export class SoftBody {
             this.fluidCouplingSamples = couplingSamples;
         } else {
             this.fluidCouplingCarryDisplacement = 0;
+            this.fluidCouplingSoftCarryDisplacement = 0;
+            this.fluidCouplingRigidCarryDisplacement = 0;
             this.fluidCouplingDragForce = 0;
             this.fluidCouplingSoftDragForce = 0;
             this.fluidCouplingRigidDragForce = 0;

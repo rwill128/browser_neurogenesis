@@ -287,6 +287,10 @@ const config = {
     canCreaturesReproduceGlobally: true,
 
     BODY_FLUID_ENTRAINMENT_FACTOR: 0.485,
+    // Fluid->body carry coupling gates: FLOATING nodes use full carry, NEUTRAL nodes use a reduced carry factor.
+    BODY_FLUID_CARRY_NEUTRAL_FACTOR: 0.18,
+    // Rigid-linked points receive a mild carry gain to keep rigid frame advection visible in strong currents.
+    BODY_FLUID_CARRY_RIGID_BOOST: 0.35,
     FLUID_CURRENT_STRENGTH_ON_BODY: 19.7,
     SOFT_BODY_PUSH_STRENGTH: 0.10,
     BODY_REPULSION_STRENGTH: 100.0,

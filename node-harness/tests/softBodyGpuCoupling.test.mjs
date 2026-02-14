@@ -202,6 +202,73 @@ test('rigid-coupled point injects stronger feedback than soft-coupled point', ()
   }
 });
 
+test('GPU neutral carry coupling gives rigid-linked bodies stronger current advection than soft bodies', () => {
+  const cfgBackup = {
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED,
+    FLUID_CURRENT_STRENGTH_ON_BODY: config.FLUID_CURRENT_STRENGTH_ON_BODY,
+    BODY_FLUID_ENTRAINMENT_FACTOR: config.BODY_FLUID_ENTRAINMENT_FACTOR,
+    BODY_FLUID_CARRY_NEUTRAL_FACTOR: config.BODY_FLUID_CARRY_NEUTRAL_FACTOR,
+    BODY_FLUID_CARRY_RIGID_BOOST: config.BODY_FLUID_CARRY_RIGID_BOOST
+  };
+
+  try {
+    config.DYE_ECOLOGY_ENABLED = false;
+    config.FLUID_CURRENT_STRENGTH_ON_BODY = 1.0;
+    config.BODY_FLUID_ENTRAINMENT_FACTOR = 0.45;
+    config.BODY_FLUID_CARRY_NEUTRAL_FACTOR = 0.45;
+    config.BODY_FLUID_CARRY_RIGID_BOOST = 0.8;
+
+    const dt = 1 / 30;
+
+    const fluidSoft = makeShadowOnlyGpuFluid({ size: 48, dt, scaleX: 1, scaleY: 1 });
+    fluidSoft.addVelocity(20, 20, 1.6, 0.0, 18);
+
+    const softBody = new SoftBody(9251, 20, 20, null, false);
+    const softPoint = softBody.massPoints[0];
+    softPoint.nodeType = NodeType.EATER;
+    softPoint.movementType = MovementType.NEUTRAL;
+    softPoint.pos.x = 20;
+    softPoint.prevPos.x = 20;
+    softPoint.pos.y = 20;
+    softPoint.prevPos.y = 20;
+    softBody.massPoints = [softPoint];
+    softBody.springs = [];
+
+    softBody._performPhysicalUpdates(dt, fluidSoft);
+
+    const fluidRigid = makeShadowOnlyGpuFluid({ size: 48, dt, scaleX: 1, scaleY: 1 });
+    fluidRigid.addVelocity(20, 20, 1.6, 0.0, 18);
+
+    const rigidBody = new SoftBody(9252, 20, 20, null, false);
+    const rigidPoint = rigidBody.massPoints[0];
+    const anchorBody = new SoftBody(9253, 22, 20, null, false);
+    const anchorPoint = anchorBody.massPoints[0];
+
+    rigidPoint.nodeType = NodeType.EATER;
+    rigidPoint.movementType = MovementType.NEUTRAL;
+    rigidPoint.pos.x = 20;
+    rigidPoint.prevPos.x = 20;
+    rigidPoint.pos.y = 20;
+    rigidPoint.prevPos.y = 20;
+
+    anchorPoint.movementType = MovementType.FIXED;
+
+    rigidBody.massPoints = [rigidPoint, anchorPoint];
+    rigidBody.springs = [new Spring(rigidPoint, anchorPoint, 1, 0.1, 2, true)];
+
+    rigidBody._performPhysicalUpdates(dt, fluidRigid);
+
+    assert.ok(softBody.fluidCouplingCarryDisplacement > 0.002,
+      `expected neutral soft body carry > 0, got ${softBody.fluidCouplingCarryDisplacement}`);
+    assert.ok(rigidBody.fluidCouplingCarryDisplacement > softBody.fluidCouplingCarryDisplacement * 1.25,
+      `expected rigid carry gain over soft carry (rigid=${rigidBody.fluidCouplingCarryDisplacement}, soft=${softBody.fluidCouplingCarryDisplacement})`);
+    assert.ok(rigidBody.fluidCouplingRigidCarryDisplacement > softBody.fluidCouplingSoftCarryDisplacement,
+      `expected rigid carry telemetry to dominate soft telemetry (rigid=${rigidBody.fluidCouplingRigidCarryDisplacement}, soft=${softBody.fluidCouplingSoftCarryDisplacement})`);
+  } finally {
+    Object.assign(config, cfgBackup);
+  }
+});
+
 test('GPU shadow fluid path shows two-way coupling for soft vs rigid bodies with swimmer pushback transport', () => {
   const cfgBackup = {
     DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED,

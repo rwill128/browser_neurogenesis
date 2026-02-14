@@ -921,6 +921,13 @@ fn c(x: i32, maxv: u32) -> u32 { return u32(clamp(x, 0, i32(maxv) - 1)); }
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (gid.x >= p.width || gid.y >= p.height) { return; }
+
+  let edge = gid.x == 0u || gid.y == 0u || gid.x == (p.width - 1u) || gid.y == (p.height - 1u);
+  if (edge) {
+    div[idx(gid.x, gid.y)] = 0.0;
+    return;
+  }
+
   let x = i32(gid.x);
   let y = i32(gid.y);
   let vl = vel[idx(c(x - 1, p.width), c(y, p.height))].x;
@@ -957,6 +964,13 @@ fn c(x: i32, maxv: u32) -> u32 { return u32(clamp(x, 0, i32(maxv) - 1)); }
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (gid.x >= p.width || gid.y >= p.height) { return; }
+
+  let edge = gid.x == 0u || gid.y == 0u || gid.x == (p.width - 1u) || gid.y == (p.height - 1u);
+  if (edge) {
+    p_out[idx(gid.x, gid.y)] = 0.0;
+    return;
+  }
+
   let x = i32(gid.x);
   let y = i32(gid.y);
   let pl = p_in[idx(c(x - 1, p.width), c(y, p.height))];

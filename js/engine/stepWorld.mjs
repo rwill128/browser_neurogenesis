@@ -690,7 +690,8 @@ function ensureLandscapeVelocityEmitters(state, config, rng) {
       baseStrength: randomInRange(rng, strengthMin, strengthMax),
       pulseHz: randomInRange(rng, pulseMin, pulseMax),
       phase: randomInRange(rng, 0, Math.PI * 2),
-      swirl: rng() < 0.5 ? -1 : 1
+      swirl: rng() < 0.5 ? -1 : 1,
+      budget: 1
     };
   });
 
@@ -705,6 +706,9 @@ function applyLandscapeVelocityEmitters(state, config, dt, rng) {
 
   const radiusCells = Math.max(0, Math.floor(Number(config.LANDSCAPE_VELOCITY_EMITTER_RADIUS_CELLS) || 0));
   const t = (Number(state.simulationStep) || 0) * Math.max(0, Number(dt) || 0.01);
+  const localSpeedCap = Math.max(1e-6, Number(config.LANDSCAPE_VELOCITY_EMITTER_LOCAL_SPEED_CAP) || 0.8);
+  const budgetMax = Math.max(0, Number(config.LANDSCAPE_VELOCITY_EMITTER_BUDGET_MAX) || 2.4);
+  const budgetRefillPerSec = Math.max(0, Number(config.LANDSCAPE_VELOCITY_EMITTER_BUDGET_REFILL_PER_SEC) || 0.45);
 
   for (const emitter of emitters) {
     if (!emitter) continue;
@@ -716,6 +720,34 @@ function applyLandscapeVelocityEmitters(state, config, dt, rng) {
     const pulse = 0.5 + 0.5 * Math.sin((Math.PI * 2 * pulseHz * t) + phase);
     const strength = Math.max(0, Number(emitter.baseStrength) || 0) * (0.45 + 0.55 * pulse);
 
+    // Neighborhood feedback: if local flow is already strong, back off injection.
+    const centerRadius = Math.max(1, radiusCells);
+    let sumSpeed = 0;
+    let count = 0;
+    for (let oy = -centerRadius; oy <= centerRadius; oy++) {
+      for (let ox = -centerRadius; ox <= centerRadius; ox++) {
+        const idx = state.fluidField.IX(gx + ox, gy + oy);
+        const vx0 = state.fluidField.Vx[idx] || 0;
+        const vy0 = state.fluidField.Vy[idx] || 0;
+        sumSpeed += Math.hypot(vx0, vy0);
+        count++;
+      }
+    }
+    const avgLocalSpeed = count > 0 ? (sumSpeed / count) : 0;
+    const localFeedback = Math.max(0, 1 - (avgLocalSpeed / localSpeedCap));
+
+    // Budget system: per-emitter impulse budget refills slowly and depletes with use.
+    const prevBudget = Number.isFinite(Number(emitter.budget)) ? Number(emitter.budget) : budgetMax;
+    const replenishedBudget = Math.min(budgetMax, prevBudget + budgetRefillPerSec * Math.max(0, Number(dt) || 0));
+    const budgetFactor = budgetMax > 1e-9 ? Math.max(0, Math.min(1, replenishedBudget / budgetMax)) : 0;
+
+    const effectiveStrength = strength * localFeedback * budgetFactor;
+    if (effectiveStrength <= 1e-6) {
+      emitter.budget = replenishedBudget;
+      continue;
+    }
+
+    let appliedImpulse = 0;
     for (let dy = -radiusCells; dy <= radiusCells; dy++) {
       for (let dx = -radiusCells; dx <= radiusCells; dx++) {
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -725,11 +757,15 @@ function applyLandscapeVelocityEmitters(state, config, dt, rng) {
         // Tangential component creates a local swirl, plus a directional drift component.
         const tx = dist > 1e-9 ? (-dy / dist) * emitter.swirl : 0;
         const ty = dist > 1e-9 ? (dx / dist) * emitter.swirl : 0;
-        const vx = (emitter.dirX * 0.55 + tx * 0.45) * strength * falloff;
-        const vy = (emitter.dirY * 0.55 + ty * 0.45) * strength * falloff;
+        const vx = (emitter.dirX * 0.55 + tx * 0.45) * effectiveStrength * falloff;
+        const vy = (emitter.dirY * 0.55 + ty * 0.45) * effectiveStrength * falloff;
         state.fluidField.addVelocity(gx + dx, gy + dy, vx, vy);
+        appliedImpulse += Math.hypot(vx, vy);
       }
     }
+
+    const budgetSpend = appliedImpulse * 0.08;
+    emitter.budget = Math.max(0, replenishedBudget - budgetSpend);
   }
 }
 

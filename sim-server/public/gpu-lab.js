@@ -472,11 +472,29 @@ function sampleFieldBilinear(field, n, x, y) {
   return a * (1 - sy) + b * sy;
 }
 
-function rigidVertexWorld(b, vertexIndex) {
+function rigidVerticesWorld(b) {
+  if (Array.isArray(b.verticesLocal) && b.verticesLocal.length >= 3) {
+    const th = b.theta || 0;
+    const c = Math.cos(th), s = Math.sin(th);
+    return b.verticesLocal.map((v) => ({
+      x: b.x + v.x * c - v.y * s,
+      y: b.y + v.x * s + v.y * c,
+    }));
+  }
   const sides = Math.max(3, b.sides || 3);
   const rot = (b.theta || 0) + (sides === 3 ? -Math.PI * 0.5 : Math.PI * 0.25);
-  const a = rot + (vertexIndex / sides) * Math.PI * 2;
-  return { x: b.x + Math.cos(a) * b.r, y: b.y + Math.sin(a) * b.r };
+  const verts = [];
+  for (let i = 0; i < sides; i++) {
+    const a = rot + (i / sides) * Math.PI * 2;
+    verts.push({ x: b.x + Math.cos(a) * b.r, y: b.y + Math.sin(a) * b.r });
+  }
+  return verts;
+}
+
+function rigidVertexWorld(b, vertexIndex) {
+  const verts = rigidVerticesWorld(b);
+  const n = verts.length || 1;
+  return verts[((vertexIndex % n) + n) % n];
 }
 
 function initBodies(n, controls) {
@@ -1086,12 +1104,8 @@ function applyBodyEdgeFieldBarriers(sim, r, g, b, vx, vy) {
   const rigidThickness = Math.max(1.4, 1.2 * (n / 256));
 
   for (const rb of sim.bodies.rigid) {
-    const sides = Math.max(3, rb.sides || 4);
-    const verts = [];
-    for (let i = 0; i < sides; i++) {
-      const a = (rb.theta || 0) + (i / sides) * Math.PI * 2;
-      verts.push({ x: rb.x + Math.cos(a) * rb.r, y: rb.y + Math.sin(a) * rb.r });
-    }
+    const verts = rigidVerticesWorld(rb);
+    const sides = verts.length;
     for (let i = 0; i < sides; i++) {
       const dyeModeRGB = normalizeEdgeDyeModeRGB(!rb.edgeDyeMode ? EDGE_DYE_MODE.DEFLECT : rb.edgeDyeMode[i]);
       if (dyeModeRGB[0] === EDGE_DYE_MODE.PASS && dyeModeRGB[1] === EDGE_DYE_MODE.PASS && dyeModeRGB[2] === EDGE_DYE_MODE.PASS) continue;
@@ -1174,17 +1188,17 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const b = bodies.rigid[bi];
     const invMass = 1 / Math.max(0.05, b.mass);
     const invInertia = 1 / Math.max(0.05, b.inertia || 1);
-    const sampleCount = Math.max(3, b.sides || (bi === 0 ? 3 : 4));
+    const sampleVerts = rigidVerticesWorld(b);
+    const sampleCount = Math.max(1, sampleVerts.length);
     let forceX = 0;
     let forceY = 0;
     let torque = 0;
 
     for (let si = 0; si < sampleCount; si++) {
-      const a = (b.theta || 0) + (si / sampleCount) * Math.PI * 2;
-      const rx = Math.cos(a) * b.r;
-      const ry = Math.sin(a) * b.r;
-      const sx = b.x + rx;
-      const sy = b.y + ry;
+      const sx = sampleVerts[si].x;
+      const sy = sampleVerts[si].y;
+      const rx = sx - b.x;
+      const ry = sy - b.y;
       const fx = sampleFieldBilinear(vxField, n, sx, sy);
       const fy = sampleFieldBilinear(vyField, n, sx, sy);
       const localVx = b.vx + (-(b.omega || 0) * ry);
@@ -1450,12 +1464,7 @@ function applyDigestiveCapture(sim, r, g, b) {
   for (const rb of sim.bodies.rigid) {
     if (!rb.digestEnabled) continue;
     const dig = rb.digestRGB || [1, 1, 1];
-    const sides = Math.max(3, rb.sides || 4);
-    const verts = [];
-    for (let i = 0; i < sides; i++) {
-      const a = (rb.theta || 0) + (i / sides) * Math.PI * 2;
-      verts.push({ x: rb.x + Math.cos(a) * rb.r, y: rb.y + Math.sin(a) * rb.r });
-    }
+    const verts = rigidVerticesWorld(rb);
     let minX = n - 1, minY = n - 1, maxX = 0, maxY = 0;
     for (const v of verts) {
       minX = Math.min(minX, v.x); minY = Math.min(minY, v.y);
@@ -1588,17 +1597,17 @@ function drawBodiesOverlay(sim) {
     }
     const sp = worldToScreen(sim, b._rx, b._ry);
     ctx.fillStyle = b.digestEnabled ? 'rgba(255, 90, 120, 0.22)' : 'rgba(255,255,255,0.06)';
+    const vertsW = rigidVerticesWorld({ ...b, x: b._rx, y: b._ry, theta: b._rtheta });
+    const verts = vertsW.map((v) => worldToScreen(sim, v.x, v.y));
+    const sides = verts.length;
     ctx.beginPath();
-    const sides = Math.max(3, b.sides || (i === 0 ? 3 : 4));
-    const rot = (b._rtheta || 0) + (sides === 3 ? -Math.PI * 0.5 : Math.PI * 0.25);
-    drawRegularPolygon(sp.x, sp.y, b.r * pxPerWorld, sides, rot);
-    ctx.fill();
-
-    const verts = [];
     for (let vi = 0; vi < sides; vi++) {
-      const a = rot + (vi / sides) * Math.PI * 2;
-      verts.push({ x: sp.x + Math.cos(a) * b.r * pxPerWorld, y: sp.y + Math.sin(a) * b.r * pxPerWorld });
+      const p = verts[vi];
+      if (vi === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
     }
+    ctx.closePath();
+    ctx.fill();
     for (let ei = 0; ei < sides; ei++) {
       const a = verts[ei];
       const b2 = verts[(ei + 1) % sides];

@@ -97,7 +97,11 @@ function buildRigidClusters(tris, nodes, controls) {
     for (const p of pts) r = Math.max(r, Math.hypot(p.x - cx, p.y - cy));
     r = Math.max(2.5, r);
 
-    const sides = Math.max(3, Math.min(12, approximateHullSides(pts)));
+    const hull = convexHull(pts);
+    const verticesLocal = hull
+      .map((p) => ({ x: p.x - cx, y: p.y - cy }))
+      .filter((v) => Number.isFinite(v.x) && Number.isFinite(v.y));
+    const sides = Math.max(3, verticesLocal.length || Math.min(12, approximateHullSides(pts)));
     const mass = controls.massHeavy;
     const body = {
       x: cx,
@@ -106,6 +110,7 @@ function buildRigidClusters(tris, nodes, controls) {
       vy: 0,
       r,
       sides,
+      verticesLocal: verticesLocal.length >= 3 ? verticesLocal : null,
       edgeDyeMode: Array.from({ length: sides }, () => [1, 1, 1]),
       edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
       digestEnabled: false,
@@ -284,6 +289,27 @@ function triangleComponents(tris) {
     comps.push(comp);
   }
   return comps;
+}
+
+function convexHull(points) {
+  if (!points || points.length < 3) return points || [];
+  const pts = [...points]
+    .map((p) => ({ x: p.x, y: p.y }))
+    .sort((a, b) => (a.x - b.x) || (a.y - b.y));
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop(); upper.pop();
+  return [...lower, ...upper];
 }
 
 function approximateHullSides(points) {

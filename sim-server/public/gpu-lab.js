@@ -496,7 +496,7 @@ function initBodies(n, controls) {
     }
 
     for (const p of local) {
-      softNodes.push({ x: p.x, y: p.y, vx: 0, vy: 0, mass: controls.massSoft, r: 1.4 * scale * bodyScale });
+      softNodes.push({ x: p.x, y: p.y, vx: 0, vy: 0, mass: controls.massSoft, r: 1.4 * scale * bodyScale, clusterId: c });
     }
 
     // Ring springs (solid edges: rigid bodies should collide with them).
@@ -677,27 +677,29 @@ function resolveCircleCollision(a, b, restitution = 0.35) {
   b.vy += iy * invB;
 }
 
-function resolveRigidVsSoftEdgeCollision(rigid, a, b, restitution = 0.28) {
-  const abx = b.x - a.x;
-  const aby = b.y - a.y;
+function closestPointOnSegment(px, py, ax, ay, bx, by) {
+  const abx = bx - ax;
+  const aby = by - ay;
   const ab2 = abx * abx + aby * aby;
-  if (ab2 < 1e-8) return;
-
-  const apx = rigid.x - a.x;
-  const apy = rigid.y - a.y;
+  if (ab2 < 1e-8) return { t: 0, x: ax, y: ay, abx, aby, ab2 };
+  const apx = px - ax;
+  const apy = py - ay;
   const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / ab2));
-  const qx = a.x + abx * t;
-  const qy = a.y + aby * t;
-  let nx = rigid.x - qx;
-  let ny = rigid.y - qy;
+  return { t, x: ax + abx * t, y: ay + aby * t, abx, aby, ab2 };
+}
+
+function resolveRigidVsSoftEdgeCollision(rigid, a, b, restitution = 0.28) {
+  const cp = closestPointOnSegment(rigid.x, rigid.y, a.x, a.y, b.x, b.y);
+  let nx = rigid.x - cp.x;
+  let ny = rigid.y - cp.y;
   let dist = Math.hypot(nx, ny);
   const minDist = Math.max(0.8, rigid.r || 1);
   if (dist >= minDist) return;
 
   if (dist < 1e-6) {
-    const invLen = 1 / Math.max(1e-6, Math.hypot(-aby, abx));
-    nx = -aby * invLen;
-    ny = abx * invLen;
+    const invLen = 1 / Math.max(1e-6, Math.hypot(-cp.aby, cp.abx));
+    nx = -cp.aby * invLen;
+    ny = cp.abx * invLen;
     dist = 1e-6;
   } else {
     nx /= dist;
@@ -717,6 +719,44 @@ function resolveRigidVsSoftEdgeCollision(rigid, a, b, restitution = 0.28) {
     const j = -(1 + restitution) * vn;
     rigid.vx += nx * j;
     rigid.vy += ny * j;
+  }
+}
+
+function resolveSoftNodeVsSoftEdgeCollision(node, a, b, restitution = 0.12) {
+  const cp = closestPointOnSegment(node.x, node.y, a.x, a.y, b.x, b.y);
+  let nx = node.x - cp.x;
+  let ny = node.y - cp.y;
+  let dist = Math.hypot(nx, ny);
+  const minDist = Math.max(0.4, node.r || 1.0);
+  if (dist >= minDist) return;
+
+  if (dist < 1e-6) {
+    const invLen = 1 / Math.max(1e-6, Math.hypot(-cp.aby, cp.abx));
+    nx = -cp.aby * invLen;
+    ny = cp.abx * invLen;
+    dist = 1e-6;
+  } else {
+    nx /= dist;
+    ny /= dist;
+  }
+
+  const penetration = minDist - dist;
+  node.x += nx * penetration * 0.92;
+  node.y += ny * penetration * 0.92;
+  a.x -= nx * penetration * 0.04;
+  a.y -= ny * penetration * 0.04;
+  b.x -= nx * penetration * 0.04;
+  b.y -= ny * penetration * 0.04;
+
+  const edgeVx = (a.vx + b.vx) * 0.5;
+  const edgeVy = (a.vy + b.vy) * 0.5;
+  const rvx = node.vx - edgeVx;
+  const rvy = node.vy - edgeVy;
+  const vn = rvx * nx + rvy * ny;
+  if (vn < 0) {
+    const j = -(1 + restitution) * vn;
+    node.vx += nx * j;
+    node.vy += ny * j;
   }
 }
 
@@ -910,6 +950,17 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     for (let i = 0; i < s.nodes.length; i++) {
       for (let j = i + 1; j < s.nodes.length; j++) {
         resolveCircleCollision(s.nodes[i], s.nodes[j], 0.22);
+      }
+    }
+    // Soft-node vs foreign soft-edge blocking for solid edges.
+    for (let ni = 0; ni < s.nodes.length; ni++) {
+      const node = s.nodes[ni];
+      for (const [i, j, _rest, edgeSolid] of s.springs) {
+        if (!edgeSolid) continue;
+        if (i === ni || j === ni) continue;
+        const a = s.nodes[i], b = s.nodes[j];
+        if (a.clusterId === node.clusterId && b.clusterId === node.clusterId) continue;
+        resolveSoftNodeVsSoftEdgeCollision(node, a, b, 0.12);
       }
     }
     for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);

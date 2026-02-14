@@ -101,3 +101,43 @@ test('GPU shadow arrays are exposed through FluidField-compatible views for coup
   assert.equal(fluid.densityR, fluid.shadowDensityR, 'densityR alias should track swapped shadow density buffer');
   assert.ok(Math.abs(fluid.Vx[idxAfter]) > 1e-4, 'expected non-zero transported momentum after step');
 });
+
+test('GPU shadow velocity splat and advection sanitize NaN/Inf and clamp unsafe magnitudes', () => {
+  const fluid = makeShadowOnlyField({ size: 32, dt: 2.5, scaleX: 1, scaleY: 1 });
+  fluid.maxVelComponent = 3;
+
+  fluid.addVelocity(10, 10, Infinity, NaN, 24);
+  fluid.addVelocity(10, 10, -999, 999, 24);
+
+  const seeded = fluid.getVelocityAtWorld(10, 10);
+  assert.ok(Number.isFinite(seeded.vx) && Number.isFinite(seeded.vy), 'seeded velocity should remain finite');
+  assert.ok(Math.abs(seeded.vx) <= fluid.maxVelComponent + 1e-6, `vx should be clamped, got ${seeded.vx}`);
+  assert.ok(Math.abs(seeded.vy) <= fluid.maxVelComponent + 1e-6, `vy should be clamped, got ${seeded.vy}`);
+
+  fluid.step();
+  const after = fluid.getVelocityAtWorld(10, 10);
+  assert.ok(Number.isFinite(after.vx) && Number.isFinite(after.vy), 'advected velocity should remain finite');
+  assert.ok(Math.abs(after.vx) <= fluid.maxVelComponent + 1e-6, `vx after step should remain clamped, got ${after.vx}`);
+  assert.ok(Math.abs(after.vy) <= fluid.maxVelComponent + 1e-6, `vy after step should remain clamped, got ${after.vy}`);
+});
+
+test('GPU shadow boundary damping preserves interior dynamics while reducing edge spikes', () => {
+  const fluid = makeShadowOnlyField({ size: 40, dt: 0.05, scaleX: 1, scaleY: 1 });
+  fluid.maxVelComponent = 8;
+
+  fluid.addVelocity(0, 20, 4.2, 0, 18);
+  fluid.addVelocity(20, 20, 4.2, 0, 18);
+
+  const edgeBefore = Math.abs(fluid.getVelocityAtWorld(0, 20).vx);
+  const interiorBefore = Math.abs(fluid.getVelocityAtWorld(20, 20).vx);
+
+  fluid.step();
+
+  const edgeAfter = Math.abs(fluid.getVelocityAtWorld(0, 20).vx);
+  const interiorAfter = Math.abs(fluid.getVelocityAtWorld(20, 20).vx);
+
+  assert.ok(edgeAfter < edgeBefore, `expected edge damping (${edgeAfter} < ${edgeBefore})`);
+  assert.ok(interiorAfter > 0.5, `expected interior flow to stay energetic, got ${interiorAfter}`);
+  assert.ok(interiorAfter > edgeAfter * 0.6,
+    `interior should not collapse relative to edge (${interiorAfter} vs ${edgeAfter})`);
+});

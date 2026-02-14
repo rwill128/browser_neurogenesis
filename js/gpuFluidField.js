@@ -588,8 +588,12 @@ export class GPUFluidField {
         const sigma = Math.max(0.25, radiusCells * 0.75 + 0.25);
         const sigma2 = sigma * sigma;
 
-        const baseVx = Number(amountX) || 0;
-        const baseVy = Number(amountY) || 0;
+        const maxVel = Math.max(1e-6, Number(this.maxVelComponent) || 10);
+        const rawVx = Number(amountX);
+        const rawVy = Number(amountY);
+        const baseVx = Number.isFinite(rawVx) ? Math.max(-maxVel, Math.min(maxVel, rawVx)) : 0;
+        const baseVy = Number.isFinite(rawVy) ? Math.max(-maxVel, Math.min(maxVel, rawVy)) : 0;
+
         for (let oy = -radiusInt; oy <= radiusInt; oy++) {
             for (let ox = -radiusInt; ox <= radiusInt; ox++) {
                 const gx = centerCell.gx + ox;
@@ -600,8 +604,10 @@ export class GPUFluidField {
                 if (d2 > radiusCells * radiusCells + 1e-6) continue;
                 const w = Math.exp(-d2 / (2 * sigma2));
                 const idx = gx + gy * this.size;
-                this.shadowVx[idx] = Math.max(-this.maxVelComponent, Math.min(this.maxVelComponent, this.shadowVx[idx] + baseVx * w));
-                this.shadowVy[idx] = Math.max(-this.maxVelComponent, Math.min(this.maxVelComponent, this.shadowVy[idx] + baseVy * w));
+                const nextVx = this.shadowVx[idx] + baseVx * w;
+                const nextVy = this.shadowVy[idx] + baseVy * w;
+                this.shadowVx[idx] = Number.isFinite(nextVx) ? Math.max(-maxVel, Math.min(maxVel, nextVx)) : 0;
+                this.shadowVy[idx] = Number.isFinite(nextVy) ? Math.max(-maxVel, Math.min(maxVel, nextVy)) : 0;
             }
         }
     }
@@ -638,24 +644,41 @@ export class GPUFluidField {
     }
 
     _advanceShadowFields() {
-        const dt = Math.max(1e-6, Number(this.dt) || (1 / 60));
+        const dt = Math.max(1e-6, Math.min(0.25, Number(this.dt) || (1 / 60)));
         const velDiffusion = Math.max(0, Math.min(0.25, (Number(this.viscosity) || 0.005) * 8));
         const densityDiffusion = Math.max(0, Math.min(0.25, (Number(this.diffusion) || 0.01) * 8));
+        const maxVel = Math.max(1e-6, Number(this.maxVelComponent) || 10);
+        const maxBacktrace = 2.5; // CFL-like guard: avoid unstable long backtraces during coupling bursts.
+
+        const shadowVx = this.shadowVx;
+        const shadowVy = this.shadowVy;
+        const shadowDensityR = this.shadowDensityR;
+        const shadowDensityG = this.shadowDensityG;
+        const shadowDensityB = this.shadowDensityB;
+        const shadowVxNext = this.shadowVxNext;
+        const shadowVyNext = this.shadowVyNext;
+        const shadowDensityRNext = this.shadowDensityRNext;
+        const shadowDensityGNext = this.shadowDensityGNext;
+        const shadowDensityBNext = this.shadowDensityBNext;
 
         for (let gy = 0; gy < this.size; gy++) {
             for (let gx = 0; gx < this.size; gx++) {
                 const idx = gx + gy * this.size;
-                const vx = this.shadowVx[idx];
-                const vy = this.shadowVy[idx];
+                const rawVx = shadowVx[idx];
+                const rawVy = shadowVy[idx];
+                const vx = Number.isFinite(rawVx) ? Math.max(-maxVel, Math.min(maxVel, rawVx)) : 0;
+                const vy = Number.isFinite(rawVy) ? Math.max(-maxVel, Math.min(maxVel, rawVy)) : 0;
 
-                const prevX = gx - vx * dt;
-                const prevY = gy - vy * dt;
+                const backX = Math.max(-maxBacktrace, Math.min(maxBacktrace, vx * dt));
+                const backY = Math.max(-maxBacktrace, Math.min(maxBacktrace, vy * dt));
+                const prevX = gx - backX;
+                const prevY = gy - backY;
 
-                this.shadowVxNext[idx] = this._sampleShadowBilinear(this.shadowVx, prevX, prevY);
-                this.shadowVyNext[idx] = this._sampleShadowBilinear(this.shadowVy, prevX, prevY);
-                this.shadowDensityRNext[idx] = this._sampleShadowBilinear(this.shadowDensityR, prevX, prevY);
-                this.shadowDensityGNext[idx] = this._sampleShadowBilinear(this.shadowDensityG, prevX, prevY);
-                this.shadowDensityBNext[idx] = this._sampleShadowBilinear(this.shadowDensityB, prevX, prevY);
+                shadowVxNext[idx] = this._sampleShadowBilinear(shadowVx, prevX, prevY);
+                shadowVyNext[idx] = this._sampleShadowBilinear(shadowVy, prevX, prevY);
+                shadowDensityRNext[idx] = this._sampleShadowBilinear(shadowDensityR, prevX, prevY);
+                shadowDensityGNext[idx] = this._sampleShadowBilinear(shadowDensityG, prevX, prevY);
+                shadowDensityBNext[idx] = this._sampleShadowBilinear(shadowDensityB, prevX, prevY);
             }
         }
 
@@ -669,29 +692,51 @@ export class GPUFluidField {
                     const right = idx + 1;
 
                     if (velDiffusion > 0) {
-                        const vxNbr = 0.25 * (this.shadowVxNext[up] + this.shadowVxNext[down] + this.shadowVxNext[left] + this.shadowVxNext[right]);
-                        const vyNbr = 0.25 * (this.shadowVyNext[up] + this.shadowVyNext[down] + this.shadowVyNext[left] + this.shadowVyNext[right]);
-                        this.shadowVxNext[idx] = this.shadowVxNext[idx] * (1 - velDiffusion) + vxNbr * velDiffusion;
-                        this.shadowVyNext[idx] = this.shadowVyNext[idx] * (1 - velDiffusion) + vyNbr * velDiffusion;
+                        const vxNbr = 0.25 * (shadowVxNext[up] + shadowVxNext[down] + shadowVxNext[left] + shadowVxNext[right]);
+                        const vyNbr = 0.25 * (shadowVyNext[up] + shadowVyNext[down] + shadowVyNext[left] + shadowVyNext[right]);
+                        const nextVx = shadowVxNext[idx] * (1 - velDiffusion) + vxNbr * velDiffusion;
+                        const nextVy = shadowVyNext[idx] * (1 - velDiffusion) + vyNbr * velDiffusion;
+                        shadowVxNext[idx] = Number.isFinite(nextVx) ? Math.max(-maxVel, Math.min(maxVel, nextVx)) : 0;
+                        shadowVyNext[idx] = Number.isFinite(nextVy) ? Math.max(-maxVel, Math.min(maxVel, nextVy)) : 0;
                     }
 
                     if (densityDiffusion > 0) {
-                        const rNbr = 0.25 * (this.shadowDensityRNext[up] + this.shadowDensityRNext[down] + this.shadowDensityRNext[left] + this.shadowDensityRNext[right]);
-                        const gNbr = 0.25 * (this.shadowDensityGNext[up] + this.shadowDensityGNext[down] + this.shadowDensityGNext[left] + this.shadowDensityGNext[right]);
-                        const bNbr = 0.25 * (this.shadowDensityBNext[up] + this.shadowDensityBNext[down] + this.shadowDensityBNext[left] + this.shadowDensityBNext[right]);
-                        this.shadowDensityRNext[idx] = this.shadowDensityRNext[idx] * (1 - densityDiffusion) + rNbr * densityDiffusion;
-                        this.shadowDensityGNext[idx] = this.shadowDensityGNext[idx] * (1 - densityDiffusion) + gNbr * densityDiffusion;
-                        this.shadowDensityBNext[idx] = this.shadowDensityBNext[idx] * (1 - densityDiffusion) + bNbr * densityDiffusion;
+                        const rNbr = 0.25 * (shadowDensityRNext[up] + shadowDensityRNext[down] + shadowDensityRNext[left] + shadowDensityRNext[right]);
+                        const gNbr = 0.25 * (shadowDensityGNext[up] + shadowDensityGNext[down] + shadowDensityGNext[left] + shadowDensityGNext[right]);
+                        const bNbr = 0.25 * (shadowDensityBNext[up] + shadowDensityBNext[down] + shadowDensityBNext[left] + shadowDensityBNext[right]);
+                        const nextR = shadowDensityRNext[idx] * (1 - densityDiffusion) + rNbr * densityDiffusion;
+                        const nextG = shadowDensityGNext[idx] * (1 - densityDiffusion) + gNbr * densityDiffusion;
+                        const nextB = shadowDensityBNext[idx] * (1 - densityDiffusion) + bNbr * densityDiffusion;
+                        shadowDensityRNext[idx] = Number.isFinite(nextR) ? Math.max(0, Math.min(255, nextR)) : 0;
+                        shadowDensityGNext[idx] = Number.isFinite(nextG) ? Math.max(0, Math.min(255, nextG)) : 0;
+                        shadowDensityBNext[idx] = Number.isFinite(nextB) ? Math.max(0, Math.min(255, nextB)) : 0;
                     }
                 }
             }
         }
 
-        [this.shadowVx, this.shadowVxNext] = [this.shadowVxNext, this.shadowVx];
-        [this.shadowVy, this.shadowVyNext] = [this.shadowVyNext, this.shadowVy];
-        [this.shadowDensityR, this.shadowDensityRNext] = [this.shadowDensityRNext, this.shadowDensityR];
-        [this.shadowDensityG, this.shadowDensityGNext] = [this.shadowDensityGNext, this.shadowDensityG];
-        [this.shadowDensityB, this.shadowDensityBNext] = [this.shadowDensityBNext, this.shadowDensityB];
+        for (let gx = 0; gx < this.size; gx++) {
+            const top = gx;
+            const bottom = gx + (this.size - 1) * this.size;
+            shadowVxNext[top] *= 0.7;
+            shadowVyNext[top] *= 0.7;
+            shadowVxNext[bottom] *= 0.7;
+            shadowVyNext[bottom] *= 0.7;
+        }
+        for (let gy = 0; gy < this.size; gy++) {
+            const left = gy * this.size;
+            const right = left + (this.size - 1);
+            shadowVxNext[left] *= 0.7;
+            shadowVyNext[left] *= 0.7;
+            shadowVxNext[right] *= 0.7;
+            shadowVyNext[right] *= 0.7;
+        }
+
+        [this.shadowVx, this.shadowVxNext] = [shadowVxNext, shadowVx];
+        [this.shadowVy, this.shadowVyNext] = [shadowVyNext, shadowVy];
+        [this.shadowDensityR, this.shadowDensityRNext] = [shadowDensityRNext, shadowDensityR];
+        [this.shadowDensityG, this.shadowDensityGNext] = [shadowDensityGNext, shadowDensityG];
+        [this.shadowDensityB, this.shadowDensityBNext] = [shadowDensityBNext, shadowDensityB];
 
         this._decayShadowFields();
     }

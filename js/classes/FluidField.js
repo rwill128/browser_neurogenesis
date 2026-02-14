@@ -48,9 +48,11 @@ export class FluidField {
         this.lastActiveTileTelemetry = {
             carrierActiveTiles: 0,
             momentumActiveTiles: 0,
+            momentumOnlyTiles: 0,
             totalTiles: this.activeTileCols * this.activeTileRows,
             carrierPct: 0,
             momentumPct: 0,
+            momentumOnlyPct: 0,
             carrierTouchedTiles: 0,
             momentumTouchedTiles: 0,
             sleepingCarrierTiles: 0,
@@ -156,12 +158,18 @@ export class FluidField {
         const totalTiles = Math.max(1, this.activeTileCols * this.activeTileRows);
         const carrierActiveTiles = this.carrierTiles.size;
         const momentumActiveTiles = this.momentumTiles.size;
+        let momentumOnlyTiles = 0;
+        for (const key of this.momentumTiles.keys()) {
+            if (!this.carrierTiles.has(key)) momentumOnlyTiles++;
+        }
         this.lastActiveTileTelemetry = {
             carrierActiveTiles,
             momentumActiveTiles,
+            momentumOnlyTiles,
             totalTiles,
             carrierPct: carrierActiveTiles / totalTiles,
             momentumPct: momentumActiveTiles / totalTiles,
+            momentumOnlyPct: momentumOnlyTiles / totalTiles,
             carrierTouchedTiles: this.carrierTilesTouchedThisStep.size,
             momentumTouchedTiles: this.momentumTilesTouchedThisStep.size,
             sleepingCarrierTiles,

@@ -178,7 +178,13 @@ export function resolveRigidVsSoftNodeCollision(rigid, node, vertsInput, restitu
   const invInertia = 1 / Math.max(0.05, rigid.inertia || (0.5 * mRigid * Math.max(1, rigid.r || 1) ** 2));
   const rn = rx * ny - ry * nx;
   const denom = invNode + invRigid + (rn * rn) * invInertia;
-  const j = (-(1 + restitution) * vn) / Math.max(EPS, denom);
+  const rawJ = (-(1 + restitution) * vn) / Math.max(EPS, denom);
+
+  // Guardrail: clamp very deep/high-speed contacts so one bad frame cannot inject
+  // unbounded momentum into rigid angular velocity.
+  const maxImpactSpeed = 24;
+  const maxJ = ((1 + restitution) * Math.min(maxImpactSpeed, Math.abs(vn))) / Math.max(EPS, denom);
+  const j = Math.max(-maxJ, Math.min(maxJ, rawJ));
   const jx = j * nx;
   const jy = j * ny;
 

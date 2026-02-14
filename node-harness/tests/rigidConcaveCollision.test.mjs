@@ -63,3 +63,15 @@ test('concave rigid collision: impulse transfers momentum from soft node into ri
   assert.ok(node.vx < 1.2, `expected node to lose forward speed, got ${node.vx}`);
   assert.ok(rigid.vx > 0, `expected rigid to gain momentum, got ${rigid.vx}`);
 });
+
+test('concave rigid collision: high-speed contact is guardrailed to bounded impulse', () => {
+  const rigid = makeConcaveRigid();
+  const verts = rigidVerticesWorld(rigid);
+  const node = { x: 21.4, y: 30, vx: 240.0, vy: 0, mass: 1, r: 1.0 };
+
+  const hit = resolveRigidVsSoftNodeCollision(rigid, node, verts, 0.3);
+  assert.equal(hit, true, 'expected contact at left rigid edge');
+  assert.ok(Number.isFinite(rigid.vx) && Number.isFinite(rigid.omega), 'rigid velocity should remain finite');
+  assert.ok(Math.abs(rigid.vx) < 40, `guardrail should cap rigid velocity injection, got ${rigid.vx}`);
+  assert.ok(Math.abs(rigid.omega) < 3, `guardrail should cap rigid spin injection, got ${rigid.omega}`);
+});

@@ -41,10 +41,9 @@ export class FluidField {
         this.activeTileTtlMax = Math.max(1, Math.floor(Number(config.FLUID_ACTIVE_TILE_TTL_STEPS) || 12));
         this.activeTileCols = Math.max(1, Math.ceil(this.size / this.activeTileSize));
         this.activeTileRows = Math.max(1, Math.ceil(this.size / this.activeTileSize));
-        this.carrierTiles = new Map(); // dye/creature/particle carriers -> full-res priority
-        this.momentumTiles = new Map(); // velocity-only regions -> lower-frequency priority
-        this.carrierTilesTouchedThisStep = new Set();
-        this.momentumTilesTouchedThisStep = new Set();
+        this.totalActiveTiles = this.activeTileCols * this.activeTileRows;
+        this.carrierTiles = this._createTileTracker(); // dye/creature/particle carriers -> full-res priority
+        this.momentumTiles = this._createTileTracker(); // velocity-only regions -> lower-frequency priority
         this.coarseMomentumBlockSize = 2; // phase A scaffold: 2x2 momentum-only macro blocks
         this.lastStepPerf = {
             totalMs: 0,
@@ -99,22 +98,58 @@ export class FluidField {
         return Math.floor(tileId / this.activeTileCols);
     }
 
-    _markTileByCoord(tileMap, touchedSet, tx, ty) {
+    _createTileTracker() {
+        return {
+            ttl: new Uint16Array(this.totalActiveTiles),
+            index: new Int32Array(this.totalActiveTiles).fill(-1),
+            active: new Int32Array(this.totalActiveTiles),
+            count: 0,
+            touched: new Uint8Array(this.totalActiveTiles),
+            touchedCount: 0
+        };
+    }
+
+    _trackerHas(tracker, tileId) {
+        return tracker.ttl[tileId] > 0;
+    }
+
+    _trackerActivate(tracker, tileId) {
+        if (tracker.ttl[tileId] < this.activeTileTtlMax) tracker.ttl[tileId] = this.activeTileTtlMax;
+        if (tracker.index[tileId] < 0) {
+            const pos = tracker.count;
+            tracker.active[pos] = tileId;
+            tracker.index[tileId] = pos;
+            tracker.count = pos + 1;
+        }
+        if (tracker.touched[tileId] === 0) {
+            tracker.touched[tileId] = 1;
+            tracker.touchedCount += 1;
+        }
+    }
+
+    _trackerClearTouched(tracker) {
+        const active = tracker.active;
+        for (let i = 0; i < tracker.count; i++) {
+            const tileId = active[i];
+            tracker.touched[tileId] = 0;
+        }
+        tracker.touchedCount = 0;
+    }
+
+    _markTileByCoord(tileTracker, tx, ty) {
         if (!Number.isFinite(tx) || !Number.isFinite(ty)) return;
         const clampedTx = Math.max(0, Math.min(this.activeTileCols - 1, Math.floor(tx)));
         const clampedTy = Math.max(0, Math.min(this.activeTileRows - 1, Math.floor(ty)));
-        const key = this._tileKey(clampedTx, clampedTy);
-        const prev = Number(tileMap.get(key) || 0);
-        tileMap.set(key, Math.max(prev, this.activeTileTtlMax));
-        touchedSet.add(key);
+        const tileId = this._tileKey(clampedTx, clampedTy);
+        this._trackerActivate(tileTracker, tileId);
     }
 
-    _markTileAroundCell(tileMap, touchedSet, gx, gy) {
+    _markTileAroundCell(tileTracker, gx, gy) {
         const tx = Math.floor((Math.max(0, Math.min(this.size - 1, Math.floor(gx))) / this.activeTileSize));
         const ty = Math.floor((Math.max(0, Math.min(this.size - 1, Math.floor(gy))) / this.activeTileSize));
         for (let oy = -this.activeTileHalo; oy <= this.activeTileHalo; oy++) {
             for (let ox = -this.activeTileHalo; ox <= this.activeTileHalo; ox++) {
-                this._markTileByCoord(tileMap, touchedSet, tx + ox, ty + oy);
+                this._markTileByCoord(tileTracker, tx + ox, ty + oy);
             }
         }
     }
@@ -123,14 +158,14 @@ export class FluidField {
      * Mark carrier activity around a fluid-grid cell (gx,gy), including halo tiles.
      */
     markCarrierCell(gx, gy) {
-        this._markTileAroundCell(this.carrierTiles, this.carrierTilesTouchedThisStep, gx, gy);
+        this._markTileAroundCell(this.carrierTiles, gx, gy);
     }
 
     /**
      * Mark momentum-only activity around a fluid-grid cell (gx,gy), including halo tiles.
      */
     markMomentumCell(gx, gy) {
-        this._markTileAroundCell(this.momentumTiles, this.momentumTilesTouchedThisStep, gx, gy);
+        this._markTileAroundCell(this.momentumTiles, gx, gy);
     }
 
     /**
@@ -186,16 +221,25 @@ export class FluidField {
         }
     }
 
-    _decayTileMap(tileMap) {
+    _decayTileMap(tileTracker) {
         let sleeping = 0;
-        for (const [key, ttlRaw] of Array.from(tileMap.entries())) {
-            const ttl = Math.max(0, Math.floor(Number(ttlRaw) || 0) - 1);
-            if (ttl <= 0) {
-                tileMap.delete(key);
+        let i = 0;
+        while (i < tileTracker.count) {
+            const tileId = tileTracker.active[i];
+            const ttl = tileTracker.ttl[tileId];
+            if (ttl <= 1) {
+                tileTracker.ttl[tileId] = 0;
+                tileTracker.index[tileId] = -1;
+                const lastIdx = tileTracker.count - 1;
+                const lastTileId = tileTracker.active[lastIdx];
+                tileTracker.active[i] = lastTileId;
+                tileTracker.index[lastTileId] = i;
+                tileTracker.count = lastIdx;
                 sleeping += 1;
-            } else {
-                tileMap.set(key, ttl);
+                continue;
             }
+            tileTracker.ttl[tileId] = ttl - 1;
+            i += 1;
         }
         return sleeping;
     }
@@ -207,8 +251,9 @@ export class FluidField {
     _collectCoarseMomentumBlocks() {
         const blockSize = Math.max(2, Math.floor(Number(this.coarseMomentumBlockSize) || 2));
         const blocks = new Set();
-        for (const key of this.momentumTiles.keys()) {
-            if (this.carrierTiles.has(key)) continue;
+        for (let i = 0; i < this.momentumTiles.count; i++) {
+            const key = this.momentumTiles.active[i];
+            if (this._trackerHas(this.carrierTiles, key)) continue;
             const tx = this._tileTx(key);
             const ty = this._tileTy(key);
             const bx = Math.floor(tx / blockSize);
@@ -231,11 +276,12 @@ export class FluidField {
         const sleepingMomentumTiles = this._decayTileMap(this.momentumTiles);
 
         const totalTiles = Math.max(1, this.activeTileCols * this.activeTileRows);
-        const carrierActiveTiles = this.carrierTiles.size;
-        const momentumTilesTotal = this.momentumTiles.size;
+        const carrierActiveTiles = this.carrierTiles.count;
+        const momentumTilesTotal = this.momentumTiles.count;
         let momentumTilesNonCarrier = 0;
-        for (const key of this.momentumTiles.keys()) {
-            if (!this.carrierTiles.has(key)) momentumTilesNonCarrier++;
+        for (let i = 0; i < this.momentumTiles.count; i++) {
+            const key = this.momentumTiles.active[i];
+            if (!this._trackerHas(this.carrierTiles, key)) momentumTilesNonCarrier++;
         }
         const coarse = this._collectCoarseMomentumBlocks();
         this.lastActiveTileTelemetry = {
@@ -249,13 +295,13 @@ export class FluidField {
             carrierPct: carrierActiveTiles / totalTiles,
             momentumPct: momentumTilesTotal / totalTiles,
             momentumNonCarrierPct: momentumTilesNonCarrier / totalTiles,
-            carrierTouchedTiles: this.carrierTilesTouchedThisStep.size,
-            momentumTouchedTiles: this.momentumTilesTouchedThisStep.size,
+            carrierTouchedTiles: this.carrierTiles.touchedCount,
+            momentumTouchedTiles: this.momentumTiles.touchedCount,
             sleepingCarrierTiles,
             sleepingMomentumTiles
         };
-        this.carrierTilesTouchedThisStep.clear();
-        this.momentumTilesTouchedThisStep.clear();
+        this._trackerClearTouched(this.carrierTiles);
+        this._trackerClearTouched(this.momentumTiles);
     }
 
     getActiveTileTelemetry() {
@@ -271,16 +317,18 @@ export class FluidField {
         const limit = Math.max(0, Math.floor(Number(maxCells) || 0));
         const seen = new Set();
 
-        for (const key of this.carrierTiles.keys()) {
+        for (let i = 0; i < this.carrierTiles.count; i++) {
             if (limit > 0 && out.length >= limit) break;
+            const key = this.carrierTiles.active[i];
             const tx = this._tileTx(key);
             const ty = this._tileTy(key);
             seen.add(key);
             out.push({ tx, ty, kind: 'carrier' });
         }
 
-        for (const key of this.momentumTiles.keys()) {
+        for (let i = 0; i < this.momentumTiles.count; i++) {
             if (limit > 0 && out.length >= limit) break;
+            const key = this.momentumTiles.active[i];
             if (seen.has(key)) continue;
             const tx = this._tileTx(key);
             const ty = this._tileTy(key);
@@ -573,34 +621,57 @@ export class FluidField {
      * Build a sparse cell-domain from active tiles (row -> merged [x0,x1] spans).
      */
     _buildSparseDomainFromTiles(tileMap) {
-        if (!tileMap || tileMap.size === 0) return null;
+        if (!tileMap) return null;
+        const hasTracker = Number.isFinite(tileMap.count) && tileMap.active;
+        if (hasTracker && tileMap.count <= 0) return null;
+        if (!hasTracker && tileMap.size === 0) return null;
+
         const maxCell = this.size - 2;
         const pad = Math.max(1, this.activeTileSize);
         const rows = new Map();
 
-        for (const key of tileMap.keys()) {
-            let tx;
-            let ty;
-            if (typeof key === 'string') {
-                const parts = key.split(':');
-                if (parts.length !== 2) continue;
-                tx = Math.floor(Number(parts[0]));
-                ty = Math.floor(Number(parts[1]));
-                if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
-            } else {
-                tx = this._tileTx(Number(key));
-                ty = this._tileTy(Number(key));
+        if (hasTracker) {
+            for (let i = 0; i < tileMap.count; i++) {
+                const key = tileMap.active[i];
+                const tx = this._tileTx(key);
+                const ty = this._tileTy(key);
+
+                const x0 = Math.max(1, (tx * this.activeTileSize) - pad);
+                const x1 = Math.min(maxCell, ((tx + 1) * this.activeTileSize) + pad);
+                const y0 = Math.max(1, (ty * this.activeTileSize) - pad);
+                const y1 = Math.min(maxCell, ((ty + 1) * this.activeTileSize) + pad);
+
+                for (let y = y0; y <= y1; y++) {
+                    const list = rows.get(y) || [];
+                    list.push([x0, x1]);
+                    rows.set(y, list);
+                }
             }
+        } else {
+            for (const key of tileMap.keys()) {
+                let tx;
+                let ty;
+                if (typeof key === 'string') {
+                    const parts = key.split(':');
+                    if (parts.length !== 2) continue;
+                    tx = Math.floor(Number(parts[0]));
+                    ty = Math.floor(Number(parts[1]));
+                    if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+                } else {
+                    tx = this._tileTx(Number(key));
+                    ty = this._tileTy(Number(key));
+                }
 
-            const x0 = Math.max(1, (tx * this.activeTileSize) - pad);
-            const x1 = Math.min(maxCell, ((tx + 1) * this.activeTileSize) + pad);
-            const y0 = Math.max(1, (ty * this.activeTileSize) - pad);
-            const y1 = Math.min(maxCell, ((ty + 1) * this.activeTileSize) + pad);
+                const x0 = Math.max(1, (tx * this.activeTileSize) - pad);
+                const x1 = Math.min(maxCell, ((tx + 1) * this.activeTileSize) + pad);
+                const y0 = Math.max(1, (ty * this.activeTileSize) - pad);
+                const y1 = Math.min(maxCell, ((ty + 1) * this.activeTileSize) + pad);
 
-            for (let y = y0; y <= y1; y++) {
-                const list = rows.get(y) || [];
-                list.push([x0, x1]);
-                rows.set(y, list);
+                for (let y = y0; y <= y1; y++) {
+                    const list = rows.get(y) || [];
+                    list.push([x0, x1]);
+                    rows.set(y, list);
+                }
             }
         }
 
@@ -673,48 +744,72 @@ export class FluidField {
 
     _expandTileMap(tileMap, haloTiles = 1) {
         const halo = Math.max(0, Math.floor(Number(haloTiles) || 0));
-        if (!tileMap || typeof tileMap.keys !== 'function') return tileMap;
+        if (!tileMap) return tileMap;
         if (halo <= 0) return tileMap;
 
-        const expanded = new Map();
-        for (const key of tileMap.keys()) {
-            const tx = this._tileTx(key);
-            const ty = this._tileTy(key);
+        const active = [];
+        const mark = new Uint8Array(this.totalActiveTiles);
 
+        const pushExpanded = (tileId) => {
+            const tx = this._tileTx(tileId);
+            const ty = this._tileTy(tileId);
             for (let oy = -halo; oy <= halo; oy++) {
                 for (let ox = -halo; ox <= halo; ox++) {
                     const nx = Math.max(0, Math.min(this.activeTileCols - 1, tx + ox));
                     const ny = Math.max(0, Math.min(this.activeTileRows - 1, ty + oy));
-                    expanded.set(this._tileKey(nx, ny), this.activeTileTtlMax);
+                    const id = this._tileKey(nx, ny);
+                    if (mark[id] === 0) {
+                        mark[id] = 1;
+                        active.push(id);
+                    }
                 }
             }
+        };
+
+        if (Number.isFinite(tileMap.count) && tileMap.active) {
+            for (let i = 0; i < tileMap.count; i++) pushExpanded(tileMap.active[i]);
+        } else if (typeof tileMap.keys === 'function') {
+            for (const key of tileMap.keys()) pushExpanded(Number(key));
         }
-        return expanded;
+
+        return { count: active.length, active };
     }
 
     _subtractTileMaps(source, exclude) {
-        const out = new Map();
-        if (!source || typeof source.keys !== 'function') return out;
-        for (const key of source.keys()) {
-            if (exclude && exclude.has && exclude.has(key)) continue;
-            out.set(key, this.activeTileTtlMax);
+        const active = [];
+        if (!source) return { count: 0, active };
+
+        if (Number.isFinite(source.count) && source.active) {
+            for (let i = 0; i < source.count; i++) {
+                const key = source.active[i];
+                if (exclude && Number.isFinite(exclude.count) && exclude.ttl && exclude.ttl[key] > 0) continue;
+                active.push(key);
+            }
+        } else if (typeof source.keys === 'function') {
+            for (const key of source.keys()) {
+                const k = Number(key);
+                if (exclude && Number.isFinite(exclude.count) && exclude.ttl && exclude.ttl[k] > 0) continue;
+                active.push(k);
+            }
         }
-        return out;
+        return { count: active.length, active };
     }
 
     _buildDeepEmptyTileMap(tier1Tiles, tier2Tiles) {
-        const out = new Map();
-        const hasTier1 = (k) => tier1Tiles && tier1Tiles.has && tier1Tiles.has(k);
-        const hasTier2 = (k) => tier2Tiles && tier2Tiles.has && tier2Tiles.has(k);
+        const active = [];
+        const tier1Ttl = tier1Tiles?.ttl;
+        const tier2Mark = new Uint8Array(this.totalActiveTiles);
 
-        for (let ty = 0; ty < this.activeTileRows; ty++) {
-            for (let tx = 0; tx < this.activeTileCols; tx++) {
-                const key = this._tileKey(tx, ty);
-                if (hasTier1(key) || hasTier2(key)) continue;
-                out.set(key, this.activeTileTtlMax);
-            }
+        if (tier2Tiles && Number.isFinite(tier2Tiles.count) && tier2Tiles.active) {
+            for (let i = 0; i < tier2Tiles.count; i++) tier2Mark[tier2Tiles.active[i]] = 1;
         }
-        return out;
+
+        for (let tileId = 0; tileId < this.totalActiveTiles; tileId++) {
+            if (tier1Ttl && tier1Ttl[tileId] > 0) continue;
+            if (tier2Mark[tileId] > 0) continue;
+            active.push(tileId);
+        }
+        return { count: active.length, active };
     }
 
     step(worldTick = 0) {

@@ -843,13 +843,14 @@ function drawSnapshot(snap, { includePanels = true } = {}) {
     const cellW = Number(fluid?.worldCell?.width) || 0;
     const cellH = Number(fluid?.worldCell?.height) || 0;
     if (fluid && Array.isArray(fluid.cells) && cellW > 0 && cellH > 0) {
-      const baseLenWorld = Math.min(cellW, cellH) * 0.8;
-      const minSpeed = 0.08;
-      const speedToLen = 0.35;
+      const minSpeed = 0.01;
+      const minArrowPx = 6;
+      const maxArrowPx = 22;
+      const speedToPx = 4.5;
 
       ctx.save();
-      ctx.strokeStyle = 'rgba(170,210,255,0.55)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = 'rgba(170,210,255,0.85)';
+      ctx.lineWidth = 1.25;
 
       for (const cell of fluid.cells) {
         const x = Number(cell.x);
@@ -863,16 +864,25 @@ function drawSnapshot(snap, { includePanels = true } = {}) {
 
         const ux = vx / speed;
         const uy = vy / speed;
-        const lenWorld = baseLenWorld * Math.min(1.8, 0.35 + speed * speedToLen);
+        const lenPx = Math.max(minArrowPx, Math.min(maxArrowPx, minArrowPx + speed * speedToPx));
 
         const sx = worldToScreenX(x);
         const sy = worldToScreenY(y);
-        const ex = worldToScreenX(x + ux * lenWorld);
-        const ey = worldToScreenY(y + uy * lenWorld);
+        const ex = sx + ux * lenPx;
+        const ey = sy + uy * lenPx;
 
         ctx.beginPath();
         ctx.moveTo(sx, sy);
         ctx.lineTo(ex, ey);
+        ctx.stroke();
+
+        const head = Math.max(3, Math.min(6, lenPx * 0.28));
+        const a = Math.atan2(ey - sy, ex - sx);
+        ctx.beginPath();
+        ctx.moveTo(ex, ey);
+        ctx.lineTo(ex - head * Math.cos(a - Math.PI / 7), ey - head * Math.sin(a - Math.PI / 7));
+        ctx.moveTo(ex, ey);
+        ctx.lineTo(ex - head * Math.cos(a + Math.PI / 7), ey - head * Math.sin(a + Math.PI / 7));
         ctx.stroke();
       }
       ctx.restore();

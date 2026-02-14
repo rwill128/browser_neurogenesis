@@ -27,4 +27,8 @@ test('CreatureSpec roundtrip parse and build bodies', () => {
   assert.ok(Array.isArray(bodies.soft.springs));
   assert.equal(bodies.rigid.length, 0);
   assert.ok(bodies.soft.nodes.length >= 6);
+  for (const [a, b] of bodies.soft.springs) {
+    assert.ok(Number.isInteger(a) && a >= 0 && a < bodies.soft.nodes.length);
+    assert.ok(Number.isInteger(b) && b >= 0 && b < bodies.soft.nodes.length);
+  }
 });

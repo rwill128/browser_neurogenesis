@@ -64,11 +64,20 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
     digestRGB: [1, 1, 1],
   });
 
+  const rigidNodeCount = rigidLike.nodes.length;
+  const softSpringsShifted = soft.springs.map(([a, b, rest, edgeBodyMode, edgeDyeMode]) => [
+    a + rigidNodeCount,
+    b + rigidNodeCount,
+    rest,
+    edgeBodyMode,
+    edgeDyeMode,
+  ]);
+
   return {
     rigid: [],
     soft: {
       nodes: [...rigidLike.nodes, ...soft.nodes],
-      springs: [...rigidLike.springs, ...soft.springs],
+      springs: [...rigidLike.springs, ...softSpringsShifted],
     },
     hybrid: [],
   };

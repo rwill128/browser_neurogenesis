@@ -681,6 +681,39 @@ parentPort.on('message', (msg) => {
         return reply(requestId, { ok: true, result: computeStatus() });
       }
 
+      if (method === 'getStatusAndSnapshot') {
+        const tSnap0 = Date.now();
+        const mode = String(args?.mode || 'render');
+        const status = computeStatus();
+        let snapshot;
+
+        if (mode === 'render') {
+          markFrameBufferAccess();
+
+          const requestedSeq = args?.frameSeq;
+          if (requestedSeq !== undefined && requestedSeq !== null && requestedSeq !== '') {
+            snapshot = getRenderFrameBySeq(requestedSeq);
+          }
+
+          if (!snapshot) {
+            const requestedOffset = args?.frameOffset;
+            if (requestedOffset !== undefined && requestedOffset !== null && requestedOffset !== '') {
+              snapshot = getRenderFrameByOffset(requestedOffset);
+            }
+          }
+
+          if (!snapshot) {
+            const fresh = captureRenderFrameIfNeeded({ force: true });
+            snapshot = fresh || getLatestRenderFrame() || computeSnapshot('render');
+          }
+        } else {
+          snapshot = computeSnapshot(mode);
+        }
+
+        perfAdd('snapshot', Date.now() - tSnap0);
+        return reply(requestId, { ok: true, result: { status, snapshot } });
+      }
+
       if (method === 'getSnapshot') {
         const tSnap0 = Date.now();
         const mode = String(args?.mode || 'render');

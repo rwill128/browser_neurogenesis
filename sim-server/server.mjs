@@ -1762,10 +1762,9 @@ app.get('/ws', { websocket: true }, (socket, req) => {
     if (!active || inFlight) return;
     inFlight = true;
     try {
-      const status = await handle.rpc('getStatus');
-      const snapshot = await handle.rpc('getSnapshot', { mode });
-      socket.send(JSON.stringify({ kind: 'status', data: status }));
-      socket.send(JSON.stringify({ kind: 'snapshot', data: snapshot }));
+      const bundled = await handle.rpc('getStatusAndSnapshot', { mode });
+      socket.send(JSON.stringify({ kind: 'status', data: bundled.status }));
+      socket.send(JSON.stringify({ kind: 'snapshot', data: bundled.snapshot }));
     } catch (err) {
       try {
         socket.send(JSON.stringify({ kind: 'error', error: String(err?.message || err) }));

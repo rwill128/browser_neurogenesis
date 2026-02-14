@@ -20,6 +20,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { gzipSync, gunzipSync } from 'node:zlib';
+import { serialize as v8Serialize, deserialize as v8Deserialize } from 'node:v8';
 
 import { scenarioDefs } from '../js/engine/scenarioDefs.mjs';
 
@@ -334,13 +335,11 @@ class WorldHandle {
           const frame = msg.frame;
           if (!frame || typeof frame !== 'object') return;
 
-          // Persist per-frame immediately (for newest/tail access), then compact into chunks.
+          // Chunk-first archival path: keep newest tail in memory, persist compressed chunks.
           const encoded = encodeArchivedFrame(frame);
-          stmtInsertArchivedFrame.run(worldId, tick, new Date().toISOString(), encoded.gz.length, encoded.gz);
-
           const chunkStartTick = chunkStartForTick(tick);
           const buf = getChunkBuffer(worldId, chunkStartTick);
-          buf.push({ tick, frame });
+          buf.push({ tick, frame: encoded.frame });
           persistChunkIfReady(worldId, chunkStartTick);
           enforceArchiveBudgetForWorld(worldId);
         } catch {
@@ -463,6 +462,29 @@ function clearChunkBuffersForWorld(worldId) {
   pendingChunkFramesByWorld.delete(worldId);
 }
 
+function getPendingTailStats(worldId) {
+  const worldMap = pendingChunkFramesByWorld.get(worldId);
+  if (!worldMap || worldMap.size === 0) {
+    return { count: 0, oldestTick: null, latestTick: null };
+  }
+
+  let count = 0;
+  let oldestTick = null;
+  let latestTick = null;
+
+  for (const arr of worldMap.values()) {
+    for (const it of arr || []) {
+      const t = Number(it?.tick);
+      if (!Number.isFinite(t)) continue;
+      count += 1;
+      oldestTick = oldestTick === null ? t : Math.min(oldestTick, t);
+      latestTick = latestTick === null ? t : Math.max(latestTick, t);
+    }
+  }
+
+  return { count, oldestTick, latestTick };
+}
+
 function getArchiveBytesForWorld(worldId) {
   const frameBytes = Number(stmtArchivedFrameBytesSum.get(worldId)?.totalBytes) || 0;
   const chunkBytes = Number(stmtArchivedChunkBytesSum.get(worldId)?.totalBytes) || 0;
@@ -522,7 +544,7 @@ function persistChunkIfReady(worldId, chunkStartTick) {
     chunkStartTick,
     expectedEnd,
     frames.length,
-    'gzip-json-array-v1',
+    'gzip-v8-array-v2',
     new Date().toISOString(),
     encoded.gz.length,
     encoded.gz
@@ -536,23 +558,23 @@ function persistChunkIfReady(worldId, chunkStartTick) {
 
 function getArchivedFrameByTick(worldId, tick) {
   const t = Math.max(0, Math.floor(Number(tick) || 0));
-
-  const row = stmtGetArchivedFrame.get(worldId, t);
-  if (row) return decodeArchivedFrame(row.payloadGzip);
-
   const chunkStartTick = chunkStartForTick(t);
-  const cRow = stmtGetArchivedChunkByStart.get(worldId, chunkStartTick);
-  if (cRow) {
-    const frames = decodeArchivedFrameChunk(cRow.payloadGzip);
-    for (const f of frames) {
-      if (Number(f?.tick) === t) return f;
-    }
-  }
 
   const worldMap = pendingChunkFramesByWorld.get(worldId);
   const pending = worldMap?.get(chunkStartTick) || [];
   for (const it of pending) {
     if (Number(it?.tick) === t && it?.frame) return it.frame;
+  }
+
+  const row = stmtGetArchivedFrame.get(worldId, t);
+  if (row) return decodeArchivedFrame(row.payloadGzip);
+
+  const cRow = stmtGetArchivedChunkByStart.get(worldId, chunkStartTick);
+  if (cRow) {
+    const frames = decodeArchivedFrameChunk(cRow.payloadGzip, cRow.codec);
+    for (const f of frames) {
+      if (Number(f?.tick) === t) return f;
+    }
   }
 
   return null;
@@ -569,10 +591,50 @@ function decodeCheckpoint(gzBuffer) {
   return JSON.parse(json);
 }
 
+function leanArchivedFrame(frame) {
+  if (!frame || typeof frame !== 'object') return frame;
+
+  const creatures = Array.isArray(frame.creatures)
+    ? frame.creatures.map((c) => {
+        if (!c || typeof c !== 'object') return c;
+        const out = {
+          id: c.id,
+          energy: c.energy,
+          center: c.center,
+          nodeTypeCounts: c.nodeTypeCounts,
+          vertices: c.vertices,
+          springs: c.springs
+        };
+        if (frame.__richStats === true) {
+          out.fullStats = c.fullStats;
+          out.actuationTelemetry = c.actuationTelemetry;
+        }
+        return out;
+      })
+    : [];
+
+  return {
+    id: frame.id,
+    scenario: frame.scenario,
+    tick: frame.tick,
+    time: frame.time,
+    seed: frame.seed,
+    world: frame.world,
+    populations: frame.populations,
+    worldStats: frame.worldStats,
+    instabilityTelemetry: frame.instabilityTelemetry,
+    mutationStats: frame.mutationStats,
+    fluid: frame.fluid,
+    creatures,
+    __frameSeq: frame.__frameSeq,
+    __capturedAtIso: frame.__capturedAtIso,
+    __richStats: frame.__richStats === true
+  };
+}
+
 function encodeArchivedFrame(frame) {
-  const json = JSON.stringify(frame);
-  const gz = gzipSync(Buffer.from(json, 'utf8'));
-  return { jsonBytes: Buffer.byteLength(json, 'utf8'), gz };
+  const lean = leanArchivedFrame(frame);
+  return { jsonBytes: 0, gz: null, frame: lean };
 }
 
 function decodeArchivedFrame(gzBuffer) {
@@ -581,12 +643,18 @@ function decodeArchivedFrame(gzBuffer) {
 }
 
 function encodeArchivedFrameChunk(frames) {
-  const json = JSON.stringify({ frames });
-  const gz = gzipSync(Buffer.from(json, 'utf8'));
-  return { gz, jsonBytes: Buffer.byteLength(json, 'utf8') };
+  const payload = { frames: Array.isArray(frames) ? frames.map((f) => leanArchivedFrame(f)) : [] };
+  const bin = v8Serialize(payload);
+  const gz = gzipSync(bin);
+  return { gz, jsonBytes: bin.length };
 }
 
-function decodeArchivedFrameChunk(gzBuffer) {
+function decodeArchivedFrameChunk(gzBuffer, codec = 'gzip-json-array-v1') {
+  if (codec === 'gzip-v8-array-v2') {
+    const bin = gunzipSync(gzBuffer);
+    const payload = v8Deserialize(bin);
+    return Array.isArray(payload?.frames) ? payload.frames : [];
+  }
   const json = gunzipSync(gzBuffer).toString('utf8');
   const payload = JSON.parse(json);
   return Array.isArray(payload?.frames) ? payload.frames : [];
@@ -1273,11 +1341,12 @@ app.get('/api/worlds/:id/frameTimeline', async (req, reply) => {
 
     const frameStats = stmtArchivedFrameStats.get(worldId) || {};
     const chunkStats = stmtArchivedChunkStats.get(worldId) || {};
+    const pendingStats = getPendingTailStats(worldId);
 
-    const frameCount = Number(frameStats.count) || 0;
+    const frameCount = (Number(frameStats.count) || 0) + (Number(pendingStats.count) || 0);
     const chunkFrameCount = Number(chunkStats.frameCount) || 0;
-    const oldestCandidates = [frameStats.oldestTick, frameStats.latestTick, null];
-    const latestCandidates = [frameStats.latestTick, frameStats.oldestTick, null];
+    const oldestCandidates = [frameStats.oldestTick, frameStats.latestTick, pendingStats.oldestTick, pendingStats.latestTick, null];
+    const latestCandidates = [frameStats.latestTick, frameStats.oldestTick, pendingStats.latestTick, pendingStats.oldestTick, null];
 
     // Chunk bounds are deterministic by chunkStartTick/frameCount.
     const firstChunk = db.prepare(

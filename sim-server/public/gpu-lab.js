@@ -534,6 +534,14 @@ function initBodies(n, controls) {
         springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 0, 0]);
       }
     }
+    // Hex-specific mirror chords to remove the last skew mode and keep visual symmetry.
+    if (nodeCount === 6) {
+      const extraPairs = [[0, 4], [1, 5]];
+      for (const [i, j] of extraPairs) {
+        const a = local[i], b = local[j];
+        springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 0, 0]);
+      }
+    }
   }
 
   return { rigid, soft: { nodes: softNodes, springs } };

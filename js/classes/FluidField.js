@@ -45,10 +45,14 @@ export class FluidField {
         this.momentumTiles = new Map(); // velocity-only regions -> lower-frequency priority
         this.carrierTilesTouchedThisStep = new Set();
         this.momentumTilesTouchedThisStep = new Set();
+        this.coarseMomentumBlockSize = 2; // phase A scaffold: 2x2 momentum-only macro blocks
         this.lastActiveTileTelemetry = {
             carrierActiveTiles: 0,
             momentumTilesTotal: 0,
             momentumTilesNonCarrier: 0,
+            coarseMomentumBlockSize: this.coarseMomentumBlockSize,
+            coarseMomentumBlockCount: 0,
+            coarseMomentumCoveragePct: 0,
             totalTiles: this.activeTileCols * this.activeTileRows,
             carrierPct: 0,
             momentumPct: 0,
@@ -176,6 +180,34 @@ export class FluidField {
         return sleeping;
     }
 
+    /**
+     * Phase A scaffold for coarse momentum-only processing:
+     * group momentum-non-carrier tiles into 2x2 macro blocks and report coverage telemetry.
+     */
+    _collectCoarseMomentumBlocks() {
+        const blockSize = Math.max(2, Math.floor(Number(this.coarseMomentumBlockSize) || 2));
+        const blocks = new Set();
+        for (const key of this.momentumTiles.keys()) {
+            if (this.carrierTiles.has(key)) continue;
+            const [txRaw, tyRaw] = String(key).split(':');
+            const tx = Math.floor(Number(txRaw));
+            const ty = Math.floor(Number(tyRaw));
+            if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+            const bx = Math.floor(tx / blockSize);
+            const by = Math.floor(ty / blockSize);
+            blocks.add(`${bx}:${by}`);
+        }
+
+        const coarseMomentumBlockCount = blocks.size;
+        const totalTiles = Math.max(1, this.activeTileCols * this.activeTileRows);
+        const approxCoveredTiles = Math.min(totalTiles, coarseMomentumBlockCount * blockSize * blockSize);
+        return {
+            coarseMomentumBlockSize: blockSize,
+            coarseMomentumBlockCount,
+            coarseMomentumCoveragePct: approxCoveredTiles / totalTiles
+        };
+    }
+
     _finalizeActiveTileTelemetry() {
         const sleepingCarrierTiles = this._decayTileMap(this.carrierTiles);
         const sleepingMomentumTiles = this._decayTileMap(this.momentumTiles);
@@ -187,10 +219,14 @@ export class FluidField {
         for (const key of this.momentumTiles.keys()) {
             if (!this.carrierTiles.has(key)) momentumTilesNonCarrier++;
         }
+        const coarse = this._collectCoarseMomentumBlocks();
         this.lastActiveTileTelemetry = {
             carrierActiveTiles,
             momentumTilesTotal,
             momentumTilesNonCarrier,
+            coarseMomentumBlockSize: coarse.coarseMomentumBlockSize,
+            coarseMomentumBlockCount: coarse.coarseMomentumBlockCount,
+            coarseMomentumCoveragePct: coarse.coarseMomentumCoveragePct,
             totalTiles,
             carrierPct: carrierActiveTiles / totalTiles,
             momentumPct: momentumTilesTotal / totalTiles,

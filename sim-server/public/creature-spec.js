@@ -1,7 +1,10 @@
 export const CREATURE_SPEC_VERSION = 'creature-spec.v2';
 
 const EDGE_BODY_BLOCK = 1;
-const EDGE_DYE_DEFLECT_RGB = [1, 1, 1];
+const EDGE_DYE_PASS = 0;
+const EDGE_DYE_DEFLECT = 1;
+const EDGE_DYE_ABSORB = 2;
+const EDGE_DYE_DEFLECT_RGB = [EDGE_DYE_DEFLECT, EDGE_DYE_DEFLECT, EDGE_DYE_DEFLECT];
 
 export function createCreatureSpecFromMesh(mesh, options = {}) {
   const width = mesh?.meta?.width || options.width || 128;
@@ -667,10 +670,26 @@ function normalizeEdgeBodyMode(v) {
 }
 
 function normalizeEdgeDyeMode(v) {
-  if (Array.isArray(v) && v.length >= 3) return [Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0];
+  if (Array.isArray(v) && v.length >= 3) {
+    return [
+      normalizeEdgeDyeModeChannel(v[0]),
+      normalizeEdgeDyeModeChannel(v[1]),
+      normalizeEdgeDyeModeChannel(v[2]),
+    ];
+  }
   const n = Number(v);
-  if (Number.isFinite(n)) return [n, n, n];
+  if (Number.isFinite(n)) {
+    const c = normalizeEdgeDyeModeChannel(n);
+    return [c, c, c];
+  }
   return [...EDGE_DYE_DEFLECT_RGB];
+}
+
+function normalizeEdgeDyeModeChannel(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return EDGE_DYE_DEFLECT;
+  if (n === EDGE_DYE_PASS || n === EDGE_DYE_DEFLECT || n === EDGE_DYE_ABSORB) return n;
+  return EDGE_DYE_DEFLECT;
 }
 
 function normalizeRGB(v) {

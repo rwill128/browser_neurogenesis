@@ -44,8 +44,21 @@ const EDGE_BODY_MODE = {
 };
 
 function normalizeEdgeDyeModeRGB(mode) {
-  if (Array.isArray(mode)) return mode;
-  return [mode, mode, mode];
+  if (Array.isArray(mode)) {
+    return [
+      normalizeEdgeDyeModeChannel(mode[0]),
+      normalizeEdgeDyeModeChannel(mode[1]),
+      normalizeEdgeDyeModeChannel(mode[2]),
+    ];
+  }
+  const c = normalizeEdgeDyeModeChannel(mode);
+  return [c, c, c];
+}
+
+function normalizeEdgeDyeModeChannel(mode) {
+  const n = Number(mode);
+  if (n === EDGE_DYE_MODE.PASS || n === EDGE_DYE_MODE.DEFLECT || n === EDGE_DYE_MODE.ABSORB) return n;
+  return EDGE_DYE_MODE.DEFLECT;
 }
 
 function readControls() {

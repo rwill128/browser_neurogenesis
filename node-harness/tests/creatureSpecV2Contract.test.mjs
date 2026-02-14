@@ -111,6 +111,26 @@ test('buildBodiesFromCreatureSpec ignores invalid joint references safely', () =
   }
 });
 
+test('buildBodiesFromCreatureSpec clamps unknown edge dye modes to DEFLECT guardrail', () => {
+  const spec = createCreatureSpecFromMesh(sampleMesh());
+
+  // Unknown scalar modes should not create silent non-pass/non-behavioral edges.
+  spec.rigidBodies[0].edgeDyeMode = [99, 0, 2];
+
+  // Unknown per-channel values on soft springs should clamp channel-wise.
+  const firstSpring = spec.softBodies[0].springs[0];
+  if (Array.isArray(firstSpring)) firstSpring[4] = [7, -2, 2];
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+  const rigidModes = bodies.rigid[0].edgeDyeMode[0];
+  assert.deepEqual(rigidModes, [1, 1, 1]);
+  assert.deepEqual(bodies.rigid[0].edgeDyeMode[1], [0, 0, 0]);
+  assert.deepEqual(bodies.rigid[0].edgeDyeMode[2], [2, 2, 2]);
+
+  const softSpringMode = bodies.soft.springs[0][4];
+  assert.deepEqual(softSpringMode, [1, 1, 2]);
+});
+
 test('createCreatureSpecFromMesh preserves optional authoring field payload', () => {
   const w = 16;
   const rigidField = new Float32Array(w * w);

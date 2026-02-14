@@ -83,9 +83,12 @@ export function compileFieldToMesh({
     keptTriangles: filtered.triangles,
   });
 
+  const noOverlap = removeSoftTrianglesOverlappingRigidContours(filtered.triangles, nodes, rigidDecomp.pieces);
+  const final = enforceConnectivity({ triangles: noOverlap.triangles, mode: connectivityMode, minComponentTriangles });
+
   return {
     nodes,
-    triangles: filtered.triangles,
+    triangles: final.triangles,
     rigidPieces: rigidDecomp.pieces,
     rigidWelds: rigidDecomp.welds,
     meta: {
@@ -96,11 +99,14 @@ export function compileFieldToMesh({
       connectivityMode,
       components: filtered.componentCount,
       keptComponents: filtered.keptComponents,
-      rigidTriangles: filtered.triangles.filter((t) => t.kind === 'rigid').length,
-      softTriangles: filtered.triangles.filter((t) => t.kind === 'soft').length,
+      componentsFinal: final.componentCount,
+      keptComponentsFinal: final.keptComponents,
+      rigidTriangles: final.triangles.filter((t) => t.kind === 'rigid').length,
+      softTriangles: final.triangles.filter((t) => t.kind === 'soft').length,
       rigidPieces: rigidDecomp.pieces.length,
       rigidWelds: rigidDecomp.welds.length,
-      droppedTriangles: triangles.length - filtered.triangles.length,
+      droppedTriangles: triangles.length - final.triangles.length,
+      softOverlapTrimmed: noOverlap.removed,
     },
   };
 }
@@ -237,6 +243,50 @@ function extractRigidContoursFromField({ width, height, rigidField, threshold, c
   }
 
   return { pieces, welds: [] };
+}
+
+function removeSoftTrianglesOverlappingRigidContours(triangles, nodes, rigidPieces) {
+  const hulls = (rigidPieces || [])
+    .map((p) => p?.hull)
+    .filter((h) => Array.isArray(h) && h.length >= 3);
+  if (!hulls.length) return { triangles, removed: 0 };
+
+  const keep = [];
+  let removed = 0;
+
+  for (const t of triangles) {
+    if (!t || t.kind !== 'soft') {
+      keep.push(t);
+      continue;
+    }
+    const a = nodes[t.a];
+    const b = nodes[t.b];
+    const c = nodes[t.c];
+    if (!a || !b || !c) continue;
+
+    const probes = [
+      { x: a.x, y: a.y },
+      { x: b.x, y: b.y },
+      { x: c.x, y: c.y },
+      { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 },
+      { x: (b.x + c.x) * 0.5, y: (b.y + c.y) * 0.5 },
+      { x: (c.x + a.x) * 0.5, y: (c.y + a.y) * 0.5 },
+      { x: (a.x + b.x + c.x) / 3, y: (a.y + b.y + c.y) / 3 },
+    ];
+
+    let overlapsRigid = false;
+    for (const hull of hulls) {
+      if (probes.some((p) => pointInPolygon(p.x, p.y, hull))) {
+        overlapsRigid = true;
+        break;
+      }
+    }
+
+    if (overlapsRigid) removed += 1;
+    else keep.push(t);
+  }
+
+  return { triangles: keep, removed };
 }
 
 function collectMaskComponents(mask, cols, rows) {

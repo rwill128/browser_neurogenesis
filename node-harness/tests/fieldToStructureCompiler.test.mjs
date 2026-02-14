@@ -133,16 +133,16 @@ test('compiler exposes rigid decomposition pieces and welds at compile time', ()
 });
 
 test('soft triangles do not overlap rigid contour in rigid+soft overlap zones', () => {
-  const w = 48, h = 48;
+  const w = 64, h = 64;
   const rigid = new Float32Array(w * h);
   const soft = new Float32Array(w * h);
 
   // rigid L
-  for (let y = 8; y <= 34; y++) for (let x = 8; x <= 15; x++) rigid[y * w + x] = 1;
-  for (let y = 26; y <= 34; y++) for (let x = 8; x <= 34; x++) rigid[y * w + x] = 1;
+  for (let y = 10; y <= 48; y++) for (let x = 10; x <= 20; x++) rigid[y * w + x] = 1;
+  for (let y = 36; y <= 48; y++) for (let x = 10; x <= 48; x++) rigid[y * w + x] = 1;
 
   // soft patch intentionally overlapping lower-right interior of rigid L
-  for (let y = 22; y <= 34; y++) for (let x = 14; x <= 30; x++) soft[y * w + x] = 1;
+  for (let y = 28; y <= 48; y++) for (let x = 18; x <= 42; x++) soft[y * w + x] = 1;
 
   const mesh = compileFieldToMesh({
     width: w,
@@ -150,7 +150,7 @@ test('soft triangles do not overlap rigid contour in rigid+soft overlap zones', 
     rigidField: rigid,
     softField: soft,
     threshold: 0.35,
-    density: 2,
+    density: 6,
     connectivityMode: 'largest',
   });
 
@@ -162,10 +162,22 @@ test('soft triangles do not overlap rigid contour in rigid+soft overlap zones', 
     const a = mesh.nodes[t.a];
     const b = mesh.nodes[t.b];
     const c = mesh.nodes[t.c];
-    const cx = (a.x + b.x + c.x) / 3;
-    const cy = (a.y + b.y + c.y) / 3;
+    const probes = [
+      { x: a.x, y: a.y },
+      { x: b.x, y: b.y },
+      { x: c.x, y: c.y },
+      { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 },
+      { x: (b.x + c.x) * 0.5, y: (b.y + c.y) * 0.5 },
+      { x: (c.x + a.x) * 0.5, y: (c.y + a.y) * 0.5 },
+      { x: (a.x + b.x + c.x) / 3, y: (a.y + b.y + c.y) / 3 },
+    ];
+
     for (const hull of rigidHulls) {
-      assert.equal(pointInPolygon(cx, cy, hull), false, 'soft triangle centroid overlapped rigid contour');
+      for (const p of probes) {
+        assert.equal(pointInPolygon(p.x, p.y, hull), false, 'soft triangle probe overlapped rigid contour');
+      }
     }
   }
+
+  assert.ok((mesh.meta.softOverlapTrimmed || 0) > 0, 'expected overlap-trim guardrail to remove some soft triangles');
 });

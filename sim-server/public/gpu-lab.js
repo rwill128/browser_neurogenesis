@@ -4,8 +4,6 @@ const stopBtn = document.getElementById('stopBtn');
 const clearViscBtn = document.getElementById('clearViscBtn');
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
-const viscCanvas = document.getElementById('viscMap');
-const viscCtx = viscCanvas.getContext('2d');
 
 const gridEl = document.getElementById('gridSize');
 const dtEl = document.getElementById('dt');
@@ -283,39 +281,52 @@ function uploadViscMap() {
   sim.device.queue.writeBuffer(sim.viscMapGpu, 0, sim.viscMapCpu);
 }
 
-function drawViscPane() {
+function drawViscosityOverlay() {
   if (!sim) return;
   const n = sim.controls.n;
-  const img = viscCtx.createImageData(n, n);
+  const img = ctx.createImageData(n, n);
   for (let i = 0; i < sim.viscMapCpu.length; i++) {
     const v = Math.max(0, Math.min(1, sim.viscMapCpu[i]));
+    const d = v - 0.5; // neutral is transparent
     const o = i * 4;
-    img.data[o] = v * 255;
-    img.data[o + 1] = (1 - v) * 180;
-    img.data[o + 2] = (1 - v) * 255;
-    img.data[o + 3] = 255;
+    if (Math.abs(d) < 0.03) {
+      img.data[o] = 0;
+      img.data[o + 1] = 0;
+      img.data[o + 2] = 0;
+      img.data[o + 3] = 0;
+      continue;
+    }
+    const t = Math.min(1, Math.abs(d) / 0.5);
+    if (d > 0) {
+      img.data[o] = 255;
+      img.data[o + 1] = 40;
+      img.data[o + 2] = 30;
+    } else {
+      img.data[o] = 45;
+      img.data[o + 1] = 140;
+      img.data[o + 2] = 255;
+    }
+    img.data[o + 3] = Math.floor(145 * t);
   }
   const tmp = document.createElement('canvas');
   tmp.width = n; tmp.height = n;
   tmp.getContext('2d').putImageData(img, 0, 0);
-  viscCtx.clearRect(0, 0, viscCanvas.width, viscCanvas.height);
-  viscCtx.drawImage(tmp, 0, 0, n, n, 0, 0, viscCanvas.width, viscCanvas.height);
+  ctx.drawImage(tmp, 0, 0, n, n, 0, 0, canvas.width, canvas.height);
 }
 
 function resetViscMap() {
   if (!sim) return;
   sim.viscMapCpu.fill(0.5);
   uploadViscMap();
-  drawViscPane();
   log({ ok: true, msg: 'viscosity map reset' });
 }
 
 function paintAt(clientX, clientY, erase = false) {
   if (!sim) return;
-  const rect = viscCanvas.getBoundingClientRect();
+  const rect = canvas.getBoundingClientRect();
   const x = ((clientX - rect.left) / rect.width) * sim.controls.n;
   const y = ((clientY - rect.top) / rect.height) * sim.controls.n;
-  const r = Math.max(1, Number(brushSizeEl.value) || 12) * (sim.controls.n / viscCanvas.width);
+  const r = Math.max(1, Number(brushSizeEl.value) || 12) * (sim.controls.n / canvas.width);
   const value = erase ? 0.05 : Math.max(0, Math.min(1, Number(paintValueEl.value) || 0.85));
 
   const minX = Math.max(0, Math.floor(x - r));
@@ -336,16 +347,15 @@ function paintAt(clientX, clientY, erase = false) {
     }
   }
   uploadViscMap();
-  drawViscPane();
 }
 
-viscCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
-viscCanvas.addEventListener('mousedown', (e) => {
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('mousedown', (e) => {
   painting = true;
   paintAt(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
 });
 window.addEventListener('mouseup', () => { painting = false; });
-viscCanvas.addEventListener('mousemove', (e) => {
+canvas.addEventListener('mousemove', (e) => {
   if (!painting) return;
   paintAt(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
 });
@@ -926,9 +936,8 @@ async function stepAndRender() {
     tmp.getContext('2d').putImageData(img, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(tmp, 0, 0, n, n, 0, 0, canvas.width, canvas.height);
+    drawViscosityOverlay();
     drawBodiesOverlay(s);
-
-    drawViscPane();
 
     const elapsed = (performance.now() - s.t0) / 1000;
     const couplingAverages = summarizeCouplingTelemetry(s.couplingTelemetry);
@@ -962,7 +971,6 @@ async function start() {
   if (running) return;
   running = true;
   sim = await initSim();
-  drawViscPane();
   log('starting live GPU fluid sim...');
   stepAndRender().catch((e) => {
     running = false;

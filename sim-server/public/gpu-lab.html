@@ -47,7 +47,7 @@
     <strong>Viscosity paint:</strong>
     <label>pen width(px) <input id="brushSize" type="number" step="1" value="12" /></label>
     <label>intensity (0..1) <input id="paintValue" type="number" step="0.05" value="0.85" /></label>
-    <span style="color:#aaa">Paint on right pane • Shift/RMB = low viscosity</span>
+    <span style="color:#aaa">Paint directly on fluid pane • Shift/RMB = subtract viscosity (blue)</span>
   </div>
 
   <div class="row">
@@ -61,12 +61,8 @@
 
   <div class="pane-row">
     <div class="pane">
-      <div class="pane-title">GPU fluid visualization</div>
+      <div class="pane-title">GPU fluid visualization + viscosity overlay</div>
       <canvas id="view" width="512" height="512"></canvas>
-    </div>
-    <div class="pane">
-      <div class="pane-title">Viscosity map (paint here)</div>
-      <canvas id="viscMap" width="512" height="512"></canvas>
     </div>
   </div>
 

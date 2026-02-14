@@ -319,6 +319,121 @@ viscCanvas.addEventListener('mousemove', (e) => {
   paintAt(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
 });
 
+function sampleFieldBilinear(field, n, x, y) {
+  const cx = Math.max(0, Math.min(n - 1.001, x));
+  const cy = Math.max(0, Math.min(n - 1.001, y));
+  const x0 = Math.floor(cx), y0 = Math.floor(cy);
+  const x1 = Math.min(n - 1, x0 + 1), y1 = Math.min(n - 1, y0 + 1);
+  const sx = cx - x0, sy = cy - y0;
+  const i00 = y0 * n + x0, i10 = y0 * n + x1, i01 = y1 * n + x0, i11 = y1 * n + x1;
+  const a = field[i00] * (1 - sx) + field[i10] * sx;
+  const b = field[i01] * (1 - sx) + field[i11] * sx;
+  return a * (1 - sy) + b * sy;
+}
+
+function initBodies(n) {
+  const rigid = [
+    { x: n * 0.22, y: n * 0.28, vx: 0, vy: 0, r: 5 },
+    { x: n * 0.75, y: n * 0.62, vx: 0, vy: 0, r: 6 },
+  ];
+  const softNodes = [
+    { x: n * 0.50, y: n * 0.35, vx: 0, vy: 0 },
+    { x: n * 0.55, y: n * 0.40, vx: 0, vy: 0 },
+    { x: n * 0.46, y: n * 0.42, vx: 0, vy: 0 },
+    { x: n * 0.51, y: n * 0.47, vx: 0, vy: 0 },
+  ];
+  const springs = [[0,1,6],[1,2,7],[2,3,6],[3,0,7],[0,2,8],[1,3,8]];
+  return { rigid, soft: { nodes: softNodes, springs } };
+}
+
+function stepBodiesAndInject(sim, vxField, vyField) {
+  const n = sim.controls.n;
+  const dt = sim.controls.dt;
+  const bodies = sim.bodies;
+
+  for (const b of bodies.rigid) {
+    const fx = sampleFieldBilinear(vxField, n, b.x, b.y);
+    const fy = sampleFieldBilinear(vyField, n, b.x, b.y);
+    b.vx += (fx - b.vx) * 0.22 + Math.sin(sim.frame * 0.03 + b.x * 0.01) * 0.01;
+    b.vy += (fy - b.vy) * 0.22;
+    b.x = (b.x + b.vx * dt * 30 + n) % n;
+    b.y = (b.y + b.vy * dt * 30 + n) % n;
+  }
+
+  const s = bodies.soft;
+  for (const node of s.nodes) {
+    const fx = sampleFieldBilinear(vxField, n, node.x, node.y);
+    const fy = sampleFieldBilinear(vyField, n, node.x, node.y);
+    node.vx += (fx - node.vx) * 0.28;
+    node.vy += (fy - node.vy) * 0.28;
+  }
+  for (let iter = 0; iter < 2; iter++) {
+    for (const [i, j, rest] of s.springs) {
+      const a = s.nodes[i], b = s.nodes[j];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.max(1e-6, Math.hypot(dx, dy));
+      const err = (d - rest) * 0.18;
+      const nx = dx / d, ny = dy / d;
+      a.vx += nx * err * 0.02; a.vy += ny * err * 0.02;
+      b.vx -= nx * err * 0.02; b.vy -= ny * err * 0.02;
+    }
+  }
+  for (const node of s.nodes) {
+    node.x = (node.x + node.vx * dt * 26 + n) % n;
+    node.y = (node.y + node.vy * dt * 26 + n) % n;
+  }
+
+  const injectPoint = (px, py, pvx, pvy, rad=3.0) => {
+    const minX = Math.max(0, Math.floor(px - rad));
+    const maxX = Math.min(n - 1, Math.ceil(px + rad));
+    const minY = Math.max(0, Math.floor(py - rad));
+    const maxY = Math.min(n - 1, Math.ceil(py + rad));
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        const dx = x - px, dy = y - py;
+        const d = Math.hypot(dx, dy);
+        if (d > rad) continue;
+        const w = 1 - d / rad;
+        const idx = y * n + x;
+        vxField[idx] += pvx * 0.06 * w;
+        vyField[idx] += pvy * 0.06 * w;
+      }
+    }
+  };
+
+  for (const b of bodies.rigid) injectPoint(b.x, b.y, b.vx, b.vy, b.r * 0.8);
+  for (const node of s.nodes) injectPoint(node.x, node.y, node.vx, node.vy, 2.2);
+}
+
+function drawBodiesOverlay(sim) {
+  const n = sim.controls.n;
+  const sx = canvas.width / n;
+  ctx.save();
+  ctx.lineWidth = 1.5;
+  for (const b of sim.bodies.rigid) {
+    ctx.strokeStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(b.x * sx, b.y * sx, b.r * sx, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  const s = sim.bodies.soft;
+  ctx.strokeStyle = '#7ee0ff';
+  for (const [i, j] of s.springs) {
+    const a = s.nodes[i], b = s.nodes[j];
+    ctx.beginPath();
+    ctx.moveTo(a.x * sx, a.y * sx);
+    ctx.lineTo(b.x * sx, b.y * sx);
+    ctx.stroke();
+  }
+  for (const node of s.nodes) {
+    ctx.fillStyle = '#00ffd0';
+    ctx.beginPath();
+    ctx.arc(node.x * sx, node.y * sx, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 async function initSim() {
   const controls = readControls();
   if (!navigator.gpu) throw new Error('WebGPU unavailable in browser');
@@ -347,6 +462,8 @@ async function initSim() {
   const readR = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const readG = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const readB = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const readVx = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const readVy = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
 
   const inject = await createPipeline(device, injectWgsl);
   const advVel = await createPipeline(device, advectVelWgsl);
@@ -363,7 +480,8 @@ async function initSim() {
     pr0: pA, pr1: pB,
     rr0: rA, rr1: rB, gg0: gA, gg1: gB, bb0: bA, bb1: bB,
     viscMapCpu, viscMapGpu,
-    div, readR, readG, readB,
+    div, readR, readG, readB, readVx, readVy,
+    bodies: initBodies(controls.n),
     frame: 0, t0: performance.now(),
   };
 }
@@ -427,6 +545,8 @@ async function stepAndRender() {
     enc.copyBufferToBuffer(s.rr0, 0, s.readR, 0, s.bytes);
     enc.copyBufferToBuffer(s.gg0, 0, s.readG, 0, s.bytes);
     enc.copyBufferToBuffer(s.bb0, 0, s.readB, 0, s.bytes);
+    enc.copyBufferToBuffer(s.vx0, 0, s.readVx, 0, s.bytes);
+    enc.copyBufferToBuffer(s.vy0, 0, s.readVy, 0, s.bytes);
   }
 
   s.device.queue.submit([enc.finish()]);
@@ -436,12 +556,21 @@ async function stepAndRender() {
       s.readR.mapAsync(GPUMapMode.READ),
       s.readG.mapAsync(GPUMapMode.READ),
       s.readB.mapAsync(GPUMapMode.READ),
+      s.readVx.mapAsync(GPUMapMode.READ),
+      s.readVy.mapAsync(GPUMapMode.READ),
     ]);
 
     const r = new Float32Array(s.readR.getMappedRange().slice(0));
     const g = new Float32Array(s.readG.getMappedRange().slice(0));
     const b = new Float32Array(s.readB.getMappedRange().slice(0));
-    s.readR.unmap(); s.readG.unmap(); s.readB.unmap();
+    const vx = new Float32Array(s.readVx.getMappedRange().slice(0));
+    const vy = new Float32Array(s.readVy.getMappedRange().slice(0));
+    s.readR.unmap(); s.readG.unmap(); s.readB.unmap(); s.readVx.unmap(); s.readVy.unmap();
+
+    // Foundation for rigid+soft body coupling: fluid carries bodies, bodies inject momentum back.
+    stepBodiesAndInject(s, vx, vy);
+    s.device.queue.writeBuffer(s.vx0, 0, vx);
+    s.device.queue.writeBuffer(s.vy0, 0, vy);
 
     const n = s.controls.n;
     const img = ctx.createImageData(n, n);
@@ -464,6 +593,7 @@ async function stepAndRender() {
     tmp.getContext('2d').putImageData(img, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(tmp, 0, 0, n, n, 0, 0, canvas.width, canvas.height);
+    drawBodiesOverlay(s);
 
     drawViscPane();
 

@@ -24,6 +24,15 @@
     <button id="runBtn">Start GPU fluid sim</button>
     <button id="stopBtn">Stop</button>
     <button id="clearViscBtn">Reset viscosity map</button>
+    <label>Scenario
+      <select id="scenarioPreset">
+        <option value="baseline" selected>Baseline</option>
+        <option value="vortexGarden">Vortex Garden</option>
+        <option value="shearCanals">Shear Canals</option>
+        <option value="islands">Viscosity Islands</option>
+        <option value="checkerPlumes">Checker Plumes</option>
+      </select>
+    </label>
     <span id="fpsHud" style="margin-left:10px;color:#9fe3ff;font-family:ui-monospace,Menlo,monospace">FPS: --</span>
   </div>
 

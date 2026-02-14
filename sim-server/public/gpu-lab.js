@@ -15,6 +15,7 @@ const radiusEl = document.getElementById('radius');
 const brushSizeEl = document.getElementById('brushSize');
 const paintValueEl = document.getElementById('paintValue');
 const showViscEl = document.getElementById('showVisc');
+const scenarioPresetEl = document.getElementById('scenarioPreset');
 const massLightEl = document.getElementById('massLight');
 const massHeavyEl = document.getElementById('massHeavy');
 const massSoftEl = document.getElementById('massSoft');
@@ -630,6 +631,126 @@ function initEmitters(n) {
     });
   }
   return emitters;
+}
+
+function buildPresetEmitters(n, preset) {
+  const emitters = [];
+  const mk = (xf, yf, vxf, vyf, color, radius, strength, spin = 0.8) => ({
+    x: n * xf,
+    y: n * yf,
+    vx: vxf,
+    vy: vyf,
+    r: radius,
+    cr: color[0],
+    cg: color[1],
+    cb: color[2],
+    strength,
+    spin,
+    swirlJitter: Math.random() * Math.PI * 2,
+  });
+
+  if (preset === 'vortexGarden') {
+    const colors = [[255,90,70],[80,170,255],[255,220,90],[190,90,255],[90,255,190]];
+    const count = Math.max(8, Math.floor(n / 120));
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      const rf = 0.23 + (i % 3) * 0.06;
+      emitters.push(mk(
+        0.5 + Math.cos(a) * rf,
+        0.5 + Math.sin(a) * rf,
+        -Math.sin(a) * 0.22,
+        Math.cos(a) * 0.22,
+        colors[i % colors.length],
+        Math.max(8, n / 42),
+        1.35,
+        (i % 2 ? 1 : -1) * 1.0
+      ));
+    }
+  } else if (preset === 'shearCanals') {
+    const lanes = 5;
+    for (let i = 0; i < lanes; i++) {
+      const y = 0.16 + (i / (lanes - 1)) * 0.68;
+      const dir = i % 2 === 0 ? 1 : -1;
+      emitters.push(mk(0.08, y, 0.36 * dir, 0, [255,150,80], Math.max(7, n / 55), 1.05, 0.55 * dir));
+      emitters.push(mk(0.92, y, -0.36 * dir, 0, [90,180,255], Math.max(7, n / 55), 1.05, -0.55 * dir));
+    }
+  } else if (preset === 'islands') {
+    const centers = [[0.22,0.24],[0.78,0.28],[0.30,0.75],[0.75,0.72],[0.52,0.50]];
+    const colors = [[255,110,80],[70,160,255],[255,220,90],[180,90,255],[90,255,180]];
+    for (let i = 0; i < centers.length; i++) {
+      const c = centers[i];
+      emitters.push(mk(c[0], c[1], (Math.random()*2-1)*0.12, (Math.random()*2-1)*0.12, colors[i], Math.max(10, n / 35), 1.45, (i%2?1:-1)*0.9));
+    }
+  } else if (preset === 'checkerPlumes') {
+    const cols = 4, rows = 4;
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const xf = 0.16 + x * 0.22;
+        const yf = 0.16 + y * 0.22;
+        const odd = (x + y) % 2 === 1;
+        const color = odd ? [255,120,70] : [90,170,255];
+        emitters.push(mk(xf, yf, odd ? 0.15 : -0.15, odd ? -0.08 : 0.08, color, Math.max(6, n / 65), 0.95, odd ? 0.7 : -0.7));
+      }
+    }
+  } else {
+    return initEmitters(n);
+  }
+  return emitters;
+}
+
+function applyPresetViscosityTerrain(sim, preset) {
+  const n = sim.controls.n;
+  const m = sim.viscMapCpu;
+  m.fill(0.5);
+  const addBlob = (xf, yf, rf, target) => {
+    const cx = n * xf, cy = n * yf, rr = n * rf;
+    const minX = Math.max(0, Math.floor(cx - rr));
+    const maxX = Math.min(n - 1, Math.ceil(cx + rr));
+    const minY = Math.max(0, Math.floor(cy - rr));
+    const maxY = Math.min(n - 1, Math.ceil(cy + rr));
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        const d = Math.hypot(x - cx, y - cy);
+        if (d > rr) continue;
+        const w = 1 - d / rr;
+        const i = y * n + x;
+        m[i] = m[i] * (1 - w) + target * w;
+      }
+    }
+  };
+
+  if (preset === 'vortexGarden') {
+    addBlob(0.5, 0.5, 0.26, 0.15);
+    addBlob(0.5, 0.5, 0.42, 0.78);
+  } else if (preset === 'shearCanals') {
+    for (let i = 0; i < 6; i++) {
+      addBlob(0.5, 0.12 + i * 0.15, 0.06, i % 2 === 0 ? 0.2 : 0.82);
+    }
+  } else if (preset === 'islands') {
+    addBlob(0.24, 0.24, 0.16, 0.88);
+    addBlob(0.76, 0.30, 0.14, 0.84);
+    addBlob(0.30, 0.76, 0.15, 0.86);
+    addBlob(0.74, 0.72, 0.13, 0.82);
+    addBlob(0.52, 0.50, 0.19, 0.18);
+  } else if (preset === 'checkerPlumes') {
+    for (let y = 0; y < 5; y++) {
+      for (let x = 0; x < 5; x++) {
+        addBlob(0.1 + x * 0.2, 0.1 + y * 0.2, 0.07, ((x + y) % 2 === 0) ? 0.2 : 0.8);
+      }
+    }
+  }
+
+  uploadViscMap();
+}
+
+function applyScenarioPreset(sim, preset) {
+  if (!sim) return;
+  const p = preset || 'baseline';
+  sim.emitters = buildPresetEmitters(sim.controls.n, p);
+  applyPresetViscosityTerrain(sim, p);
+  sim.camera.x = sim.controls.n * 0.5;
+  sim.camera.y = sim.controls.n * 0.5;
+  sim.camera.zoom = sim.controls.n >= 1024 ? 1.8 : 1.0;
 }
 
 function applyEmitters(sim, r, g, b, vx, vy) {
@@ -1655,6 +1776,7 @@ async function start() {
   running = true;
   if (fpsHud) fpsHud.textContent = 'FPS: --';
   sim = await initSim();
+  applyScenarioPreset(sim, scenarioPresetEl?.value || 'baseline');
   log('starting live GPU fluid sim...');
   stepAndRender().catch((e) => {
     running = false;
@@ -1671,4 +1793,10 @@ function stop() {
 runBtn.addEventListener('click', () => start().catch((e) => log({ ok: false, error: String(e) })));
 stopBtn.addEventListener('click', stop);
 clearViscBtn.addEventListener('click', resetViscMap);
-log('ready: paint on right viscosity pane, then Start');
+if (scenarioPresetEl) {
+  scenarioPresetEl.addEventListener('change', () => {
+    if (!sim) return;
+    applyScenarioPreset(sim, scenarioPresetEl.value || 'baseline');
+  });
+}
+log('ready: choose scenario, paint, then Start');

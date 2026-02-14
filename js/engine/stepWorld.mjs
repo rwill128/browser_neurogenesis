@@ -1040,8 +1040,12 @@ export function stepWorld(state, dt, options = {}) {
   applyLandscapeDyeEmitters(state, runtimeConfig, dt, rng);
 
   if (state.fluidField) {
-    state.fluidField.dt = dt;
-    state.fluidField.step();
+    const fluidStepEvery = Math.max(1, Math.floor(Number(runtimeConfig.FLUID_STEP_EVERY_N_TICKS) || 1));
+    const worldTick = Math.max(0, Math.floor(Number(state.tick) || 0));
+    if ((worldTick % fluidStepEvery) === 0) {
+      state.fluidField.dt = dt * fluidStepEvery;
+      state.fluidField.step();
+    }
   }
 
   const creatureCeiling = runtimeConfig.CREATURE_POPULATION_CEILING;

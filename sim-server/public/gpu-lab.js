@@ -696,36 +696,52 @@ function drawRegularPolygon(cx, cy, radius, sides, rotation = 0) {
 function drawBodiesOverlay(sim) {
   const n = sim.controls.n;
   const sx = canvas.width / n;
+  const smooth = 0.35;
   ctx.save();
   ctx.lineWidth = 1.5;
   for (let i = 0; i < sim.bodies.rigid.length; i++) {
     const b = sim.bodies.rigid[i];
+    if (b._rx == null) {
+      b._rx = b.x; b._ry = b.y; b._rtheta = b.theta || 0;
+    } else {
+      b._rx += (b.x - b._rx) * smooth;
+      b._ry += (b.y - b._ry) * smooth;
+      b._rtheta += ((b.theta || 0) - b._rtheta) * smooth;
+    }
     ctx.strokeStyle = '#ffffff';
     ctx.fillStyle = 'rgba(255,255,255,0.06)';
     ctx.beginPath();
     drawRegularPolygon(
-      b.x * sx,
-      b.y * sx,
+      b._rx * sx,
+      b._ry * sx,
       b.r * sx,
       i === 0 ? 3 : 4,
-      (b.theta || 0) + (i === 0 ? -Math.PI * 0.5 : Math.PI * 0.25)
+      (b._rtheta || 0) + (i === 0 ? -Math.PI * 0.5 : Math.PI * 0.25)
     );
     ctx.fill();
     ctx.stroke();
   }
   const s = sim.bodies.soft;
+  for (const node of s.nodes) {
+    if (node._rx == null) {
+      node._rx = node.x; node._ry = node.y;
+    } else {
+      node._rx += (node.x - node._rx) * smooth;
+      node._ry += (node.y - node._ry) * smooth;
+    }
+  }
   ctx.strokeStyle = '#7ee0ff';
   for (const [i, j] of s.springs) {
     const a = s.nodes[i], b = s.nodes[j];
     ctx.beginPath();
-    ctx.moveTo(a.x * sx, a.y * sx);
-    ctx.lineTo(b.x * sx, b.y * sx);
+    ctx.moveTo(a._rx * sx, a._ry * sx);
+    ctx.lineTo(b._rx * sx, b._ry * sx);
     ctx.stroke();
   }
   for (const node of s.nodes) {
     ctx.fillStyle = '#00ffd0';
     ctx.beginPath();
-    ctx.arc(node.x * sx, node.y * sx, 2.2, 0, Math.PI * 2);
+    ctx.arc(node._rx * sx, node._ry * sx, 2.2, 0, Math.PI * 2);
     ctx.fill();
   }
 

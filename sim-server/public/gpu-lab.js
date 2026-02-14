@@ -374,26 +374,112 @@ function sampleFieldBilinear(field, n, x, y) {
 
 function initBodies(n, controls) {
   const scale = n / 256;
-  const r0 = 5 * scale;
-  const r1 = 6 * scale;
-  const rigid = [
-    { x: n * 0.22, y: n * 0.28, vx: 0, vy: 0, r: r0, mass: controls.massLight, theta: 0, omega: 0, inertia: 0.5 * controls.massLight * r0 * r0 },
-    { x: n * 0.75, y: n * 0.62, vx: 0, vy: 0, r: r1, mass: controls.massHeavy, theta: 0.3, omega: 0, inertia: 0.5 * controls.massHeavy * r1 * r1 },
-  ];
-  const softNodes = [
-    { x: n * 0.50, y: n * 0.35, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 * scale },
-    { x: n * 0.55, y: n * 0.40, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 * scale },
-    { x: n * 0.46, y: n * 0.42, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 * scale },
-    { x: n * 0.51, y: n * 0.47, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 * scale },
-  ];
-  const edges = [[0,1],[1,2],[2,3],[3,0],[0,2],[1,3]];
-  const springs = edges.map(([i, j]) => {
-    const dx = softNodes[j].x - softNodes[i].x;
-    const dy = softNodes[j].y - softNodes[i].y;
-    const rest = Math.max(1e-3, Math.hypot(dx, dy));
-    return [i, j, rest];
-  });
+  const bigMode = n >= 1024;
+  const rigidCount = bigMode ? 10 : 2;
+  const softClusterCount = bigMode ? 10 : 1;
+
+  const rigid = [];
+  for (let i = 0; i < rigidCount; i++) {
+    const t = rigidCount <= 1 ? 0.5 : i / (rigidCount - 1);
+    const mass = (i % 2 === 0) ? controls.massLight : controls.massHeavy;
+    const r = ((i % 2 === 0) ? 5 : 6) * scale;
+    rigid.push({
+      x: n * (0.15 + 0.7 * ((t + Math.random() * 0.1) % 1)),
+      y: n * (0.2 + 0.6 * Math.random()),
+      vx: 0,
+      vy: 0,
+      r,
+      mass,
+      theta: Math.random() * Math.PI * 2,
+      omega: 0,
+      inertia: 0.5 * mass * r * r,
+    });
+  }
+
+  const softNodes = [];
+  const springs = [];
+  const clusterEdges = [[0,1],[1,2],[2,3],[3,0],[0,2],[1,3]];
+  for (let c = 0; c < softClusterCount; c++) {
+    const cx = n * (0.18 + 0.64 * Math.random());
+    const cy = n * (0.2 + 0.6 * Math.random());
+    const local = [
+      { x: cx - 6 * scale, y: cy - 8 * scale },
+      { x: cx + 6 * scale, y: cy - 2 * scale },
+      { x: cx - 4 * scale, y: cy + 5 * scale },
+      { x: cx + 3 * scale, y: cy + 9 * scale },
+    ];
+    const base = softNodes.length;
+    for (const p of local) {
+      softNodes.push({ x: p.x, y: p.y, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 * scale });
+    }
+    for (const [i, j] of clusterEdges) {
+      const a = local[i], b = local[j];
+      const rest = Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y));
+      springs.push([base + i, base + j, rest]);
+    }
+  }
+
   return { rigid, soft: { nodes: softNodes, springs } };
+}
+
+function initEmitters(n) {
+  if (n < 1024) return [];
+  const count = n >= 2048 ? 16 : 10;
+  const palette = [
+    [255, 70, 50],
+    [50, 170, 255],
+    [255, 220, 70],
+    [170, 90, 255],
+    [80, 255, 170],
+  ];
+  const emitters = [];
+  for (let i = 0; i < count; i++) {
+    const c = palette[i % palette.length];
+    emitters.push({
+      x: n * (0.1 + 0.8 * Math.random()),
+      y: n * (0.1 + 0.8 * Math.random()),
+      vx: (Math.random() * 2 - 1) * 0.2,
+      vy: (Math.random() * 2 - 1) * 0.2,
+      r: (n >= 2048 ? 14 : 10) + Math.random() * 6,
+      cr: c[0],
+      cg: c[1],
+      cb: c[2],
+      strength: n >= 2048 ? 1.6 : 1.2,
+    });
+  }
+  return emitters;
+}
+
+function applyEmitters(sim, r, g, b, vx, vy) {
+  const n = sim.controls.n;
+  for (const e of sim.emitters || []) {
+    e.x += e.vx;
+    e.y += e.vy;
+    if (e.x < e.r || e.x > n - e.r) e.vx *= -1;
+    if (e.y < e.r || e.y > n - e.r) e.vy *= -1;
+    e.x = Math.max(e.r, Math.min(n - e.r, e.x));
+    e.y = Math.max(e.r, Math.min(n - e.r, e.y));
+
+    const minX = Math.max(0, Math.floor(e.x - e.r));
+    const maxX = Math.min(n - 1, Math.ceil(e.x + e.r));
+    const minY = Math.max(0, Math.floor(e.y - e.r));
+    const maxY = Math.min(n - 1, Math.ceil(e.y + e.r));
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        const dx = x - e.x;
+        const dy = y - e.y;
+        const d = Math.hypot(dx, dy);
+        if (d > e.r) continue;
+        const w = (1 - d / e.r) * e.strength;
+        const i = y * n + x;
+        r[i] = Math.min(255, r[i] + e.cr * 0.03 * w);
+        g[i] = Math.min(255, g[i] + e.cg * 0.03 * w);
+        b[i] = Math.min(255, b[i] + e.cb * 0.03 * w);
+        vx[i] += e.vx * 0.03 * w;
+        vy[i] += e.vy * 0.03 * w;
+      }
+    }
+  }
 }
 
 function computeSoftCentroid(nodes) {
@@ -813,6 +899,7 @@ async function initSim() {
     viscMapCpu, viscMapGpu,
     div, readR, readG, readB, readVx, readVy,
     bodies: initBodies(controls.n, controls),
+    emitters: initEmitters(controls.n),
     couplingTelemetry: [],
     frame: 0, t0: performance.now(),
   };
@@ -913,9 +1000,13 @@ async function stepAndRender() {
 
     // Rigid + soft coupling: carry/drag from flow + two-way pushback/swim impulses.
     const couplingInstant = stepBodiesAndInject(s, vx, vy);
+    applyEmitters(s, r, g, b, vx, vy);
     enforceFluidEdgeBoundariesCpu(vx, vy, s.controls.n);
     s.device.queue.writeBuffer(s.vx0, 0, vx);
     s.device.queue.writeBuffer(s.vy0, 0, vy);
+    s.device.queue.writeBuffer(s.rr0, 0, r);
+    s.device.queue.writeBuffer(s.gg0, 0, g);
+    s.device.queue.writeBuffer(s.bb0, 0, b);
 
     const n = s.controls.n;
     const img = ctx.createImageData(n, n);

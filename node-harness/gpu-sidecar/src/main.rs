@@ -344,21 +344,100 @@ async fn run_fluid_step(
     let advect_dye_pipeline = mk_pipeline(&device, "advect-dye", FLUID_ADVECT_DYE_WGSL);
     let fade_pipeline = mk_pipeline(&device, "fade", FLUID_FADE_WGSL);
 
+    // pre-build bind groups so per-step work stays focused on GPU kernels (less CPU descriptor churn)
+    let bg_init = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-init"),
+        layout: &init_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: dye_a.as_entire_binding() },
+        ],
+    });
+    let bg_advect_vel = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-advect-vel"),
+        layout: &advect_vel_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: vel_b.as_entire_binding() },
+        ],
+    });
+    let bg_div = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-div"),
+        layout: &divergence_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: vel_b.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: div.as_entire_binding() },
+        ],
+    });
+    let bg_jacobi_ab = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-jacobi-ab"),
+        layout: &jacobi_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: pressure_a.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: div.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: pressure_b.as_entire_binding() },
+        ],
+    });
+    let bg_jacobi_ba = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-jacobi-ba"),
+        layout: &jacobi_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: pressure_b.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: div.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: pressure_a.as_entire_binding() },
+        ],
+    });
+    let bg_project_from_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-project-from-a"),
+        layout: &project_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: vel_b.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: pressure_a.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: vel_a.as_entire_binding() },
+        ],
+    });
+    let bg_project_from_b = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-project-from-b"),
+        layout: &project_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: vel_b.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: pressure_b.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: vel_a.as_entire_binding() },
+        ],
+    });
+    let bg_advect_dye = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-advect-dye"),
+        layout: &advect_dye_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: dye_a.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 3, resource: dye_b.as_entire_binding() },
+        ],
+    });
+    let bg_fade = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-fade"),
+        layout: &fade_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 1, resource: dye_b.as_entire_binding() },
+            wgpu::BindGroupEntry { binding: 2, resource: dye_a.as_entire_binding() },
+        ],
+    });
+
     // seed initial velocity + dye
     {
         let mut encoder = device.create_command_encoder(&Default::default());
-        let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("bg-init"),
-            layout: &init_pipeline.get_bind_group_layout(0),
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: dye_a.as_entire_binding() },
-            ],
-        });
         let mut pass = encoder.begin_compute_pass(&Default::default());
         pass.set_pipeline(&init_pipeline);
-        pass.set_bind_group(0, &bg, &[]);
+        pass.set_bind_group(0, &bg_init, &[]);
         pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
         drop(pass);
         queue.submit(Some(encoder.finish()));
@@ -373,108 +452,48 @@ async fn run_fluid_step(
 
         // velocity advection
         {
-            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("bg-advect-vel"),
-                layout: &advect_vel_pipeline.get_bind_group_layout(0),
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: vel_b.as_entire_binding() },
-                ],
-            });
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&advect_vel_pipeline);
-            pass.set_bind_group(0, &bg, &[]);
+            pass.set_bind_group(0, &bg_advect_vel, &[]);
             pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
         }
 
         // divergence
         {
-            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("bg-div"),
-                layout: &divergence_pipeline.get_bind_group_layout(0),
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: vel_b.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: div.as_entire_binding() },
-                ],
-            });
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&divergence_pipeline);
-            pass.set_bind_group(0, &bg, &[]);
+            pass.set_bind_group(0, &bg_div, &[]);
             pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
         }
 
         for i in 0..jacobi_iters {
-            let (p_in, p_out) = if i % 2 == 0 { (&pressure_a, &pressure_b) } else { (&pressure_b, &pressure_a) };
-            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("bg-jacobi"),
-                layout: &jacobi_pipeline.get_bind_group_layout(0),
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: p_in.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: div.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: p_out.as_entire_binding() },
-                ],
-            });
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&jacobi_pipeline);
-            pass.set_bind_group(0, &bg, &[]);
+            pass.set_bind_group(0, if i % 2 == 0 { &bg_jacobi_ab } else { &bg_jacobi_ba }, &[]);
             pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
         }
 
-        let p_final = if jacobi_iters % 2 == 0 { &pressure_a } else { &pressure_b };
-
         // projection
         {
-            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("bg-project"),
-                layout: &project_pipeline.get_bind_group_layout(0),
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: vel_b.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: p_final.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: vel_a.as_entire_binding() },
-                ],
-            });
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&project_pipeline);
-            pass.set_bind_group(0, &bg, &[]);
+            pass.set_bind_group(0, if jacobi_iters % 2 == 0 { &bg_project_from_a } else { &bg_project_from_b }, &[]);
             pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
         }
 
         // dye advection
         {
-            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("bg-advect-dye"),
-                layout: &advect_dye_pipeline.get_bind_group_layout(0),
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: dye_a.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: dye_b.as_entire_binding() },
-                ],
-            });
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&advect_dye_pipeline);
-            pass.set_bind_group(0, &bg, &[]);
+            pass.set_bind_group(0, &bg_advect_dye, &[]);
             pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
         }
 
         // dye fade and re-seed source slightly
         {
-            let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("bg-fade"),
-                layout: &fade_pipeline.get_bind_group_layout(0),
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: dye_b.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: dye_a.as_entire_binding() },
-                ],
-            });
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&fade_pipeline);
-            pass.set_bind_group(0, &bg, &[]);
+            pass.set_bind_group(0, &bg_fade, &[]);
             pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
         }
 

@@ -411,6 +411,26 @@ function applyBounceBoundary(body, n, damping = 0.82) {
   }
 }
 
+function enforceFluidEdgeBoundariesCpu(vxField, vyField, n) {
+  const last = n - 1;
+  for (let x = 0; x < n; x++) {
+    const top = x;
+    const bottom = last * n + x;
+    vyField[top] = 0;
+    vyField[bottom] = 0;
+    vxField[top] *= 0.7;
+    vxField[bottom] *= 0.7;
+  }
+  for (let y = 0; y < n; y++) {
+    const left = y * n;
+    const right = y * n + last;
+    vxField[left] = 0;
+    vxField[right] = 0;
+    vyField[left] *= 0.7;
+    vyField[right] *= 0.7;
+  }
+}
+
 function stepBodiesAndInject(sim, vxField, vyField) {
   const n = sim.controls.n;
   const dt = sim.controls.dt;
@@ -773,6 +793,7 @@ async function stepAndRender() {
 
     // Rigid + soft coupling: carry/drag from flow + two-way pushback/swim impulses.
     const couplingInstant = stepBodiesAndInject(s, vx, vy);
+    enforceFluidEdgeBoundariesCpu(vx, vy, s.controls.n);
     s.device.queue.writeBuffer(s.vx0, 0, vx);
     s.device.queue.writeBuffer(s.vy0, 0, vy);
 

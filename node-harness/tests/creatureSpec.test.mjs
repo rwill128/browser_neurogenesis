@@ -25,6 +25,6 @@ test('CreatureSpec roundtrip parse and build bodies', () => {
   assert.ok(Array.isArray(bodies.rigid));
   assert.ok(Array.isArray(bodies.soft.nodes));
   assert.ok(Array.isArray(bodies.soft.springs));
-  assert.ok(bodies.rigid.length >= 1);
-  assert.ok(bodies.soft.nodes.length >= 3);
+  assert.equal(bodies.rigid.length, 0);
+  assert.ok(bodies.soft.nodes.length >= 6);
 });

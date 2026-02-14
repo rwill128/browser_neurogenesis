@@ -47,53 +47,42 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
     else triByKind.soft.push(t);
   }
 
-  const rigid = buildRigidFromTriangles(triByKind.rigid, nodes, controls);
-  const soft = buildSoftFromTriangles(triByKind.soft, nodes, controls);
-  return { rigid, soft, hybrid: [] };
+  // Preserve imported geometry fidelity by compiling both rigid and soft triangle regions into
+  // explicit node/spring meshes (instead of convex-hulling rigid regions into one regular polygon).
+  const rigidLike = buildSoftFromTriangles(triByKind.rigid, nodes, controls, {
+    clusterOffset: 10000,
+    mass: controls.massHeavy,
+    radius: 1.4,
+    digestEnabled: false,
+    digestRGB: [1, 1, 1],
+  });
+  const soft = buildSoftFromTriangles(triByKind.soft, nodes, controls, {
+    clusterOffset: 0,
+    mass: controls.massSoft,
+    radius: 1.6,
+    digestEnabled: false,
+    digestRGB: [1, 1, 1],
+  });
+
+  return {
+    rigid: [],
+    soft: {
+      nodes: [...rigidLike.nodes, ...soft.nodes],
+      springs: [...rigidLike.springs, ...soft.springs],
+    },
+    hybrid: [],
+  };
 }
 
-function buildRigidFromTriangles(tris, nodes, controls) {
-  const comps = triangleComponents(tris);
-  const out = [];
-  for (const comp of comps) {
-    const pointIds = new Set();
-    for (const t of comp) {
-      pointIds.add(t.a); pointIds.add(t.b); pointIds.add(t.c);
-    }
-    const pts = [...pointIds].map((i) => nodes[i]);
-    if (!pts.length) continue;
-    let cx = 0, cy = 0;
-    for (const p of pts) { cx += p.x; cy += p.y; }
-    cx /= pts.length; cy /= pts.length;
-    let r = 0;
-    for (const p of pts) r = Math.max(r, Math.hypot(p.x - cx, p.y - cy));
-    r = Math.max(2.5, r);
-    const sides = Math.max(3, Math.min(8, approximateHullSides(pts)));
-    out.push({
-      x: cx,
-      y: cy,
-      vx: 0,
-      vy: 0,
-      r,
-      sides,
-      edgeDyeMode: Array.from({ length: sides }, () => [1, 1, 1]),
-      edgeBodyMode: Array.from({ length: sides }, () => 1),
-      digestEnabled: false,
-      digestRGB: [1, 1, 1],
-      mass: controls.massHeavy,
-      theta: 0,
-      omega: 0,
-      inertia: 0.5 * controls.massHeavy * r * r,
-    });
-  }
-  return out;
-}
-
-function buildSoftFromTriangles(tris, nodes, controls) {
+function buildSoftFromTriangles(tris, nodes, controls, opts = {}) {
   const comps = triangleComponents(tris);
   const softNodes = [];
   const springs = [];
-  let clusterId = 0;
+  let clusterId = opts.clusterOffset || 0;
+  const nodeMass = opts.mass ?? controls.massSoft;
+  const nodeRadius = opts.radius ?? 1.6;
+  const digestEnabled = !!opts.digestEnabled;
+  const digestRGB = opts.digestRGB || [1, 1, 1];
   for (const comp of comps) {
     const pointIds = new Set();
     for (const t of comp) {
@@ -110,11 +99,11 @@ function buildSoftFromTriangles(tris, nodes, controls) {
         y: p.y,
         vx: 0,
         vy: 0,
-        mass: controls.massSoft,
-        r: 1.6,
+        mass: nodeMass,
+        r: nodeRadius,
         clusterId,
-        digestEnabled: false,
-        digestRGB: [1, 1, 1],
+        digestEnabled,
+        digestRGB: [...digestRGB],
       });
     });
 

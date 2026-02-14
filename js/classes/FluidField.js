@@ -36,7 +36,7 @@ export class FluidField {
          * This does not yet restrict solver compute to active tiles; it tracks spatial activity so
          * we can quantify sparsity and progressively migrate solver work to active regions.
          */
-        this.activeTileSize = Math.max(8, Math.floor(Number(config.FLUID_ACTIVE_TILE_SIZE_CELLS) || 32));
+        this.activeTileSize = Math.max(1, Math.floor(Number(config.FLUID_ACTIVE_TILE_SIZE_CELLS) || 32));
         this.activeTileHalo = Math.max(0, Math.floor(Number(config.FLUID_ACTIVE_TILE_HALO_TILES) || 1));
         this.activeTileTtlMax = Math.max(1, Math.floor(Number(config.FLUID_ACTIVE_TILE_TTL_STEPS) || 12));
         this.activeTileCols = Math.max(1, Math.ceil(this.size / this.activeTileSize));

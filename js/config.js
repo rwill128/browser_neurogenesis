@@ -333,7 +333,7 @@ const config = {
     // Multi-rate fluid stepping: run fluid solver every N world ticks.
     FLUID_STEP_EVERY_N_TICKS: 1,
     // Active-tile tracking scaffold (phase 1 sparse-fluid architecture).
-    FLUID_ACTIVE_TILE_SIZE_CELLS: 32,
+    FLUID_ACTIVE_TILE_SIZE_CELLS: 1,
     FLUID_ACTIVE_TILE_HALO_TILES: 1,
     FLUID_ACTIVE_TILE_TTL_STEPS: 12,
     FLUID_MOMENTUM_ONLY_STEP_EVERY_N_TICKS: 6,

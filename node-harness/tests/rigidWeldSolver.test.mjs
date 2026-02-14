@@ -74,6 +74,62 @@ test('applyRigidWeldConstraints limits first-step correction for far-separated b
   assert.ok(Number.isFinite(bodies.rigid[0].omega) && Number.isFinite(bodies.rigid[1].omega));
 });
 
+test('applyRigidWeldConstraints enforces a minimum bounded maxPairError floor', () => {
+  const bodies = {
+    rigid: [
+      {
+        x: 0, y: 0, vx: 0, vy: 0, theta: 0, omega: 0,
+        verticesLocal: [{ x: -1, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }],
+      },
+      {
+        x: 40, y: 0, vx: 0, vy: 0, theta: 0, omega: 0,
+        verticesLocal: [{ x: -1, y: 0 }, { x: 1, y: 0 }, { x: 0, y: -1 }],
+      },
+    ],
+    rigidWelds: [
+      { a: 0, b: 1, a0: 1, a1: 2, b0: 0, b1: 2 },
+    ],
+  };
+
+  applyRigidWeldConstraints({
+    rigid: bodies.rigid,
+    rigidWelds: bodies.rigidWelds,
+    rigidVertexWorld,
+    stiffness: 0.06,
+    errorScale: 0.95,
+    maxPairError: 0,
+  });
+
+  // maxPairError is floored to 0.05 internally.
+  const maxExpectedDelta = 2 * 0.06 * 0.05 + 1e-9;
+  assert.ok(Math.abs(bodies.rigid[0].vx) <= maxExpectedDelta);
+  assert.ok(Math.abs(bodies.rigid[1].vx) <= maxExpectedDelta);
+});
+
+test('applyRigidWeldConstraints sanitizes non-finite rigid state while applying constraints', () => {
+  const bodies = {
+    rigid: [
+      {
+        x: 0, y: 0, vx: Number.NaN, vy: Number.POSITIVE_INFINITY, theta: 0, omega: Number.NaN,
+        verticesLocal: [{ x: -1, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }],
+      },
+      {
+        x: 8, y: 0, vx: 0, vy: 0, theta: 0, omega: 0,
+        verticesLocal: [{ x: -1, y: 0 }, { x: 1, y: 0 }, { x: 0, y: -1 }],
+      },
+    ],
+    rigidWelds: [
+      { a: 0, b: 1, a0: 1, a1: 2, b0: 0, b1: 2 },
+    ],
+  };
+
+  applyRigidWeldConstraints({ rigid: bodies.rigid, rigidWelds: bodies.rigidWelds, rigidVertexWorld });
+
+  assert.ok(Number.isFinite(bodies.rigid[0].vx));
+  assert.ok(Number.isFinite(bodies.rigid[0].vy));
+  assert.ok(Number.isFinite(bodies.rigid[0].omega));
+});
+
 test('applyRigidWeldConstraints pulls welded rigid pieces together over steps', () => {
   const bodies = {
     rigid: [

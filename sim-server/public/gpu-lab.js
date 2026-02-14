@@ -609,8 +609,17 @@ function initBodies(n, controls) {
 
   const hybrid = [];
   // Minimal hybrid archetype: rigid triangle edge-attached to a soft triangle with one free soft apex.
-  const triRigidIndex = rigid.findIndex((rb) => (rb.sides || 0) === 3);
-  if (triRigidIndex >= 0) {
+  const triangleCandidates = rigid
+    .map((rb, idx) => ({ rb, idx }))
+    .filter(({ rb }) => (rb.sides || 0) === 3)
+    .sort((a, b) => {
+      const ma = Math.min(a.rb.x, n - a.rb.x, a.rb.y, n - a.rb.y) - a.rb.r;
+      const mb = Math.min(b.rb.x, n - b.rb.x, b.rb.y, n - b.rb.y) - b.rb.r;
+      return mb - ma;
+    });
+
+  if (triangleCandidates.length > 0) {
+    const triRigidIndex = triangleCandidates[0].idx;
     const rb = rigid[triRigidIndex];
     const va = rigidVertexWorld(rb, 1);
     const vb = rigidVertexWorld(rb, 2);
@@ -618,9 +627,21 @@ function initBodies(n, controls) {
     const my = (va.y + vb.y) * 0.5;
     const ex = vb.x - va.x, ey = vb.y - va.y;
     const el = Math.max(1e-6, Math.hypot(ex, ey));
-    const nx = -ey / el, ny = ex / el;
+
+    // Choose the edge normal that points further into the domain to avoid corner clipping.
+    const n1 = { x: -ey / el, y: ex / el };
+    const n2 = { x: -n1.x, y: -n1.y };
+    const marginScore = (px, py) => Math.min(px, n - px, py, n - py);
     const apexDist = rb.r * 0.95;
-    const apex = { x: mx + nx * apexDist, y: my + ny * apexDist };
+    const a1 = { x: mx + n1.x * apexDist, y: my + n1.y * apexDist };
+    const a2 = { x: mx + n2.x * apexDist, y: my + n2.y * apexDist };
+    const apexRaw = marginScore(a1.x, a1.y) >= marginScore(a2.x, a2.y) ? a1 : a2;
+    const margin = rb.r * 0.75;
+    const apex = {
+      x: Math.max(margin, Math.min(n - margin, apexRaw.x)),
+      y: Math.max(margin, Math.min(n - margin, apexRaw.y)),
+    };
+
     const nodeIndex = softNodes.length;
     softNodes.push({
       x: apex.x,

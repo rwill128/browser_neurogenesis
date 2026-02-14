@@ -376,6 +376,7 @@ function sampleFieldBilinear(field, n, x, y) {
 function initBodies(n, controls) {
   const scale = n / 256;
   const bigMode = n >= 1024;
+  const bodyScale = bigMode ? 0.5 : 1.0;
   const rigidCount = bigMode ? 10 : 2;
   const softClusterCount = bigMode ? 10 : 1;
 
@@ -383,7 +384,7 @@ function initBodies(n, controls) {
   for (let i = 0; i < rigidCount; i++) {
     const t = rigidCount <= 1 ? 0.5 : i / (rigidCount - 1);
     const mass = (i % 2 === 0) ? controls.massLight : controls.massHeavy;
-    const r = ((i % 2 === 0) ? 5 : 6) * scale;
+    const r = ((i % 2 === 0) ? 5 : 6) * scale * bodyScale;
     rigid.push({
       x: n * (0.15 + 0.7 * ((t + Math.random() * 0.1) % 1)),
       y: n * (0.2 + 0.6 * Math.random()),
@@ -404,14 +405,14 @@ function initBodies(n, controls) {
     const cx = n * (0.18 + 0.64 * Math.random());
     const cy = n * (0.2 + 0.6 * Math.random());
     const local = [
-      { x: cx - 6 * scale, y: cy - 8 * scale },
-      { x: cx + 6 * scale, y: cy - 2 * scale },
-      { x: cx - 4 * scale, y: cy + 5 * scale },
-      { x: cx + 3 * scale, y: cy + 9 * scale },
+      { x: cx - 6 * scale * bodyScale, y: cy - 8 * scale * bodyScale },
+      { x: cx + 6 * scale * bodyScale, y: cy - 2 * scale * bodyScale },
+      { x: cx - 4 * scale * bodyScale, y: cy + 5 * scale * bodyScale },
+      { x: cx + 3 * scale * bodyScale, y: cy + 9 * scale * bodyScale },
     ];
     const base = softNodes.length;
     for (const p of local) {
-      softNodes.push({ x: p.x, y: p.y, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 * scale });
+      softNodes.push({ x: p.x, y: p.y, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 * scale * bodyScale });
     }
     for (const [i, j] of clusterEdges) {
       const a = local[i], b = local[j];
@@ -674,15 +675,15 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     softCarryTransfer += Math.hypot(carryX, carryY);
   }
 
-  for (let iter = 0; iter < 5; iter++) {
+  for (let iter = 0; iter < 7; iter++) {
     for (const [i, j, rest] of s.springs) {
       const a = s.nodes[i], b = s.nodes[j];
       const dx = b.x - a.x, dy = b.y - a.y;
       const d = Math.max(1e-6, Math.hypot(dx, dy));
-      const err = (d - rest) * 0.52;
+      const err = (d - rest) * 0.68;
       const nx = dx / d, ny = dy / d;
-      a.vx += nx * err * 0.028; a.vy += ny * err * 0.028;
-      b.vx -= nx * err * 0.028; b.vy -= ny * err * 0.028;
+      a.vx += nx * err * 0.034; a.vy += ny * err * 0.034;
+      b.vx -= nx * err * 0.034; b.vy -= ny * err * 0.034;
     }
   }
 

@@ -22,6 +22,7 @@ const radiusEl = document.getElementById('radius');
 const brushSizeEl = document.getElementById('brushSize');
 const paintValueEl = document.getElementById('paintValue');
 const showViscEl = document.getElementById('showVisc');
+const showCollisionHullEl = document.getElementById('showCollisionHull');
 const scenarioPresetEl = document.getElementById('scenarioPreset');
 const massLightEl = document.getElementById('massLight');
 const massHeavyEl = document.getElementById('massHeavy');
@@ -1573,10 +1574,29 @@ function mergeBodiesIntoSim(target, incoming) {
   }
 }
 
+function isConcavePolygon(verts) {
+  if (!Array.isArray(verts) || verts.length < 4) return false;
+  let hasPos = false;
+  let hasNeg = false;
+  for (let i = 0; i < verts.length; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % verts.length];
+    const c = verts[(i + 2) % verts.length];
+    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+    if (cross > 1e-6) hasPos = true;
+    if (cross < -1e-6) hasNeg = true;
+    if (hasPos && hasNeg) return true;
+  }
+  return false;
+}
+
 function drawBodiesOverlay(sim) {
   const smooth = 0.35;
   const v = getCameraView(sim);
   const pxPerWorld = canvas.width / v.w;
+  const collisionDebug = !!showCollisionHullEl?.checked;
+  let concaveCount = 0;
+
   ctx.save();
   ctx.lineWidth = 1.5;
   for (let i = 0; i < sim.bodies.rigid.length; i++) {
@@ -1588,10 +1608,11 @@ function drawBodiesOverlay(sim) {
       b._ry += (b.y - b._ry) * smooth;
       b._rtheta += ((b.theta || 0) - b._rtheta) * smooth;
     }
-    const sp = worldToScreen(sim, b._rx, b._ry);
     ctx.fillStyle = b.digestEnabled ? 'rgba(255, 90, 120, 0.22)' : 'rgba(255,255,255,0.06)';
     const vertsW = rigidVerticesWorld({ ...b, x: b._rx, y: b._ry, theta: b._rtheta });
     const verts = vertsW.map((v) => worldToScreen(sim, v.x, v.y));
+    const solverVertsW = rigidVerticesWorld(b);
+    if (isConcavePolygon(solverVertsW)) concaveCount += 1;
     const sides = verts.length;
     ctx.beginPath();
     for (let vi = 0; vi < sides; vi++) {
@@ -1611,6 +1632,40 @@ function drawBodiesOverlay(sim) {
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b2.x, b2.y);
       ctx.stroke();
+    }
+
+    if (collisionDebug) {
+      const solverVerts = solverVertsW.map((p) => worldToScreen(sim, p.x, p.y));
+
+      // Solver collision hull (actual polygon used by rigid-vs-soft concave contact).
+      ctx.save();
+      ctx.setLineDash([6, 4]);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = isConcavePolygon(solverVertsW) ? 'rgba(80,255,120,0.98)' : 'rgba(120,220,255,0.95)';
+      ctx.beginPath();
+      for (let vi = 0; vi < solverVerts.length; vi++) {
+        const p = solverVerts[vi];
+        if (vi === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+
+      // Broad-phase rigid-rigid collision proxy currently still uses body radius.
+      const c = worldToScreen(sim, b.x, b.y);
+      ctx.strokeStyle = 'rgba(255,90,90,0.85)';
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, Math.max(1, b.r * pxPerWorld), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      for (const p of solverVerts) {
+        ctx.fillStyle = 'rgba(255,255,0,0.95)';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
     }
   }
 
@@ -1707,9 +1762,15 @@ function drawBodiesOverlay(sim) {
 
   ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
-  ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, ABSORB=amber, MIXED=violet | zoom ${sim.camera.zoom.toFixed(2)}x`, 10, canvas.height - 28);
+  const collisionDebugSuffix = collisionDebug
+    ? ` | solver hull debug ON (concave ${concaveCount}/${sim.bodies.rigid.length})`
+    : '';
+  ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, ABSORB=amber, MIXED=violet | zoom ${sim.camera.zoom.toFixed(2)}x${collisionDebugSuffix}`, 10, canvas.height - 28);
   ctx.fillStyle = 'rgba(0,255,208,0.95)';
-  ctx.fillText('Body edges: BLOCK (bright) vs PASS (dim) | hybrid links=magenta | Alt+drag/right-drag pan, wheel zoom', 10, canvas.height - 12);
+  const line2 = collisionDebug
+    ? 'Body edges: BLOCK (bright) vs PASS (dim) | dashed green/cyan=solver hull, dashed red=circle broad-phase | Alt+drag/right-drag pan, wheel zoom'
+    : 'Body edges: BLOCK (bright) vs PASS (dim) | hybrid links=magenta | Alt+drag/right-drag pan, wheel zoom';
+  ctx.fillText(line2, 10, canvas.height - 12);
   ctx.restore();
 }
 

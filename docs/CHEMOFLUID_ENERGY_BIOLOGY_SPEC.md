@@ -145,11 +145,54 @@ Global drag coefficients are too coarse. Local coefficients create directional m
 - Ensure deterministic ordering/indexing so heredity and parity checks remain stable.
 
 ## 8) Developmental growth plan (evo-devo direction)
-Instead of fully static bodies:
-- Define staged growth (node/edge addition, materialization over time).
-- Growth consumes energy.
-- Growth plan is heritable + mutable.
-- Enables life-history strategies (fast repro vs robust mature forms).
+
+### 8.1 Growth-plan representation
+Each lineage carries a finite, ordered growth plan `P = [p1..pn]`, where each step `pi` is:
+- `kind`: `{add_node, add_edge, reinforce_material, activate_actuator, remodel_local_drag}`
+- `cost_energy`: metabolizable energy required before execution
+- `maturity_gate`: minimum organism age or stage index
+- `topology_guard`: invariant checks that must pass pre/post step
+- `rollback_policy`: `{skip, retry_later, abort_plan}`
+
+`P` is heritable and mutation-editable (insert/delete/retune step params) under Section 6.2 budget limits.
+
+### 8.2 Execution state machine
+Per organism, maintain:
+- `growth_stage` (index into `P`)
+- `growth_active` (bool)
+- `growth_debt` (reserved but not yet spent energy)
+- `growth_cooldown_until`
+
+Step `pi` can execute only if all are true:
+1. `E_store - E_reserve_min >= cost_energy + E_operational_buffer`
+2. `S_ema(t) >= S_growth_min` over `T_growth_hold` (prevents growth during transient spikes)
+3. `now >= growth_cooldown_until`
+4. Topology/material guards succeed
+
+On execute:
+- Reserve `cost_energy` into `growth_debt`, apply structural/material change, then settle spend:
+  - success: `E_store -= cost_energy`, `growth_debt -> 0`, `growth_stage++`
+  - failure with rollback `skip`: `growth_stage++`, debt returned
+  - failure with rollback `retry_later`: debt returned, keep stage, set cooldown
+  - failure with rollback `abort_plan`: debt returned, disable growth for life
+
+### 8.3 Coupling to reproduction and survival
+- While `growth_active`, reproduction gate in Section 4.4 uses `G(t)` including planned growth amortization term:
+  `G(t) = G_exec(t) + G_reserve(t)` where `G_reserve(t)` tracks active reservation pressure.
+- If starvation mode is entered, pending growth is automatically paused and reservations released.
+- Optional life-history switch: once final stage completes, maintenance multiplier may increase (larger mature form) while actuator efficiency may improve.
+
+### 8.4 Mutation constraints for growth plans
+- Max steps: `|P| <= P_max`.
+- Structural edits to `P` must preserve at least one viable minimal morphology path.
+- `activate_actuator` cannot reference unsupported actuator enum/state.
+- `remodel_local_drag` must respect per-node/per-edge bounds and smoothness regularizer.
+
+### 8.5 Starter constants (design defaults)
+- `T_growth_hold`: 8-20 s
+- `S_growth_min`: 0.25-1.0x median maintenance flux
+- `E_operational_buffer`: 0.5-1.5x instantaneous maintenance
+- `growth_cooldown`: 3-10 s between steps
 
 ## 8) Evaluation scenarios (for future implementation)
 Create fixed scenario suite for meaningful comparisons:
@@ -189,7 +232,14 @@ For each scenario, track survival, reproduction, lineage persistence, diversity,
 - [ ] Structural mutation never breaks required topology invariants.
 - [ ] Drift adaptation never sets `σ` outside `[σ_min, σ_max]`.
 
-### 10.4 Chemofluid consistency checks
+### 10.4 Growth-plan logic and gating checks
+- [ ] Growth step cannot execute unless energy + sustained-surplus gates in Section 8.2 are simultaneously satisfied.
+- [ ] Reservation accounting test: when a step reserves `cost_energy`, that amount is unavailable to reproduction gating until released or spent.
+- [ ] Rollback test matrix (`skip/retry_later/abort_plan`) preserves energy (no hidden gain/loss) and advances/halts stage as specified.
+- [ ] Starvation interrupt test: entering starvation mode pauses growth and releases pending reservation within one simulation step.
+- [ ] Plan mutation validity test: mutated plans never exceed `P_max`, never reference invalid actuator/material enums, and always retain at least one viable minimal morphology path.
+
+### 10.5 Chemofluid consistency checks
 - [ ] Selective digestion uses existing channel semantics (`digestRGB` / affinity) with no bypass path.
 - [ ] Local drag traits are read at node-level (soft) and edge-level (rigid) in force integration.
 - [ ] Emitter-driven resource intake remains dependent on local dye concentration and body/edge interaction modes.

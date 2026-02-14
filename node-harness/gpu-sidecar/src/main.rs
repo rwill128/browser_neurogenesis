@@ -80,6 +80,8 @@ struct FluidStepResponse {
     sps: f64,
     avg_speed: f32,
     max_speed: f32,
+    avg_divergence: f32,
+    max_divergence: f32,
     dye_footprint: f32,
     dye_total: f32,
 }
@@ -504,6 +506,27 @@ async fn run_fluid_step(
         max_speed = max_speed.max(s);
     }
 
+    let w = width as usize;
+    let h = height as usize;
+    let mut sum_div = 0.0f32;
+    let mut max_div = 0.0f32;
+    for y in 0..h {
+        let ym = y.saturating_sub(1);
+        let yp = (y + 1).min(h - 1);
+        for x in 0..w {
+            let xm = x.saturating_sub(1);
+            let xp = (x + 1).min(w - 1);
+            let vl = vel[y * w + xm][0];
+            let vr = vel[y * w + xp][0];
+            let vb = vel[ym * w + x][1];
+            let vt = vel[yp * w + x][1];
+            let d = 0.5 * ((vr - vl) + (vt - vb));
+            let ad = d.abs();
+            sum_div += ad;
+            max_div = max_div.max(ad);
+        }
+    }
+
     let mut dye_total = 0.0f32;
     let mut nonzero = 0usize;
     for &d in dye {
@@ -529,6 +552,8 @@ async fn run_fluid_step(
         sps: (steps as f64) / elapsed.max(1e-6),
         avg_speed: sum_speed / (cells as f32),
         max_speed,
+        avg_divergence: sum_div / (cells as f32),
+        max_divergence: max_div,
         dye_footprint: (nonzero as f32) / (cells as f32),
         dye_total,
     })

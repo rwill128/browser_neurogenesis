@@ -1161,19 +1161,28 @@ function drawBodiesOverlay(sim) {
       b._rtheta += ((b.theta || 0) - b._rtheta) * smooth;
     }
     const sp = worldToScreen(sim, b._rx, b._ry);
-    ctx.strokeStyle = '#ffffff';
     ctx.fillStyle = 'rgba(255,255,255,0.06)';
     ctx.beginPath();
     const sides = Math.max(3, b.sides || (i === 0 ? 3 : 4));
-    drawRegularPolygon(
-      sp.x,
-      sp.y,
-      b.r * pxPerWorld,
-      sides,
-      (b._rtheta || 0) + (sides === 3 ? -Math.PI * 0.5 : Math.PI * 0.25)
-    );
+    const rot = (b._rtheta || 0) + (sides === 3 ? -Math.PI * 0.5 : Math.PI * 0.25);
+    drawRegularPolygon(sp.x, sp.y, b.r * pxPerWorld, sides, rot);
     ctx.fill();
-    ctx.stroke();
+
+    const verts = [];
+    for (let vi = 0; vi < sides; vi++) {
+      const a = rot + (vi / sides) * Math.PI * 2;
+      verts.push({ x: sp.x + Math.cos(a) * b.r * pxPerWorld, y: sp.y + Math.sin(a) * b.r * pxPerWorld });
+    }
+    for (let ei = 0; ei < sides; ei++) {
+      const a = verts[ei];
+      const b2 = verts[(ei + 1) % sides];
+      const blocked = !b.edgeDyeBlock ? 1 : b.edgeDyeBlock[ei];
+      ctx.strokeStyle = blocked ? '#ffffff' : 'rgba(140,180,255,0.95)';
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b2.x, b2.y);
+      ctx.stroke();
+    }
   }
   const s = sim.bodies.soft;
   for (const node of s.nodes) {
@@ -1184,11 +1193,12 @@ function drawBodiesOverlay(sim) {
       node._ry += (node.y - node._ry) * smooth;
     }
   }
-  ctx.strokeStyle = '#7ee0ff';
-  for (const [i, j] of s.springs) {
+  for (const [i, j, _rest, edgeSolid, edgeDyeBlock] of s.springs) {
     const a = s.nodes[i], b = s.nodes[j];
     const pa = worldToScreen(sim, a._rx, a._ry);
     const pb = worldToScreen(sim, b._rx, b._ry);
+    if (!edgeSolid) ctx.strokeStyle = 'rgba(90,180,190,0.45)';
+    else ctx.strokeStyle = edgeDyeBlock ? '#00ffd0' : 'rgba(120,150,255,0.95)';
     ctx.beginPath();
     ctx.moveTo(pa.x, pa.y);
     ctx.lineTo(pb.x, pb.y);
@@ -1204,9 +1214,9 @@ function drawBodiesOverlay(sim) {
 
   ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
-  ctx.fillText(`Rigid = white polygons | zoom ${sim.camera.zoom.toFixed(2)}x`, 10, canvas.height - 28);
+  ctx.fillText(`Blocked edges=white/cyan, permeable=blue | zoom ${sim.camera.zoom.toFixed(2)}x`, 10, canvas.height - 28);
   ctx.fillStyle = 'rgba(0,255,208,0.95)';
-  ctx.fillText('Soft = cyan spring mesh | Alt+drag/right-drag pan, wheel zoom', 10, canvas.height - 12);
+  ctx.fillText('Rigid+soft mixed edge permeability | Alt+drag/right-drag pan, wheel zoom', 10, canvas.height - 12);
   ctx.restore();
 }
 

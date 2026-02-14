@@ -15,6 +15,11 @@ const impulseEl = document.getElementById('impulse');
 const radiusEl = document.getElementById('radius');
 const brushSizeEl = document.getElementById('brushSize');
 const paintValueEl = document.getElementById('paintValue');
+const massLightEl = document.getElementById('massLight');
+const massHeavyEl = document.getElementById('massHeavy');
+const massSoftEl = document.getElementById('massSoft');
+const bodyDragEl = document.getElementById('bodyDrag');
+const bodyFeedbackEl = document.getElementById('bodyFeedback');
 
 function log(v) { out.textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2); }
 
@@ -29,6 +34,11 @@ function readControls() {
     viscosity: Number(viscosityEl.value) || 0.001,
     impulse: Number(impulseEl.value) || 7,
     radius: Number(radiusEl.value) || 8,
+    massLight: Math.max(0.05, Number(massLightEl.value) || 0.8),
+    massHeavy: Math.max(0.05, Number(massHeavyEl.value) || 3.0),
+    massSoft: Math.max(0.02, Number(massSoftEl.value) || 0.35),
+    bodyDrag: Math.max(0, Number(bodyDragEl.value) || 1.0),
+    bodyFeedback: Math.max(0, Number(bodyFeedbackEl.value) || 0.03),
   };
 }
 
@@ -331,16 +341,16 @@ function sampleFieldBilinear(field, n, x, y) {
   return a * (1 - sy) + b * sy;
 }
 
-function initBodies(n) {
+function initBodies(n, controls) {
   const rigid = [
-    { x: n * 0.22, y: n * 0.28, vx: 0, vy: 0, r: 5 },
-    { x: n * 0.75, y: n * 0.62, vx: 0, vy: 0, r: 6 },
+    { x: n * 0.22, y: n * 0.28, vx: 0, vy: 0, r: 5, mass: controls.massLight },
+    { x: n * 0.75, y: n * 0.62, vx: 0, vy: 0, r: 6, mass: controls.massHeavy },
   ];
   const softNodes = [
-    { x: n * 0.50, y: n * 0.35, vx: 0, vy: 0 },
-    { x: n * 0.55, y: n * 0.40, vx: 0, vy: 0 },
-    { x: n * 0.46, y: n * 0.42, vx: 0, vy: 0 },
-    { x: n * 0.51, y: n * 0.47, vx: 0, vy: 0 },
+    { x: n * 0.50, y: n * 0.35, vx: 0, vy: 0, mass: controls.massSoft },
+    { x: n * 0.55, y: n * 0.40, vx: 0, vy: 0, mass: controls.massSoft },
+    { x: n * 0.46, y: n * 0.42, vx: 0, vy: 0, mass: controls.massSoft },
+    { x: n * 0.51, y: n * 0.47, vx: 0, vy: 0, mass: controls.massSoft },
   ];
   const springs = [[0,1,6],[1,2,7],[2,3,6],[3,0,7],[0,2,8],[1,3,8]];
   return { rigid, soft: { nodes: softNodes, springs } };
@@ -350,23 +360,34 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   const n = sim.controls.n;
   const dt = sim.controls.dt;
   const bodies = sim.bodies;
+  const dragK = sim.controls.bodyDrag;
+  const feedbackK = sim.controls.bodyFeedback;
+
+  if (bodies.rigid[0]) bodies.rigid[0].mass = sim.controls.massLight;
+  if (bodies.rigid[1]) bodies.rigid[1].mass = sim.controls.massHeavy;
+  for (const node of bodies.soft.nodes) node.mass = sim.controls.massSoft;
 
   for (const b of bodies.rigid) {
     const fx = sampleFieldBilinear(vxField, n, b.x, b.y);
     const fy = sampleFieldBilinear(vyField, n, b.x, b.y);
-    b.vx += (fx - b.vx) * 0.22 + Math.sin(sim.frame * 0.03 + b.x * 0.01) * 0.01;
-    b.vy += (fy - b.vy) * 0.22;
-    b.x = (b.x + b.vx * dt * 30 + n) % n;
-    b.y = (b.y + b.vy * dt * 30 + n) % n;
+    const invMass = 1 / Math.max(0.05, b.mass);
+    const ax = (fx - b.vx) * dragK * invMass;
+    const ay = (fy - b.vy) * dragK * invMass;
+    b.vx += ax * dt * 60 + Math.sin(sim.frame * 0.03 + b.x * 0.01) * 0.004 * invMass;
+    b.vy += ay * dt * 60;
+    b.x = (b.x + b.vx * dt * 28 + n) % n;
+    b.y = (b.y + b.vy * dt * 28 + n) % n;
   }
 
   const s = bodies.soft;
   for (const node of s.nodes) {
     const fx = sampleFieldBilinear(vxField, n, node.x, node.y);
     const fy = sampleFieldBilinear(vyField, n, node.x, node.y);
-    node.vx += (fx - node.vx) * 0.28;
-    node.vy += (fy - node.vy) * 0.28;
+    const invMass = 1 / Math.max(0.02, node.mass);
+    node.vx += (fx - node.vx) * dragK * 0.8 * invMass * dt * 60;
+    node.vy += (fy - node.vy) * dragK * 0.8 * invMass * dt * 60;
   }
+
   for (let iter = 0; iter < 2; iter++) {
     for (const [i, j, rest] of s.springs) {
       const a = s.nodes[i], b = s.nodes[j];
@@ -378,16 +399,20 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       b.vx -= nx * err * 0.02; b.vy -= ny * err * 0.02;
     }
   }
+
   for (const node of s.nodes) {
     node.x = (node.x + node.vx * dt * 26 + n) % n;
     node.y = (node.y + node.vy * dt * 26 + n) % n;
   }
 
-  const injectPoint = (px, py, pvx, pvy, rad=3.0) => {
+  const injectPoint = (px, py, pvx, pvy, localFluidX, localFluidY, mass, rad=3.0) => {
     const minX = Math.max(0, Math.floor(px - rad));
     const maxX = Math.min(n - 1, Math.ceil(px + rad));
     const minY = Math.max(0, Math.floor(py - rad));
     const maxY = Math.min(n - 1, Math.ceil(py + rad));
+    const relX = pvx - localFluidX;
+    const relY = pvy - localFluidY;
+    const scale = feedbackK * Math.max(0.1, mass);
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
         const dx = x - px, dy = y - py;
@@ -395,14 +420,22 @@ function stepBodiesAndInject(sim, vxField, vyField) {
         if (d > rad) continue;
         const w = 1 - d / rad;
         const idx = y * n + x;
-        vxField[idx] += pvx * 0.06 * w;
-        vyField[idx] += pvy * 0.06 * w;
+        vxField[idx] += relX * scale * w;
+        vyField[idx] += relY * scale * w;
       }
     }
   };
 
-  for (const b of bodies.rigid) injectPoint(b.x, b.y, b.vx, b.vy, b.r * 0.8);
-  for (const node of s.nodes) injectPoint(node.x, node.y, node.vx, node.vy, 2.2);
+  for (const b of bodies.rigid) {
+    const fx = sampleFieldBilinear(vxField, n, b.x, b.y);
+    const fy = sampleFieldBilinear(vyField, n, b.x, b.y);
+    injectPoint(b.x, b.y, b.vx, b.vy, fx, fy, b.mass, b.r * 0.8);
+  }
+  for (const node of s.nodes) {
+    const fx = sampleFieldBilinear(vxField, n, node.x, node.y);
+    const fy = sampleFieldBilinear(vyField, n, node.x, node.y);
+    injectPoint(node.x, node.y, node.vx, node.vy, fx, fy, node.mass, 2.2);
+  }
 }
 
 function drawBodiesOverlay(sim) {
@@ -481,7 +514,7 @@ async function initSim() {
     rr0: rA, rr1: rB, gg0: gA, gg1: gB, bb0: bA, bb1: bB,
     viscMapCpu, viscMapGpu,
     div, readR, readG, readB, readVx, readVy,
-    bodies: initBodies(controls.n),
+    bodies: initBodies(controls.n, controls),
     frame: 0, t0: performance.now(),
   };
 }
@@ -606,6 +639,11 @@ async function stepAndRender() {
       fps: +(s.frame / Math.max(1e-6, elapsed)).toFixed(1),
       dyeEnergy: +sum.toFixed(1),
       viscosityScale: s.controls.viscosity,
+      massLight: s.controls.massLight,
+      massHeavy: s.controls.massHeavy,
+      massSoft: s.controls.massSoft,
+      bodyDrag: s.controls.bodyDrag,
+      bodyFeedback: s.controls.bodyFeedback,
       paintValue: Number(paintValueEl.value) || 0.85,
       brushSize: Number(brushSizeEl.value) || 12,
     });

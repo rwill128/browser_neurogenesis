@@ -342,10 +342,9 @@ async fn run_fluid_step(
     let advect_dye_pipeline = mk_pipeline(&device, "advect-dye", FLUID_ADVECT_DYE_WGSL);
     let fade_pipeline = mk_pipeline(&device, "fade", FLUID_FADE_WGSL);
 
-    let mut encoder = device.create_command_encoder(&Default::default());
-
     // seed initial velocity + dye
     {
+        let mut encoder = device.create_command_encoder(&Default::default());
         let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bg-init"),
             layout: &init_pipeline.get_bind_group_layout(0),
@@ -359,9 +358,17 @@ async fn run_fluid_step(
         pass.set_pipeline(&init_pipeline);
         pass.set_bind_group(0, &bg, &[]);
         pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        drop(pass);
+        queue.submit(Some(encoder.finish()));
     }
 
     for _ in 0..steps {
+        let mut encoder = device.create_command_encoder(&Default::default());
+
+        // reset pressure buffers before solve so each projection starts from a clean slate
+        encoder.clear_buffer(&pressure_a, 0, None);
+        encoder.clear_buffer(&pressure_b, 0, None);
+
         // velocity advection
         {
             let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -468,12 +475,16 @@ async fn run_fluid_step(
             pass.set_bind_group(0, &bg, &[]);
             pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
         }
+
+        queue.submit(Some(encoder.finish()));
     }
 
-    encoder.copy_buffer_to_buffer(&vel_a, 0, &vel_read, 0, (cells * std::mem::size_of::<[f32; 2]>()) as u64);
-    encoder.copy_buffer_to_buffer(&dye_a, 0, &dye_read, 0, (cells * std::mem::size_of::<f32>()) as u64);
-
-    queue.submit(Some(encoder.finish()));
+    {
+        let mut encoder = device.create_command_encoder(&Default::default());
+        encoder.copy_buffer_to_buffer(&vel_a, 0, &vel_read, 0, (cells * std::mem::size_of::<[f32; 2]>()) as u64);
+        encoder.copy_buffer_to_buffer(&dye_a, 0, &dye_read, 0, (cells * std::mem::size_of::<f32>()) as u64);
+        queue.submit(Some(encoder.finish()));
+    }
 
     let vel_slice = vel_read.slice(..);
     let dye_slice = dye_read.slice(..);
@@ -542,7 +553,7 @@ fn mk_storage_vec2(device: &wgpu::Device, label: &str, cells: usize) -> wgpu::Bu
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size: (cells * std::mem::size_of::<[f32; 2]>()) as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
 }
@@ -551,7 +562,7 @@ fn mk_storage_f32(device: &wgpu::Device, label: &str, cells: usize) -> wgpu::Buf
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size: (cells * std::mem::size_of::<f32>()) as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
 }
@@ -893,7 +904,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let pb = pressure[idx(c(x, p.width), c(y - 1, p.height))];
   let pt = pressure[idx(c(x, p.width), c(y + 1, p.height))];
   let grad = vec2<f32>(pr - pl, pt - pb) * 0.5;
-  out_vel[idx(gid.x, gid.y)] = vel[idx(gid.x, gid.y)] - grad;
+
+  let edge = gid.x == 0u || gid.y == 0u || gid.x == (p.width - 1u) || gid.y == (p.height - 1u);
+  out_vel[idx(gid.x, gid.y)] = select(vel[idx(gid.x, gid.y)] - grad, vec2<f32>(0.0, 0.0), edge);
 }
 "#;
 

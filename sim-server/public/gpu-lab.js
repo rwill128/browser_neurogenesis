@@ -363,17 +363,26 @@ function sampleFieldBilinear(field, n, x, y) {
 }
 
 function initBodies(n, controls) {
+  const scale = n / 256;
+  const r0 = 5 * scale;
+  const r1 = 6 * scale;
   const rigid = [
-    { x: n * 0.22, y: n * 0.28, vx: 0, vy: 0, r: 5, mass: controls.massLight, theta: 0, omega: 0, inertia: 0.5 * controls.massLight * 25 },
-    { x: n * 0.75, y: n * 0.62, vx: 0, vy: 0, r: 6, mass: controls.massHeavy, theta: 0.3, omega: 0, inertia: 0.5 * controls.massHeavy * 36 },
+    { x: n * 0.22, y: n * 0.28, vx: 0, vy: 0, r: r0, mass: controls.massLight, theta: 0, omega: 0, inertia: 0.5 * controls.massLight * r0 * r0 },
+    { x: n * 0.75, y: n * 0.62, vx: 0, vy: 0, r: r1, mass: controls.massHeavy, theta: 0.3, omega: 0, inertia: 0.5 * controls.massHeavy * r1 * r1 },
   ];
   const softNodes = [
-    { x: n * 0.50, y: n * 0.35, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 },
-    { x: n * 0.55, y: n * 0.40, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 },
-    { x: n * 0.46, y: n * 0.42, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 },
-    { x: n * 0.51, y: n * 0.47, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 },
+    { x: n * 0.50, y: n * 0.35, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 * scale },
+    { x: n * 0.55, y: n * 0.40, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 * scale },
+    { x: n * 0.46, y: n * 0.42, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 * scale },
+    { x: n * 0.51, y: n * 0.47, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 * scale },
   ];
-  const springs = [[0,1,6],[1,2,7],[2,3,6],[3,0,7],[0,2,8],[1,3,8]];
+  const edges = [[0,1],[1,2],[2,3],[3,0],[0,2],[1,3]];
+  const springs = edges.map(([i, j]) => {
+    const dx = softNodes[j].x - softNodes[i].x;
+    const dy = softNodes[j].y - softNodes[i].y;
+    const rest = Math.max(1e-3, Math.hypot(dx, dy));
+    return [i, j, rest];
+  });
   return { rigid, soft: { nodes: softNodes, springs } };
 }
 

@@ -1135,9 +1135,13 @@ function stepBodiesAndInject(sim, vxField, vyField) {
 
   const localHoneyDrag = (x, y) => {
     const v = sampleFieldBilinear(viscMap, n, x, y);
-    // Make high-viscosity paint feel like honey for bodies.
+    // Unified viscosity response curve for both rigid and soft bodies.
     return 1.0 + Math.pow(Math.max(0, Math.min(1, v)), 2.2) * 14.0;
   };
+  const viscosityMotionResponse = (honey, vmaxBase) => ({
+    damp: Math.max(0.72, 1.0 - 0.018 * honey),
+    vmax: Math.max(0.4, vmaxBase / (1 + 0.28 * honey)),
+  });
 
   if (bodies.rigid[0]) {
     bodies.rigid[0].mass = sim.controls.massLight;
@@ -1205,14 +1209,12 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     b.omega = (b.omega || 0) + alpha * dt * 60 + swimTorque;
 
     const centerHoney = localHoneyDrag(b.x, b.y);
-    const linDamp = Math.max(0.72, 1.0 - 0.018 * centerHoney);
-    const angDamp = Math.max(0.70, 0.992 - 0.012 * centerHoney);
-    b.vx *= linDamp;
-    b.vy *= linDamp;
-    b.omega *= angDamp;
+    const rigidVisc = viscosityMotionResponse(centerHoney, 3.2);
+    b.vx *= rigidVisc.damp;
+    b.vy *= rigidVisc.damp;
+    b.omega *= Math.max(0.72, 0.99 - 0.01 * centerHoney);
 
-    const bMaxBase = 3.2;
-    const bMax = Math.max(0.45, bMaxBase / (1 + 0.28 * centerHoney));
+    const bMax = rigidVisc.vmax;
     const bMag = Math.hypot(b.vx, b.vy);
     if (bMag > bMax) {
       b.vx = (b.vx / bMag) * bMax;
@@ -1241,15 +1243,14 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const swimX = (-cy * activeSwimAmp + Math.cos(activeSwimPhase) * 0.004) * invMass;
     const swimY = (cx * activeSwimAmp + Math.sin(activeSwimPhase) * 0.004) * invMass;
     const honey = localHoneyDrag(node.x, node.y);
-    const carryX = (fx - node.vx) * dragK * 0.8 * honey * invMass;
-    const carryY = (fy - node.vy) * dragK * 0.8 * honey * invMass;
+    const carryX = (fx - node.vx) * dragK * honey * invMass;
+    const carryY = (fy - node.vy) * dragK * honey * invMass;
     node.vx += carryX * dt * 60 + swimX;
     node.vy += carryY * dt * 60 + swimY;
-    const nodeDamp = Math.max(0.70, 1.0 - 0.02 * honey);
-    node.vx *= nodeDamp;
-    node.vy *= nodeDamp;
-    const nMaxBase = 2.8;
-    const nMax = Math.max(0.35, nMaxBase / (1 + 0.32 * honey));
+    const softVisc = viscosityMotionResponse(honey, 2.8);
+    node.vx *= softVisc.damp;
+    node.vy *= softVisc.damp;
+    const nMax = softVisc.vmax;
     const nMag = Math.hypot(node.vx, node.vy);
     if (nMag > nMax) {
       node.vx = (node.vx / nMag) * nMax;

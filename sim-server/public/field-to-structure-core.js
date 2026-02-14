@@ -45,9 +45,15 @@ export function compileFieldToMesh({
     const my = (ay + by + cy) / 3;
     const rv = sampleBilinear(rigidField, width, height, mx, my);
     const sv = sampleBilinear(softField, width, height, mx, my);
-    const mag = Math.max(rv, sv);
-    if (mag < threshold) return;
-    const kind = rv >= sv ? 'rigid' : 'soft';
+
+    // Rigid has absolute precedence in overlap zones:
+    // if rigid is above threshold, this triangle cannot be soft.
+    const rigidSolid = rv >= threshold;
+    const softSolid = sv >= threshold;
+    if (!rigidSolid && !softSolid) return;
+
+    const kind = rigidSolid ? 'rigid' : 'soft';
+    const mag = kind === 'rigid' ? rv : sv;
     triangles.push({
       kind,
       a: nodeId(ax, ay),

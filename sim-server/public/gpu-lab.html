@@ -10,7 +10,7 @@
     label { font-size: 13px; color: #ccc; }
     input, select { background: #222; color: #eee; border: 1px solid #444; border-radius: 6px; padding: 4px 6px; }
     pre { background: #1b1b1b; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
-    canvas { border: 1px solid #333; image-rendering: pixelated; image-rendering: crisp-edges; }
+    canvas { border: 1px solid #333; image-rendering: pixelated; image-rendering: crisp-edges; cursor: crosshair; }
   </style>
 </head>
 <body>
@@ -19,7 +19,8 @@
   <div class="row">
     <button id="runBtn">Start GPU fluid sim</button>
     <button id="stopBtn">Stop</button>
-    <button id="regenViscBtn">Rebuild viscosity map</button>
+    <button id="clearViscBtn">Reset viscosity map</button>
+    <label><input id="showVisc" type="checkbox" /> show viscosity overlay</label>
   </div>
 
   <div class="row">
@@ -38,9 +39,10 @@
   </div>
 
   <div class="row">
-    <label>visc base <input id="viscBase" type="number" step="0.01" value="0.45" /></label>
-    <label>visc contrast <input id="viscContrast" type="number" step="0.01" value="0.55" /></label>
-    <label>river width <input id="riverWidth" type="number" step="0.01" value="0.08" /></label>
+    <strong>Paint viscosity map:</strong>
+    <label>brush size(px) <input id="brushSize" type="number" step="1" value="12" /></label>
+    <label>paint value (0..1) <input id="paintValue" type="number" step="0.05" value="0.85" /></label>
+    <span style="color:#aaa">LMB paint • RMB/Shift paint low-visc (0.05)</span>
   </div>
 
   <canvas id="view" width="512" height="512"></canvas>

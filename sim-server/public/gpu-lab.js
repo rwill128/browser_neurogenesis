@@ -1,7 +1,8 @@
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
 const stopBtn = document.getElementById('stopBtn');
-const regenViscBtn = document.getElementById('regenViscBtn');
+const clearViscBtn = document.getElementById('clearViscBtn');
+const showViscEl = document.getElementById('showVisc');
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
 
@@ -11,9 +12,8 @@ const fadeEl = document.getElementById('fade');
 const viscosityEl = document.getElementById('viscosity');
 const impulseEl = document.getElementById('impulse');
 const radiusEl = document.getElementById('radius');
-const viscBaseEl = document.getElementById('viscBase');
-const viscContrastEl = document.getElementById('viscContrast');
-const riverWidthEl = document.getElementById('riverWidth');
+const brushSizeEl = document.getElementById('brushSize');
+const paintValueEl = document.getElementById('paintValue');
 
 function log(v) { out.textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2); }
 
@@ -28,9 +28,6 @@ function readControls() {
     viscosity: Number(viscosityEl.value) || 0.001,
     impulse: Number(impulseEl.value) || 7,
     radius: Number(radiusEl.value) || 8,
-    viscBase: Number(viscBaseEl.value) || 0.45,
-    viscContrast: Number(viscContrastEl.value) || 0.55,
-    riverWidth: Number(riverWidthEl.value) || 0.08,
   };
 }
 
@@ -55,24 +52,10 @@ function uploadUniforms(device, uniformBuffer, s) {
   device.queue.writeBuffer(uniformBuffer, 0, a);
 }
 
-function buildViscosityMap(n, controls) {
-  const map = new Float32Array(n * n);
-  const { viscBase, viscContrast, riverWidth } = controls;
-  for (let y = 0; y < n; y++) {
-    const ny = y / n;
-    for (let x = 0; x < n; x++) {
-      const nx = x / n;
-      const i = y * n + x;
-      const island = 0.5 + 0.5 * Math.sin(nx * 9.0 + Math.sin(ny * 7.0) * 2.0) * Math.cos(ny * 8.0);
-      const riverCenter = 0.5 + 0.18 * Math.sin(nx * 6.0 + 1.7);
-      const riverDist = Math.abs(ny - riverCenter);
-      const river = Math.max(0, 1.0 - riverDist / Math.max(0.01, riverWidth));
-      let v = viscBase + viscContrast * (island - 0.5);
-      v -= river * 0.35; // low-viscosity channels
-      map[i] = Math.max(0.02, Math.min(1.0, v));
-    }
-  }
-  return map;
+function makeDefaultViscMap(n) {
+  const m = new Float32Array(n * n);
+  m.fill(0.5);
+  return m;
 }
 
 const commonWgsl = `
@@ -261,13 +244,58 @@ async function createPipeline(device, code) {
 
 let running = false;
 let sim = null;
+let painting = false;
 
-function regenViscosityMap() {
+function uploadViscMap() {
   if (!sim) return;
-  const map = buildViscosityMap(sim.controls.n, readControls());
-  sim.device.queue.writeBuffer(sim.viscMap, 0, map);
-  log({ ok: true, msg: 'viscosity map rebuilt', grid: sim.controls.n });
+  sim.device.queue.writeBuffer(sim.viscMapGpu, 0, sim.viscMapCpu);
 }
+
+function resetViscMap() {
+  if (!sim) return;
+  sim.viscMapCpu.fill(0.5);
+  uploadViscMap();
+  log({ ok: true, msg: 'viscosity map reset' });
+}
+
+function paintAt(clientX, clientY, erase = false) {
+  if (!sim) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = ((clientX - rect.left) / rect.width) * sim.controls.n;
+  const y = ((clientY - rect.top) / rect.height) * sim.controls.n;
+  const r = Math.max(1, Number(brushSizeEl.value) || 12) * (sim.controls.n / canvas.width);
+  const value = erase ? 0.05 : Math.max(0, Math.min(1, Number(paintValueEl.value) || 0.85));
+
+  const minX = Math.max(0, Math.floor(x - r));
+  const maxX = Math.min(sim.controls.n - 1, Math.ceil(x + r));
+  const minY = Math.max(0, Math.floor(y - r));
+  const maxY = Math.min(sim.controls.n - 1, Math.ceil(y + r));
+
+  for (let yy = minY; yy <= maxY; yy++) {
+    for (let xx = minX; xx <= maxX; xx++) {
+      const dx = xx - x;
+      const dy = yy - y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d > r) continue;
+      const t = 1 - d / r;
+      const idx = yy * sim.controls.n + xx;
+      const current = sim.viscMapCpu[idx];
+      sim.viscMapCpu[idx] = current * (1 - t) + value * t;
+    }
+  }
+  uploadViscMap();
+}
+
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('mousedown', (e) => {
+  painting = true;
+  paintAt(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
+});
+window.addEventListener('mouseup', () => { painting = false; });
+canvas.addEventListener('mousemove', (e) => {
+  if (!painting) return;
+  paintAt(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
+});
 
 async function initSim() {
   const controls = readControls();
@@ -289,8 +317,10 @@ async function initSim() {
   const rA = createBuffer(device, bytes), rB = createBuffer(device, bytes);
   const gA = createBuffer(device, bytes), gB = createBuffer(device, bytes);
   const bA = createBuffer(device, bytes), bB = createBuffer(device, bytes);
-  const viscMap = createBuffer(device, bytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
-  device.queue.writeBuffer(viscMap, 0, buildViscosityMap(controls.n, controls));
+
+  const viscMapCpu = makeDefaultViscMap(controls.n);
+  const viscMapGpu = createBuffer(device, bytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  device.queue.writeBuffer(viscMapGpu, 0, viscMapCpu);
 
   const readR = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const readG = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
@@ -310,7 +340,7 @@ async function initSim() {
     vx0: vxA, vx1: vxB, vy0: vyA, vy1: vyB,
     pr0: pA, pr1: pB,
     rr0: rA, rr1: rB, gg0: gA, gg1: gB, bb0: bA, bb1: bB,
-    viscMap,
+    viscMapCpu, viscMapGpu,
     div, readR, readG, readB,
     frame: 0, t0: performance.now(),
   };
@@ -321,7 +351,7 @@ function workgroups(n) { return Math.ceil(n / WORKGROUP); }
 async function stepAndRender() {
   if (!running || !sim) return;
   const s = sim;
-  s.controls = readControls();
+  s.controls = { ...s.controls, ...readControls() };
   uploadUniforms(s.device, s.uniform, s.controls);
 
   const enc = s.device.createCommandEncoder();
@@ -334,7 +364,7 @@ async function stepAndRender() {
 
   pass = enc.beginComputePass();
   pass.setPipeline(s.advVel.pipeline);
-  pass.setBindGroup(0, s.advVel.bg([s.uniform, s.vx0, s.vy0, s.vx1, s.vy1, s.viscMap]));
+  pass.setBindGroup(0, s.advVel.bg([s.uniform, s.vx0, s.vy0, s.vx1, s.vy1, s.viscMapGpu]));
   pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
   pass.end();
   [s.vx0, s.vx1] = [s.vx1, s.vx0];
@@ -395,14 +425,22 @@ async function stepAndRender() {
     const img = ctx.createImageData(n, n);
     const px = img.data;
     let sum = 0;
+    const showVisc = showViscEl.checked;
     for (let i = 0; i < s.cells; i++) {
       const ri = Math.max(0, Math.min(255, r[i]));
       const gi = Math.max(0, Math.min(255, g[i]));
       const bi = Math.max(0, Math.min(255, b[i]));
       const o = i * 4;
-      px[o] = ri;
-      px[o + 1] = gi;
-      px[o + 2] = bi;
+      if (showVisc) {
+        const v = Math.max(0, Math.min(1, s.viscMapCpu[i]));
+        px[o] = Math.max(ri, v * 255);
+        px[o + 1] = Math.max(gi, (1 - v) * 160);
+        px[o + 2] = Math.max(bi, (1 - v) * 220);
+      } else {
+        px[o] = ri;
+        px[o + 1] = gi;
+        px[o + 2] = bi;
+      }
       px[o + 3] = 255;
       sum += ri + gi + bi;
     }
@@ -422,14 +460,10 @@ async function stepAndRender() {
       frames: s.frame,
       fps: +(s.frame / Math.max(1e-6, elapsed)).toFixed(1),
       dyeEnergy: +sum.toFixed(1),
-      dt: s.controls.dt,
-      fade: s.controls.fade,
       viscosityScale: s.controls.viscosity,
-      impulse: s.controls.impulse,
-      radius: s.controls.radius,
-      viscBase: s.controls.viscBase,
-      viscContrast: s.controls.viscContrast,
-      riverWidth: s.controls.riverWidth,
+      paintValue: Number(paintValueEl.value) || 0.85,
+      brushSize: Number(brushSizeEl.value) || 12,
+      overlay: showVisc,
     });
   }
 
@@ -455,5 +489,5 @@ function stop() {
 
 runBtn.addEventListener('click', () => start().catch((e) => log({ ok: false, error: String(e) })));
 stopBtn.addEventListener('click', stop);
-regenViscBtn.addEventListener('click', regenViscosityMap);
-log('ready: set controls and click "Start GPU fluid sim"');
+clearViscBtn.addEventListener('click', resetViscMap);
+log('ready: paint viscosity on canvas (LMB high, RMB/Shift low), then Start');

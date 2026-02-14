@@ -249,7 +249,9 @@ function setScrubTick(worldId, nextTickOrNull) {
     return;
   }
 
-  const safeTick = Math.max(oldestTick, Math.min(latestTick, Math.floor(Number(nextTickOrNull) || latestTick)));
+  const rawTick = Number(nextTickOrNull);
+  const parsedTick = Number.isFinite(rawTick) ? Math.floor(rawTick) : latestTick;
+  const safeTick = Math.max(oldestTick, Math.min(latestTick, parsedTick));
   scrubTickByWorld.set(worldId, safeTick);
   updateHistoryUi(worldId);
   loadScrubFrameByTick(worldId, safeTick);

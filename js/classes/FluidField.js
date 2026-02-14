@@ -685,6 +685,45 @@ export class FluidField {
         return expanded;
     }
 
+    _subtractTileMaps(source, exclude) {
+        const out = new Map();
+        if (!source || typeof source.keys !== 'function') return out;
+        for (const key of source.keys()) {
+            if (exclude && exclude.has && exclude.has(key)) continue;
+            out.set(key, this.activeTileTtlMax);
+        }
+        return out;
+    }
+
+    _buildDeepEmptyTileMap(carrierTiles, momentumTiles, momentumNeighborRadius = 1) {
+        const out = new Map();
+        const r = Math.max(0, Math.floor(Number(momentumNeighborRadius) || 0));
+        const hasCarrier = (k) => carrierTiles && carrierTiles.has && carrierTiles.has(k);
+        const hasMomentum = (k) => momentumTiles && momentumTiles.has && momentumTiles.has(k);
+
+        for (let ty = 0; ty < this.activeTileRows; ty++) {
+            for (let tx = 0; tx < this.activeTileCols; tx++) {
+                const key = `${tx}:${ty}`;
+                if (hasCarrier(key) || hasMomentum(key)) continue;
+
+                let nearMomentum = false;
+                for (let oy = -r; oy <= r && !nearMomentum; oy++) {
+                    for (let ox = -r; ox <= r; ox++) {
+                        const nx = tx + ox;
+                        const ny = ty + oy;
+                        if (nx < 0 || ny < 0 || nx >= this.activeTileCols || ny >= this.activeTileRows) continue;
+                        if (hasMomentum(`${nx}:${ny}`)) {
+                            nearMomentum = true;
+                            break;
+                        }
+                    }
+                }
+                if (!nearMomentum) out.set(key, this.activeTileTtlMax);
+            }
+        }
+        return out;
+    }
+
     step(worldTick = 0) {
         const tStart = Date.now();
         let t0 = Date.now();
@@ -692,15 +731,26 @@ export class FluidField {
         const seedMomentumMs = Date.now() - t0;
 
         const carrierBounds = this._buildSparseDomainFromTiles(this.carrierTiles);
-        const expandedMomentumTiles = this._expandTileMap(this.momentumTiles, 1);
-        const momentumBounds = this._buildSparseDomainFromTiles(expandedMomentumTiles);
-        const momentumEvery = Math.max(1, Math.floor(Number(config.FLUID_MOMENTUM_ONLY_STEP_EVERY_N_TICKS) || 10));
-        const allowMomentumSolve = (Math.max(0, Math.floor(Number(worldTick) || 0)) % momentumEvery) === 0;
 
-        // Carrier region runs every fluid step; momentum-only region is folded in at reduced cadence.
-        const bounds = allowMomentumSolve
-            ? this._mergeDomains(carrierBounds, momentumBounds)
-            : carrierBounds;
+        const momentumNonCarrierTiles = this._subtractTileMaps(this.momentumTiles, this.carrierTiles);
+        const expandedMomentumTiles = this._expandTileMap(momentumNonCarrierTiles, 1);
+        const momentumBounds = this._buildSparseDomainFromTiles(expandedMomentumTiles);
+
+        const momentumEvery = Math.max(1, Math.floor(Number(config.FLUID_MOMENTUM_ONLY_STEP_EVERY_N_TICKS) || 10));
+        const emptyEvery = Math.max(1, Math.floor(Number(config.FLUID_EMPTY_STEP_EVERY_N_TICKS) || 24));
+        const tick = Math.max(0, Math.floor(Number(worldTick) || 0));
+        const allowMomentumSolve = (tick % momentumEvery) === 0;
+        const allowEmptySolve = (tick % emptyEvery) === 0;
+
+        let bounds = carrierBounds;
+        if (allowMomentumSolve) {
+            bounds = this._mergeDomains(bounds, momentumBounds);
+        }
+        if (allowEmptySolve) {
+            const deepEmptyTiles = this._buildDeepEmptyTileMap(this.carrierTiles, this.momentumTiles, 1);
+            const deepEmptyBounds = this._buildSparseDomainFromTiles(deepEmptyTiles);
+            bounds = this._mergeDomains(bounds, deepEmptyBounds);
+        }
 
         if (!bounds) {
             this.lastStepPerf = {

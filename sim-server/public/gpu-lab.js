@@ -1,6 +1,7 @@
 import { parseCreatureSpec, buildBodiesFromCreatureSpec } from '/creature-spec.js';
 import { applyRigidWeldConstraints, buildRigidWeldPairSet } from '/rigid-weld.js';
 import { EDGE_DYE_MODE, normalizeEdgeDyeModeRGB, applyBodyEdgeFieldBarriers } from '/dye-barrier.js';
+import { resolveRigidVsSoftNodeCollision } from '/rigid-collision.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -1257,8 +1258,9 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       }
     }
     for (const rb of bodies.rigid) {
+      const rbVerts = rigidVerticesWorld(rb);
       for (const sn of s.nodes) {
-        resolveCircleCollision(rb, sn, 0.35);
+        resolveRigidVsSoftNodeCollision(rb, sn, rbVerts, 0.32);
       }
       for (const [i, j, _rest, edgeBodyMode] of s.springs) {
         if (edgeBodyMode !== EDGE_BODY_MODE.BLOCK) continue;

@@ -29,16 +29,16 @@ const JACOBI_ITERS = 20;
 function readControls() {
   return {
     n: Math.max(32, Number(gridEl.value) || 256),
-    dt: Number(dtEl.value) || 0.1,
-    fade: Number(fadeEl.value) || 0.996,
-    viscosity: Number(viscosityEl.value) || 0.001,
-    impulse: Number(impulseEl.value) || 7,
-    radius: Number(radiusEl.value) || 8,
-    massLight: Math.max(0.05, Number(massLightEl.value) || 0.8),
-    massHeavy: Math.max(0.05, Number(massHeavyEl.value) || 3.0),
-    massSoft: Math.max(0.02, Number(massSoftEl.value) || 0.35),
-    bodyDrag: Math.max(0, Number(bodyDragEl.value) || 1.0),
-    bodyFeedback: Math.max(0, Number(bodyFeedbackEl.value) || 0.03),
+    dt: Number(dtEl.value) || 0.035,
+    fade: Number(fadeEl.value) || 0.992,
+    viscosity: Number(viscosityEl.value) || 0.0025,
+    impulse: Number(impulseEl.value) || 2.5,
+    radius: Number(radiusEl.value) || 6,
+    massLight: Math.max(0.05, Number(massLightEl.value) || 1.2),
+    massHeavy: Math.max(0.05, Number(massHeavyEl.value) || 5.0),
+    massSoft: Math.max(0.02, Number(massSoftEl.value) || 0.6),
+    bodyDrag: Math.max(0, Number(bodyDragEl.value) || 0.55),
+    bodyFeedback: Math.max(0, Number(bodyFeedbackEl.value) || 0.012),
   };
 }
 
@@ -121,8 +121,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let py = y - p.dt * vy0[i];
   let localVisc = max(0.0, viscMap[i]) * p.viscosity_scale;
   let decay = 1.0 / (1.0 + 4.0 * localVisc * p.dt);
-  vx1[i] = sampleBilinear(&vx0, px, py) * decay;
-  vy1[i] = sampleBilinear(&vy0, px, py) * decay;
+  var nx = sampleBilinear(&vx0, px, py) * decay;
+  var ny = sampleBilinear(&vy0, px, py) * decay;
+  let vmax = 6.0;
+  let mag = sqrt(nx * nx + ny * ny);
+  if (mag > vmax) {
+    let s = vmax / mag;
+    nx = nx * s;
+    ny = ny * s;
+  }
+  vx1[i] = nx;
+  vy1[i] = ny;
 }
 `;
 
@@ -395,12 +404,18 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const ax = (fx - b.vx) * dragK * invMass;
     const ay = (fy - b.vy) * dragK * invMass;
     const swimPhase = sim.frame * 0.08 + bi * 2.1;
-    const swimX = Math.cos(swimPhase) * 0.03 * invMass;
-    const swimY = Math.sin(swimPhase * 1.6) * 0.022 * invMass;
+    const swimX = Math.cos(swimPhase) * 0.012 * invMass;
+    const swimY = Math.sin(swimPhase * 1.6) * 0.009 * invMass;
     b.vx += ax * dt * 60 + swimX;
     b.vy += ay * dt * 60 + swimY;
+    const bMax = 3.2;
+    const bMag = Math.hypot(b.vx, b.vy);
+    if (bMag > bMax) {
+      b.vx = (b.vx / bMag) * bMax;
+      b.vy = (b.vy / bMag) * bMax;
+    }
     rigidCarryTransfer += Math.hypot(ax, ay);
-    b.x = (b.x + b.vx * dt * 28 + n) % n;
+    b.x = (b.x + b.vx * dt * 22 + n) % n;
     b.y = (b.y + b.vy * dt * 28 + n) % n;
   }
 
@@ -414,13 +429,19 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const cx = node.x - softCentroid.x;
     const cy = node.y - softCentroid.y;
     const activeSwimPhase = sim.frame * 0.12 + i * 1.57;
-    const activeSwimAmp = 0.018 * (1 + 0.2 * Math.sin(sim.frame * 0.05 + i));
-    const swimX = (-cy * activeSwimAmp + Math.cos(activeSwimPhase) * 0.01) * invMass;
-    const swimY = (cx * activeSwimAmp + Math.sin(activeSwimPhase) * 0.01) * invMass;
+    const activeSwimAmp = 0.008 * (1 + 0.2 * Math.sin(sim.frame * 0.05 + i));
+    const swimX = (-cy * activeSwimAmp + Math.cos(activeSwimPhase) * 0.004) * invMass;
+    const swimY = (cx * activeSwimAmp + Math.sin(activeSwimPhase) * 0.004) * invMass;
     const carryX = (fx - node.vx) * dragK * 0.8 * invMass;
     const carryY = (fy - node.vy) * dragK * 0.8 * invMass;
     node.vx += carryX * dt * 60 + swimX;
     node.vy += carryY * dt * 60 + swimY;
+    const nMax = 2.8;
+    const nMag = Math.hypot(node.vx, node.vy);
+    if (nMag > nMax) {
+      node.vx = (node.vx / nMag) * nMax;
+      node.vy = (node.vy / nMag) * nMax;
+    }
     softCarryTransfer += Math.hypot(carryX, carryY);
   }
 

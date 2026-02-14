@@ -356,6 +356,17 @@ function initBodies(n, controls) {
   return { rigid, soft: { nodes: softNodes, springs } };
 }
 
+function computeSoftCentroid(nodes) {
+  let sx = 0;
+  let sy = 0;
+  for (const node of nodes) {
+    sx += node.x;
+    sy += node.y;
+  }
+  const inv = nodes.length > 0 ? (1 / nodes.length) : 0;
+  return { x: sx * inv, y: sy * inv };
+}
+
 function stepBodiesAndInject(sim, vxField, vyField) {
   const n = sim.controls.n;
   const dt = sim.controls.dt;
@@ -367,25 +378,50 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   if (bodies.rigid[1]) bodies.rigid[1].mass = sim.controls.massHeavy;
   for (const node of bodies.soft.nodes) node.mass = sim.controls.massSoft;
 
-  for (const b of bodies.rigid) {
+  const softCentroidBefore = computeSoftCentroid(bodies.soft.nodes);
+  const rigidCenterBefore = {
+    x: (bodies.rigid[0].x + bodies.rigid[1].x) * 0.5,
+    y: (bodies.rigid[0].y + bodies.rigid[1].y) * 0.5,
+  };
+
+  let rigidCarryTransfer = 0;
+  let softCarryTransfer = 0;
+
+  for (let bi = 0; bi < bodies.rigid.length; bi++) {
+    const b = bodies.rigid[bi];
     const fx = sampleFieldBilinear(vxField, n, b.x, b.y);
     const fy = sampleFieldBilinear(vyField, n, b.x, b.y);
     const invMass = 1 / Math.max(0.05, b.mass);
     const ax = (fx - b.vx) * dragK * invMass;
     const ay = (fy - b.vy) * dragK * invMass;
-    b.vx += ax * dt * 60 + Math.sin(sim.frame * 0.03 + b.x * 0.01) * 0.004 * invMass;
-    b.vy += ay * dt * 60;
+    const swimPhase = sim.frame * 0.08 + bi * 2.1;
+    const swimX = Math.cos(swimPhase) * 0.03 * invMass;
+    const swimY = Math.sin(swimPhase * 1.6) * 0.022 * invMass;
+    b.vx += ax * dt * 60 + swimX;
+    b.vy += ay * dt * 60 + swimY;
+    rigidCarryTransfer += Math.hypot(ax, ay);
     b.x = (b.x + b.vx * dt * 28 + n) % n;
     b.y = (b.y + b.vy * dt * 28 + n) % n;
   }
 
   const s = bodies.soft;
-  for (const node of s.nodes) {
+  const softCentroid = computeSoftCentroid(s.nodes);
+  for (let i = 0; i < s.nodes.length; i++) {
+    const node = s.nodes[i];
     const fx = sampleFieldBilinear(vxField, n, node.x, node.y);
     const fy = sampleFieldBilinear(vyField, n, node.x, node.y);
     const invMass = 1 / Math.max(0.02, node.mass);
-    node.vx += (fx - node.vx) * dragK * 0.8 * invMass * dt * 60;
-    node.vy += (fy - node.vy) * dragK * 0.8 * invMass * dt * 60;
+    const cx = node.x - softCentroid.x;
+    const cy = node.y - softCentroid.y;
+    const activeSwimPhase = sim.frame * 0.12 + i * 1.57;
+    const activeSwimAmp = 0.018 * (1 + 0.2 * Math.sin(sim.frame * 0.05 + i));
+    const swimX = (-cy * activeSwimAmp + Math.cos(activeSwimPhase) * 0.01) * invMass;
+    const swimY = (cx * activeSwimAmp + Math.sin(activeSwimPhase) * 0.01) * invMass;
+    const carryX = (fx - node.vx) * dragK * 0.8 * invMass;
+    const carryY = (fy - node.vy) * dragK * 0.8 * invMass;
+    node.vx += carryX * dt * 60 + swimX;
+    node.vy += carryY * dt * 60 + swimY;
+    softCarryTransfer += Math.hypot(carryX, carryY);
   }
 
   for (let iter = 0; iter < 2; iter++) {
@@ -405,13 +441,14 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     node.y = (node.y + node.vy * dt * 26 + n) % n;
   }
 
-  const injectPoint = (px, py, pvx, pvy, localFluidX, localFluidY, mass, rad=3.0) => {
+  let injectedMomentum = 0;
+  const injectPoint = (px, py, pvx, pvy, localFluidX, localFluidY, mass, rad=3.0, swimInjectX = 0, swimInjectY = 0) => {
     const minX = Math.max(0, Math.floor(px - rad));
     const maxX = Math.min(n - 1, Math.ceil(px + rad));
     const minY = Math.max(0, Math.floor(py - rad));
     const maxY = Math.min(n - 1, Math.ceil(py + rad));
-    const relX = pvx - localFluidX;
-    const relY = pvy - localFluidY;
+    const relX = pvx - localFluidX + swimInjectX;
+    const relY = pvy - localFluidY + swimInjectY;
     const scale = feedbackK * Math.max(0.1, mass);
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
@@ -420,22 +457,76 @@ function stepBodiesAndInject(sim, vxField, vyField) {
         if (d > rad) continue;
         const w = 1 - d / rad;
         const idx = y * n + x;
-        vxField[idx] += relX * scale * w;
-        vyField[idx] += relY * scale * w;
+        const jx = relX * scale * w;
+        const jy = relY * scale * w;
+        vxField[idx] += jx;
+        vyField[idx] += jy;
+        injectedMomentum += Math.hypot(jx, jy);
       }
     }
   };
 
-  for (const b of bodies.rigid) {
+  for (let bi = 0; bi < bodies.rigid.length; bi++) {
+    const b = bodies.rigid[bi];
     const fx = sampleFieldBilinear(vxField, n, b.x, b.y);
     const fy = sampleFieldBilinear(vyField, n, b.x, b.y);
-    injectPoint(b.x, b.y, b.vx, b.vy, fx, fy, b.mass, b.r * 0.8);
+    const swimPhase = sim.frame * 0.08 + bi * 2.1;
+    injectPoint(b.x, b.y, b.vx, b.vy, fx, fy, b.mass, b.r * 0.8, Math.cos(swimPhase) * 0.015, Math.sin(swimPhase) * 0.012);
   }
-  for (const node of s.nodes) {
+  for (let i = 0; i < s.nodes.length; i++) {
+    const node = s.nodes[i];
     const fx = sampleFieldBilinear(vxField, n, node.x, node.y);
     const fy = sampleFieldBilinear(vyField, n, node.x, node.y);
-    injectPoint(node.x, node.y, node.vx, node.vy, fx, fy, node.mass, 2.2);
+    const swimPhase = sim.frame * 0.12 + i * 1.57;
+    injectPoint(node.x, node.y, node.vx, node.vy, fx, fy, node.mass, 2.2, Math.cos(swimPhase) * 0.01, Math.sin(swimPhase) * 0.01);
   }
+
+  const softCentroidAfter = computeSoftCentroid(s.nodes);
+  const rigidCenterAfter = {
+    x: (bodies.rigid[0].x + bodies.rigid[1].x) * 0.5,
+    y: (bodies.rigid[0].y + bodies.rigid[1].y) * 0.5,
+  };
+
+  const metrics = {
+    rigidCenterDelta: Math.hypot(rigidCenterAfter.x - rigidCenterBefore.x, rigidCenterAfter.y - rigidCenterBefore.y),
+    softCentroidDelta: Math.hypot(softCentroidAfter.x - softCentroidBefore.x, softCentroidAfter.y - softCentroidBefore.y),
+    rigidCarryTransfer,
+    softCarryTransfer,
+    injectedMomentum,
+  };
+  sim.couplingTelemetry = sim.couplingTelemetry || [];
+  sim.couplingTelemetry.push(metrics);
+  if (sim.couplingTelemetry.length > 120) sim.couplingTelemetry.shift();
+  return metrics;
+}
+
+
+function summarizeCouplingTelemetry(telemetry) {
+  if (!Array.isArray(telemetry) || telemetry.length === 0) {
+    return {
+      rigidCenterDeltaAvg: 0,
+      softCentroidDeltaAvg: 0,
+      rigidCarryTransferAvg: 0,
+      softCarryTransferAvg: 0,
+      injectedMomentumAvg: 0,
+    };
+  }
+  const acc = { rigidCenterDelta: 0, softCentroidDelta: 0, rigidCarryTransfer: 0, softCarryTransfer: 0, injectedMomentum: 0 };
+  for (const t of telemetry) {
+    acc.rigidCenterDelta += t.rigidCenterDelta || 0;
+    acc.softCentroidDelta += t.softCentroidDelta || 0;
+    acc.rigidCarryTransfer += t.rigidCarryTransfer || 0;
+    acc.softCarryTransfer += t.softCarryTransfer || 0;
+    acc.injectedMomentum += t.injectedMomentum || 0;
+  }
+  const k = 1 / telemetry.length;
+  return {
+    rigidCenterDeltaAvg: +(acc.rigidCenterDelta * k).toFixed(4),
+    softCentroidDeltaAvg: +(acc.softCentroidDelta * k).toFixed(4),
+    rigidCarryTransferAvg: +(acc.rigidCarryTransfer * k).toFixed(4),
+    softCarryTransferAvg: +(acc.softCarryTransfer * k).toFixed(4),
+    injectedMomentumAvg: +(acc.injectedMomentum * k).toFixed(4),
+  };
 }
 
 function drawBodiesOverlay(sim) {
@@ -515,6 +606,7 @@ async function initSim() {
     viscMapCpu, viscMapGpu,
     div, readR, readG, readB, readVx, readVy,
     bodies: initBodies(controls.n, controls),
+    couplingTelemetry: [],
     frame: 0, t0: performance.now(),
   };
 }
@@ -600,8 +692,8 @@ async function stepAndRender() {
     const vy = new Float32Array(s.readVy.getMappedRange().slice(0));
     s.readR.unmap(); s.readG.unmap(); s.readB.unmap(); s.readVx.unmap(); s.readVy.unmap();
 
-    // Foundation for rigid+soft body coupling: fluid carries bodies, bodies inject momentum back.
-    stepBodiesAndInject(s, vx, vy);
+    // Rigid + soft coupling: carry/drag from flow + two-way pushback/swim impulses.
+    const couplingInstant = stepBodiesAndInject(s, vx, vy);
     s.device.queue.writeBuffer(s.vx0, 0, vx);
     s.device.queue.writeBuffer(s.vy0, 0, vy);
 
@@ -631,6 +723,10 @@ async function stepAndRender() {
     drawViscPane();
 
     const elapsed = (performance.now() - s.t0) / 1000;
+    const couplingAverages = summarizeCouplingTelemetry(s.couplingTelemetry);
+    const couplingSnapshot = { ...couplingAverages, ...Object.fromEntries(Object.entries(couplingInstant || {}).map(([k,v]) => [k+'Now', +((v || 0).toFixed(4))])) };
+    window.__gpuLabCoupling = couplingSnapshot;
+
     log({
       ok: true,
       mode: 'live-fluid',
@@ -646,6 +742,7 @@ async function stepAndRender() {
       bodyFeedback: s.controls.bodyFeedback,
       paintValue: Number(paintValueEl.value) || 0.85,
       brushSize: Number(brushSizeEl.value) || 12,
+      coupling: couplingSnapshot,
     });
   }
 

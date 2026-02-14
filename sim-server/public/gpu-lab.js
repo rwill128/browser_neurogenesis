@@ -1,5 +1,8 @@
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
+const stopBtn = document.getElementById('stopBtn');
+const canvas = document.getElementById('view');
+const ctx = canvas.getContext('2d');
 
 function log(v) { out.textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2); }
 
@@ -7,6 +10,7 @@ const N = 256;
 const CELLS = N * N;
 const BYTES = CELLS * 4;
 const WORKGROUP = 8;
+const JACOBI_ITERS = 20;
 
 function wg() { return Math.ceil(N / WORKGROUP); }
 
@@ -71,10 +75,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = idx(gid.x, gid.y);
   let x = f32(gid.x);
   let y = f32(gid.y);
-  let vx = vx0[i];
-  let vy = vy0[i];
-  let px = x - p.dt * vx;
-  let py = y - p.dt * vy;
+  let px = x - p.dt * vx0[i];
+  let py = y - p.dt * vy0[i];
   vx1[i] = sampleBilinear(&vx0, px, py);
   vy1[i] = sampleBilinear(&vy0, px, py);
 }
@@ -182,22 +184,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let dy = f32(gid.y) - cy;
   let d2 = dx*dx + dy*dy;
   let i = idx(gid.x, gid.y);
-  if (d2 < 36.0) {
-    vx[i] = vx[i] + 10.0;
-    vy[i] = vy[i] + 1.5 * sin(f32(i) * 0.0005);
+  if (d2 < 64.0) {
+    vx[i] = vx[i] + 7.0;
+    vy[i] = vy[i] + 1.2 * sin(f32(i) * 0.0007);
     r[i] = 255.0;
-    g[i] = 120.0;
-    b[i] = 40.0;
+    g[i] = 140.0;
+    b[i] = 60.0;
   }
 }
 `;
 
-async function createPipeline(device, code, entries) {
+async function createPipeline(device, code) {
   const module = device.createShaderModule({ code });
   const pipeline = await device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint: 'main' } });
   return {
     pipeline,
-    makeBindGroup(resources) {
+    bg(resources) {
       return device.createBindGroup({
         layout: pipeline.getBindGroupLayout(0),
         entries: resources.map((buffer, i) => ({ binding: i, resource: { buffer } }))
@@ -206,14 +208,17 @@ async function createPipeline(device, code, entries) {
   };
 }
 
-async function runFluid() {
-  if (!navigator.gpu) return log({ ok: false, reason: 'WebGPU unavailable in browser' });
+let running = false;
+let sim = null;
+
+async function initSim() {
+  if (!navigator.gpu) throw new Error('WebGPU unavailable in browser');
   const adapter = await navigator.gpu.requestAdapter();
-  if (!adapter) return log({ ok: false, reason: 'No adapter' });
+  if (!adapter) throw new Error('No WebGPU adapter');
   const device = await adapter.requestDevice();
 
   const uniform = createUniformBuffer(device);
-  uploadUniforms(device, uniform, 0.12, 0.996);
+  uploadUniforms(device, uniform, 0.10, 0.996);
 
   const vxA = createBuffer(device), vxB = createBuffer(device);
   const vyA = createBuffer(device), vyB = createBuffer(device);
@@ -223,6 +228,10 @@ async function runFluid() {
   const gA = createBuffer(device), gB = createBuffer(device);
   const bA = createBuffer(device), bB = createBuffer(device);
 
+  const readR = device.createBuffer({ size: BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const readG = device.createBuffer({ size: BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const readB = device.createBuffer({ size: BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+
   const inject = await createPipeline(device, injectWgsl);
   const advVel = await createPipeline(device, advectVelWgsl);
   const divPipe = await createPipeline(device, divergenceWgsl);
@@ -230,103 +239,142 @@ async function runFluid() {
   const project = await createPipeline(device, projectWgsl);
   const advDye = await createPipeline(device, advectDyeWgsl);
 
-  const readback = device.createBuffer({ size: BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  return {
+    device, uniform,
+    inject, advVel, divPipe, jacobiP, project, advDye,
+    vx0: vxA, vx1: vxB, vy0: vyA, vy1: vyB,
+    pr0: pA, pr1: pB,
+    rr0: rA, rr1: rB, gg0: gA, gg1: gB, bb0: bA, bb1: bB,
+    div, readR, readG, readB,
+    frame: 0, t0: performance.now(),
+  };
+}
 
-  let vx0 = vxA, vx1 = vxB, vy0 = vyA, vy1 = vyB;
-  let pr0 = pA, pr1 = pB;
-  let rr0 = rA, rr1 = rB, gg0 = gA, gg1 = gB, bb0 = bA, bb1 = bB;
+async function stepAndRender() {
+  if (!running || !sim) return;
+  const s = sim;
 
-  const t0 = performance.now();
-  const STEPS = 180;
+  const enc = s.device.createCommandEncoder();
 
-  for (let s = 0; s < STEPS; s++) {
-    const enc = device.createCommandEncoder();
+  let pass = enc.beginComputePass();
+  pass.setPipeline(s.inject.pipeline);
+  pass.setBindGroup(0, s.inject.bg([s.uniform, s.vx0, s.vy0, s.rr0, s.gg0, s.bb0]));
+  pass.dispatchWorkgroups(wg(), wg());
+  pass.end();
 
-    {
-      const pass = enc.beginComputePass();
-      pass.setPipeline(inject.pipeline);
-      pass.setBindGroup(0, inject.makeBindGroup([uniform, vx0, vy0, rr0, gg0, bb0]));
-      pass.dispatchWorkgroups(wg(), wg());
-      pass.end();
-    }
+  pass = enc.beginComputePass();
+  pass.setPipeline(s.advVel.pipeline);
+  pass.setBindGroup(0, s.advVel.bg([s.uniform, s.vx0, s.vy0, s.vx1, s.vy1]));
+  pass.dispatchWorkgroups(wg(), wg());
+  pass.end();
+  [s.vx0, s.vx1] = [s.vx1, s.vx0];
+  [s.vy0, s.vy1] = [s.vy1, s.vy0];
 
-    {
-      const pass = enc.beginComputePass();
-      pass.setPipeline(advVel.pipeline);
-      pass.setBindGroup(0, advVel.makeBindGroup([uniform, vx0, vy0, vx1, vy1]));
-      pass.dispatchWorkgroups(wg(), wg());
-      pass.end();
-    }
-    [vx0, vx1] = [vx1, vx0];
-    [vy0, vy1] = [vy1, vy0];
+  pass = enc.beginComputePass();
+  pass.setPipeline(s.divPipe.pipeline);
+  pass.setBindGroup(0, s.divPipe.bg([s.uniform, s.vx0, s.vy0, s.div]));
+  pass.dispatchWorkgroups(wg(), wg());
+  pass.end();
 
-    {
-      const pass = enc.beginComputePass();
-      pass.setPipeline(divPipe.pipeline);
-      pass.setBindGroup(0, divPipe.makeBindGroup([uniform, vx0, vy0, div]));
-      pass.dispatchWorkgroups(wg(), wg());
-      pass.end();
-    }
-
-    for (let i = 0; i < 20; i++) {
-      const pass = enc.beginComputePass();
-      pass.setPipeline(jacobiP.pipeline);
-      pass.setBindGroup(0, jacobiP.makeBindGroup([uniform, pr0, div, pr1]));
-      pass.dispatchWorkgroups(wg(), wg());
-      pass.end();
-      [pr0, pr1] = [pr1, pr0];
-    }
-
-    {
-      const pass = enc.beginComputePass();
-      pass.setPipeline(project.pipeline);
-      pass.setBindGroup(0, project.makeBindGroup([uniform, vx0, vy0, pr0]));
-      pass.dispatchWorkgroups(wg(), wg());
-      pass.end();
-    }
-
-    {
-      const pass = enc.beginComputePass();
-      pass.setPipeline(advDye.pipeline);
-      pass.setBindGroup(0, advDye.makeBindGroup([uniform, vx0, vy0, rr0, gg0, bb0, rr1, gg1, bb1]));
-      pass.dispatchWorkgroups(wg(), wg());
-      pass.end();
-    }
-    [rr0, rr1] = [rr1, rr0];
-    [gg0, gg1] = [gg1, gg0];
-    [bb0, bb1] = [bb1, bb0];
-
-    if (s === STEPS - 1) {
-      enc.copyBufferToBuffer(rr0, 0, readback, 0, BYTES);
-    }
-
-    device.queue.submit([enc.finish()]);
+  for (let i = 0; i < JACOBI_ITERS; i++) {
+    pass = enc.beginComputePass();
+    pass.setPipeline(s.jacobiP.pipeline);
+    pass.setBindGroup(0, s.jacobiP.bg([s.uniform, s.pr0, s.div, s.pr1]));
+    pass.dispatchWorkgroups(wg(), wg());
+    pass.end();
+    [s.pr0, s.pr1] = [s.pr1, s.pr0];
   }
 
-  await readback.mapAsync(GPUMapMode.READ);
-  const arr = new Float32Array(readback.getMappedRange());
-  let sum = 0;
-  let max = 0;
-  let nz = 0;
-  for (let i = 0; i < arr.length; i++) {
-    const v = arr[i];
-    sum += v;
-    if (v > max) max = v;
-    if (v > 0.5) nz++;
-  }
-  readback.unmap();
-  const elapsed = performance.now() - t0;
+  pass = enc.beginComputePass();
+  pass.setPipeline(s.project.pipeline);
+  pass.setBindGroup(0, s.project.bg([s.uniform, s.vx0, s.vy0, s.pr0]));
+  pass.dispatchWorkgroups(wg(), wg());
+  pass.end();
 
-  log({
-    ok: true,
-    backend: 'webgpu',
-    grid: N,
-    steps: STEPS,
-    sps: +((STEPS * 1000) / elapsed).toFixed(2),
-    elapsedMs: +elapsed.toFixed(2),
-    dye: { sum: +sum.toFixed(2), max: +max.toFixed(2), footprintPct: +(100 * nz / arr.length).toFixed(3) }
+  pass = enc.beginComputePass();
+  pass.setPipeline(s.advDye.pipeline);
+  pass.setBindGroup(0, s.advDye.bg([s.uniform, s.vx0, s.vy0, s.rr0, s.gg0, s.bb0, s.rr1, s.gg1, s.bb1]));
+  pass.dispatchWorkgroups(wg(), wg());
+  pass.end();
+  [s.rr0, s.rr1] = [s.rr1, s.rr0];
+  [s.gg0, s.gg1] = [s.gg1, s.gg0];
+  [s.bb0, s.bb1] = [s.bb1, s.bb0];
+
+  // Render every other frame to keep it responsive.
+  const doReadback = (s.frame % 2) === 0;
+  if (doReadback) {
+    enc.copyBufferToBuffer(s.rr0, 0, s.readR, 0, BYTES);
+    enc.copyBufferToBuffer(s.gg0, 0, s.readG, 0, BYTES);
+    enc.copyBufferToBuffer(s.bb0, 0, s.readB, 0, BYTES);
+  }
+
+  s.device.queue.submit([enc.finish()]);
+
+  if (doReadback) {
+    await Promise.all([
+      s.readR.mapAsync(GPUMapMode.READ),
+      s.readG.mapAsync(GPUMapMode.READ),
+      s.readB.mapAsync(GPUMapMode.READ),
+    ]);
+
+    const r = new Float32Array(s.readR.getMappedRange().slice(0));
+    const g = new Float32Array(s.readG.getMappedRange().slice(0));
+    const b = new Float32Array(s.readB.getMappedRange().slice(0));
+    s.readR.unmap(); s.readG.unmap(); s.readB.unmap();
+
+    const img = ctx.createImageData(N, N);
+    const px = img.data;
+    let sum = 0;
+    for (let i = 0; i < CELLS; i++) {
+      const ri = Math.max(0, Math.min(255, r[i]));
+      const gi = Math.max(0, Math.min(255, g[i]));
+      const bi = Math.max(0, Math.min(255, b[i]));
+      const o = i * 4;
+      px[o] = ri;
+      px[o + 1] = gi;
+      px[o + 2] = bi;
+      px[o + 3] = 255;
+      sum += ri + gi + bi;
+    }
+
+    const scale = canvas.width / N;
+    const tmp = document.createElement('canvas');
+    tmp.width = N; tmp.height = N;
+    tmp.getContext('2d').putImageData(img, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(tmp, 0, 0, N, N, 0, 0, N * scale, N * scale);
+
+    const elapsed = (performance.now() - s.t0) / 1000;
+    log({
+      ok: true,
+      mode: 'live-fluid',
+      grid: N,
+      frames: s.frame,
+      fps: +(s.frame / Math.max(1e-6, elapsed)).toFixed(1),
+      dyeEnergy: +sum.toFixed(1)
+    });
+  }
+
+  s.frame += 1;
+  if (running) requestAnimationFrame(() => stepAndRender());
+}
+
+async function start() {
+  if (running) return;
+  running = true;
+  if (!sim) sim = await initSim();
+  log('starting live GPU fluid sim...');
+  stepAndRender().catch((e) => {
+    running = false;
+    log({ ok: false, error: String(e) });
   });
 }
 
-runBtn.addEventListener('click', () => runFluid().catch((e) => log({ ok: false, error: String(e) })));
-log('ready: click Run WebGPU smoke test (now running fluid compute passes)');
+function stop() {
+  running = false;
+  log('stopped');
+}
+
+runBtn.addEventListener('click', () => start().catch((e) => log({ ok: false, error: String(e) })));
+stopBtn.addEventListener('click', stop);
+log('ready: click "Start GPU fluid sim" to see live GPU fluid');

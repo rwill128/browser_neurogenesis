@@ -4,11 +4,20 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>GPU Lab</title>
-  <style>body{font-family:system-ui;background:#111;color:#eee;padding:16px} pre{background:#1b1b1b;padding:12px;border-radius:8px;white-space:pre-wrap}</style>
+  <style>
+    body { font-family: system-ui; background: #111; color: #eee; padding: 16px; }
+    .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+    pre { background: #1b1b1b; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
+    canvas { border: 1px solid #333; image-rendering: pixelated; image-rendering: crisp-edges; }
+  </style>
 </head>
 <body>
-  <h2>GPU Lab (WebGPU)</h2>
-  <button id="runBtn">Run WebGPU smoke test</button>
+  <h2>GPU Lab (WebGPU Fluid)</h2>
+  <div class="row">
+    <button id="runBtn">Start GPU fluid sim</button>
+    <button id="stopBtn">Stop</button>
+  </div>
+  <canvas id="view" width="512" height="512"></canvas>
   <pre id="out">idle</pre>
   <script type="module" src="/gpu-lab.js"></script>
 </body>

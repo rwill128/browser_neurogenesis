@@ -7,10 +7,10 @@ export const scenarioDefs = {
   },
   browser_default_big: {
     name: 'browser_default_big',
-    description: 'Big browser-like default world (40000x32000, creature floor=0, particle-free)',
+    description: 'Big browser-like default world (80000x64000, creature floor=0, particle-free)',
     browserConfig: {
-      WORLD_WIDTH: 40000,
-      WORLD_HEIGHT: 32000,
+      WORLD_WIDTH: 80000,
+      WORLD_HEIGHT: 64000,
       CREATURE_POPULATION_FLOOR: 0,
       CREATURE_POPULATION_CEILING: 10000,
       PARTICLE_POPULATION_FLOOR: 0,
@@ -27,12 +27,12 @@ export const scenarioDefs = {
       MAX_VISCOSITY_MULTIPLIER: 12.0,
       VISCOSITY_LANDSCAPE_CONTRAST: 0.9,
       VISCOSITY_LANDSCAPE_BANDS: 12,
-      FLUID_GRID_SIZE_CONTROL: 256,
+      FLUID_GRID_SIZE_CONTROL: 768,
       AUTO_FOLLOW_CREATURE: true
     },
     nodeConfig: {
-      world: { width: 40000, height: 32000 },
-      creatures: 400,
+      world: { width: 80000, height: 64000 },
+      creatures: 600,
       creatureFloor: 0,
       creatureCeiling: 10000,
       particles: 0,

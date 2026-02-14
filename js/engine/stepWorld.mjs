@@ -1043,10 +1043,6 @@ export function stepWorld(state, dt, options = {}) {
     if (typeof state.fluidField.seedCarrierTilesFromBodies === 'function') {
       state.fluidField.seedCarrierTilesFromBodies(state.softBodyPopulation);
     }
-    if (typeof state.fluidField.seedCarrierTilesFromParticles === 'function') {
-      state.fluidField.seedCarrierTilesFromParticles(state.particles);
-    }
-
     const fluidStepEvery = Math.max(1, Math.floor(Number(runtimeConfig.FLUID_STEP_EVERY_N_TICKS) || 1));
     const worldTick = Math.max(0, Math.floor(Number(state.tick) || 0));
     if ((worldTick % fluidStepEvery) === 0) {

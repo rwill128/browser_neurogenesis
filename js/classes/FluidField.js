@@ -486,14 +486,29 @@ export class FluidField {
         return { xMin, yMin, xMax, yMax };
     }
 
+    _mergeBounds(a, b) {
+        if (!a) return b || null;
+        if (!b) return a || null;
+        return {
+            xMin: Math.min(a.xMin, b.xMin),
+            yMin: Math.min(a.yMin, b.yMin),
+            xMax: Math.max(a.xMax, b.xMax),
+            yMax: Math.max(a.yMax, b.yMax)
+        };
+    }
+
     step(worldTick = 0) {
         this.seedMomentumTilesFromVelocityField();
         const carrierBounds = this._getActiveCellBounds(this.carrierTiles);
         const momentumBounds = this._getActiveCellBounds(this.momentumTiles);
-        const momentumEvery = Math.max(1, Math.floor(Number(config.FLUID_MOMENTUM_ONLY_STEP_EVERY_N_TICKS) || 6));
+        const momentumEvery = Math.max(1, Math.floor(Number(config.FLUID_MOMENTUM_ONLY_STEP_EVERY_N_TICKS) || 10));
         const allowMomentumSolve = (Math.max(0, Math.floor(Number(worldTick) || 0)) % momentumEvery) === 0;
 
-        const bounds = carrierBounds || (allowMomentumSolve ? momentumBounds : null);
+        // Carrier region runs every fluid step; momentum-only region is folded in at reduced cadence.
+        const bounds = allowMomentumSolve
+            ? this._mergeBounds(carrierBounds, momentumBounds)
+            : carrierBounds;
+
         if (!bounds) {
             this._finalizeActiveTileTelemetry();
             return;

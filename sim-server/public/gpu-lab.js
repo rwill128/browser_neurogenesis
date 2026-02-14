@@ -598,6 +598,50 @@ function applyBounceBoundary(body, n, damping = 0.82) {
   }
 }
 
+function resolveCircleCollision(a, b, restitution = 0.35) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const d2 = dx * dx + dy * dy;
+  const minDist = (a.r || 1) + (b.r || 1);
+  if (d2 <= 1e-10) {
+    const jitter = 0.01;
+    a.x -= jitter; b.x += jitter;
+    return;
+  }
+  if (d2 >= minDist * minDist) return;
+
+  const d = Math.sqrt(d2);
+  const nx = dx / d;
+  const ny = dy / d;
+  const penetration = minDist - d;
+
+  const ma = Math.max(0.02, a.mass || 1);
+  const mb = Math.max(0.02, b.mass || 1);
+  const invA = 1 / ma;
+  const invB = 1 / mb;
+  const invSum = invA + invB;
+
+  // Positional correction
+  const corr = (penetration / Math.max(1e-6, invSum)) * 0.85;
+  a.x -= nx * corr * invA;
+  a.y -= ny * corr * invA;
+  b.x += nx * corr * invB;
+  b.y += ny * corr * invB;
+
+  // Impulse resolution
+  const rvx = b.vx - a.vx;
+  const rvy = b.vy - a.vy;
+  const vn = rvx * nx + rvy * ny;
+  if (vn > 0) return;
+  const j = (-(1 + restitution) * vn) / Math.max(1e-6, invSum);
+  const ix = j * nx;
+  const iy = j * ny;
+  a.vx -= ix * invA;
+  a.vy -= iy * invA;
+  b.vx += ix * invB;
+  b.vy += iy * invB;
+}
+
 function enforceFluidEdgeBoundariesCpu(vxField, vyField, n) {
   const last = n - 1;
   for (let x = 0; x < n; x++) {
@@ -767,6 +811,27 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     node.x = node.x + node.vx * dt * 24;
     node.y = node.y + node.vy * dt * 24;
     applyBounceBoundary(node, n, 0.78);
+  }
+
+  // Body-body collisions: rigid↔rigid, rigid↔soft, soft↔soft
+  for (let iter = 0; iter < 2; iter++) {
+    for (let i = 0; i < bodies.rigid.length; i++) {
+      for (let j = i + 1; j < bodies.rigid.length; j++) {
+        resolveCircleCollision(bodies.rigid[i], bodies.rigid[j], 0.45);
+      }
+    }
+    for (const rb of bodies.rigid) {
+      for (const sn of s.nodes) {
+        resolveCircleCollision(rb, sn, 0.35);
+      }
+    }
+    for (let i = 0; i < s.nodes.length; i++) {
+      for (let j = i + 1; j < s.nodes.length; j++) {
+        resolveCircleCollision(s.nodes[i], s.nodes[j], 0.22);
+      }
+    }
+    for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
+    for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
   }
 
   let injectedMomentum = 0;

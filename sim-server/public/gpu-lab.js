@@ -28,7 +28,7 @@ function readControls() {
   return {
     n: Math.max(32, Number(gridEl.value) || 256),
     dt: Number(dtEl.value) || 0.035,
-    fade: Number(fadeEl.value) || 0.992,
+    fade: Number(fadeEl.value) || 0.9999,
     viscosity: Number(viscosityEl.value) || 0.0025,
     impulse: Number(impulseEl.value) || 2.5,
     radius: Number(radiusEl.value) || 6,

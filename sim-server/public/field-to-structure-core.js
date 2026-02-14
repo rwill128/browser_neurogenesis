@@ -19,6 +19,8 @@ export function compileFieldToMesh({
   permeabilityField = null,
   threshold = 0.35,
   density = 1,
+  connectivityMode = 'none', // none | largest
+  minComponentTriangles = 0,
 }) {
   const step = Math.max(1, density | 0);
   const nodeMap = new Map();
@@ -64,16 +66,74 @@ export function compileFieldToMesh({
     }
   }
 
+  const filtered = enforceConnectivity({ triangles, mode: connectivityMode, minComponentTriangles });
+
   return {
     nodes,
-    triangles,
+    triangles: filtered.triangles,
     meta: {
       width,
       height,
       density: step,
       threshold,
-      rigidTriangles: triangles.filter((t) => t.kind === 'rigid').length,
-      softTriangles: triangles.filter((t) => t.kind === 'soft').length,
+      connectivityMode,
+      components: filtered.componentCount,
+      keptComponents: filtered.keptComponents,
+      rigidTriangles: filtered.triangles.filter((t) => t.kind === 'rigid').length,
+      softTriangles: filtered.triangles.filter((t) => t.kind === 'soft').length,
+      droppedTriangles: triangles.length - filtered.triangles.length,
     },
   };
+}
+
+function enforceConnectivity({ triangles, mode = 'none', minComponentTriangles = 0 }) {
+  if (!triangles.length || mode === 'none') {
+    return { triangles, componentCount: triangles.length ? 1 : 0, keptComponents: triangles.length ? 1 : 0 };
+  }
+
+  const nodeToTris = new Map();
+  for (let i = 0; i < triangles.length; i++) {
+    const t = triangles[i];
+    for (const n of [t.a, t.b, t.c]) {
+      if (!nodeToTris.has(n)) nodeToTris.set(n, []);
+      nodeToTris.get(n).push(i);
+    }
+  }
+
+  const seen = new Uint8Array(triangles.length);
+  const components = [];
+  for (let i = 0; i < triangles.length; i++) {
+    if (seen[i]) continue;
+    const stack = [i];
+    seen[i] = 1;
+    const comp = [];
+    while (stack.length) {
+      const ti = stack.pop();
+      comp.push(ti);
+      const tri = triangles[ti];
+      for (const n of [tri.a, tri.b, tri.c]) {
+        for (const ni of (nodeToTris.get(n) || [])) {
+          if (!seen[ni]) {
+            seen[ni] = 1;
+            stack.push(ni);
+          }
+        }
+      }
+    }
+    components.push(comp);
+  }
+
+  components.sort((a, b) => b.length - a.length);
+  let keep = [];
+  if (mode === 'largest') {
+    const largest = components[0] || [];
+    if (minComponentTriangles > 0) {
+      keep = components.filter((c, idx) => idx === 0 || c.length >= minComponentTriangles);
+    } else {
+      keep = largest.length ? [largest] : [];
+    }
+  }
+  const keepSet = new Set(keep.flat());
+  const keptTriangles = triangles.filter((_, idx) => keepSet.has(idx));
+  return { triangles: keptTriangles, componentCount: components.length, keptComponents: keep.length };
 }

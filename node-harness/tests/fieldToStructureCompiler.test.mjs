@@ -41,3 +41,21 @@ test('higher threshold reduces generated triangles', () => {
 
   assert.ok(low.triangles.length > high.triangles.length);
 });
+
+test('connectivity largest mode drops disconnected islands', () => {
+  const w = 20, h = 20;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+
+  // big island
+  for (let y = 3; y <= 10; y++) for (let x = 3; x <= 10; x++) rigid[y * w + x] = 1;
+  // tiny island
+  for (let y = 14; y <= 15; y++) for (let x = 14; x <= 15; x++) rigid[y * w + x] = 1;
+
+  const raw = compileFieldToMesh({ width: w, height: h, rigidField: rigid, softField: soft, threshold: 0.2, density: 2, connectivityMode: 'none' });
+  const connected = compileFieldToMesh({ width: w, height: h, rigidField: rigid, softField: soft, threshold: 0.2, density: 2, connectivityMode: 'largest' });
+
+  assert.ok(raw.triangles.length > connected.triangles.length);
+  assert.ok(connected.meta.components >= 2);
+  assert.equal(connected.meta.keptComponents, 1);
+});

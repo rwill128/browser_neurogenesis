@@ -8,6 +8,8 @@ const modeEl = document.getElementById('paintMode');
 const brushEl = document.getElementById('brush');
 const densityEl = document.getElementById('density');
 const thresholdEl = document.getElementById('threshold');
+const enforceConnectivityEl = document.getElementById('enforceConnectivity');
+const minCompTrisEl = document.getElementById('minCompTris');
 const clearBtn = document.getElementById('clearBtn');
 const compileBtn = document.getElementById('compileBtn');
 const out = document.getElementById('out');
@@ -88,6 +90,8 @@ function compileNow() {
     softField: soft,
     density: Math.max(1, Number(densityEl.value) || 4),
     threshold: Math.max(0, Math.min(1, Number(thresholdEl.value) || 0.35)),
+    connectivityMode: enforceConnectivityEl?.checked ? 'largest' : 'none',
+    minComponentTriangles: Math.max(0, Number(minCompTrisEl?.value) || 0),
   });
   drawMesh(mesh);
 }

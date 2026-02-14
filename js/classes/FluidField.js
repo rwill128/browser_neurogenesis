@@ -176,9 +176,13 @@ export class FluidField {
         return fallback;
     }
 
-    lin_solve(b, x, x0, a_global_param, c_global_param, field_type, base_diff_rate, dt_param) {
+    lin_solve(b, x, x0, a_global_param, c_global_param, field_type, base_diff_rate, dt_param, bounds = null) {
         const N = this.size;
         const NMinus1 = N - 1;
+        const xMin = bounds ? Math.max(1, Math.min(NMinus1 - 1, Math.floor(bounds.xMin))) : 1;
+        const xMax = bounds ? Math.max(xMin, Math.min(NMinus1 - 1, Math.floor(bounds.xMax))) : (NMinus1 - 1);
+        const yMin = bounds ? Math.max(1, Math.min(NMinus1 - 1, Math.floor(bounds.yMin))) : 1;
+        const yMax = bounds ? Math.max(yMin, Math.min(NMinus1 - 1, Math.floor(bounds.yMax))) : (NMinus1 - 1);
         const cRecipGlobal = 1.0 / c_global_param;
         const solverIterations = this._getSolverIterationsForField(field_type);
 
@@ -187,9 +191,9 @@ export class FluidField {
 
         if (!viscosityField) {
             for (let k_iter = 0; k_iter < solverIterations; k_iter++) {
-                for (let j = 1; j < NMinus1; j++) {
-                    let idx = j * N + 1;
-                    const rowEnd = j * N + NMinus1;
+                for (let j = yMin; j <= yMax; j++) {
+                    let idx = j * N + xMin;
+                    const rowEnd = j * N + xMax + 1;
                     while (idx < rowEnd) {
                         x[idx] = (x0[idx] + a_global_param * (x[idx + 1] + x[idx - 1] + x[idx + N] + x[idx - N])) * cRecipGlobal;
                         idx++;
@@ -209,9 +213,9 @@ export class FluidField {
         const effectiveCRecipByIdx = this._linSolveEffectiveCRecip;
 
         // Build local coefficients once; reuse across all Gauss-Seidel iterations in this solve.
-        for (let j = 1; j < NMinus1; j++) {
-            let idx = j * N + 1;
-            const rowEnd = j * N + NMinus1;
+        for (let j = yMin; j <= yMax; j++) {
+            let idx = j * N + xMin;
+            const rowEnd = j * N + xMax + 1;
             while (idx < rowEnd) {
                 let localMultiplier = viscosityField[idx];
                 if (!Number.isFinite(localMultiplier)) localMultiplier = 1;
@@ -226,9 +230,9 @@ export class FluidField {
         }
 
         for (let k_iter = 0; k_iter < solverIterations; k_iter++) {
-            for (let j = 1; j < NMinus1; j++) {
-                let idx = j * N + 1;
-                const rowEnd = j * N + NMinus1;
+            for (let j = yMin; j <= yMax; j++) {
+                let idx = j * N + xMin;
+                const rowEnd = j * N + xMax + 1;
                 while (idx < rowEnd) {
                     const effectiveA = effectiveAByIdx[idx];
                     const effectiveCRecip = effectiveCRecipByIdx[idx];
@@ -240,18 +244,22 @@ export class FluidField {
         }
     }
 
-    diffuse(b, x_out, x_in, base_diff_rate, dt, field_type = 'density') {
+    diffuse(b, x_out, x_in, base_diff_rate, dt, field_type = 'density', bounds = null) {
         const a_global = dt * base_diff_rate * (this.size - 2) * (this.size - 2);
-        this.lin_solve(b, x_out, x_in, a_global, 1 + 4 * a_global, field_type, base_diff_rate, dt);
+        this.lin_solve(b, x_out, x_in, a_global, 1 + 4 * a_global, field_type, base_diff_rate, dt, bounds);
     }
 
-    project(velocX_in_out, velocY_in_out, p_temp, div_temp) {
+    project(velocX_in_out, velocY_in_out, p_temp, div_temp, bounds = null) {
         const N = this.size;
         const NMinus1 = N - 1;
+        const xMin = bounds ? Math.max(1, Math.min(NMinus1 - 1, Math.floor(bounds.xMin))) : 1;
+        const xMax = bounds ? Math.max(xMin, Math.min(NMinus1 - 1, Math.floor(bounds.xMax))) : (NMinus1 - 1);
+        const yMin = bounds ? Math.max(1, Math.min(NMinus1 - 1, Math.floor(bounds.yMin))) : 1;
+        const yMax = bounds ? Math.max(yMin, Math.min(NMinus1 - 1, Math.floor(bounds.yMax))) : (NMinus1 - 1);
 
-        for (let j = 1; j < NMinus1; j++) {
-            let idx = j * N + 1;
-            const rowEnd = j * N + NMinus1;
+        for (let j = yMin; j <= yMax; j++) {
+            let idx = j * N + xMin;
+            const rowEnd = j * N + xMax + 1;
             while (idx < rowEnd) {
                 div_temp[idx] = -0.5 * (velocX_in_out[idx + 1] - velocX_in_out[idx - 1] + velocY_in_out[idx + N] - velocY_in_out[idx - N]) / N;
                 p_temp[idx] = 0;
@@ -261,11 +269,11 @@ export class FluidField {
 
         this.set_bnd(0, div_temp);
         this.set_bnd(0, p_temp);
-        this.lin_solve(0, p_temp, div_temp, 1, 4, 'pressure', 0, 0);
+        this.lin_solve(0, p_temp, div_temp, 1, 4, 'pressure', 0, 0, bounds);
 
-        for (let j = 1; j < NMinus1; j++) {
-            let idx = j * N + 1;
-            const rowEnd = j * N + NMinus1;
+        for (let j = yMin; j <= yMax; j++) {
+            let idx = j * N + xMin;
+            const rowEnd = j * N + xMax + 1;
             while (idx < rowEnd) {
                 velocX_in_out[idx] -= 0.5 * (p_temp[idx + 1] - p_temp[idx - 1]) * N;
                 velocY_in_out[idx] -= 0.5 * (p_temp[idx + N] - p_temp[idx - N]) * N;
@@ -277,15 +285,19 @@ export class FluidField {
         this.set_bnd(2, velocY_in_out);
     }
 
-    advect(b, d_out, d_in, velocX_source, velocY_source, dt) {
+    advect(b, d_out, d_in, velocX_source, velocY_source, dt, bounds = null) {
         const N = this.size;
         const NMinus1 = N - 1;
+        const xMin = bounds ? Math.max(1, Math.min(NMinus1 - 1, Math.floor(bounds.xMin))) : 1;
+        const xMax = bounds ? Math.max(xMin, Math.min(NMinus1 - 1, Math.floor(bounds.xMax))) : (NMinus1 - 1);
+        const yMin = bounds ? Math.max(1, Math.min(NMinus1 - 1, Math.floor(bounds.yMin))) : 1;
+        const yMax = bounds ? Math.max(yMin, Math.min(NMinus1 - 1, Math.floor(bounds.yMax))) : (NMinus1 - 1);
         const dtx_scaled = dt * N;
         const dty_scaled = dt * N;
 
-        for (let j_cell = 1; j_cell < NMinus1; j_cell++) {
-            let current_idx = j_cell * N + 1;
-            const rowEnd = j_cell * N + NMinus1;
+        for (let j_cell = yMin; j_cell <= yMax; j_cell++) {
+            let current_idx = j_cell * N + xMin;
+            const rowEnd = j_cell * N + xMax + 1;
 
             for (let i_cell = 1; current_idx < rowEnd; i_cell++, current_idx++) {
                 let x = i_cell - (dtx_scaled * velocX_source[current_idx]);
@@ -373,27 +385,78 @@ export class FluidField {
         x_arr[N * N - 1] = 0.5 * (x_arr[N * N - 2] + x_arr[N * (NMinus1 - 1) + NMinus1]);
     }
 
+    /**
+     * Compute active-cell bounds from currently active tiles (with safety halo).
+     */
+    _getActiveCellBounds() {
+        if (!this.activeTiles || this.activeTiles.size === 0) return null;
+
+        let minTx = Infinity;
+        let minTy = Infinity;
+        let maxTx = -Infinity;
+        let maxTy = -Infinity;
+        for (const key of this.activeTiles.keys()) {
+            const [txRaw, tyRaw] = String(key).split(':');
+            const tx = Math.floor(Number(txRaw));
+            const ty = Math.floor(Number(tyRaw));
+            if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+            if (tx < minTx) minTx = tx;
+            if (ty < minTy) minTy = ty;
+            if (tx > maxTx) maxTx = tx;
+            if (ty > maxTy) maxTy = ty;
+        }
+        if (!Number.isFinite(minTx) || !Number.isFinite(minTy) || !Number.isFinite(maxTx) || !Number.isFinite(maxTy)) {
+            return null;
+        }
+
+        const pad = Math.max(1, this.activeTileSize);
+        const xMin = Math.max(1, (minTx * this.activeTileSize) - pad);
+        const yMin = Math.max(1, (minTy * this.activeTileSize) - pad);
+        const xMax = Math.min(this.size - 2, ((maxTx + 1) * this.activeTileSize) + pad);
+        const yMax = Math.min(this.size - 2, ((maxTy + 1) * this.activeTileSize) + pad);
+        return { xMin, yMin, xMax, yMax };
+    }
+
     step() {
-        this.diffuse(1, this.Vx0, this.Vx, this.viscosity, this.dt, 'velX');
-        this.diffuse(2, this.Vy0, this.Vy, this.viscosity, this.dt, 'velY');
+        const bounds = this._getActiveCellBounds();
+        this.diffuse(1, this.Vx0, this.Vx, this.viscosity, this.dt, 'velX', bounds);
+        this.diffuse(2, this.Vy0, this.Vy, this.viscosity, this.dt, 'velY', bounds);
         this.clampVelocityComponents(this.Vx0);
         this.clampVelocityComponents(this.Vy0);
-        this.project(this.Vx0, this.Vy0, this.Vx, this.Vy);
-        this.advect(1, this.Vx, this.Vx0, this.Vx0, this.Vy0, this.dt);
-        this.advect(2, this.Vy, this.Vy0, this.Vx0, this.Vy0, this.dt);
+        this.project(this.Vx0, this.Vy0, this.Vx, this.Vy, bounds);
+        this.advect(1, this.Vx, this.Vx0, this.Vx0, this.Vy0, this.dt, bounds);
+        this.advect(2, this.Vy, this.Vy0, this.Vx0, this.Vy0, this.dt, bounds);
         this.clampVelocityComponents(this.Vx);
         this.clampVelocityComponents(this.Vy);
-        this.project(this.Vx, this.Vy, this.Vx0, this.Vy0);
-        this.diffuse(0, this.densityR0, this.densityR, this.diffusion, this.dt, 'density');
-        this.diffuse(0, this.densityG0, this.densityG, this.diffusion, this.dt, 'density');
-        this.diffuse(0, this.densityB0, this.densityB, this.diffusion, this.dt, 'density');
-        this.advect(0, this.densityR, this.densityR0, this.Vx, this.Vy, this.dt);
-        this.advect(0, this.densityG, this.densityG0, this.Vx, this.Vy, this.dt);
-        this.advect(0, this.densityB, this.densityB0, this.Vx, this.Vy, this.dt);
-        for (let i = 0; i < this.densityR.length; i++) {
-            this.densityR[i] = Math.max(0, this.densityR[i] - config.FLUID_FADE_RATE * 255 * this.dt);
-            this.densityG[i] = Math.max(0, this.densityG[i] - config.FLUID_FADE_RATE * 255 * this.dt);
-            this.densityB[i] = Math.max(0, this.densityB[i] - config.FLUID_FADE_RATE * 255 * this.dt);
+        this.project(this.Vx, this.Vy, this.Vx0, this.Vy0, bounds);
+        this.diffuse(0, this.densityR0, this.densityR, this.diffusion, this.dt, 'density', bounds);
+        this.diffuse(0, this.densityG0, this.densityG, this.diffusion, this.dt, 'density', bounds);
+        this.diffuse(0, this.densityB0, this.densityB, this.diffusion, this.dt, 'density', bounds);
+        this.advect(0, this.densityR, this.densityR0, this.Vx, this.Vy, this.dt, bounds);
+        this.advect(0, this.densityG, this.densityG0, this.Vx, this.Vy, this.dt, bounds);
+        this.advect(0, this.densityB, this.densityB0, this.Vx, this.Vy, this.dt, bounds);
+
+        if (bounds) {
+            const x0 = Math.max(0, Math.floor(bounds.xMin));
+            const x1 = Math.min(this.size - 1, Math.floor(bounds.xMax));
+            const y0 = Math.max(0, Math.floor(bounds.yMin));
+            const y1 = Math.min(this.size - 1, Math.floor(bounds.yMax));
+            for (let y = y0; y <= y1; y++) {
+                let idx = y * this.size + x0;
+                const rowEnd = y * this.size + x1 + 1;
+                while (idx < rowEnd) {
+                    this.densityR[idx] = Math.max(0, this.densityR[idx] - config.FLUID_FADE_RATE * 255 * this.dt);
+                    this.densityG[idx] = Math.max(0, this.densityG[idx] - config.FLUID_FADE_RATE * 255 * this.dt);
+                    this.densityB[idx] = Math.max(0, this.densityB[idx] - config.FLUID_FADE_RATE * 255 * this.dt);
+                    idx++;
+                }
+            }
+        } else {
+            for (let i = 0; i < this.densityR.length; i++) {
+                this.densityR[i] = Math.max(0, this.densityR[i] - config.FLUID_FADE_RATE * 255 * this.dt);
+                this.densityG[i] = Math.max(0, this.densityG[i] - config.FLUID_FADE_RATE * 255 * this.dt);
+                this.densityB[i] = Math.max(0, this.densityB[i] - config.FLUID_FADE_RATE * 255 * this.dt);
+            }
         }
         this._finalizeActiveTileTelemetry();
     }

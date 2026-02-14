@@ -168,6 +168,15 @@ export class SoftBody {
 
         // Actuation telemetry (new): evaluative throttling observability.
         this.actuationEvaluations = 0;
+
+        // Fluid coupling telemetry (new): explicit two-way coupling observability for GPU shadow path and CPU path.
+        this.fluidCouplingCarryDisplacement = 0;
+        this.fluidCouplingDragForce = 0;
+        this.fluidCouplingBodyToFluidImpulse = 0;
+        this.fluidCouplingSwimToFluidImpulse = 0;
+        this.fluidCouplingSoftFeedbackImpulse = 0;
+        this.fluidCouplingRigidFeedbackImpulse = 0;
+        this.fluidCouplingSamples = 0;
         this.actuationSkips = 0;
         this.actuationEvaluationsByNodeType = {};
         this.actuationSkipsByNodeType = {};
@@ -3921,6 +3930,14 @@ export class SoftBody {
             const rigidFeedback = Math.max(0, Number(config.BODY_TO_FLUID_FEEDBACK_RIGID) || 0.06);
             const swimmerFeedback = Math.max(0, Number(config.SWIMMER_TO_FLUID_FEEDBACK) || 0.25);
 
+            let carryDisplacementAccum = 0;
+            let dragForceAccum = 0;
+            let bodyToFluidImpulseAccum = 0;
+            let swimToFluidImpulseAccum = 0;
+            let softFeedbackImpulseAccum = 0;
+            let rigidFeedbackImpulseAccum = 0;
+            let couplingSamples = 0;
+
             for (let point of this.massPoints) {
                 const fluidGridX = Math.floor(point.pos.x / safeScaleX);
                 const fluidGridY = Math.floor(point.pos.y / safeScaleY);
@@ -3956,8 +3973,11 @@ export class SoftBody {
                         const swimForceX = Math.cos(angle) * (magnitude / Math.max(dt, 1e-6));
                         const swimForceY = Math.sin(angle) * (magnitude / Math.max(dt, 1e-6));
                         point.applyForce(new Vec2(swimForceX, swimForceY));
+                        const swimImpulseX = -Math.cos(angle) * magnitude * swimmerFeedback;
+                        const swimImpulseY = -Math.sin(angle) * magnitude * swimmerFeedback;
                         // Active swimmer impulse pushes fluid in the opposite direction.
-                        fluidFieldRef.addVelocity(fluidGridX, fluidGridY, -Math.cos(angle) * magnitude * swimmerFeedback, -Math.sin(angle) * magnitude * swimmerFeedback);
+                        fluidFieldRef.addVelocity(fluidGridX, fluidGridY, swimImpulseX, swimImpulseY);
+                        swimToFluidImpulseAccum += Math.hypot(swimImpulseX, swimImpulseY);
                     }
                 }
 
@@ -3971,6 +3991,7 @@ export class SoftBody {
                     this._tempVec2.mulInPlace(this.fluidCurrentStrength).mulInPlace(this.fluidEntrainment);
                     this._tempVec1.addInPlace(this._tempVec2);
                     point.prevPos.copyFrom(point.pos).subInPlace(this._tempVec1);
+                    carryDisplacementAccum += Math.hypot(this._tempVec2.x, this._tempVec2.y);
                 }
 
                 const totalSprings = springCount.get(point) || 0;
@@ -3986,16 +4007,42 @@ export class SoftBody {
                 const relVy = bodyVy - fluidWorldVy;
 
                 // Fluid->body drag/carry term (two-way half #1).
-                point.applyForce(new Vec2(-relVx * dragCoeff, -relVy * dragCoeff));
+                const dragForceX = -relVx * dragCoeff;
+                const dragForceY = -relVy * dragCoeff;
+                point.applyForce(new Vec2(dragForceX, dragForceY));
+                dragForceAccum += Math.hypot(dragForceX, dragForceY);
 
                 // Body->fluid feedback term (two-way half #2): moving mass pushes local fluid.
+                const feedbackX = relVx * feedbackCoeff / safeScaleX;
+                const feedbackY = relVy * feedbackCoeff / safeScaleY;
                 fluidFieldRef.addVelocity(
                     fluidGridX,
                     fluidGridY,
-                    relVx * feedbackCoeff / safeScaleX,
-                    relVy * feedbackCoeff / safeScaleY
+                    feedbackX,
+                    feedbackY
                 );
+                const feedbackMag = Math.hypot(feedbackX, feedbackY);
+                bodyToFluidImpulseAccum += feedbackMag;
+                softFeedbackImpulseAccum += feedbackMag * (1 - rigidMix);
+                rigidFeedbackImpulseAccum += feedbackMag * rigidMix;
+                couplingSamples += 1;
             }
+
+            this.fluidCouplingCarryDisplacement = carryDisplacementAccum;
+            this.fluidCouplingDragForce = dragForceAccum;
+            this.fluidCouplingBodyToFluidImpulse = bodyToFluidImpulseAccum;
+            this.fluidCouplingSwimToFluidImpulse = swimToFluidImpulseAccum;
+            this.fluidCouplingSoftFeedbackImpulse = softFeedbackImpulseAccum;
+            this.fluidCouplingRigidFeedbackImpulse = rigidFeedbackImpulseAccum;
+            this.fluidCouplingSamples = couplingSamples;
+        } else {
+            this.fluidCouplingCarryDisplacement = 0;
+            this.fluidCouplingDragForce = 0;
+            this.fluidCouplingBodyToFluidImpulse = 0;
+            this.fluidCouplingSwimToFluidImpulse = 0;
+            this.fluidCouplingSoftFeedbackImpulse = 0;
+            this.fluidCouplingRigidFeedbackImpulse = 0;
+            this.fluidCouplingSamples = 0;
         }
 
         const forceAllSpringsRigid = config.FORCE_ALL_SPRINGS_RIGID === true;

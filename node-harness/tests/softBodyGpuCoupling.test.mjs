@@ -57,6 +57,9 @@ test('GPU-style fluid coupling works without IX/Vx arrays (sensor + swimmer + fl
     assert.equal(fluid.calls.length > 0, true, 'expected body->fluid velocity injection');
     assert.equal(p.pos.x > beforeX, true, 'floating/swimmer coupling should advance point with flow');
     assert.equal(fluid.calls.some((c) => c.amountX < 0), true, 'swimmer impulse should push back against fluid');
+    assert.ok(body.fluidCouplingCarryDisplacement > 0, `expected carry displacement > 0, got ${body.fluidCouplingCarryDisplacement}`);
+    assert.ok(body.fluidCouplingDragForce > 0, `expected drag force > 0, got ${body.fluidCouplingDragForce}`);
+    assert.ok(body.fluidCouplingSwimToFluidImpulse > 0, `expected swimmer pushback > 0, got ${body.fluidCouplingSwimToFluidImpulse}`);
   } finally {
     Object.assign(config, cfgBackup);
   }
@@ -116,6 +119,8 @@ test('rigid-coupled point injects stronger feedback than soft-coupled point', ()
     const rigidInjection = Math.abs(fluidRigid.calls[0]?.amountX || 0);
 
     assert.ok(rigidInjection > softInjection * 2, `expected rigid feedback > soft (rigid=${rigidInjection}, soft=${softInjection})`);
+    assert.ok(rigidBody.fluidCouplingRigidFeedbackImpulse > softBody.fluidCouplingSoftFeedbackImpulse * 2,
+      `expected rigid-weighted telemetry > soft-weighted telemetry (rigid=${rigidBody.fluidCouplingRigidFeedbackImpulse}, soft=${softBody.fluidCouplingSoftFeedbackImpulse})`);
   } finally {
     Object.assign(config, cfgBackup);
   }

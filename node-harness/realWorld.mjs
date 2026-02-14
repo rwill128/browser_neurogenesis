@@ -507,6 +507,15 @@ export class RealWorld {
             projectionCorrections: Number(b.rigidConstraintProjectionCorrections || 0),
             maxRelativeErrorBefore: round(b.rigidConstraintProjectionMaxRelativeError, 6)
           },
+          fluidCoupling: {
+            carryDisplacement: round(b.fluidCouplingCarryDisplacement, 6),
+            dragForce: round(b.fluidCouplingDragForce, 6),
+            bodyToFluidImpulse: round(b.fluidCouplingBodyToFluidImpulse, 6),
+            swimToFluidImpulse: round(b.fluidCouplingSwimToFluidImpulse, 6),
+            softFeedbackImpulse: round(b.fluidCouplingSoftFeedbackImpulse, 6),
+            rigidFeedbackImpulse: round(b.fluidCouplingRigidFeedbackImpulse, 6),
+            samples: Number(b.fluidCouplingSamples || 0)
+          },
           reproductionSuppression: {
             density: Number(b.reproductionSuppressedByDensity || 0),
             resources: Number(b.reproductionSuppressedByResources || 0),

@@ -239,6 +239,8 @@ async fn run_fluid_init(
     let t0 = std::time::Instant::now();
     let (device, queue) = create_device().await?;
     let cells = (width as usize) * (height as usize);
+    let wg_x = width.div_ceil(8);
+    let wg_y = height.div_ceil(8);
 
     let params = Params {
         width,
@@ -312,7 +314,7 @@ async fn run_fluid_init(
         let mut pass = encoder.begin_compute_pass(&Default::default());
         pass.set_pipeline(&init_pipeline);
         pass.set_bind_group(0, &init_bg, &[]);
-        pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        pass.dispatch_workgroups(wg_x, wg_y, 1);
     }
     queue.submit(Some(encoder.finish()));
     let _ = device.poll(wgpu::PollType::wait_indefinitely());
@@ -692,10 +694,13 @@ async fn run_fluid_step(
 
     let mut seeded = false;
     let mut remaining = steps;
-    const STEPS_PER_SUBMIT: u32 = 16;
+    let wg_x = width.div_ceil(8);
+    let wg_y = height.div_ceil(8);
+    let passes_per_step = 8u32 + jacobi_iters.saturating_mul(projection_passes.max(1));
+    let steps_per_submit = (2048u32 / passes_per_step.max(1)).clamp(4, 24);
 
     while remaining > 0 {
-        let batch_steps = remaining.min(STEPS_PER_SUBMIT);
+        let batch_steps = remaining.min(steps_per_submit);
         let mut encoder = device.create_command_encoder(&Default::default());
 
         if !seeded {
@@ -703,7 +708,7 @@ async fn run_fluid_step(
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&init_pipeline);
             pass.set_bind_group(0, &bg_init, &[]);
-            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+            pass.dispatch_workgroups(wg_x, wg_y, 1);
             seeded = true;
         }
 
@@ -717,7 +722,7 @@ async fn run_fluid_step(
                 let mut pass = encoder.begin_compute_pass(&Default::default());
                 pass.set_pipeline(&advect_vel_pipeline);
                 pass.set_bind_group(0, &bg_advect_vel, &[]);
-                pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                pass.dispatch_workgroups(wg_x, wg_y, 1);
             }
 
             // viscosity diffusion solve (small Jacobi ping-pong on velocity field)
@@ -735,7 +740,7 @@ async fn run_fluid_step(
                         },
                         &[],
                     );
-                    pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                    pass.dispatch_workgroups(wg_x, wg_y, 1);
                 }
             }
 
@@ -744,7 +749,7 @@ async fn run_fluid_step(
                 let mut pass = encoder.begin_compute_pass(&Default::default());
                 pass.set_pipeline(&divergence_pipeline);
                 pass.set_bind_group(0, &bg_div, &[]);
-                pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                pass.dispatch_workgroups(wg_x, wg_y, 1);
             }
 
             for i in 0..jacobi_iters {
@@ -759,7 +764,7 @@ async fn run_fluid_step(
                     },
                     &[],
                 );
-                pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                pass.dispatch_workgroups(wg_x, wg_y, 1);
             }
 
             // projection
@@ -775,7 +780,7 @@ async fn run_fluid_step(
                     },
                     &[],
                 );
-                pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                pass.dispatch_workgroups(wg_x, wg_y, 1);
             }
 
             // optional additional projection passes to tighten incompressibility.
@@ -785,7 +790,7 @@ async fn run_fluid_step(
                     let mut pass = encoder.begin_compute_pass(&Default::default());
                     pass.set_pipeline(&divergence_pipeline);
                     pass.set_bind_group(0, &bg_div_from_a, &[]);
-                    pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                    pass.dispatch_workgroups(wg_x, wg_y, 1);
                 }
 
                 encoder.clear_buffer(&pressure_a, 0, None);
@@ -801,7 +806,7 @@ async fn run_fluid_step(
                         },
                         &[],
                     );
-                    pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                    pass.dispatch_workgroups(wg_x, wg_y, 1);
                 }
 
                 {
@@ -816,7 +821,7 @@ async fn run_fluid_step(
                         },
                         &[],
                     );
-                    pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                    pass.dispatch_workgroups(wg_x, wg_y, 1);
                 }
 
                 encoder.copy_buffer_to_buffer(
@@ -833,7 +838,7 @@ async fn run_fluid_step(
                 let mut pass = encoder.begin_compute_pass(&Default::default());
                 pass.set_pipeline(&advect_dye_pipeline);
                 pass.set_bind_group(0, &bg_advect_dye, &[]);
-                pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                pass.dispatch_workgroups(wg_x, wg_y, 1);
             }
 
             // dye fade and re-seed source slightly
@@ -841,7 +846,7 @@ async fn run_fluid_step(
                 let mut pass = encoder.begin_compute_pass(&Default::default());
                 pass.set_pipeline(&fade_pipeline);
                 pass.set_bind_group(0, &bg_fade, &[]);
-                pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                pass.dispatch_workgroups(wg_x, wg_y, 1);
             }
         }
 

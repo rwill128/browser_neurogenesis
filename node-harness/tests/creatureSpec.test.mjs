@@ -25,7 +25,7 @@ test('CreatureSpec v2 roundtrip parse and build bodies', () => {
   assert.equal(spec.schemaVersion, CREATURE_SPEC_VERSION);
   assert.ok(Array.isArray(spec.rigidBodies));
   assert.ok(Array.isArray(spec.softBodies));
-  assert.ok(Array.isArray(spec.rigidWelds));
+  // rigidWelds removed from public spec (compound rigid is fused at export)
   assert.ok(Array.isArray(spec.hybridJoints));
   assert.equal(spec.mesh, undefined);
 
@@ -89,7 +89,7 @@ test('hybrid links anchor to nearest rigid hull edge for irregular rigid meshes'
 
   const spec = createCreatureSpecFromMesh(mesh);
   assert.equal(spec.rigidBodies.length, 1);
-  assert.equal(spec.rigidWelds.length, 0);
+  assert.equal(spec.rigidWelds, undefined);
 
   const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
   assert.equal(bodies.rigid.length, 1);
@@ -127,7 +127,7 @@ test('createCreatureSpecFromMesh fuses compiler rigid pieces by compoundId (no s
 
   const spec = createCreatureSpecFromMesh(mesh);
   assert.equal(spec.rigidBodies.length, 2);
-  assert.equal(spec.rigidWelds.length, 0);
+  assert.equal(spec.rigidWelds, undefined);
   const fusedA = spec.rigidBodies.find((rb) => rb.compoundId === 'compound_A');
   assert.ok(fusedA);
   assert.ok(Array.isArray(fusedA.subHulls));

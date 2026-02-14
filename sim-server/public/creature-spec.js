@@ -40,7 +40,6 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
     name: options.name || 'unnamed-creature',
     space: { width, height },
     rigidBodies: rigidBuild.rigidBodies,
-    rigidWelds: rigidBuild.rigidWelds,
     softBodies: softBuild.softBodies,
     hybridJoints,
   };
@@ -76,7 +75,6 @@ export function parseCreatureSpec(jsonText) {
   if (!Array.isArray(obj.rigidBodies) || !Array.isArray(obj.softBodies) || !Array.isArray(obj.hybridJoints)) {
     throw new Error('CreatureSpec missing rigidBodies/softBodies/hybridJoints arrays');
   }
-  if (!Array.isArray(obj.rigidWelds)) obj.rigidWelds = [];
   for (const rb of obj.rigidBodies) {
     if (!Array.isArray(rb.hull) || rb.hull.length < 3) throw new Error('Rigid body missing hull vertices');
   }
@@ -94,7 +92,6 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
   const sRest = 0.5 * (sx + sy);
 
   const rigid = [];
-  const rigidIndexMap = new Map();
   for (let rbi = 0; rbi < (spec.rigidBodies || []).length; rbi++) {
     const rb = spec.rigidBodies[rbi];
     const hull = (rb.hull || []).map((p) => ({ x: (Number(p.x) || 0) * sx, y: (Number(p.y) || 0) * sy }));
@@ -106,7 +103,6 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
     const sides = Math.max(3, verticesLocal.length);
     const mass = finiteOr(Number(rb.mass), controls.massHeavy);
 
-    rigidIndexMap.set(rbi, rigid.length);
     const subPolysLocal = Array.isArray(rb.subHulls)
       ? rb.subHulls
           .map((poly) => (Array.isArray(poly) ? poly : []))
@@ -137,22 +133,6 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
   }
 
   const rigidWelds = [];
-  for (const w of (spec.rigidWelds || [])) {
-    const aSrc = Number(w.a);
-    const bSrc = Number(w.b);
-    if (!Number.isInteger(aSrc) || !Number.isInteger(bSrc)) continue;
-    const a = rigidIndexMap.get(aSrc);
-    const b = rigidIndexMap.get(bSrc);
-    if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
-    const ra = rigid[a];
-    const rb = rigid[b];
-    if (!ra || !rb) continue;
-    const a0 = Math.max(0, Math.min(ra.sides - 1, Number(w.a0) | 0));
-    const a1 = Math.max(0, Math.min(ra.sides - 1, Number(w.a1) | 0));
-    const b0 = Math.max(0, Math.min(rb.sides - 1, Number(w.b0) | 0));
-    const b1 = Math.max(0, Math.min(rb.sides - 1, Number(w.b1) | 0));
-    rigidWelds.push({ a, b, a0, a1, b0, b1 });
-  }
 
   const soft = { nodes: [], springs: [] };
   const softNodeMap = new Map();

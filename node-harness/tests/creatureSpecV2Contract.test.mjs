@@ -35,7 +35,7 @@ test('createCreatureSpecFromMesh exports solver-ready v2 sections', () => {
   assert.ok(Array.isArray(spec.rigidBodies));
   assert.ok(Array.isArray(spec.softBodies));
   assert.ok(Array.isArray(spec.hybridJoints));
-  assert.ok(Array.isArray(spec.rigidWelds));
+  assert.equal(spec.rigidWelds, undefined);
   assert.equal(spec.mesh, undefined);
 
   const rb = spec.rigidBodies[0];
@@ -65,7 +65,7 @@ test('createCreatureSpecFromMesh merges adjacent rigid triangles into a single c
 
   const spec = createCreatureSpecFromMesh(mesh);
   assert.equal(spec.rigidBodies.length, 1);
-  assert.equal(spec.rigidWelds.length, 0);
+  assert.equal(spec.rigidWelds, undefined);
 });
 
 test('createCreatureSpecFromMesh keeps compiler concave decomposition fused as one compound body', () => {
@@ -94,7 +94,7 @@ test('createCreatureSpecFromMesh keeps compiler concave decomposition fused as o
 
   const spec = createCreatureSpecFromMesh(mesh);
   assert.equal(spec.rigidBodies.length, 1);
-  assert.equal(spec.rigidWelds.length, 0);
+  assert.equal(spec.rigidWelds, undefined);
   assert.ok(Array.isArray(spec.rigidBodies[0].subHulls));
   assert.equal(spec.rigidBodies[0].subHulls.length, 2);
 });
@@ -109,7 +109,7 @@ test('createCreatureSpecFromMesh prefers compiler-provided rigid decomposition w
 
   const spec = createCreatureSpecFromMesh(mesh);
   assert.equal(spec.rigidBodies.length, 1);
-  assert.equal(spec.rigidWelds.length, 0);
+  assert.equal(spec.rigidWelds, undefined);
   assert.equal(spec.rigidBodies[0].compoundId, 'c0');
   assert.ok(Array.isArray(spec.rigidBodies[0].subHulls));
   assert.equal(spec.rigidBodies[0].subHulls.length, 2);
@@ -117,7 +117,6 @@ test('createCreatureSpecFromMesh prefers compiler-provided rigid decomposition w
 
 test('buildBodiesFromCreatureSpec ignores invalid joint references safely', () => {
   const spec = createCreatureSpecFromMesh(sampleMesh());
-  spec.rigidWelds.push({ a: 999, b: 998, a0: 0, a1: 1, b0: 0, b1: 1 });
   spec.hybridJoints.push({ rigidBodyIndex: 999, softBodyIndex: 999, softNodeIndex: 999, edgeA: 0, edgeB: 1, restA: 1, restB: 1 });
 
   const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);

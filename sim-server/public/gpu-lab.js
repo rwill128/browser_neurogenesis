@@ -1,6 +1,7 @@
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
 const stopBtn = document.getElementById('stopBtn');
+const regenViscBtn = document.getElementById('regenViscBtn');
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
 
@@ -10,6 +11,9 @@ const fadeEl = document.getElementById('fade');
 const viscosityEl = document.getElementById('viscosity');
 const impulseEl = document.getElementById('impulse');
 const radiusEl = document.getElementById('radius');
+const viscBaseEl = document.getElementById('viscBase');
+const viscContrastEl = document.getElementById('viscContrast');
+const riverWidthEl = document.getElementById('riverWidth');
 
 function log(v) { out.textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2); }
 
@@ -21,9 +25,12 @@ function readControls() {
     n: Math.max(32, Number(gridEl.value) || 256),
     dt: Number(dtEl.value) || 0.1,
     fade: Number(fadeEl.value) || 0.996,
-    viscosity: Number(viscosityEl.value) || 0,
+    viscosity: Number(viscosityEl.value) || 0.001,
     impulse: Number(impulseEl.value) || 7,
     radius: Number(radiusEl.value) || 8,
+    viscBase: Number(viscBaseEl.value) || 0.45,
+    viscContrast: Number(viscContrastEl.value) || 0.55,
+    riverWidth: Number(riverWidthEl.value) || 0.08,
   };
 }
 
@@ -48,6 +55,26 @@ function uploadUniforms(device, uniformBuffer, s) {
   device.queue.writeBuffer(uniformBuffer, 0, a);
 }
 
+function buildViscosityMap(n, controls) {
+  const map = new Float32Array(n * n);
+  const { viscBase, viscContrast, riverWidth } = controls;
+  for (let y = 0; y < n; y++) {
+    const ny = y / n;
+    for (let x = 0; x < n; x++) {
+      const nx = x / n;
+      const i = y * n + x;
+      const island = 0.5 + 0.5 * Math.sin(nx * 9.0 + Math.sin(ny * 7.0) * 2.0) * Math.cos(ny * 8.0);
+      const riverCenter = 0.5 + 0.18 * Math.sin(nx * 6.0 + 1.7);
+      const riverDist = Math.abs(ny - riverCenter);
+      const river = Math.max(0, 1.0 - riverDist / Math.max(0.01, riverWidth));
+      let v = viscBase + viscContrast * (island - 0.5);
+      v -= river * 0.35; // low-viscosity channels
+      map[i] = Math.max(0.02, Math.min(1.0, v));
+    }
+  }
+  return map;
+}
+
 const commonWgsl = `
 struct Params {
   n: u32,
@@ -55,7 +82,7 @@ struct Params {
   fade: f32,
   impulse: f32,
   radius: f32,
-  viscosity: f32,
+  viscosity_scale: f32,
   _pad0: f32,
   _pad1: f32,
 };
@@ -88,6 +115,7 @@ const advectVelWgsl = commonWgsl + `
 @group(0) @binding(2) var<storage, read> vy0: array<f32>;
 @group(0) @binding(3) var<storage, read_write> vx1: array<f32>;
 @group(0) @binding(4) var<storage, read_write> vy1: array<f32>;
+@group(0) @binding(5) var<storage, read> viscMap: array<f32>;
 
 @compute @workgroup_size(${WORKGROUP}, ${WORKGROUP})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -97,7 +125,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let y = f32(gid.y);
   let px = x - p.dt * vx0[i];
   let py = y - p.dt * vy0[i];
-  let decay = 1.0 / (1.0 + 4.0 * p.viscosity * p.dt);
+  let localVisc = max(0.0, viscMap[i]) * p.viscosity_scale;
+  let decay = 1.0 / (1.0 + 4.0 * localVisc * p.dt);
   vx1[i] = sampleBilinear(&vx0, px, py) * decay;
   vy1[i] = sampleBilinear(&vy0, px, py) * decay;
 }
@@ -233,6 +262,13 @@ async function createPipeline(device, code) {
 let running = false;
 let sim = null;
 
+function regenViscosityMap() {
+  if (!sim) return;
+  const map = buildViscosityMap(sim.controls.n, readControls());
+  sim.device.queue.writeBuffer(sim.viscMap, 0, map);
+  log({ ok: true, msg: 'viscosity map rebuilt', grid: sim.controls.n });
+}
+
 async function initSim() {
   const controls = readControls();
   if (!navigator.gpu) throw new Error('WebGPU unavailable in browser');
@@ -253,6 +289,8 @@ async function initSim() {
   const rA = createBuffer(device, bytes), rB = createBuffer(device, bytes);
   const gA = createBuffer(device, bytes), gB = createBuffer(device, bytes);
   const bA = createBuffer(device, bytes), bB = createBuffer(device, bytes);
+  const viscMap = createBuffer(device, bytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  device.queue.writeBuffer(viscMap, 0, buildViscosityMap(controls.n, controls));
 
   const readR = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const readG = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
@@ -272,6 +310,7 @@ async function initSim() {
     vx0: vxA, vx1: vxB, vy0: vyA, vy1: vyB,
     pr0: pA, pr1: pB,
     rr0: rA, rr1: rB, gg0: gA, gg1: gB, bb0: bA, bb1: bB,
+    viscMap,
     div, readR, readG, readB,
     frame: 0, t0: performance.now(),
   };
@@ -295,7 +334,7 @@ async function stepAndRender() {
 
   pass = enc.beginComputePass();
   pass.setPipeline(s.advVel.pipeline);
-  pass.setBindGroup(0, s.advVel.bg([s.uniform, s.vx0, s.vy0, s.vx1, s.vy1]));
+  pass.setBindGroup(0, s.advVel.bg([s.uniform, s.vx0, s.vy0, s.vx1, s.vy1, s.viscMap]));
   pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
   pass.end();
   [s.vx0, s.vx1] = [s.vx1, s.vx0];
@@ -385,9 +424,12 @@ async function stepAndRender() {
       dyeEnergy: +sum.toFixed(1),
       dt: s.controls.dt,
       fade: s.controls.fade,
-      viscosity: s.controls.viscosity,
+      viscosityScale: s.controls.viscosity,
       impulse: s.controls.impulse,
       radius: s.controls.radius,
+      viscBase: s.controls.viscBase,
+      viscContrast: s.controls.viscContrast,
+      riverWidth: s.controls.riverWidth,
     });
   }
 
@@ -413,4 +455,5 @@ function stop() {
 
 runBtn.addEventListener('click', () => start().catch((e) => log({ ok: false, error: String(e) })));
 stopBtn.addEventListener('click', stop);
+regenViscBtn.addEventListener('click', regenViscosityMap);
 log('ready: set controls and click "Start GPU fluid sim"');

@@ -26,6 +26,17 @@ function log(v) { out.textContent = typeof v === 'string' ? v : JSON.stringify(v
 const WORKGROUP = 8;
 const JACOBI_ITERS = 20;
 
+const EDGE_DYE_MODE = {
+  PASS: 0,
+  DEFLECT: 1,
+  ABSORB: 2,
+};
+
+const EDGE_BODY_MODE = {
+  PASS: 0,
+  BLOCK: 1,
+};
+
 function readControls() {
   return {
     n: Math.max(32, Number(gridEl.value) || 256),
@@ -464,7 +475,13 @@ function initBodies(n, controls) {
     const mass = (i % 2 === 0) ? controls.massLight : controls.massHeavy;
     const sides = rigidShapeCycle[i % rigidShapeCycle.length];
     const r = ((i % 2 === 0) ? 5 : 6) * scale * bodyScale * (sides >= 5 ? 0.95 : 1.0);
-    const edgeDyeBlock = Array.from({ length: sides }, (_, ei) => ((ei + i) % 2 === 0) ? 1 : 0);
+    const edgeDyeMode = Array.from({ length: sides }, (_, ei) => {
+      const m = (ei + i) % 3;
+      if (m === 0) return EDGE_DYE_MODE.DEFLECT;
+      if (m === 1) return EDGE_DYE_MODE.PASS;
+      return EDGE_DYE_MODE.ABSORB;
+    });
+    const edgeBodyMode = Array.from({ length: sides }, (_, ei) => ((ei + i) % 2 === 0) ? EDGE_BODY_MODE.BLOCK : EDGE_BODY_MODE.PASS);
     rigid.push({
       x: n * (0.15 + 0.7 * ((t + Math.random() * 0.1) % 1)),
       y: n * (0.2 + 0.6 * Math.random()),
@@ -472,7 +489,8 @@ function initBodies(n, controls) {
       vy: 0,
       r,
       sides,
-      edgeDyeBlock,
+      edgeDyeMode,
+      edgeBodyMode,
       digestEnabled: (i % 2) === 0,
       mass,
       theta: Math.random() * Math.PI * 2,
@@ -515,15 +533,29 @@ function initBodies(n, controls) {
     for (let i = 0; i < nodeCount; i++) {
       const j = (i + 1) % nodeCount;
       const a = local[i], b = local[j];
-      const ringDyeBlock = ((i + c) % 2 === 0) ? 1 : 0; // per-edge dye permeability toggle
-      springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 1, ringDyeBlock]);
+      const ringDyeMode = ((i + c) % 3 === 0)
+        ? EDGE_DYE_MODE.DEFLECT
+        : (((i + c) % 3 === 1) ? EDGE_DYE_MODE.PASS : EDGE_DYE_MODE.ABSORB);
+      springs.push([
+        base + i,
+        base + j,
+        Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)),
+        EDGE_BODY_MODE.BLOCK,
+        ringDyeMode,
+      ]);
     }
     // Cross/diagonal springs for shape retention (internal, non-solid by default).
     for (let i = 0; i < nodeCount; i++) {
       const j = (i + 2) % nodeCount;
       if (i < j || nodeCount <= 4) {
         const a = local[i], b = local[j];
-        springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 0, 0]);
+        springs.push([
+          base + i,
+          base + j,
+          Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)),
+          EDGE_BODY_MODE.PASS,
+          EDGE_DYE_MODE.PASS,
+        ]);
       }
     }
     // Opposite braces for even polygons (especially hex) to prevent skew collapse.
@@ -531,7 +563,13 @@ function initBodies(n, controls) {
       for (let i = 0; i < nodeCount / 2; i++) {
         const j = (i + nodeCount / 2) % nodeCount;
         const a = local[i], b = local[j];
-        springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 0, 0]);
+        springs.push([
+          base + i,
+          base + j,
+          Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)),
+          EDGE_BODY_MODE.PASS,
+          EDGE_DYE_MODE.PASS,
+        ]);
       }
     }
     // Hex-specific mirror chords to remove the last skew mode and keep visual symmetry.
@@ -539,7 +577,13 @@ function initBodies(n, controls) {
       const extraPairs = [[0, 4], [1, 5]];
       for (const [i, j] of extraPairs) {
         const a = local[i], b = local[j];
-        springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 0, 0]);
+        springs.push([
+          base + i,
+          base + j,
+          Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)),
+          EDGE_BODY_MODE.PASS,
+          EDGE_DYE_MODE.PASS,
+        ]);
       }
     }
   }
@@ -781,7 +825,7 @@ function resolveSoftNodeVsSoftEdgeCollision(node, a, b, restitution = 0.12) {
   }
 }
 
-function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, vx, vy, thickness = 1.4) {
+function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, vx, vy, thickness = 1.4, dyeMode = EDGE_DYE_MODE.DEFLECT) {
   const minX = Math.max(0, Math.floor(Math.min(ax, bx) - thickness - 1));
   const maxX = Math.min(n - 1, Math.ceil(Math.max(ax, bx) + thickness + 1));
   const minY = Math.max(0, Math.floor(Math.min(ay, by) - thickness - 1));
@@ -804,24 +848,30 @@ function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, vx, vy,
       const w = 1 - (d / Math.max(1e-6, thickness));
       const i = y * n + x;
 
-      // Wall behavior: remove normal velocity, keep tangential flow (deflection, not absorption).
-      const vn = vx[i] * nx + vy[i] * ny;
-      vx[i] -= vn * nx * w;
-      vy[i] -= vn * ny * w;
+      if (dyeMode !== EDGE_DYE_MODE.PASS) {
+        // Wall behavior: remove normal velocity, keep tangential flow.
+        const vn = vx[i] * nx + vy[i] * ny;
+        vx[i] -= vn * nx * w;
+        vy[i] -= vn * ny * w;
+      }
 
-      // Deflect dye along tangent rather than stripping it.
-      const vt = vx[i] * tx + vy[i] * ty;
-      const step = vt >= 0 ? 1 : -1;
-      const txi = Math.max(0, Math.min(n - 1, Math.round(x + tx * step)));
-      const tyi = Math.max(0, Math.min(n - 1, Math.round(y + ty * step)));
-      const ti = tyi * n + txi;
-      if (ti !== i) {
-        const move = 0.22 * w;
-        const dr = r[i] * move, dg = g[i] * move, db = b[i] * move;
-        r[i] -= dr; g[i] -= dg; b[i] -= db;
-        r[ti] = Math.min(255, r[ti] + dr);
-        g[ti] = Math.min(255, g[ti] + dg);
-        b[ti] = Math.min(255, b[ti] + db);
+      if (dyeMode === EDGE_DYE_MODE.DEFLECT) {
+        const vt = vx[i] * tx + vy[i] * ty;
+        const step = vt >= 0 ? 1 : -1;
+        const txi = Math.max(0, Math.min(n - 1, Math.round(x + tx * step)));
+        const tyi = Math.max(0, Math.min(n - 1, Math.round(y + ty * step)));
+        const ti = tyi * n + txi;
+        if (ti !== i) {
+          const move = 0.22 * w;
+          const dr = r[i] * move, dg = g[i] * move, db = b[i] * move;
+          r[i] -= dr; g[i] -= dg; b[i] -= db;
+          r[ti] = Math.min(255, r[ti] + dr);
+          g[ti] = Math.min(255, g[ti] + dg);
+          b[ti] = Math.min(255, b[ti] + db);
+        }
+      } else if (dyeMode === EDGE_DYE_MODE.ABSORB) {
+        const keep = 1 - 0.9 * w;
+        r[i] *= keep; g[i] *= keep; b[i] *= keep;
       }
     }
   }
@@ -840,19 +890,19 @@ function applyBodyEdgeFieldBarriers(sim, r, g, b, vx, vy) {
       verts.push({ x: rb.x + Math.cos(a) * rb.r, y: rb.y + Math.sin(a) * rb.r });
     }
     for (let i = 0; i < sides; i++) {
-      const edgeBlock = !rb.edgeDyeBlock ? 1 : rb.edgeDyeBlock[i];
-      if (!edgeBlock) continue;
+      const dyeMode = !rb.edgeDyeMode ? EDGE_DYE_MODE.DEFLECT : rb.edgeDyeMode[i];
+      if (dyeMode === EDGE_DYE_MODE.PASS) continue;
       const a = verts[i];
       const b2 = verts[(i + 1) % sides];
-      applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, rigidThickness);
+      applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, rigidThickness, dyeMode);
     }
   }
 
   const s = sim.bodies.soft;
-  for (const [i, j, _rest, edgeSolid, edgeDyeBlock] of s.springs) {
-    if (!edgeSolid || !edgeDyeBlock) continue;
+  for (const [i, j, _rest, edgeBodyMode, edgeDyeMode] of s.springs) {
+    if (edgeDyeMode === EDGE_DYE_MODE.PASS) continue;
     const a = s.nodes[i], b2 = s.nodes[j];
-    applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, softThickness);
+    applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, softThickness, edgeDyeMode);
   }
 }
 
@@ -1038,8 +1088,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       for (const sn of s.nodes) {
         resolveCircleCollision(rb, sn, 0.35);
       }
-      for (const [i, j, _rest, edgeSolid] of s.springs) {
-        if (!edgeSolid) continue;
+      for (const [i, j, _rest, edgeBodyMode] of s.springs) {
+        if (edgeBodyMode !== EDGE_BODY_MODE.BLOCK) continue;
         resolveRigidVsSoftEdgeCollision(rb, s.nodes[i], s.nodes[j], 0.3);
       }
     }
@@ -1051,8 +1101,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     // Soft-node vs foreign soft-edge blocking for solid edges.
     for (let ni = 0; ni < s.nodes.length; ni++) {
       const node = s.nodes[ni];
-      for (const [i, j, _rest, edgeSolid] of s.springs) {
-        if (!edgeSolid) continue;
+      for (const [i, j, _rest, edgeBodyMode] of s.springs) {
+        if (edgeBodyMode !== EDGE_BODY_MODE.BLOCK) continue;
         if (i === ni || j === ni) continue;
         const a = s.nodes[i], b = s.nodes[j];
         if (a.clusterId === node.clusterId && b.clusterId === node.clusterId) continue;
@@ -1282,8 +1332,10 @@ function drawBodiesOverlay(sim) {
     for (let ei = 0; ei < sides; ei++) {
       const a = verts[ei];
       const b2 = verts[(ei + 1) % sides];
-      const blocked = !b.edgeDyeBlock ? 1 : b.edgeDyeBlock[ei];
-      ctx.strokeStyle = blocked ? '#ffffff' : 'rgba(140,180,255,0.95)';
+      const dyeMode = !b.edgeDyeMode ? EDGE_DYE_MODE.DEFLECT : b.edgeDyeMode[ei];
+      if (dyeMode === EDGE_DYE_MODE.PASS) ctx.strokeStyle = 'rgba(120,150,255,0.95)';
+      else if (dyeMode === EDGE_DYE_MODE.DEFLECT) ctx.strokeStyle = '#ffffff';
+      else ctx.strokeStyle = 'rgba(255,180,70,0.95)';
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b2.x, b2.y);
@@ -1324,12 +1376,19 @@ function drawBodiesOverlay(sim) {
     ctx.closePath();
     ctx.fill();
   }
-  for (const [i, j, _rest, edgeSolid, edgeDyeBlock] of s.springs) {
+  for (const [i, j, _rest, edgeBodyMode, edgeDyeMode] of s.springs) {
     const a = s.nodes[i], b = s.nodes[j];
     const pa = worldToScreen(sim, a._rx, a._ry);
     const pb = worldToScreen(sim, b._rx, b._ry);
-    if (!edgeSolid) ctx.strokeStyle = 'rgba(90,180,190,0.45)';
-    else ctx.strokeStyle = edgeDyeBlock ? '#00ffd0' : 'rgba(120,150,255,0.95)';
+    if (edgeBodyMode !== EDGE_BODY_MODE.BLOCK) {
+      ctx.strokeStyle = 'rgba(90,180,190,0.35)';
+    } else if (edgeDyeMode === EDGE_DYE_MODE.PASS) {
+      ctx.strokeStyle = 'rgba(120,150,255,0.95)';
+    } else if (edgeDyeMode === EDGE_DYE_MODE.DEFLECT) {
+      ctx.strokeStyle = '#00ffd0';
+    } else {
+      ctx.strokeStyle = 'rgba(255,180,70,0.95)';
+    }
     ctx.beginPath();
     ctx.moveTo(pa.x, pa.y);
     ctx.lineTo(pb.x, pb.y);
@@ -1345,9 +1404,9 @@ function drawBodiesOverlay(sim) {
 
   ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
-  ctx.fillText(`Blocked edges=white/cyan, permeable=blue, digest ON=magenta fill | zoom ${sim.camera.zoom.toFixed(2)}x`, 10, canvas.height - 28);
+  ctx.fillText(`Dye edges: DEFLECT=white/cyan, PASS=blue, ABSORB=amber | zoom ${sim.camera.zoom.toFixed(2)}x`, 10, canvas.height - 28);
   ctx.fillStyle = 'rgba(0,255,208,0.95)';
-  ctx.fillText('Rigid+soft mixed edge permeability | Alt+drag/right-drag pan, wheel zoom', 10, canvas.height - 12);
+  ctx.fillText('Body edges: BLOCK (bright) vs PASS (dim) | digest ON=magenta fill | Alt+drag/right-drag pan, wheel zoom', 10, canvas.height - 12);
   ctx.restore();
 }
 

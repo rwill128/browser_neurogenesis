@@ -467,6 +467,13 @@ function sampleFieldBilinear(field, n, x, y) {
   return a * (1 - sy) + b * sy;
 }
 
+function rigidVertexWorld(b, vertexIndex) {
+  const sides = Math.max(3, b.sides || 3);
+  const rot = (b.theta || 0) + (sides === 3 ? -Math.PI * 0.5 : Math.PI * 0.25);
+  const a = rot + (vertexIndex / sides) * Math.PI * 2;
+  return { x: b.x + Math.cos(a) * b.r, y: b.y + Math.sin(a) * b.r };
+}
+
 function initBodies(n, controls) {
   const scale = n / 256;
   const bigMode = n >= 1024;
@@ -600,7 +607,43 @@ function initBodies(n, controls) {
     }
   }
 
-  return { rigid, soft: { nodes: softNodes, springs } };
+  const hybrid = [];
+  // Minimal hybrid archetype: rigid triangle edge-attached to a soft triangle with one free soft apex.
+  const triRigidIndex = rigid.findIndex((rb) => (rb.sides || 0) === 3);
+  if (triRigidIndex >= 0) {
+    const rb = rigid[triRigidIndex];
+    const va = rigidVertexWorld(rb, 1);
+    const vb = rigidVertexWorld(rb, 2);
+    const mx = (va.x + vb.x) * 0.5;
+    const my = (va.y + vb.y) * 0.5;
+    const ex = vb.x - va.x, ey = vb.y - va.y;
+    const el = Math.max(1e-6, Math.hypot(ex, ey));
+    const nx = -ey / el, ny = ex / el;
+    const apexDist = rb.r * 0.95;
+    const apex = { x: mx + nx * apexDist, y: my + ny * apexDist };
+    const nodeIndex = softNodes.length;
+    softNodes.push({
+      x: apex.x,
+      y: apex.y,
+      vx: 0,
+      vy: 0,
+      mass: controls.massSoft,
+      r: 1.4 * scale * bodyScale,
+      clusterId: softClusterCount + 1000,
+      digestEnabled: false,
+      digestRGB: [1, 1, 1],
+    });
+    hybrid.push({
+      rigidIndex: triRigidIndex,
+      nodeIndex,
+      vertexA: 1,
+      vertexB: 2,
+      restA: Math.hypot(apex.x - va.x, apex.y - va.y),
+      restB: Math.hypot(apex.x - vb.x, apex.y - vb.y),
+    });
+  }
+
+  return { rigid, soft: { nodes: softNodes, springs }, hybrid };
 }
 
 function initEmitters(n) {
@@ -1204,6 +1247,29 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       a.vx += nx * err * 0.034; a.vy += ny * err * 0.034;
       b.vx -= nx * err * 0.034; b.vy -= ny * err * 0.034;
     }
+
+    // Hybrid rigid-soft attachment constraints (weld-like springs to rigid edge vertices).
+    for (const h of (bodies.hybrid || [])) {
+      const rb = bodies.rigid[h.rigidIndex];
+      const node = s.nodes[h.nodeIndex];
+      if (!rb || !node) continue;
+      const va = rigidVertexWorld(rb, h.vertexA);
+      const vb = rigidVertexWorld(rb, h.vertexB);
+      const pairs = [[va, h.restA], [vb, h.restB]];
+      for (const [anchor, rest] of pairs) {
+        const dx = node.x - anchor.x;
+        const dy = node.y - anchor.y;
+        const d = Math.max(1e-6, Math.hypot(dx, dy));
+        const err = (d - rest) * 0.85;
+        const nx = dx / d, ny = dy / d;
+        node.vx -= nx * err * 0.06;
+        node.vy -= ny * err * 0.06;
+        // Small reaction torque/force into rigid body for two-way feel.
+        rb.vx += nx * err * 0.008;
+        rb.vy += ny * err * 0.008;
+        rb.omega = (rb.omega || 0) + (nx * ny) * err * 0.0008;
+      }
+    }
   }
 
   for (const node of s.nodes) {
@@ -1547,11 +1613,26 @@ function drawBodiesOverlay(sim) {
     ctx.fill();
   }
 
+  // Visualize hybrid rigid-soft attachments.
+  for (const h of (sim.bodies.hybrid || [])) {
+    const rb = sim.bodies.rigid[h.rigidIndex];
+    const node = s.nodes[h.nodeIndex];
+    if (!rb || !node) continue;
+    const va = rigidVertexWorld(rb, h.vertexA);
+    const vb = rigidVertexWorld(rb, h.vertexB);
+    const pA = worldToScreen(sim, va.x, va.y);
+    const pB = worldToScreen(sim, vb.x, vb.y);
+    const pN = worldToScreen(sim, node._rx, node._ry);
+    ctx.strokeStyle = 'rgba(255,120,220,0.95)';
+    ctx.beginPath(); ctx.moveTo(pA.x, pA.y); ctx.lineTo(pN.x, pN.y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(pB.x, pB.y); ctx.lineTo(pN.x, pN.y); ctx.stroke();
+  }
+
   ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
   ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, ABSORB=amber, MIXED=violet | zoom ${sim.camera.zoom.toFixed(2)}x`, 10, canvas.height - 28);
   ctx.fillStyle = 'rgba(0,255,208,0.95)';
-  ctx.fillText('Body edges: BLOCK (bright) vs PASS (dim) | digest ON=magenta fill | Alt+drag/right-drag pan, wheel zoom', 10, canvas.height - 12);
+  ctx.fillText('Body edges: BLOCK (bright) vs PASS (dim) | hybrid links=magenta | Alt+drag/right-drag pan, wheel zoom', 10, canvas.height - 12);
   ctx.restore();
 }
 

@@ -6,8 +6,12 @@ use std::io::{self, Read};
 #[derive(Debug, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 enum Request {
-    Smoke { n: u32 },
-    SmokeSweep { sizes: Vec<u32> },
+    Smoke {
+        n: u32,
+    },
+    SmokeSweep {
+        sizes: Vec<u32>,
+    },
     FluidInit {
         width: u32,
         height: u32,
@@ -29,6 +33,8 @@ enum Request {
         fade: f32,
         #[serde(default = "default_jacobi")]
         jacobi_iters: u32,
+        #[serde(default = "default_projection_passes")]
+        projection_passes: u32,
         #[serde(default = "default_dye_radius")]
         dye_radius: f32,
         #[serde(default = "default_impulse")]
@@ -36,13 +42,30 @@ enum Request {
     },
 }
 
-fn default_steps() -> u32 { 1 }
-fn default_dt() -> f32 { 0.1 }
-fn default_viscosity() -> f32 { 0.0002 }
-fn default_fade() -> f32 { 0.995 }
-fn default_jacobi() -> u32 { 30 }
-fn default_dye_radius() -> f32 { 0.15 }
-fn default_impulse() -> f32 { 25.0 }
+fn default_steps() -> u32 {
+    1
+}
+fn default_dt() -> f32 {
+    0.1
+}
+fn default_viscosity() -> f32 {
+    0.0002
+}
+fn default_fade() -> f32 {
+    0.995
+}
+fn default_jacobi() -> u32 {
+    30
+}
+fn default_projection_passes() -> u32 {
+    2
+}
+fn default_dye_radius() -> f32 {
+    0.15
+}
+fn default_impulse() -> f32 {
+    25.0
+}
 
 #[derive(Debug, Serialize)]
 struct SmokeResponse {
@@ -151,7 +174,12 @@ fn run() -> Result<()> {
             dye_radius,
             impulse,
         } => {
-            let resp = pollster::block_on(run_fluid_init(width.max(16), height.max(16), dye_radius, impulse))?;
+            let resp = pollster::block_on(run_fluid_init(
+                width.max(16),
+                height.max(16),
+                dye_radius,
+                impulse,
+            ))?;
             println!("{}", serde_json::to_string_pretty(&resp)?);
         }
         Request::FluidStep {
@@ -162,6 +190,7 @@ fn run() -> Result<()> {
             viscosity,
             fade,
             jacobi_iters,
+            projection_passes,
             dye_radius,
             impulse,
         } => {
@@ -173,6 +202,7 @@ fn run() -> Result<()> {
                 viscosity.max(0.0),
                 fade.clamp(0.8, 1.0),
                 jacobi_iters.clamp(5, 120),
+                projection_passes.clamp(1, 6),
                 dye_radius,
                 impulse,
             ))?;
@@ -200,7 +230,12 @@ async fn create_device() -> Result<(wgpu::Device, wgpu::Queue)> {
     Ok((device, queue))
 }
 
-async fn run_fluid_init(width: u32, height: u32, dye_radius: f32, impulse: f32) -> Result<FluidInitResponse> {
+async fn run_fluid_init(
+    width: u32,
+    height: u32,
+    dye_radius: f32,
+    impulse: f32,
+) -> Result<FluidInitResponse> {
     let t0 = std::time::Instant::now();
     let (device, queue) = create_device().await?;
     let cells = (width as usize) * (height as usize);
@@ -257,9 +292,18 @@ async fn run_fluid_init(width: u32, height: u32, dye_radius: f32, impulse: f32) 
         label: Some("fluid-init-bg"),
         layout: &init_pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: vel_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: dye_buf.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: vel_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: dye_buf.as_entire_binding(),
+            },
         ],
     });
 
@@ -291,6 +335,7 @@ async fn run_fluid_step(
     viscosity: f32,
     fade: f32,
     jacobi_iters: u32,
+    projection_passes: u32,
     dye_radius: f32,
     impulse: f32,
 ) -> Result<FluidStepResponse> {
@@ -367,115 +412,244 @@ async fn run_fluid_step(
         label: Some("bg-init"),
         layout: &init_pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: dye_a.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: vel_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: dye_a.as_entire_binding(),
+            },
         ],
     });
     let bg_advect_vel = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bg-advect-vel"),
         layout: &advect_vel_pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: vel_b.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: vel_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: vel_b.as_entire_binding(),
+            },
         ],
     });
     let bg_div = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bg-div"),
         layout: &divergence_pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: vel_b.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: div.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: vel_b.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: div.as_entire_binding(),
+            },
         ],
     });
     let bg_div_from_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bg-div-from-a"),
         layout: &divergence_pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: div.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: vel_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: div.as_entire_binding(),
+            },
         ],
     });
     let bg_jacobi_ab = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bg-jacobi-ab"),
         layout: &jacobi_pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: pressure_a.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: div.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: pressure_b.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: pressure_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: div.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: pressure_b.as_entire_binding(),
+            },
         ],
     });
     let bg_jacobi_ba = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bg-jacobi-ba"),
         layout: &jacobi_pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: pressure_b.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: div.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: pressure_a.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: pressure_b.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: div.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: pressure_a.as_entire_binding(),
+            },
         ],
     });
     let bg_project_from_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bg-project-from-a"),
         layout: &project_pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: vel_b.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: pressure_a.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: vel_a.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: vel_b.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: pressure_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: vel_a.as_entire_binding(),
+            },
         ],
     });
     let bg_project_from_b = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bg-project-from-b"),
         layout: &project_pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: vel_b.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: pressure_b.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: vel_a.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: vel_b.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: pressure_b.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: vel_a.as_entire_binding(),
+            },
         ],
     });
     let bg_project_cleanup_from_a = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bg-project-cleanup-from-a"),
         layout: &project_pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: pressure_a.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: vel_b.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: vel_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: pressure_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: vel_b.as_entire_binding(),
+            },
         ],
     });
     let bg_project_cleanup_from_b = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bg-project-cleanup-from-b"),
         layout: &project_pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: pressure_b.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: vel_b.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: vel_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: pressure_b.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: vel_b.as_entire_binding(),
+            },
         ],
     });
     let bg_advect_dye = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bg-advect-dye"),
         layout: &advect_dye_pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: vel_a.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: dye_a.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 3, resource: dye_b.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: vel_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: dye_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: dye_b.as_entire_binding(),
+            },
         ],
     });
     let bg_fade = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bg-fade"),
         layout: &fade_pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: dye_b.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 2, resource: dye_a.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: dye_b.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: dye_a.as_entire_binding(),
+            },
         ],
     });
 
@@ -516,7 +690,15 @@ async fn run_fluid_step(
         for i in 0..jacobi_iters {
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&jacobi_pipeline);
-            pass.set_bind_group(0, if i % 2 == 0 { &bg_jacobi_ab } else { &bg_jacobi_ba }, &[]);
+            pass.set_bind_group(
+                0,
+                if i % 2 == 0 {
+                    &bg_jacobi_ab
+                } else {
+                    &bg_jacobi_ba
+                },
+                &[],
+            );
             pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
         }
 
@@ -524,43 +706,67 @@ async fn run_fluid_step(
         {
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&project_pipeline);
-            pass.set_bind_group(0, if jacobi_iters % 2 == 0 { &bg_project_from_a } else { &bg_project_from_b }, &[]);
-            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
-        }
-
-        // one extra pressure-projection cleanup pass from the projected field
-        {
-            let mut pass = encoder.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&divergence_pipeline);
-            pass.set_bind_group(0, &bg_div_from_a, &[]);
-            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
-        }
-
-        encoder.clear_buffer(&pressure_a, 0, None);
-        for i in 0..jacobi_iters {
-            let mut pass = encoder.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&jacobi_pipeline);
-            pass.set_bind_group(0, if i % 2 == 0 { &bg_jacobi_ab } else { &bg_jacobi_ba }, &[]);
-            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
-        }
-
-        {
-            let mut pass = encoder.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&project_pipeline);
             pass.set_bind_group(
                 0,
                 if jacobi_iters % 2 == 0 {
-                    &bg_project_cleanup_from_a
+                    &bg_project_from_a
                 } else {
-                    &bg_project_cleanup_from_b
+                    &bg_project_from_b
                 },
                 &[],
             );
             pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
         }
 
-        // keep velocity in vel_a for next step and for dye advection.
-        encoder.copy_buffer_to_buffer(&vel_b, 0, &vel_a, 0, (cells * std::mem::size_of::<[f32; 2]>()) as u64);
+        // optional additional projection passes to tighten incompressibility.
+        // pass 0 above leaves velocity in vel_a, then each extra pass goes a->b and copies back to a.
+        for _ in 1..projection_passes {
+            {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pass.set_pipeline(&divergence_pipeline);
+                pass.set_bind_group(0, &bg_div_from_a, &[]);
+                pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+            }
+
+            encoder.clear_buffer(&pressure_a, 0, None);
+            for i in 0..jacobi_iters {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pass.set_pipeline(&jacobi_pipeline);
+                pass.set_bind_group(
+                    0,
+                    if i % 2 == 0 {
+                        &bg_jacobi_ab
+                    } else {
+                        &bg_jacobi_ba
+                    },
+                    &[],
+                );
+                pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+            }
+
+            {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pass.set_pipeline(&project_pipeline);
+                pass.set_bind_group(
+                    0,
+                    if jacobi_iters % 2 == 0 {
+                        &bg_project_cleanup_from_a
+                    } else {
+                        &bg_project_cleanup_from_b
+                    },
+                    &[],
+                );
+                pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+            }
+
+            encoder.copy_buffer_to_buffer(
+                &vel_b,
+                0,
+                &vel_a,
+                0,
+                (cells * std::mem::size_of::<[f32; 2]>()) as u64,
+            );
+        }
 
         // dye advection
         {
@@ -583,8 +789,20 @@ async fn run_fluid_step(
 
     {
         let mut encoder = device.create_command_encoder(&Default::default());
-        encoder.copy_buffer_to_buffer(&vel_a, 0, &vel_read, 0, (cells * std::mem::size_of::<[f32; 2]>()) as u64);
-        encoder.copy_buffer_to_buffer(&dye_a, 0, &dye_read, 0, (cells * std::mem::size_of::<f32>()) as u64);
+        encoder.copy_buffer_to_buffer(
+            &vel_a,
+            0,
+            &vel_read,
+            0,
+            (cells * std::mem::size_of::<[f32; 2]>()) as u64,
+        );
+        encoder.copy_buffer_to_buffer(
+            &dye_a,
+            0,
+            &dye_read,
+            0,
+            (cells * std::mem::size_of::<f32>()) as u64,
+        );
         queue.submit(Some(encoder.finish()));
     }
 
@@ -678,7 +896,9 @@ fn mk_storage_vec2(device: &wgpu::Device, label: &str, cells: usize) -> wgpu::Bu
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size: (cells * std::mem::size_of::<[f32; 2]>()) as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
 }
@@ -687,7 +907,9 @@ fn mk_storage_f32(device: &wgpu::Device, label: &str, cells: usize) -> wgpu::Buf
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size: (cells * std::mem::size_of::<f32>()) as u64,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     })
 }

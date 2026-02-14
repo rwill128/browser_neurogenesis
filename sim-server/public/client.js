@@ -12,6 +12,7 @@ const resumeBtn = document.getElementById('resumeBtn');
 const runModeSelect = document.getElementById('runModeSelect');
 const setRunModeBtn = document.getElementById('setRunModeBtn');
 const fitBtn = document.getElementById('fitBtn');
+const showFluidVelocityToggle = document.getElementById('showFluidVelocityToggle');
 
 const prevCreatureBtn = document.getElementById('prevCreatureBtn');
 const nextCreatureBtn = document.getElementById('nextCreatureBtn');
@@ -54,6 +55,7 @@ function scheduleRender({ includePanels = false } = {}) {
 }
 
 let creatureStatsMode = 'compact';
+let showFluidVelocityArrows = false;
 
 function syncCreatureStatsModeUI() {
   if (creatureStatsModeBtn) {
@@ -834,6 +836,47 @@ function drawSnapshot(snap, { includePanels = true } = {}) {
     }
   }
 
+  if (showFluidVelocityArrows) {
+    const fluid = snap.fluid;
+    const cellW = Number(fluid?.worldCell?.width) || 0;
+    const cellH = Number(fluid?.worldCell?.height) || 0;
+    if (fluid && Array.isArray(fluid.cells) && cellW > 0 && cellH > 0) {
+      const baseLenWorld = Math.min(cellW, cellH) * 0.8;
+      const minSpeed = 0.08;
+      const speedToLen = 0.35;
+
+      ctx.save();
+      ctx.strokeStyle = 'rgba(170,210,255,0.55)';
+      ctx.lineWidth = 1;
+
+      for (const cell of fluid.cells) {
+        const x = Number(cell.x);
+        const y = Number(cell.y);
+        const vx = Number(cell.vx) || 0;
+        const vy = Number(cell.vy) || 0;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+        const speed = Math.hypot(vx, vy);
+        if (!Number.isFinite(speed) || speed < minSpeed) continue;
+
+        const ux = vx / speed;
+        const uy = vy / speed;
+        const lenWorld = baseLenWorld * Math.min(1.8, 0.35 + speed * speedToLen);
+
+        const sx = worldToScreenX(x);
+        const sy = worldToScreenY(y);
+        const ex = worldToScreenX(x + ux * lenWorld);
+        const ey = worldToScreenY(y + uy * lenWorld);
+
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
   if (Array.isArray(snap.particles) && snap.particles.length) {
     for (const p of snap.particles) {
       const x = Number(p?.x);
@@ -1206,6 +1249,14 @@ fitBtn.addEventListener('click', () => {
   fitCameraToWorld(currentWorldId, cam.worldW || 1, cam.worldH || 1);
   scheduleRender({ includePanels: false });
 });
+
+if (showFluidVelocityToggle) {
+  showFluidVelocityToggle.checked = showFluidVelocityArrows;
+  showFluidVelocityToggle.addEventListener('change', () => {
+    showFluidVelocityArrows = !!showFluidVelocityToggle.checked;
+    scheduleRender({ includePanels: false });
+  });
+}
 
 prevCreatureBtn.addEventListener('click', () => cycleCreature(-1));
 nextCreatureBtn.addEventListener('click', () => cycleCreature(1));

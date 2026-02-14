@@ -29,9 +29,9 @@ const JACOBI_ITERS = 20;
 function readControls() {
   return {
     n: Math.max(32, Number(gridEl.value) || 256),
-    dt: Number(dtEl.value) || 0.01,
+    dt: Number(dtEl.value) || 0.03,
     fade: Number(fadeEl.value) || 0.9999,
-    viscosity: Number(viscosityEl.value) || 0.0005,
+    viscosity: Number(viscosityEl.value) || 0.00001,
     impulse: Number(impulseEl.value) || 2.5,
     radius: Number(radiusEl.value) || 6,
     massLight: Math.max(0.05, Number(massLightEl.value) || 1.2),

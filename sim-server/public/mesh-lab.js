@@ -110,7 +110,10 @@ compileBtn.addEventListener('click', compileNow);
 
 exportBtn.addEventListener('click', () => {
   if (!lastMesh) compileNow();
-  const spec = createCreatureSpecFromMesh(lastMesh, { name: 'mesh-lab-creature' });
+  const spec = createCreatureSpecFromMesh(lastMesh, {
+    name: 'mesh-lab-creature',
+    fields: { rigidField: rigid, softField: soft },
+  });
   const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -125,17 +128,58 @@ importFile.addEventListener('change', async () => {
   if (!f) return;
   const text = await f.text();
   const spec = parseCreatureSpec(text);
-  if (spec.space?.width === W && spec.space?.height === H && Array.isArray(spec.fields?.rigid) && Array.isArray(spec.fields?.soft)) {
-    rigid.set(spec.fields.rigid);
-    soft.set(spec.fields.soft);
+
+  const authoring = spec.authoring?.fields;
+  if (authoring && Number(authoring.width) === W && Number(authoring.height) === H && Array.isArray(authoring.rigid) && Array.isArray(authoring.soft)) {
+    rigid.set(authoring.rigid);
+    soft.set(authoring.soft);
     drawFields();
+    compileNow();
+    return;
   }
-  lastMesh = {
-    nodes: spec.mesh.nodes,
-    triangles: spec.mesh.triangles,
-    meta: spec.mesh.meta || { width: W, height: H },
-  };
-  drawMesh(lastMesh);
+
+  // Fallback preview for specs that don't carry authoring fields.
+  mctx.clearRect(0, 0, meshCanvas.width, meshCanvas.height);
+  const sx = meshCanvas.width / W;
+  const sy = meshCanvas.height / H;
+
+  for (const rb of spec.rigidBodies || []) {
+    if (!rb.hull?.length) continue;
+    mctx.beginPath();
+    for (let i = 0; i < rb.hull.length; i++) {
+      const p = rb.hull[i];
+      const x = p.x * sx;
+      const y = p.y * sy;
+      if (i === 0) mctx.moveTo(x, y);
+      else mctx.lineTo(x, y);
+    }
+    mctx.closePath();
+    mctx.fillStyle = 'rgba(255,90,90,0.16)';
+    mctx.strokeStyle = 'rgba(255,140,140,0.8)';
+    mctx.fill();
+    mctx.stroke();
+  }
+
+  for (const sb of spec.softBodies || []) {
+    for (const [ai, bi] of sb.springs || []) {
+      const a = sb.nodes?.[ai];
+      const b = sb.nodes?.[bi];
+      if (!a || !b) continue;
+      mctx.strokeStyle = 'rgba(120,170,255,0.8)';
+      mctx.beginPath();
+      mctx.moveTo(a.x * sx, a.y * sy);
+      mctx.lineTo(b.x * sx, b.y * sy);
+      mctx.stroke();
+    }
+  }
+
+  out.textContent = JSON.stringify({
+    schemaVersion: spec.schemaVersion,
+    rigidBodies: spec.rigidBodies?.length || 0,
+    softBodies: spec.softBodies?.length || 0,
+    hybridJoints: spec.hybridJoints?.length || 0,
+    note: 'No authoring fields embedded; showing solver-structure preview.',
+  }, null, 2);
 });
 
 drawFields();

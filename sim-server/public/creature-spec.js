@@ -1,151 +1,241 @@
-export const CREATURE_SPEC_VERSION = 'creature-spec.v1';
+export const CREATURE_SPEC_VERSION = 'creature-spec.v2';
 
 const EDGE_BODY_BLOCK = 1;
+const EDGE_DYE_DEFLECT_RGB = [1, 1, 1];
 
 export function createCreatureSpecFromMesh(mesh, options = {}) {
-  return {
+  const width = mesh?.meta?.width || options.width || 128;
+  const height = mesh?.meta?.height || options.height || 128;
+  const nodes = (mesh?.nodes || []).map((p, i) => ({
+    id: i,
+    x: Number(p.x) || 0,
+    y: Number(p.y) || 0,
+    rigid: Number(p.rigid) || 0,
+    soft: Number(p.soft) || 0,
+  }));
+
+  const triByKind = { rigid: [], soft: [] };
+  for (const t of (mesh?.triangles || [])) {
+    if (t?.kind === 'rigid') triByKind.rigid.push(t);
+    else if (t?.kind === 'soft') triByKind.soft.push(t);
+  }
+
+  const rigidBuild = buildRigidExport(triByKind.rigid, nodes, options);
+  const softBuild = buildSoftExport(triByKind.soft, nodes, options);
+  const hybridJoints = buildHybridExport({
+    rigidComps: rigidBuild.components,
+    softComps: softBuild.components,
+    rigidBodies: rigidBuild.rigidBodies,
+    sourceNodes: nodes,
+  });
+
+  const out = {
     schemaVersion: CREATURE_SPEC_VERSION,
     createdAt: new Date().toISOString(),
     name: options.name || 'unnamed-creature',
-    space: {
-      width: mesh?.meta?.width || options.width || 128,
-      height: mesh?.meta?.height || options.height || 128,
-    },
-    mesh: {
-      nodes: mesh?.nodes || [],
-      triangles: mesh?.triangles || [],
-      meta: mesh?.meta || {},
-    },
+    space: { width, height },
+    rigidBodies: rigidBuild.rigidBodies,
+    softBodies: softBuild.softBodies,
+    hybridJoints,
   };
+
+  // Authoring payload is optional and intentionally separate from solver contract.
+  if (options.includeAuthoring !== false) {
+    const rigidField = options?.fields?.rigidField;
+    const softField = options?.fields?.softField;
+    if (rigidField && softField) {
+      out.authoring = {
+        fields: {
+          width,
+          height,
+          rigid: Array.from(rigidField),
+          soft: Array.from(softField),
+        },
+      };
+    }
+  }
+
+  return out;
 }
 
 export function parseCreatureSpec(jsonText) {
   const obj = JSON.parse(jsonText);
   if (!obj || typeof obj !== 'object') throw new Error('Invalid JSON object');
-  if (obj.schemaVersion !== CREATURE_SPEC_VERSION) throw new Error(`Unsupported schemaVersion: ${obj.schemaVersion}`);
-  if (!obj.mesh || !Array.isArray(obj.mesh.nodes) || !Array.isArray(obj.mesh.triangles)) {
-    throw new Error('CreatureSpec missing mesh.nodes/mesh.triangles');
+  if (obj.schemaVersion !== CREATURE_SPEC_VERSION) {
+    throw new Error(`Unsupported schemaVersion: ${obj.schemaVersion}`);
+  }
+  if (!obj.space || !Number.isFinite(obj.space.width) || !Number.isFinite(obj.space.height)) {
+    throw new Error('CreatureSpec missing valid space.width/space.height');
+  }
+  if (!Array.isArray(obj.rigidBodies) || !Array.isArray(obj.softBodies) || !Array.isArray(obj.hybridJoints)) {
+    throw new Error('CreatureSpec missing rigidBodies/softBodies/hybridJoints arrays');
+  }
+  for (const rb of obj.rigidBodies) {
+    if (!Array.isArray(rb.hull) || rb.hull.length < 3) throw new Error('Rigid body missing hull vertices');
+  }
+  for (const sb of obj.softBodies) {
+    if (!Array.isArray(sb.nodes) || !Array.isArray(sb.springs)) throw new Error('Soft body missing nodes/springs');
   }
   return obj;
 }
 
 export function buildBodiesFromCreatureSpec(spec, n, controls) {
-  const srcW = Math.max(1, spec.space?.width || n);
-  const srcH = Math.max(1, spec.space?.height || n);
+  const srcW = Math.max(1, Number(spec.space?.width) || n);
+  const srcH = Math.max(1, Number(spec.space?.height) || n);
   const sx = n / srcW;
   const sy = n / srcH;
+  const sRest = 0.5 * (sx + sy);
 
-  const nodes = spec.mesh.nodes.map((p, i) => ({
-    id: i,
-    x: p.x * sx,
-    y: p.y * sy,
-    rigid: p.rigid || 0,
-    soft: p.soft || 0,
-  }));
-
-  const triByKind = { rigid: [], soft: [] };
-  for (const t of spec.mesh.triangles || []) {
-    if (t.kind === 'rigid') triByKind.rigid.push(t);
-    else if (t.kind === 'soft') triByKind.soft.push(t);
-  }
-
-  const rigidBuild = buildRigidClusters(triByKind.rigid, nodes, controls);
-  const softBuild = buildSoftFromTriangles(triByKind.soft, nodes, controls, {
-    clusterOffset: 0,
-    mass: controls.massSoft,
-    radius: 1.6,
-    digestEnabled: false,
-    digestRGB: [1, 1, 1],
-  });
-
-  const hybrid = buildRigidSoftHybridLinks({
-    rigidComps: rigidBuild.components,
-    softComps: softBuild.components,
-    rigidBodies: rigidBuild.rigid,
-    softNodeRemap: softBuild.globalRemap,
-    nodes,
-  });
-
-  return {
-    rigid: rigidBuild.rigid,
-    soft: {
-      nodes: softBuild.nodes,
-      springs: softBuild.springs,
-    },
-    hybrid,
-  };
-}
-
-function buildRigidClusters(tris, nodes, controls) {
-  const comps = triangleComponents(tris);
   const rigid = [];
-  const components = [];
-  for (let ci = 0; ci < comps.length; ci++) {
-    const comp = comps[ci];
-    const pointIds = new Set();
-    for (const t of comp) {
-      pointIds.add(t.a); pointIds.add(t.b); pointIds.add(t.c);
-    }
-    const pts = [...pointIds].map((i) => nodes[i]).filter(Boolean);
-    if (!pts.length) continue;
+  for (const rb of spec.rigidBodies || []) {
+    const hull = (rb.hull || []).map((p) => ({ x: (Number(p.x) || 0) * sx, y: (Number(p.y) || 0) * sy }));
+    if (hull.length < 3) continue;
 
-    let cx = 0, cy = 0;
-    for (const p of pts) { cx += p.x; cy += p.y; }
-    cx /= pts.length; cy /= pts.length;
+    const c = centroid(hull);
+    const verticesLocal = hull.map((p) => ({ x: p.x - c.x, y: p.y - c.y }));
+    const r = Math.max(2.5, ...verticesLocal.map((v) => Math.hypot(v.x, v.y)));
+    const sides = Math.max(3, verticesLocal.length);
+    const mass = finiteOr(Number(rb.mass), controls.massHeavy);
 
-    let r = 0;
-    for (const p of pts) r = Math.max(r, Math.hypot(p.x - cx, p.y - cy));
-    r = Math.max(2.5, r);
-
-    const hull = convexHull(pts);
-    const verticesLocal = hull
-      .map((p) => ({ x: p.x - cx, y: p.y - cy }))
-      .filter((v) => Number.isFinite(v.x) && Number.isFinite(v.y));
-    const sides = Math.max(3, verticesLocal.length || Math.min(12, approximateHullSides(pts)));
-    const mass = controls.massHeavy;
-    const body = {
-      x: cx,
-      y: cy,
+    rigid.push({
+      x: c.x,
+      y: c.y,
       vx: 0,
       vy: 0,
       r,
       sides,
-      verticesLocal: verticesLocal.length >= 3 ? verticesLocal : null,
-      edgeDyeMode: Array.from({ length: sides }, () => [1, 1, 1]),
-      edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
-      digestEnabled: false,
-      digestRGB: [1, 1, 1],
+      verticesLocal,
+      edgeDyeMode: normalizeEdgeDyeModeList(rb.edgeDyeMode, sides),
+      edgeBodyMode: normalizeEdgeBodyModeList(rb.edgeBodyMode, sides),
+      digestEnabled: !!rb.digestEnabled,
+      digestRGB: normalizeRGB(rb.digestRGB),
       mass,
       theta: 0,
       omega: 0,
-      inertia: 0.5 * mass * r * r,
-    };
-
-    rigid.push(body);
-    components.push({
-      index: rigid.length - 1,
-      nodeIds: pointIds,
-      cx,
-      cy,
-      r,
-      sides,
+      inertia: finiteOr(Number(rb.inertia), 0.5 * mass * r * r),
     });
   }
-  return { rigid, components };
+
+  const soft = { nodes: [], springs: [] };
+  const softNodeMap = new Map();
+  let clusterId = 0;
+  for (let sbi = 0; sbi < (spec.softBodies || []).length; sbi++) {
+    const sb = spec.softBodies[sbi];
+    const base = soft.nodes.length;
+    for (let i = 0; i < sb.nodes.length; i++) {
+      const p = sb.nodes[i] || {};
+      soft.nodes.push({
+        x: (Number(p.x) || 0) * sx,
+        y: (Number(p.y) || 0) * sy,
+        vx: 0,
+        vy: 0,
+        mass: finiteOr(Number(p.mass), controls.massSoft),
+        r: finiteOr(Number(p.r), 1.6),
+        clusterId,
+        digestEnabled: !!p.digestEnabled,
+        digestRGB: normalizeRGB(p.digestRGB),
+      });
+      softNodeMap.set(`${sbi}:${i}`, base + i);
+    }
+
+    for (const sp of sb.springs) {
+      const [aRaw, bRaw, restRaw, edgeBodyRaw, edgeDyeRaw] = Array.isArray(sp)
+        ? sp
+        : [sp?.a, sp?.b, sp?.rest, sp?.edgeBodyMode, sp?.edgeDyeMode];
+      const a = Number(aRaw);
+      const b = Number(bRaw);
+      if (!Number.isInteger(a) || !Number.isInteger(b)) continue;
+      if (a < 0 || b < 0 || a >= sb.nodes.length || b >= sb.nodes.length) continue;
+      soft.springs.push([
+        base + a,
+        base + b,
+        Math.max(1e-4, finiteOr(Number(restRaw), 1) * sRest),
+        normalizeEdgeBodyMode(edgeBodyRaw),
+        normalizeEdgeDyeMode(edgeDyeRaw),
+      ]);
+    }
+
+    clusterId += 1;
+  }
+
+  const hybrid = [];
+  for (const j of (spec.hybridJoints || [])) {
+    const rigidIndex = Number(j.rigidBodyIndex);
+    const softBodyIndex = Number(j.softBodyIndex);
+    const softNodeIndex = Number(j.softNodeIndex);
+    if (!Number.isInteger(rigidIndex) || rigidIndex < 0 || rigidIndex >= rigid.length) continue;
+
+    const globalSoft = softNodeMap.get(`${softBodyIndex}:${softNodeIndex}`);
+    if (!Number.isInteger(globalSoft) || globalSoft < 0 || globalSoft >= soft.nodes.length) continue;
+
+    const rb = rigid[rigidIndex];
+    const edgeA = Math.max(0, Math.min(rb.sides - 1, Number(j.edgeA) | 0));
+    const edgeB = Math.max(0, Math.min(rb.sides - 1, Number(j.edgeB) | 0));
+    const aPos = rigidVertexWorld(rb, edgeA);
+    const bPos = rigidVertexWorld(rb, edgeB);
+    const p = soft.nodes[globalSoft];
+    const restA = Math.max(0.8, finiteOr(Number(j.restA), Math.hypot(p.x - aPos.x, p.y - aPos.y) / Math.max(1e-6, sRest)) * sRest);
+    const restB = Math.max(0.8, finiteOr(Number(j.restB), Math.hypot(p.x - bPos.x, p.y - bPos.y) / Math.max(1e-6, sRest)) * sRest);
+
+    hybrid.push({
+      rigidIndex,
+      nodeIndex: globalSoft,
+      vertexA: edgeA,
+      vertexB: edgeB,
+      restA,
+      restB,
+    });
+  }
+
+  return { rigid, soft, hybrid };
 }
 
-function buildSoftFromTriangles(tris, nodes, controls, opts = {}) {
+function buildRigidExport(tris, nodes, options) {
   const comps = triangleComponents(tris);
-  const softNodes = [];
-  const springs = [];
+  const rigidBodies = [];
   const components = [];
-  const globalRemap = new Map();
 
-  let clusterId = opts.clusterOffset || 0;
-  const nodeMass = opts.mass ?? controls.massSoft;
-  const nodeRadius = opts.radius ?? 1.6;
-  const digestEnabled = !!opts.digestEnabled;
-  const digestRGB = opts.digestRGB || [1, 1, 1];
+  for (const comp of comps) {
+    const pointIds = new Set();
+    for (const t of comp) {
+      pointIds.add(t.a); pointIds.add(t.b); pointIds.add(t.c);
+    }
+
+    const pts = [...pointIds].map((i) => nodes[i]).filter(Boolean);
+    if (pts.length < 3) continue;
+
+    const hull = convexHull(pts).map((p) => ({ x: p.x, y: p.y }));
+    if (hull.length < 3) continue;
+
+    const c = centroid(hull);
+    const r = Math.max(2.5, ...hull.map((p) => Math.hypot(p.x - c.x, p.y - c.y)));
+    const sides = hull.length;
+
+    const rigidBody = {
+      id: `rigid_${rigidBodies.length}`,
+      hull,
+      mass: finiteOr(Number(options.massHeavy), 5),
+      edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
+      edgeDyeMode: Array.from({ length: sides }, () => [...EDGE_DYE_DEFLECT_RGB]),
+      digestEnabled: false,
+      digestRGB: [1, 1, 1],
+    };
+
+    rigidBodies.push(rigidBody);
+    components.push({
+      index: rigidBodies.length - 1,
+      nodeIds: pointIds,
+      radius: r,
+    });
+  }
+
+  return { rigidBodies, components };
+}
+
+function buildSoftExport(tris, nodes, options) {
+  const comps = triangleComponents(tris);
+  const softBodies = [];
+  const components = [];
 
   for (const comp of comps) {
     const pointIds = new Set();
@@ -153,25 +243,19 @@ function buildSoftFromTriangles(tris, nodes, controls, opts = {}) {
       pointIds.add(t.a); pointIds.add(t.b); pointIds.add(t.c);
     }
     const ids = [...pointIds];
-    const base = softNodes.length;
     const remap = new Map();
 
-    ids.forEach((id, i) => {
-      const outIdx = base + i;
-      remap.set(id, outIdx);
-      globalRemap.set(id, outIdx);
+    const softNodes = ids.map((id, i) => {
+      remap.set(id, i);
       const p = nodes[id];
-      softNodes.push({
+      return {
         x: p.x,
         y: p.y,
-        vx: 0,
-        vy: 0,
-        mass: nodeMass,
-        r: nodeRadius,
-        clusterId,
-        digestEnabled,
-        digestRGB: [...digestRGB],
-      });
+        mass: finiteOr(Number(options.massSoft), 0.6),
+        r: 1.6,
+        digestEnabled: false,
+        digestRGB: [1, 1, 1],
+      };
     });
 
     const edgeCount = new Map();
@@ -182,31 +266,42 @@ function buildSoftFromTriangles(tris, nodes, controls, opts = {}) {
       }
     }
 
+    const springs = [];
     for (const [k, c] of edgeCount.entries()) {
       const [ua, ub] = k.split('-').map((x) => Number(x));
-      const aIdx = remap.get(ua);
-      const bIdx = remap.get(ub);
-      const a = softNodes[aIdx];
-      const b = softNodes[bIdx];
-      const rest = Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y));
+      const a = remap.get(ua);
+      const b = remap.get(ub);
+      const pa = softNodes[a];
+      const pb = softNodes[b];
+      const rest = Math.max(1e-3, Math.hypot(pb.x - pa.x, pb.y - pa.y));
       const boundary = c === 1;
       springs.push([
-        aIdx,
-        bIdx,
+        a,
+        b,
         rest,
         boundary ? EDGE_BODY_BLOCK : 0,
-        boundary ? [1, 1, 1] : [0, 0, 0],
+        boundary ? [...EDGE_DYE_DEFLECT_RGB] : [0, 0, 0],
       ]);
     }
 
-    components.push({ nodeIds: pointIds, clusterId });
-    clusterId += 1;
+    const bodyIndex = softBodies.length;
+    softBodies.push({
+      id: `soft_${bodyIndex}`,
+      nodes: softNodes,
+      springs,
+    });
+
+    components.push({
+      index: bodyIndex,
+      nodeIds: pointIds,
+      sourceToLocal: remap,
+    });
   }
 
-  return { nodes: softNodes, springs, components, globalRemap };
+  return { softBodies, components };
 }
 
-function buildRigidSoftHybridLinks({ rigidComps, softComps, rigidBodies, softNodeRemap, nodes }) {
+function buildHybridExport({ rigidComps, softComps, rigidBodies, sourceNodes }) {
   const links = [];
   const used = new Set();
 
@@ -215,36 +310,46 @@ function buildRigidSoftHybridLinks({ rigidComps, softComps, rigidBodies, softNod
       const shared = [];
       for (const nid of rc.nodeIds) if (sc.nodeIds.has(nid)) shared.push(nid);
       for (const nid of shared) {
-        const softIdx = softNodeRemap.get(nid);
-        if (softIdx == null) continue;
-        const key = `${rc.index}:${softIdx}`;
+        const softNodeLocal = sc.sourceToLocal.get(nid);
+        if (softNodeLocal == null) continue;
+
+        const key = `${rc.index}:${sc.index}:${softNodeLocal}`;
         if (used.has(key)) continue;
         used.add(key);
 
-        const p = nodes[nid];
+        const p = sourceNodes[nid];
         const rb = rigidBodies[rc.index];
-        if (!p || !rb) continue;
+        if (!p || !rb || !rb.hull?.length) continue;
 
-        const { vA, vB } = nearestRigidEdgeForPoint(rb, p.x, p.y);
-        const aPos = rigidVertexWorld(rb, vA);
-        const bPos = rigidVertexWorld(rb, vB);
-        const maxRest = Math.max(6, rb.r * 0.55);
-        const restA = Math.min(maxRest, Math.max(0.8, Math.hypot(p.x - aPos.x, p.y - aPos.y)));
-        const restB = Math.min(maxRest, Math.max(0.8, Math.hypot(p.x - bPos.x, p.y - bPos.y)));
+        const { vA, vB } = nearestHullEdgeForPoint(rb.hull, p.x, p.y);
+        const aPos = rb.hull[vA];
+        const bPos = rb.hull[vB];
+        const maxRest = Math.max(6, rc.radius * 0.55);
 
         links.push({
-          rigidIndex: rc.index,
-          nodeIndex: softIdx,
-          vertexA: vA,
-          vertexB: vB,
-          restA,
-          restB,
+          rigidBodyIndex: rc.index,
+          softBodyIndex: sc.index,
+          softNodeIndex: softNodeLocal,
+          edgeA: vA,
+          edgeB: vB,
+          restA: Math.min(maxRest, Math.max(0.8, Math.hypot(p.x - aPos.x, p.y - aPos.y))),
+          restB: Math.min(maxRest, Math.max(0.8, Math.hypot(p.x - bPos.x, p.y - bPos.y))),
         });
       }
     }
   }
 
   return links;
+}
+
+function centroid(points) {
+  let sx = 0;
+  let sy = 0;
+  for (const p of points) {
+    sx += p.x;
+    sy += p.y;
+  }
+  return { x: sx / Math.max(1, points.length), y: sy / Math.max(1, points.length) };
 }
 
 function rigidVerticesWorld(rb) {
@@ -272,31 +377,29 @@ function rigidVertexWorld(rb, vi) {
   return verts[((vi % n) + n) % n];
 }
 
-function nearestRigidEdgeForPoint(rb, px, py) {
-  const verts = rigidVerticesWorld(rb);
-  if (!verts.length) return { vA: 0, vB: 0 };
-  if (verts.length === 1) return { vA: 0, vB: 0 };
+function nearestHullEdgeForPoint(hull, px, py) {
+  if (!hull?.length) return { vA: 0, vB: 0 };
+  if (hull.length === 1) return { vA: 0, vB: 0 };
 
-  // Guardrail: when a shared soft node lies directly on a rigid vertex,
-  // tie-break deterministically to one of that vertex's local edges
-  // instead of whichever segment appears first in the scan.
   let nearestVertex = 0;
   let nearestVertexD2 = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < verts.length; i++) {
-    const dx = px - verts[i].x;
-    const dy = py - verts[i].y;
+  for (let i = 0; i < hull.length; i++) {
+    const dx = px - hull[i].x;
+    const dy = py - hull[i].y;
     const d2 = dx * dx + dy * dy;
     if (d2 < nearestVertexD2) {
       nearestVertexD2 = d2;
       nearestVertex = i;
     }
   }
+
+  // Deterministic tie-break for shared nodes that land directly on a rigid vertex.
   if (nearestVertexD2 <= 1e-6) {
-    const n = verts.length;
+    const n = hull.length;
     const prev = (nearestVertex - 1 + n) % n;
     const next = (nearestVertex + 1) % n;
-    const prevLen2 = (verts[nearestVertex].x - verts[prev].x) ** 2 + (verts[nearestVertex].y - verts[prev].y) ** 2;
-    const nextLen2 = (verts[nearestVertex].x - verts[next].x) ** 2 + (verts[nearestVertex].y - verts[next].y) ** 2;
+    const prevLen2 = (hull[nearestVertex].x - hull[prev].x) ** 2 + (hull[nearestVertex].y - hull[prev].y) ** 2;
+    const nextLen2 = (hull[nearestVertex].x - hull[next].x) ** 2 + (hull[nearestVertex].y - hull[next].y) ** 2;
     return nextLen2 <= prevLen2
       ? { vA: nearestVertex, vB: next }
       : { vA: prev, vB: nearestVertex };
@@ -304,9 +407,9 @@ function nearestRigidEdgeForPoint(rb, px, py) {
 
   let bestIdx = 0;
   let bestD2 = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < verts.length; i++) {
-    const a = verts[i];
-    const b = verts[(i + 1) % verts.length];
+  for (let i = 0; i < hull.length; i++) {
+    const a = hull[i];
+    const b = hull[(i + 1) % hull.length];
     const abx = b.x - a.x;
     const aby = b.y - a.y;
     const apx = px - a.x;
@@ -323,7 +426,8 @@ function nearestRigidEdgeForPoint(rb, px, py) {
       bestIdx = i;
     }
   }
-  return { vA: bestIdx, vB: (bestIdx + 1) % verts.length };
+
+  return { vA: bestIdx, vB: (bestIdx + 1) % hull.length };
 }
 
 function triangleComponents(tris) {
@@ -336,6 +440,7 @@ function triangleComponents(tris) {
       nodeToTri.get(n).push(i);
     }
   }
+
   const seen = new Uint8Array(tris.length);
   const comps = [];
   for (let i = 0; i < tris.length; i++) {
@@ -365,6 +470,7 @@ function convexHull(points) {
   const pts = [...points]
     .map((p) => ({ x: p.x, y: p.y }))
     .sort((a, b) => (a.x - b.x) || (a.y - b.y));
+
   const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
   const lower = [];
   for (const p of pts) {
@@ -381,21 +487,32 @@ function convexHull(points) {
   return [...lower, ...upper];
 }
 
-function approximateHullSides(points) {
-  if (points.length < 3) return 3;
-  const sorted = [...points].sort((a, b) => (a.x - b.x) || (a.y - b.y));
-  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-  const lower = [];
-  for (const p of sorted) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
-    lower.push(p);
-  }
-  const upper = [];
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    const p = sorted[i];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
-    upper.push(p);
-  }
-  lower.pop(); upper.pop();
-  return Math.max(3, lower.length + upper.length);
+function normalizeEdgeBodyModeList(list, count) {
+  if (!Array.isArray(list) || !list.length) return Array.from({ length: count }, () => EDGE_BODY_BLOCK);
+  return Array.from({ length: count }, (_, i) => normalizeEdgeBodyMode(list[i % list.length]));
+}
+
+function normalizeEdgeDyeModeList(list, count) {
+  if (!Array.isArray(list) || !list.length) return Array.from({ length: count }, () => [...EDGE_DYE_DEFLECT_RGB]);
+  return Array.from({ length: count }, (_, i) => normalizeEdgeDyeMode(list[i % list.length]));
+}
+
+function normalizeEdgeBodyMode(v) {
+  return Number(v) === EDGE_BODY_BLOCK ? EDGE_BODY_BLOCK : 0;
+}
+
+function normalizeEdgeDyeMode(v) {
+  if (Array.isArray(v) && v.length >= 3) return [Number(v[0]) || 0, Number(v[1]) || 0, Number(v[2]) || 0];
+  const n = Number(v);
+  if (Number.isFinite(n)) return [n, n, n];
+  return [...EDGE_DYE_DEFLECT_RGB];
+}
+
+function normalizeRGB(v) {
+  if (!Array.isArray(v) || v.length < 3) return [1, 1, 1];
+  return [finiteOr(Number(v[0]), 1), finiteOr(Number(v[1]), 1), finiteOr(Number(v[2]), 1)];
+}
+
+function finiteOr(v, fallback) {
+  return Number.isFinite(v) ? v : fallback;
 }

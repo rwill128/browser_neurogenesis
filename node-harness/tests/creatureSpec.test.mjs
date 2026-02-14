@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCreatureSpecFromMesh, parseCreatureSpec, buildBodiesFromCreatureSpec } from '../../sim-server/public/creature-spec.js';
+import { createCreatureSpecFromMesh, parseCreatureSpec, buildBodiesFromCreatureSpec, CREATURE_SPEC_VERSION } from '../../sim-server/public/creature-spec.js';
 
-test('CreatureSpec roundtrip parse and build bodies', () => {
+const CONTROLS = { massSoft: 0.6, massHeavy: 5.0 };
+
+test('CreatureSpec v2 roundtrip parse and build bodies', () => {
   const mesh = {
     nodes: [
       { id: 0, x: 2, y: 2, rigid: 1, soft: 0 },
@@ -18,9 +20,16 @@ test('CreatureSpec roundtrip parse and build bodies', () => {
     ],
     meta: { width: 16, height: 16 },
   };
-  const spec = createCreatureSpecFromMesh(mesh, { name: 'test' });
+
+  const spec = createCreatureSpecFromMesh(mesh, { name: 'test', fields: { rigidField: new Float32Array(16 * 16), softField: new Float32Array(16 * 16) } });
+  assert.equal(spec.schemaVersion, CREATURE_SPEC_VERSION);
+  assert.ok(Array.isArray(spec.rigidBodies));
+  assert.ok(Array.isArray(spec.softBodies));
+  assert.ok(Array.isArray(spec.hybridJoints));
+  assert.equal(spec.mesh, undefined);
+
   const parsed = parseCreatureSpec(JSON.stringify(spec));
-  const bodies = buildBodiesFromCreatureSpec(parsed, 256, { massSoft: 0.6, massHeavy: 5.0 });
+  const bodies = buildBodiesFromCreatureSpec(parsed, 256, CONTROLS);
 
   assert.ok(Array.isArray(bodies.rigid));
   assert.ok(Array.isArray(bodies.soft.nodes));
@@ -48,9 +57,9 @@ test('shared rigid-soft boundary creates hybrid links', () => {
     ],
     meta: { width: 16, height: 16 },
   };
-  const bodies = buildBodiesFromCreatureSpec(createCreatureSpecFromMesh(mesh), 256, { massSoft: 0.6, massHeavy: 5.0 });
 
-  assert.ok(bodies.rigid.length === 1);
+  const bodies = buildBodiesFromCreatureSpec(createCreatureSpecFromMesh(mesh), 256, CONTROLS);
+  assert.equal(bodies.rigid.length, 1);
   assert.ok(bodies.soft.nodes.length >= 3);
   assert.ok(bodies.hybrid.length >= 1);
   for (const h of bodies.hybrid) {
@@ -73,15 +82,13 @@ test('hybrid links anchor to nearest rigid hull edge for irregular rigid meshes'
       { kind: 'rigid', a: 0, b: 2, c: 3 },
       { kind: 'soft', a: 1, b: 2, c: 4 },
     ],
-    meta: { width: 24, height: 12 },
+    meta: { width: 24, height: 24 },
   };
 
-  const bodies = buildBodiesFromCreatureSpec(createCreatureSpecFromMesh(mesh), 256, { massSoft: 0.6, massHeavy: 5.0 });
+  const bodies = buildBodiesFromCreatureSpec(createCreatureSpecFromMesh(mesh), 256, CONTROLS);
   assert.equal(bodies.rigid.length, 1);
   assert.ok(bodies.hybrid.length >= 2);
 
-  // Shared nodes are on/near the rigid hull, so anchor-rest lengths should stay local
-  // (previous regular-polygon indexing produced huge rest lengths here).
   for (const h of bodies.hybrid) {
     assert.ok(h.restA < 110, `restA too large: ${h.restA}`);
     assert.ok(h.restB < 110, `restB too large: ${h.restB}`);
@@ -92,7 +99,7 @@ test('hybrid links at rigid vertices choose a local incident edge (deterministic
   const mesh = {
     nodes: [
       { id: 0, x: 0, y: 0, rigid: 1, soft: 0 },
-      { id: 1, x: 40, y: 0, rigid: 1, soft: 1 }, // shared rigid vertex
+      { id: 1, x: 40, y: 0, rigid: 1, soft: 1 },
       { id: 2, x: 40, y: 3, rigid: 1, soft: 0 },
       { id: 3, x: 0, y: 12, rigid: 1, soft: 0 },
       { id: 4, x: 48, y: 6, rigid: 0, soft: 1 },
@@ -102,13 +109,20 @@ test('hybrid links at rigid vertices choose a local incident edge (deterministic
       { kind: 'rigid', a: 0, b: 2, c: 3 },
       { kind: 'soft', a: 1, b: 2, c: 4 },
     ],
-    meta: { width: 48, height: 12 },
+    meta: { width: 48, height: 48 },
   };
 
-  const bodies = buildBodiesFromCreatureSpec(createCreatureSpecFromMesh(mesh), 256, { massSoft: 0.6, massHeavy: 5.0 });
+  const bodies = buildBodiesFromCreatureSpec(createCreatureSpecFromMesh(mesh), 256, CONTROLS);
   assert.equal(bodies.rigid.length, 1);
 
-  const sharedVertexLink = bodies.hybrid.find((h) => Math.min(h.restA, h.restB) <= 0.81);
+  const sharedVertexLink = bodies.hybrid.find((h) => {
+    const rb0 = bodies.rigid[h.rigidIndex];
+    const verts0 = rb0.verticesLocal.map((v) => ({ x: rb0.x + v.x, y: rb0.y + v.y }));
+    const node0 = bodies.soft.nodes[h.nodeIndex];
+    const da = Math.hypot(node0.x - verts0[h.vertexA].x, node0.y - verts0[h.vertexA].y);
+    const db = Math.hypot(node0.x - verts0[h.vertexB].x, node0.y - verts0[h.vertexB].y);
+    return Math.min(da, db) <= 1e-4;
+  });
   assert.ok(sharedVertexLink, 'expected a hybrid link pinned on/near a rigid vertex');
 
   const rb = bodies.rigid[sharedVertexLink.rigidIndex];

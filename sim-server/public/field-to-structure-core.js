@@ -270,7 +270,9 @@ function mergeConvexPieces(triPieces, nodes) {
         const hullArea = polygonAreaAbs(hull);
         const sumArea = a.area + b.area;
         const eps = Math.max(1e-4, sumArea * 0.02);
-        if (Math.abs(hullArea - sumArea) <= eps) {
+        const convexCompatible = Math.abs(hullArea - sumArea) <= eps;
+        const smallSliverMerge = Math.min(a.area, b.area) <= sumArea * 0.24 && hullArea <= sumArea * 1.22;
+        if (convexCompatible || smallSliverMerge) {
           pieces[i] = { nodeIds: mergedIds, area: sumArea };
           pieces.splice(j, 1);
           changed = true;

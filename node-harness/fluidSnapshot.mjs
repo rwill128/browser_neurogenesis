@@ -22,6 +22,7 @@ export function collectFluidSnapshot({
       maxDye: 0,
       maxSpeed: 0,
       activeTileTelemetry: null,
+      fluidStepPerf: null,
       boundsWorld: null,
       cells: []
     };
@@ -38,6 +39,7 @@ export function collectFluidSnapshot({
       maxDye: 0,
       maxSpeed: 0,
       activeTileTelemetry: null,
+      fluidStepPerf: null,
       boundsWorld: null,
       cells: []
     };
@@ -123,6 +125,9 @@ export function collectFluidSnapshot({
     },
     activeTileTelemetry: typeof fluidField.getActiveTileTelemetry === 'function'
       ? fluidField.getActiveTileTelemetry()
+      : null,
+    fluidStepPerf: typeof fluidField.getLastStepPerf === 'function'
+      ? fluidField.getLastStepPerf()
       : null,
     boundsWorld: {
       x: Number(x0.toFixed(3)),

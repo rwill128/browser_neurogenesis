@@ -46,6 +46,16 @@ export class FluidField {
         this.carrierTilesTouchedThisStep = new Set();
         this.momentumTilesTouchedThisStep = new Set();
         this.coarseMomentumBlockSize = 2; // phase A scaffold: 2x2 momentum-only macro blocks
+        this.lastStepPerf = {
+            totalMs: 0,
+            seedMomentumMs: 0,
+            diffuseVelMs: 0,
+            projectMs: 0,
+            advectVelMs: 0,
+            diffuseDensityMs: 0,
+            advectDensityMs: 0,
+            fadeMs: 0
+        };
         this.lastActiveTileTelemetry = {
             carrierActiveTiles: 0,
             momentumTilesTotal: 0,
@@ -242,6 +252,10 @@ export class FluidField {
 
     getActiveTileTelemetry() {
         return { ...this.lastActiveTileTelemetry };
+    }
+
+    getLastStepPerf() {
+        return { ...this.lastStepPerf };
     }
 
     addDensity(x, y, emitterR, emitterG, emitterB, emissionStrength) {
@@ -596,7 +610,11 @@ export class FluidField {
     }
 
     step(worldTick = 0) {
+        const tStart = Date.now();
+        let t0 = Date.now();
         this.seedMomentumTilesFromVelocityField();
+        const seedMomentumMs = Date.now() - t0;
+
         const carrierBounds = this._buildSparseDomainFromTiles(this.carrierTiles);
         const momentumBounds = this._buildSparseDomainFromTiles(this.momentumTiles);
         const momentumEvery = Math.max(1, Math.floor(Number(config.FLUID_MOMENTUM_ONLY_STEP_EVERY_N_TICKS) || 10));
@@ -608,27 +626,54 @@ export class FluidField {
             : carrierBounds;
 
         if (!bounds) {
+            this.lastStepPerf = {
+                totalMs: Date.now() - tStart,
+                seedMomentumMs,
+                diffuseVelMs: 0,
+                projectMs: 0,
+                advectVelMs: 0,
+                diffuseDensityMs: 0,
+                advectDensityMs: 0,
+                fadeMs: 0
+            };
             this._finalizeActiveTileTelemetry();
             return;
         }
 
+        t0 = Date.now();
         this.diffuse(1, this.Vx0, this.Vx, this.viscosity, this.dt, 'velX', bounds);
         this.diffuse(2, this.Vy0, this.Vy, this.viscosity, this.dt, 'velY', bounds);
+        const diffuseVelMs = Date.now() - t0;
+
         this.clampVelocityComponents(this.Vx0);
         this.clampVelocityComponents(this.Vy0);
+
+        t0 = Date.now();
         this.project(this.Vx0, this.Vy0, this.Vx, this.Vy, bounds);
+        this.project(this.Vx, this.Vy, this.Vx0, this.Vy0, bounds);
+        const projectMs = Date.now() - t0;
+
+        t0 = Date.now();
         this.advect(1, this.Vx, this.Vx0, this.Vx0, this.Vy0, this.dt, bounds);
         this.advect(2, this.Vy, this.Vy0, this.Vx0, this.Vy0, this.dt, bounds);
+        const advectVelMs = Date.now() - t0;
+
         this.clampVelocityComponents(this.Vx);
         this.clampVelocityComponents(this.Vy);
-        this.project(this.Vx, this.Vy, this.Vx0, this.Vy0, bounds);
+
+        t0 = Date.now();
         this.diffuse(0, this.densityR0, this.densityR, this.diffusion, this.dt, 'density', bounds);
         this.diffuse(0, this.densityG0, this.densityG, this.diffusion, this.dt, 'density', bounds);
         this.diffuse(0, this.densityB0, this.densityB, this.diffusion, this.dt, 'density', bounds);
+        const diffuseDensityMs = Date.now() - t0;
+
+        t0 = Date.now();
         this.advect(0, this.densityR, this.densityR0, this.Vx, this.Vy, this.dt, bounds);
         this.advect(0, this.densityG, this.densityG0, this.Vx, this.Vy, this.dt, bounds);
         this.advect(0, this.densityB, this.densityB0, this.Vx, this.Vy, this.dt, bounds);
+        const advectDensityMs = Date.now() - t0;
 
+        t0 = Date.now();
         if (bounds) {
             this._forEachDomainSpan(bounds, (y, xStart, xEnd) => {
                 let idx = y * this.size + xStart;
@@ -647,6 +692,19 @@ export class FluidField {
                 this.densityB[i] = Math.max(0, this.densityB[i] - config.FLUID_FADE_RATE * 255 * this.dt);
             }
         }
+        const fadeMs = Date.now() - t0;
+
+        this.lastStepPerf = {
+            totalMs: Date.now() - tStart,
+            seedMomentumMs,
+            diffuseVelMs,
+            projectMs,
+            advectVelMs,
+            diffuseDensityMs,
+            advectDensityMs,
+            fadeMs
+        };
+
         this._finalizeActiveTileTelemetry();
     }
 

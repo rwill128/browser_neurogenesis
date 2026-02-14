@@ -88,12 +88,12 @@ test('hybrid links anchor to nearest rigid hull edge for irregular rigid meshes'
   };
 
   const spec = createCreatureSpecFromMesh(mesh);
-  assert.equal(spec.rigidBodies.length, 2);
-  assert.ok(spec.rigidWelds.length >= 1);
+  assert.equal(spec.rigidBodies.length, 1);
+  assert.equal(spec.rigidWelds.length, 0);
 
   const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
-  assert.equal(bodies.rigid.length, 2);
-  assert.ok(bodies.rigidWelds.length >= 1);
+  assert.equal(bodies.rigid.length, 1);
+  assert.equal(bodies.rigidWelds.length, 0);
   assert.ok(bodies.hybrid.length >= 2);
 
   for (const h of bodies.hybrid) {
@@ -120,7 +120,7 @@ test('hybrid links at rigid vertices choose a local incident edge (deterministic
   };
 
   const bodies = buildBodiesFromCreatureSpec(createCreatureSpecFromMesh(mesh), 256, CONTROLS);
-  assert.equal(bodies.rigid.length, 2);
+  assert.equal(bodies.rigid.length, 1);
 
   const sharedVertexLink = bodies.hybrid.find((h) => {
     const rb0 = bodies.rigid[h.rigidIndex];

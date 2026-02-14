@@ -221,14 +221,27 @@ function buildRigidExport(tris, nodes, options) {
 
   for (let compIdx = 0; compIdx < comps.length; compIdx++) {
     const comp = comps[compIdx];
-    const localPieces = [];
 
+    const triPieces = [];
     for (const t of comp) {
       const idsRaw = [Number(t.a), Number(t.b), Number(t.c)];
       const ids = [...new Set(idsRaw)].filter((id) => Number.isInteger(id) && nodes[id]);
       if (ids.length < 3) continue;
+      triPieces.push({
+        nodeIds: new Set(ids),
+        area: triangleAreaAbs(nodes[ids[0]], nodes[ids[1]], nodes[ids[2]]),
+      });
+    }
 
-      const hull = ids.map((id) => ({ x: nodes[id].x, y: nodes[id].y }));
+    const mergedPieces = mergeRigidPiecesConvex(triPieces, nodes);
+    const localPieces = [];
+
+    for (const piece of mergedPieces) {
+      const hullWithIds = convexHullWithIds([...piece.nodeIds].map((id) => ({ id, x: nodes[id].x, y: nodes[id].y })));
+      if (hullWithIds.length < 3) continue;
+      const hull = hullWithIds.map((p) => ({ x: p.x, y: p.y }));
+      const hullSourceIds = hullWithIds.map((p) => p.id);
+
       const c = centroid(hull);
       const r = Math.max(2.5, ...hull.map((p) => Math.hypot(p.x - c.x, p.y - c.y)));
       const sides = hull.length;
@@ -247,42 +260,141 @@ function buildRigidExport(tris, nodes, options) {
 
       components.push({
         index: rigidIndex,
-        nodeIds: new Set(ids),
+        nodeIds: new Set(piece.nodeIds),
         radius: r,
       });
 
-      localPieces.push({ rigidIndex, nodeIds: ids });
+      localPieces.push({ rigidIndex, nodeIds: new Set(piece.nodeIds), hullSourceIds });
     }
 
-    // Weld neighboring rigid pieces that share an edge (two common source vertices).
+    // Weld neighboring rigid pieces that share an edge (two common hull vertices).
     for (let i = 0; i < localPieces.length; i++) {
       for (let j = i + 1; j < localPieces.length; j++) {
         const a = localPieces[i];
         const b = localPieces[j];
-        const shared = a.nodeIds.filter((id) => b.nodeIds.includes(id));
+        const shared = [...a.nodeIds].filter((id) => b.nodeIds.has(id));
         if (shared.length < 2) continue;
 
-        const s0 = shared[0];
-        const s1 = shared[1];
-        const a0 = a.nodeIds.indexOf(s0);
-        const a1 = a.nodeIds.indexOf(s1);
-        const b0 = b.nodeIds.indexOf(s0);
-        const b1 = b.nodeIds.indexOf(s1);
-        if ([a0, a1, b0, b1].some((x) => x < 0)) continue;
+        const aHullSet = new Set(a.hullSourceIds);
+        const bHullSet = new Set(b.hullSourceIds);
+        const sharedHull = shared.filter((id) => aHullSet.has(id) && bHullSet.has(id));
 
+        if (sharedHull.length >= 2) {
+          let bestA = sharedHull[0];
+          let bestB = sharedHull[1];
+          let bestDist2 = -1;
+          for (let p = 0; p < sharedHull.length; p++) {
+            for (let q = p + 1; q < sharedHull.length; q++) {
+              const idA = sharedHull[p];
+              const idB = sharedHull[q];
+              const dx = nodes[idA].x - nodes[idB].x;
+              const dy = nodes[idA].y - nodes[idB].y;
+              const d2 = dx * dx + dy * dy;
+              if (d2 > bestDist2) {
+                bestDist2 = d2;
+                bestA = idA;
+                bestB = idB;
+              }
+            }
+          }
+
+          const a0 = a.hullSourceIds.indexOf(bestA);
+          const a1 = a.hullSourceIds.indexOf(bestB);
+          const b0 = b.hullSourceIds.indexOf(bestA);
+          const b1 = b.hullSourceIds.indexOf(bestB);
+          if ([a0, a1, b0, b1].some((x) => x < 0)) continue;
+          rigidWelds.push({ a: a.rigidIndex, b: b.rigidIndex, a0, a1, b0, b1 });
+          continue;
+        }
+
+        // Fallback: if merged hull simplification removed shared source vertices,
+        // still weld nearest-facing hull edges so compound pieces stay coherent.
+        const aHull = rigidBodies[a.rigidIndex].hull;
+        const bHull = rigidBodies[b.rigidIndex].hull;
+        const ca = centroid(aHull);
+        const cb = centroid(bHull);
+        const ea = nearestHullEdgeForPoint(aHull, cb.x, cb.y);
+        const eb = nearestHullEdgeForPoint(bHull, ca.x, ca.y);
         rigidWelds.push({
           a: a.rigidIndex,
           b: b.rigidIndex,
-          a0,
-          a1,
-          b0,
-          b1,
+          a0: ea.vA,
+          a1: ea.vB,
+          b0: eb.vA,
+          b1: eb.vB,
         });
       }
     }
   }
 
   return { rigidBodies, rigidWelds, components };
+}
+
+function mergeRigidPiecesConvex(triPieces, nodes) {
+  const pieces = triPieces.map((p) => ({ nodeIds: new Set(p.nodeIds), area: p.area }));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    outer: for (let i = 0; i < pieces.length; i++) {
+      for (let j = i + 1; j < pieces.length; j++) {
+        const a = pieces[i];
+        const b = pieces[j];
+        const shared = [...a.nodeIds].filter((id) => b.nodeIds.has(id));
+        if (shared.length < 2) continue;
+
+        const mergedIds = new Set([...a.nodeIds, ...b.nodeIds]);
+        const mergedHull = convexHull([...mergedIds].map((id) => ({ x: nodes[id].x, y: nodes[id].y })));
+        const hullArea = polygonAreaAbs(mergedHull);
+        const sumArea = a.area + b.area;
+        const eps = Math.max(1e-4, sumArea * 0.02);
+        if (Math.abs(hullArea - sumArea) <= eps) {
+          pieces[i] = { nodeIds: mergedIds, area: sumArea };
+          pieces.splice(j, 1);
+          changed = true;
+          break outer;
+        }
+      }
+    }
+  }
+  return pieces;
+}
+
+function triangleAreaAbs(a, b, c) {
+  return Math.abs((a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y)) * 0.5);
+}
+
+function polygonAreaAbs(poly) {
+  if (!poly || poly.length < 3) return 0;
+  let s = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i];
+    const q = poly[(i + 1) % poly.length];
+    s += p.x * q.y - q.x * p.y;
+  }
+  return Math.abs(s * 0.5);
+}
+
+function convexHullWithIds(pointsWithIds) {
+  if (!pointsWithIds || pointsWithIds.length < 3) return pointsWithIds || [];
+  const pts = [...pointsWithIds]
+    .map((p) => ({ id: p.id, x: p.x, y: p.y }))
+    .sort((a, b) => (a.x - b.x) || (a.y - b.y));
+
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return [...lower, ...upper];
 }
 
 function buildSoftExport(tris, nodes, options) {

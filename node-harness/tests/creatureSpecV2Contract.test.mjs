@@ -48,7 +48,7 @@ test('createCreatureSpecFromMesh exports solver-ready v2 sections', () => {
   assert.ok(Array.isArray(sb.springs));
 });
 
-test('createCreatureSpecFromMesh emits rigid welds for adjacent rigid triangles', () => {
+test('createCreatureSpecFromMesh merges adjacent rigid triangles into a single convex rigid body', () => {
   const mesh = {
     nodes: [
       { id: 0, x: 0, y: 0, rigid: 1, soft: 0 },
@@ -64,7 +64,34 @@ test('createCreatureSpecFromMesh emits rigid welds for adjacent rigid triangles'
   };
 
   const spec = createCreatureSpecFromMesh(mesh);
-  assert.equal(spec.rigidBodies.length, 2);
+  assert.equal(spec.rigidBodies.length, 1);
+  assert.equal(spec.rigidWelds.length, 0);
+});
+
+test('createCreatureSpecFromMesh emits rigid welds for concave rigid regions', () => {
+  const mesh = {
+    nodes: [
+      { id: 0, x: 0, y: 0, rigid: 1, soft: 0 },
+      { id: 1, x: 4, y: 0, rigid: 1, soft: 0 },
+      { id: 2, x: 8, y: 0, rigid: 1, soft: 0 },
+      { id: 3, x: 0, y: 4, rigid: 1, soft: 0 },
+      { id: 4, x: 4, y: 4, rigid: 1, soft: 0 },
+      { id: 5, x: 8, y: 4, rigid: 1, soft: 0 },
+      { id: 6, x: 0, y: 8, rigid: 1, soft: 0 },
+      { id: 7, x: 4, y: 8, rigid: 1, soft: 0 },
+      { id: 8, x: 8, y: 8, rigid: 1, soft: 0 },
+    ],
+    triangles: [
+      // L-shape made of 3 quads (6 triangles), still connected but concave overall
+      { kind: 'rigid', a: 0, b: 1, c: 4 }, { kind: 'rigid', a: 0, b: 4, c: 3 },
+      { kind: 'rigid', a: 3, b: 4, c: 7 }, { kind: 'rigid', a: 3, b: 7, c: 6 },
+      { kind: 'rigid', a: 1, b: 2, c: 5 }, { kind: 'rigid', a: 1, b: 5, c: 4 },
+    ],
+    meta: { width: 8, height: 8 },
+  };
+
+  const spec = createCreatureSpecFromMesh(mesh);
+  assert.ok(spec.rigidBodies.length >= 2);
   assert.ok(spec.rigidWelds.length >= 1);
 });
 

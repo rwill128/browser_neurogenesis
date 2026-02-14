@@ -62,6 +62,39 @@ test('createCreatureSpecFromMesh exports solver-ready v2 sections', () => {
   assert.ok(Array.isArray(sb.springs));
 });
 
+test('createCreatureSpecFromMesh carries compiler soft cross-beams into soft spring export', () => {
+  const mesh = {
+    nodes: [
+      { id: 0, x: 0, y: 0, rigid: 0, soft: 1 },
+      { id: 1, x: 4, y: 0, rigid: 0, soft: 1 },
+      { id: 2, x: 0, y: 4, rigid: 0, soft: 1 },
+      { id: 3, x: 4, y: 4, rigid: 0, soft: 1 },
+    ],
+    triangles: [
+      { kind: 'soft', a: 0, b: 1, c: 2 },
+      { kind: 'soft', a: 1, b: 3, c: 2 },
+    ],
+    softCrossBeams: [[0, 3]],
+    meta: { width: 8, height: 8 },
+  };
+
+  const spec = createCreatureSpecFromMesh(mesh);
+  assert.equal(spec.softBodies.length, 1);
+  const springs = spec.softBodies[0].springs || [];
+
+  const hasPrimaryDiag = springs.some((s) => {
+    const [a, b] = s;
+    return (a === 1 && b === 2) || (a === 2 && b === 1);
+  });
+  const hasCrossBeamDiag = springs.some((s) => {
+    const [a, b] = s;
+    return (a === 0 && b === 3) || (a === 3 && b === 0);
+  });
+
+  assert.ok(hasPrimaryDiag, 'expected existing triangle diagonal spring');
+  assert.ok(hasCrossBeamDiag, 'expected compiler cross-beam diagonal spring');
+});
+
 test('createCreatureSpecFromMesh merges adjacent rigid triangles into a single convex rigid body', () => {
   const mesh = {
     nodes: [

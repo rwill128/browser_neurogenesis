@@ -76,6 +76,30 @@ test('higher threshold reduces generated triangles', () => {
   assert.ok(low.triangles.length > high.triangles.length);
 });
 
+test('compiler emits soft cross-beams for square soft cells', () => {
+  const w = 16, h = 16;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+
+  for (let y = 4; y <= 11; y++) {
+    for (let x = 4; x <= 11; x++) soft[y * w + x] = 1;
+  }
+
+  const mesh = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    threshold: 0.35,
+    density: 2,
+    connectivityMode: 'largest',
+  });
+
+  assert.ok(Array.isArray(mesh.softCrossBeams));
+  assert.ok(mesh.softCrossBeams.length > 0, 'expected diagonal cross-beams for square soft lattice');
+  assert.ok((mesh.meta.softCrossBeams || 0) === mesh.softCrossBeams.length);
+});
+
 test('connectivity largest mode drops disconnected islands', () => {
   const w = 20, h = 20;
   const rigid = new Float32Array(w * h);

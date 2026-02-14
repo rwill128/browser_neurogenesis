@@ -84,6 +84,21 @@ function drawMesh(mesh) {
     mctx.stroke();
   }
 
+  if (Array.isArray(mesh.softCrossBeams)) {
+    mctx.strokeStyle = 'rgba(140,220,255,0.92)';
+    mctx.lineWidth = 1.5;
+    for (const [ai, bi] of mesh.softCrossBeams) {
+      const a = mesh.nodes[ai];
+      const b = mesh.nodes[bi];
+      if (!a || !b) continue;
+      mctx.beginPath();
+      mctx.moveTo(a.x * sx, a.y * sy);
+      mctx.lineTo(b.x * sx, b.y * sy);
+      mctx.stroke();
+    }
+    mctx.lineWidth = 1;
+  }
+
   // Compiler-stage rigid decomposition preview (authoritative for export/import path).
   if (Array.isArray(mesh.rigidPieces)) {
     for (const p of mesh.rigidPieces) {

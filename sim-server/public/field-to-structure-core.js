@@ -85,10 +85,12 @@ export function compileFieldToMesh({
 
   const noOverlap = removeSoftTrianglesOverlappingRigidContours(filtered.triangles, nodes, rigidDecomp.pieces);
   const final = enforceConnectivity({ triangles: noOverlap.triangles, mode: connectivityMode, minComponentTriangles });
+  const softCrossBeams = buildSoftCrossBeams(final.triangles, nodes);
 
   return {
     nodes,
     triangles: final.triangles,
+    softCrossBeams,
     rigidPieces: rigidDecomp.pieces,
     rigidWelds: rigidDecomp.welds,
     meta: {
@@ -105,6 +107,7 @@ export function compileFieldToMesh({
       softTriangles: final.triangles.filter((t) => t.kind === 'soft').length,
       rigidPieces: rigidDecomp.pieces.length,
       rigidWelds: rigidDecomp.welds.length,
+      softCrossBeams: softCrossBeams.length,
       droppedTriangles: triangles.length - final.triangles.length,
       softOverlapTrimmed: noOverlap.removed,
     },
@@ -287,6 +290,79 @@ function removeSoftTrianglesOverlappingRigidContours(triangles, nodes, rigidPiec
   }
 
   return { triangles: keep, removed };
+}
+
+function buildSoftCrossBeams(triangles, nodes) {
+  const softTris = (triangles || []).filter((t) => t?.kind === 'soft');
+  if (!softTris.length) return [];
+
+  const edgeSet = new Set();
+  const softNodeIds = new Set();
+  for (const t of softTris) {
+    softNodeIds.add(t.a); softNodeIds.add(t.b); softNodeIds.add(t.c);
+    for (const [u, v] of [[t.a, t.b], [t.b, t.c], [t.c, t.a]]) {
+      const key = u < v ? `${u}:${v}` : `${v}:${u}`;
+      edgeSet.add(key);
+    }
+  }
+
+  const quant = (v) => Math.round((Number(v) || 0) * 1e6) / 1e6;
+  const posKey = (x, y) => `${quant(x)},${quant(y)}`;
+
+  const nodeByPos = new Map();
+  const xs = new Set();
+  const ys = new Set();
+  for (const id of softNodeIds) {
+    const p = nodes[id];
+    if (!p) continue;
+    nodeByPos.set(posKey(p.x, p.y), id);
+    xs.add(quant(p.x));
+    ys.add(quant(p.y));
+  }
+
+  const minDelta = (vals) => {
+    const arr = [...vals].sort((a, b) => a - b);
+    let best = Number.POSITIVE_INFINITY;
+    for (let i = 1; i < arr.length; i++) {
+      const d = arr[i] - arr[i - 1];
+      if (d > 1e-6) best = Math.min(best, d);
+    }
+    return Number.isFinite(best) ? best : 0;
+  };
+
+  const stepX = minDelta(xs);
+  const stepY = minDelta(ys);
+  if (!(stepX > 0 && stepY > 0)) return [];
+
+  const beams = [];
+  const beamSet = new Set();
+  const edgeKey = (a, b) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+
+  for (const id of softNodeIds) {
+    const tl = nodes[id];
+    if (!tl) continue;
+    const tr = nodeByPos.get(posKey(tl.x + stepX, tl.y));
+    const bl = nodeByPos.get(posKey(tl.x, tl.y + stepY));
+    const br = nodeByPos.get(posKey(tl.x + stepX, tl.y + stepY));
+    if (![tr, bl, br].every((v) => Number.isInteger(v))) continue;
+
+    // Require full square occupancy from existing soft mesh with one diagonal (TR-BL).
+    const requiredEdges = [
+      edgeKey(id, tr),
+      edgeKey(id, bl),
+      edgeKey(tr, br),
+      edgeKey(bl, br),
+      edgeKey(tr, bl),
+    ];
+    if (!requiredEdges.every((k) => edgeSet.has(k))) continue;
+
+    const diag2 = edgeKey(id, br);
+    if (edgeSet.has(diag2) || beamSet.has(diag2)) continue;
+    beamSet.add(diag2);
+    beams.push([id, br]);
+  }
+
+  return beams;
 }
 
 function collectMaskComponents(mask, cols, rows) {

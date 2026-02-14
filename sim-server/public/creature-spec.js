@@ -26,7 +26,7 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
   const rigidBuild = Array.isArray(mesh?.rigidPieces)
     ? buildRigidExportFromCompilerPieces(mesh.rigidPieces, mesh.rigidWelds || [], nodes, options)
     : buildRigidExport(triByKind.rigid, nodes, options);
-  const softBuild = buildSoftExport(triByKind.soft, nodes, options);
+  const softBuild = buildSoftExport(triByKind.soft, nodes, options, mesh?.softCrossBeams || []);
   const hybridJoints = buildHybridExport({
     rigidComps: rigidBuild.components,
     softComps: softBuild.components,
@@ -465,7 +465,7 @@ function convexHullWithIds(pointsWithIds) {
   return [...lower, ...upper];
 }
 
-function buildSoftExport(tris, nodes, options) {
+function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
   const comps = triangleComponents(tris);
   const softBodies = [];
   const components = [];
@@ -500,12 +500,17 @@ function buildSoftExport(tris, nodes, options) {
     }
 
     const springs = [];
+    const springSet = new Set();
+    const springKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
+
     for (const [k, c] of edgeCount.entries()) {
       const [ua, ub] = k.split('-').map((x) => Number(x));
       const a = remap.get(ua);
       const b = remap.get(ub);
+      if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
       const pa = softNodes[a];
       const pb = softNodes[b];
+      if (!pa || !pb) continue;
       const rest = Math.max(1e-3, Math.hypot(pb.x - pa.x, pb.y - pa.y));
       const boundary = c === 1;
       springs.push([
@@ -515,6 +520,29 @@ function buildSoftExport(tris, nodes, options) {
         boundary ? EDGE_BODY_BLOCK : 0,
         boundary ? [...EDGE_DYE_DEFLECT_RGB] : [0, 0, 0],
       ]);
+      springSet.add(springKey(a, b));
+    }
+
+    // Double cross-beam square reinforcement for soft lattice.
+    for (const beam of (softCrossBeams || [])) {
+      const ua = Number(beam?.[0]);
+      const ub = Number(beam?.[1]);
+      const a = remap.get(ua);
+      const b = remap.get(ub);
+      if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
+      const key = springKey(a, b);
+      if (springSet.has(key)) continue;
+      const pa = softNodes[a];
+      const pb = softNodes[b];
+      if (!pa || !pb) continue;
+      springs.push([
+        a,
+        b,
+        Math.max(1e-3, Math.hypot(pb.x - pa.x, pb.y - pa.y)),
+        0,
+        [0, 0, 0],
+      ]);
+      springSet.add(key);
     }
 
     const bodyIndex = softBodies.length;

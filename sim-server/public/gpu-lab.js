@@ -297,7 +297,7 @@ async function createPipeline(device, code) {
 
 let running = false;
 let sim = null;
-let importedCreatureSpec = null;
+let pendingImportedSpecs = [];
 let painting = false;
 let panning = false;
 let panLastX = 0;
@@ -1541,6 +1541,36 @@ function drawRegularPolygon(cx, cy, radius, sides, rotation = 0) {
   ctx.closePath();
 }
 
+function mergeBodiesIntoSim(target, incoming) {
+  if (!target || !incoming) return;
+  target.rigid = target.rigid || [];
+  target.soft = target.soft || { nodes: [], springs: [] };
+  target.hybrid = target.hybrid || [];
+
+  const rigidOffset = target.rigid.length;
+  const nodeOffset = target.soft.nodes.length;
+  const maxCluster = target.soft.nodes.reduce((m, n) => Math.max(m, n.clusterId || 0), -1);
+  const clusterOffset = maxCluster + 1;
+
+  for (const rb of incoming.rigid || []) target.rigid.push({ ...rb });
+
+  for (const n of incoming.soft?.nodes || []) {
+    target.soft.nodes.push({ ...n, clusterId: (n.clusterId || 0) + clusterOffset });
+  }
+  for (const s of incoming.soft?.springs || []) {
+    const [a, b, rest, edgeBodyMode, edgeDyeMode] = s;
+    target.soft.springs.push([a + nodeOffset, b + nodeOffset, rest, edgeBodyMode, edgeDyeMode]);
+  }
+
+  for (const h of incoming.hybrid || []) {
+    target.hybrid.push({
+      ...h,
+      rigidIndex: (h.rigidIndex || 0) + rigidOffset,
+      nodeIndex: (h.nodeIndex || 0) + nodeOffset,
+    });
+  }
+}
+
 function drawBodiesOverlay(sim) {
   const smooth = 0.35;
   const v = getCameraView(sim);
@@ -1710,9 +1740,7 @@ async function initSim() {
     rr0: rA, rr1: rB, gg0: gA, gg1: gB, bb0: bA, bb1: bB,
     viscMapCpu, viscMapGpu,
     div, readR, readG, readB, readVx, readVy,
-    bodies: importedCreatureSpec
-      ? buildBodiesFromCreatureSpec(importedCreatureSpec, controls.n, controls)
-      : initBodies(controls.n, controls),
+    bodies: initBodies(controls.n, controls),
     emitters: initEmitters(controls.n),
     camera: { x: controls.n * 0.5, y: controls.n * 0.5, zoom: controls.n >= 1024 ? 1.8 : 1.0 },
     couplingTelemetry: [],
@@ -1887,6 +1915,13 @@ async function start() {
   if (fpsHud) fpsHud.textContent = 'FPS: --';
   sim = await initSim();
   applyScenarioPreset(sim, scenarioPresetEl?.value || 'baseline');
+  if (pendingImportedSpecs.length) {
+    for (const spec of pendingImportedSpecs) {
+      const imported = buildBodiesFromCreatureSpec(spec, sim.controls.n, sim.controls);
+      mergeBodiesIntoSim(sim.bodies, imported);
+    }
+    pendingImportedSpecs = [];
+  }
   log('starting live GPU fluid sim...');
   stepAndRender().catch((e) => {
     running = false;
@@ -1917,12 +1952,14 @@ if (importSpecBtn && importSpecFile) {
     if (!f) return;
     try {
       const text = await f.text();
-      importedCreatureSpec = parseCreatureSpec(text);
-      if (running) {
-        stop();
-        await start();
+      const spec = parseCreatureSpec(text);
+      if (sim) {
+        const imported = buildBodiesFromCreatureSpec(spec, sim.controls.n, sim.controls);
+        mergeBodiesIntoSim(sim.bodies, imported);
+      } else {
+        pendingImportedSpecs.push(spec);
       }
-      log({ ok: true, msg: 'CreatureSpec imported', name: importedCreatureSpec.name || 'unnamed' });
+      log({ ok: true, msg: 'CreatureSpec imported (appended)', name: spec.name || 'unnamed' });
     } catch (e) {
       log({ ok: false, error: `Import failed: ${String(e)}` });
     }

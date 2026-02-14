@@ -590,6 +590,74 @@ export class FluidField {
         this.set_bnd(b, d_out);
     }
 
+    advectDensityRGB(bounds = null) {
+        const N = this.size;
+        const domain = this._compileDomain(bounds);
+        const dtx_scaled = this.dt * N;
+        const dty_scaled = this.dt * N;
+
+        const rOut = this.densityR;
+        const gOut = this.densityG;
+        const bOut = this.densityB;
+        const rIn = this.densityR0;
+        const gIn = this.densityG0;
+        const bIn = this.densityB0;
+        const vxSrc = this.Vx;
+        const vySrc = this.Vy;
+
+        for (let rr = 0; rr < domain._compiledRows.length; rr++) {
+            const [j_cell, spans] = domain._compiledRows[rr];
+            for (let s = 0; s < spans.length; s++) {
+                const span = spans[s];
+                let current_idx = j_cell * N + span[0];
+                const rowEnd = j_cell * N + span[1] + 1;
+
+                for (let i_cell = span[0]; current_idx < rowEnd; i_cell++, current_idx++) {
+                    let x = i_cell - (dtx_scaled * vxSrc[current_idx]);
+                    let y = j_cell - (dty_scaled * vySrc[current_idx]);
+
+                    let i0, i1, j0, j1;
+                    if (this.useWrapping) {
+                        x = (x % N + N) % N;
+                        y = (y % N + N) % N;
+                        i0 = Math.floor(x);
+                        j0 = Math.floor(y);
+                        i1 = (i0 + 1) % N;
+                        j1 = (j0 + 1) % N;
+                    } else {
+                        if (x < 0.5) x = 0.5;
+                        else if (x > N - 1.5) x = N - 1.5;
+                        i0 = Math.floor(x);
+                        i1 = i0 + 1;
+
+                        if (y < 0.5) y = 0.5;
+                        else if (y > N - 1.5) y = N - 1.5;
+                        j0 = Math.floor(y);
+                        j1 = j0 + 1;
+                    }
+
+                    const s1 = x - i0;
+                    const s0 = 1.0 - s1;
+                    const t1 = y - j0;
+                    const t0 = 1.0 - t1;
+
+                    const idx00 = i0 + j0 * N;
+                    const idx01 = i0 + j1 * N;
+                    const idx10 = i1 + j0 * N;
+                    const idx11 = i1 + j1 * N;
+
+                    rOut[current_idx] = s0 * (t0 * rIn[idx00] + t1 * rIn[idx01]) + s1 * (t0 * rIn[idx10] + t1 * rIn[idx11]);
+                    gOut[current_idx] = s0 * (t0 * gIn[idx00] + t1 * gIn[idx01]) + s1 * (t0 * gIn[idx10] + t1 * gIn[idx11]);
+                    bOut[current_idx] = s0 * (t0 * bIn[idx00] + t1 * bIn[idx01]) + s1 * (t0 * bIn[idx10] + t1 * bIn[idx11]);
+                }
+            }
+        }
+
+        this.set_bnd(0, rOut);
+        this.set_bnd(0, gOut);
+        this.set_bnd(0, bOut);
+    }
+
     set_bnd(b, x_arr) {
         const N = this.size;
         const NMinus1 = N - 1;
@@ -916,9 +984,7 @@ export class FluidField {
         const diffuseDensityMs = Date.now() - t0;
 
         t0 = Date.now();
-        this.advect(0, this.densityR, this.densityR0, this.Vx, this.Vy, this.dt, bounds);
-        this.advect(0, this.densityG, this.densityG0, this.Vx, this.Vy, this.dt, bounds);
-        this.advect(0, this.densityB, this.densityB0, this.Vx, this.Vy, this.dt, bounds);
+        this.advectDensityRGB(bounds);
         const advectDensityMs = Date.now() - t0;
 
         t0 = Date.now();

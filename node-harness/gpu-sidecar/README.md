@@ -16,9 +16,14 @@ JSON
 ```
 
 ## Protocol (stdin JSON -> stdout JSON)
-Request:
+Single-run request:
 ```json
 {"cmd":"smoke","n":1024}
+```
+
+Multi-size diagnostic request:
+```json
+{"cmd":"smoke_sweep","sizes":[1024,4096,16384,65536]}
 ```
 
 Response:

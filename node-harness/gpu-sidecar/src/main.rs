@@ -7,6 +7,7 @@ use std::io::{self, Read};
 #[serde(tag = "cmd", rename_all = "snake_case")]
 enum Request {
     Smoke { n: u32 },
+    SmokeSweep { sizes: Vec<u32> },
 }
 
 #[derive(Debug, Serialize)]
@@ -18,6 +19,13 @@ struct SmokeResponse {
     sample: [f32; 4],
     mismatch_count: u32,
     max_abs_error: f32,
+}
+
+#[derive(Debug, Serialize)]
+struct SmokeSweepResponse {
+    ok: bool,
+    backend: &'static str,
+    runs: Vec<SmokeResponse>,
 }
 
 #[repr(C)]
@@ -32,7 +40,10 @@ struct Params {
 fn main() {
     if let Err(err) = run() {
         let out = serde_json::json!({"ok": false, "error": format!("{err:#}")});
-        println!("{}", serde_json::to_string_pretty(&out).unwrap_or_else(|_| "{\"ok\":false}".into()));
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&out).unwrap_or_else(|_| "{\"ok\":false}".into())
+        );
         std::process::exit(1);
     }
 }
@@ -49,6 +60,20 @@ fn run() -> Result<()> {
     match req {
         Request::Smoke { n } => {
             let resp = pollster::block_on(run_smoke(n.max(64)))?;
+            println!("{}", serde_json::to_string_pretty(&resp)?);
+        }
+        Request::SmokeSweep { sizes } => {
+            let fallback = vec![1024, 4096, 16384, 65536];
+            let mut runs = Vec::new();
+            for n in if sizes.is_empty() { &fallback } else { &sizes } {
+                runs.push(pollster::block_on(run_smoke((*n).max(64)))?);
+            }
+            let ok = runs.iter().all(|r| r.ok);
+            let resp = SmokeSweepResponse {
+                ok,
+                backend: "metal/wgpu",
+                runs,
+            };
             println!("{}", serde_json::to_string_pretty(&resp)?);
         }
     }
@@ -80,7 +105,9 @@ async fn run_smoke(n: u32) -> Result<SmokeResponse> {
     let storage = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("storage"),
         size: bytes,
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
     let readback = device.create_buffer(&wgpu::BufferDescriptor {
@@ -97,7 +124,16 @@ async fn run_smoke(n: u32) -> Result<SmokeResponse> {
     });
 
     queue.write_buffer(&storage, 0, bytemuck::cast_slice(&src));
-    queue.write_buffer(&params_buf, 0, bytemuck::bytes_of(&Params { n, _pad0: 0, _pad1: 0, _pad2: 0 }));
+    queue.write_buffer(
+        &params_buf,
+        0,
+        bytemuck::bytes_of(&Params {
+            n,
+            _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
+        }),
+    );
 
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("smoke"),
@@ -137,8 +173,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         label: Some("smoke-bg"),
         layout: &pipeline.get_bind_group_layout(0),
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: params_buf.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 1, resource: storage.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: storage.as_entire_binding(),
+            },
         ],
     });
 

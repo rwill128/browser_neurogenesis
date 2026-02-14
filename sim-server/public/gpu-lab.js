@@ -364,8 +364,8 @@ function sampleFieldBilinear(field, n, x, y) {
 
 function initBodies(n, controls) {
   const rigid = [
-    { x: n * 0.22, y: n * 0.28, vx: 0, vy: 0, r: 5, mass: controls.massLight },
-    { x: n * 0.75, y: n * 0.62, vx: 0, vy: 0, r: 6, mass: controls.massHeavy },
+    { x: n * 0.22, y: n * 0.28, vx: 0, vy: 0, r: 5, mass: controls.massLight, theta: 0, omega: 0, inertia: 0.5 * controls.massLight * 25 },
+    { x: n * 0.75, y: n * 0.62, vx: 0, vy: 0, r: 6, mass: controls.massHeavy, theta: 0.3, omega: 0, inertia: 0.5 * controls.massHeavy * 36 },
   ];
   const softNodes = [
     { x: n * 0.50, y: n * 0.35, vx: 0, vy: 0, mass: controls.massSoft, r: 1.6 },
@@ -397,17 +397,21 @@ function applyBounceBoundary(body, n, damping = 0.82) {
   if (body.x < minX) {
     body.x = minX;
     if (body.vx < 0) body.vx = -body.vx * damping;
+    if (typeof body.omega === 'number') body.omega *= 0.9;
   } else if (body.x > maxX) {
     body.x = maxX;
     if (body.vx > 0) body.vx = -body.vx * damping;
+    if (typeof body.omega === 'number') body.omega *= 0.9;
   }
 
   if (body.y < minY) {
     body.y = minY;
     if (body.vy < 0) body.vy = -body.vy * damping;
+    if (typeof body.omega === 'number') body.omega *= 0.9;
   } else if (body.y > maxY) {
     body.y = maxY;
     if (body.vy > 0) body.vy = -body.vy * damping;
+    if (typeof body.omega === 'number') body.omega *= 0.9;
   }
 }
 
@@ -438,8 +442,14 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   const dragK = sim.controls.bodyDrag;
   const feedbackK = sim.controls.bodyFeedback;
 
-  if (bodies.rigid[0]) bodies.rigid[0].mass = sim.controls.massLight;
-  if (bodies.rigid[1]) bodies.rigid[1].mass = sim.controls.massHeavy;
+  if (bodies.rigid[0]) {
+    bodies.rigid[0].mass = sim.controls.massLight;
+    bodies.rigid[0].inertia = 0.5 * bodies.rigid[0].mass * bodies.rigid[0].r * bodies.rigid[0].r;
+  }
+  if (bodies.rigid[1]) {
+    bodies.rigid[1].mass = sim.controls.massHeavy;
+    bodies.rigid[1].inertia = 0.5 * bodies.rigid[1].mass * bodies.rigid[1].r * bodies.rigid[1].r;
+  }
   for (const node of bodies.soft.nodes) node.mass = sim.controls.massSoft;
 
   const softCentroidBefore = computeSoftCentroid(bodies.soft.nodes);
@@ -453,25 +463,62 @@ function stepBodiesAndInject(sim, vxField, vyField) {
 
   for (let bi = 0; bi < bodies.rigid.length; bi++) {
     const b = bodies.rigid[bi];
-    const fx = sampleFieldBilinear(vxField, n, b.x, b.y);
-    const fy = sampleFieldBilinear(vyField, n, b.x, b.y);
     const invMass = 1 / Math.max(0.05, b.mass);
-    const ax = (fx - b.vx) * dragK * invMass;
-    const ay = (fy - b.vy) * dragK * invMass;
+    const invInertia = 1 / Math.max(0.05, b.inertia || 1);
+    const sampleCount = bi === 0 ? 3 : 4;
+    let forceX = 0;
+    let forceY = 0;
+    let torque = 0;
+
+    for (let si = 0; si < sampleCount; si++) {
+      const a = (b.theta || 0) + (si / sampleCount) * Math.PI * 2;
+      const rx = Math.cos(a) * b.r;
+      const ry = Math.sin(a) * b.r;
+      const sx = b.x + rx;
+      const sy = b.y + ry;
+      const fx = sampleFieldBilinear(vxField, n, sx, sy);
+      const fy = sampleFieldBilinear(vyField, n, sx, sy);
+      const localVx = b.vx + (-(b.omega || 0) * ry);
+      const localVy = b.vy + ((b.omega || 0) * rx);
+      const relX = fx - localVx;
+      const relY = fy - localVy;
+      const fpx = relX * dragK;
+      const fpy = relY * dragK;
+      forceX += fpx;
+      forceY += fpy;
+      torque += rx * fpy - ry * fpx;
+    }
+
+    forceX /= sampleCount;
+    forceY /= sampleCount;
+    torque /= sampleCount;
+
+    const ax = forceX * invMass;
+    const ay = forceY * invMass;
+    const alpha = torque * invInertia;
+
     const swimPhase = sim.frame * 0.08 + bi * 2.1;
     const swimX = Math.cos(swimPhase) * 0.012 * invMass;
     const swimY = Math.sin(swimPhase * 1.6) * 0.009 * invMass;
+    const swimTorque = Math.sin(swimPhase * 1.1) * 0.0025;
+
     b.vx += ax * dt * 60 + swimX;
     b.vy += ay * dt * 60 + swimY;
+    b.omega = (b.omega || 0) + alpha * dt * 60 + swimTorque;
+    b.omega *= 0.985;
+
     const bMax = 3.2;
     const bMag = Math.hypot(b.vx, b.vy);
     if (bMag > bMax) {
       b.vx = (b.vx / bMag) * bMax;
       b.vy = (b.vy / bMag) * bMax;
     }
+    b.omega = Math.max(-0.25, Math.min(0.25, b.omega));
+
     rigidCarryTransfer += Math.hypot(ax, ay);
     b.x = b.x + b.vx * dt * 22;
     b.y = b.y + b.vy * dt * 28;
+    b.theta = (b.theta || 0) + b.omega * dt * 60;
     applyBounceBoundary(b, n, 0.84);
   }
 
@@ -629,7 +676,13 @@ function drawBodiesOverlay(sim) {
     ctx.strokeStyle = '#ffffff';
     ctx.fillStyle = 'rgba(255,255,255,0.06)';
     ctx.beginPath();
-    drawRegularPolygon(b.x * sx, b.y * sx, b.r * sx, i === 0 ? 3 : 4, i === 0 ? -Math.PI * 0.5 : Math.PI * 0.25);
+    drawRegularPolygon(
+      b.x * sx,
+      b.y * sx,
+      b.r * sx,
+      i === 0 ? 3 : 4,
+      (b.theta || 0) + (i === 0 ? -Math.PI * 0.5 : Math.PI * 0.25)
+    );
     ctx.fill();
     ctx.stroke();
   }

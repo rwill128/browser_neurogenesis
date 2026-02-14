@@ -464,6 +464,7 @@ function initBodies(n, controls) {
     const mass = (i % 2 === 0) ? controls.massLight : controls.massHeavy;
     const sides = rigidShapeCycle[i % rigidShapeCycle.length];
     const r = ((i % 2 === 0) ? 5 : 6) * scale * bodyScale * (sides >= 5 ? 0.95 : 1.0);
+    const edgeDyeBlock = Array.from({ length: sides }, (_, ei) => ((ei + i) % 2 === 0) ? 1 : 0);
     rigid.push({
       x: n * (0.15 + 0.7 * ((t + Math.random() * 0.1) % 1)),
       y: n * (0.2 + 0.6 * Math.random()),
@@ -471,6 +472,7 @@ function initBodies(n, controls) {
       vy: 0,
       r,
       sides,
+      edgeDyeBlock,
       mass,
       theta: Math.random() * Math.PI * 2,
       omega: 0,
@@ -503,14 +505,15 @@ function initBodies(n, controls) {
     for (let i = 0; i < nodeCount; i++) {
       const j = (i + 1) % nodeCount;
       const a = local[i], b = local[j];
-      springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 1]);
+      const ringDyeBlock = ((i + c) % 2 === 0) ? 1 : 0; // per-edge dye permeability toggle
+      springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 1, ringDyeBlock]);
     }
     // Cross/diagonal springs for shape retention (internal, non-solid by default).
     for (let i = 0; i < nodeCount; i++) {
       const j = (i + 2) % nodeCount;
       if (i < j || nodeCount <= 4) {
         const a = local[i], b = local[j];
-        springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 0]);
+        springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 0, 0]);
       }
     }
     // Opposite braces for even polygons (especially hex) to prevent skew collapse.
@@ -518,7 +521,7 @@ function initBodies(n, controls) {
       for (let i = 0; i < nodeCount / 2; i++) {
         const j = (i + nodeCount / 2) % nodeCount;
         const a = local[i], b = local[j];
-        springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 0]);
+        springs.push([base + i, base + j, Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)), 0, 0]);
       }
     }
   }
@@ -819,6 +822,8 @@ function applyBodyEdgeFieldBarriers(sim, r, g, b, vx, vy) {
       verts.push({ x: rb.x + Math.cos(a) * rb.r, y: rb.y + Math.sin(a) * rb.r });
     }
     for (let i = 0; i < sides; i++) {
+      const edgeBlock = !rb.edgeDyeBlock ? 1 : rb.edgeDyeBlock[i];
+      if (!edgeBlock) continue;
       const a = verts[i];
       const b2 = verts[(i + 1) % sides];
       applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, rigidThickness);
@@ -826,8 +831,8 @@ function applyBodyEdgeFieldBarriers(sim, r, g, b, vx, vy) {
   }
 
   const s = sim.bodies.soft;
-  for (const [i, j, _rest, edgeSolid] of s.springs) {
-    if (!edgeSolid) continue;
+  for (const [i, j, _rest, edgeSolid, edgeDyeBlock] of s.springs) {
+    if (!edgeSolid || !edgeDyeBlock) continue;
     const a = s.nodes[i], b2 = s.nodes[j];
     applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, softThickness);
   }

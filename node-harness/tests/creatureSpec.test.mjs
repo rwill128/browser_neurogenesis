@@ -58,3 +58,32 @@ test('shared rigid-soft boundary creates hybrid links', () => {
     assert.ok(h.nodeIndex >= 0 && h.nodeIndex < bodies.soft.nodes.length);
   }
 });
+
+test('hybrid links anchor to nearest rigid hull edge for irregular rigid meshes', () => {
+  const mesh = {
+    nodes: [
+      { id: 0, x: 0, y: 0, rigid: 1, soft: 0 },
+      { id: 1, x: 20, y: 0, rigid: 1, soft: 1 },
+      { id: 2, x: 18, y: 2, rigid: 1, soft: 1 },
+      { id: 3, x: 0, y: 10, rigid: 1, soft: 0 },
+      { id: 4, x: 24, y: 4, rigid: 0, soft: 1 },
+    ],
+    triangles: [
+      { kind: 'rigid', a: 0, b: 1, c: 2 },
+      { kind: 'rigid', a: 0, b: 2, c: 3 },
+      { kind: 'soft', a: 1, b: 2, c: 4 },
+    ],
+    meta: { width: 24, height: 12 },
+  };
+
+  const bodies = buildBodiesFromCreatureSpec(createCreatureSpecFromMesh(mesh), 256, { massSoft: 0.6, massHeavy: 5.0 });
+  assert.equal(bodies.rigid.length, 1);
+  assert.ok(bodies.hybrid.length >= 2);
+
+  // Shared nodes are on/near the rigid hull, so anchor-rest lengths should stay local
+  // (previous regular-polygon indexing produced huge rest lengths here).
+  for (const h of bodies.hybrid) {
+    assert.ok(h.restA < 110, `restA too large: ${h.restA}`);
+    assert.ok(h.restB < 110, `restB too large: ${h.restB}`);
+  }
+});

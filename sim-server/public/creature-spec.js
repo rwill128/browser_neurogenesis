@@ -225,17 +225,12 @@ function buildRigidSoftHybridLinks({ rigidComps, softComps, rigidBodies, softNod
         const rb = rigidBodies[rc.index];
         if (!p || !rb) continue;
 
-        const ang = Math.atan2(p.y - rb.y, p.x - rb.x);
-        const twoPi = Math.PI * 2;
-        const phase = ((ang - (rb.theta || 0)) % twoPi + twoPi) % twoPi;
-        const f = (phase / twoPi) * rb.sides;
-        const vA = Math.floor(f) % rb.sides;
-        const vB = (vA + 1) % rb.sides;
-
+        const { vA, vB } = nearestRigidEdgeForPoint(rb, p.x, p.y);
         const aPos = rigidVertexWorld(rb, vA);
         const bPos = rigidVertexWorld(rb, vB);
-        const restA = Math.max(0.8, Math.hypot(p.x - aPos.x, p.y - aPos.y));
-        const restB = Math.max(0.8, Math.hypot(p.x - bPos.x, p.y - bPos.y));
+        const maxRest = Math.max(6, rb.r * 0.55);
+        const restA = Math.min(maxRest, Math.max(0.8, Math.hypot(p.x - aPos.x, p.y - aPos.y)));
+        const restB = Math.min(maxRest, Math.max(0.8, Math.hypot(p.x - bPos.x, p.y - bPos.y)));
 
         links.push({
           rigidIndex: rc.index,
@@ -252,9 +247,58 @@ function buildRigidSoftHybridLinks({ rigidComps, softComps, rigidBodies, softNod
   return links;
 }
 
+function rigidVerticesWorld(rb) {
+  if (Array.isArray(rb.verticesLocal) && rb.verticesLocal.length >= 3) {
+    const th = rb.theta || 0;
+    const c = Math.cos(th), s = Math.sin(th);
+    return rb.verticesLocal.map((v) => ({
+      x: rb.x + v.x * c - v.y * s,
+      y: rb.y + v.x * s + v.y * c,
+    }));
+  }
+  const sides = Math.max(3, rb.sides || 3);
+  const rot = (rb.theta || 0) + (sides === 3 ? -Math.PI * 0.5 : Math.PI * 0.25);
+  const verts = [];
+  for (let i = 0; i < sides; i++) {
+    const a = rot + (i / sides) * Math.PI * 2;
+    verts.push({ x: rb.x + Math.cos(a) * rb.r, y: rb.y + Math.sin(a) * rb.r });
+  }
+  return verts;
+}
+
 function rigidVertexWorld(rb, vi) {
-  const ang = (vi / rb.sides) * Math.PI * 2 + (rb.theta || 0);
-  return { x: rb.x + Math.cos(ang) * rb.r, y: rb.y + Math.sin(ang) * rb.r };
+  const verts = rigidVerticesWorld(rb);
+  const n = verts.length || 1;
+  return verts[((vi % n) + n) % n];
+}
+
+function nearestRigidEdgeForPoint(rb, px, py) {
+  const verts = rigidVerticesWorld(rb);
+  if (!verts.length) return { vA: 0, vB: 0 };
+  if (verts.length === 1) return { vA: 0, vB: 0 };
+
+  let bestIdx = 0;
+  let bestD2 = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < verts.length; i++) {
+    const a = verts[i];
+    const b = verts[(i + 1) % verts.length];
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const apx = px - a.x;
+    const apy = py - a.y;
+    const denom = Math.max(1e-6, abx * abx + aby * aby);
+    const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / denom));
+    const cx = a.x + abx * t;
+    const cy = a.y + aby * t;
+    const dx = px - cx;
+    const dy = py - cy;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      bestIdx = i;
+    }
+  }
+  return { vA: bestIdx, vB: (bestIdx + 1) % verts.length };
 }
 
 function triangleComponents(tris) {

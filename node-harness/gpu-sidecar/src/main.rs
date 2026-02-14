@@ -653,82 +653,44 @@ async fn run_fluid_step(
         ],
     });
 
-    // seed initial velocity + dye
-    {
-        let mut encoder = device.create_command_encoder(&Default::default());
-        let mut pass = encoder.begin_compute_pass(&Default::default());
-        pass.set_pipeline(&init_pipeline);
-        pass.set_bind_group(0, &bg_init, &[]);
-        pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
-        drop(pass);
-        queue.submit(Some(encoder.finish()));
-    }
+    let mut seeded = false;
+    let mut remaining = steps;
+    const STEPS_PER_SUBMIT: u32 = 16;
 
-    for _ in 0..steps {
+    while remaining > 0 {
+        let batch_steps = remaining.min(STEPS_PER_SUBMIT);
         let mut encoder = device.create_command_encoder(&Default::default());
 
-        // reset pressure source before solve so each projection starts from a clean slate.
-        // pressure_b is fully overwritten on the first Jacobi pass, so clearing it is wasted work.
-        encoder.clear_buffer(&pressure_a, 0, None);
-
-        // velocity advection
-        {
+        if !seeded {
+            // seed initial velocity + dye
             let mut pass = encoder.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&advect_vel_pipeline);
-            pass.set_bind_group(0, &bg_advect_vel, &[]);
+            pass.set_pipeline(&init_pipeline);
+            pass.set_bind_group(0, &bg_init, &[]);
             pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+            seeded = true;
         }
 
-        // divergence
-        {
-            let mut pass = encoder.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&divergence_pipeline);
-            pass.set_bind_group(0, &bg_div, &[]);
-            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
-        }
+        for _ in 0..batch_steps {
+            // reset pressure source before solve so each projection starts from a clean slate.
+            // pressure_b is fully overwritten on the first Jacobi pass, so clearing it is wasted work.
+            encoder.clear_buffer(&pressure_a, 0, None);
 
-        for i in 0..jacobi_iters {
-            let mut pass = encoder.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&jacobi_pipeline);
-            pass.set_bind_group(
-                0,
-                if i % 2 == 0 {
-                    &bg_jacobi_ab
-                } else {
-                    &bg_jacobi_ba
-                },
-                &[],
-            );
-            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
-        }
-
-        // projection
-        {
-            let mut pass = encoder.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&project_pipeline);
-            pass.set_bind_group(
-                0,
-                if jacobi_iters % 2 == 0 {
-                    &bg_project_from_a
-                } else {
-                    &bg_project_from_b
-                },
-                &[],
-            );
-            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
-        }
-
-        // optional additional projection passes to tighten incompressibility.
-        // pass 0 above leaves velocity in vel_a, then each extra pass goes a->b and copies back to a.
-        for _ in 1..projection_passes {
+            // velocity advection
             {
                 let mut pass = encoder.begin_compute_pass(&Default::default());
-                pass.set_pipeline(&divergence_pipeline);
-                pass.set_bind_group(0, &bg_div_from_a, &[]);
+                pass.set_pipeline(&advect_vel_pipeline);
+                pass.set_bind_group(0, &bg_advect_vel, &[]);
                 pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
             }
 
-            encoder.clear_buffer(&pressure_a, 0, None);
+            // divergence
+            {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pass.set_pipeline(&divergence_pipeline);
+                pass.set_bind_group(0, &bg_div, &[]);
+                pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+            }
+
             for i in 0..jacobi_iters {
                 let mut pass = encoder.begin_compute_pass(&Default::default());
                 pass.set_pipeline(&jacobi_pipeline);
@@ -744,47 +706,91 @@ async fn run_fluid_step(
                 pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
             }
 
+            // projection
             {
                 let mut pass = encoder.begin_compute_pass(&Default::default());
                 pass.set_pipeline(&project_pipeline);
                 pass.set_bind_group(
                     0,
                     if jacobi_iters % 2 == 0 {
-                        &bg_project_cleanup_from_a
+                        &bg_project_from_a
                     } else {
-                        &bg_project_cleanup_from_b
+                        &bg_project_from_b
                     },
                     &[],
                 );
                 pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
             }
 
-            encoder.copy_buffer_to_buffer(
-                &vel_b,
-                0,
-                &vel_a,
-                0,
-                (cells * std::mem::size_of::<[f32; 2]>()) as u64,
-            );
-        }
+            // optional additional projection passes to tighten incompressibility.
+            // pass 0 above leaves velocity in vel_a, then each extra pass goes a->b and copies back to a.
+            for _ in 1..projection_passes {
+                {
+                    let mut pass = encoder.begin_compute_pass(&Default::default());
+                    pass.set_pipeline(&divergence_pipeline);
+                    pass.set_bind_group(0, &bg_div_from_a, &[]);
+                    pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                }
 
-        // dye advection
-        {
-            let mut pass = encoder.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&advect_dye_pipeline);
-            pass.set_bind_group(0, &bg_advect_dye, &[]);
-            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
-        }
+                encoder.clear_buffer(&pressure_a, 0, None);
+                for i in 0..jacobi_iters {
+                    let mut pass = encoder.begin_compute_pass(&Default::default());
+                    pass.set_pipeline(&jacobi_pipeline);
+                    pass.set_bind_group(
+                        0,
+                        if i % 2 == 0 {
+                            &bg_jacobi_ab
+                        } else {
+                            &bg_jacobi_ba
+                        },
+                        &[],
+                    );
+                    pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                }
 
-        // dye fade and re-seed source slightly
-        {
-            let mut pass = encoder.begin_compute_pass(&Default::default());
-            pass.set_pipeline(&fade_pipeline);
-            pass.set_bind_group(0, &bg_fade, &[]);
-            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                {
+                    let mut pass = encoder.begin_compute_pass(&Default::default());
+                    pass.set_pipeline(&project_pipeline);
+                    pass.set_bind_group(
+                        0,
+                        if jacobi_iters % 2 == 0 {
+                            &bg_project_cleanup_from_a
+                        } else {
+                            &bg_project_cleanup_from_b
+                        },
+                        &[],
+                    );
+                    pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                }
+
+                encoder.copy_buffer_to_buffer(
+                    &vel_b,
+                    0,
+                    &vel_a,
+                    0,
+                    (cells * std::mem::size_of::<[f32; 2]>()) as u64,
+                );
+            }
+
+            // dye advection
+            {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pass.set_pipeline(&advect_dye_pipeline);
+                pass.set_bind_group(0, &bg_advect_dye, &[]);
+                pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+            }
+
+            // dye fade and re-seed source slightly
+            {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pass.set_pipeline(&fade_pipeline);
+                pass.set_bind_group(0, &bg_fade, &[]);
+                pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+            }
         }
 
         queue.submit(Some(encoder.finish()));
+        remaining -= batch_steps;
     }
 
     {

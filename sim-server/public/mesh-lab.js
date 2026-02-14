@@ -1,4 +1,5 @@
 import { compileFieldToMesh } from '/field-to-structure-core.js';
+import { createCreatureSpecFromMesh, parseCreatureSpec } from '/creature-spec.js';
 
 const paintCanvas = document.getElementById('paint');
 const meshCanvas = document.getElementById('mesh');
@@ -12,12 +13,16 @@ const enforceConnectivityEl = document.getElementById('enforceConnectivity');
 const minCompTrisEl = document.getElementById('minCompTris');
 const clearBtn = document.getElementById('clearBtn');
 const compileBtn = document.getElementById('compileBtn');
+const exportBtn = document.getElementById('exportBtn');
+const importBtn = document.getElementById('importBtn');
+const importFile = document.getElementById('importFile');
 const out = document.getElementById('out');
 
 const W = 128, H = 128;
 const rigid = new Float32Array(W * H);
 const soft = new Float32Array(W * H);
 let painting = false;
+let lastMesh = null;
 
 function idx(x, y) { return y * W + x; }
 
@@ -93,6 +98,7 @@ function compileNow() {
     connectivityMode: enforceConnectivityEl?.checked ? 'largest' : 'none',
     minComponentTriangles: Math.max(0, Number(minCompTrisEl?.value) || 0),
   });
+  lastMesh = mesh;
   drawMesh(mesh);
 }
 
@@ -101,6 +107,36 @@ window.addEventListener('mouseup', () => { painting = false; });
 paintCanvas.addEventListener('mousemove', (e) => { if (painting) paint(e.clientX, e.clientY); });
 clearBtn.addEventListener('click', () => { rigid.fill(0); soft.fill(0); drawFields(); compileNow(); });
 compileBtn.addEventListener('click', compileNow);
+
+exportBtn.addEventListener('click', () => {
+  if (!lastMesh) compileNow();
+  const spec = createCreatureSpecFromMesh(lastMesh, { name: 'mesh-lab-creature' });
+  const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `creature-spec-${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+importBtn.addEventListener('click', () => importFile.click());
+importFile.addEventListener('change', async () => {
+  const f = importFile.files?.[0];
+  if (!f) return;
+  const text = await f.text();
+  const spec = parseCreatureSpec(text);
+  if (spec.space?.width === W && spec.space?.height === H && Array.isArray(spec.fields?.rigid) && Array.isArray(spec.fields?.soft)) {
+    rigid.set(spec.fields.rigid);
+    soft.set(spec.fields.soft);
+    drawFields();
+  }
+  lastMesh = {
+    nodes: spec.mesh.nodes,
+    triangles: spec.mesh.triangles,
+    meta: spec.mesh.meta || { width: W, height: H },
+  };
+  drawMesh(lastMesh);
+});
 
 drawFields();
 compileNow();

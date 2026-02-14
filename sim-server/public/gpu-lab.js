@@ -1,7 +1,11 @@
+import { parseCreatureSpec, buildBodiesFromCreatureSpec } from '/creature-spec.js';
+
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
 const stopBtn = document.getElementById('stopBtn');
 const clearViscBtn = document.getElementById('clearViscBtn');
+const importSpecBtn = document.getElementById('importSpecBtn');
+const importSpecFile = document.getElementById('importSpecFile');
 const fpsHud = document.getElementById('fpsHud');
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
@@ -293,6 +297,7 @@ async function createPipeline(device, code) {
 
 let running = false;
 let sim = null;
+let importedCreatureSpec = null;
 let painting = false;
 let panning = false;
 let panLastX = 0;
@@ -1705,7 +1710,9 @@ async function initSim() {
     rr0: rA, rr1: rB, gg0: gA, gg1: gB, bb0: bA, bb1: bB,
     viscMapCpu, viscMapGpu,
     div, readR, readG, readB, readVx, readVy,
-    bodies: initBodies(controls.n, controls),
+    bodies: importedCreatureSpec
+      ? buildBodiesFromCreatureSpec(importedCreatureSpec, controls.n, controls)
+      : initBodies(controls.n, controls),
     emitters: initEmitters(controls.n),
     camera: { x: controls.n * 0.5, y: controls.n * 0.5, zoom: controls.n >= 1024 ? 1.8 : 1.0 },
     couplingTelemetry: [],
@@ -1902,4 +1909,24 @@ if (scenarioPresetEl) {
     applyScenarioPreset(sim, scenarioPresetEl.value || 'baseline');
   });
 }
+
+if (importSpecBtn && importSpecFile) {
+  importSpecBtn.addEventListener('click', () => importSpecFile.click());
+  importSpecFile.addEventListener('change', async () => {
+    const f = importSpecFile.files?.[0];
+    if (!f) return;
+    try {
+      const text = await f.text();
+      importedCreatureSpec = parseCreatureSpec(text);
+      if (running) {
+        stop();
+        await start();
+      }
+      log({ ok: true, msg: 'CreatureSpec imported', name: importedCreatureSpec.name || 'unnamed' });
+    } catch (e) {
+      log({ ok: false, error: `Import failed: ${String(e)}` });
+    }
+  });
+}
+
 log('ready: choose scenario, paint, then Start');

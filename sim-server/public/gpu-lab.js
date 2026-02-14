@@ -450,6 +450,13 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   const bodies = sim.bodies;
   const dragK = sim.controls.bodyDrag;
   const feedbackK = sim.controls.bodyFeedback;
+  const viscMap = sim.viscMapCpu;
+
+  const localHoneyDrag = (x, y) => {
+    const v = sampleFieldBilinear(viscMap, n, x, y);
+    // Make high-viscosity paint feel like honey for bodies.
+    return 1.0 + Math.pow(Math.max(0, Math.min(1, v)), 2.2) * 14.0;
+  };
 
   if (bodies.rigid[0]) {
     bodies.rigid[0].mass = sim.controls.massLight;
@@ -491,8 +498,9 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       const localVy = b.vy + ((b.omega || 0) * rx);
       const relX = fx - localVx;
       const relY = fy - localVy;
-      const fpx = relX * dragK;
-      const fpy = relY * dragK;
+      const honey = localHoneyDrag(sx, sy);
+      const fpx = relX * dragK * honey;
+      const fpy = relY * dragK * honey;
       forceX += fpx;
       forceY += fpy;
       torque += rx * fpy - ry * fpx;
@@ -514,7 +522,13 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     b.vx += ax * dt * 60 + swimX;
     b.vy += ay * dt * 60 + swimY;
     b.omega = (b.omega || 0) + alpha * dt * 60 + swimTorque;
-    b.omega *= 0.985;
+
+    const centerHoney = localHoneyDrag(b.x, b.y);
+    const linDamp = Math.max(0.72, 1.0 - 0.018 * centerHoney);
+    const angDamp = Math.max(0.70, 0.992 - 0.012 * centerHoney);
+    b.vx *= linDamp;
+    b.vy *= linDamp;
+    b.omega *= angDamp;
 
     const bMax = 3.2;
     const bMag = Math.hypot(b.vx, b.vy);
@@ -544,10 +558,14 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const activeSwimAmp = 0.008 * (1 + 0.2 * Math.sin(sim.frame * 0.05 + i));
     const swimX = (-cy * activeSwimAmp + Math.cos(activeSwimPhase) * 0.004) * invMass;
     const swimY = (cx * activeSwimAmp + Math.sin(activeSwimPhase) * 0.004) * invMass;
-    const carryX = (fx - node.vx) * dragK * 0.8 * invMass;
-    const carryY = (fy - node.vy) * dragK * 0.8 * invMass;
+    const honey = localHoneyDrag(node.x, node.y);
+    const carryX = (fx - node.vx) * dragK * 0.8 * honey * invMass;
+    const carryY = (fy - node.vy) * dragK * 0.8 * honey * invMass;
     node.vx += carryX * dt * 60 + swimX;
     node.vy += carryY * dt * 60 + swimY;
+    const nodeDamp = Math.max(0.70, 1.0 - 0.02 * honey);
+    node.vx *= nodeDamp;
+    node.vy *= nodeDamp;
     const nMax = 2.8;
     const nMag = Math.hypot(node.vx, node.vy);
     if (nMag > nMax) {

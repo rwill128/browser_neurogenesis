@@ -401,6 +401,7 @@ async fn run_fluid_step(
     });
 
     let advect_vel_pipeline = mk_pipeline(&device, "advect-vel", FLUID_ADVECT_VEL_WGSL);
+    let diffuse_vel_pipeline = mk_pipeline(&device, "diffuse-vel", FLUID_DIFFUSE_VEL_WGSL);
     let divergence_pipeline = mk_pipeline(&device, "divergence", FLUID_DIVERGENCE_WGSL);
     let jacobi_pipeline = mk_pipeline(&device, "jacobi", FLUID_JACOBI_WGSL);
     let project_pipeline = mk_pipeline(&device, "project", FLUID_PROJECT_WGSL);
@@ -429,6 +430,42 @@ async fn run_fluid_step(
     let bg_advect_vel = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bg-advect-vel"),
         layout: &advect_vel_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: vel_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: vel_b.as_entire_binding(),
+            },
+        ],
+    });
+    let bg_diffuse_ba = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-diffuse-ba"),
+        layout: &diffuse_vel_pipeline.get_bind_group_layout(0),
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: vel_b.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: vel_a.as_entire_binding(),
+            },
+        ],
+    });
+    let bg_diffuse_ab = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bg-diffuse-ab"),
+        layout: &diffuse_vel_pipeline.get_bind_group_layout(0),
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -681,6 +718,25 @@ async fn run_fluid_step(
                 pass.set_pipeline(&advect_vel_pipeline);
                 pass.set_bind_group(0, &bg_advect_vel, &[]);
                 pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+            }
+
+            // viscosity diffusion solve (small Jacobi ping-pong on velocity field)
+            if viscosity > 0.0 {
+                const DIFFUSE_ITERS: u32 = 4;
+                for i in 0..DIFFUSE_ITERS {
+                    let mut pass = encoder.begin_compute_pass(&Default::default());
+                    pass.set_pipeline(&diffuse_vel_pipeline);
+                    pass.set_bind_group(
+                        0,
+                        if i % 2 == 0 {
+                            &bg_diffuse_ba
+                        } else {
+                            &bg_diffuse_ab
+                        },
+                        &[],
+                    );
+                    pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                }
             }
 
             // divergence
@@ -1184,6 +1240,51 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
 
   dst[id] = v_next;
+}
+"#;
+
+const FLUID_DIFFUSE_VEL_WGSL: &str = r#"
+struct Params {
+  width: u32,
+  height: u32,
+  jacobi_iters: u32,
+  _pad0: u32,
+  dt: f32,
+  viscosity: f32,
+  fade: f32,
+  dye_radius: f32,
+  impulse: f32,
+  _pad1: f32,
+  _pad2: f32,
+  _pad3: f32,
+};
+@group(0) @binding(0) var<uniform> p: Params;
+@group(0) @binding(1) var<storage, read> src: array<vec2<f32>>;
+@group(0) @binding(2) var<storage, read_write> dst: array<vec2<f32>>;
+
+fn idx(x: u32, y: u32) -> u32 { return y * p.width + x; }
+fn c(x: i32, maxv: u32) -> u32 { return u32(clamp(x, 0, i32(maxv) - 1)); }
+
+@compute @workgroup_size(8, 8, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= p.width || gid.y >= p.height) { return; }
+  let id = idx(gid.x, gid.y);
+  let edge = gid.x == 0u || gid.y == 0u || gid.x == (p.width - 1u) || gid.y == (p.height - 1u);
+  if (edge) {
+    dst[id] = vec2<f32>(0.0, 0.0);
+    return;
+  }
+
+  let x = i32(gid.x);
+  let y = i32(gid.y);
+  let center = src[id];
+  let vl = src[idx(c(x - 1, p.width), c(y, p.height))];
+  let vr = src[idx(c(x + 1, p.width), c(y, p.height))];
+  let vb = src[idx(c(x, p.width), c(y - 1, p.height))];
+  let vt = src[idx(c(x, p.width), c(y + 1, p.height))];
+
+  let a = max(p.viscosity * p.dt, 0.0);
+  dst[id] = (center + a * (vl + vr + vb + vt)) / (1.0 + 4.0 * a);
 }
 "#;
 

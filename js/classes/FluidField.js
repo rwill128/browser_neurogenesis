@@ -329,14 +329,17 @@ export class FluidField {
 
         if (!viscosityField) {
             for (let k_iter = 0; k_iter < solverIterations; k_iter++) {
-                this._forEachDomainSpan(domain, (j, xStart, xEnd) => {
-                    let idx = j * N + xStart;
-                    const rowEnd = j * N + xEnd + 1;
-                    while (idx < rowEnd) {
-                        x[idx] = (x0[idx] + a_global_param * (x[idx + 1] + x[idx - 1] + x[idx + N] + x[idx - N])) * cRecipGlobal;
-                        idx++;
+                for (const [j, spans] of domain.rowSpans.entries()) {
+                    for (let s = 0; s < spans.length; s++) {
+                        const span = spans[s];
+                        let idx = j * N + span[0];
+                        const rowEnd = j * N + span[1] + 1;
+                        while (idx < rowEnd) {
+                            x[idx] = (x0[idx] + a_global_param * (x[idx + 1] + x[idx - 1] + x[idx + N] + x[idx - N])) * cRecipGlobal;
+                            idx++;
+                        }
                     }
-                });
+                }
                 this.set_bnd(b, x);
             }
             return;
@@ -351,33 +354,39 @@ export class FluidField {
         const effectiveCRecipByIdx = this._linSolveEffectiveCRecip;
 
         // Build local coefficients once; reuse across all Gauss-Seidel iterations in this solve.
-        this._forEachDomainSpan(domain, (j, xStart, xEnd) => {
-            let idx = j * N + xStart;
-            const rowEnd = j * N + xEnd + 1;
-            while (idx < rowEnd) {
-                let localMultiplier = viscosityField[idx];
-                if (!Number.isFinite(localMultiplier)) localMultiplier = 1;
-                if (localMultiplier < minVisc) localMultiplier = minVisc;
-                else if (localMultiplier > maxVisc) localMultiplier = maxVisc;
-
-                const effectiveA = baseScale * localMultiplier;
-                effectiveAByIdx[idx] = effectiveA;
-                effectiveCRecipByIdx[idx] = 1.0 / (1 + 4 * effectiveA);
-                idx++;
-            }
-        });
-
-        for (let k_iter = 0; k_iter < solverIterations; k_iter++) {
-            this._forEachDomainSpan(domain, (j, xStart, xEnd) => {
-                let idx = j * N + xStart;
-                const rowEnd = j * N + xEnd + 1;
+        for (const [j, spans] of domain.rowSpans.entries()) {
+            for (let s = 0; s < spans.length; s++) {
+                const span = spans[s];
+                let idx = j * N + span[0];
+                const rowEnd = j * N + span[1] + 1;
                 while (idx < rowEnd) {
-                    const effectiveA = effectiveAByIdx[idx];
-                    const effectiveCRecip = effectiveCRecipByIdx[idx];
-                    x[idx] = (x0[idx] + effectiveA * (x[idx + 1] + x[idx - 1] + x[idx + N] + x[idx - N])) * effectiveCRecip;
+                    let localMultiplier = viscosityField[idx];
+                    if (!Number.isFinite(localMultiplier)) localMultiplier = 1;
+                    if (localMultiplier < minVisc) localMultiplier = minVisc;
+                    else if (localMultiplier > maxVisc) localMultiplier = maxVisc;
+
+                    const effectiveA = baseScale * localMultiplier;
+                    effectiveAByIdx[idx] = effectiveA;
+                    effectiveCRecipByIdx[idx] = 1.0 / (1 + 4 * effectiveA);
                     idx++;
                 }
-            });
+            }
+        }
+
+        for (let k_iter = 0; k_iter < solverIterations; k_iter++) {
+            for (const [j, spans] of domain.rowSpans.entries()) {
+                for (let s = 0; s < spans.length; s++) {
+                    const span = spans[s];
+                    let idx = j * N + span[0];
+                    const rowEnd = j * N + span[1] + 1;
+                    while (idx < rowEnd) {
+                        const effectiveA = effectiveAByIdx[idx];
+                        const effectiveCRecip = effectiveCRecipByIdx[idx];
+                        x[idx] = (x0[idx] + effectiveA * (x[idx + 1] + x[idx - 1] + x[idx + N] + x[idx - N])) * effectiveCRecip;
+                        idx++;
+                    }
+                }
+            }
             this.set_bnd(b, x);
         }
     }
@@ -391,29 +400,35 @@ export class FluidField {
         const N = this.size;
         const domain = this._normalizeDomain(bounds);
 
-        this._forEachDomainSpan(domain, (j, xStart, xEnd) => {
-            let idx = j * N + xStart;
-            const rowEnd = j * N + xEnd + 1;
-            while (idx < rowEnd) {
-                div_temp[idx] = -0.5 * (velocX_in_out[idx + 1] - velocX_in_out[idx - 1] + velocY_in_out[idx + N] - velocY_in_out[idx - N]) / N;
-                p_temp[idx] = 0;
-                idx++;
+        for (const [j, spans] of domain.rowSpans.entries()) {
+            for (let s = 0; s < spans.length; s++) {
+                const span = spans[s];
+                let idx = j * N + span[0];
+                const rowEnd = j * N + span[1] + 1;
+                while (idx < rowEnd) {
+                    div_temp[idx] = -0.5 * (velocX_in_out[idx + 1] - velocX_in_out[idx - 1] + velocY_in_out[idx + N] - velocY_in_out[idx - N]) / N;
+                    p_temp[idx] = 0;
+                    idx++;
+                }
             }
-        });
+        }
 
         this.set_bnd(0, div_temp);
         this.set_bnd(0, p_temp);
         this.lin_solve(0, p_temp, div_temp, 1, 4, 'pressure', 0, 0, bounds);
 
-        this._forEachDomainSpan(domain, (j, xStart, xEnd) => {
-            let idx = j * N + xStart;
-            const rowEnd = j * N + xEnd + 1;
-            while (idx < rowEnd) {
-                velocX_in_out[idx] -= 0.5 * (p_temp[idx + 1] - p_temp[idx - 1]) * N;
-                velocY_in_out[idx] -= 0.5 * (p_temp[idx + N] - p_temp[idx - N]) * N;
-                idx++;
+        for (const [j, spans] of domain.rowSpans.entries()) {
+            for (let s = 0; s < spans.length; s++) {
+                const span = spans[s];
+                let idx = j * N + span[0];
+                const rowEnd = j * N + span[1] + 1;
+                while (idx < rowEnd) {
+                    velocX_in_out[idx] -= 0.5 * (p_temp[idx + 1] - p_temp[idx - 1]) * N;
+                    velocY_in_out[idx] -= 0.5 * (p_temp[idx + N] - p_temp[idx - N]) * N;
+                    idx++;
+                }
             }
-        });
+        }
 
         this.set_bnd(1, velocX_in_out);
         this.set_bnd(2, velocY_in_out);
@@ -425,11 +440,13 @@ export class FluidField {
         const dtx_scaled = dt * N;
         const dty_scaled = dt * N;
 
-        this._forEachDomainSpan(domain, (j_cell, xStart, xEnd) => {
-            let current_idx = j_cell * N + xStart;
-            const rowEnd = j_cell * N + xEnd + 1;
+        for (const [j_cell, spans] of domain.rowSpans.entries()) {
+            for (let s = 0; s < spans.length; s++) {
+                const span = spans[s];
+                let current_idx = j_cell * N + span[0];
+                const rowEnd = j_cell * N + span[1] + 1;
 
-            for (let i_cell = xStart; current_idx < rowEnd; i_cell++, current_idx++) {
+                for (let i_cell = span[0]; current_idx < rowEnd; i_cell++, current_idx++) {
                 let x = i_cell - (dtx_scaled * velocX_source[current_idx]);
                 let y = j_cell - (dty_scaled * velocY_source[current_idx]);
 
@@ -463,10 +480,11 @@ export class FluidField {
                 const idx10 = i1 + j0 * N;
                 const idx11 = i1 + j1 * N;
 
-                d_out[current_idx] = s0 * (t0 * d_in[idx00] + t1 * d_in[idx01]) +
-                                     s1 * (t0 * d_in[idx10] + t1 * d_in[idx11]);
+                    d_out[current_idx] = s0 * (t0 * d_in[idx00] + t1 * d_in[idx01]) +
+                                         s1 * (t0 * d_in[idx10] + t1 * d_in[idx11]);
+                }
             }
-        });
+        }
 
         this.set_bnd(b, d_out);
     }

@@ -27,7 +27,7 @@ export const scenarioDefs = {
       MAX_VISCOSITY_MULTIPLIER: 12.0,
       VISCOSITY_LANDSCAPE_CONTRAST: 0.9,
       VISCOSITY_LANDSCAPE_BANDS: 12,
-      FLUID_GRID_SIZE_CONTROL: 512,
+      FLUID_GRID_SIZE_CONTROL: 128,
       AUTO_FOLLOW_CREATURE: true
     },
     nodeConfig: {
@@ -44,7 +44,7 @@ export const scenarioDefs = {
       events: [],
       configOverrides: {
         EATER_NODE_ENERGY_COST: 0.25,
-        FLUID_GRID_SIZE_CONTROL: 512,
+        FLUID_GRID_SIZE_CONTROL: 128,
         FLUID_FADE_RATE: 0.003,
         LANDSCAPE_DYE_EMITTERS_ENABLED: true,
         LANDSCAPE_DYE_EMITTER_COUNT: 42,

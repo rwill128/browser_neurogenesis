@@ -65,7 +65,11 @@ Use resource budget instead of ad hoc caps:
 1. **Material traits**: edge dye mode (pass/deflect/absorb), body permeability (pass/block), drag/friction.
 2. **Metabolic traits**: channel affinity/selectivity, uptake saturation curves, storage capacity, efficiency.
 3. **Motor traits**: actuation amplitude/frequency/phasing, torque/carry coupling gains.
-4. **Morphological traits**: topology templates, edge types, growth sequence controls.
+4. **Material-distribution traits (local, not global)**:
+   - soft bodies: per-node drag/friction coefficients,
+   - rigid bodies: per-edge (or per-hull-sample) drag coefficients,
+   - enables asymmetric drag layouts as an evolvable behavior axis.
+5. **Morphological traits**: topology templates, edge types, growth sequence controls.
 
 ### 6.2 Mutation/drift model
 - Point mutations for scalar parameters.
@@ -73,7 +77,27 @@ Use resource budget instead of ad hoc caps:
 - Drift + occasional larger jumps.
 - Keep mutation rates adaptive but bounded.
 
-## 7) Developmental growth plan (evo-devo direction)
+## 7) Local drag/friction granularity (new core evolvable axis)
+
+### 7.1 Why this matters
+Global drag coefficients are too coarse. Local coefficients create directional mechanics (e.g., sticky leading edge, slippery trailing edge), unlocking richer locomotion, trapping, and channeling strategies.
+
+### 7.2 Soft bodies
+- Store drag/friction per node.
+- Node drag participates in local force exchange with fluid.
+- Mutation can tune node-level values independently (bounded ranges + smooth mutation).
+
+### 7.3 Rigid bodies
+- Store drag/friction per edge (or equivalent hull sample points mapped to edges).
+- Fluid coupling integrates per-edge drag into net force + torque.
+- Asymmetric edge drag should produce directional turning bias and passive steering.
+
+### 7.4 Design constraints
+- Keep trait counts bounded (avoid huge genomes by default).
+- Add regularization or mutation penalties against extreme checkerboard coefficients.
+- Ensure deterministic ordering/indexing so heredity and parity checks remain stable.
+
+## 8) Developmental growth plan (evo-devo direction)
 Instead of fully static bodies:
 - Define staged growth (node/edge addition, materialization over time).
 - Growth consumes energy.

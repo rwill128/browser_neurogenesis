@@ -445,18 +445,38 @@ function pointSegmentDistance(p, a, b) {
   return Math.hypot(p.x - cx, p.y - cy);
 }
 
-function pointInPolygon(px, py, poly) {
+function pointInPolygon(px, py, poly, eps = 1e-6) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const xi = poly[i].x;
     const yi = poly[i].y;
     const xj = poly[j].x;
     const yj = poly[j].y;
+
+    if (pointOnSegment(px, py, xi, yi, xj, yj, eps)) return true;
+
     const intersect = ((yi > py) !== (yj > py))
       && (px < ((xj - xi) * (py - yi)) / Math.max(1e-9, (yj - yi)) + xi);
     if (intersect) inside = !inside;
   }
   return inside;
+}
+
+function pointOnSegment(px, py, ax, ay, bx, by, eps = 1e-6) {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const apx = px - ax;
+  const apy = py - ay;
+  const cross = Math.abs(abx * apy - aby * apx);
+  if (cross > eps) return false;
+
+  const dot = apx * abx + apy * aby;
+  if (dot < -eps) return false;
+
+  const len2 = abx * abx + aby * aby;
+  if (dot > len2 + eps) return false;
+
+  return true;
 }
 
 function decomposeRigidTriangles(triangles, nodes) {

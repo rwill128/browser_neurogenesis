@@ -2,18 +2,38 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { compileFieldToMesh } from '../../sim-server/public/field-to-structure-core.js';
 
-function pointInPolygon(px, py, poly) {
+function pointInPolygon(px, py, poly, eps = 1e-6) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const xi = poly[i].x;
     const yi = poly[i].y;
     const xj = poly[j].x;
     const yj = poly[j].y;
+
+    if (pointOnSegment(px, py, xi, yi, xj, yj, eps)) return true;
+
     const intersect = ((yi > py) !== (yj > py))
       && (px < ((xj - xi) * (py - yi)) / Math.max(1e-9, (yj - yi)) + xi);
     if (intersect) inside = !inside;
   }
   return inside;
+}
+
+function pointOnSegment(px, py, ax, ay, bx, by, eps = 1e-6) {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const apx = px - ax;
+  const apy = py - ay;
+  const cross = Math.abs(abx * apy - aby * apx);
+  if (cross > eps) return false;
+
+  const dot = apx * abx + apy * aby;
+  if (dot < -eps) return false;
+
+  const len2 = abx * abx + aby * aby;
+  if (dot > len2 + eps) return false;
+
+  return true;
 }
 
 test('field-to-structure compiler creates rigid and soft triangles from painted regions', () => {
@@ -180,4 +200,50 @@ test('soft triangles do not overlap rigid contour in rigid+soft overlap zones', 
   }
 
   assert.ok((mesh.meta.softOverlapTrimmed || 0) > 0, 'expected overlap-trim guardrail to remove some soft triangles');
+});
+
+test('soft overlap trim treats rigid hull boundary as blocking (no seam-hugging soft triangles)', () => {
+  const w = 48, h = 48;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+
+  // Compact rigid square.
+  for (let y = 14; y <= 34; y++) for (let x = 14; x <= 34; x++) rigid[y * w + x] = 1;
+
+  // Soft strip that exactly rides along the rigid top edge + slightly inside.
+  for (let y = 10; y <= 16; y++) for (let x = 12; x <= 36; x++) soft[y * w + x] = 1;
+
+  const mesh = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    threshold: 0.35,
+    density: 4,
+    connectivityMode: 'largest',
+  });
+
+  assert.ok(mesh.rigidPieces.length >= 1, 'expected rigid contour to exist');
+  const hulls = mesh.rigidPieces.map((p) => p.hull).filter((hull) => Array.isArray(hull) && hull.length >= 3);
+
+  for (const t of mesh.triangles) {
+    if (t.kind !== 'soft') continue;
+    const a = mesh.nodes[t.a];
+    const b = mesh.nodes[t.b];
+    const c = mesh.nodes[t.c];
+    const probes = [
+      { x: a.x, y: a.y },
+      { x: b.x, y: b.y },
+      { x: c.x, y: c.y },
+      { x: (a.x + b.x + c.x) / 3, y: (a.y + b.y + c.y) / 3 },
+    ];
+
+    for (const hull of hulls) {
+      for (const p of probes) {
+        assert.equal(pointInPolygon(p.x, p.y, hull), false, 'soft triangle is inside or on rigid hull boundary');
+      }
+    }
+  }
+
+  assert.ok((mesh.meta.softOverlapTrimmed || 0) > 0, 'expected seam-hugging overlap to be trimmed');
 });

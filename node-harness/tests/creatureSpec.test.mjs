@@ -102,7 +102,7 @@ test('hybrid links anchor to nearest rigid hull edge for irregular rigid meshes'
   }
 });
 
-test('createCreatureSpecFromMesh sanitizes compiler welds (same-compound + dedupe)', () => {
+test('createCreatureSpecFromMesh fuses compiler rigid pieces by compoundId (no spring-style inter-piece weld export)', () => {
   const mesh = {
     nodes: [
       { id: 0, x: 0, y: 0, rigid: 1, soft: 0 },
@@ -118,18 +118,20 @@ test('createCreatureSpecFromMesh sanitizes compiler welds (same-compound + dedup
     ],
     rigidWelds: [
       { a: 0, b: 1, a0: 0, a1: 1, b0: 0, b1: 1 },
-      { a: 1, b: 0, a0: 1, a1: 2, b0: 1, b1: 2 }, // duplicate pair, reverse order
-      { a: 1, b: 2, a0: 0, a1: 1, b0: 0, b1: 1 }, // cross-compound, should be dropped
-      { a: 99, b: 0, a0: 0, a1: 1, b0: 0, b1: 1 }, // invalid index, should be dropped
+      { a: 1, b: 0, a0: 1, a1: 2, b0: 1, b1: 2 },
+      { a: 1, b: 2, a0: 0, a1: 1, b0: 0, b1: 1 },
+      { a: 99, b: 0, a0: 0, a1: 1, b0: 0, b1: 1 },
     ],
     meta: { width: 8, height: 8 },
   };
 
   const spec = createCreatureSpecFromMesh(mesh);
-  assert.equal(spec.rigidBodies.length, 3);
-  assert.equal(spec.rigidWelds.length, 1);
-  assert.equal(spec.rigidWelds[0].a, 0);
-  assert.equal(spec.rigidWelds[0].b, 1);
+  assert.equal(spec.rigidBodies.length, 2);
+  assert.equal(spec.rigidWelds.length, 0);
+  const fusedA = spec.rigidBodies.find((rb) => rb.compoundId === 'compound_A');
+  assert.ok(fusedA);
+  assert.ok(Array.isArray(fusedA.subHulls));
+  assert.equal(fusedA.subHulls.length, 2);
 });
 
 test('hybrid links at rigid vertices choose a local incident edge (deterministic tie-break)', () => {

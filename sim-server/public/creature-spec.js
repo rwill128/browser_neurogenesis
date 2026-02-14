@@ -107,6 +107,15 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
     const mass = finiteOr(Number(rb.mass), controls.massHeavy);
 
     rigidIndexMap.set(rbi, rigid.length);
+    const subPolysLocal = Array.isArray(rb.subHulls)
+      ? rb.subHulls
+          .map((poly) => (Array.isArray(poly) ? poly : []))
+          .map((poly) => poly
+            .map((p) => ({ x: (Number(p?.x) || 0) * sx - c.x, y: (Number(p?.y) || 0) * sy - c.y }))
+            .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)))
+          .filter((poly) => poly.length >= 3)
+      : null;
+
     rigid.push({
       x: c.x,
       y: c.y,
@@ -115,6 +124,7 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
       r,
       sides,
       verticesLocal,
+      subPolysLocal,
       edgeDyeMode: normalizeEdgeDyeModeList(rb.edgeDyeMode, sides),
       edgeBodyMode: normalizeEdgeBodyModeList(rb.edgeBodyMode, sides),
       digestEnabled: !!rb.digestEnabled,
@@ -219,26 +229,50 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
 }
 
 function buildRigidExportFromCompilerPieces(rigidPieces, rigidWelds, nodes, options) {
-  const rigidBodies = [];
-  const components = [];
-  const pieceMap = new Map();
-
+  const grouped = new Map();
   for (let i = 0; i < rigidPieces.length; i++) {
     const rp = rigidPieces[i] || {};
     const hull = (rp.hull || [])
-      .map((p) => ({ x: Number(p?.x) || 0, y: Number(p?.y) || 0 }));
+      .map((p) => ({ x: Number(p?.x) || 0, y: Number(p?.y) || 0 }))
+      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
     if (hull.length < 3) continue;
+    const compoundId = rp.compoundId || `compound_piece_${i}`;
+    if (!grouped.has(compoundId)) grouped.set(compoundId, []);
+    grouped.get(compoundId).push({
+      hull,
+      sourceNodeIds: Array.isArray(rp.sourceNodeIds)
+        ? rp.sourceNodeIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && nodes[id])
+        : [],
+    });
+  }
 
-    const c = centroid(hull);
-    const r = Math.max(2.5, ...hull.map((p) => Math.hypot(p.x - c.x, p.y - c.y)));
-    const sides = hull.length;
+  const rigidBodies = [];
+  const components = [];
+
+  for (const [compoundId, pieces] of grouped.entries()) {
+    const allPoints = [];
+    const sourceNodeSet = new Set();
+    const subHulls = [];
+
+    for (const p of pieces) {
+      subHulls.push(p.hull.map((v) => ({ x: v.x, y: v.y })));
+      for (const v of p.hull) allPoints.push(v);
+      for (const sid of p.sourceNodeIds) sourceNodeSet.add(sid);
+    }
+
+    const outerHull = convexHull(allPoints);
+    if (outerHull.length < 3) continue;
+
+    const c = centroid(outerHull);
+    const r = Math.max(2.5, ...outerHull.map((p) => Math.hypot(p.x - c.x, p.y - c.y)));
+    const sides = outerHull.length;
 
     const rigidIndex = rigidBodies.length;
-    pieceMap.set(i, rigidIndex);
     rigidBodies.push({
-      id: rp.id || `rigid_${rigidIndex}`,
-      compoundId: rp.compoundId || `compound_${rigidIndex}`,
-      hull,
+      id: `rigid_${rigidIndex}`,
+      compoundId,
+      hull: outerHull,
+      subHulls,
       mass: finiteOr(Number(options.massHeavy), 5),
       edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
       edgeDyeMode: Array.from({ length: sides }, () => [...EDGE_DYE_DEFLECT_RGB]),
@@ -246,44 +280,15 @@ function buildRigidExportFromCompilerPieces(rigidPieces, rigidWelds, nodes, opti
       digestRGB: [1, 1, 1],
     });
 
-    const sourceNodeIds = Array.isArray(rp.sourceNodeIds)
-      ? new Set(rp.sourceNodeIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && nodes[id]))
-      : new Set();
-
     components.push({
       index: rigidIndex,
-      nodeIds: sourceNodeIds,
+      nodeIds: sourceNodeSet,
       radius: r,
     });
   }
 
-  const mappedWelds = [];
-  const weldSeen = new Set();
-  for (const w of (rigidWelds || [])) {
-    const a = pieceMap.get(Number(w?.a));
-    const b = pieceMap.get(Number(w?.b));
-    if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
-    const ra = rigidBodies[a];
-    const rb = rigidBodies[b];
-    if (!ra || !rb) continue;
-    // Guardrail: keep compiler welds within the same rigid compound only.
-    if ((ra.compoundId || '') !== (rb.compoundId || '')) continue;
-
-    const pairKey = a < b ? `${a}:${b}` : `${b}:${a}`;
-    if (weldSeen.has(pairKey)) continue;
-    weldSeen.add(pairKey);
-
-    mappedWelds.push({
-      a,
-      b,
-      a0: Math.max(0, Math.min(ra.hull.length - 1, Number(w?.a0) | 0)),
-      a1: Math.max(0, Math.min(ra.hull.length - 1, Number(w?.a1) | 0)),
-      b0: Math.max(0, Math.min(rb.hull.length - 1, Number(w?.b0) | 0)),
-      b1: Math.max(0, Math.min(rb.hull.length - 1, Number(w?.b1) | 0)),
-    });
-  }
-
-  return { rigidBodies, rigidWelds: mappedWelds, components };
+  // Compound fusion path: no runtime inter-piece spring/weld constraints.
+  return { rigidBodies, rigidWelds: [], components };
 }
 
 function buildRigidExport(tris, nodes, options) {

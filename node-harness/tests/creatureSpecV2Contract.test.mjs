@@ -68,31 +68,35 @@ test('createCreatureSpecFromMesh merges adjacent rigid triangles into a single c
   assert.equal(spec.rigidWelds.length, 0);
 });
 
-test('createCreatureSpecFromMesh emits rigid welds for concave rigid regions', () => {
+test('createCreatureSpecFromMesh keeps compiler concave decomposition fused as one compound body', () => {
   const mesh = {
     nodes: [
       { id: 0, x: 0, y: 0, rigid: 1, soft: 0 },
       { id: 1, x: 4, y: 0, rigid: 1, soft: 0 },
-      { id: 2, x: 8, y: 0, rigid: 1, soft: 0 },
+      { id: 2, x: 4, y: 4, rigid: 1, soft: 0 },
       { id: 3, x: 0, y: 4, rigid: 1, soft: 0 },
-      { id: 4, x: 4, y: 4, rigid: 1, soft: 0 },
+      { id: 4, x: 8, y: 0, rigid: 1, soft: 0 },
       { id: 5, x: 8, y: 4, rigid: 1, soft: 0 },
-      { id: 6, x: 0, y: 8, rigid: 1, soft: 0 },
-      { id: 7, x: 4, y: 8, rigid: 1, soft: 0 },
-      { id: 8, x: 8, y: 8, rigid: 1, soft: 0 },
     ],
     triangles: [
-      // L-shape made of 3 quads (6 triangles), still connected but concave overall
-      { kind: 'rigid', a: 0, b: 1, c: 4 }, { kind: 'rigid', a: 0, b: 4, c: 3 },
-      { kind: 'rigid', a: 3, b: 4, c: 7 }, { kind: 'rigid', a: 3, b: 7, c: 6 },
-      { kind: 'rigid', a: 1, b: 2, c: 5 }, { kind: 'rigid', a: 1, b: 5, c: 4 },
+      { kind: 'rigid', a: 0, b: 1, c: 2 },
+      { kind: 'rigid', a: 0, b: 2, c: 3 },
+      { kind: 'rigid', a: 1, b: 4, c: 5 },
+      { kind: 'rigid', a: 1, b: 5, c: 2 },
     ],
+    rigidPieces: [
+      { id: 'rp0', compoundId: 'compound_concave', hull: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }], sourceNodeIds: [0, 1, 2, 3] },
+      { id: 'rp1', compoundId: 'compound_concave', hull: [{ x: 4, y: 0 }, { x: 8, y: 0 }, { x: 8, y: 4 }, { x: 4, y: 4 }], sourceNodeIds: [1, 4, 5, 2] },
+    ],
+    rigidWelds: [{ a: 0, b: 1, a0: 1, a1: 2, b0: 0, b1: 3 }],
     meta: { width: 8, height: 8 },
   };
 
   const spec = createCreatureSpecFromMesh(mesh);
-  assert.ok(spec.rigidBodies.length >= 2);
-  assert.ok(spec.rigidWelds.length >= 1);
+  assert.equal(spec.rigidBodies.length, 1);
+  assert.equal(spec.rigidWelds.length, 0);
+  assert.ok(Array.isArray(spec.rigidBodies[0].subHulls));
+  assert.equal(spec.rigidBodies[0].subHulls.length, 2);
 });
 
 test('createCreatureSpecFromMesh prefers compiler-provided rigid decomposition when present', () => {
@@ -104,9 +108,11 @@ test('createCreatureSpecFromMesh prefers compiler-provided rigid decomposition w
   mesh.rigidWelds = [{ a: 0, b: 1, a0: 1, a1: 2, b0: 0, b1: 1 }];
 
   const spec = createCreatureSpecFromMesh(mesh);
-  assert.equal(spec.rigidBodies.length, 2);
-  assert.equal(spec.rigidWelds.length, 1);
-  assert.equal(spec.rigidBodies[0].id, 'p0');
+  assert.equal(spec.rigidBodies.length, 1);
+  assert.equal(spec.rigidWelds.length, 0);
+  assert.equal(spec.rigidBodies[0].compoundId, 'c0');
+  assert.ok(Array.isArray(spec.rigidBodies[0].subHulls));
+  assert.equal(spec.rigidBodies[0].subHulls.length, 2);
 });
 
 test('buildBodiesFromCreatureSpec ignores invalid joint references safely', () => {

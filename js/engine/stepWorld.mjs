@@ -1040,15 +1040,18 @@ export function stepWorld(state, dt, options = {}) {
   applyLandscapeDyeEmitters(state, runtimeConfig, dt, rng);
 
   if (state.fluidField) {
-    if (typeof state.fluidField.seedActiveTilesFromBodies === 'function') {
-      state.fluidField.seedActiveTilesFromBodies(state.softBodyPopulation);
+    if (typeof state.fluidField.seedCarrierTilesFromBodies === 'function') {
+      state.fluidField.seedCarrierTilesFromBodies(state.softBodyPopulation);
+    }
+    if (typeof state.fluidField.seedCarrierTilesFromParticles === 'function') {
+      state.fluidField.seedCarrierTilesFromParticles(state.particles);
     }
 
     const fluidStepEvery = Math.max(1, Math.floor(Number(runtimeConfig.FLUID_STEP_EVERY_N_TICKS) || 1));
     const worldTick = Math.max(0, Math.floor(Number(state.tick) || 0));
     if ((worldTick % fluidStepEvery) === 0) {
       state.fluidField.dt = dt * fluidStepEvery;
-      state.fluidField.step();
+      state.fluidField.step(worldTick);
     }
   }
 

@@ -815,7 +815,9 @@ function drawSnapshot(snap, { includePanels = true } = {}) {
         const dye = Number(cell.dye) || (r + g + b);
         const speed = Number(cell.speed) || 0;
 
-        const alpha = Math.max(0.03, Math.min(0.35, (dye / 255) * 0.35 + Math.min(0.15, speed * 0.04)));
+        const baseAlpha = (dye / 255) * 0.35 + Math.min(0.15, speed * 0.04);
+        const zoomOutBoost = Math.max(1, 0.25 / Math.max(0.0001, cam.zoom));
+        const alpha = Math.max(0.06, Math.min(0.85, baseAlpha * zoomOutBoost));
         ctx.fillStyle = `rgba(${Math.min(255, r)},${Math.min(255, g)},${Math.min(255, b)},${alpha})`;
 
         const x = Number(cell.x);

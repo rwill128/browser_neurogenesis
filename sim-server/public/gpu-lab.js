@@ -557,15 +557,15 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     softCarryTransfer += Math.hypot(carryX, carryY);
   }
 
-  for (let iter = 0; iter < 2; iter++) {
+  for (let iter = 0; iter < 5; iter++) {
     for (const [i, j, rest] of s.springs) {
       const a = s.nodes[i], b = s.nodes[j];
       const dx = b.x - a.x, dy = b.y - a.y;
       const d = Math.max(1e-6, Math.hypot(dx, dy));
-      const err = (d - rest) * 0.30;
+      const err = (d - rest) * 0.52;
       const nx = dx / d, ny = dy / d;
-      a.vx += nx * err * 0.02; a.vy += ny * err * 0.02;
-      b.vx -= nx * err * 0.02; b.vy -= ny * err * 0.02;
+      a.vx += nx * err * 0.028; a.vy += ny * err * 0.028;
+      b.vx -= nx * err * 0.028; b.vy -= ny * err * 0.028;
     }
   }
 

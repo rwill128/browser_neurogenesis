@@ -65,6 +65,52 @@ test('GPU-style fluid coupling works without IX/Vx arrays (sensor + swimmer + fl
   }
 });
 
+test('GPU-style coupling uses world-space fluid queries when scale != 1 (carry + drag + pushback)', () => {
+  const cfgBackup = {
+    DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED,
+    FLUID_CURRENT_STRENGTH_ON_BODY: config.FLUID_CURRENT_STRENGTH_ON_BODY,
+    BODY_FLUID_ENTRAINMENT_FACTOR: config.BODY_FLUID_ENTRAINMENT_FACTOR,
+    SWIMMER_TO_FLUID_FEEDBACK: config.SWIMMER_TO_FLUID_FEEDBACK
+  };
+
+  try {
+    config.DYE_ECOLOGY_ENABLED = false;
+    config.FLUID_CURRENT_STRENGTH_ON_BODY = 1;
+    config.BODY_FLUID_ENTRAINMENT_FACTOR = 0.35;
+    config.SWIMMER_TO_FLUID_FEEDBACK = 0.4;
+
+    const fluid = makeGpuStyleFluid({ vx: 1.5, vy: 0 });
+    fluid.scaleX = 10;
+    fluid.scaleY = 10;
+
+    const body = new SoftBody(9105, 80, 40, null, false);
+    const p = body.massPoints[0];
+    p.nodeType = NodeType.SWIMMER;
+    p.movementType = MovementType.FLOATING;
+    p.pos.x = 80;
+    p.prevPos.x = 80;
+    p.pos.y = 40;
+    p.prevPos.y = 40;
+    p.swimmerActuation = { magnitude: 1.2, angle: Math.PI };
+
+    body.massPoints = [p];
+    body.springs = [];
+
+    body._performPhysicalUpdates(1 / 60, fluid);
+
+    assert.ok(body.fluidCouplingCarryDisplacement > 0.05,
+      `expected measurable carry displacement from scaled world query, got ${body.fluidCouplingCarryDisplacement}`);
+    assert.ok(body.fluidCouplingDragForce > 0.01,
+      `expected drag from fluid/body relative velocity, got ${body.fluidCouplingDragForce}`);
+    assert.ok(body.fluidCouplingSwimToFluidImpulse > 0.05,
+      `expected active swimmer pushback into fluid, got ${body.fluidCouplingSwimToFluidImpulse}`);
+    assert.equal(fluid.calls.some((c) => c.amountX > 0), true, 'expected body->fluid feedback term');
+    assert.equal(fluid.calls.some((c) => c.amountX < 0), true, 'expected swimmer opposite-direction pushback');
+  } finally {
+    Object.assign(config, cfgBackup);
+  }
+});
+
 test('rigid-coupled point injects stronger feedback than soft-coupled point', () => {
   const cfgBackup = {
     DYE_ECOLOGY_ENABLED: config.DYE_ECOLOGY_ENABLED,

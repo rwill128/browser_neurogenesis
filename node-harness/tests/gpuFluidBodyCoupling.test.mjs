@@ -66,3 +66,17 @@ test('GPU fluid shadow path advects momentum to neighboring cells (current trans
   assert.ok(neighborAfter.vx > 1e-4, `expected downstream transported velocity, got ${neighborAfter.vx}`);
   assert.ok(sourceAfter.vx < 2.0, `expected source to diffuse/advect, got ${sourceAfter.vx}`);
 });
+
+test('GPU fluid world-space sampling respects scaleX/scaleY near origin for coupling queries', () => {
+  const fluid = makeShadowOnlyField({ size: 64, dt: 0.1, scaleX: 10, scaleY: 10 });
+
+  // Grid injection at (4,3) should be sampled from world (40,30).
+  fluid.addVelocity(4, 3, 3.25, -1.5);
+
+  const sampled = fluid.getVelocityAtWorld(40, 30);
+  const wrongCell = fluid.getVelocityAtWorld(4, 3);
+
+  assert.ok(sampled.vx > 3.0 && sampled.vy < -1.0, `expected world->grid mapping at scaled coord, got (${sampled.vx}, ${sampled.vy})`);
+  assert.ok(Math.abs(wrongCell.vx) < 1e-6 && Math.abs(wrongCell.vy) < 1e-6,
+    `expected world cell (4,3) to remain untouched under scaled mapping, got (${wrongCell.vx}, ${wrongCell.vy})`);
+});

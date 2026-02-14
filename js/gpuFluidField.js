@@ -504,18 +504,18 @@ export class GPUFluidField {
         }
     }
 
-    _toShadowGridCell(x, y) {
+    _toShadowGridCell(x, y, coordSpace = 'auto') {
         const rawX = Number(x);
         const rawY = Number(y);
         if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) return null;
 
-        // Accept both grid coordinates (common CPU call sites) and world coordinates.
-        const gx = (rawX <= this.size && rawY <= this.size)
-            ? Math.floor(rawX)
-            : Math.floor(rawX / Math.max(1e-6, this.scaleX));
-        const gy = (rawX <= this.size && rawY <= this.size)
-            ? Math.floor(rawY)
-            : Math.floor(rawY / Math.max(1e-6, this.scaleY));
+        // Explicit coordSpace avoids ambiguous near-origin world coords (e.g. worldX=40, scaleX=10).
+        // auto mode is retained for compatibility with legacy call sites.
+        const isGrid = coordSpace === 'grid'
+            || (coordSpace === 'auto' && Number.isInteger(rawX) && Number.isInteger(rawY) && rawX >= 0 && rawY >= 0 && rawX < this.size && rawY < this.size);
+
+        const gx = isGrid ? Math.floor(rawX) : Math.floor(rawX / Math.max(1e-6, this.scaleX));
+        const gy = isGrid ? Math.floor(rawY) : Math.floor(rawY / Math.max(1e-6, this.scaleY));
 
         const clampedX = Math.max(0, Math.min(this.size - 1, gx));
         const clampedY = Math.max(0, Math.min(this.size - 1, gy));
@@ -830,7 +830,7 @@ export class GPUFluidField {
     }
 
     addDensity(x, y, r, g, b, strength) {
-        const shadowCell = this._toShadowGridCell(x, y);
+        const shadowCell = this._toShadowGridCell(x, y, 'grid');
         if (shadowCell) {
             const idx = shadowCell.idx;
             const blend = Math.max(0, Math.min(1, (Number(strength) || 0) / 80));
@@ -895,7 +895,7 @@ export class GPUFluidField {
     }
 
     addVelocity(x, y, amountX, amountY, strength = 15) { // Added strength for radius
-        const shadowCell = this._toShadowGridCell(x, y);
+        const shadowCell = this._toShadowGridCell(x, y, 'grid');
         if (shadowCell) {
             const idx = shadowCell.idx;
             const vx = Number(amountX) || 0;
@@ -1107,14 +1107,14 @@ export class GPUFluidField {
     }
 
     getDensityAtWorld(worldX, worldY) {
-        const cell = this._toShadowGridCell(worldX, worldY);
+        const cell = this._toShadowGridCell(worldX, worldY, 'world');
         if (!cell) return [0, 0, 0, 0];
         const idx = cell.idx;
         return [this.shadowDensityR[idx], this.shadowDensityG[idx], this.shadowDensityB[idx], 1.0];
     }
 
     getVelocityAtWorld(worldX, worldY) {
-        const cell = this._toShadowGridCell(worldX, worldY);
+        const cell = this._toShadowGridCell(worldX, worldY, 'world');
         if (!cell) return { vx: 0, vy: 0 };
         const idx = cell.idx;
         return { vx: this.shadowVx[idx], vy: this.shadowVy[idx] };

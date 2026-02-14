@@ -91,31 +91,59 @@ function enforceConnectivity({ triangles, mode = 'none', minComponentTriangles =
     return { triangles, componentCount: triangles.length ? 1 : 0, keptComponents: triangles.length ? 1 : 0 };
   }
 
-  const nodeToTris = new Map();
+  // Keep connectivity decomposition material-aware so rigid and soft lattices
+  // do not erase one another when disconnected in the paint field.
+  const groups = new Map();
   for (let i = 0; i < triangles.length; i++) {
-    const t = triangles[i];
-    for (const n of [t.a, t.b, t.c]) {
-      if (!nodeToTris.has(n)) nodeToTris.set(n, []);
-      nodeToTris.get(n).push(i);
+    const kind = triangles[i].kind || 'unknown';
+    if (!groups.has(kind)) groups.set(kind, []);
+    groups.get(kind).push(i);
+  }
+
+  const keepSet = new Set();
+  let componentCount = 0;
+  let keptComponents = 0;
+
+  for (const indices of groups.values()) {
+    const components = collectTriangleComponents(triangles, indices);
+    componentCount += components.length;
+    const keep = pickComponentsToKeep(components, mode, minComponentTriangles);
+    keptComponents += keep.length;
+    for (const comp of keep) {
+      for (const triIdx of comp) keepSet.add(triIdx);
     }
   }
 
-  const seen = new Uint8Array(triangles.length);
+  const keptTriangles = triangles.filter((_, idx) => keepSet.has(idx));
+  return { triangles: keptTriangles, componentCount, keptComponents };
+}
+
+function collectTriangleComponents(triangles, indices) {
+  const nodeToTris = new Map();
+  for (const idx of indices) {
+    const t = triangles[idx];
+    for (const n of [t.a, t.b, t.c]) {
+      if (!nodeToTris.has(n)) nodeToTris.set(n, []);
+      nodeToTris.get(n).push(idx);
+    }
+  }
+
+  const seen = new Set();
   const components = [];
-  for (let i = 0; i < triangles.length; i++) {
-    if (seen[i]) continue;
-    const stack = [i];
-    seen[i] = 1;
+  for (const startIdx of indices) {
+    if (seen.has(startIdx)) continue;
+    const stack = [startIdx];
+    seen.add(startIdx);
     const comp = [];
     while (stack.length) {
-      const ti = stack.pop();
-      comp.push(ti);
-      const tri = triangles[ti];
+      const triIdx = stack.pop();
+      comp.push(triIdx);
+      const tri = triangles[triIdx];
       for (const n of [tri.a, tri.b, tri.c]) {
-        for (const ni of (nodeToTris.get(n) || [])) {
-          if (!seen[ni]) {
-            seen[ni] = 1;
-            stack.push(ni);
+        for (const nextIdx of (nodeToTris.get(n) || [])) {
+          if (!seen.has(nextIdx)) {
+            seen.add(nextIdx);
+            stack.push(nextIdx);
           }
         }
       }
@@ -124,16 +152,16 @@ function enforceConnectivity({ triangles, mode = 'none', minComponentTriangles =
   }
 
   components.sort((a, b) => b.length - a.length);
-  let keep = [];
+  return components;
+}
+
+function pickComponentsToKeep(components, mode, minComponentTriangles) {
+  if (!components.length) return [];
   if (mode === 'largest') {
-    const largest = components[0] || [];
     if (minComponentTriangles > 0) {
-      keep = components.filter((c, idx) => idx === 0 || c.length >= minComponentTriangles);
-    } else {
-      keep = largest.length ? [largest] : [];
+      return components.filter((c, idx) => idx === 0 || c.length >= minComponentTriangles);
     }
+    return [components[0]];
   }
-  const keepSet = new Set(keep.flat());
-  const keptTriangles = triangles.filter((_, idx) => keepSet.has(idx));
-  return { triangles: keptTriangles, componentCount: components.length, keptComponents: keep.length };
+  return components;
 }

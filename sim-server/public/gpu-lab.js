@@ -30,6 +30,9 @@ const massSoftEl = document.getElementById('massSoft');
 const bodyDragEl = document.getElementById('bodyDrag');
 const bodyFeedbackEl = document.getElementById('bodyFeedback');
 
+const GENERATED_MINI_SCENARIOS_URL = '/generated-mini-scenarios.json';
+let generatedMiniScenarios = new Map();
+
 function log(v) { out.textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2); }
 
 const WORKGROUP = 8;
@@ -833,9 +836,206 @@ function applyPresetViscosityTerrain(sim, preset) {
   uploadViscMap();
 }
 
+function cloneMiniBodies(miniBodies, controls) {
+  const rigid = Array.isArray(miniBodies?.rigid)
+    ? miniBodies.rigid.map((rb) => {
+        const sides = Math.max(3, Number(rb?.sides) || 3);
+        const edgeDyeMode = Array.isArray(rb?.edgeDyeMode)
+          ? rb.edgeDyeMode.map((m) => normalizeEdgeDyeModeRGB(m))
+          : Array.from({ length: sides }, () => [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT]);
+        const edgeBodyMode = Array.isArray(rb?.edgeBodyMode)
+          ? rb.edgeBodyMode.map((m) => Number(m) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK)
+          : Array.from({ length: sides }, () => EDGE_BODY_MODE.BLOCK);
+        const edgePermeabilityRGB = Array.isArray(rb?.edgePermeabilityRGB)
+          ? rb.edgePermeabilityRGB.map((m) => [Number(m?.[0]) > 0 ? 1 : 0, Number(m?.[1]) > 0 ? 1 : 0, Number(m?.[2]) > 0 ? 1 : 0])
+          : Array.from({ length: sides }, () => [0, 0, 0]);
+        const mass = Math.max(0.05, Number(rb?.mass) || controls.massHeavy || 3.5);
+        const r = Math.max(1.0, Number(rb?.r) || 6);
+        return {
+          x: Number(rb?.x) || 0,
+          y: Number(rb?.y) || 0,
+          vx: Number(rb?.vx) || 0,
+          vy: Number(rb?.vy) || 0,
+          r,
+          sides,
+          theta: Number(rb?.theta) || 0,
+          omega: Number(rb?.omega) || 0,
+          edgeDyeMode,
+          edgeBodyMode,
+          edgePermeabilityRGB,
+          digestEnabled: Boolean(rb?.digestEnabled),
+          digestRGB: Array.isArray(rb?.digestRGB) ? [Number(rb.digestRGB[0]) || 0, Number(rb.digestRGB[1]) || 0, Number(rb.digestRGB[2]) || 0] : [0, 0, 0],
+          consumeDyeRGB: Array.isArray(rb?.consumeDyeRGB) ? [Number(rb.consumeDyeRGB[0]) > 0 ? 1 : 0, Number(rb.consumeDyeRGB[1]) > 0 ? 1 : 0, Number(rb.consumeDyeRGB[2]) > 0 ? 1 : 0] : [0, 0, 0],
+          mass,
+          inertia: Math.max(0.05, Number(rb?.inertia) || (0.5 * mass * r * r)),
+          verticesLocal: Array.isArray(rb?.verticesLocal)
+            ? rb.verticesLocal.map((v) => ({ x: Number(v?.x) || 0, y: Number(v?.y) || 0 }))
+            : undefined,
+        };
+      })
+    : [];
+
+  const softNodes = Array.isArray(miniBodies?.soft?.nodes)
+    ? miniBodies.soft.nodes.map((n) => ({
+        x: Number(n?.x) || 0,
+        y: Number(n?.y) || 0,
+        vx: Number(n?.vx) || 0,
+        vy: Number(n?.vy) || 0,
+        mass: Math.max(0.02, Number(n?.mass) || controls.massSoft || 0.6),
+        r: Math.max(0.2, Number(n?.r) || 1.2),
+        clusterId: Number.isFinite(Number(n?.clusterId)) ? Number(n.clusterId) : 0,
+        digestEnabled: Boolean(n?.digestEnabled),
+        digestRGB: Array.isArray(n?.digestRGB) ? [Number(n.digestRGB[0]) || 0, Number(n.digestRGB[1]) || 0, Number(n.digestRGB[2]) || 0] : [0, 0, 0],
+      }))
+    : [];
+
+  const softSprings = Array.isArray(miniBodies?.soft?.springs)
+    ? miniBodies.soft.springs
+        .map((sp) => {
+          if (!Array.isArray(sp) || sp.length < 3) return null;
+          return [
+            Number(sp[0]) | 0,
+            Number(sp[1]) | 0,
+            Math.max(1e-3, Number(sp[2]) || 1),
+            Number(sp[3]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK,
+            normalizeEdgeDyeModeRGB(sp[4]),
+          ];
+        })
+        .filter(Boolean)
+    : [];
+
+  const hybrid = Array.isArray(miniBodies?.hybrid)
+    ? miniBodies.hybrid.map((h) => ({
+        rigidIndex: Number(h?.rigidIndex) | 0,
+        nodeIndex: Number(h?.nodeIndex) | 0,
+        vertexA: Number(h?.vertexA) | 0,
+        vertexB: Number(h?.vertexB) | 0,
+        restA: Math.max(0.8, Number(h?.restA) || 0.8),
+        restB: Math.max(0.8, Number(h?.restB) || 0.8),
+      }))
+    : [];
+
+  const rigidWelds = Array.isArray(miniBodies?.rigidWelds)
+    ? miniBodies.rigidWelds.map((w) => ({
+        a: Number(w?.a) | 0,
+        b: Number(w?.b) | 0,
+        rest: Number(w?.rest) || 0,
+      }))
+    : [];
+
+  return { rigid, soft: { nodes: softNodes, springs: softSprings }, hybrid, rigidWelds };
+}
+
+function getMiniScenarioFromPreset(preset) {
+  const p = String(preset || '');
+  if (!p.startsWith('mini:')) return null;
+  const id = p.slice(5);
+  return generatedMiniScenarios.get(id) || null;
+}
+
+function ensureGridOption(value) {
+  const s = String(value);
+  if (![...gridEl.options].some((o) => o.value === s)) {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    gridEl.appendChild(opt);
+  }
+}
+
+function ensureMiniScenarioGridSelection(preset) {
+  const mini = getMiniScenarioFromPreset(preset);
+  if (!mini) return null;
+  const requiredGrid = Math.max(32, Number(mini.grid) || 100);
+  ensureGridOption(requiredGrid);
+  if (String(gridEl.value) !== String(requiredGrid)) {
+    gridEl.value = String(requiredGrid);
+  }
+  return mini;
+}
+
+function applyMiniScenarioPreset(sim, mini) {
+  sim.bodies = cloneMiniBodies(mini?.bodies, sim.controls);
+  sim.emitters = Array.isArray(mini?.emitters)
+    ? mini.emitters.map((e) => ({ ...e }))
+    : [];
+
+  sim.frame = 0;
+  sim.couplingTelemetry = [];
+  sim.lastRigidContacts = [];
+  sim.viscMapCpu.fill(0.5);
+  uploadViscMap();
+  focusCameraOnBodies(sim, sim.bodies);
+
+  log({
+    ok: true,
+    msg: 'mini scenario loaded',
+    id: mini.id,
+    combo: mini.combo,
+    seed: mini.seed,
+    steps: mini.steps,
+    grid: mini.grid,
+  });
+}
+
+async function loadGeneratedMiniScenarios() {
+  if (!scenarioPresetEl) return;
+  const previous = scenarioPresetEl.value;
+  try {
+    const res = await fetch(`${GENERATED_MINI_SCENARIOS_URL}?t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) return;
+    const payload = await res.json();
+    const scenarios = Array.isArray(payload?.scenarios) ? payload.scenarios : [];
+
+    for (const opt of [...scenarioPresetEl.querySelectorAll('option[data-generated-mini="1"]')]) {
+      opt.remove();
+    }
+
+    generatedMiniScenarios = new Map();
+    const sorted = [...scenarios]
+      .filter((s) => s && s.id && s.bodies)
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+      .slice(0, 24);
+
+    for (const s of sorted) {
+      const id = String(s.id);
+      generatedMiniScenarios.set(id, s);
+      const opt = document.createElement('option');
+      opt.value = `mini:${id}`;
+      opt.dataset.generatedMini = '1';
+      const combo = s.combo || 'mixed';
+      const steps = Number(s.steps) || 0;
+      opt.textContent = `${s.name || `Mini ${id}`} (${combo}, ${steps} steps)`;
+      scenarioPresetEl.appendChild(opt);
+    }
+
+    if ([...scenarioPresetEl.options].some((o) => o.value === previous)) {
+      scenarioPresetEl.value = previous;
+    }
+  } catch {
+    // Optional file; ignore when absent.
+  }
+}
+
 function applyScenarioPreset(sim, preset) {
   if (!sim) return;
   const p = preset || 'baseline';
+  const mini = getMiniScenarioFromPreset(p);
+  if (mini) {
+    if (Number(mini.grid) !== sim.controls.n) {
+      log({
+        ok: false,
+        msg: 'mini scenario requires matching grid; select preset again to reinit',
+        id: mini.id,
+        requiredGrid: mini.grid,
+        currentGrid: sim.controls.n,
+      });
+      return;
+    }
+    applyMiniScenarioPreset(sim, mini);
+    return;
+  }
+
   sim.emitters = buildPresetEmitters(sim.controls.n, p);
   applyPresetViscosityTerrain(sim, p);
   sim.camera.x = sim.controls.n * 0.5;
@@ -2204,8 +2404,15 @@ async function start() {
   if (running) return;
   running = true;
   if (fpsHud) fpsHud.textContent = 'FPS: --';
+
+  const selectedPreset = scenarioPresetEl?.value || 'baseline';
+  if (selectedPreset.startsWith('mini:') && generatedMiniScenarios.size === 0) {
+    await loadGeneratedMiniScenarios();
+  }
+  ensureMiniScenarioGridSelection(selectedPreset);
+
   sim = await initSim();
-  applyScenarioPreset(sim, scenarioPresetEl?.value || 'baseline');
+  applyScenarioPreset(sim, selectedPreset);
   if (pendingImportedSpecs.length) {
     let lastImported = null;
     for (const spec of pendingImportedSpecs) {
@@ -2233,9 +2440,17 @@ runBtn.addEventListener('click', () => start().catch((e) => log({ ok: false, err
 stopBtn.addEventListener('click', stop);
 clearViscBtn.addEventListener('click', resetViscMap);
 if (scenarioPresetEl) {
-  scenarioPresetEl.addEventListener('change', () => {
+  scenarioPresetEl.addEventListener('change', async () => {
+    const preset = scenarioPresetEl.value || 'baseline';
+    const mini = ensureMiniScenarioGridSelection(preset);
     if (!sim) return;
-    applyScenarioPreset(sim, scenarioPresetEl.value || 'baseline');
+    if (mini && sim.controls.n !== Number(mini.grid || sim.controls.n)) {
+      running = false;
+      sim = null;
+      await start();
+      return;
+    }
+    applyScenarioPreset(sim, preset);
   });
 }
 
@@ -2283,4 +2498,6 @@ if (importSpecBtn && importSpecFile) {
   });
 }
 
-log('ready: choose scenario, paint, then Start');
+loadGeneratedMiniScenarios().finally(() => {
+  log('ready: choose scenario, paint, then Start');
+});

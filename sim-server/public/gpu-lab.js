@@ -2177,6 +2177,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       elongationBiasMax: recovering ? 1.22 : 1.08,
       compressionBiasMax: recovering ? 1.12 : 1.04,
       errorPivot: 0.16,
+      outlierRecoveryCouplingMax: recovering ? 1.22 : 1.05,
+      outlierErrorPivot: recovering ? 0.75 : 0.95,
     });
   }
   sim.softDeformationState = deform;

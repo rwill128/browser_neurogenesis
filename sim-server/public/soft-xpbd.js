@@ -193,6 +193,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   nearBaselineSnapBlend = 0.85,
   globalErrorCouplingMax = 1.25,
   globalDirectionalCouplingMax = 1.18,
+  outlierRecoveryCouplingMax = 1.22,
+  outlierErrorPivot = 0.75,
 } = {}) {
   if (!Array.isArray(springs) || !restBaseline || typeof restBaseline.length !== 'number') return 0;
 
@@ -213,6 +215,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const snapBlend = clamp(Number(nearBaselineSnapBlend) || 0, 0, 1);
   const globalCouplingMax = Math.max(1, Number(globalErrorCouplingMax) || 1);
   const directionalCouplingMax = Math.max(1, Number(globalDirectionalCouplingMax) || 1);
+  const outlierCouplingMax = Math.max(1, Number(outlierRecoveryCouplingMax) || 1);
+  const outlierPivot = Math.max(1e-6, Number(outlierErrorPivot) || 0.75);
 
   let touched = 0;
   const n = Math.min(springs.length, restBaseline.length);
@@ -253,7 +257,12 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       ? 0
       : (Math.sign(signedErrNorm) === Math.sign(meanSignedErrNorm) ? 1 : 0);
     const directionalBoost = 1 + (directionalCouplingMax - 1) * globalDirectionalAlpha * directionalAligned;
-    const boost = (1 + (gainMax - 1) * adaptiveErr * dirBoost) * globalBoost * directionalBoost;
+    const outlierRatio = (adaptiveMode && outlierCouplingMax > 1.0001 && meanErrCount > 0)
+      ? (errNorm / Math.max(1e-6, meanErrNorm || 0))
+      : 1;
+    const outlierAlpha = clamp((outlierRatio - 1) / outlierPivot, 0, 1);
+    const outlierBoost = 1 + (outlierCouplingMax - 1) * outlierAlpha;
+    const boost = (1 + (gainMax - 1) * adaptiveErr * dirBoost) * globalBoost * directionalBoost * outlierBoost;
     const recover = clamp(k * boost, 0, 1);
 
     // As we approach baseline, gradually tighten allowable rest-length range to reduce

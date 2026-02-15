@@ -5,6 +5,9 @@ const EDGE_DYE_PASS = 0;
 const EDGE_DYE_DEFLECT = 1;
 const EDGE_DYE_ABSORB = 2;
 const EDGE_DYE_DEFLECT_RGB = [EDGE_DYE_DEFLECT, EDGE_DYE_DEFLECT, EDGE_DYE_DEFLECT];
+const MEMBRANE_DEFAULT_PRESSURE_GAIN = 0.08;
+const MEMBRANE_DEFAULT_RADIAL_DAMPING = 0.06;
+const MEMBRANE_DEFAULT_SHAPE_MEMORY_GAIN = 0.045;
 
 function normalizeSoftSolverMode(mode) {
   return String(mode || '').toLowerCase() === 'membrane' ? 'membrane' : 'spring';
@@ -214,8 +217,9 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
       softMembraneClusters.push({
         clusterId,
         restArea: Math.max(1e-4, Number(sb?.restArea) || 0),
-        pressureGain: Math.max(0.001, Number(sb?.pressureGain) || 0.08),
-        radialDamping: Math.max(0, Number(sb?.radialDamping) || 0.06),
+        pressureGain: Math.max(0.001, Number(sb?.pressureGain) || MEMBRANE_DEFAULT_PRESSURE_GAIN),
+        radialDamping: Math.max(0, Math.min(0.2, Number(sb?.radialDamping) || MEMBRANE_DEFAULT_RADIAL_DAMPING)),
+        shapeMemoryGain: Math.max(0, Math.min(0.35, Number(sb?.shapeMemoryGain) || MEMBRANE_DEFAULT_SHAPE_MEMORY_GAIN)),
         solverMode,
       });
     }
@@ -609,6 +613,8 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
       springSet.add(springKey(a, b));
     }
 
+    const boundaryLoops = buildBoundaryLoopsFromEdgeList(boundaryEdges, softNodes.length);
+
     if (enableSeamWeldSprings) {
       for (const [k, c] of edgeCount.entries()) {
         if (c !== 2) continue;
@@ -678,7 +684,7 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
     }
 
     if (enableBoundaryRing) {
-      const loops = buildBoundaryLoopsFromEdgeList(boundaryEdges, softNodes.length);
+      const loops = boundaryLoops;
       const boundaryEdgeRestByKey = new Map();
       for (const [a, b] of boundaryEdges) {
         if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
@@ -740,17 +746,86 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
         : softSolverModeDefault);
     const solverMode = normalizeSoftSolverMode(modeRaw);
 
-    softBodies.push({
+    let exportNodes = softNodes;
+    let exportSprings = springs;
+    let exportNodeIds = pointIds;
+    let exportSourceToLocal = remap;
+    let membraneRestArea = null;
+
+    if (solverMode === 'membrane') {
+      const majorLoop = [...boundaryLoops].sort((a, b) => (b?.length || 0) - (a?.length || 0))[0] || null;
+      if (Array.isArray(majorLoop) && majorLoop.length >= 3) {
+        const oldToNew = new Map();
+        const membraneNodes = [];
+        const membraneNodeIds = new Set();
+        const membraneSourceToLocal = new Map();
+
+        for (const oldIdxRaw of majorLoop) {
+          const oldIdx = Number(oldIdxRaw);
+          if (!Number.isInteger(oldIdx) || oldToNew.has(oldIdx)) continue;
+          const srcId = ids[oldIdx];
+          const srcNode = softNodes[oldIdx];
+          if (!srcNode || !Number.isInteger(srcId)) continue;
+          const newIdx = membraneNodes.length;
+          oldToNew.set(oldIdx, newIdx);
+          membraneNodes.push({ ...srcNode });
+          membraneNodeIds.add(srcId);
+          membraneSourceToLocal.set(srcId, newIdx);
+        }
+
+        const membraneSprings = [];
+        if (membraneNodes.length >= 3) {
+          for (let i = 0; i < majorLoop.length; i++) {
+            const aOld = Number(majorLoop[i]);
+            const bOld = Number(majorLoop[(i + 1) % majorLoop.length]);
+            const a = oldToNew.get(aOld);
+            const b = oldToNew.get(bOld);
+            if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
+            const pa = membraneNodes[a];
+            const pb = membraneNodes[b];
+            membraneSprings.push([
+              a,
+              b,
+              Math.max(1e-3, Math.hypot(pb.x - pa.x, pb.y - pa.y)),
+              EDGE_BODY_BLOCK,
+              [...EDGE_DYE_DEFLECT_RGB],
+            ]);
+          }
+        }
+
+        if (membraneNodes.length >= 3 && membraneSprings.length >= 3) {
+          membraneRestArea = Math.max(1e-4, polygonAreaAbs(membraneNodes));
+          exportNodes = membraneNodes;
+          exportSprings = membraneSprings;
+          exportNodeIds = membraneNodeIds;
+          exportSourceToLocal = membraneSourceToLocal;
+        }
+      }
+
+      if (!Number.isFinite(membraneRestArea) || membraneRestArea <= 0) {
+        membraneRestArea = Math.max(1e-4, polygonAreaAbs(exportNodes));
+      }
+    }
+
+    const softBody = {
       id: `soft_${bodyIndex}`,
       solverMode,
-      nodes: softNodes,
-      springs,
-    });
+      nodes: exportNodes,
+      springs: exportSprings,
+    };
+    if (solverMode === 'membrane') {
+      softBody.restArea = Math.max(1e-4, Number(options?.membraneRestArea) || membraneRestArea || 1);
+      softBody.pressureGain = Math.max(0.001, Number(options?.membranePressureGain) || MEMBRANE_DEFAULT_PRESSURE_GAIN);
+      softBody.radialDamping = Math.max(0, Math.min(0.2, Number(options?.membraneRadialDamping) || MEMBRANE_DEFAULT_RADIAL_DAMPING));
+      softBody.shapeMemoryGain = Math.max(0, Math.min(0.35, Number(options?.membraneShapeMemoryGain) || MEMBRANE_DEFAULT_SHAPE_MEMORY_GAIN));
+    }
+
+    softBodies.push(softBody);
 
     components.push({
       index: bodyIndex,
-      nodeIds: pointIds,
-      sourceToLocal: remap,
+      nodeIds: exportNodeIds,
+      sourceToLocal: exportSourceToLocal,
     });
   }
 

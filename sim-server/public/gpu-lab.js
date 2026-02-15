@@ -56,6 +56,9 @@ const SOFT_DEFORM_SEVERE_AREA_RATIO_MAX = 5.0;
 const MEMBRANE_CELL_BASE_COUNT = 4;
 const MEMBRANE_CELL_BASE_PRESSURE_GAIN = 0.08;
 const MEMBRANE_CELL_BASE_RADIAL_DAMPING = 0.06;
+const MEMBRANE_SHAPE_MEMORY_GAIN = 0.045;
+const MEMBRANE_SHAPE_MEMORY_ITERS = 2;
+const MEMBRANE_SHAPE_MEMORY_MAX_SHIFT_FRAC = 0.08;
 const MEMBRANE_EDGE_XPBD_ITERS = 8;
 const MEMBRANE_EDGE_BASE_COMPLIANCE = 0.0007;
 const MEMBRANE_BEND_XPBD_ITERS = 4;
@@ -605,6 +608,7 @@ function pushMembraneCellCluster({
     restArea: Math.max(1e-4, Math.abs(polygonSignedAreaPoints(ring))),
     pressureGain: MEMBRANE_CELL_BASE_PRESSURE_GAIN,
     radialDamping: MEMBRANE_CELL_BASE_RADIAL_DAMPING,
+    shapeMemoryGain: MEMBRANE_SHAPE_MEMORY_GAIN,
   };
 }
 
@@ -1070,6 +1074,7 @@ function cloneMiniBodies(miniBodies, controls) {
           restArea: Number(c?.restArea),
           pressureGain: Number(c?.pressureGain),
           radialDamping: Number(c?.radialDamping),
+          shapeMemoryGain: Number(c?.shapeMemoryGain),
         }))
         .filter((c) => Number.isInteger(c.clusterId))
         .map((c) => ({
@@ -1077,6 +1082,7 @@ function cloneMiniBodies(miniBodies, controls) {
           restArea: Number.isFinite(c.restArea) && c.restArea > 0 ? c.restArea : 1,
           pressureGain: Number.isFinite(c.pressureGain) && c.pressureGain > 0 ? c.pressureGain : MEMBRANE_CELL_BASE_PRESSURE_GAIN,
           radialDamping: Number.isFinite(c.radialDamping) ? clamp(c.radialDamping, 0, 0.2) : MEMBRANE_CELL_BASE_RADIAL_DAMPING,
+          shapeMemoryGain: Number.isFinite(c.shapeMemoryGain) ? clamp(c.shapeMemoryGain, 0, 0.35) : MEMBRANE_SHAPE_MEMORY_GAIN,
         }))
     : [];
 
@@ -1135,6 +1141,7 @@ function applyMiniScenarioPreset(sim, mini) {
   sim.softMembraneAreaBaseline = null;
   sim.softMembraneLoopState = null;
   sim.softMembraneClusterSet = null;
+  sim.softMembraneClusterMap = null;
   sim.viscMapCpu.fill(0.5);
   uploadViscMap();
   focusCameraOnBodies(sim, sim.bodies);
@@ -1608,11 +1615,15 @@ function signedAreaCurrent(nodes, indices) {
 
 function ensureSoftMembraneClusterSet(sim) {
   const set = new Set();
+  const map = new Map();
   for (const c of (sim?.bodies?.softMembraneClusters || [])) {
     const cid = Number(c?.clusterId);
-    if (Number.isInteger(cid)) set.add(cid);
+    if (!Number.isInteger(cid)) continue;
+    set.add(cid);
+    map.set(cid, c);
   }
   sim.softMembraneClusterSet = set;
+  sim.softMembraneClusterMap = map;
   return set;
 }
 
@@ -1638,18 +1649,47 @@ function ensureSoftMembraneLoopState(sim, s, loops) {
         edgeLambda: new Float32Array(ids.length),
         bendRest: new Float32Array(ids.length),
         bendLambda: new Float32Array(ids.length),
+        shapeRef: new Float32Array(ids.length * 2),
+        shapeRefRms: 1,
       };
+
+      let cx = 0;
+      let cy = 0;
+      let count = 0;
+      for (let i = 0; i < ids.length; i++) {
+        const node = s.nodes[ids[i]];
+        if (!node) continue;
+        cx += node.x || 0;
+        cy += node.y || 0;
+        count += 1;
+      }
+      if (count > 0) {
+        cx /= count;
+        cy /= count;
+      }
+
+      let refR2 = 0;
       for (let i = 0; i < ids.length; i++) {
         const a = s.nodes[ids[i]];
         const b = s.nodes[ids[(i + 1) % ids.length]];
-        if (!a || !b) continue;
-        st.edgeRest[i] = Math.max(1e-4, Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0)));
+        if (a && b) {
+          st.edgeRest[i] = Math.max(1e-4, Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0)));
+        }
 
         const p = s.nodes[ids[(i - 1 + ids.length) % ids.length]];
         const n = s.nodes[ids[(i + 1) % ids.length]];
-        if (!p || !n) continue;
-        st.bendRest[i] = Math.max(1e-4, Math.hypot((n.x || 0) - (p.x || 0), (n.y || 0) - (p.y || 0)));
+        if (p && n) {
+          st.bendRest[i] = Math.max(1e-4, Math.hypot((n.x || 0) - (p.x || 0), (n.y || 0) - (p.y || 0)));
+        }
+
+        const node = s.nodes[ids[i]];
+        const rx = (node?.x || 0) - cx;
+        const ry = (node?.y || 0) - cy;
+        st.shapeRef[i * 2] = rx;
+        st.shapeRef[i * 2 + 1] = ry;
+        refR2 += rx * rx + ry * ry;
       }
+      st.shapeRefRms = Math.max(1e-3, Math.sqrt(refR2 / Math.max(1, ids.length)));
       sim.softMembraneLoopState.set(cid, st);
     }
   }
@@ -1758,6 +1798,96 @@ function applySoftMembraneBoundaryXPBDVelocity(sim, s, loops, dtPos) {
         next.vx += (wN * dl * ux) / dtPos;
         next.vy += (wN * dl * uy) / dtPos;
       }
+    }
+  }
+
+  return touched;
+}
+
+function applySoftMembraneShapeMemoryVelocity(sim, s, loops, dtPos) {
+  const clusterMap = sim?.softMembraneClusterMap;
+  if (!(clusterMap instanceof Map) || clusterMap.size === 0) return 0;
+
+  let touched = 0;
+  for (let iter = 0; iter < MEMBRANE_SHAPE_MEMORY_ITERS; iter++) {
+    for (const loop of loops || []) {
+      const cid = Number(loop?.clusterId);
+      if (!Number.isInteger(cid)) continue;
+      const membrane = clusterMap.get(cid);
+      if (!membrane) continue;
+
+      const shapeMemoryGainRaw = Number(membrane?.shapeMemoryGain);
+      const shapeMemoryGain = Number.isFinite(shapeMemoryGainRaw)
+        ? clamp(shapeMemoryGainRaw, 0, 0.35)
+        : MEMBRANE_SHAPE_MEMORY_GAIN;
+      if (shapeMemoryGain <= 1e-6) continue;
+
+      const ids = loop.indices || [];
+      if (ids.length < 3) continue;
+      const st = sim.softMembraneLoopState?.get(cid);
+      if (!st || !(st.shapeRef instanceof Float32Array) || st.shapeRef.length !== ids.length * 2) continue;
+
+      let cx = 0;
+      let cy = 0;
+      let count = 0;
+      for (const idx of ids) {
+        const node = s.nodes[idx];
+        if (!node) continue;
+        cx += (node.x || 0) + (node.vx || 0) * dtPos;
+        cy += (node.y || 0) + (node.vy || 0) * dtPos;
+        count += 1;
+      }
+      if (count < 3) continue;
+      cx /= count;
+      cy /= count;
+
+      let dot = 0;
+      let cross = 0;
+      for (let i = 0; i < ids.length; i++) {
+        const node = s.nodes[ids[i]];
+        if (!node) continue;
+        const px = (node.x || 0) + (node.vx || 0) * dtPos - cx;
+        const py = (node.y || 0) + (node.vy || 0) * dtPos - cy;
+        const rx = st.shapeRef[i * 2] || 0;
+        const ry = st.shapeRef[i * 2 + 1] || 0;
+        dot += rx * px + ry * py;
+        cross += rx * py - ry * px;
+      }
+
+      const theta = (Math.abs(dot) + Math.abs(cross)) > 1e-9 ? Math.atan2(cross, dot) : 0;
+      const c = Math.cos(theta);
+      const sn = Math.sin(theta);
+      const maxShift = Math.max(0.02, (st.shapeRefRms || 1) * MEMBRANE_SHAPE_MEMORY_MAX_SHIFT_FRAC);
+
+      for (let i = 0; i < ids.length; i++) {
+        const node = s.nodes[ids[i]];
+        if (!node) continue;
+
+        const px = (node.x || 0) + (node.vx || 0) * dtPos;
+        const py = (node.y || 0) + (node.vy || 0) * dtPos;
+        const rx = st.shapeRef[i * 2] || 0;
+        const ry = st.shapeRef[i * 2 + 1] || 0;
+
+        const tx = cx + rx * c - ry * sn;
+        const ty = cy + rx * sn + ry * c;
+
+        let ex = tx - px;
+        let ey = ty - py;
+        const eLen = Math.hypot(ex, ey);
+        if (!Number.isFinite(eLen) || eLen <= 1e-7) continue;
+        if (eLen > maxShift) {
+          const k = maxShift / eLen;
+          ex *= k;
+          ey *= k;
+        }
+
+        const invMass = 1 / Math.max(0.02, Number(node.mass) || 1);
+        const corrPos = shapeMemoryGain * invMass;
+        node.vx += (ex * corrPos) / dtPos;
+        node.vy += (ey * corrPos) / dtPos;
+      }
+
+      touched += 1;
     }
   }
 
@@ -2192,6 +2322,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     blockMode: EDGE_BODY_MODE.BLOCK,
   });
   const membraneBoundaryClusters = applySoftMembraneBoundaryXPBDVelocity(sim, s, softClusterLoops, dtPos);
+  const membraneShapeClusters = applySoftMembraneShapeMemoryVelocity(sim, s, softClusterLoops, dtPos);
   ensureSoftAreaRestState(sim, s, softClusterLoops, dtPos);
   applySoftAreaXPBDVelocity(sim, s, softClusterLoops, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT);
   const membranePressureClusters = applySoftMembraneCellPressure(sim, s, softClusterLoops, dtPos);
@@ -2441,6 +2572,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     softDeformWorstAreaRatio: Number.isFinite(deform.worstAreaRatio) ? deform.worstAreaRatio : 1,
     membraneCellClusters: Array.isArray(sim?.bodies?.softMembraneClusters) ? sim.bodies.softMembraneClusters.length : 0,
     membraneBoundaryClusters,
+    membraneShapeClusters,
     membranePressureClusters,
     softDtUsed: dt,
     softDtRaw: dtRaw,
@@ -2749,6 +2881,7 @@ function mergeBodiesIntoSim(target, incoming) {
       restArea: Number.isFinite(Number(c?.restArea)) ? Math.max(1e-4, Number(c.restArea)) : 1,
       pressureGain: Number.isFinite(Number(c?.pressureGain)) ? Math.max(0.001, Number(c.pressureGain)) : MEMBRANE_CELL_BASE_PRESSURE_GAIN,
       radialDamping: Number.isFinite(Number(c?.radialDamping)) ? clamp(Number(c.radialDamping), 0, 0.2) : MEMBRANE_CELL_BASE_RADIAL_DAMPING,
+      shapeMemoryGain: Number.isFinite(Number(c?.shapeMemoryGain)) ? clamp(Number(c.shapeMemoryGain), 0, 0.35) : MEMBRANE_SHAPE_MEMORY_GAIN,
     });
   }
 

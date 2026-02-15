@@ -89,11 +89,14 @@ test('soft solver mode is exported and membrane mode is mapped on import bodies'
     softBoundaryRingSprings: false,
   });
   assert.equal(membraneSpec.softBodies[0].solverMode, 'membrane');
+  assert.ok(Number(membraneSpec.softBodies[0].restArea) > 0);
+  assert.ok(Number(membraneSpec.softBodies[0].shapeMemoryGain) > 0);
 
   const importedMembrane = buildBodiesFromCreatureSpec(membraneSpec, 64, CONTROLS);
   assert.ok(Array.isArray(importedMembrane.softMembraneClusters));
   assert.equal(importedMembrane.softMembraneClusters.length, 1);
   assert.equal(importedMembrane.softMembraneClusters[0].clusterId, 0);
+  assert.ok(Number(importedMembrane.softMembraneClusters[0].shapeMemoryGain) > 0);
 
   const springSpec = createCreatureSpecFromMesh(mesh, {
     softSolverMode: 'spring',

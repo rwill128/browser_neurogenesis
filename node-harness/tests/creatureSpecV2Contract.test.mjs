@@ -87,7 +87,7 @@ test('createCreatureSpecFromMesh carries compiler soft cross-beams into soft spr
     meta: { width: 8, height: 8 },
   };
 
-  const spec = createCreatureSpecFromMesh(mesh);
+  const spec = createCreatureSpecFromMesh(mesh, { softBoundaryRingSprings: false });
   assert.equal(spec.softBodies.length, 1);
   const springs = spec.softBodies[0].springs || [];
 
@@ -102,6 +102,33 @@ test('createCreatureSpecFromMesh carries compiler soft cross-beams into soft spr
 
   assert.ok(hasPrimaryDiag, 'expected existing triangle diagonal spring');
   assert.ok(hasCrossBeamDiag, 'expected compiler cross-beam diagonal spring');
+});
+
+test('createCreatureSpecFromMesh can reinforce soft perimeter with border-ring springs', () => {
+  const mesh = {
+    nodes: [
+      { id: 0, x: 0, y: 0, rigid: 0, soft: 1 },
+      { id: 1, x: 4, y: 0, rigid: 0, soft: 1 },
+      { id: 2, x: 0, y: 4, rigid: 0, soft: 1 },
+      { id: 3, x: 4, y: 4, rigid: 0, soft: 1 },
+    ],
+    triangles: [
+      { kind: 'soft', a: 0, b: 1, c: 2 },
+      { kind: 'soft', a: 1, b: 3, c: 2 },
+    ],
+    meta: { width: 8, height: 8 },
+  };
+
+  const withoutRing = createCreatureSpecFromMesh(mesh, { softBoundaryRingSprings: false });
+  const withRing = createCreatureSpecFromMesh(mesh, { softBoundaryRingSprings: true, softBoundaryRingStride: 2 });
+
+  const hasOpposingDiag = (springs) => springs.some((s) => {
+    const [a, b] = s;
+    return (a === 0 && b === 3) || (a === 3 && b === 0);
+  });
+
+  assert.ok(!hasOpposingDiag(withoutRing.softBodies[0].springs || []), 'without perimeter ring, opposite diagonal should be absent');
+  assert.ok(hasOpposingDiag(withRing.softBodies[0].springs || []), 'perimeter ring should add reinforcing opposite diagonal spring');
 });
 
 test('createCreatureSpecFromMesh merges adjacent rigid triangles into a single convex rigid body', () => {

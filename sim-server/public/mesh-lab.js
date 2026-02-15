@@ -13,6 +13,7 @@ const thresholdEl = document.getElementById('threshold');
 const softDensityPaintEl = document.getElementById('softDensityPaint');
 const softInfillModeEl = document.getElementById('softInfillMode');
 const softMinCellSizeEl = document.getElementById('softMinCellSize');
+const softBoundaryRingEl = document.getElementById('softBoundaryRing');
 const clearBtn = document.getElementById('clearBtn');
 const compileBtn = document.getElementById('compileBtn');
 const exportBtn = document.getElementById('exportBtn');
@@ -226,6 +227,7 @@ exportBtn.addEventListener('click', () => {
   const spec = createCreatureSpecFromMesh(lastMesh, {
     name: 'mesh-lab-creature',
     fields: { rigidField: rigid, softField: soft, softDensityField: softDensity },
+    softBoundaryRingSprings: !!softBoundaryRingEl?.checked,
   });
   const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');

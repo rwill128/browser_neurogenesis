@@ -441,7 +441,85 @@ function convexHullWithIds(pointsWithIds) {
   return [...lower, ...upper];
 }
 
+function buildBoundaryLoopsFromEdgeList(edges, nodeCount) {
+  const adjacency = new Map();
+  const unique = new Set();
+  const edgeKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
+
+  for (const e of (edges || [])) {
+    const a = Number(e?.[0]);
+    const b = Number(e?.[1]);
+    if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
+    const k = edgeKey(a, b);
+    if (unique.has(k)) continue;
+    unique.add(k);
+    if (!adjacency.has(a)) adjacency.set(a, []);
+    if (!adjacency.has(b)) adjacency.set(b, []);
+    adjacency.get(a).push(b);
+    adjacency.get(b).push(a);
+  }
+
+  for (const vs of adjacency.values()) vs.sort((a, b) => a - b);
+
+  const orderedEdges = [...unique]
+    .map((k) => k.split('-').map((x) => Number(x)))
+    .sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+
+  const used = new Set();
+  const loops = [];
+
+  for (const [startA, startB] of orderedEdges) {
+    const startKey = edgeKey(startA, startB);
+    if (used.has(startKey)) continue;
+
+    const loop = [startA, startB];
+    used.add(startKey);
+
+    let prev = startA;
+    let curr = startB;
+    let closed = false;
+    const guard = Math.max(16, nodeCount * 4 + 8);
+
+    for (let iter = 0; iter < guard; iter++) {
+      const neighbors = adjacency.get(curr) || [];
+      let next = null;
+      for (const n of neighbors) {
+        if (n === prev) continue;
+        const ek = edgeKey(curr, n);
+        if (used.has(ek)) continue;
+        next = n;
+        break;
+      }
+
+      if (next == null) {
+        const closeKey = edgeKey(curr, startA);
+        if (curr !== startA && neighbors.includes(startA) && !used.has(closeKey)) {
+          used.add(closeKey);
+          closed = true;
+        }
+        break;
+      }
+
+      used.add(edgeKey(curr, next));
+      if (next === startA) {
+        closed = true;
+        break;
+      }
+
+      loop.push(next);
+      prev = curr;
+      curr = next;
+    }
+
+    if (closed && loop.length >= 3) loops.push(loop);
+  }
+
+  return loops;
+}
+
 function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
+  const enableBoundaryRing = options?.softBoundaryRingSprings !== false;
+  const boundaryRingStrideRaw = Math.max(2, Math.round(Number(options?.softBoundaryRingStride) || 2));
   const comps = triangleComponents(tris);
   const softBodies = [];
   const components = [];
@@ -478,6 +556,7 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
     const springs = [];
     const springSet = new Set();
     const springKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
+    const boundaryEdges = [];
 
     for (const [k, c] of edgeCount.entries()) {
       const [ua, ub] = k.split('-').map((x) => Number(x));
@@ -496,6 +575,7 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
         boundary ? EDGE_BODY_BLOCK : 0,
         boundary ? [...EDGE_DYE_DEFLECT_RGB] : [0, 0, 0],
       ]);
+      if (boundary) boundaryEdges.push([a, b]);
       springSet.add(springKey(a, b));
     }
 
@@ -519,6 +599,37 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
         [0, 0, 0],
       ]);
       springSet.add(key);
+    }
+
+    if (enableBoundaryRing) {
+      const loops = buildBoundaryLoopsFromEdgeList(boundaryEdges, softNodes.length);
+      for (const loop of loops) {
+        if (!Array.isArray(loop) || loop.length < 4) continue;
+        const stride = Math.max(2, Math.min(Math.floor(loop.length / 2), boundaryRingStrideRaw));
+        if (!Number.isInteger(stride) || stride < 2) continue;
+
+        for (let i = 0; i < loop.length; i++) {
+          const a = loop[i];
+          const b = loop[(i + stride) % loop.length];
+          if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
+
+          const key = springKey(a, b);
+          if (springSet.has(key)) continue;
+
+          const pa = softNodes[a];
+          const pb = softNodes[b];
+          if (!pa || !pb) continue;
+
+          springs.push([
+            a,
+            b,
+            Math.max(1e-3, Math.hypot(pb.x - pa.x, pb.y - pa.y)),
+            0,
+            [0, 0, 0],
+          ]);
+          springSet.add(key);
+        }
+      }
     }
 
     const bodyIndex = softBodies.length;

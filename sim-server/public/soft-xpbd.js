@@ -182,6 +182,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   hardMaxFactor = 1.6,
   jitterDeadband = 1e-4,
   adaptiveGainMax = 2.4,
+  adaptiveExponent = 0.8,
+  elongationBiasMax = 1.22,
   errorPivot = 0.16,
   convergenceWindow = 0.12,
   convergenceBiasMax = 0.96,
@@ -195,6 +197,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const eps = Math.max(0, Number(jitterDeadband) || 0);
   const gainMax = Math.max(1, Number(adaptiveGainMax) || 1);
   const adaptiveMode = gainMax > 1.0001;
+  const exponent = Math.max(0.25, Math.min(2, Number(adaptiveExponent) || 0.8));
+  const elongationBias = Math.max(1, Number(elongationBiasMax) || 1);
   const pivot = Math.max(1e-6, Number(errorPivot) || 0.16);
   const window = Math.max(1e-6, Number(convergenceWindow) || 0.12);
   const biasMax = clamp(Number(convergenceBiasMax) || 0, 0, 0.999);
@@ -210,7 +214,9 @@ export function recoverSoftSpringRests(springs, restBaseline, {
     const current = Number(sp[2]);
     const cur = Number.isFinite(current) ? current : base;
     const errNorm = Math.abs(base - cur) / base;
-    const boost = 1 + (gainMax - 1) * Math.min(1, errNorm / pivot);
+    const adaptiveErr = Math.min(1, Math.pow(errNorm / pivot, exponent));
+    const dirBoost = (cur > base) ? elongationBias : 1;
+    const boost = 1 + (gainMax - 1) * adaptiveErr * dirBoost;
     const recover = clamp(k * boost, 0, 1);
 
     // As we approach baseline, gradually tighten allowable rest-length range to reduce

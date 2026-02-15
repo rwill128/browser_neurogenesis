@@ -2173,6 +2173,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       hardMaxFactor: 1.45,
       jitterDeadband: 1e-5,
       adaptiveGainMax: recovering ? 2.4 : 1.35,
+      adaptiveExponent: recovering ? 0.78 : 1.0,
+      elongationBiasMax: recovering ? 1.22 : 1.08,
       errorPivot: 0.16,
     });
   }

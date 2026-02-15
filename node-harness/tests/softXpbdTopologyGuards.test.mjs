@@ -27,6 +27,21 @@ test('sanitizeSoftSprings drops malformed/out-of-range entries deterministically
   assert.ok(out.springs[1][2] >= 1e-3, 'rest should be clamped to finite floor');
 });
 
+test('sanitizeSoftSprings de-duplicates undirected spring pairs to avoid double constraints', () => {
+  const raw = [
+    [0, 2, 1.0, 1, [1, 1, 1]],
+    [2, 0, 1.0, 1, [1, 1, 1]], // duplicate reversed edge
+    [0, 2, 1.0, 0, [0, 0, 0]], // duplicate same orientation, different mode
+    [2, 3, 1.5, 1, [1, 1, 1]],
+  ];
+
+  const out = sanitizeSoftSprings(raw, 5, { edgeBodyPass: 0, edgeBodyBlock: 1, restFloor: 1e-3 });
+  assert.equal(out.springs.length, 2);
+  assert.equal(out.dropped, 2);
+  assert.deepEqual(out.springs[0].slice(0, 4), [0, 2, 1, 1]);
+  assert.deepEqual(out.springs[1].slice(0, 4), [2, 3, 1.5, 1]);
+});
+
 test('buildSoftClusterBoundaryLoops prefers boundary BLOCK cycle and ignores interior nodes', () => {
   const nodes = [
     { x: 0, y: 0, clusterId: 0 },  // 0

@@ -102,6 +102,7 @@ export function sanitizeSoftSprings(rawSprings, nodeCount, {
   restFloor = 1e-3,
 } = {}) {
   const out = [];
+  const seenPairs = new Set();
   let dropped = 0;
 
   for (const sp of (Array.isArray(rawSprings) ? rawSprings : [])) {
@@ -121,6 +122,15 @@ export function sanitizeSoftSprings(rawSprings, nodeCount, {
       dropped += 1;
       continue;
     }
+
+    const lo = Math.min(a, b);
+    const hi = Math.max(a, b);
+    const key = `${lo}:${hi}`;
+    if (seenPairs.has(key)) {
+      dropped += 1;
+      continue;
+    }
+    seenPairs.add(key);
 
     const rest = Math.max(restFloor, Number.isFinite(Number(restRaw)) ? Number(restRaw) : 1);
     const edgeBodyMode = Number(edgeBodyRaw) === edgeBodyPass ? edgeBodyPass : edgeBodyBlock;

@@ -146,3 +146,47 @@ test('rigid-rigid proxy decomposition stays inside concave hull and logs trigger
   assert.ok(Number.isInteger(c.proxyA) && c.proxyA >= 0);
   assert.ok(Number.isInteger(c.proxyB) && c.proxyB >= 0);
 });
+
+test('pointInPolygonInclusive is orientation-invariant on descending edges', () => {
+  const poly = [
+    { x: -3.70121809708695, y: -2.407090008712247 },
+    { x: 0.7885652164026515, y: -1.423716793386125 },
+    { x: 3.9016137324883324, y: -4.802757318032596 },
+    { x: 4.423244291069521, y: -4.319993574872287 },
+    { x: 4.656174669804701, y: 4.372090947773785 },
+    { x: 1.4558556911874856, y: 2.366994659922299 },
+    { x: 0.9095704001006224, y: 0.6897309632088007 },
+    { x: -3.019057310101797, y: 1.7610003204523466 },
+  ];
+  const px = 2.9182181336383675;
+  const py = -2.0885609761779342;
+
+  assert.equal(pointInPolygonInclusive(px, py, poly), true, 'point should classify inside polygon');
+  assert.equal(pointInPolygonInclusive(px, py, [...poly].reverse()), true, 'classification should be stable for reversed winding');
+});
+
+test('pointInPolygonInclusive keeps inside/outside classification stable across windings', () => {
+  const poly = [
+    { x: -4.889825200151876, y: -1.1713868636523896 },
+    { x: -0.9143948169659533, y: -1.0382849723255982 },
+    { x: -2.094022655840809, y: -3.958326780597795 },
+    { x: 3.960405762190902, y: -3.4220954006394844 },
+    { x: 2.065864045246874, y: 0.16777584034944137 },
+    { x: 3.618644558107338, y: 4.946060228851987 },
+    { x: -1.3380905228651918, y: 1.1529191086827435 },
+    { x: -2.7627442987497997, y: 0.949753967738153 },
+  ];
+
+  const samples = [
+    { x: 4.1401389656467344, y: 1.327161566969819, inside: false },
+    { x: 0.0, y: 0.0, inside: true },
+    { x: -4.7, y: -1.3, inside: false },
+  ];
+
+  for (const sample of samples) {
+    const cw = pointInPolygonInclusive(sample.x, sample.y, poly);
+    const ccw = pointInPolygonInclusive(sample.x, sample.y, [...poly].reverse());
+    assert.equal(cw, sample.inside, `expected cw classification for (${sample.x}, ${sample.y})`);
+    assert.equal(ccw, sample.inside, `expected ccw classification for (${sample.x}, ${sample.y})`);
+  }
+});

@@ -49,8 +49,10 @@ export function pointInPolygonInclusive(px, py, verts, eps = EPS) {
 
     if (pointOnSegment(px, py, xi, yi, xj, yj, eps)) return true;
 
+    const dy = yj - yi;
+    if (Math.abs(dy) <= eps) continue;
     const intersect = ((yi > py) !== (yj > py))
-      && (px < ((xj - xi) * (py - yi)) / Math.max(EPS, (yj - yi)) + xi);
+      && (px < ((xj - xi) * (py - yi)) / dy + xi);
     if (intersect) inside = !inside;
   }
   return inside;

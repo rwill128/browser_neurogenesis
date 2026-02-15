@@ -526,8 +526,10 @@ function initBodies(n, controls) {
   const scale = n / 256;
   const bigMode = n >= 1024;
   const bodyScale = bigMode ? 0.5 : 1.0;
-  const rigidCount = bigMode ? 10 : 2;
-  const softClusterCount = bigMode ? 10 : 1;
+  // Keep the same primitive catalog across 128/256/512/1024+ so
+  // deformation differences are easier to attribute to fluid resolution.
+  const rigidCount = 10;
+  const softClusterCount = 10;
 
   const rigidShapeCycle = [3, 4, 5, 6];
   const rigid = [];

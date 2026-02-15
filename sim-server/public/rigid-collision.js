@@ -436,6 +436,25 @@ function isProxyTriangleValid(tri, sourcePoly, maxAspect = 14) {
   return true;
 }
 
+function sanitizeFiniteLocalPolygon(poly, eps = EPS) {
+  if (!Array.isArray(poly) || poly.length < 3) return [];
+  const out = [];
+  for (const v of poly) {
+    const x = Number(v?.x);
+    const y = Number(v?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    const prev = out[out.length - 1];
+    if (prev && Math.hypot(x - prev.x, y - prev.y) <= eps) continue;
+    out.push({ x, y });
+  }
+  if (out.length >= 2) {
+    const first = out[0];
+    const last = out[out.length - 1];
+    if (Math.hypot(first.x - last.x, first.y - last.y) <= eps) out.pop();
+  }
+  return out.length >= 3 ? out : [];
+}
+
 function buildCollisionPolysLocal(body) {
   const basePolys = Array.isArray(body?.subPolysLocal) && body.subPolysLocal.length
     ? body.subPolysLocal
@@ -444,7 +463,10 @@ function buildCollisionPolysLocal(body) {
   const out = [];
   for (const poly of basePolys) {
     if (!Array.isArray(poly) || poly.length < 3) continue;
-    const clean = ensureCCW(poly);
+    const finitePoly = sanitizeFiniteLocalPolygon(poly);
+    if (finitePoly.length < 3) continue;
+
+    const clean = ensureCCW(finitePoly);
     if (isConvexPolygon(clean)) {
       out.push(clean);
       continue;

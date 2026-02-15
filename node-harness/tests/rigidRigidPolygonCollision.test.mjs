@@ -165,6 +165,31 @@ test('rigid collision proxy cache invalidates when local hull changes', () => {
   assert.deepEqual(second[0][1], { x: 2, y: -2 }, 'world collision polys should refresh after topology edit');
 });
 
+test('rigid-rigid collision ignores non-finite local vertices deterministically', () => {
+  const malformed = makeBox(14, 10, 2);
+  malformed.verticesLocal = [
+    { x: -2, y: -2 },
+    { x: 2, y: -2 },
+    { x: NaN, y: 0 },
+    { x: 2, y: 2 },
+    { x: -2, y: 2 },
+    { x: -2, y: -2 },
+  ];
+
+  const b = makeBox(20, 10, 2);
+  const ax = malformed.x;
+  const bx = b.x;
+
+  const hit = resolveRigidVsRigidPolygonCollision(malformed, b, 0.3);
+  assert.equal(hit, false, 'non-overlapping malformed hull should not spuriously collide');
+  assert.equal(malformed.x, ax, 'malformed body should not be moved by invalid geometry');
+  assert.equal(b.x, bx, 'other body should remain unchanged');
+
+  const polys = getRigidCollisionPolysWorld(malformed);
+  assert.equal(polys.length, 1, 'sanitized convex proxy should still be available');
+  assert.ok(polys[0].every((v) => Number.isFinite(v.x) && Number.isFinite(v.y)), 'cached proxy should be finite');
+});
+
 test('pointInPolygonInclusive is orientation-invariant on descending edges', () => {
   const poly = [
     { x: -3.70121809708695, y: -2.407090008712247 },

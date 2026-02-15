@@ -280,7 +280,9 @@ export function compileFieldToMesh({
   softBridgeNeighborMax = 3, // max cardinal neighbors counted as bridge-like (default=3 narrows broad bridge cells less aggressively)
   softTerminalTipCellCap = 0, // optional tighter cap for terminal tips (<=1 cardinal soft neighbor)
 }) {
-  const infillMode = softInfillMode === 'triangles' ? 'triangles' : 'triangles+cross';
+  const infillMode = softInfillMode === 'triangles+cross'
+    ? 'triangles+cross'
+    : (softInfillMode === 'none' ? 'none' : 'triangles');
   const rigidMode = String(rigidCompileMode || 'contours') === 'primitive-tiling' ? 'primitive-tiling' : 'contours';
   const primitiveSideMin = Math.max(2, Math.round(Number(rigidPrimitiveSideMin) || 4));
   const primitiveSideMax = Math.max(primitiveSideMin, Math.round(Number(rigidPrimitiveSideMax) || 10));

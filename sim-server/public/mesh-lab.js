@@ -219,8 +219,23 @@ function drawMesh(mesh) {
   }, null, 2);
 }
 
-function compileNow() {
+function syncSoftModeUi() {
   const membraneMode = (softSolverModeEl?.value || 'spring') === 'membrane';
+  if (!softInfillModeEl) return membraneMode;
+  if (membraneMode) {
+    softInfillModeEl.value = 'none';
+    softInfillModeEl.disabled = true;
+    softInfillModeEl.title = 'Membrane mode uses perimeter-only representation (no interior infill)';
+  } else {
+    if (softInfillModeEl.value === 'none') softInfillModeEl.value = 'triangles';
+    softInfillModeEl.disabled = false;
+    softInfillModeEl.title = '';
+  }
+  return membraneMode;
+}
+
+function compileNow() {
+  const membraneMode = syncSoftModeUi();
   const requestedSoftMin = Math.max(1, Math.min(Math.max(1, W - 1), Math.round(Number(softMinCellSizeEl?.value) || 3)));
 
   const mesh = compileFieldToMesh({
@@ -235,7 +250,7 @@ function compileNow() {
     rigidCompileMode: rigidCompileModeEl?.value || 'contours',
     rigidPrimitiveSideMin: Math.max(2, Math.min(64, Math.round(Number(rigidPrimitiveSideMinEl?.value) || 4))),
     rigidPrimitiveSideMax: Math.max(2, Math.min(96, Math.round(Number(rigidPrimitiveSideMaxEl?.value) || 10))),
-    softInfillMode: membraneMode ? 'triangles' : (softInfillModeEl?.value || 'triangles'),
+    softInfillMode: membraneMode ? 'none' : (softInfillModeEl?.value || 'triangles'),
     softDensityField: softDensity,
     // Membrane mode should preserve boundary fidelity; coarse soft cells make boxy/square contours.
     softMinCellSize: membraneMode ? 1 : requestedSoftMin,
@@ -301,6 +316,7 @@ importFile.addEventListener('change', async () => {
     const mode = (spec.softBodies?.[0]?.solverMode === 'membrane') ? 'membrane' : 'spring';
     softSolverModeEl.value = mode;
   }
+  syncSoftModeUi();
 
   const authoring = spec.authoring?.fields;
   if (authoring && Number(authoring.width) === W && Number(authoring.height) === H && Array.isArray(authoring.rigid) && Array.isArray(authoring.soft)) {

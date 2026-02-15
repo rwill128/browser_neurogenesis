@@ -192,6 +192,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   nearBaselineSnapWindow = 0.003,
   nearBaselineSnapBlend = 0.85,
   globalErrorCouplingMax = 1.25,
+  globalDirectionalCouplingMax = 1.18,
 } = {}) {
   if (!Array.isArray(springs) || !restBaseline || typeof restBaseline.length !== 'number') return 0;
 
@@ -211,10 +212,12 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const snapWindow = Math.max(0, Number(nearBaselineSnapWindow) || 0);
   const snapBlend = clamp(Number(nearBaselineSnapBlend) || 0, 0, 1);
   const globalCouplingMax = Math.max(1, Number(globalErrorCouplingMax) || 1);
+  const directionalCouplingMax = Math.max(1, Number(globalDirectionalCouplingMax) || 1);
 
   let touched = 0;
   const n = Math.min(springs.length, restBaseline.length);
   let meanErrNorm = 0;
+  let meanSignedErrNorm = 0;
   let meanErrCount = 0;
   if (adaptiveMode && globalCouplingMax > 1.0001 && n > 0) {
     for (let i = 0; i < n; i++) {
@@ -223,10 +226,13 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       const base = Math.max(1e-4, Number(restBaseline[i]) || 1e-4);
       const current = Number(sp[2]);
       const cur = Number.isFinite(current) ? current : base;
-      meanErrNorm += Math.abs(base - cur) / base;
+      const signedErrNorm = (cur - base) / base;
+      meanErrNorm += Math.abs(signedErrNorm);
+      meanSignedErrNorm += signedErrNorm;
       meanErrCount += 1;
     }
     meanErrNorm = meanErrCount > 0 ? (meanErrNorm / meanErrCount) : 0;
+    meanSignedErrNorm = meanErrCount > 0 ? (meanSignedErrNorm / meanErrCount) : 0;
   }
 
   for (let i = 0; i < n; i++) {
@@ -236,12 +242,18 @@ export function recoverSoftSpringRests(springs, restBaseline, {
     const base = Math.max(1e-4, Number(restBaseline[i]) || 1e-4);
     const current = Number(sp[2]);
     const cur = Number.isFinite(current) ? current : base;
-    const errNorm = Math.abs(base - cur) / base;
+    const signedErrNorm = (cur - base) / base;
+    const errNorm = Math.abs(signedErrNorm);
     const adaptiveErr = Math.min(1, Math.pow(errNorm / pivot, exponent));
-    const dirBoost = (cur > base) ? elongationBias : compressionBias;
+    const dirBoost = (signedErrNorm >= 0) ? elongationBias : compressionBias;
     const globalErrAlpha = clamp(meanErrNorm / pivot, 0, 1);
     const globalBoost = 1 + (globalCouplingMax - 1) * globalErrAlpha;
-    const boost = (1 + (gainMax - 1) * adaptiveErr * dirBoost) * globalBoost;
+    const globalDirectionalAlpha = clamp(Math.abs(meanSignedErrNorm) / pivot, 0, 1);
+    const directionalAligned = (signedErrNorm === 0 || meanSignedErrNorm === 0)
+      ? 0
+      : (Math.sign(signedErrNorm) === Math.sign(meanSignedErrNorm) ? 1 : 0);
+    const directionalBoost = 1 + (directionalCouplingMax - 1) * globalDirectionalAlpha * directionalAligned;
+    const boost = (1 + (gainMax - 1) * adaptiveErr * dirBoost) * globalBoost * directionalBoost;
     const recover = clamp(k * boost, 0, 1);
 
     // As we approach baseline, gradually tighten allowable rest-length range to reduce

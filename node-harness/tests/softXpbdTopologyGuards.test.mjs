@@ -679,3 +679,46 @@ test('global recovery coupling improves adversarial half-life without area-drift
   assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 5e-5,
     `expected bounded area drift under global coupling (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });
+
+test('directional global coupling improves compression-heavy pure-soft recovery without area regression', () => {
+  const before = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      recoverRate: 0.028,
+      adaptiveGainMax: 1.7,
+      adaptiveExponent: 0.95,
+      nearBaselineSnapWindow: 0,
+      nearBaselineSnapBlend: 0,
+      globalErrorCouplingMax: 1.25,
+      globalDirectionalCouplingMax: 1,
+    },
+  });
+  const after = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      recoverRate: 0.028,
+      adaptiveGainMax: 1.7,
+      adaptiveExponent: 0.95,
+      nearBaselineSnapWindow: 0,
+      nearBaselineSnapBlend: 0,
+      globalErrorCouplingMax: 1.25,
+      globalDirectionalCouplingMax: 1.18,
+    },
+  });
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-directional-coupling]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryAt200 > before.recoveryAt200,
+    `expected better early recovery under directional coupling (before=${before.recoveryAt200}, after=${after.recoveryAt200})`);
+  assert.ok(after.recoveryAt500 > before.recoveryAt500,
+    `expected better mid recovery under directional coupling (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
+  assert.ok(after.recoveryAt1000 >= before.recoveryAt1000,
+    `expected non-regressing late recovery under directional coupling (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.tailMeanRestScaleDrift < before.tailMeanRestScaleDrift,
+    `expected lower tail rest-scale drift under directional coupling (before=${before.tailMeanRestScaleDrift}, after=${after.tailMeanRestScaleDrift})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 5e-5,
+    `expected bounded area drift under directional coupling (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+});

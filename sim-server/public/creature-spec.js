@@ -8,6 +8,9 @@ const EDGE_DYE_DEFLECT_RGB = [EDGE_DYE_DEFLECT, EDGE_DYE_DEFLECT, EDGE_DYE_DEFLE
 const MEMBRANE_DEFAULT_PRESSURE_GAIN = 0.08;
 const MEMBRANE_DEFAULT_RADIAL_DAMPING = 0.06;
 const MEMBRANE_DEFAULT_SHAPE_MEMORY_GAIN = 0.045;
+const MEMBRANE_DEFAULT_MIN_EDGE_LENGTH = 4.0;
+const MEMBRANE_DEFAULT_MAX_NODES = 96;
+const MEMBRANE_DEFAULT_SIMPLIFY_EPS = 0.8;
 
 function normalizeSoftSolverMode(mode) {
   return String(mode || '').toLowerCase() === 'membrane' ? 'membrane' : 'spring';
@@ -663,7 +666,107 @@ function simplifyCollinearLoop(poly, eps = 1e-6) {
   return out.length >= 3 ? out : poly;
 }
 
-function buildSoftMembraneExportFromField({ width, height, softField, threshold, options }) {
+function pointSegmentDistance(p, a, b) {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const apx = p.x - a.x;
+  const apy = p.y - a.y;
+  const den = Math.max(1e-9, abx * abx + aby * aby);
+  const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / den));
+  const cx = a.x + abx * t;
+  const cy = a.y + aby * t;
+  return Math.hypot(p.x - cx, p.y - cy);
+}
+
+function simplifyDouglasPeuckerClosed(poly, epsilon = 0.8) {
+  if (!Array.isArray(poly) || poly.length < 4) return poly || [];
+  const open = [...poly, poly[0]];
+  const keep = new Uint8Array(open.length);
+  keep[0] = 1;
+  keep[open.length - 1] = 1;
+
+  const stack = [[0, open.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    let maxDist = -1;
+    let maxIdx = -1;
+    for (let i = a + 1; i < b; i++) {
+      const d = pointSegmentDistance(open[i], open[a], open[b]);
+      if (d > maxDist) {
+        maxDist = d;
+        maxIdx = i;
+      }
+    }
+    if (maxDist > epsilon && maxIdx > a && maxIdx < b) {
+      keep[maxIdx] = 1;
+      stack.push([a, maxIdx], [maxIdx, b]);
+    }
+  }
+
+  const out = [];
+  for (let i = 0; i < open.length - 1; i++) {
+    if (keep[i]) out.push(open[i]);
+  }
+  return out.length >= 3 ? out : poly;
+}
+
+function resampleClosedLoopByMinEdge(poly, minEdgeLength = MEMBRANE_DEFAULT_MIN_EDGE_LENGTH, maxNodes = MEMBRANE_DEFAULT_MAX_NODES) {
+  if (!Array.isArray(poly) || poly.length < 3) return poly || [];
+
+  let perimeter = 0;
+  const segLen = new Float64Array(poly.length);
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const len = Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0));
+    segLen[i] = len;
+    perimeter += len;
+  }
+  if (!Number.isFinite(perimeter) || perimeter <= 1e-6) return poly;
+
+  const minEdge = Math.max(0.75, Number(minEdgeLength) || MEMBRANE_DEFAULT_MIN_EDGE_LENGTH);
+  const targetCount = Math.max(3, Math.min(
+    Math.max(3, Math.round(Number(maxNodes) || MEMBRANE_DEFAULT_MAX_NODES)),
+    Math.max(3, Math.floor(perimeter / minEdge)),
+  ));
+  const spacing = perimeter / targetCount;
+
+  const out = [];
+  let edgeIndex = 0;
+  let edgeStart = poly[0];
+  let edgeEnd = poly[1 % poly.length];
+  let edgeRemaining = segLen[0];
+  let traveled = 0;
+
+  for (let k = 0; k < targetCount; k++) {
+    const targetDist = k * spacing;
+    while ((traveled + edgeRemaining) < targetDist && edgeIndex < poly.length - 1) {
+      traveled += edgeRemaining;
+      edgeIndex += 1;
+      edgeStart = poly[edgeIndex % poly.length];
+      edgeEnd = poly[(edgeIndex + 1) % poly.length];
+      edgeRemaining = segLen[edgeIndex % poly.length];
+    }
+
+    const local = Math.max(0, Math.min(1, (targetDist - traveled) / Math.max(1e-9, edgeRemaining)));
+    out.push({
+      x: edgeStart.x + (edgeEnd.x - edgeStart.x) * local,
+      y: edgeStart.y + (edgeEnd.y - edgeStart.y) * local,
+    });
+  }
+
+  return out.length >= 3 ? out : poly;
+}
+
+export function buildMembraneRingsFromSoftField({
+  width,
+  height,
+  softField,
+  threshold = 0.35,
+  minEdgeLength = MEMBRANE_DEFAULT_MIN_EDGE_LENGTH,
+  maxNodes = MEMBRANE_DEFAULT_MAX_NODES,
+  simplifyEpsilon = MEMBRANE_DEFAULT_SIMPLIFY_EPS,
+}) {
   const total = Math.max(1, width * height);
   const mask = new Uint8Array(total);
   const th = Math.max(0, Math.min(1, Number(threshold) || 0.35));
@@ -672,8 +775,7 @@ function buildSoftMembraneExportFromField({ width, height, softField, threshold,
   }
 
   const comps = collectMaskComponents(mask, width, height);
-  const softBodies = [];
-  const components = [];
+  const rings = [];
 
   for (const comp of comps) {
     const loops = traceMaskComponentLoops(comp, 1);
@@ -690,9 +792,34 @@ function buildSoftMembraneExportFromField({ width, height, softField, threshold,
     }
 
     hull = simplifyCollinearLoop(hull, 1e-6);
+    hull = simplifyDouglasPeuckerClosed(hull, Math.max(0, Number(simplifyEpsilon) || MEMBRANE_DEFAULT_SIMPLIFY_EPS));
+    hull = simplifyCollinearLoop(hull, 1e-6);
+    hull = resampleClosedLoopByMinEdge(hull, minEdgeLength, maxNodes);
+    hull = simplifyCollinearLoop(hull, 1e-6);
+
     if (!Array.isArray(hull) || hull.length < 3) continue;
     if (signedArea(hull) < 0) hull = [...hull].reverse();
+    rings.push(hull);
+  }
 
+  return rings;
+}
+
+function buildSoftMembraneExportFromField({ width, height, softField, threshold, options }) {
+  const rings = buildMembraneRingsFromSoftField({
+    width,
+    height,
+    softField,
+    threshold,
+    minEdgeLength: Number(options?.membraneMinEdgeLength) || MEMBRANE_DEFAULT_MIN_EDGE_LENGTH,
+    maxNodes: Number(options?.membraneMaxNodes) || MEMBRANE_DEFAULT_MAX_NODES,
+    simplifyEpsilon: Number(options?.membraneSimplifyEpsilon) || MEMBRANE_DEFAULT_SIMPLIFY_EPS,
+  });
+
+  const softBodies = [];
+  const components = [];
+
+  for (const hull of rings) {
     const softNodes = hull.map((p) => ({
       x: p.x,
       y: p.y,
@@ -728,7 +855,6 @@ function buildSoftMembraneExportFromField({ width, height, softField, threshold,
       springs,
     });
 
-    // Field-derived membrane export does not currently map hybrid source-node links.
     components.push({
       index: bodyIndex,
       nodeIds: new Set(),

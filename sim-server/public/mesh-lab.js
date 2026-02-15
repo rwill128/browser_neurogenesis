@@ -1,5 +1,5 @@
 import { compileFieldToMesh } from '/field-to-structure-core.js';
-import { createCreatureSpecFromMesh, parseCreatureSpec } from '/creature-spec.js';
+import { createCreatureSpecFromMesh, parseCreatureSpec, buildMembraneRingsFromSoftField } from '/creature-spec.js';
 
 const paintCanvas = document.getElementById('paint');
 const densityCanvas = document.getElementById('densityPaint');
@@ -18,6 +18,7 @@ const softInfillModeEl = document.getElementById('softInfillMode');
 const softMinCellSizeEl = document.getElementById('softMinCellSize');
 const softBoundaryRingEl = document.getElementById('softBoundaryRing');
 const softSolverModeEl = document.getElementById('softSolverMode');
+const membraneMinEdgeLengthEl = document.getElementById('membraneMinEdgeLength');
 const clearBtn = document.getElementById('clearBtn');
 const compileBtn = document.getElementById('compileBtn');
 const exportBtn = document.getElementById('exportBtn');
@@ -162,47 +163,37 @@ function drawMesh(mesh) {
       mctx.lineWidth = 1;
     }
   } else {
-    // Membrane mode preview: draw perimeter directly from painted soft mask so
-    // adaptive triangulation seams cannot appear as fake interior "infill".
+    // Membrane mode preview: draw the same resampled perimeter ring used for export.
     const thr = Math.max(0, Math.min(1, Number(thresholdEl?.value) || 0.35));
-    const filled = new Uint8Array(W * H);
-    for (let i = 0; i < filled.length; i++) {
-      filled[i] = (Number(soft[i]) || 0) >= thr ? 1 : 0;
-    }
-    const at = (x, y) => {
-      if (x < 0 || y < 0 || x >= W || y >= H) return 0;
-      return filled[y * W + x] ? 1 : 0;
-    };
+    const minEdge = Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4);
+    const rings = buildMembraneRingsFromSoftField({
+      width: W,
+      height: H,
+      softField: soft,
+      threshold: thr,
+      minEdgeLength: minEdge,
+    });
 
     mctx.strokeStyle = 'rgba(120,220,255,0.95)';
+    mctx.fillStyle = 'rgba(120,240,255,0.95)';
     mctx.lineWidth = 2;
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        if (!at(x, y)) continue;
-        if (!at(x, y - 1)) {
-          mctx.beginPath();
-          mctx.moveTo(x * sx, y * sy);
-          mctx.lineTo((x + 1) * sx, y * sy);
-          mctx.stroke();
-        }
-        if (!at(x + 1, y)) {
-          mctx.beginPath();
-          mctx.moveTo((x + 1) * sx, y * sy);
-          mctx.lineTo((x + 1) * sx, (y + 1) * sy);
-          mctx.stroke();
-        }
-        if (!at(x, y + 1)) {
-          mctx.beginPath();
-          mctx.moveTo((x + 1) * sx, (y + 1) * sy);
-          mctx.lineTo(x * sx, (y + 1) * sy);
-          mctx.stroke();
-        }
-        if (!at(x - 1, y)) {
-          mctx.beginPath();
-          mctx.moveTo(x * sx, (y + 1) * sy);
-          mctx.lineTo(x * sx, y * sy);
-          mctx.stroke();
-        }
+    for (const ring of rings) {
+      if (!Array.isArray(ring) || ring.length < 3) continue;
+      mctx.beginPath();
+      for (let i = 0; i < ring.length; i++) {
+        const p = ring[i];
+        const x = p.x * sx;
+        const y = p.y * sy;
+        if (i === 0) mctx.moveTo(x, y);
+        else mctx.lineTo(x, y);
+      }
+      mctx.closePath();
+      mctx.stroke();
+
+      for (const p of ring) {
+        mctx.beginPath();
+        mctx.arc(p.x * sx, p.y * sy, 1.8, 0, Math.PI * 2);
+        mctx.fill();
       }
     }
     mctx.lineWidth = 1;
@@ -233,8 +224,9 @@ function drawMesh(mesh) {
     compileRevision,
     softSolverMode: softSolverModeEl?.value || 'spring',
     softPreview: ((softSolverModeEl?.value || 'spring') === 'membrane')
-      ? 'boundary-loops (interior triangles hidden)'
+      ? 'resampled membrane ring from painted mask'
       : 'triangulated soft mesh',
+    membraneMinEdgeLength: Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4),
   }, null, 2);
 }
 
@@ -245,10 +237,18 @@ function syncSoftModeUi() {
     softInfillModeEl.value = 'none';
     softInfillModeEl.disabled = true;
     softInfillModeEl.title = 'Membrane mode uses perimeter-only representation (no interior infill)';
+    if (membraneMinEdgeLengthEl) {
+      membraneMinEdgeLengthEl.disabled = false;
+      membraneMinEdgeLengthEl.title = 'Minimum edge length for exported membrane ring';
+    }
   } else {
     if (softInfillModeEl.value === 'none') softInfillModeEl.value = 'triangles';
     softInfillModeEl.disabled = false;
     softInfillModeEl.title = '';
+    if (membraneMinEdgeLengthEl) {
+      membraneMinEdgeLengthEl.disabled = true;
+      membraneMinEdgeLengthEl.title = 'Enable membrane mode to edit membrane edge spacing';
+    }
   }
   return membraneMode;
 }
@@ -314,6 +314,7 @@ compileBtn.addEventListener('click', compileNow);
 if (softInfillModeEl) softInfillModeEl.addEventListener('change', compileNow);
 if (softMinCellSizeEl) softMinCellSizeEl.addEventListener('change', compileNow);
 if (softSolverModeEl) softSolverModeEl.addEventListener('change', compileNow);
+if (membraneMinEdgeLengthEl) membraneMinEdgeLengthEl.addEventListener('change', compileNow);
 if (rigidCompileModeEl) rigidCompileModeEl.addEventListener('change', compileNow);
 if (rigidPrimitiveSideMinEl) rigidPrimitiveSideMinEl.addEventListener('change', compileNow);
 if (rigidPrimitiveSideMaxEl) rigidPrimitiveSideMaxEl.addEventListener('change', compileNow);
@@ -324,8 +325,10 @@ exportBtn.addEventListener('click', () => {
   const spec = createCreatureSpecFromMesh(mesh, {
     name: 'mesh-lab-creature',
     fields: { rigidField: rigid, softField: soft, softDensityField: softDensity },
+    threshold: Math.max(0, Math.min(1, Number(thresholdEl?.value) || 0.35)),
     softBoundaryRingSprings: !!softBoundaryRingEl?.checked,
     softSolverMode: softSolverModeEl?.value || 'spring',
+    membraneMinEdgeLength: Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4),
   });
   const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');

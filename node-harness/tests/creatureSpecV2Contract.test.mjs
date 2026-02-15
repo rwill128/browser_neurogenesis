@@ -184,6 +184,7 @@ test('membrane export from authoring soft field is perimeter-only (no interior i
     softSolverMode: 'membrane',
     fields: { rigidField, softField },
     threshold: 0.35,
+    membraneMinEdgeLength: 4,
   });
 
   assert.ok(Array.isArray(spec.softBodies));
@@ -192,6 +193,8 @@ test('membrane export from authoring soft field is perimeter-only (no interior i
   assert.equal(sb.solverMode, 'membrane');
   assert.ok(sb.nodes.length >= 8, 'expected perimeter loop nodes from painted field contour');
   assertMembraneRingOnly(sb);
+  const minRest = Math.min(...sb.springs.map((sp) => Number(sp?.[2]) || 0));
+  assert.ok(minRest >= 3.2, `expected membrane edge rests to honor minimum edge length (minRest=${minRest})`);
 
   const bodies = buildBodiesFromCreatureSpec(spec, 64, CONTROLS);
   assert.equal(bodies.softMembraneClusters.length, 1);

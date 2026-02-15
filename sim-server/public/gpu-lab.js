@@ -731,6 +731,9 @@ function initEmitters(n) {
       spin: (Math.random() < 0.5 ? -1 : 1) * (0.45 + Math.random() * 0.55),
       curlGain: 1.1,
       driftGain: 0.014,
+      chaosGain: 1.1,
+      wobbleAmp: Math.max(0.6, n / 220),
+      wobbleFreq: 0.045 + Math.random() * 0.02,
       swirlJitter: Math.random() * Math.PI * 2,
     });
   }
@@ -739,7 +742,7 @@ function initEmitters(n) {
 
 function buildPresetEmitters(n, preset) {
   const emitters = [];
-  const mk = (xf, yf, vxf, vyf, color, radius, strength, spin = 0.8, curlGain = 1.25, driftGain = 0.012) => ({
+  const mk = (xf, yf, vxf, vyf, color, radius, strength, spin = 0.8, curlGain = 1.25, driftGain = 0.012, chaosGain = 1.2, wobbleAmp = 0, wobbleFreq = 0.05) => ({
     x: n * xf,
     y: n * yf,
     vx: vxf,
@@ -752,6 +755,9 @@ function buildPresetEmitters(n, preset) {
     spin,
     curlGain,
     driftGain,
+    chaosGain,
+    wobbleAmp,
+    wobbleFreq,
     swirlJitter: Math.random() * Math.PI * 2,
   });
 
@@ -779,8 +785,10 @@ function buildPresetEmitters(n, preset) {
     for (let i = 0; i < lanes; i++) {
       const y = 0.16 + (i / (lanes - 1)) * 0.68;
       const dir = i % 2 === 0 ? 1 : -1;
-      emitters.push(mk(0.08, y, 0.36 * dir, 0, [255,150,80], Math.max(7, n / 55), 1.05, 1.35 * dir, 1.5, 0.006));
-      emitters.push(mk(0.92, y, -0.36 * dir, 0, [90,180,255], Math.max(7, n / 55), 1.05, -1.35 * dir, 1.5, 0.006));
+      const wobbleAmp = Math.max(2.5, n / 60);
+      const wobbleFreq = 0.08 + i * 0.01;
+      emitters.push(mk(0.08, y, 0.34 * dir, 0.05 * dir, [255,150,80], Math.max(7, n / 55), 1.12, 2.1 * dir, 1.9, 0.004, 2.3, wobbleAmp, wobbleFreq));
+      emitters.push(mk(0.92, y, -0.34 * dir, -0.05 * dir, [90,180,255], Math.max(7, n / 55), 1.12, 2.1 * dir, 1.9, 0.004, 2.3, wobbleAmp, wobbleFreq * 1.07));
     }
   } else if (preset === 'islands') {
     const centers = [[0.22,0.24],[0.78,0.28],[0.30,0.75],[0.75,0.72],[0.52,0.50]];
@@ -1069,15 +1077,21 @@ function applyEmitters(sim, r, g, b, vx, vy) {
     e.x = Math.max(e.r, Math.min(n - e.r, e.x));
     e.y = Math.max(e.r, Math.min(n - e.r, e.y));
 
-    const minX = Math.max(0, Math.floor(e.x - e.r));
-    const maxX = Math.min(n - 1, Math.ceil(e.x + e.r));
-    const minY = Math.max(0, Math.floor(e.y - e.r));
-    const maxY = Math.min(n - 1, Math.ceil(e.y + e.r));
+    const wobbleAmp = Number.isFinite(Number(e.wobbleAmp)) ? Number(e.wobbleAmp) : 0;
+    const wobbleFreq = Number.isFinite(Number(e.wobbleFreq)) ? Number(e.wobbleFreq) : 0.05;
+    const wobblePhase = sim.frame * wobbleFreq + (Number(e.swirlJitter) || 0);
+    const ex = e.x + Math.cos(wobblePhase * 1.31) * wobbleAmp;
+    const ey = e.y + Math.sin(wobblePhase * 1.73) * wobbleAmp;
+
+    const minX = Math.max(0, Math.floor(ex - e.r));
+    const maxX = Math.min(n - 1, Math.ceil(ex + e.r));
+    const minY = Math.max(0, Math.floor(ey - e.r));
+    const maxY = Math.min(n - 1, Math.ceil(ey + e.r));
     const pulse = 0.75 + 0.25 * Math.sin(sim.frame * 0.03 + e.swirlJitter);
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
-        const dx = x - e.x;
-        const dy = y - e.y;
+        const dx = x - ex;
+        const dy = y - ey;
         const d = Math.hypot(dx, dy);
         if (d > e.r) continue;
         const nd = d / Math.max(1e-6, e.r);
@@ -1089,14 +1103,21 @@ function applyEmitters(sim, r, g, b, vx, vy) {
 
         const tx = d > 1e-6 ? (-dy / d) : 0;
         const ty = d > 1e-6 ? (dx / d) : 0;
+        const rx = d > 1e-6 ? (dx / d) : 0;
+        const ry = d > 1e-6 ? (dy / d) : 0;
         const spin = Number.isFinite(Number(e.spin)) ? Number(e.spin) : 0.9;
         const curlGain = Number.isFinite(Number(e.curlGain)) ? Number(e.curlGain) : 1.0;
         const driftGain = Number.isFinite(Number(e.driftGain)) ? Number(e.driftGain) : 0.016;
+        const chaosGain = Number.isFinite(Number(e.chaosGain)) ? Number(e.chaosGain) : 1.0;
         const swirlProfile = (1 - nd) * (0.45 + 0.55 * nd);
-        const swirlOsc = 0.92 + 0.08 * Math.sin(sim.frame * 0.07 + e.swirlJitter * 1.7);
-        const swirl = spin * 0.16 * swirlProfile * swirlOsc * curlGain;
-        vx[i] += (e.vx * driftGain + tx * swirl) * w;
-        vy[i] += (e.vy * driftGain + ty * swirl) * w;
+        const swirlOsc = 0.9 + 0.1 * Math.sin(sim.frame * 0.08 + e.swirlJitter * 1.7);
+        const swirl = spin * 0.22 * swirlProfile * swirlOsc * curlGain;
+        const radialPulse = Math.sin(sim.frame * 0.12 + nd * 11.0 + e.swirlJitter * 0.7);
+        const ringPulse = Math.cos(sim.frame * 0.06 + nd * 15.0 + e.swirlJitter * 0.5);
+        const radial = spin * 0.1 * (1 - nd) * radialPulse * chaosGain;
+        const ring = spin * 0.075 * (1 - nd) * (1 - nd) * ringPulse * chaosGain;
+        vx[i] += (e.vx * driftGain + tx * swirl + rx * radial + tx * ring) * w;
+        vy[i] += (e.vy * driftGain + ty * swirl + ry * radial + ty * ring) * w;
       }
     }
   }

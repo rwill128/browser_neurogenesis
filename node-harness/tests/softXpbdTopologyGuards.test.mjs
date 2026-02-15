@@ -530,6 +530,7 @@ function runRestDriftRecoveryScenario({ useRestRecovery, adaptiveRecovery = fals
         adaptiveGainMax: adaptiveRecovery ? 2.4 : 1,
         adaptiveExponent: adaptiveRecovery ? 0.8 : 1,
         elongationBiasMax: adaptiveRecovery ? 1.22 : 1,
+        compressionBiasMax: adaptiveRecovery ? 1.12 : 1,
         errorPivot: 0.16,
       });
     }

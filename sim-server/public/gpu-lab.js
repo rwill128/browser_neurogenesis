@@ -2175,6 +2175,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       adaptiveGainMax: recovering ? 2.4 : 1.35,
       adaptiveExponent: recovering ? 0.78 : 1.0,
       elongationBiasMax: recovering ? 1.22 : 1.08,
+      compressionBiasMax: recovering ? 1.12 : 1.04,
       errorPivot: 0.16,
     });
   }

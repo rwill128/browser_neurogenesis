@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   rigidVerticesWorld,
@@ -8,6 +8,8 @@ import {
   resolveRigidVsSoftNodeCollision,
   pointInPolygonInclusive,
 } from '../sim-server/public/rigid-collision.js';
+import { compileFieldToMesh } from '../sim-server/public/field-to-structure-core.js';
+import { createCreatureSpecFromMesh, buildBodiesFromCreatureSpec } from '../sim-server/public/creature-spec.js';
 import { EDGE_DYE_MODE, EDGE_BODY_MODE } from '../sim-server/public/dye-barrier.js';
 import { GPUFluidField } from '../js/gpuFluidField.js';
 
@@ -51,6 +53,118 @@ function clamp(v, lo, hi) {
 
 function clone(obj) {
   return JSON.parse(JSON.stringify(obj));
+}
+
+function paintDisk(field, width, height, cx, cy, radius, value = 1) {
+  const r = Math.max(0.8, Number(radius) || 1);
+  const v = clamp(Number(value) || 0, 0, 1);
+  const minX = Math.max(0, Math.floor(cx - r));
+  const maxX = Math.min(width - 1, Math.ceil(cx + r));
+  const minY = Math.max(0, Math.floor(cy - r));
+  const maxY = Math.min(height - 1, Math.ceil(cy + r));
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const d = Math.hypot(x - cx, y - cy);
+      if (d > r) continue;
+      const softEdge = 1 - (d / r);
+      const idx = y * width + x;
+      field[idx] = Math.max(field[idx], v * softEdge + field[idx] * (1 - softEdge));
+    }
+  }
+}
+
+function buildAuthoringFieldsForCombo(combo, rng, width = GRID, height = GRID) {
+  const rigidField = new Float32Array(width * height).fill(0);
+  const softField = new Float32Array(width * height).fill(0);
+  const softDensityField = new Float32Array(width * height).fill(1);
+
+  const paintRigidBlob = (cx, cy, scale = 1) => {
+    paintDisk(rigidField, width, height, cx, cy, 8.5 * scale, 1.0);
+    paintDisk(rigidField, width, height, cx + 3.0 * scale, cy - 1.5 * scale, 5.2 * scale, 1.0);
+    paintDisk(rigidField, width, height, cx - 2.4 * scale, cy + 2.0 * scale, 4.8 * scale, 0.92);
+  };
+
+  const paintSoftBlob = (cx, cy, scale = 1, sparse = 0.22) => {
+    paintDisk(softField, width, height, cx, cy, 9.8 * scale, 1.0);
+    paintDisk(softField, width, height, cx - 2.0 * scale, cy + 2.0 * scale, 6.4 * scale, 0.95);
+    paintDisk(softField, width, height, cx + 2.8 * scale, cy - 2.2 * scale, 5.6 * scale, 0.88);
+
+    // Real painted density gradient: center dense, rim sparser.
+    for (let y = Math.max(0, Math.floor(cy - 13 * scale)); y <= Math.min(height - 1, Math.ceil(cy + 13 * scale)); y++) {
+      for (let x = Math.max(0, Math.floor(cx - 13 * scale)); x <= Math.min(width - 1, Math.ceil(cx + 13 * scale)); x++) {
+        const idx = y * width + x;
+        if (softField[idx] <= 0.03) continue;
+        const d = Math.hypot(x - cx, y - cy) / Math.max(1, 11 * scale);
+        const ring = clamp(d, 0, 1);
+        const jitter = (rng() - 0.5) * 0.08;
+        const density = clamp(1 - ring * (1 - sparse) + jitter, sparse, 1);
+        softDensityField[idx] = Math.min(softDensityField[idx], density);
+      }
+    }
+  };
+
+  if (combo === 'rigid-rigid') {
+    paintRigidBlob(30 + randRange(rng, -1.8, 1.8), 50 + randRange(rng, -2.0, 2.0), 1.0);
+    paintRigidBlob(70 + randRange(rng, -1.8, 1.8), 50 + randRange(rng, -2.0, 2.0), 1.0);
+  } else if (combo === 'soft-soft') {
+    paintSoftBlob(30 + randRange(rng, -2.0, 2.0), 50 + randRange(rng, -2.0, 2.0), 1.0, 0.24);
+    paintSoftBlob(70 + randRange(rng, -2.0, 2.0), 50 + randRange(rng, -2.0, 2.0), 1.0, 0.2);
+  } else {
+    paintRigidBlob(31 + randRange(rng, -2.0, 2.0), 50 + randRange(rng, -2.0, 2.0), 1.0);
+    paintSoftBlob(69 + randRange(rng, -2.0, 2.0), 50 + randRange(rng, -2.0, 2.0), 1.0, 0.22);
+  }
+
+  return { rigidField, softField, softDensityField };
+}
+
+function makeBodiesFromMeshLabField(combo, seedBase) {
+  const rng = mulberry32((seedBase ^ 0x9e3779b9) >>> 0);
+  const fields = buildAuthoringFieldsForCombo(combo, rng, GRID, GRID);
+  const mesh = compileFieldToMesh({
+    width: GRID,
+    height: GRID,
+    rigidField: fields.rigidField,
+    softField: fields.softField,
+    density: 3,
+    threshold: 0.35,
+    connectivityMode: 'none',
+    minComponentTriangles: 0,
+    softInfillMode: 'triangles+cross',
+    softDensityField: fields.softDensityField,
+  });
+
+  const spec = createCreatureSpecFromMesh(mesh, {
+    name: `mini-${combo}-mesh-lab`,
+    includeAuthoring: false,
+    fields,
+  });
+
+  const controls = {
+    massLight: 1.2,
+    massHeavy: 3.0,
+    massSoft: 0.6,
+  };
+  const bodies = buildBodiesFromCreatureSpec(spec, GRID, controls);
+
+  // Deterministic gentle drift so components interact inside watchdog horizon.
+  if (combo === 'rigid-rigid' && bodies.rigid.length >= 2) {
+    bodies.rigid[0].vx = +0.11;
+    bodies.rigid[1].vx = -0.11;
+  } else if (combo === 'soft-soft') {
+    for (const n of bodies.soft.nodes) {
+      n.vx = (n.clusterId % 2 === 0) ? +0.065 : -0.065;
+    }
+  } else if (combo === 'soft-rigid') {
+    if (bodies.rigid[0]) bodies.rigid[0].vx = +0.095;
+    for (const n of bodies.soft.nodes) n.vx = -0.05;
+  }
+
+  return { bodies, meshMeta: mesh.meta, specSummary: {
+    schemaVersion: spec.schemaVersion,
+    rigidBodies: spec.rigidBodies.length,
+    softBodies: spec.softBodies.length,
+    hybridJoints: spec.hybridJoints.length,
+  } };
 }
 
 function makeShadowOnlyFluid({ size = GRID, dt = DT, scaleX = 1, scaleY = 1 } = {}) {
@@ -158,23 +272,50 @@ function makeScenario(seedBase) {
   const createdAt = new Date().toISOString();
   const id = `mini-${Math.floor(seedBase % 1_000_000)}-${combo}`;
 
-  const bodies = { rigid: [], soft: { nodes: [], springs: [] }, hybrid: [] };
+  let bodies = null;
+  let source = 'mesh-lab-field';
+  let meshMeta = null;
+  let specSummary = null;
 
-  if (combo === 'rigid-rigid') {
-    bodies.rigid.push(makeRigid(rng, 0));
-    bodies.rigid.push(makeRigid(rng, 1));
-  } else if (combo === 'soft-soft') {
-    const a = makeSoftCluster(rng, 0, 0);
-    const b = makeSoftCluster(rng, 1, 1);
-    bodies.soft.nodes.push(...a.nodes, ...b.nodes);
-    bodies.soft.springs.push(...a.springs);
-    const offset = a.nodes.length;
-    bodies.soft.springs.push(...b.springs.map((s) => [s[0] + offset, s[1] + offset, s[2], s[3], s[4]]));
-  } else {
-    bodies.rigid.push(makeRigid(rng, 0));
-    const s = makeSoftCluster(rng, 0, 1);
-    bodies.soft.nodes.push(...s.nodes);
-    bodies.soft.springs.push(...s.springs);
+  try {
+    const built = makeBodiesFromMeshLabField(combo, seedBase >>> 0);
+    bodies = built.bodies;
+    meshMeta = built.meshMeta;
+    specSummary = built.specSummary;
+
+    const rigidCount = bodies?.rigid?.length || 0;
+    const softNodeCount = bodies?.soft?.nodes?.length || 0;
+    const softClusterCount = new Set((bodies?.soft?.nodes || []).map((n) => n.clusterId)).size;
+
+    const comboSatisfied = (
+      (combo === 'rigid-rigid' && rigidCount >= 2) ||
+      (combo === 'soft-soft' && softNodeCount >= 6 && softClusterCount >= 2) ||
+      (combo === 'soft-rigid' && rigidCount >= 1 && softNodeCount >= 3)
+    );
+
+    if (!comboSatisfied) {
+      throw new Error(`mesh-lab scenario did not satisfy combo ${combo} (rigid=${rigidCount}, softNodes=${softNodeCount}, softClusters=${softClusterCount})`);
+    }
+  } catch {
+    // Fallback only when mesh-lab field generation fails to produce a usable combo.
+    source = 'procedural-fallback';
+    bodies = { rigid: [], soft: { nodes: [], springs: [] }, hybrid: [] };
+    if (combo === 'rigid-rigid') {
+      bodies.rigid.push(makeRigid(rng, 0));
+      bodies.rigid.push(makeRigid(rng, 1));
+    } else if (combo === 'soft-soft') {
+      const a = makeSoftCluster(rng, 0, 0);
+      const b = makeSoftCluster(rng, 1, 1);
+      bodies.soft.nodes.push(...a.nodes, ...b.nodes);
+      bodies.soft.springs.push(...a.springs);
+      const offset = a.nodes.length;
+      bodies.soft.springs.push(...b.springs.map((s) => [s[0] + offset, s[1] + offset, s[2], s[3], s[4]]));
+    } else {
+      bodies.rigid.push(makeRigid(rng, 0));
+      const s = makeSoftCluster(rng, 0, 1);
+      bodies.soft.nodes.push(...s.nodes);
+      bodies.soft.springs.push(...s.springs);
+    }
   }
 
   return {
@@ -186,6 +327,9 @@ function makeScenario(seedBase) {
     dt: DT,
     steps,
     combo,
+    source,
+    meshMeta,
+    specSummary,
     fluid: {
       size: GRID,
       dt: DT,
@@ -673,9 +817,17 @@ async function writeReport(report) {
   await fs.appendFile(REPORT_HISTORY, `${JSON.stringify(report)}\n`, 'utf8');
 }
 
+function readSeedArg() {
+  const i = process.argv.indexOf('--seed');
+  if (i < 0 || i + 1 >= process.argv.length) return null;
+  const raw = Number(process.argv[i + 1]);
+  return Number.isFinite(raw) ? (raw >>> 0) : null;
+}
+
 async function main() {
+  const seedArg = readSeedArg();
   const epoch30 = Math.floor(Date.now() / (30 * 60 * 1000));
-  const seed = (epoch30 * 2654435761) >>> 0;
+  const seed = seedArg ?? ((epoch30 * 2654435761) >>> 0);
   const scenario = makeScenario(seed);
   const result = runScenario(scenario);
 
@@ -684,9 +836,11 @@ async function main() {
     generatedAt: new Date().toISOString(),
     scenarioId: scenario.id,
     combo: scenario.combo,
+    source: scenario.source || 'unknown',
     seed: scenario.seed,
     grid: scenario.grid,
     steps: scenario.steps,
+    specSummary: scenario.specSummary || null,
     final: result.final,
     violations: result.violations,
     sampledTelemetry: result.sampledTelemetry,
@@ -700,8 +854,22 @@ async function main() {
   if (!result.pass) process.exitCode = 1;
 }
 
-main().catch((err) => {
-  const msg = err && err.stack ? err.stack : String(err);
-  process.stderr.write(`${msg}\n`);
-  process.exitCode = 1;
-});
+export {
+  makeScenario,
+  makeBodiesFromMeshLabField,
+  buildAuthoringFieldsForCombo,
+};
+
+const isDirectRun = (() => {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  return import.meta.url === pathToFileURL(path.resolve(entry)).href;
+})();
+
+if (isDirectRun) {
+  main().catch((err) => {
+    const msg = err && err.stack ? err.stack : String(err);
+    process.stderr.write(`${msg}\n`);
+    process.exitCode = 1;
+  });
+}

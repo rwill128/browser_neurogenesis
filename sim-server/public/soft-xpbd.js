@@ -191,6 +191,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   convergenceNudge = 0.35,
   nearBaselineSnapWindow = 0.003,
   nearBaselineSnapBlend = 0.85,
+  globalErrorCouplingMax = 1.25,
 } = {}) {
   if (!Array.isArray(springs) || !restBaseline || typeof restBaseline.length !== 'number') return 0;
 
@@ -209,9 +210,25 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const nudge = clamp(Number(convergenceNudge) || 0, 0, 1);
   const snapWindow = Math.max(0, Number(nearBaselineSnapWindow) || 0);
   const snapBlend = clamp(Number(nearBaselineSnapBlend) || 0, 0, 1);
+  const globalCouplingMax = Math.max(1, Number(globalErrorCouplingMax) || 1);
 
   let touched = 0;
   const n = Math.min(springs.length, restBaseline.length);
+  let meanErrNorm = 0;
+  let meanErrCount = 0;
+  if (adaptiveMode && globalCouplingMax > 1.0001 && n > 0) {
+    for (let i = 0; i < n; i++) {
+      const sp = springs[i];
+      if (!Array.isArray(sp) || sp.length < 3) continue;
+      const base = Math.max(1e-4, Number(restBaseline[i]) || 1e-4);
+      const current = Number(sp[2]);
+      const cur = Number.isFinite(current) ? current : base;
+      meanErrNorm += Math.abs(base - cur) / base;
+      meanErrCount += 1;
+    }
+    meanErrNorm = meanErrCount > 0 ? (meanErrNorm / meanErrCount) : 0;
+  }
+
   for (let i = 0; i < n; i++) {
     const sp = springs[i];
     if (!Array.isArray(sp) || sp.length < 3) continue;
@@ -222,7 +239,9 @@ export function recoverSoftSpringRests(springs, restBaseline, {
     const errNorm = Math.abs(base - cur) / base;
     const adaptiveErr = Math.min(1, Math.pow(errNorm / pivot, exponent));
     const dirBoost = (cur > base) ? elongationBias : compressionBias;
-    const boost = 1 + (gainMax - 1) * adaptiveErr * dirBoost;
+    const globalErrAlpha = clamp(meanErrNorm / pivot, 0, 1);
+    const globalBoost = 1 + (globalCouplingMax - 1) * globalErrAlpha;
+    const boost = (1 + (gainMax - 1) * adaptiveErr * dirBoost) * globalBoost;
     const recover = clamp(k * boost, 0, 1);
 
     // As we approach baseline, gradually tighten allowable rest-length range to reduce

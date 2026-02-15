@@ -640,3 +640,42 @@ test('near-baseline adaptive snap eliminates deterministic tail drift without to
   assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 5e-5,
     `expected bounded area-deviation guardrail under snap recovery (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });
+
+test('global recovery coupling improves adversarial half-life without area-drift regression', () => {
+  const before = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      recoverRate: 0.028,
+      adaptiveGainMax: 1.7,
+      adaptiveExponent: 0.95,
+      nearBaselineSnapWindow: 0,
+      nearBaselineSnapBlend: 0,
+      globalErrorCouplingMax: 1,
+    },
+  });
+  const after = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      recoverRate: 0.028,
+      adaptiveGainMax: 1.7,
+      adaptiveExponent: 0.95,
+      nearBaselineSnapWindow: 0,
+      nearBaselineSnapBlend: 0,
+      globalErrorCouplingMax: 1.25,
+    },
+  });
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-global-coupling]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryHalfLifeSteps < before.recoveryHalfLifeSteps,
+    `expected faster half-life under global coupling (before=${before.recoveryHalfLifeSteps}, after=${after.recoveryHalfLifeSteps})`);
+  assert.ok(after.recoveryAt200 >= (before.recoveryAt200 - 2e-5),
+    `expected near-par early recovery under global coupling (before=${before.recoveryAt200}, after=${after.recoveryAt200})`);
+  assert.ok(after.recoveryAt500 >= (before.recoveryAt500 - 2e-5),
+    `expected near-par mid recovery under global coupling (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 5e-5,
+    `expected bounded area drift under global coupling (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+});

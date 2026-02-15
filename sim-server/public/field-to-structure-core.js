@@ -42,7 +42,7 @@ function deriveBaseStepFromDensityField({ width, height, rigidField, softField, 
   return densityValueToStep(meanDensity);
 }
 
-function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField, softMinCellSize = 1, softMaxCellSize = 6, softBoundaryCellCap = 2, softNeighborStepDeltaCap = 0, softThinFeatureCellCap = 0, softBridgeCellCap = 2, softBridgeNeighborMax = 2 }) {
+function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField, softMinCellSize = 1, softMaxCellSize = 6, softBoundaryCellCap = 2, softNeighborStepDeltaCap = 0, softThinFeatureCellCap = 0, softBridgeCellCap = 2, softBridgeNeighborMax = 3 }) {
   const minSoftStep = Math.max(1, Math.round(Number(softMinCellSize) || 1));
   const maxSoftStep = Math.max(minSoftStep, Math.round(Number(softMaxCellSize) || 6));
   const boundaryCap = Number.isFinite(Number(softBoundaryCellCap))
@@ -59,7 +59,7 @@ function buildAdaptiveDensityCells({ width, height, rigidField, softField, thres
     : 3;
   const bridgeNeighborMax = Number.isFinite(Number(softBridgeNeighborMax))
     ? Math.max(1, Math.min(4, Math.round(Number(softBridgeNeighborMax))))
-    : 2;
+    : 3;
   const cw = Math.max(1, width - 1);
   const ch = Math.max(1, height - 1);
   const cellCount = cw * ch;
@@ -265,7 +265,7 @@ export function compileFieldToMesh({
   softNeighborStepDeltaCap = 1, // max coarse-step delta between neighboring soft cells (0 disables)
   softThinFeatureCellCap = 2, // cap primitive size in narrow/tendril soft regions to preserve shape memory topology
   softBridgeCellCap = 2, // cap primitive size in low-cardinality bridge cells to reduce soft rest-span outliers
-  softBridgeNeighborMax = 2, // max cardinal neighbors counted as bridge-like (legacy/default=2)
+  softBridgeNeighborMax = 3, // max cardinal neighbors counted as bridge-like (default=3 narrows broad bridge cells less aggressively)
 }) {
   const infillMode = softInfillMode === 'triangles' ? 'triangles' : 'triangles+cross';
   const fallbackStep = Math.max(1, density | 0);
@@ -283,7 +283,7 @@ export function compileFieldToMesh({
     : 3;
   const softBridgeNeighborLimit = Number.isFinite(Number(softBridgeNeighborMax))
     ? Math.max(1, Math.min(4, Math.round(Number(softBridgeNeighborMax))))
-    : 2;
+    : 3;
   const step = deriveBaseStepFromDensityField({
     width,
     height,

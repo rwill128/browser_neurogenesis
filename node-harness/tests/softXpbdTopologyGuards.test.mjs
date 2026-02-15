@@ -1437,6 +1437,66 @@ test('default bridge neighbor-max (3) improves adversarial pure-soft endpoint re
     `expected improved area guardrail under bridge neighbor-max 3 (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });
 
+test('compileFieldToMesh defaults bridge-neighbor-max to 3 for pure-soft adaptive topology', () => {
+  const recoveryOverrides = {
+    recoverRate: 0.056,
+    adaptiveGainMax: 2.4,
+    adaptiveExponent: 0.8,
+    elongationBiasMax: 1.22,
+    compressionBiasMax: 1.12,
+    errorPivot: 0.16,
+    nearBaselineSnapWindow: 0.004,
+    nearBaselineSnapBlend: 0.9,
+  };
+  const compileBase = {
+    softNeighborStepDeltaCap: 0,
+    softBoundaryCellCap: 6,
+    softMaxCellSize: 10,
+    softThinFeatureCellCap: 0,
+    softBridgeCellCap: 2,
+  };
+
+  const legacy = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides,
+    compileOverrides: {
+      ...compileBase,
+      softBridgeNeighborMax: 2,
+    },
+  });
+
+  const defaultAfter = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides,
+    compileOverrides: compileBase,
+  });
+
+  const explicitThree = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides,
+    compileOverrides: {
+      ...compileBase,
+      softBridgeNeighborMax: 3,
+    },
+  });
+
+  assert.equal(defaultAfter.baselineRestSpanRatio, explicitThree.baselineRestSpanRatio,
+    'default topology should match explicit softBridgeNeighborMax=3 span metric');
+  assert.equal(defaultAfter.recoveryAt1000, explicitThree.recoveryAt1000,
+    'default topology should match explicit softBridgeNeighborMax=3 late recovery');
+  assert.ok(defaultAfter.recoveryAt200 >= legacy.recoveryAt200,
+    `expected non-regressing early recovery vs legacy default=2 (legacy=${legacy.recoveryAt200}, default=${defaultAfter.recoveryAt200})`);
+  assert.ok(defaultAfter.recoveryAt500 >= legacy.recoveryAt500,
+    `expected non-regressing mid recovery vs legacy default=2 (legacy=${legacy.recoveryAt500}, default=${defaultAfter.recoveryAt500})`);
+  assert.ok(defaultAfter.recoveryAt1000 >= legacy.recoveryAt1000,
+    `expected non-regressing late recovery vs legacy default=2 (legacy=${legacy.recoveryAt1000}, default=${defaultAfter.recoveryAt1000})`);
+  assert.ok(defaultAfter.maxAreaDeviation <= legacy.maxAreaDeviation,
+    `expected improved/non-regressing area guardrail vs legacy default=2 (legacy=${legacy.maxAreaDeviation}, default=${defaultAfter.maxAreaDeviation})`);
+});
+
 test('tighter default bridge cap (3 -> 2) improves coarse pure-soft mesh span without recovery regression', () => {
   const recoveryOverrides = {
     recoverRate: 0.02,

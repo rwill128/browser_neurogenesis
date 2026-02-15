@@ -456,6 +456,7 @@ test('pure-soft boundary cap prevents oversized seam triangles in adversarial pa
     softInfillMode: 'triangles+cross',
     softBoundaryCellCap: 0,
     softThinFeatureCellCap: 0,
+    softBridgeCellCap: 0,
   });
 
   const defaultBoundaryCap = compileFieldToMesh({
@@ -468,6 +469,7 @@ test('pure-soft boundary cap prevents oversized seam triangles in adversarial pa
     connectivityMode: 'largest',
     softInfillMode: 'triangles+cross',
     softThinFeatureCellCap: 0,
+    softBridgeCellCap: 0,
   });
 
   const before = softBoundaryStretchMetrics(noBoundaryCap, w, h);

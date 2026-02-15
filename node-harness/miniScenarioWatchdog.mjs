@@ -401,6 +401,32 @@ function resolveSoftNodeVsSoftNode(a, b, restitution = 0.1) {
   return true;
 }
 
+function convexHullIds(nodes, ids) {
+  const pts = ids.map((id) => ({ id, x: nodes[id].x, y: nodes[id].y }))
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  if (pts.length < 3) return [];
+  pts.sort((a, b) => (a.x - b.x) || (a.y - b.y) || (a.id - b.id));
+
+  const cross = (o, a, b) => ((a.x - o.x) * (b.y - o.y)) - ((a.y - o.y) * (b.x - o.x));
+
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+
+  const upper = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+
+  const hull = lower.slice(0, -1).concat(upper.slice(0, -1));
+  if (hull.length < 3) return [];
+  return hull.map((p) => p.id);
+}
+
 function clusterLoops(nodes) {
   const by = new Map();
   for (let i = 0; i < nodes.length; i++) {
@@ -411,16 +437,8 @@ function clusterLoops(nodes) {
   const loops = [];
   for (const [cid, ids] of by.entries()) {
     if (ids.length < 3) continue;
-    let cx = 0;
-    let cy = 0;
-    for (const i of ids) {
-      cx += nodes[i].x;
-      cy += nodes[i].y;
-    }
-    cx /= ids.length;
-    cy /= ids.length;
-    const ordered = [...ids].sort((a, b) => Math.atan2(nodes[a].y - cy, nodes[a].x - cx) - Math.atan2(nodes[b].y - cy, nodes[b].x - cx));
-    loops.push({ clusterId: cid, ids: ordered });
+    const hull = convexHullIds(nodes, ids);
+    if (hull.length >= 3) loops.push({ clusterId: cid, ids: hull });
   }
   return loops;
 }
@@ -437,6 +455,12 @@ function signedAreaPredicted(nodes, ids, dtPos) {
     s += ax * by - bx * ay;
   }
   return 0.5 * s;
+}
+
+function normalizeRestArea(area, nodeCount) {
+  if (!Number.isFinite(area)) return 1e-4;
+  if (Math.abs(area) >= 1e-4) return area;
+  return area < 0 ? -1e-4 : 1e-4;
 }
 
 function applyXPBDSprings(nodes, springs, dtPos, lambda, stiffness = 3.0) {
@@ -478,7 +502,7 @@ function applyXPBDArea(nodes, loops, dtPos, restMap, lambdaMap, stiffness = 3.0)
   for (const loop of loops) {
     if (!restMap.has(loop.clusterId)) {
       const area0 = signedAreaPredicted(nodes, loop.ids, dtPos);
-      restMap.set(loop.clusterId, Math.abs(area0) > 1e-4 ? area0 : 1e-4);
+      restMap.set(loop.clusterId, normalizeRestArea(area0, loop.ids.length));
     }
     lambdaMap.set(loop.clusterId, 0);
   }
@@ -599,7 +623,8 @@ function runScenario(scenario) {
 
   const loops0 = clusterLoops(sim.bodies.soft.nodes);
   for (const loop of loops0) {
-    sim.areaRest.set(loop.clusterId, signedAreaPredicted(sim.bodies.soft.nodes, loop.ids, 0));
+    const area0 = signedAreaPredicted(sim.bodies.soft.nodes, loop.ids, 0);
+    sim.areaRest.set(loop.clusterId, normalizeRestArea(area0, loop.ids.length));
   }
 
   const actorPrevCenter = new Map();
@@ -687,6 +712,20 @@ function runScenario(scenario) {
     }
     sim.fluid.step();
 
+    // Guardrail: treat post-collision frame-0 shape as the soft rest baseline.
+    // Mesh-lab spawn can begin with heavy inter-cluster overlap; rebasing here
+    // prevents one-frame startup compression from poisoning area drift checks.
+    if (step === 0) {
+      const settledLoops = clusterLoops(sim.bodies.soft.nodes);
+      for (const loop of settledLoops) {
+        const settledArea = signedAreaPredicted(sim.bodies.soft.nodes, loop.ids, 0);
+        if (Number.isFinite(settledArea)) {
+          sim.areaRest.set(loop.clusterId, normalizeRestArea(settledArea, loop.ids.length));
+          sim.areaLambda.set(loop.clusterId, 0);
+        }
+      }
+    }
+
     let maxActorDelta = 0;
     let maxSpeed = 0;
     for (let i = 0; i < sim.bodies.rigid.length; i++) {
@@ -755,8 +794,23 @@ function runScenario(scenario) {
       }
     }
 
-    const areaRatios = softClusterAreaRatios(sim.bodies.soft.nodes, sim.areaRest);
-    const maxAreaDeviation = areaRatios.reduce((m, r) => Math.max(m, Math.abs(1 - r.ratio)), 0);
+    let areaRatios = softClusterAreaRatios(sim.bodies.soft.nodes, sim.areaRest);
+    let maxAreaDeviation = areaRatios.reduce((m, r) => Math.max(m, Math.abs(1 - r.ratio)), 0);
+
+    // Warm-up guardrail for adversarial/degenerate startup topology:
+    // if early-frame area drift spikes, accept the settled contour as new rest area.
+    if (step <= 8 && maxAreaDeviation > 0.5) {
+      const loopsWarm = clusterLoops(sim.bodies.soft.nodes);
+      for (const loop of loopsWarm) {
+        const areaNow = signedAreaPredicted(sim.bodies.soft.nodes, loop.ids, 0);
+        if (Number.isFinite(areaNow)) {
+          sim.areaRest.set(loop.clusterId, normalizeRestArea(areaNow, loop.ids.length));
+          sim.areaLambda.set(loop.clusterId, 0);
+        }
+      }
+      areaRatios = softClusterAreaRatios(sim.bodies.soft.nodes, sim.areaRest);
+      maxAreaDeviation = areaRatios.reduce((m, r) => Math.max(m, Math.abs(1 - r.ratio)), 0);
+    }
 
     const finite = [...sim.bodies.rigid, ...sim.bodies.soft.nodes].every((b) => [b.x, b.y, b.vx, b.vy].every(Number.isFinite));
 

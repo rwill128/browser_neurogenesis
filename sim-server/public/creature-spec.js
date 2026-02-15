@@ -588,6 +588,8 @@ function nearestHullEdgeForPoint(hull, px, py) {
   if (!hull?.length) return { vA: 0, vB: 0 };
   if (hull.length === 1) return { vA: 0, vB: 0 };
 
+  const EDGE_EPS2 = 1e-8;
+
   let nearestVertex = 0;
   let nearestVertexD2 = Number.POSITIVE_INFINITY;
   for (let i = 0; i < hull.length; i++) {
@@ -601,40 +603,58 @@ function nearestHullEdgeForPoint(hull, px, py) {
   }
 
   // Deterministic tie-break for shared nodes that land directly on a rigid vertex.
+  // Prefer a local non-degenerate incident edge when possible.
   if (nearestVertexD2 <= 1e-6) {
     const n = hull.length;
     const prev = (nearestVertex - 1 + n) % n;
     const next = (nearestVertex + 1) % n;
     const prevLen2 = (hull[nearestVertex].x - hull[prev].x) ** 2 + (hull[nearestVertex].y - hull[prev].y) ** 2;
     const nextLen2 = (hull[nearestVertex].x - hull[next].x) ** 2 + (hull[nearestVertex].y - hull[next].y) ** 2;
-    return nextLen2 <= prevLen2
-      ? { vA: nearestVertex, vB: next }
-      : { vA: prev, vB: nearestVertex };
+
+    const prevValid = prevLen2 > EDGE_EPS2;
+    const nextValid = nextLen2 > EDGE_EPS2;
+    if (prevValid && nextValid) {
+      return nextLen2 <= prevLen2
+        ? { vA: nearestVertex, vB: next }
+        : { vA: prev, vB: nearestVertex };
+    }
+    if (nextValid) return { vA: nearestVertex, vB: next };
+    if (prevValid) return { vA: prev, vB: nearestVertex };
   }
 
   let bestIdx = 0;
   let bestD2 = Number.POSITIVE_INFINITY;
+  let fallbackIdx = 0;
+  let fallbackD2 = Number.POSITIVE_INFINITY;
   for (let i = 0; i < hull.length; i++) {
     const a = hull[i];
     const b = hull[(i + 1) % hull.length];
     const abx = b.x - a.x;
     const aby = b.y - a.y;
+    const len2 = abx * abx + aby * aby;
     const apx = px - a.x;
     const apy = py - a.y;
-    const denom = Math.max(1e-6, abx * abx + aby * aby);
+    const denom = Math.max(1e-6, len2);
     const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / denom));
     const cx = a.x + abx * t;
     const cy = a.y + aby * t;
     const dx = px - cx;
     const dy = py - cy;
     const d2 = dx * dx + dy * dy;
+
+    if (d2 < fallbackD2) {
+      fallbackD2 = d2;
+      fallbackIdx = i;
+    }
+    if (len2 <= EDGE_EPS2) continue;
     if (d2 < bestD2) {
       bestD2 = d2;
       bestIdx = i;
     }
   }
 
-  return { vA: bestIdx, vB: (bestIdx + 1) % hull.length };
+  const idx = Number.isFinite(bestD2) ? bestIdx : fallbackIdx;
+  return { vA: idx, vB: (idx + 1) % hull.length };
 }
 
 function triangleComponents(tris) {

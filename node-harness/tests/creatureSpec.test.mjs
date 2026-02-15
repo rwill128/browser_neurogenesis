@@ -177,6 +177,7 @@ test('hybrid links at rigid vertices choose a local incident edge (deterministic
   const shortestIncident = Math.min(edgeLen(vertexIdx, prevIdx), edgeLen(vertexIdx, nextIdx));
   const chosenLen = edgeLen(vertexIdx, otherIdx);
 
+  assert.ok(chosenLen > 1e-6, `expected non-degenerate hybrid edge, got ${chosenLen}`);
   assert.ok(chosenLen <= shortestIncident + 1e-6,
     `expected local tie-break edge (chosen=${chosenLen}, shortestIncident=${shortestIncident})`);
 });

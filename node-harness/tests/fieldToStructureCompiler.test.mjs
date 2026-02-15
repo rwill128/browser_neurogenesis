@@ -36,6 +36,39 @@ function pointOnSegment(px, py, ax, ay, bx, by, eps = 1e-6) {
   return true;
 }
 
+function softQualityMetrics(mesh) {
+  const softTris = mesh.triangles.filter((t) => t.kind === 'soft');
+  let maxEdge = 0;
+  let minEdge = Number.POSITIVE_INFINITY;
+  let maxArea = 0;
+  let minArea = Number.POSITIVE_INFINITY;
+
+  for (const t of softTris) {
+    const a = mesh.nodes[t.a];
+    const b = mesh.nodes[t.b];
+    const c = mesh.nodes[t.c];
+    const ab = Math.hypot(a.x - b.x, a.y - b.y);
+    const bc = Math.hypot(b.x - c.x, b.y - c.y);
+    const ca = Math.hypot(c.x - a.x, c.y - a.y);
+    maxEdge = Math.max(maxEdge, ab, bc, ca);
+    minEdge = Math.min(minEdge, ab, bc, ca);
+
+    const area = Math.abs((a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y)) * 0.5);
+    maxArea = Math.max(maxArea, area);
+    minArea = Math.min(minArea, area);
+  }
+
+  return {
+    softTriangles: softTris.length,
+    maxEdge,
+    minEdge,
+    edgeRatio: maxEdge / Math.max(1e-9, minEdge),
+    maxArea,
+    minArea,
+    areaRatio: maxArea / Math.max(1e-9, minArea),
+  };
+}
+
 test('field-to-structure compiler creates rigid and soft triangles from painted regions', () => {
   const w = 16, h = 16;
   const rigid = new Float32Array(w * h);
@@ -297,6 +330,62 @@ test('soft minimum primitive size clamps adaptive tiny triangles', () => {
     const minEdge = Math.min(ab, bc, ca);
     assert.ok(minEdge >= 4 - 1e-6, `expected strict min soft edge >=4, saw ${minEdge}`);
   }
+});
+
+test('adversarial pure-soft density map bounds coarse primitive scale to reduce deformation risk', () => {
+  const w = 96, h = 96;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+  const softDensity = new Float32Array(w * h).fill(0.95);
+
+  // Pure-soft body with narrow bridge + abrupt density gradient (deterministic adversarial case).
+  for (let y = 12; y <= 84; y++) {
+    for (let x = 12; x <= 84; x++) soft[y * w + x] = 1;
+  }
+  for (let y = 44; y <= 52; y++) {
+    for (let x = 18; x <= 78; x++) {
+      soft[y * w + x] = 1;
+      softDensity[y * w + x] = 0.02;
+    }
+  }
+  for (let y = 12; y <= 84; y++) {
+    for (let x = 12; x <= 30; x++) softDensity[y * w + x] = 0.02;
+  }
+
+  const legacyUnbounded = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: softDensity,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles+cross',
+    softMinCellSize: 1,
+    softMaxCellSize: 12,
+  });
+
+  const boundedDefault = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: softDensity,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles+cross',
+    softMinCellSize: 1,
+  });
+
+  const before = softQualityMetrics(legacyUnbounded);
+  const after = softQualityMetrics(boundedDefault);
+
+  assert.ok(after.softTriangles > 0, 'bounded mesh should still produce soft triangles');
+  assert.ok(after.maxEdge < before.maxEdge, `expected bounded max edge reduction (before=${before.maxEdge}, after=${after.maxEdge})`);
+  assert.ok(after.edgeRatio < before.edgeRatio, `expected bounded edge ratio reduction (before=${before.edgeRatio}, after=${after.edgeRatio})`);
+  assert.ok(after.areaRatio < before.areaRatio, `expected bounded area ratio reduction (before=${before.areaRatio}, after=${after.areaRatio})`);
+  assert.ok(after.maxEdge <= 9, `default soft max-cell bound should cap soft edge span, saw ${after.maxEdge}`);
+  assert.equal(boundedDefault.meta.softMaxCellSize, 6);
 });
 
 test('density map also modulates rigid infill resolution (not soft-only)', () => {

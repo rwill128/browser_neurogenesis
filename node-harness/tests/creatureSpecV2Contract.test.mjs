@@ -23,6 +23,56 @@ function isConcave(poly) {
   return hasPos && hasNeg;
 }
 
+function assertMembraneRingOnly(sb) {
+  assert.ok(sb && Array.isArray(sb.nodes), 'membrane body should have nodes');
+  assert.ok(Array.isArray(sb.springs), 'membrane body should have springs');
+  const n = sb.nodes.length;
+  assert.ok(n >= 3, 'membrane ring requires at least 3 nodes');
+  assert.equal(sb.springs.length, n, 'ring-only membrane must have exactly one edge per node');
+
+  const deg = new Array(n).fill(0);
+  const adj = Array.from({ length: n }, () => []);
+  const seen = new Set();
+
+  for (const sp of sb.springs) {
+    assert.ok(Array.isArray(sp) && sp.length >= 3, 'spring record malformed');
+    const a = Number(sp[0]);
+    const b = Number(sp[1]);
+    assert.ok(Number.isInteger(a) && a >= 0 && a < n, `spring endpoint a out of range: ${a}`);
+    assert.ok(Number.isInteger(b) && b >= 0 && b < n, `spring endpoint b out of range: ${b}`);
+    assert.notEqual(a, b, 'ring spring cannot be self-loop');
+
+    const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+    assert.equal(seen.has(key), false, `duplicate membrane edge detected: ${key}`);
+    seen.add(key);
+
+    deg[a] += 1;
+    deg[b] += 1;
+    adj[a].push(b);
+    adj[b].push(a);
+
+    const edgeBodyMode = Number(sp[3]);
+    assert.equal(edgeBodyMode, 1, 'membrane ring edges should be blocking');
+  }
+
+  for (let i = 0; i < n; i++) {
+    assert.equal(deg[i], 2, `ring node degree must be 2 (node ${i} has ${deg[i]})`);
+  }
+
+  // Confirm single-cycle connectivity.
+  const visited = new Set([0]);
+  const stack = [0];
+  while (stack.length) {
+    const u = stack.pop();
+    for (const v of adj[u]) {
+      if (visited.has(v)) continue;
+      visited.add(v);
+      stack.push(v);
+    }
+  }
+  assert.equal(visited.size, n, 'membrane ring should be one connected cycle');
+}
+
 function sampleMesh() {
   return {
     nodes: [
@@ -92,6 +142,7 @@ test('soft solver mode is exported and membrane mode is mapped on import bodies'
   assert.ok(Number(membraneSpec.softBodies[0].restArea) > 0);
   assert.ok(Number(membraneSpec.softBodies[0].shapeMemoryGain) > 0);
   assert.equal(Number(membraneSpec.softBodies[0].insideCorrectionEnabled), 1);
+  assertMembraneRingOnly(membraneSpec.softBodies[0]);
 
   const importedMembrane = buildBodiesFromCreatureSpec(membraneSpec, 64, CONTROLS);
   assert.ok(Array.isArray(importedMembrane.softMembraneClusters));
@@ -140,7 +191,7 @@ test('membrane export from authoring soft field is perimeter-only (no interior i
   const sb = spec.softBodies[0];
   assert.equal(sb.solverMode, 'membrane');
   assert.ok(sb.nodes.length >= 8, 'expected perimeter loop nodes from painted field contour');
-  assert.equal(sb.springs.length, sb.nodes.length, 'perimeter-only membrane should have one ring spring per node');
+  assertMembraneRingOnly(sb);
 
   const bodies = buildBodiesFromCreatureSpec(spec, 64, CONTROLS);
   assert.equal(bodies.softMembraneClusters.length, 1);

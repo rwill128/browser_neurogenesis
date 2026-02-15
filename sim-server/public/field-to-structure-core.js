@@ -120,6 +120,7 @@ export function compileFieldToMesh({
       droppedTriangles: triangles.length - final.triangles.length,
       softOverlapTrimmed: noOverlap.removed,
       softDensityCulled: densityApplied.culled,
+      softDensityLevels: softDensityField ? 15 : 0,
     },
   };
 }
@@ -364,13 +365,19 @@ function applySoftInfillDensityMap(triangles, nodes, { width, height, softDensit
     const gy = sampleBilinear(softDensityField, width, height, cx, cy + step) - sampleBilinear(softDensityField, width, height, cx, cy - step);
     const grad = Math.hypot(gx, gy) * 0.5;
 
-    // Dense map=1 keeps all; sparse map=0 still keeps some lattice for stability.
-    let keepProb = 0.22 + densCenter * 0.78;
+    // Explicit 1..15 local density scale from painted intensity:
+    // intensity 1.0 => level 1 (most dense), intensity 0.0 => level 15 (most sparse).
+    const localDensityLevel = 1 + Math.round((1 - densCenter) * 14);
+    const baseStep = Math.max(1, step | 0);
+
+    // Approximate local step-density ratio with deterministic retention probability.
+    // (Cannot exceed base mesh density; level 1 saturates to full retention.)
+    let keepProb = Math.min(1, (baseStep * baseStep) / (localDensityLevel * localDensityLevel));
 
     // Boundary handling between density shifts: keep a transition belt where gradients are high.
     const transitionBoost = Math.max(0, Math.min(1, grad * 1.8));
-    keepProb = Math.max(keepProb, 0.55 * transitionBoost + 0.35);
-    keepProb = Math.max(0.22, Math.min(1, keepProb));
+    keepProb = Math.max(keepProb, 0.62 * transitionBoost + 0.28);
+    keepProb = Math.max(0.06, Math.min(1, keepProb));
 
     const h = hash01FromTri(t.a, t.b, t.c);
     if (h <= keepProb) keep.push(t);

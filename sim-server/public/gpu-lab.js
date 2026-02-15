@@ -39,7 +39,10 @@ function log(v) { out.textContent = typeof v === 'string' ? v : JSON.stringify(v
 
 const WORKGROUP = 8;
 const JACOBI_ITERS = 20;
-const SOFT_SPRING_STIFFNESS_DEFAULT = 3.0; // requested stronger default baseline
+const SOFT_SPRING_STIFFNESS_DEFAULT = 4.2; // stronger lattice resistance for spring-mode soft bodies
+const SOFT_NODE_FLOW_COUPLING = 0.42; // reduce per-vertex fluid carry so single nodes are less individually yanked
+const SOFT_CLUSTER_TUG_COUPLING = 0.58; // redistribute current-induced pull across the whole soft cluster
+const SOFT_CLUSTER_RELATIVE_DRAG = 0.11; // damp per-node divergence from cluster motion
 const SOFT_XPBD_ITERS = 10;
 const SOFT_XPBD_BASE_COMPLIANCE = 0.0012;
 const SOFT_AREA_XPBD_ITERS = 6;
@@ -2492,7 +2495,10 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   }
 
   const s = bodies.soft;
+  const softMembraneClusterSet = ensureSoftMembraneClusterSet(sim);
   const softCentroid = computeSoftCentroid(s.nodes);
+  const clusterCarryMap = new Map();
+
   for (let i = 0; i < s.nodes.length; i++) {
     const node = s.nodes[i];
     const fx = sampleFieldBilinear(vxField, n, node.x, node.y);
@@ -2505,10 +2511,26 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const swimX = (-cy * activeSwimAmp + Math.cos(activeSwimPhase) * 0.004) * invMass;
     const swimY = (cx * activeSwimAmp + Math.sin(activeSwimPhase) * 0.004) * invMass;
     const honey = localHoneyDrag(node.x, node.y);
-    const carryX = (fx - node.vx) * dragK * honey * invMass;
-    const carryY = (fy - node.vy) * dragK * honey * invMass;
+    const cid = node.clusterId ?? 0;
+    const isMembraneCluster = softMembraneClusterSet.has(cid);
+    const flowCoupling = isMembraneCluster ? (SOFT_NODE_FLOW_COUPLING * 0.88) : SOFT_NODE_FLOW_COUPLING;
+    const carryX = (fx - node.vx) * dragK * honey * invMass * flowCoupling;
+    const carryY = (fy - node.vy) * dragK * honey * invMass * flowCoupling;
     node.vx += carryX * dt * 60 + swimX * dtNorm;
     node.vy += carryY * dt * 60 + swimY * dtNorm;
+
+    const st = clusterCarryMap.get(cid) || { sumX: 0, sumY: 0, count: 0, maxX: 0, maxY: 0, maxMag: 0 };
+    st.sumX += carryX;
+    st.sumY += carryY;
+    st.count += 1;
+    const cmag = Math.hypot(carryX, carryY);
+    if (cmag > st.maxMag) {
+      st.maxMag = cmag;
+      st.maxX = carryX;
+      st.maxY = carryY;
+    }
+    clusterCarryMap.set(cid, st);
+
     const softVisc = viscosityMotionResponse(honey, 2.8);
     node.vx *= softVisc.damp;
     node.vy *= softVisc.damp;
@@ -2519,6 +2541,41 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       node.vy = (node.vy / nMag) * nMax;
     }
     softCarryTransfer += Math.hypot(carryX, carryY);
+  }
+
+  // Redistribute flow pull across each cluster so one stretched node drags the body along.
+  for (const node of s.nodes) {
+    const cid = node.clusterId ?? 0;
+    const st = clusterCarryMap.get(cid);
+    if (!st || st.count <= 0) continue;
+    const meanX = st.sumX / st.count;
+    const meanY = st.sumY / st.count;
+    const pullX = meanX * 0.45 + st.maxX * 0.55;
+    const pullY = meanY * 0.45 + st.maxY * 0.55;
+    const tugCoupling = softMembraneClusterSet.has(cid) ? (SOFT_CLUSTER_TUG_COUPLING * 0.55) : SOFT_CLUSTER_TUG_COUPLING;
+    node.vx += pullX * tugCoupling * dt * 60;
+    node.vy += pullY * tugCoupling * dt * 60;
+  }
+
+  // Keep clusters coherent: damp relative drift around cluster mean velocity.
+  const clusterVelMap = new Map();
+  for (const node of s.nodes) {
+    const cid = node.clusterId ?? 0;
+    const st = clusterVelMap.get(cid) || { sumVx: 0, sumVy: 0, count: 0 };
+    st.sumVx += node.vx || 0;
+    st.sumVy += node.vy || 0;
+    st.count += 1;
+    clusterVelMap.set(cid, st);
+  }
+  for (const node of s.nodes) {
+    const cid = node.clusterId ?? 0;
+    const st = clusterVelMap.get(cid);
+    if (!st || st.count <= 0) continue;
+    const meanVx = st.sumVx / st.count;
+    const meanVy = st.sumVy / st.count;
+    const relDamp = softMembraneClusterSet.has(cid) ? (SOFT_CLUSTER_RELATIVE_DRAG * 0.65) : SOFT_CLUSTER_RELATIVE_DRAG;
+    node.vx -= (node.vx - meanVx) * relDamp * dtNorm;
+    node.vy -= (node.vy - meanVy) * relDamp * dtNorm;
   }
 
   const dtPos = Math.max(1e-4, dt * SOFT_INTEGRATION_SCALE);
@@ -2532,7 +2589,6 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     }
   }
 
-  const softMembraneClusterSet = ensureSoftMembraneClusterSet(sim);
   applySoftSpringsXPBDVelocity(s, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT, sim.softXPBDLambda, {
     skipClusterSet: softMembraneClusterSet,
   });

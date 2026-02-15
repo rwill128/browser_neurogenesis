@@ -2184,7 +2184,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       localImbalanceCouplingMax: recovering ? 1.12 : 1.02,
       localErrorPivot: recovering ? 0.2 : 0.3,
       counterPolarityCouplingMax: recovering ? 1.07 : 1.02,
-      smallRestRecoveryCouplingMax: recovering ? 1.14 : 1.03,
+      smallRestRecoveryCouplingMax: recovering ? 1.14 : 1.0,
       smallRestPivot: recovering ? 0.9 : 1.2,
     });
   }

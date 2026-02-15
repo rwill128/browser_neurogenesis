@@ -201,8 +201,9 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   localErrorPivot = 0.2,
   polarityCouplingMax = 1.08,
   counterPolarityCouplingMax = 1,
-  smallRestRecoveryCouplingMax = 1.03,
+  smallRestRecoveryCouplingMax = 1,
   smallRestPivot = 0.9,
+  smallRestErrorGate = 0.08,
   midErrorRecoveryCouplingMax = 1,
   midErrorRecoveryCenter = 0.22,
   midErrorRecoveryHalfWidth = 0.22,
@@ -238,6 +239,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const counterPolarityMax = Math.max(1, Number(counterPolarityCouplingMax) || 1);
   const smallRestCouplingMax = Math.max(1, Number(smallRestRecoveryCouplingMax) || 1);
   const smallRestErrPivot = Math.max(1e-6, Number(smallRestPivot) || 0.9);
+  const smallRestErrGate = Math.max(1e-6, Number(smallRestErrorGate) || 0.08);
   const midErrorCouplingMax = Math.max(1, Number(midErrorRecoveryCouplingMax) || 1);
   const midErrorCenter = Math.max(1e-6, Number(midErrorRecoveryCenter) || 0.22);
   const midErrorHalfWidth = Math.max(1e-6, Number(midErrorRecoveryHalfWidth) || 0.22);
@@ -349,7 +351,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       ? (meanBaseRest / base)
       : 1;
     const shortRestAlpha = clamp((shortRestRatio - 1) / smallRestErrPivot, 0, 1);
-    const shortRestBoost = 1 + (smallRestCouplingMax - 1) * shortRestAlpha;
+    const shortRestErrAlpha = clamp(errNorm / smallRestErrGate, 0, 1);
+    const shortRestBoost = 1 + (smallRestCouplingMax - 1) * shortRestAlpha * shortRestErrAlpha;
     const midErrorDistance = Math.abs(errNorm - midErrorCenter);
     const midErrorAlpha = clamp(1 - (midErrorDistance / midErrorHalfWidth), 0, 1);
     const midErrorBoost = 1 + (midErrorCouplingMax - 1) * midErrorAlpha;

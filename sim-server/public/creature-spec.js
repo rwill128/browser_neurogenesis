@@ -521,6 +521,7 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
   const enableBoundaryRing = options?.softBoundaryRingSprings !== false;
   const boundaryRingStrideRaw = Math.max(2, Math.round(Number(options?.softBoundaryRingStride) || 2));
   const boundaryRingMaxSpanFactor = Math.max(1.5, Number(options?.softBoundaryRingMaxSpanFactor) || 2.75);
+  const crossBeamMaxSpanFactor = Math.max(1.25, Number(options?.softCrossBeamMaxSpanFactor) || 2.75);
   const comps = triangleComponents(tris);
   const softBodies = [];
   const components = [];
@@ -580,7 +581,13 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
       springSet.add(springKey(a, b));
     }
 
-    // Double cross-beam square reinforcement for soft lattice.
+    const structuralRest = springs.map((sp) => Number(sp?.[2])).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);
+    const medianStructuralRest = structuralRest.length
+      ? structuralRest[Math.floor(structuralRest.length * 0.5)]
+      : 1;
+    const maxCrossBeamRest = Math.max(1e-3, medianStructuralRest * crossBeamMaxSpanFactor);
+
+    // Double cross-beam square reinforcement for soft lattice, span-bounded to avoid long-range shear overconstraint.
     for (const beam of (softCrossBeams || [])) {
       const ua = Number(beam?.[0]);
       const ub = Number(beam?.[1]);
@@ -592,10 +599,12 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
       const pa = softNodes[a];
       const pb = softNodes[b];
       if (!pa || !pb) continue;
+      const rest = Math.max(1e-3, Math.hypot(pb.x - pa.x, pb.y - pa.y));
+      if (rest > maxCrossBeamRest + 1e-6) continue;
       springs.push([
         a,
         b,
-        Math.max(1e-3, Math.hypot(pb.x - pa.x, pb.y - pa.y)),
+        rest,
         0,
         [0, 0, 0],
       ]);

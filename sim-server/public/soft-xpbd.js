@@ -199,6 +199,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   localDirectionalCouplingMax = 1.1,
   localErrorPivot = 0.2,
   polarityCouplingMax = 1.08,
+  counterPolarityCouplingMax = 1,
   smallRestRecoveryCouplingMax = 1.03,
   smallRestPivot = 0.9,
   highRateSnapRecoverThreshold = 0.055,
@@ -229,6 +230,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const localDirectionalMax = Math.max(1, Number(localDirectionalCouplingMax) || 1);
   const localPivot = Math.max(1e-6, Number(localErrorPivot) || 0.2);
   const polarityMax = Math.max(1, Number(polarityCouplingMax) || 1);
+  const counterPolarityMax = Math.max(1, Number(counterPolarityCouplingMax) || 1);
   const smallRestCouplingMax = Math.max(1, Number(smallRestRecoveryCouplingMax) || 1);
   const smallRestErrPivot = Math.max(1e-6, Number(smallRestPivot) || 0.9);
   const highRateSnapRateThreshold = Math.max(0, Number(highRateSnapRecoverThreshold) || 0);
@@ -326,6 +328,10 @@ export function recoverSoftSpringRests(springs, restBaseline, {
     const polarityMeanErrNorm = signedErrNorm >= 0 ? meanPositiveErrNorm : meanNegativeErrNorm;
     const polarityAlpha = clamp(polarityMeanErrNorm / pivot, 0, 1);
     const polarityBoost = 1 + (polarityMax - 1) * polarityAlpha;
+    const counterPolarityAligned = (signedErrNorm === 0 || meanSignedErrNorm === 0)
+      ? 0
+      : (Math.sign(signedErrNorm) === Math.sign(meanSignedErrNorm) ? 0 : 1);
+    const counterPolarityBoost = 1 + (counterPolarityMax - 1) * globalDirectionalAlpha * counterPolarityAligned;
     const outlierRatio = (adaptiveMode && outlierCouplingMax > 1.0001 && meanErrCount > 0)
       ? (errNorm / Math.max(1e-6, meanErrNorm || 0))
       : 1;
@@ -368,6 +374,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       * globalBoost
       * directionalBoost
       * polarityBoost
+      * counterPolarityBoost
       * outlierBoost
       * shortRestBoost
       * localBoost

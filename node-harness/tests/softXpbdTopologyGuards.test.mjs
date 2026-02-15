@@ -1431,3 +1431,65 @@ test('stronger short-rest coupling (1.12 -> 1.14) improves pure-soft form-memory
   assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 7e-5,
     `expected bounded area guardrail with stronger short-rest coupling (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });
+
+test('mid-error recovery coupling improves adversarial pure-soft shape memory without topology drift', () => {
+  const recoveryProfile = {
+    recoverRate: 0.018,
+    adaptiveGainMax: 1.25,
+    adaptiveExponent: 1.05,
+    nearBaselineSnapWindow: 0,
+    nearBaselineSnapBlend: 0,
+    smallRestRecoveryCouplingMax: 1,
+    localEndpointCouplingMax: 1,
+    localDirectionalCouplingMax: 1,
+    globalErrorCouplingMax: 1,
+    globalDirectionalCouplingMax: 1,
+    outlierRecoveryCouplingMax: 1,
+    polarityCouplingMax: 1,
+  };
+
+  const compileOverrides = {
+    softNeighborStepDeltaCap: 0,
+    softBoundaryCellCap: 6,
+    softMaxCellSize: 10,
+    softThinFeatureCellCap: 0,
+    softBridgeCellCap: 0,
+  };
+
+  const before = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      ...recoveryProfile,
+      midErrorRecoveryCouplingMax: 1,
+    },
+    compileOverrides,
+  });
+
+  const after = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      ...recoveryProfile,
+      midErrorRecoveryCouplingMax: 1.35,
+      midErrorRecoveryCenter: 0.24,
+      midErrorRecoveryHalfWidth: 0.28,
+    },
+    compileOverrides,
+  });
+
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-mid-error-coupling]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryAt200 > before.recoveryAt200,
+    `expected better early recovery under mid-error coupling (before=${before.recoveryAt200}, after=${after.recoveryAt200})`);
+  assert.ok(after.recoveryAt500 > before.recoveryAt500,
+    `expected better mid recovery under mid-error coupling (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
+  assert.ok(after.recoveryAt1000 >= before.recoveryAt1000,
+    `expected non-regressing late recovery under mid-error coupling (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 7e-5,
+    `expected bounded area guardrail under mid-error coupling (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+  assert.ok(after.baselineRestSpanRatio <= before.baselineRestSpanRatio + 1e-9,
+    `expected non-regressing mesh rest-span topology (before=${before.baselineRestSpanRatio}, after=${after.baselineRestSpanRatio})`);
+});

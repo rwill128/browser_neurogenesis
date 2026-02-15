@@ -935,6 +935,57 @@ test('higher solver recovery rate accelerates adversarial pure-soft shape-memory
     `expected bounded area guardrail with higher recoverRate (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });
 
+test('runtime recovery-rate bump improves deterministic pure-soft form-memory return with bounded area drift', () => {
+  const profile = {
+    adaptiveGainMax: 2.4,
+    adaptiveExponent: 0.8,
+    elongationBiasMax: 1.22,
+    compressionBiasMax: 1.12,
+    errorPivot: 0.16,
+    nearBaselineSnapWindow: 0,
+    nearBaselineSnapBlend: 0,
+    globalErrorCouplingMax: 1.25,
+    globalDirectionalCouplingMax: 1.18,
+    outlierRecoveryCouplingMax: 1.22,
+    outlierErrorPivot: 0.75,
+    localEndpointCouplingMax: 1.16,
+    localDirectionalCouplingMax: 1.1,
+    localErrorPivot: 0.2,
+    polarityCouplingMax: 1.08,
+  };
+
+  const before = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      ...profile,
+      recoverRate: 0.052,
+    },
+  });
+
+  const after = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      ...profile,
+      recoverRate: 0.056,
+    },
+  });
+
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-runtime-rate-bump]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryAt200 >= before.recoveryAt200,
+    `expected non-regressing early recovery under runtime rate bump (before=${before.recoveryAt200}, after=${after.recoveryAt200})`);
+  assert.ok(after.recoveryAt500 >= before.recoveryAt500,
+    `expected non-regressing mid recovery under runtime rate bump (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
+  assert.ok(after.recoveryAt1000 >= before.recoveryAt1000,
+    `expected non-regressing late recovery under runtime rate bump (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 4e-5,
+    `expected bounded area drift under runtime rate bump (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+});
+
 test('default near-baseline snap profile removes deterministic pure-soft tail drift under adaptive recovery settings', () => {
   const runtimeRecovery = {
     recoverRate: 0.045,

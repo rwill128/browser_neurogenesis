@@ -2168,7 +2168,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   if (sim.softSpringRestBaseline && sim.softSpringRestBaseline.length === s.springs.length) {
     const recovering = deform.severeCount === 0;
     recoverSoftSpringRests(s.springs, sim.softSpringRestBaseline, {
-      recoverRate: recovering ? 0.052 : 0.015,
+      recoverRate: recovering ? 0.056 : 0.015,
       hardMinFactor: 0.7,
       hardMaxFactor: 1.45,
       jitterDeadband: 1e-5,

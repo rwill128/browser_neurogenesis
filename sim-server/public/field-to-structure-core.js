@@ -42,7 +42,7 @@ function deriveBaseStepFromDensityField({ width, height, rigidField, softField, 
   return densityValueToStep(meanDensity);
 }
 
-function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField, softMinCellSize = 1, softMaxCellSize = 6, softBoundaryCellCap = 2, softNeighborStepDeltaCap = 0, softThinFeatureCellCap = 0, softBridgeCellCap = 3 }) {
+function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField, softMinCellSize = 1, softMaxCellSize = 6, softBoundaryCellCap = 2, softNeighborStepDeltaCap = 0, softThinFeatureCellCap = 0, softBridgeCellCap = 2 }) {
   const minSoftStep = Math.max(1, Math.round(Number(softMinCellSize) || 1));
   const maxSoftStep = Math.max(minSoftStep, Math.round(Number(softMaxCellSize) || 6));
   const boundaryCap = Number.isFinite(Number(softBoundaryCellCap))
@@ -261,7 +261,7 @@ export function compileFieldToMesh({
   softBoundaryCellCap = 2, // cap soft primitive size on paint boundary to avoid seam stretch/fit loss
   softNeighborStepDeltaCap = 1, // max coarse-step delta between neighboring soft cells (0 disables)
   softThinFeatureCellCap = 2, // cap primitive size in narrow/tendril soft regions to preserve shape memory topology
-  softBridgeCellCap = 3, // cap primitive size in low-cardinality bridge cells to reduce soft rest-span outliers
+  softBridgeCellCap = 2, // cap primitive size in low-cardinality bridge cells to reduce soft rest-span outliers
 }) {
   const infillMode = softInfillMode === 'triangles' ? 'triangles' : 'triangles+cross';
   const fallbackStep = Math.max(1, density | 0);

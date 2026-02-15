@@ -1043,24 +1043,34 @@ export class GPUFluidField {
     }
 
     addVelocity(x, y, amountX, amountY, strength = 15) { // Added strength for radius
-        const shadowCell = this._toShadowGridCell(x, y, 'grid');
-        this._applyShadowVelocitySplat(shadowCell, amountX, amountY, strength);
+        const finiteOr = (v, fallback = 0) => Number.isFinite(Number(v)) ? Number(v) : fallback;
+        const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+        const worldX = finiteOr(x, 0);
+        const worldY = finiteOr(y, 0);
+        const safeStrength = clamp(finiteOr(strength, 15), 0.1, 256);
+        const velCap = Number.isFinite(this.maxVelComponent) ? Math.max(1, this.maxVelComponent) : 10;
+        const safeAmountX = clamp(finiteOr(amountX, 0), -velCap, velCap);
+        const safeAmountY = clamp(finiteOr(amountY, 0), -velCap, velCap);
+
+        const shadowCell = this._toShadowGridCell(worldX, worldY, 'grid');
+        this._applyShadowVelocitySplat(shadowCell, safeAmountX, safeAmountY, safeStrength);
 
         if (!this.gpuEnabled) return;
 
         if (this.device) { // WebGPU Path
-            // console.log(`WebGPU addVelocity: x=${x}, y=${y}, amount=(${amountX},${amountY})`);
-            const VELOCITY_SPLAT_RADIUS_WORLD = strength; 
+            // console.log(`WebGPU addVelocity: x=${worldX}, y=${worldY}, amount=(${safeAmountX},${safeAmountY})`);
+            const VELOCITY_SPLAT_RADIUS_WORLD = safeStrength; 
             const VELOCITY_SPLAT_SCALE = 0.1; // Scale down impulse if it's too strong
 
-            const uvX = x / WORLD_WIDTH;
-            const uvY = 1.0 - (y / WORLD_HEIGHT); // Y is often inverted
+            const uvX = clamp(worldX / WORLD_WIDTH, 0, 1);
+            const uvY = clamp(1.0 - (worldY / WORLD_HEIGHT), 0, 1); // Y is often inverted
 
             const splatUniformsSpec = {
                 u_targetTexture: this.textures.velocityPing,
                 u_point: [uvX, uvY],
-                u_splatValue: [amountX * VELOCITY_SPLAT_SCALE, amountY * VELOCITY_SPLAT_SCALE, 0.0, 1.0], // Store velocity in RG, B can be 0, A for intensity if shader uses it
-                u_radius: (VELOCITY_SPLAT_RADIUS_WORLD / Math.min(WORLD_WIDTH, WORLD_HEIGHT)) * 0.5 
+                u_splatValue: [safeAmountX * VELOCITY_SPLAT_SCALE, safeAmountY * VELOCITY_SPLAT_SCALE, 0.0, 1.0], // Store velocity in RG, B can be 0, A for intensity if shader uses it
+                u_radius: clamp((VELOCITY_SPLAT_RADIUS_WORLD / Math.min(WORLD_WIDTH, WORLD_HEIGHT)) * 0.5, 1e-6, 1)
             };
 
             this._runShaderPass(
@@ -1077,13 +1087,13 @@ export class GPUFluidField {
             if(!actualSplatProgram) { console.error("WebGL splat program not found for addVelocity"); return; }
             gl.useProgram(actualSplatProgram);
 
-            const texCoordX = x / WORLD_WIDTH;
-            const texCoordY = 1.0 - (y / WORLD_HEIGHT);
+            const texCoordX = clamp(worldX / WORLD_WIDTH, 0, 1);
+            const texCoordY = clamp(1.0 - (worldY / WORLD_HEIGHT), 0, 1);
             const VELOCITY_SPLAT_SCALE_GL = 0.005; // May need different scaling for GLSL float textures
 
             gl.uniform2f(gl.getUniformLocation(actualSplatProgram, "u_point"), texCoordX, texCoordY);
-            gl.uniform3f(gl.getUniformLocation(actualSplatProgram, "u_color"), amountX * VELOCITY_SPLAT_SCALE_GL, amountY * VELOCITY_SPLAT_SCALE_GL, 0.0); 
-            gl.uniform1f(gl.getUniformLocation(actualSplatProgram, "u_radius"), (strength / Math.min(WORLD_WIDTH, WORLD_HEIGHT)) * 0.025); 
+            gl.uniform3f(gl.getUniformLocation(actualSplatProgram, "u_color"), safeAmountX * VELOCITY_SPLAT_SCALE_GL, safeAmountY * VELOCITY_SPLAT_SCALE_GL, 0.0); 
+            gl.uniform1f(gl.getUniformLocation(actualSplatProgram, "u_radius"), clamp((safeStrength / Math.min(WORLD_WIDTH, WORLD_HEIGHT)) * 0.025, 1e-6, 1)); 
 
             gl.activeTexture(gl.TEXTURE0);
             gl.bindTexture(gl.TEXTURE_2D, this.textures.velocity);

@@ -43,6 +43,7 @@ const SOFT_XPBD_BASE_COMPLIANCE = 0.0012;
 const SOFT_AREA_XPBD_ITERS = 6;
 const SOFT_AREA_BASE_COMPLIANCE = 0.0009;
 const SOFT_INTEGRATION_SCALE = 24;
+const FLUID_COUPLING_COMPONENT_LIMIT = 32;
 
 const EDGE_BODY_MODE = {
   PASS: 0,
@@ -469,9 +470,17 @@ function sampleFieldBilinear(field, n, x, y) {
   const x1 = Math.min(n - 1, x0 + 1), y1 = Math.min(n - 1, y0 + 1);
   const sx = cx - x0, sy = cy - y0;
   const i00 = y0 * n + x0, i10 = y0 * n + x1, i01 = y1 * n + x0, i11 = y1 * n + x1;
-  const a = field[i00] * (1 - sx) + field[i10] * sx;
-  const b = field[i01] * (1 - sx) + field[i11] * sx;
-  return a * (1 - sy) + b * sy;
+
+  const v00 = Number(field[i00]);
+  const v10 = Number(field[i10]);
+  const v01 = Number(field[i01]);
+  const v11 = Number(field[i11]);
+
+  const a = (Number.isFinite(v00) ? v00 : 0) * (1 - sx) + (Number.isFinite(v10) ? v10 : 0) * sx;
+  const b = (Number.isFinite(v01) ? v01 : 0) * (1 - sx) + (Number.isFinite(v11) ? v11 : 0) * sx;
+  const out = a * (1 - sy) + b * sy;
+  if (!Number.isFinite(out)) return 0;
+  return Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, out));
 }
 
 function rigidVerticesWorld(b) {
@@ -1645,24 +1654,35 @@ function stepBodiesAndInject(sim, vxField, vyField) {
 
   let injectedMomentum = 0;
   const injectPoint = (px, py, pvx, pvy, localFluidX, localFluidY, mass, rad=3.0, swimInjectX = 0, swimInjectY = 0) => {
-    const minX = Math.max(0, Math.floor(px - rad));
-    const maxX = Math.min(n - 1, Math.ceil(px + rad));
-    const minY = Math.max(0, Math.floor(py - rad));
-    const maxY = Math.min(n - 1, Math.ceil(py + rad));
-    const relX = pvx - localFluidX + swimInjectX;
-    const relY = pvy - localFluidY + swimInjectY;
-    const scale = feedbackK * Math.max(0.1, mass);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return;
+    const radius = Math.max(0.4, Number.isFinite(rad) ? rad : 3.0);
+    const minX = Math.max(0, Math.floor(px - radius));
+    const maxX = Math.min(n - 1, Math.ceil(px + radius));
+    const minY = Math.max(0, Math.floor(py - radius));
+    const maxY = Math.min(n - 1, Math.ceil(py + radius));
+    const relXRaw = pvx - localFluidX + swimInjectX;
+    const relYRaw = pvy - localFluidY + swimInjectY;
+    const relX = Number.isFinite(relXRaw) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, relXRaw)) : 0;
+    const relY = Number.isFinite(relYRaw) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, relYRaw)) : 0;
+    const scaleRaw = feedbackK * Math.max(0.1, Number.isFinite(mass) ? mass : 0.1);
+    const scale = Number.isFinite(scaleRaw) ? Math.max(0, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, scaleRaw)) : 0;
+    if (scale <= 0) return;
+
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
         const dx = x - px, dy = y - py;
         const d = Math.hypot(dx, dy);
-        if (d > rad) continue;
-        const w = 1 - d / rad;
+        if (d > radius) continue;
+        const w = 1 - d / radius;
         const idx = y * n + x;
-        const jx = relX * scale * w;
-        const jy = relY * scale * w;
-        vxField[idx] += jx;
-        vyField[idx] += jy;
+        const jxRaw = relX * scale * w;
+        const jyRaw = relY * scale * w;
+        const jx = Number.isFinite(jxRaw) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, jxRaw)) : 0;
+        const jy = Number.isFinite(jyRaw) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, jyRaw)) : 0;
+        const nextVx = Number(vxField[idx]) + jx;
+        const nextVy = Number(vyField[idx]) + jy;
+        vxField[idx] = Number.isFinite(nextVx) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, nextVx)) : 0;
+        vyField[idx] = Number.isFinite(nextVy) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, nextVy)) : 0;
         injectedMomentum += Math.hypot(jx, jy);
       }
     }
@@ -2263,6 +2283,16 @@ async function stepAndRender() {
     applyBodyEdgeFieldBarriers({ sim: s, r, g, b, vx, vy, rigidVerticesWorld });
     applyDigestiveCapture(s, r, g, b);
     enforceFluidEdgeBoundariesCpu(vx, vy, s.controls.n);
+
+    // Last-resort guardrail: prevent non-finite/unsafe velocity components from
+    // being re-uploaded into the next GPU fluid step.
+    for (let i = 0; i < s.cells; i++) {
+      const vxi = Number(vx[i]);
+      const vyi = Number(vy[i]);
+      vx[i] = Number.isFinite(vxi) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, vxi)) : 0;
+      vy[i] = Number.isFinite(vyi) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, vyi)) : 0;
+    }
+
     s.device.queue.writeBuffer(s.vx0, 0, vx);
     s.device.queue.writeBuffer(s.vy0, 0, vy);
     s.device.queue.writeBuffer(s.rr0, 0, r);

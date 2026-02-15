@@ -199,3 +199,38 @@ test('GPU shadow idle step keeps quiescent fields near-zero while preserving bou
   assert.deepEqual(edge, { vx: 0, vy: 0 }, 'edge guard should sanitize non-finite boundary velocity');
   assert.ok(Math.abs(center.vx) < 1e-6 && Math.abs(center.vy) < 1e-6, 'idle interior should remain near zero');
 });
+
+test('GPU addVelocity sanitizes/clamps WebGPU splat uniforms before dispatch', () => {
+  const prevW = globalThis.WORLD_WIDTH;
+  const prevH = globalThis.WORLD_HEIGHT;
+  globalThis.WORLD_WIDTH = 32;
+  globalThis.WORLD_HEIGHT = 32;
+
+  try {
+    const fluid = makeShadowOnlyField({ size: 32, dt: 0.1, scaleX: 1, scaleY: 1 });
+    fluid.maxVelComponent = 10;
+    fluid.gpuEnabled = true;
+    fluid.device = {};
+    fluid.textures = { velocityPing: { id: 'ping' }, velocityPong: { id: 'pong' } };
+
+    let captured = null;
+    fluid._runShaderPass = (_pipeline, spec) => {
+      captured = spec;
+    };
+
+    fluid.addVelocity(8, 8, Infinity, NaN, 15);
+    assert.ok(captured, 'expected WebGPU splat dispatch');
+    assert.deepEqual(captured.u_splatValue.slice(0, 2), [0, 0], 'non-finite impulses should sanitize to zero');
+    assert.ok(Number.isFinite(captured.u_radius) && captured.u_radius > 0 && captured.u_radius <= 1,
+      `radius should be finite normalized clamp, got ${captured.u_radius}`);
+
+    fluid.addVelocity(8, 8, 999, -999, 15);
+    assert.ok(Math.abs(captured.u_splatValue[0]) <= 1.0 + 1e-6, `vx splat should be clamped, got ${captured.u_splatValue[0]}`);
+    assert.ok(Math.abs(captured.u_splatValue[1]) <= 1.0 + 1e-6, `vy splat should be clamped, got ${captured.u_splatValue[1]}`);
+  } finally {
+    if (prevW === undefined) delete globalThis.WORLD_WIDTH;
+    else globalThis.WORLD_WIDTH = prevW;
+    if (prevH === undefined) delete globalThis.WORLD_HEIGHT;
+    else globalThis.WORLD_HEIGHT = prevH;
+  }
+});

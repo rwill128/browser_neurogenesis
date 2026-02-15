@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import config from '../../js/config.js';
 import { SoftBody } from '../../js/classes/SoftBody.js';
@@ -9,6 +10,9 @@ import { Spring } from '../../js/classes/Spring.js';
 import { NodeType, MovementType } from '../../js/classes/constants.js';
 import { GPUFluidField } from '../../js/gpuFluidField.js';
 import { createSeededRandom, withRandom } from '../seededRandomScope.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURES_DIR = path.resolve(__dirname, '..', 'fixtures');
 
 function makeShadowOnlyGpuFluid({ size = 64, dt = 1 / 60, scaleX = 1, scaleY = 1 } = {}) {
   const fluid = Object.create(GPUFluidField.prototype);
@@ -233,7 +237,7 @@ function groupTolerance(metric, tolerances) {
 }
 
 function assertFixtureParity(fixtureFilename) {
-  const fixturePath = path.resolve(process.cwd(), 'node-harness/fixtures', fixtureFilename);
+  const fixturePath = path.resolve(FIXTURES_DIR, fixtureFilename);
   const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
   const runScenario = FIXTURE_RUNNERS[fixture.name];
   assert.ok(runScenario, `missing scenario runner for fixture ${fixture.name}`);

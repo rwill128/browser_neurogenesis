@@ -1,23 +1,33 @@
 const EPS = 1e-6;
 const RIGID_CONTACT_SLOP = 0.015;
 
+function finiteOr(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 export function rigidVerticesWorld(body) {
   if (!body) return [];
+  const theta = finiteOr(body.theta, 0);
+  const bx = finiteOr(body.x, 0);
+  const by = finiteOr(body.y, 0);
+
   if (Array.isArray(body.verticesLocal) && body.verticesLocal.length >= 3) {
-    const c = Math.cos(body.theta || 0);
-    const s = Math.sin(body.theta || 0);
+    const c = Math.cos(theta);
+    const s = Math.sin(theta);
     return body.verticesLocal.map((v) => ({
-      x: body.x + v.x * c - v.y * s,
-      y: body.y + v.x * s + v.y * c,
+      x: bx + v.x * c - v.y * s,
+      y: by + v.x * s + v.y * c,
     }));
   }
 
-  const sides = Math.max(3, body.sides || 3);
-  const rot = (body.theta || 0) + (sides === 3 ? -Math.PI * 0.5 : Math.PI * 0.25);
+  const sides = Math.max(3, Math.trunc(finiteOr(body.sides, 3)) || 3);
+  const rot = theta + (sides === 3 ? -Math.PI * 0.5 : Math.PI * 0.25);
+  const radius = Math.max(0, finiteOr(body.r, 0));
   const verts = [];
   for (let i = 0; i < sides; i++) {
     const a = rot + (i / sides) * Math.PI * 2;
-    verts.push({ x: body.x + Math.cos(a) * body.r, y: body.y + Math.sin(a) * body.r });
+    verts.push({ x: bx + Math.cos(a) * radius, y: by + Math.sin(a) * radius });
   }
   return verts;
 }
@@ -526,10 +536,11 @@ function bodyCollisionPolysLocal(body) {
 
 export function getRigidCollisionPolysWorld(body) {
   const polysLocal = bodyCollisionPolysLocal(body);
-  const c = Math.cos(body?.theta || 0);
-  const s = Math.sin(body?.theta || 0);
-  const bx = body?.x || 0;
-  const by = body?.y || 0;
+  const theta = finiteOr(body?.theta, 0);
+  const c = Math.cos(theta);
+  const s = Math.sin(theta);
+  const bx = finiteOr(body?.x, 0);
+  const by = finiteOr(body?.y, 0);
   return polysLocal.map((poly) => poly.map((v) => ({
     x: bx + v.x * c - v.y * s,
     y: by + v.x * s + v.y * c,

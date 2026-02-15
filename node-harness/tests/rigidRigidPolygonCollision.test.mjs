@@ -233,3 +233,24 @@ test('pointInPolygonInclusive keeps inside/outside classification stable across 
     assert.equal(ccw, sample.inside, `expected ccw classification for (${sample.x}, ${sample.y})`);
   }
 });
+
+test('rigid collision world polys stay finite when pose contains non-finite values', () => {
+  const malformed = makeBox(5, 5, 2);
+  malformed.theta = Number.POSITIVE_INFINITY;
+  malformed.x = Number.NaN;
+  malformed.y = Number.NEGATIVE_INFINITY;
+
+  const polys = getRigidCollisionPolysWorld(malformed);
+  assert.equal(polys.length, 1, 'finite fallback should preserve one polygon proxy');
+  for (const p of polys[0]) {
+    assert.ok(Number.isFinite(p.x), `x should be finite, got ${p.x}`);
+    assert.ok(Number.isFinite(p.y), `y should be finite, got ${p.y}`);
+  }
+
+  const verts = rigidVerticesWorld(malformed);
+  assert.equal(verts.length, 4, 'finite fallback should preserve local-vertex transform');
+  for (const v of verts) {
+    assert.ok(Number.isFinite(v.x), `x should be finite, got ${v.x}`);
+    assert.ok(Number.isFinite(v.y), `y should be finite, got ${v.y}`);
+  }
+});

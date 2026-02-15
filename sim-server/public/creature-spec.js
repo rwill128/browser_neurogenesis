@@ -16,6 +16,10 @@ function normalizeSoftSolverMode(mode) {
   return String(mode || '').toLowerCase() === 'membrane' ? 'membrane' : 'spring';
 }
 
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
 export function createCreatureSpecFromMesh(mesh, options = {}) {
   const width = mesh?.meta?.width || options.width || 128;
   const height = mesh?.meta?.height || options.height || 128;
@@ -45,6 +49,8 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
         width,
         height,
         softField: options?.fields?.softField,
+        edgeLengthField: options?.fields?.membraneEdgeMap,
+        shapeMemoryField: options?.fields?.membraneShapeMap,
         threshold: Number(mesh?.meta?.threshold) || Number(options?.threshold) || 0.35,
         options,
       })
@@ -72,6 +78,8 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
     const rigidField = options?.fields?.rigidField;
     const softField = options?.fields?.softField;
     const softDensityField = options?.fields?.softDensityField;
+    const membraneEdgeMap = options?.fields?.membraneEdgeMap;
+    const membraneShapeMap = options?.fields?.membraneShapeMap;
     if (rigidField && softField) {
       out.authoring = {
         fields: {
@@ -80,6 +88,8 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
           rigid: Array.from(rigidField),
           soft: Array.from(softField),
           softDensity: softDensityField ? Array.from(softDensityField) : undefined,
+          membraneEdgeMap: membraneEdgeMap ? Array.from(membraneEdgeMap) : undefined,
+          membraneShapeMap: membraneShapeMap ? Array.from(membraneShapeMap) : undefined,
         },
       };
     }
@@ -210,6 +220,7 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
         clusterId,
         digestEnabled: !!p.digestEnabled,
         digestRGB: normalizeRGB(p.digestRGB),
+        shapeMemoryWeight: clamp(Number.isFinite(Number(p.shapeMemoryWeight)) ? Number(p.shapeMemoryWeight) : 1, 0, 1),
       });
       softNodeMap.set(`${sbi}:${i}`, base + i);
     }
@@ -710,60 +721,108 @@ function simplifyDouglasPeuckerClosed(poly, epsilon = 0.8) {
   return out.length >= 3 ? out : poly;
 }
 
-function resampleClosedLoopByMinEdge(poly, minEdgeLength = MEMBRANE_DEFAULT_MIN_EDGE_LENGTH, maxNodes = MEMBRANE_DEFAULT_MAX_NODES) {
+function sampleBilinearField(field, width, height, x, y, fallback = 0.5) {
+  if (!(field instanceof Float32Array) || field.length < width * height) return fallback;
+  const cx = Math.max(0, Math.min(width - 1.001, Number(x) || 0));
+  const cy = Math.max(0, Math.min(height - 1.001, Number(y) || 0));
+  const x0 = Math.floor(cx), y0 = Math.floor(cy);
+  const x1 = Math.min(width - 1, x0 + 1), y1 = Math.min(height - 1, y0 + 1);
+  const sx = cx - x0, sy = cy - y0;
+  const i00 = y0 * width + x0, i10 = y0 * width + x1, i01 = y1 * width + x0, i11 = y1 * width + x1;
+  const v00 = Number(field[i00]);
+  const v10 = Number(field[i10]);
+  const v01 = Number(field[i01]);
+  const v11 = Number(field[i11]);
+  const a = (Number.isFinite(v00) ? v00 : fallback) * (1 - sx) + (Number.isFinite(v10) ? v10 : fallback) * sx;
+  const b = (Number.isFinite(v01) ? v01 : fallback) * (1 - sx) + (Number.isFinite(v11) ? v11 : fallback) * sx;
+  const out = a * (1 - sy) + b * sy;
+  return Number.isFinite(out) ? out : fallback;
+}
+
+function sampleClosedArcPoint(poly, segLen, cumLen, perimeter, arcLen) {
+  let s = Number(arcLen) || 0;
+  s = ((s % perimeter) + perimeter) % perimeter;
+
+  let edge = 0;
+  while (edge + 1 < cumLen.length && cumLen[edge + 1] <= s) edge += 1;
+  const a = poly[edge % poly.length];
+  const b = poly[(edge + 1) % poly.length];
+  const len = Math.max(1e-9, segLen[edge % poly.length]);
+  const t = Math.max(0, Math.min(1, (s - cumLen[edge]) / len));
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+  };
+}
+
+function resampleClosedLoopByEdgeMap({
+  poly,
+  width,
+  height,
+  edgeLengthField = null,
+  minEdgeLength = MEMBRANE_DEFAULT_MIN_EDGE_LENGTH,
+  maxEdgeLength = MEMBRANE_DEFAULT_MIN_EDGE_LENGTH * 2,
+  maxNodes = MEMBRANE_DEFAULT_MAX_NODES,
+}) {
   if (!Array.isArray(poly) || poly.length < 3) return poly || [];
+
+  const minEdge = Math.max(0.75, Number(minEdgeLength) || MEMBRANE_DEFAULT_MIN_EDGE_LENGTH);
+  const maxEdge = Math.max(minEdge, Number(maxEdgeLength) || (minEdge * 2));
+  const nodeCap = Math.max(3, Math.round(Number(maxNodes) || MEMBRANE_DEFAULT_MAX_NODES));
 
   let perimeter = 0;
   const segLen = new Float64Array(poly.length);
+  const cumLen = new Float64Array(poly.length + 1);
+  cumLen[0] = 0;
   for (let i = 0; i < poly.length; i++) {
     const a = poly[i];
     const b = poly[(i + 1) % poly.length];
     const len = Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0));
-    segLen[i] = len;
-    perimeter += len;
+    segLen[i] = Math.max(1e-9, len);
+    perimeter += segLen[i];
+    cumLen[i + 1] = perimeter;
   }
   if (!Number.isFinite(perimeter) || perimeter <= 1e-6) return poly;
 
-  const minEdge = Math.max(0.75, Number(minEdgeLength) || MEMBRANE_DEFAULT_MIN_EDGE_LENGTH);
-  const targetCount = Math.max(3, Math.min(
-    Math.max(3, Math.round(Number(maxNodes) || MEMBRANE_DEFAULT_MAX_NODES)),
-    Math.max(3, Math.floor(perimeter / minEdge)),
-  ));
-  const spacing = perimeter / targetCount;
-
-  const out = [];
-  let edgeIndex = 0;
-  let edgeStart = poly[0];
-  let edgeEnd = poly[1 % poly.length];
-  let edgeRemaining = segLen[0];
-  let traveled = 0;
-
-  for (let k = 0; k < targetCount; k++) {
-    const targetDist = k * spacing;
-    while ((traveled + edgeRemaining) < targetDist && edgeIndex < poly.length - 1) {
-      traveled += edgeRemaining;
-      edgeIndex += 1;
-      edgeStart = poly[edgeIndex % poly.length];
-      edgeEnd = poly[(edgeIndex + 1) % poly.length];
-      edgeRemaining = segLen[edgeIndex % poly.length];
-    }
-
-    const local = Math.max(0, Math.min(1, (targetDist - traveled) / Math.max(1e-9, edgeRemaining)));
-    out.push({
-      x: edgeStart.x + (edgeEnd.x - edgeStart.x) * local,
-      y: edgeStart.y + (edgeEnd.y - edgeStart.y) * local,
-    });
+  const positions = [0];
+  let s = 0;
+  let guard = nodeCap * 6;
+  while (positions.length < nodeCap && guard-- > 0) {
+    const p = sampleClosedArcPoint(poly, segLen, cumLen, perimeter, s);
+    const mapV = clamp(sampleBilinearField(edgeLengthField, width, height, p.x, p.y, 0.5), 0, 1);
+    const target = minEdge + mapV * (maxEdge - minEdge);
+    const step = Math.max(minEdge, Math.min(maxEdge, target));
+    if ((s + step) >= (perimeter - minEdge * 0.35)) break;
+    s += step;
+    positions.push(s);
   }
 
-  return out.length >= 3 ? out : poly;
+  while (positions.length < nodeCap) {
+    const tail = perimeter - positions[positions.length - 1];
+    if (tail <= maxEdge * 1.05) break;
+    positions.push(positions[positions.length - 1] + maxEdge);
+  }
+
+  if (positions.length < 3) {
+    const fallbackN = Math.max(3, Math.min(nodeCap, Math.round(perimeter / Math.max(minEdge, 1))));
+    const out = [];
+    for (let i = 0; i < fallbackN; i++) {
+      out.push(sampleClosedArcPoint(poly, segLen, cumLen, perimeter, (i * perimeter) / fallbackN));
+    }
+    return out;
+  }
+
+  return positions.map((arc) => sampleClosedArcPoint(poly, segLen, cumLen, perimeter, arc));
 }
 
 export function buildMembraneRingsFromSoftField({
   width,
   height,
   softField,
+  edgeLengthField = null,
   threshold = 0.35,
   minEdgeLength = MEMBRANE_DEFAULT_MIN_EDGE_LENGTH,
+  maxEdgeLength = 8.0,
   maxNodes = MEMBRANE_DEFAULT_MAX_NODES,
   simplifyEpsilon = MEMBRANE_DEFAULT_SIMPLIFY_EPS,
 }) {
@@ -794,7 +853,15 @@ export function buildMembraneRingsFromSoftField({
     hull = simplifyCollinearLoop(hull, 1e-6);
     hull = simplifyDouglasPeuckerClosed(hull, Math.max(0, Number(simplifyEpsilon) || MEMBRANE_DEFAULT_SIMPLIFY_EPS));
     hull = simplifyCollinearLoop(hull, 1e-6);
-    hull = resampleClosedLoopByMinEdge(hull, minEdgeLength, maxNodes);
+    hull = resampleClosedLoopByEdgeMap({
+      poly: hull,
+      width,
+      height,
+      edgeLengthField,
+      minEdgeLength,
+      maxEdgeLength,
+      maxNodes,
+    });
     hull = simplifyCollinearLoop(hull, 1e-6);
 
     if (!Array.isArray(hull) || hull.length < 3) continue;
@@ -805,13 +872,18 @@ export function buildMembraneRingsFromSoftField({
   return rings;
 }
 
-function buildSoftMembraneExportFromField({ width, height, softField, threshold, options }) {
+function buildSoftMembraneExportFromField({ width, height, softField, edgeLengthField, shapeMemoryField, threshold, options }) {
   const rings = buildMembraneRingsFromSoftField({
     width,
     height,
     softField,
+    edgeLengthField,
     threshold,
     minEdgeLength: Number(options?.membraneMinEdgeLength) || MEMBRANE_DEFAULT_MIN_EDGE_LENGTH,
+    maxEdgeLength: Math.max(
+      Number(options?.membraneMinEdgeLength) || MEMBRANE_DEFAULT_MIN_EDGE_LENGTH,
+      Number(options?.membraneMaxEdgeLength) || 8.0,
+    ),
     maxNodes: Number(options?.membraneMaxNodes) || MEMBRANE_DEFAULT_MAX_NODES,
     simplifyEpsilon: Number(options?.membraneSimplifyEpsilon) || MEMBRANE_DEFAULT_SIMPLIFY_EPS,
   });
@@ -827,6 +899,7 @@ function buildSoftMembraneExportFromField({ width, height, softField, threshold,
       r: 1.6,
       digestEnabled: false,
       digestRGB: [1, 1, 1],
+      shapeMemoryWeight: clamp(sampleBilinearField(shapeMemoryField, width, height, p.x, p.y, 1), 0, 1),
     }));
 
     const springs = [];

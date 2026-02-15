@@ -3,14 +3,20 @@ import { createCreatureSpecFromMesh, parseCreatureSpec, buildMembraneRingsFromSo
 
 const paintCanvas = document.getElementById('paint');
 const densityCanvas = document.getElementById('densityPaint');
+const membraneEdgeCanvas = document.getElementById('membraneEdgePaint');
+const membraneShapeCanvas = document.getElementById('membraneShapePaint');
 const meshCanvas = document.getElementById('mesh');
 const pctx = paintCanvas.getContext('2d');
 const dctx = densityCanvas.getContext('2d');
+const ectx = membraneEdgeCanvas.getContext('2d');
+const sctx = membraneShapeCanvas.getContext('2d');
 const mctx = meshCanvas.getContext('2d');
 const modeEl = document.getElementById('paintMode');
 const brushEl = document.getElementById('brush');
 const thresholdEl = document.getElementById('threshold');
 const softDensityPaintEl = document.getElementById('softDensityPaint');
+const membraneEdgePaintEl = document.getElementById('membraneEdgePaintValue');
+const membraneShapePaintEl = document.getElementById('membraneShapePaintValue');
 const rigidCompileModeEl = document.getElementById('rigidCompileMode');
 const rigidPrimitiveSideMinEl = document.getElementById('rigidPrimitiveSideMin');
 const rigidPrimitiveSideMaxEl = document.getElementById('rigidPrimitiveSideMax');
@@ -19,6 +25,7 @@ const softMinCellSizeEl = document.getElementById('softMinCellSize');
 const softBoundaryRingEl = document.getElementById('softBoundaryRing');
 const softSolverModeEl = document.getElementById('softSolverMode');
 const membraneMinEdgeLengthEl = document.getElementById('membraneMinEdgeLength');
+const membraneMaxEdgeLengthEl = document.getElementById('membraneMaxEdgeLength');
 const clearBtn = document.getElementById('clearBtn');
 const compileBtn = document.getElementById('compileBtn');
 const exportBtn = document.getElementById('exportBtn');
@@ -30,6 +37,8 @@ const W = 128, H = 128;
 const rigid = new Float32Array(W * H);
 const soft = new Float32Array(W * H);
 const softDensity = new Float32Array(W * H).fill(0.5);
+const membraneEdgeMap = new Float32Array(W * H).fill(0.5);
+const membraneShapeMap = new Float32Array(W * H).fill(1.0);
 let lastMesh = null;
 let compileRevision = 0;
 
@@ -38,36 +47,55 @@ function idx(x, y) { return y * W + x; }
 function drawFields() {
   const traitImg = pctx.createImageData(W, H);
   const densityImg = dctx.createImageData(W, H);
+  const edgeImg = ectx.createImageData(W, H);
+  const shapeImg = sctx.createImageData(W, H);
 
   for (let i = 0; i < rigid.length; i++) {
     const r = Math.max(0, Math.min(1, rigid[i]));
     const s = Math.max(0, Math.min(1, soft[i]));
     const dens = Math.max(0, Math.min(1, softDensity[i]));
+    const edge = Math.max(0, Math.min(1, membraneEdgeMap[i]));
+    const shape = Math.max(0, Math.min(1, membraneShapeMap[i]));
 
-    // Trait plane: rigid red, soft blue, no density overlay.
+    // Trait plane: rigid red, soft blue.
     traitImg.data[i * 4] = Math.min(255, r * 255);
     traitImg.data[i * 4 + 1] = 0;
     traitImg.data[i * 4 + 2] = Math.min(255, s * 255);
     traitImg.data[i * 4 + 3] = 255;
 
-    // Density plane: green-only, default mid-green around 0.5.
+    // Density plane: green-only.
     densityImg.data[i * 4] = 0;
     densityImg.data[i * 4 + 1] = Math.round(40 + dens * 180);
     densityImg.data[i * 4 + 2] = 0;
     densityImg.data[i * 4 + 3] = 255;
+
+    // Edge-length map: grayscale (black=min edge, white=max edge).
+    const eg = Math.round(edge * 255);
+    edgeImg.data[i * 4] = eg;
+    edgeImg.data[i * 4 + 1] = eg;
+    edgeImg.data[i * 4 + 2] = eg;
+    edgeImg.data[i * 4 + 3] = 255;
+
+    // Shape-memory map: amber->cyan gradient to show give/stiff bias.
+    shapeImg.data[i * 4] = Math.round(220 * (1 - shape));
+    shapeImg.data[i * 4 + 1] = Math.round(180 + 60 * shape);
+    shapeImg.data[i * 4 + 2] = Math.round(120 + 120 * shape);
+    shapeImg.data[i * 4 + 3] = 255;
   }
 
-  const traitTmp = document.createElement('canvas');
-  traitTmp.width = W; traitTmp.height = H;
-  traitTmp.getContext('2d').putImageData(traitImg, 0, 0);
-  pctx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
-  pctx.drawImage(traitTmp, 0, 0, W, H, 0, 0, paintCanvas.width, paintCanvas.height);
+  const blit = (ctx, canvas, img) => {
+    const tmp = document.createElement('canvas');
+    tmp.width = W;
+    tmp.height = H;
+    tmp.getContext('2d').putImageData(img, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(tmp, 0, 0, W, H, 0, 0, canvas.width, canvas.height);
+  };
 
-  const densTmp = document.createElement('canvas');
-  densTmp.width = W; densTmp.height = H;
-  densTmp.getContext('2d').putImageData(densityImg, 0, 0);
-  dctx.clearRect(0, 0, densityCanvas.width, densityCanvas.height);
-  dctx.drawImage(densTmp, 0, 0, W, H, 0, 0, densityCanvas.width, densityCanvas.height);
+  blit(pctx, paintCanvas, traitImg);
+  blit(dctx, densityCanvas, densityImg);
+  blit(ectx, membraneEdgeCanvas, edgeImg);
+  blit(sctx, membraneShapeCanvas, shapeImg);
 }
 
 function paintTrait(clientX, clientY) {
@@ -102,12 +130,14 @@ function paintTrait(clientX, clientY) {
   drawFields();
 }
 
-function paintDensity(clientX, clientY, erase = false) {
-  const rect = densityCanvas.getBoundingClientRect();
+function paintScalarMap(targetArray, canvasEl, clientX, clientY, paintValue, eraseValue, erase = false) {
+  const rect = canvasEl.getBoundingClientRect();
   const x = ((clientX - rect.left) / rect.width) * W;
   const y = ((clientY - rect.top) / rect.height) * H;
-  const r = Math.max(1, Number(brushEl.value) || 14) * (W / densityCanvas.width);
-  const target = erase ? 0.5 : Math.max(0, Math.min(1, Number(softDensityPaintEl?.value) || 0.5));
+  const r = Math.max(1, Number(brushEl.value) || 14) * (W / canvasEl.width);
+  const target = erase
+    ? Math.max(0, Math.min(1, Number(eraseValue)))
+    : Math.max(0, Math.min(1, Number(paintValue)));
 
   const minX = Math.max(0, Math.floor(x - r));
   const maxX = Math.min(W - 1, Math.ceil(x + r));
@@ -120,9 +150,47 @@ function paintDensity(clientX, clientY, erase = false) {
       if (d > r) continue;
       const t = 1 - d / r;
       const i = idx(xx, yy);
-      softDensity[i] = softDensity[i] * (1 - t) + target * t;
+      targetArray[i] = targetArray[i] * (1 - t) + target * t;
     }
   }
+}
+
+function paintDensity(clientX, clientY, erase = false) {
+  paintScalarMap(
+    softDensity,
+    densityCanvas,
+    clientX,
+    clientY,
+    Number(softDensityPaintEl?.value) || 0.5,
+    0.5,
+    erase,
+  );
+  drawFields();
+}
+
+function paintMembraneEdgeMap(clientX, clientY, erase = false) {
+  paintScalarMap(
+    membraneEdgeMap,
+    membraneEdgeCanvas,
+    clientX,
+    clientY,
+    Number(membraneEdgePaintEl?.value) || 0.5,
+    0.5,
+    erase,
+  );
+  drawFields();
+}
+
+function paintMembraneShapeMap(clientX, clientY, erase = false) {
+  paintScalarMap(
+    membraneShapeMap,
+    membraneShapeCanvas,
+    clientX,
+    clientY,
+    Number(membraneShapePaintEl?.value) || 1.0,
+    1.0,
+    erase,
+  );
   drawFields();
 }
 
@@ -166,12 +234,15 @@ function drawMesh(mesh) {
     // Membrane mode preview: draw the same resampled perimeter ring used for export.
     const thr = Math.max(0, Math.min(1, Number(thresholdEl?.value) || 0.35));
     const minEdge = Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4);
+    const maxEdge = Math.max(minEdge, Number(membraneMaxEdgeLengthEl?.value) || 8);
     const rings = buildMembraneRingsFromSoftField({
       width: W,
       height: H,
       softField: soft,
+      edgeLengthField: membraneEdgeMap,
       threshold: thr,
       minEdgeLength: minEdge,
+      maxEdgeLength: maxEdge,
     });
 
     mctx.strokeStyle = 'rgba(120,220,255,0.95)';
@@ -227,6 +298,7 @@ function drawMesh(mesh) {
       ? 'resampled membrane ring from painted mask'
       : 'triangulated soft mesh',
     membraneMinEdgeLength: Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4),
+    membraneMaxEdgeLength: Math.max(Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4), Number(membraneMaxEdgeLengthEl?.value) || 8),
   }, null, 2);
 }
 
@@ -241,6 +313,10 @@ function syncSoftModeUi() {
       membraneMinEdgeLengthEl.disabled = false;
       membraneMinEdgeLengthEl.title = 'Minimum edge length for exported membrane ring';
     }
+    if (membraneMaxEdgeLengthEl) {
+      membraneMaxEdgeLengthEl.disabled = false;
+      membraneMaxEdgeLengthEl.title = 'Maximum edge length for exported membrane ring';
+    }
   } else {
     if (softInfillModeEl.value === 'none') softInfillModeEl.value = 'triangles';
     softInfillModeEl.disabled = false;
@@ -248,6 +324,10 @@ function syncSoftModeUi() {
     if (membraneMinEdgeLengthEl) {
       membraneMinEdgeLengthEl.disabled = true;
       membraneMinEdgeLengthEl.title = 'Enable membrane mode to edit membrane edge spacing';
+    }
+    if (membraneMaxEdgeLengthEl) {
+      membraneMaxEdgeLengthEl.disabled = true;
+      membraneMaxEdgeLengthEl.title = 'Enable membrane mode to edit membrane edge spacing';
     }
   }
   return membraneMode;
@@ -290,6 +370,8 @@ function compileNow() {
 
 let traitPainting = false;
 let densityPainting = false;
+let membraneEdgePainting = false;
+let membraneShapePainting = false;
 
 paintCanvas.addEventListener('mousedown', (e) => { traitPainting = true; paintTrait(e.clientX, e.clientY); });
 paintCanvas.addEventListener('mousemove', (e) => { if (traitPainting) paintTrait(e.clientX, e.clientY); });
@@ -304,17 +386,48 @@ densityCanvas.addEventListener('mousemove', (e) => {
   paintDensity(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
 });
 
+membraneEdgeCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+membraneEdgeCanvas.addEventListener('mousedown', (e) => {
+  membraneEdgePainting = true;
+  paintMembraneEdgeMap(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
+});
+membraneEdgeCanvas.addEventListener('mousemove', (e) => {
+  if (!membraneEdgePainting) return;
+  paintMembraneEdgeMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
+});
+
+membraneShapeCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+membraneShapeCanvas.addEventListener('mousedown', (e) => {
+  membraneShapePainting = true;
+  paintMembraneShapeMap(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
+});
+membraneShapeCanvas.addEventListener('mousemove', (e) => {
+  if (!membraneShapePainting) return;
+  paintMembraneShapeMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
+});
+
 window.addEventListener('mouseup', () => {
   traitPainting = false;
   densityPainting = false;
+  membraneEdgePainting = false;
+  membraneShapePainting = false;
 });
 
-clearBtn.addEventListener('click', () => { rigid.fill(0); soft.fill(0); softDensity.fill(0.5); drawFields(); compileNow(); });
+clearBtn.addEventListener('click', () => {
+  rigid.fill(0);
+  soft.fill(0);
+  softDensity.fill(0.5);
+  membraneEdgeMap.fill(0.5);
+  membraneShapeMap.fill(1.0);
+  drawFields();
+  compileNow();
+});
 compileBtn.addEventListener('click', compileNow);
 if (softInfillModeEl) softInfillModeEl.addEventListener('change', compileNow);
 if (softMinCellSizeEl) softMinCellSizeEl.addEventListener('change', compileNow);
 if (softSolverModeEl) softSolverModeEl.addEventListener('change', compileNow);
 if (membraneMinEdgeLengthEl) membraneMinEdgeLengthEl.addEventListener('change', compileNow);
+if (membraneMaxEdgeLengthEl) membraneMaxEdgeLengthEl.addEventListener('change', compileNow);
 if (rigidCompileModeEl) rigidCompileModeEl.addEventListener('change', compileNow);
 if (rigidPrimitiveSideMinEl) rigidPrimitiveSideMinEl.addEventListener('change', compileNow);
 if (rigidPrimitiveSideMaxEl) rigidPrimitiveSideMaxEl.addEventListener('change', compileNow);
@@ -322,13 +435,22 @@ if (rigidPrimitiveSideMaxEl) rigidPrimitiveSideMaxEl.addEventListener('change', 
 exportBtn.addEventListener('click', () => {
   const mesh = compileNow();
   if (!mesh) return;
+  const membraneMinEdgeLength = Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4);
+  const membraneMaxEdgeLength = Math.max(membraneMinEdgeLength, Number(membraneMaxEdgeLengthEl?.value) || 8);
   const spec = createCreatureSpecFromMesh(mesh, {
     name: 'mesh-lab-creature',
-    fields: { rigidField: rigid, softField: soft, softDensityField: softDensity },
+    fields: {
+      rigidField: rigid,
+      softField: soft,
+      softDensityField: softDensity,
+      membraneEdgeMap,
+      membraneShapeMap,
+    },
     threshold: Math.max(0, Math.min(1, Number(thresholdEl?.value) || 0.35)),
     softBoundaryRingSprings: !!softBoundaryRingEl?.checked,
     softSolverMode: softSolverModeEl?.value || 'spring',
-    membraneMinEdgeLength: Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4),
+    membraneMinEdgeLength,
+    membraneMaxEdgeLength,
   });
   const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -356,6 +478,10 @@ importFile.addEventListener('change', async () => {
     soft.set(authoring.soft);
     if (Array.isArray(authoring.softDensity) && authoring.softDensity.length === W * H) softDensity.set(authoring.softDensity);
     else softDensity.fill(0.5);
+    if (Array.isArray(authoring.membraneEdgeMap) && authoring.membraneEdgeMap.length === W * H) membraneEdgeMap.set(authoring.membraneEdgeMap);
+    else membraneEdgeMap.fill(0.5);
+    if (Array.isArray(authoring.membraneShapeMap) && authoring.membraneShapeMap.length === W * H) membraneShapeMap.set(authoring.membraneShapeMap);
+    else membraneShapeMap.fill(1.0);
     drawFields();
     compileNow();
     return;

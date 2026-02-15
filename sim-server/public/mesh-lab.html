@@ -26,6 +26,8 @@
     <label>Brush <input id="brush" type="number" value="14" min="1" max="80" /></label>
     <label>Threshold <input id="threshold" type="number" value="0.35" min="0" max="1" step="0.01" /></label>
     <label>Resolution paint (0..1) <input id="softDensityPaint" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
+    <label>Membrane edge paint (0..1) <input id="membraneEdgePaintValue" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
+    <label>Membrane shape paint (0..1) <input id="membraneShapePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
     <span style="opacity:0.82">Resolution map controls primitive size (rigid+soft): darker green = finer/smaller, brighter green = coarser/larger</span>
     <label>Rigid compile mode
       <select id="rigidCompileMode">
@@ -55,6 +57,9 @@
     <label>Membrane min edge
       <input id="membraneMinEdgeLength" type="number" value="4" min="1" max="32" step="0.5" />
     </label>
+    <label>Membrane max edge
+      <input id="membraneMaxEdgeLength" type="number" value="8" min="1" max="64" step="0.5" />
+    </label>
     <span style="opacity:0.9">Connectivity: single connected creature (always enforced)</span>
     <button id="clearBtn">Clear fields</button>
     <button id="compileBtn">Compile mesh</button>
@@ -70,6 +75,14 @@
     <div>
       <div>Resolution map (separate plane)</div>
       <canvas id="densityPaint" width="512" height="512"></canvas>
+    </div>
+    <div>
+      <div>Membrane edge-length map (black=min edge, white=max edge)</div>
+      <canvas id="membraneEdgePaint" width="512" height="512"></canvas>
+    </div>
+    <div>
+      <div>Membrane shape-memory map (dark=more give, bright=stiffer)</div>
+      <canvas id="membraneShapePaint" width="512" height="512"></canvas>
     </div>
     <div>
       <div>Compiled mesh</div>

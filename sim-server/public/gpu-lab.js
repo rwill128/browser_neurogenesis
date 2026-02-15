@@ -591,6 +591,7 @@ function pushMembraneCellCluster({
       digestEnabled: false,
       digestRGB,
       membraneCell: true,
+      shapeMemoryWeight: 1,
     });
   }
 
@@ -1048,6 +1049,7 @@ function cloneMiniBodies(miniBodies, controls) {
         clusterId: Number.isFinite(Number(n?.clusterId)) ? Number(n.clusterId) : 0,
         digestEnabled: Boolean(n?.digestEnabled),
         digestRGB: Array.isArray(n?.digestRGB) ? [Number(n.digestRGB[0]) || 0, Number(n.digestRGB[1]) || 0, Number(n.digestRGB[2]) || 0] : [0, 0, 0],
+        shapeMemoryWeight: Number.isFinite(Number(n?.shapeMemoryWeight)) ? clamp(Number(n.shapeMemoryWeight), 0, 1) : 1,
       }))
     : [];
 
@@ -2103,8 +2105,10 @@ function applySoftMembraneShapeMemoryVelocity(sim, s, loops, dtPos) {
           ey *= k;
         }
 
+        const localWeight = clamp(Number.isFinite(Number(node.shapeMemoryWeight)) ? Number(node.shapeMemoryWeight) : 1, 0, 1);
+        if (localWeight <= 1e-6) continue;
         const invMass = 1 / Math.max(0.02, Number(node.mass) || 1);
-        const corrPos = shapeMemoryGain * invMass;
+        const corrPos = shapeMemoryGain * localWeight * invMass;
         node.vx += (ex * corrPos) / dtPos;
         node.vy += (ey * corrPos) / dtPos;
       }

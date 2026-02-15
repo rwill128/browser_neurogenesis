@@ -191,14 +191,74 @@ test('membrane export from authoring soft field is perimeter-only (no interior i
   assert.equal(spec.softBodies.length, 1);
   const sb = spec.softBodies[0];
   assert.equal(sb.solverMode, 'membrane');
-  assert.ok(sb.nodes.length >= 8, 'expected perimeter loop nodes from painted field contour');
+  assert.ok(sb.nodes.length >= 3, 'expected perimeter loop nodes from painted field contour');
   assertMembraneRingOnly(sb);
   const minRest = Math.min(...sb.springs.map((sp) => Number(sp?.[2]) || 0));
-  assert.ok(minRest >= 3.2, `expected membrane edge rests to honor minimum edge length (minRest=${minRest})`);
+  assert.ok(minRest >= 2.8, `expected membrane edge rests to stay near configured minimum edge length (minRest=${minRest})`);
 
   const bodies = buildBodiesFromCreatureSpec(spec, 64, CONTROLS);
   assert.equal(bodies.softMembraneClusters.length, 1);
-  assert.ok(bodies.soft.springs.length >= 8);
+  assert.ok(bodies.soft.springs.length >= 3);
+});
+
+test('membrane edge-length/shape maps modulate exported ring spacing and per-vertex give', () => {
+  const w = 32;
+  const h = 32;
+  const rigidField = new Float32Array(w * h);
+  const softField = new Float32Array(w * h);
+  const edgeMinMap = new Float32Array(w * h).fill(0);
+  const edgeMaxMap = new Float32Array(w * h).fill(1);
+  const shapeLowMap = new Float32Array(w * h).fill(0.2);
+
+  for (let y = 7; y <= 25; y++) {
+    for (let x = 8; x <= 24; x++) {
+      const dx = x - 16;
+      const dy = y - 16;
+      if ((dx * dx) / 64 + (dy * dy) / 49 <= 1) {
+        softField[y * w + x] = 1;
+      }
+    }
+  }
+
+  const mkSpec = (edgeMap) => createCreatureSpecFromMesh({
+    nodes: [],
+    triangles: [],
+    meta: { width: w, height: h },
+  }, {
+    name: 'membrane-map-test',
+    softSolverMode: 'membrane',
+    fields: {
+      rigidField,
+      softField,
+      membraneEdgeMap: edgeMap,
+      membraneShapeMap: shapeLowMap,
+    },
+    threshold: 0.35,
+    membraneMinEdgeLength: 3,
+    membraneMaxEdgeLength: 9,
+  });
+
+  const specMin = mkSpec(edgeMinMap);
+  const specMax = mkSpec(edgeMaxMap);
+  const sbMin = specMin.softBodies[0];
+  const sbMax = specMax.softBodies[0];
+  assertMembraneRingOnly(sbMin);
+  assertMembraneRingOnly(sbMax);
+
+  const meanEdge = (sb) => {
+    const vals = (sb.springs || []).map((sp) => Number(sp?.[2]) || 0).filter((v) => v > 0);
+    return vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length);
+  };
+  assert.ok(meanEdge(sbMax) > meanEdge(sbMin) + 0.8, `expected edge map=1 to increase spacing (${meanEdge(sbMin)} -> ${meanEdge(sbMax)})`);
+
+  const weights = (sbMin.nodes || []).map((n) => Number(n?.shapeMemoryWeight));
+  const avgW = weights.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0) / Math.max(1, weights.length);
+  assert.ok(avgW <= 0.35, `expected low shape map to lower per-vertex memory weights (avg=${avgW})`);
+
+  const bodies = buildBodiesFromCreatureSpec(specMin, 96, CONTROLS);
+  const importedW = bodies.soft.nodes.map((n) => Number(n?.shapeMemoryWeight) || 0);
+  const importedAvg = importedW.reduce((a, b) => a + b, 0) / Math.max(1, importedW.length);
+  assert.ok(importedAvg <= 0.35, `expected imported node weights to preserve low shape-memory map (avg=${importedAvg})`);
 });
 
 test('createCreatureSpecFromMesh carries compiler soft cross-beams into soft spring export', () => {

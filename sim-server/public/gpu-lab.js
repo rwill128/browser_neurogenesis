@@ -46,6 +46,12 @@ const SOFT_AREA_BASE_COMPLIANCE = 0.0009;
 const SOFT_INTEGRATION_SCALE = 24;
 const FLUID_COUPLING_COMPONENT_LIMIT = 12;
 const ENABLE_HYBRID_BODY_LINKS = false;
+const SOFT_DEFORM_WARN_STRETCH = 3.2;
+const SOFT_DEFORM_SEVERE_STRETCH = 6.0;
+const SOFT_DEFORM_WARN_AREA_RATIO_MIN = 0.45;
+const SOFT_DEFORM_WARN_AREA_RATIO_MAX = 2.2;
+const SOFT_DEFORM_SEVERE_AREA_RATIO_MIN = 0.2;
+const SOFT_DEFORM_SEVERE_AREA_RATIO_MAX = 5.0;
 
 const EDGE_BODY_MODE = {
   PASS: 0,
@@ -1452,10 +1458,209 @@ function applySoftAreaXPBDVelocity(sim, s, loops, dtPos, stiffnessScale) {
   }
 }
 
+function signedAreaCurrent(nodes, indices) {
+  let s = 0;
+  for (let i = 0; i < indices.length; i++) {
+    const a = nodes[indices[i]];
+    const b = nodes[indices[(i + 1) % indices.length]];
+    if (!a || !b) continue;
+    s += a.x * b.y - b.x * a.y;
+  }
+  return 0.5 * s;
+}
+
+function buildSoftDeformationState(sim, s, loops) {
+  const clusters = new Map();
+  const ensureCluster = (cid) => {
+    if (!clusters.has(cid)) {
+      clusters.set(cid, {
+        clusterId: cid,
+        springs: 0,
+        stretchMax: 1,
+        stretchMin: 1,
+        areaRatio: 1,
+        severe: false,
+        warning: false,
+      });
+    }
+    return clusters.get(cid);
+  };
+
+  for (const n of s.nodes || []) {
+    const c = ensureCluster(n.clusterId ?? 0);
+    if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) {
+      c.severe = true;
+      c.warning = true;
+    }
+  }
+
+  for (const sp of s.springs || []) {
+    if (!Array.isArray(sp) || sp.length < 3) continue;
+    const i = Number(sp[0]) | 0;
+    const j = Number(sp[1]) | 0;
+    const rest = Math.max(1e-4, Number(sp[2]) || 1e-4);
+    const a = s.nodes[i];
+    const b = s.nodes[j];
+    if (!a || !b) continue;
+    const cid = a.clusterId ?? b.clusterId ?? 0;
+    const c = ensureCluster(cid);
+    const len = Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0));
+    if (!Number.isFinite(len)) {
+      c.severe = true;
+      c.warning = true;
+      continue;
+    }
+    const ratio = Math.max(1e-6, len / rest);
+    c.springs += 1;
+    c.stretchMax = Math.max(c.stretchMax, ratio);
+    c.stretchMin = Math.min(c.stretchMin, ratio);
+  }
+
+  for (const loop of loops || []) {
+    const cid = loop.clusterId ?? 0;
+    const c = ensureCluster(cid);
+    const areaNow = Math.abs(signedAreaCurrent(s.nodes, loop.indices));
+    const restRaw = Math.abs(Number(sim.softAreaRest?.get(cid)) || 0);
+    const rest = Math.max(1e-4, restRaw || areaNow || 1e-4);
+    const areaRatio = Math.max(1e-6, areaNow / rest);
+    c.areaRatio = areaRatio;
+  }
+
+  const clusterList = [...clusters.values()];
+  let worstStretch = 1;
+  let worstAreaRatio = 1;
+  const warningClusters = [];
+  const severeClusters = [];
+
+  for (const c of clusterList) {
+    c.warning = c.warning
+      || c.stretchMax >= SOFT_DEFORM_WARN_STRETCH
+      || c.areaRatio <= SOFT_DEFORM_WARN_AREA_RATIO_MIN
+      || c.areaRatio >= SOFT_DEFORM_WARN_AREA_RATIO_MAX;
+    c.severe = c.severe
+      || c.stretchMax >= SOFT_DEFORM_SEVERE_STRETCH
+      || c.stretchMin <= 0.12
+      || c.areaRatio <= SOFT_DEFORM_SEVERE_AREA_RATIO_MIN
+      || c.areaRatio >= SOFT_DEFORM_SEVERE_AREA_RATIO_MAX;
+    if (c.warning) warningClusters.push(c.clusterId);
+    if (c.severe) severeClusters.push(c.clusterId);
+    worstStretch = Math.max(worstStretch, c.stretchMax);
+    worstAreaRatio = Math.max(worstAreaRatio, Math.max(c.areaRatio, c.areaRatio > 0 ? 1 / c.areaRatio : 1));
+  }
+
+  return {
+    clusters: clusterList,
+    warningClusters,
+    severeClusters,
+    warningSet: new Set(warningClusters),
+    severeSet: new Set(severeClusters),
+    warningCount: warningClusters.length,
+    severeCount: severeClusters.length,
+    worstStretch,
+    worstAreaRatio,
+  };
+}
+
+function stabilizeSeverelyDeformedSoftClusters(sim, s, loops, deform) {
+  if (!deform?.severeSet || deform.severeSet.size === 0) return;
+
+  const severeSet = deform.severeSet;
+  const centroids = new Map();
+  for (const node of s.nodes || []) {
+    const cid = node.clusterId ?? 0;
+    if (!severeSet.has(cid)) continue;
+    if (!centroids.has(cid)) centroids.set(cid, { x: 0, y: 0, n: 0 });
+    const c = centroids.get(cid);
+    c.x += node.x;
+    c.y += node.y;
+    c.n += 1;
+  }
+  for (const [cid, c] of centroids.entries()) {
+    if (c.n > 0) {
+      c.x /= c.n;
+      c.y /= c.n;
+    } else {
+      centroids.delete(cid);
+    }
+  }
+
+  const springClusterByIndex = new Array((s.springs || []).length).fill(-1);
+  const clusterRestStats = new Map();
+  for (let si = 0; si < (s.springs || []).length; si++) {
+    const sp = s.springs[si];
+    if (!Array.isArray(sp) || sp.length < 3) continue;
+    const a = s.nodes[Number(sp[0]) | 0];
+    const b = s.nodes[Number(sp[1]) | 0];
+    if (!a || !b) continue;
+    const cid = (a.clusterId ?? b.clusterId ?? 0);
+    springClusterByIndex[si] = cid;
+    if (!clusterRestStats.has(cid)) clusterRestStats.set(cid, { sum: 0, n: 0 });
+    const st = clusterRestStats.get(cid);
+    st.sum += Math.max(1e-4, Number(sp[2]) || 1e-4);
+    st.n += 1;
+  }
+
+  for (const node of s.nodes || []) {
+    const cid = node.clusterId ?? 0;
+    if (!severeSet.has(cid)) continue;
+    const c = centroids.get(cid);
+    if (!c) continue;
+    node.vx *= 0.5;
+    node.vy *= 0.5;
+
+    const dx = node.x - c.x;
+    const dy = node.y - c.y;
+    const d = Math.hypot(dx, dy);
+    const meanRest = (clusterRestStats.get(cid)?.sum || 0) / Math.max(1, clusterRestStats.get(cid)?.n || 0);
+    const maxRadius = Math.max(1.2, meanRest * 2.8);
+    if (d > maxRadius && Number.isFinite(d)) {
+      const k = maxRadius / Math.max(1e-6, d);
+      node.x = c.x + dx * k;
+      node.y = c.y + dy * k;
+    }
+
+    node.x = node.x * 0.86 + c.x * 0.14;
+    node.y = node.y * 0.86 + c.y * 0.14;
+  }
+
+  for (let si = 0; si < (s.springs || []).length; si++) {
+    const sp = s.springs[si];
+    if (!Array.isArray(sp) || sp.length < 3) continue;
+    const cid = springClusterByIndex[si];
+    if (!severeSet.has(cid)) continue;
+    const a = s.nodes[Number(sp[0]) | 0];
+    const b = s.nodes[Number(sp[1]) | 0];
+    if (!a || !b) continue;
+    const len = Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0));
+    if (!Number.isFinite(len)) continue;
+    const rest = Math.max(1e-4, Number(sp[2]) || 1e-4);
+    if (len > rest * 3.2 || len < rest * 0.15) {
+      sp[2] = Math.max(1e-4, rest * 0.65, Math.min(rest * 2.0, len));
+      if (sim.softXPBDLambda && Number.isFinite(sim.softXPBDLambda[si])) sim.softXPBDLambda[si] = 0;
+    }
+  }
+
+  for (const loop of loops || []) {
+    const cid = loop.clusterId ?? 0;
+    if (!severeSet.has(cid)) continue;
+    const areaNow = signedAreaCurrent(s.nodes, loop.indices);
+    sim.softAreaRest.set(cid, Math.abs(areaNow) > 1e-4 ? areaNow : 1e-4);
+    sim.softAreaLambda.set(cid, 0);
+  }
+}
+
 function stepBodiesAndInject(sim, vxField, vyField) {
   const n = sim.controls.n;
-  const dt = sim.controls.dt;
+  const dtRaw = Number(sim.controls.dt) || 0.01;
+  const dt = Math.max(0.001, Math.min(0.02, dtRaw));
   const dtNorm = Math.max(0.2, Math.min(1.5, (dt * 60) || 1));
+  if (Math.abs(dtRaw - dt) > 1e-6) {
+    const prevWarnFrame = Number(sim.softDtClampWarnFrame) || -9999;
+    if ((sim.frame - prevWarnFrame) > 240) {
+      sim.softDtClampWarnFrame = sim.frame;
+      console.warn('[gpu-lab] soft-body dt clamped for stability', { dtRaw, dt });
+    }
+  }
   const bodies = sim.bodies;
   const dragK = sim.controls.bodyDrag;
   const feedbackK = sim.controls.bodyFeedback;
@@ -1722,6 +1927,34 @@ function stepBodiesAndInject(sim, vxField, vyField) {
 
   sim.lastRigidContacts = rigidContactDebug.length > 64 ? rigidContactDebug.slice(0, 64) : rigidContactDebug;
 
+  let deform = buildSoftDeformationState(sim, s, softClusterLoops);
+  if (deform.severeCount > 0) {
+    stabilizeSeverelyDeformedSoftClusters(sim, s, softClusterLoops, deform);
+    deform = buildSoftDeformationState(sim, s, softClusterLoops);
+  }
+  sim.softDeformationState = deform;
+
+  const previousSevere = sim.softDeformationPrevSevereSet || new Set();
+  const newlySevere = deform.severeClusters.filter((cid) => !previousSevere.has(cid));
+  if (newlySevere.length > 0) {
+    sim.softDeformationEvents = sim.softDeformationEvents || [];
+    for (const cid of newlySevere) {
+      const c = deform.clusters.find((x) => x.clusterId === cid);
+      const evt = {
+        frame: sim.frame,
+        clusterId: cid,
+        stretchMax: +((c?.stretchMax || 0).toFixed(3)),
+        areaRatio: +((c?.areaRatio || 0).toFixed(3)),
+      };
+      sim.softDeformationEvents.push(evt);
+      console.warn('[gpu-lab] soft cluster severe deformation', evt);
+    }
+    if (sim.softDeformationEvents.length > 24) {
+      sim.softDeformationEvents.splice(0, sim.softDeformationEvents.length - 24);
+    }
+  }
+  sim.softDeformationPrevSevereSet = new Set(deform.severeClusters);
+
   let injectedMomentum = 0;
   const injectPoint = (px, py, pvx, pvy, localFluidX, localFluidY, mass, rad=3.0, swimInjectX = 0, swimInjectY = 0) => {
     if (!Number.isFinite(px) || !Number.isFinite(py)) return;
@@ -1782,6 +2015,12 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     rigidCarryTransfer,
     softCarryTransfer,
     injectedMomentum,
+    softDeformWarningCount: deform.warningCount || 0,
+    softDeformSevereCount: deform.severeCount || 0,
+    softDeformWorstStretch: Number.isFinite(deform.worstStretch) ? deform.worstStretch : 1,
+    softDeformWorstAreaRatio: Number.isFinite(deform.worstAreaRatio) ? deform.worstAreaRatio : 1,
+    softDtUsed: dt,
+    softDtRaw: dtRaw,
   };
   sim.couplingTelemetry = sim.couplingTelemetry || [];
   sim.couplingTelemetry.push(metrics);
@@ -1798,15 +2037,33 @@ function summarizeCouplingTelemetry(telemetry) {
       rigidCarryTransferAvg: 0,
       softCarryTransferAvg: 0,
       injectedMomentumAvg: 0,
+      softDeformWarningCountAvg: 0,
+      softDeformSevereCountAvg: 0,
+      softDeformWorstStretchAvg: 1,
+      softDeformWorstAreaRatioAvg: 1,
     };
   }
-  const acc = { rigidCenterDelta: 0, softCentroidDelta: 0, rigidCarryTransfer: 0, softCarryTransfer: 0, injectedMomentum: 0 };
+  const acc = {
+    rigidCenterDelta: 0,
+    softCentroidDelta: 0,
+    rigidCarryTransfer: 0,
+    softCarryTransfer: 0,
+    injectedMomentum: 0,
+    softDeformWarningCount: 0,
+    softDeformSevereCount: 0,
+    softDeformWorstStretch: 0,
+    softDeformWorstAreaRatio: 0,
+  };
   for (const t of telemetry) {
     acc.rigidCenterDelta += t.rigidCenterDelta || 0;
     acc.softCentroidDelta += t.softCentroidDelta || 0;
     acc.rigidCarryTransfer += t.rigidCarryTransfer || 0;
     acc.softCarryTransfer += t.softCarryTransfer || 0;
     acc.injectedMomentum += t.injectedMomentum || 0;
+    acc.softDeformWarningCount += t.softDeformWarningCount || 0;
+    acc.softDeformSevereCount += t.softDeformSevereCount || 0;
+    acc.softDeformWorstStretch += t.softDeformWorstStretch || 1;
+    acc.softDeformWorstAreaRatio += t.softDeformWorstAreaRatio || 1;
   }
   const k = 1 / telemetry.length;
   return {
@@ -1815,6 +2072,10 @@ function summarizeCouplingTelemetry(telemetry) {
     rigidCarryTransferAvg: +(acc.rigidCarryTransfer * k).toFixed(4),
     softCarryTransferAvg: +(acc.softCarryTransfer * k).toFixed(4),
     injectedMomentumAvg: +(acc.injectedMomentum * k).toFixed(4),
+    softDeformWarningCountAvg: +(acc.softDeformWarningCount * k).toFixed(3),
+    softDeformSevereCountAvg: +(acc.softDeformSevereCount * k).toFixed(3),
+    softDeformWorstStretchAvg: +(acc.softDeformWorstStretch * k).toFixed(3),
+    softDeformWorstAreaRatioAvg: +(acc.softDeformWorstAreaRatio * k).toFixed(3),
   };
 }
 
@@ -2156,6 +2417,10 @@ function drawBodiesOverlay(sim) {
   }
 
   const s = sim.bodies.soft;
+  const deformState = sim.softDeformationState || null;
+  const severeClusters = deformState?.severeSet || new Set();
+  const warningClusters = deformState?.warningSet || new Set();
+
   for (const node of s.nodes) {
     if (node._rx == null) {
       node._rx = node.x; node._ry = node.y;
@@ -2171,15 +2436,19 @@ function drawBodiesOverlay(sim) {
     if (!softClusters.has(cid)) softClusters.set(cid, []);
     softClusters.get(cid).push(node);
   }
-  for (const nodes of softClusters.values()) {
-    if (!nodes.length || !nodes[0].digestEnabled) continue;
+  for (const [cid, nodes] of softClusters.entries()) {
+    const severe = severeClusters.has(cid);
+    const warning = warningClusters.has(cid);
+    if (!nodes.length || (!nodes[0].digestEnabled && !severe && !warning)) continue;
     let cx = 0, cy = 0;
     for (const n0 of nodes) { cx += n0._rx; cy += n0._ry; }
     cx /= nodes.length; cy /= nodes.length;
     const ordered = [...nodes]
       .map((p) => ({ x: p._rx, y: p._ry, a: Math.atan2(p._ry - cy, p._rx - cx) }))
       .sort((a, b2) => a.a - b2.a);
-    ctx.fillStyle = 'rgba(255, 80, 140, 0.2)';
+    ctx.fillStyle = severe
+      ? 'rgba(255, 60, 60, 0.24)'
+      : (warning ? 'rgba(255, 180, 70, 0.2)' : 'rgba(255, 80, 140, 0.2)');
     ctx.beginPath();
     for (let i = 0; i < ordered.length; i++) {
       const p = worldToScreen(sim, ordered[i].x, ordered[i].y);
@@ -2191,15 +2460,27 @@ function drawBodiesOverlay(sim) {
   }
   for (const [i, j, _rest, edgeBodyMode, edgeDyeMode] of s.springs) {
     const a = s.nodes[i], b = s.nodes[j];
+    if (!a || !b) continue;
     const pa = worldToScreen(sim, a._rx, a._ry);
     const pb = worldToScreen(sim, b._rx, b._ry);
-    const baseColor = edgeModeColor(edgeDyeMode, edgeBodyMode === EDGE_BODY_MODE.BLOCK);
-    // Keep blocked+deflect soft perimeter cyan-ish for readability.
-    const m = normalizeEdgeDyeModeRGB(edgeDyeMode);
-    if (edgeBodyMode === EDGE_BODY_MODE.BLOCK && m[0] === EDGE_DYE_MODE.DEFLECT && m[1] === EDGE_DYE_MODE.DEFLECT && m[2] === EDGE_DYE_MODE.DEFLECT) {
-      ctx.strokeStyle = '#00ffd0';
+    const aSevere = severeClusters.has(a.clusterId ?? 0);
+    const bSevere = severeClusters.has(b.clusterId ?? 0);
+    const aWarn = warningClusters.has(a.clusterId ?? 0);
+    const bWarn = warningClusters.has(b.clusterId ?? 0);
+
+    if (aSevere || bSevere) {
+      ctx.strokeStyle = 'rgba(255, 70, 70, 0.98)';
+    } else if (aWarn || bWarn) {
+      ctx.strokeStyle = 'rgba(255, 190, 80, 0.92)';
     } else {
-      ctx.strokeStyle = baseColor;
+      const baseColor = edgeModeColor(edgeDyeMode, edgeBodyMode === EDGE_BODY_MODE.BLOCK);
+      // Keep blocked+deflect soft perimeter cyan-ish for readability.
+      const m = normalizeEdgeDyeModeRGB(edgeDyeMode);
+      if (edgeBodyMode === EDGE_BODY_MODE.BLOCK && m[0] === EDGE_DYE_MODE.DEFLECT && m[1] === EDGE_DYE_MODE.DEFLECT && m[2] === EDGE_DYE_MODE.DEFLECT) {
+        ctx.strokeStyle = '#00ffd0';
+      } else {
+        ctx.strokeStyle = baseColor;
+      }
     }
     ctx.beginPath();
     ctx.moveTo(pa.x, pa.y);
@@ -2208,7 +2489,10 @@ function drawBodiesOverlay(sim) {
   }
   for (const node of s.nodes) {
     const p = worldToScreen(sim, node._rx, node._ry);
-    ctx.fillStyle = '#00ffd0';
+    const cid = node.clusterId ?? 0;
+    ctx.fillStyle = severeClusters.has(cid)
+      ? 'rgba(255, 70, 70, 0.98)'
+      : (warningClusters.has(cid) ? 'rgba(255, 190, 80, 0.95)' : '#00ffd0');
     ctx.beginPath();
     ctx.arc(p.x, p.y, Math.max(1.6, 2.2 * Math.max(1, sim.camera.zoom * 0.6)), 0, Math.PI * 2);
     ctx.fill();
@@ -2248,10 +2532,10 @@ function drawBodiesOverlay(sim) {
   ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, ABSORB=amber, MIXED=violet | zoom ${sim.camera.zoom.toFixed(2)}x${collisionDebugSuffix}`, 10, canvas.height - 28);
   ctx.fillStyle = 'rgba(0,255,208,0.95)';
   const line2 = collisionDebug
-    ? 'Body edges: BLOCK (bright) vs PASS (dim) | dashed green/cyan=solver hull, dashed amber=rigid-rigid convex proxies | Alt+drag/right-drag pan, wheel zoom'
+    ? 'Body edges: BLOCK (bright) vs PASS (dim) | dashed green/cyan=solver hull, dashed amber=rigid-rigid convex proxies | soft deform warn=orange, severe=red'
     : (ENABLE_HYBRID_BODY_LINKS
-      ? 'Body edges: BLOCK (bright) vs PASS (dim) | hybrid links=magenta | Alt+drag/right-drag pan, wheel zoom'
-      : 'Body edges: BLOCK (bright) vs PASS (dim) | hybrids disabled (rigid/soft separated) | Alt+drag/right-drag pan, wheel zoom');
+      ? 'Body edges: BLOCK (bright) vs PASS (dim) | hybrid links=magenta | soft deform warn=orange, severe=red'
+      : 'Body edges: BLOCK (bright) vs PASS (dim) | hybrids disabled (rigid/soft separated) | soft deform warn=orange, severe=red');
   ctx.fillText(line2, 10, canvas.height - 12);
   ctx.restore();
 }
@@ -2480,6 +2764,13 @@ async function stepAndRender() {
       rigidContactCount: rigidContacts.length,
       rigidContactPairs: (showCollisionHullEl?.checked ? rigidContacts.slice(0, 8) : undefined),
       droppedSoftSprings: s.bodies?.topologyGuardrails?.droppedSoftSprings || 0,
+      softDeformation: {
+        warningClustersNow: sim.softDeformationState?.warningCount || 0,
+        severeClustersNow: sim.softDeformationState?.severeCount || 0,
+        worstStretchNow: +((sim.softDeformationState?.worstStretch || 1).toFixed(3)),
+        worstAreaRatioNow: +((sim.softDeformationState?.worstAreaRatio || 1).toFixed(3)),
+        severeEventsRecent: (sim.softDeformationEvents || []).slice(-4),
+      },
     });
   }
 

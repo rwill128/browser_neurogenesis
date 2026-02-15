@@ -134,6 +134,37 @@ test('createCreatureSpecFromMesh fuses compiler rigid pieces by compoundId (no s
   assert.equal(fusedA.subHulls.length, 2);
 });
 
+test('buildBodiesFromCreatureSpec drops non-finite rigid hull vertices deterministically', () => {
+  const spec = {
+    schemaVersion: CREATURE_SPEC_VERSION,
+    space: { width: 10, height: 10 },
+    rigidBodies: [{
+      id: 'rb0',
+      hull: [
+        { x: 1, y: 1 },
+        { x: 5, y: 1 },
+        { x: Number.POSITIVE_INFINITY, y: 3 },
+        { x: 3, y: 6 },
+      ],
+      mass: 4,
+    }],
+    softBodies: [],
+    hybridJoints: [],
+  };
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+  assert.equal(bodies.rigid.length, 1);
+
+  const rb = bodies.rigid[0];
+  assert.equal(rb.verticesLocal.length, 3);
+  assert.ok(Number.isFinite(rb.x) && Number.isFinite(rb.y));
+  assert.ok(Number.isFinite(rb.r) && rb.r > 0);
+  assert.ok(Number.isFinite(rb.inertia) && rb.inertia > 0);
+  for (const v of rb.verticesLocal) {
+    assert.ok(Number.isFinite(v.x) && Number.isFinite(v.y));
+  }
+});
+
 test('hybrid links at rigid vertices choose a local incident edge (deterministic tie-break)', () => {
   const mesh = {
     nodes: [

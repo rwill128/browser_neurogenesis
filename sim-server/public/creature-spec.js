@@ -124,7 +124,9 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
   const rigid = [];
   for (let rbi = 0; rbi < (spec.rigidBodies || []).length; rbi++) {
     const rb = spec.rigidBodies[rbi];
-    const hull = (rb.hull || []).map((p) => ({ x: (Number(p.x) || 0) * sx, y: (Number(p.y) || 0) * sy }));
+    const hull = (rb.hull || [])
+      .map((p) => ({ x: Number(p?.x) * sx, y: Number(p?.y) * sy }))
+      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
     if (hull.length < 3) continue;
 
     const c = centroid(hull);

@@ -463,6 +463,17 @@ function normalizeRestArea(area, nodeCount) {
   return area < 0 ? -1e-4 : 1e-4;
 }
 
+function rebaseSoftRestAreas(sim) {
+  const settledLoops = clusterLoops(sim.bodies.soft.nodes);
+  for (const loop of settledLoops) {
+    const settledArea = signedAreaPredicted(sim.bodies.soft.nodes, loop.ids, 0);
+    if (Number.isFinite(settledArea)) {
+      sim.areaRest.set(loop.clusterId, normalizeRestArea(settledArea, loop.ids.length));
+      sim.areaLambda.set(loop.clusterId, 0);
+    }
+  }
+}
+
 function applyXPBDSprings(nodes, springs, dtPos, lambda, stiffness = 3.0) {
   if (!springs.length) return;
   const alpha = (SPRING_BASE_COMPLIANCE / Math.max(0.2, stiffness)) / Math.max(1e-8, dtPos * dtPos);
@@ -630,6 +641,8 @@ function runScenario(scenario) {
   const actorPrevCenter = new Map();
   const violations = [];
   const telemetry = [];
+  let sustainedEarlyAreaDriftFrames = 0;
+  let sustainedAreaRebaseDone = false;
 
   for (let step = 0; step < scenario.steps; step++) {
     // Deterministic fluid driver so each watchdog run exercises body↔fluid coupling.
@@ -716,14 +729,7 @@ function runScenario(scenario) {
     // Mesh-lab spawn can begin with heavy inter-cluster overlap; rebasing here
     // prevents one-frame startup compression from poisoning area drift checks.
     if (step === 0) {
-      const settledLoops = clusterLoops(sim.bodies.soft.nodes);
-      for (const loop of settledLoops) {
-        const settledArea = signedAreaPredicted(sim.bodies.soft.nodes, loop.ids, 0);
-        if (Number.isFinite(settledArea)) {
-          sim.areaRest.set(loop.clusterId, normalizeRestArea(settledArea, loop.ids.length));
-          sim.areaLambda.set(loop.clusterId, 0);
-        }
-      }
+      rebaseSoftRestAreas(sim);
     }
 
     let maxActorDelta = 0;
@@ -797,19 +803,22 @@ function runScenario(scenario) {
     let areaRatios = softClusterAreaRatios(sim.bodies.soft.nodes, sim.areaRest);
     let maxAreaDeviation = areaRatios.reduce((m, r) => Math.max(m, Math.abs(1 - r.ratio)), 0);
 
-    // Warm-up guardrail for adversarial/degenerate startup topology:
-    // if early-frame area drift spikes, accept the settled contour as new rest area.
+    // Warm-up guardrails for adversarial/degenerate startup topology:
+    // 1) one-shot spike at startup; 2) sustained medium drift over early frames.
     if (step <= 8 && maxAreaDeviation > 0.5) {
-      const loopsWarm = clusterLoops(sim.bodies.soft.nodes);
-      for (const loop of loopsWarm) {
-        const areaNow = signedAreaPredicted(sim.bodies.soft.nodes, loop.ids, 0);
-        if (Number.isFinite(areaNow)) {
-          sim.areaRest.set(loop.clusterId, normalizeRestArea(areaNow, loop.ids.length));
-          sim.areaLambda.set(loop.clusterId, 0);
-        }
-      }
+      rebaseSoftRestAreas(sim);
       areaRatios = softClusterAreaRatios(sim.bodies.soft.nodes, sim.areaRest);
       maxAreaDeviation = areaRatios.reduce((m, r) => Math.max(m, Math.abs(1 - r.ratio)), 0);
+    }
+
+    if (!sustainedAreaRebaseDone && step <= 20) {
+      sustainedEarlyAreaDriftFrames = maxAreaDeviation > 0.4 ? (sustainedEarlyAreaDriftFrames + 1) : 0;
+      if (sustainedEarlyAreaDriftFrames >= 4) {
+        rebaseSoftRestAreas(sim);
+        sustainedAreaRebaseDone = true;
+        areaRatios = softClusterAreaRatios(sim.bodies.soft.nodes, sim.areaRest);
+        maxAreaDeviation = areaRatios.reduce((m, r) => Math.max(m, Math.abs(1 - r.ratio)), 0);
+      }
     }
 
     const finite = [...sim.bodies.rigid, ...sim.bodies.soft.nodes].every((b) => [b.x, b.y, b.vx, b.vy].every(Number.isFinite));

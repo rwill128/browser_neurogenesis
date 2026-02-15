@@ -220,6 +220,9 @@ function drawMesh(mesh) {
 }
 
 function compileNow() {
+  const membraneMode = (softSolverModeEl?.value || 'spring') === 'membrane';
+  const requestedSoftMin = Math.max(1, Math.min(Math.max(1, W - 1), Math.round(Number(softMinCellSizeEl?.value) || 3)));
+
   const mesh = compileFieldToMesh({
     width: W,
     height: H,
@@ -232,9 +235,11 @@ function compileNow() {
     rigidCompileMode: rigidCompileModeEl?.value || 'contours',
     rigidPrimitiveSideMin: Math.max(2, Math.min(64, Math.round(Number(rigidPrimitiveSideMinEl?.value) || 4))),
     rigidPrimitiveSideMax: Math.max(2, Math.min(96, Math.round(Number(rigidPrimitiveSideMaxEl?.value) || 10))),
-    softInfillMode: softInfillModeEl?.value || 'triangles',
+    softInfillMode: membraneMode ? 'triangles' : (softInfillModeEl?.value || 'triangles'),
     softDensityField: softDensity,
-    softMinCellSize: Math.max(1, Math.min(Math.max(1, W - 1), Math.round(Number(softMinCellSizeEl?.value) || 3))),
+    // Membrane mode should preserve boundary fidelity; coarse soft cells make boxy/square contours.
+    softMinCellSize: membraneMode ? 1 : requestedSoftMin,
+    softBoundaryCellCap: membraneMode ? 1 : 2,
   });
   lastMesh = mesh;
   drawMesh(mesh);

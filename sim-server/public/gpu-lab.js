@@ -43,7 +43,7 @@ const SOFT_XPBD_BASE_COMPLIANCE = 0.0012;
 const SOFT_AREA_XPBD_ITERS = 6;
 const SOFT_AREA_BASE_COMPLIANCE = 0.0009;
 const SOFT_INTEGRATION_SCALE = 24;
-const FLUID_COUPLING_COMPONENT_LIMIT = 32;
+const FLUID_COUPLING_COMPONENT_LIMIT = 12;
 
 const EDGE_BODY_MODE = {
   PASS: 0,
@@ -1416,6 +1416,7 @@ function applySoftAreaXPBDVelocity(sim, s, loops, dtPos, stiffnessScale) {
 function stepBodiesAndInject(sim, vxField, vyField) {
   const n = sim.controls.n;
   const dt = sim.controls.dt;
+  const dtNorm = Math.max(0.2, Math.min(1.5, (dt * 60) || 1));
   const bodies = sim.bodies;
   const dragK = sim.controls.bodyDrag;
   const feedbackK = sim.controls.bodyFeedback;
@@ -1492,9 +1493,9 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const swimY = Math.sin(swimPhase * 1.6) * 0.009 * invMass;
     const swimTorque = Math.sin(swimPhase * 1.1) * 0.0025;
 
-    b.vx += ax * dt * 60 + swimX;
-    b.vy += ay * dt * 60 + swimY;
-    b.omega = (b.omega || 0) + alpha * dt * 60 + swimTorque;
+    b.vx += ax * dt * 60 + swimX * dtNorm;
+    b.vy += ay * dt * 60 + swimY * dtNorm;
+    b.omega = (b.omega || 0) + alpha * dt * 60 + swimTorque * dtNorm;
 
     const centerHoney = localHoneyDrag(b.x, b.y);
     const rigidVisc = viscosityMotionResponse(centerHoney, 3.2);
@@ -1533,8 +1534,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const honey = localHoneyDrag(node.x, node.y);
     const carryX = (fx - node.vx) * dragK * honey * invMass;
     const carryY = (fy - node.vy) * dragK * honey * invMass;
-    node.vx += carryX * dt * 60 + swimX;
-    node.vy += carryY * dt * 60 + swimY;
+    node.vx += carryX * dt * 60 + swimX * dtNorm;
+    node.vy += carryY * dt * 60 + swimY * dtNorm;
     const softVisc = viscosityMotionResponse(honey, 2.8);
     node.vx *= softVisc.damp;
     node.vy *= softVisc.damp;
@@ -1559,7 +1560,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   ensureSoftAreaRestState(sim, s, softClusterLoops, dtPos);
   applySoftAreaXPBDVelocity(sim, s, softClusterLoops, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT);
 
-  for (let iter = 0; iter < 7; iter++) {
+  for (let iter = 0; iter < 5; iter++) {
     // Hybrid rigid-soft attachment constraints (weld-like springs to rigid edge vertices).
     for (const h of (bodies.hybrid || [])) {
       const rb = bodies.rigid[h.rigidIndex];
@@ -1572,22 +1573,38 @@ function stepBodiesAndInject(sim, vxField, vyField) {
         const dx = node.x - anchor.x;
         const dy = node.y - anchor.y;
         const d = Math.max(1e-6, Math.hypot(dx, dy));
-        const err = (d - rest) * 1.12;
+        const err = (d - rest) * 0.74;
         const nx = dx / d, ny = dy / d;
-        node.vx -= nx * err * 0.09;
-        node.vy -= ny * err * 0.09;
-        // Slightly stronger reaction into rigid body for tighter compound behavior.
-        rb.vx += nx * err * 0.012;
-        rb.vy += ny * err * 0.012;
-        rb.omega = (rb.omega || 0) + (nx * ny) * err * 0.0012;
+        node.vx -= nx * err * 0.052 * dtNorm;
+        node.vy -= ny * err * 0.052 * dtNorm;
+        // Matched, softer reaction into rigid body to avoid hybrid jitter.
+        rb.vx += nx * err * 0.0075 * dtNorm;
+        rb.vy += ny * err * 0.0075 * dtNorm;
+        rb.omega = (rb.omega || 0) + (nx * ny) * err * 0.00075 * dtNorm;
       }
     }
   }
 
+  const hybridNodeVCap = 3.2;
   for (const node of s.nodes) {
+    const vmag = Math.hypot(node.vx, node.vy);
+    if (vmag > hybridNodeVCap) {
+      node.vx = (node.vx / vmag) * hybridNodeVCap;
+      node.vy = (node.vy / vmag) * hybridNodeVCap;
+    }
     node.x = node.x + node.vx * dt * SOFT_INTEGRATION_SCALE;
     node.y = node.y + node.vy * dt * SOFT_INTEGRATION_SCALE;
     applyBounceBoundary(node, n, 0.78);
+  }
+
+  for (const rb of bodies.rigid) {
+    const vmag = Math.hypot(rb.vx, rb.vy);
+    const vcap = 4.0;
+    if (vmag > vcap) {
+      rb.vx = (rb.vx / vmag) * vcap;
+      rb.vy = (rb.vy / vmag) * vcap;
+    }
+    rb.omega = Math.max(-0.22, Math.min(0.22, rb.omega || 0));
   }
 
   const rigidContactDebug = [];

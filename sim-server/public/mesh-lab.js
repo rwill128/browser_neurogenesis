@@ -30,6 +30,7 @@ const rigid = new Float32Array(W * H);
 const soft = new Float32Array(W * H);
 const softDensity = new Float32Array(W * H).fill(0.5);
 let lastMesh = null;
+let compileRevision = 0;
 
 function idx(x, y) { return y * W + x; }
 
@@ -229,6 +230,7 @@ function drawMesh(mesh) {
 
   out.textContent = JSON.stringify({
     ...mesh.meta,
+    compileRevision,
     softSolverMode: softSolverModeEl?.value || 'spring',
     softPreview: ((softSolverModeEl?.value || 'spring') === 'membrane')
       ? 'boundary-loops (interior triangles hidden)'
@@ -252,29 +254,38 @@ function syncSoftModeUi() {
 }
 
 function compileNow() {
-  const membraneMode = syncSoftModeUi();
-  const requestedSoftMin = Math.max(1, Math.min(Math.max(1, W - 1), Math.round(Number(softMinCellSizeEl?.value) || 3)));
+  try {
+    const membraneMode = syncSoftModeUi();
+    const requestedSoftMin = Math.max(1, Math.min(Math.max(1, W - 1), Math.round(Number(softMinCellSizeEl?.value) || 3)));
 
-  const mesh = compileFieldToMesh({
-    width: W,
-    height: H,
-    rigidField: rigid,
-    softField: soft,
-    density: 1,
-    threshold: Math.max(0, Math.min(1, Number(thresholdEl.value) || 0.35)),
-    connectivityMode: 'largest',
-    minComponentTriangles: 0,
-    rigidCompileMode: rigidCompileModeEl?.value || 'contours',
-    rigidPrimitiveSideMin: Math.max(2, Math.min(64, Math.round(Number(rigidPrimitiveSideMinEl?.value) || 4))),
-    rigidPrimitiveSideMax: Math.max(2, Math.min(96, Math.round(Number(rigidPrimitiveSideMaxEl?.value) || 10))),
-    softInfillMode: membraneMode ? 'none' : (softInfillModeEl?.value || 'triangles'),
-    softDensityField: softDensity,
-    // Membrane mode should preserve boundary fidelity; coarse soft cells make boxy/square contours.
-    softMinCellSize: membraneMode ? 1 : requestedSoftMin,
-    softBoundaryCellCap: membraneMode ? 1 : 2,
-  });
-  lastMesh = mesh;
-  drawMesh(mesh);
+    const mesh = compileFieldToMesh({
+      width: W,
+      height: H,
+      rigidField: rigid,
+      softField: soft,
+      density: 1,
+      threshold: Math.max(0, Math.min(1, Number(thresholdEl.value) || 0.35)),
+      connectivityMode: 'largest',
+      minComponentTriangles: 0,
+      rigidCompileMode: rigidCompileModeEl?.value || 'contours',
+      rigidPrimitiveSideMin: Math.max(2, Math.min(64, Math.round(Number(rigidPrimitiveSideMinEl?.value) || 4))),
+      rigidPrimitiveSideMax: Math.max(2, Math.min(96, Math.round(Number(rigidPrimitiveSideMaxEl?.value) || 10))),
+      softInfillMode: membraneMode ? 'none' : (softInfillModeEl?.value || 'triangles'),
+      softDensityField: softDensity,
+      // Membrane mode should preserve boundary fidelity; coarse soft cells make boxy/square contours.
+      softMinCellSize: membraneMode ? 1 : requestedSoftMin,
+      softBoundaryCellCap: membraneMode ? 1 : 2,
+    });
+    lastMesh = mesh;
+    compileRevision += 1;
+    drawMesh(mesh);
+    return mesh;
+  } catch (err) {
+    const msg = `Compile failed: ${String(err?.message || err)}`;
+    console.error('[mesh-lab] compileNow failed', err);
+    out.textContent = msg;
+    return null;
+  }
 }
 
 let traitPainting = false;
@@ -308,8 +319,9 @@ if (rigidPrimitiveSideMinEl) rigidPrimitiveSideMinEl.addEventListener('change', 
 if (rigidPrimitiveSideMaxEl) rigidPrimitiveSideMaxEl.addEventListener('change', compileNow);
 
 exportBtn.addEventListener('click', () => {
-  if (!lastMesh) compileNow();
-  const spec = createCreatureSpecFromMesh(lastMesh, {
+  const mesh = compileNow();
+  if (!mesh) return;
+  const spec = createCreatureSpecFromMesh(mesh, {
     name: 'mesh-lab-creature',
     fields: { rigidField: rigid, softField: soft, softDensityField: softDensity },
     softBoundaryRingSprings: !!softBoundaryRingEl?.checked,

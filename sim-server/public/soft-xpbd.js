@@ -197,6 +197,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   outlierErrorPivot = 0.75,
   localEndpointCouplingMax = 1.16,
   localDirectionalCouplingMax = 1.1,
+  localImbalanceCouplingMax = 1.1,
   localErrorPivot = 0.2,
   polarityCouplingMax = 1.08,
   counterPolarityCouplingMax = 1,
@@ -231,6 +232,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const outlierPivot = Math.max(1e-6, Number(outlierErrorPivot) || 0.75);
   const localEndpointMax = Math.max(1, Number(localEndpointCouplingMax) || 1);
   const localDirectionalMax = Math.max(1, Number(localDirectionalCouplingMax) || 1);
+  const localImbalanceMax = Math.max(1, Number(localImbalanceCouplingMax) || 1);
   const localPivot = Math.max(1e-6, Number(localErrorPivot) || 0.2);
   const polarityMax = Math.max(1, Number(polarityCouplingMax) || 1);
   const counterPolarityMax = Math.max(1, Number(counterPolarityCouplingMax) || 1);
@@ -354,7 +356,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
 
     let localBoost = 1;
     let localDirectionalBoost = 1;
-    if (adaptiveMode && nodeErrAbsSum && (localEndpointMax > 1.0001 || localDirectionalMax > 1.0001)) {
+    let localImbalanceBoost = 1;
+    if (adaptiveMode && nodeErrAbsSum && (localEndpointMax > 1.0001 || localDirectionalMax > 1.0001 || localImbalanceMax > 1.0001)) {
       const a = Number(sp[0]);
       const b = Number(sp[1]);
       const validA = Number.isInteger(a) && a >= 0 && a < nodeErrAbsSum.length && nodeErrCount[a] > 0;
@@ -376,6 +379,13 @@ export function recoverSoftSpringRests(springs, restBaseline, {
           : (Math.sign(signedErrNorm) === Math.sign(endpointSigned) ? 1 : 0);
         const localDirAlpha = clamp(Math.abs(endpointSigned) / localPivot, 0, 1);
         localDirectionalBoost = 1 + (localDirectionalMax - 1) * localDirAlpha * localSignAligned;
+
+        const endpointOpposed = (signedA === 0 || signedB === 0)
+          ? 0
+          : (Math.sign(signedA) === Math.sign(signedB) ? 0 : 1);
+        const imbalanceErr = Math.abs(signedA - signedB) * 0.5;
+        const localImbalanceAlpha = clamp(imbalanceErr / localPivot, 0, 1);
+        localImbalanceBoost = 1 + (localImbalanceMax - 1) * localImbalanceAlpha * endpointOpposed;
       }
     }
 
@@ -388,7 +398,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       * shortRestBoost
       * midErrorBoost
       * localBoost
-      * localDirectionalBoost;
+      * localDirectionalBoost
+      * localImbalanceBoost;
     const recover = clamp(k * boost, 0, 1);
 
     // As we approach baseline, gradually tighten allowable rest-length range to reduce

@@ -9,6 +9,7 @@ import {
   pointInPolygonInclusive,
 } from '../sim-server/public/rigid-collision.js';
 import { EDGE_DYE_MODE, EDGE_BODY_MODE } from '../sim-server/public/dye-barrier.js';
+import { GPUFluidField } from '../js/gpuFluidField.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -50,6 +51,29 @@ function clamp(v, lo, hi) {
 
 function clone(obj) {
   return JSON.parse(JSON.stringify(obj));
+}
+
+function makeShadowOnlyFluid({ size = GRID, dt = DT, scaleX = 1, scaleY = 1 } = {}) {
+  const f = Object.create(GPUFluidField.prototype);
+  f.size = size;
+  f.dt = dt;
+  f.scaleX = scaleX;
+  f.scaleY = scaleY;
+  f.maxVelComponent = 8;
+  const cells = size * size;
+  f.shadowVx = new Float32Array(cells).fill(0);
+  f.shadowVy = new Float32Array(cells).fill(0);
+  f.shadowDensityR = new Float32Array(cells).fill(0);
+  f.shadowDensityG = new Float32Array(cells).fill(0);
+  f.shadowDensityB = new Float32Array(cells).fill(0);
+  f.shadowVxNext = new Float32Array(cells).fill(0);
+  f.shadowVyNext = new Float32Array(cells).fill(0);
+  f.shadowDensityRNext = new Float32Array(cells).fill(0);
+  f.shadowDensityGNext = new Float32Array(cells).fill(0);
+  f.shadowDensityBNext = new Float32Array(cells).fill(0);
+  f._initShadowBackCompatViews();
+  f.gpuEnabled = false;
+  return f;
 }
 
 function edgeModesForSides(sides) {
@@ -162,6 +186,10 @@ function makeScenario(seedBase) {
     dt: DT,
     steps,
     combo,
+    fluid: {
+      size: GRID,
+      dt: DT,
+    },
     emitters: [],
     bodies,
   };
@@ -403,6 +431,12 @@ function runScenario(scenario) {
     springLambda: new Float32Array(scenario.bodies.soft.springs.length),
     areaRest: new Map(),
     areaLambda: new Map(),
+    fluid: makeShadowOnlyFluid({
+      size: Number(scenario?.fluid?.size) || scenario.grid,
+      dt: Number(scenario?.fluid?.dt) || scenario.dt,
+      scaleX: 1,
+      scaleY: 1,
+    }),
   };
 
   const loops0 = clusterLoops(sim.bodies.soft.nodes);
@@ -415,9 +449,19 @@ function runScenario(scenario) {
   const telemetry = [];
 
   for (let step = 0; step < scenario.steps; step++) {
-    // deterministic micro-force for motion diversity.
+    // Deterministic fluid driver so each watchdog run exercises body↔fluid coupling.
+    const swirlX = sim.n * (0.5 + Math.cos(step * 0.041) * 0.18);
+    const swirlY = sim.n * (0.5 + Math.sin(step * 0.053) * 0.16);
+    sim.fluid.addVelocity(swirlX, swirlY, Math.cos(step * 0.17) * 1.5, Math.sin(step * 0.13) * 1.5, 8);
+
+    let maxFluidSampleSpeed = 0;
+
     for (let i = 0; i < sim.bodies.rigid.length; i++) {
       const rb = sim.bodies.rigid[i];
+      const flow = sim.fluid.getVelocityAtWorld(rb.x, rb.y);
+      maxFluidSampleSpeed = Math.max(maxFluidSampleSpeed, Math.hypot(flow.vx, flow.vy));
+      rb.vx += (flow.vx - rb.vx) * 0.045;
+      rb.vy += (flow.vy - rb.vy) * 0.045;
       rb.vx += Math.cos(step * 0.08 + i * 1.37) * 0.01;
       rb.vy += Math.sin(step * 0.06 + i * 0.91) * 0.009;
       rb.vx *= 0.992;
@@ -426,6 +470,10 @@ function runScenario(scenario) {
     }
     for (let i = 0; i < sim.bodies.soft.nodes.length; i++) {
       const node = sim.bodies.soft.nodes[i];
+      const flow = sim.fluid.getVelocityAtWorld(node.x, node.y);
+      maxFluidSampleSpeed = Math.max(maxFluidSampleSpeed, Math.hypot(flow.vx, flow.vy));
+      node.vx += (flow.vx - node.vx) * 0.05;
+      node.vy += (flow.vy - node.vy) * 0.05;
       node.vx += Math.cos(step * 0.07 + i * 0.5) * 0.004;
       node.vy += Math.sin(step * 0.05 + i * 0.73) * 0.004;
       node.vx *= 0.99;
@@ -471,6 +519,15 @@ function runScenario(scenario) {
       for (const rb of sim.bodies.rigid) applyBounceBoundary(rb, sim.n, 0.84);
       for (const node of sim.bodies.soft.nodes) applyBounceBoundary(node, sim.n, 0.78);
     }
+
+    // Two-way body feedback into the fluid shadow field, then advect one step.
+    for (const rb of sim.bodies.rigid) {
+      sim.fluid.addVelocity(rb.x, rb.y, rb.vx * 0.38, rb.vy * 0.38, Math.max(5, rb.r * 0.9));
+    }
+    for (const node of sim.bodies.soft.nodes) {
+      sim.fluid.addVelocity(node.x, node.y, node.vx * 0.18, node.vy * 0.18, 2.6);
+    }
+    sim.fluid.step();
 
     let maxActorDelta = 0;
     let maxSpeed = 0;
@@ -549,6 +606,7 @@ function runScenario(scenario) {
       finite,
       maxActorDelta,
       maxSpeed,
+      maxFluidSampleSpeed,
       maxRigidOverlap,
       maxSoftPenetration,
       maxSoftInsideRigidDepth,
@@ -561,6 +619,7 @@ function runScenario(scenario) {
     if (!finite) stepViolations.push('non-finite state');
     if (maxActorDelta > 7.5) stepViolations.push(`jerk spike ${maxActorDelta.toFixed(3)}`);
     if (maxSpeed > 8.5) stepViolations.push(`velocity spike ${maxSpeed.toFixed(3)}`);
+    if (maxFluidSampleSpeed > 6.5) stepViolations.push(`fluid speed spike ${maxFluidSampleSpeed.toFixed(3)}`);
     if (maxRigidOverlap > 0.9) stepViolations.push(`rigid overlap ${maxRigidOverlap.toFixed(3)}`);
     if (maxSoftPenetration > 0.7) stepViolations.push(`soft-soft penetration ${maxSoftPenetration.toFixed(3)}`);
     if (maxSoftInsideRigidDepth > 0.9) stepViolations.push(`soft-rigid penetration ${maxSoftInsideRigidDepth.toFixed(3)}`);

@@ -130,6 +130,41 @@ test('applyRigidWeldConstraints sanitizes non-finite rigid state while applying 
   assert.ok(Number.isFinite(bodies.rigid[0].omega));
 });
 
+test('applyRigidWeldConstraints skips malformed weld anchors from rigidVertexWorld', () => {
+  const bodies = {
+    rigid: [
+      {
+        x: 0, y: 0, vx: 0.3, vy: -0.2, theta: 0, omega: 0.05,
+        verticesLocal: [{ x: -1, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }],
+      },
+      {
+        x: 6, y: 0, vx: -0.1, vy: 0.4, theta: 0, omega: -0.03,
+        verticesLocal: [{ x: -1, y: 0 }, { x: 1, y: 0 }, { x: 0, y: -1 }],
+      },
+    ],
+    rigidWelds: [
+      { a: 0, b: 1, a0: 1, a1: 2, b0: 0, b1: 2 },
+    ],
+  };
+
+  const badRigidVertexWorld = (rb, vi) => {
+    if (vi === 2) return { x: Number.NaN, y: Number.POSITIVE_INFINITY };
+    return rigidVertexWorld(rb, vi);
+  };
+
+  applyRigidWeldConstraints({
+    rigid: bodies.rigid,
+    rigidWelds: bodies.rigidWelds,
+    rigidVertexWorld: badRigidVertexWorld,
+  });
+
+  for (const rb of bodies.rigid) {
+    assert.ok(Number.isFinite(rb.vx));
+    assert.ok(Number.isFinite(rb.vy));
+    assert.ok(Number.isFinite(rb.omega));
+  }
+});
+
 test('applyRigidWeldConstraints pulls welded rigid pieces together over steps', () => {
   const bodies = {
     rigid: [

@@ -28,12 +28,18 @@ export function applyRigidWeldConstraints({ rigid, rigidWelds, rigidVertexWorld,
 
     const pairs = [[a0, b0], [a1, b1]];
     for (const [pa, pb] of pairs) {
+      if (!isFinitePoint(pa) || !isFinitePoint(pb)) continue;
+
       const dx = pb.x - pa.x;
       const dy = pb.y - pa.y;
-      const d = Math.max(1e-6, Math.hypot(dx, dy));
+      const dRaw = Math.hypot(dx, dy);
+      if (!Number.isFinite(dRaw)) continue;
+
+      const d = Math.max(1e-6, dRaw);
       const err = Math.min(d * errorScale, boundedMaxPairError);
       const nx = dx / d;
       const ny = dy / d;
+      if (!Number.isFinite(nx) || !Number.isFinite(ny) || !Number.isFinite(err)) continue;
 
       ra.vx = finiteOrZero(ra.vx) + nx * err * stiffness;
       ra.vy = finiteOrZero(ra.vy) + ny * err * stiffness;
@@ -53,4 +59,8 @@ export function applyRigidWeldConstraints({ rigid, rigidWelds, rigidVertexWorld,
 
 function finiteOrZero(v) {
   return Number.isFinite(v) ? v : 0;
+}
+
+function isFinitePoint(p) {
+  return !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
 }

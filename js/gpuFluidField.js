@@ -141,11 +141,12 @@ export class GPUFluidField {
             uniform vec2 u_resolution;
             void main() {
                 float dx = 1.0 / u_resolution.x;
+                float dy = 1.0 / u_resolution.y;
                 float divergence = texture2D(u_divergenceTexture, v_texCoord).r;
                 float p_left  = texture2D(u_p_prev_iter_Texture, v_texCoord - vec2(dx, 0.0)).r;
                 float p_right = texture2D(u_p_prev_iter_Texture, v_texCoord + vec2(dx, 0.0)).r;
-                float p_up    = texture2D(u_p_prev_iter_Texture, v_texCoord + vec2(0.0, dx)).r;
-                float p_down  = texture2D(u_p_prev_iter_Texture, v_texCoord - vec2(0.0, dx)).r;
+                float p_up    = texture2D(u_p_prev_iter_Texture, v_texCoord + vec2(0.0, dy)).r;
+                float p_down  = texture2D(u_p_prev_iter_Texture, v_texCoord - vec2(0.0, dy)).r;
                 float cellWidthSq = dx * dx;
                 float new_pressure = (p_left + p_right + p_up + p_down - divergence * cellWidthSq) * 0.25;
                 gl_FragColor = vec4(new_pressure, 0.0, 0.0, 1.0);

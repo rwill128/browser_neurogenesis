@@ -153,6 +153,29 @@ export function ensureLambdaCacheSize(previous, nextLength, clampAbs = 20) {
   return next;
 }
 
+export function decayLambdaCache(lambdaCache, {
+  decay = 0.995,
+  clampAbs = 20,
+  deadband = 1e-4,
+} = {}) {
+  if (!lambdaCache || typeof lambdaCache.length !== 'number') return lambdaCache;
+  const k = clamp(Number(decay), 0, 1);
+  const eps = Math.max(0, Number(deadband) || 0);
+  const limit = Math.max(0, Number(clampAbs) || 0);
+
+  for (let i = 0; i < lambdaCache.length; i++) {
+    const v = Number(lambdaCache[i]);
+    if (!Number.isFinite(v)) {
+      lambdaCache[i] = 0;
+      continue;
+    }
+    const next = clamp(v * k, -limit, limit);
+    lambdaCache[i] = Math.abs(next) <= eps ? 0 : next;
+  }
+
+  return lambdaCache;
+}
+
 export function buildSoftClusterBoundaryLoops(nodes, springs, { blockMode = 1 } = {}) {
   const byClusterNodes = new Map();
   for (let i = 0; i < (nodes?.length || 0); i++) {

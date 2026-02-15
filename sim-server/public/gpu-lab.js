@@ -1345,7 +1345,8 @@ function applySoftSpringsXPBDVelocity(s, dtPos, stiffnessScale, lambdaCache) {
       const d = Math.max(1e-6, Math.hypot(dx, dy));
       const nx = dx / d;
       const ny = dy / d;
-      const C = d - rest;
+      const strainCap = Math.max(0.05, Math.abs(rest) * 0.45);
+      const C = clamp(d - rest, -strainCap, strainCap);
 
       const wA = 1 / Math.max(0.02, a.mass || 1);
       const wB = 1 / Math.max(0.02, b.mass || 1);

@@ -199,7 +199,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   localDirectionalCouplingMax = 1.1,
   localErrorPivot = 0.2,
   polarityCouplingMax = 1.08,
-  smallRestRecoveryCouplingMax = 1,
+  smallRestRecoveryCouplingMax = 1.03,
   smallRestPivot = 0.9,
 } = {}) {
   if (!Array.isArray(springs) || !restBaseline || typeof restBaseline.length !== 'number') return 0;
@@ -383,11 +383,22 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       const targetErrNorm = Math.abs(base - target) / base;
       if (targetErrNorm <= snapWindow) {
         target = clamp(target + (base - target) * snapBlend, base * localMinFactor, base * localMaxFactor);
-        if (Math.abs(base - target) / base <= (eps / base)) target = base;
       }
     }
 
-    if (Math.abs(target - cur) <= eps) continue;
+    // Deterministic tail lock: if we're already inside the configured jitter deadband,
+    // collapse exactly to baseline so increased recoverRate cannot get stuck with tiny
+    // residual rest drift from floating-point noise.
+    const deadbandNorm = eps / base;
+    if (Math.abs(base - target) / base <= deadbandNorm) target = base;
+
+    if (Math.abs(target - cur) <= eps) {
+      if (target === base && cur !== base) {
+        sp[2] = base;
+        touched += 1;
+      }
+      continue;
+    }
     sp[2] = Math.max(1e-4, target);
     touched += 1;
   }

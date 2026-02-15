@@ -475,10 +475,29 @@ function buildCollisionPolysLocal(body) {
   return out;
 }
 
+function collisionPolyCacheKey(body) {
+  if (!body) return 'none';
+  const verts = Array.isArray(body.verticesLocal) ? body.verticesLocal : null;
+  const sub = Array.isArray(body.subPolysLocal) ? body.subPolysLocal : null;
+  const vKey = verts
+    ? `v:${verts.length}:${verts.map((p) => `${Number(p?.x) || 0},${Number(p?.y) || 0}`).join('|')}`
+    : 'v:none';
+  const sKey = sub
+    ? `s:${sub.length}:${sub.map((poly) => (Array.isArray(poly)
+      ? poly.map((p) => `${Number(p?.x) || 0},${Number(p?.y) || 0}`).join('|')
+      : 'bad')).join('||')}`
+    : 's:none';
+  return `${vKey};${sKey};r:${Number(body.r) || 0};sides:${Number(body.sides) || 0}`;
+}
+
 function bodyCollisionPolysLocal(body) {
   if (!body) return [];
-  if (!Array.isArray(body._collisionPolysLocal) || body._collisionPolysLocal.length === 0) {
+  const cacheKey = collisionPolyCacheKey(body);
+  if (!Array.isArray(body._collisionPolysLocal)
+    || body._collisionPolysLocal.length === 0
+    || body._collisionPolysLocalKey !== cacheKey) {
     body._collisionPolysLocal = buildCollisionPolysLocal(body);
+    body._collisionPolysLocalKey = cacheKey;
   }
   return body._collisionPolysLocal;
 }

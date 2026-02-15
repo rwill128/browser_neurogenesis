@@ -147,6 +147,24 @@ test('rigid-rigid proxy decomposition stays inside concave hull and logs trigger
   assert.ok(Number.isInteger(c.proxyB) && c.proxyB >= 0);
 });
 
+test('rigid collision proxy cache invalidates when local hull changes', () => {
+  const body = makeBox(0, 0, 1);
+  const first = getRigidCollisionPolysWorld(body);
+  assert.equal(first.length, 1);
+  assert.deepEqual(first[0][1], { x: 1, y: -1 });
+
+  body.verticesLocal = [
+    { x: -2, y: -2 },
+    { x: 2, y: -2 },
+    { x: 2, y: 2 },
+    { x: -2, y: 2 },
+  ];
+
+  const second = getRigidCollisionPolysWorld(body);
+  assert.equal(second.length, 1);
+  assert.deepEqual(second[0][1], { x: 2, y: -2 }, 'world collision polys should refresh after topology edit');
+});
+
 test('pointInPolygonInclusive is orientation-invariant on descending edges', () => {
   const poly = [
     { x: -3.70121809708695, y: -2.407090008712247 },

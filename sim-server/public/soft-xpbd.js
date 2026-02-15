@@ -176,6 +176,37 @@ export function decayLambdaCache(lambdaCache, {
   return lambdaCache;
 }
 
+export function recoverSoftSpringRests(springs, restBaseline, {
+  recoverRate = 0.08,
+  hardMinFactor = 0.6,
+  hardMaxFactor = 1.6,
+  jitterDeadband = 1e-4,
+} = {}) {
+  if (!Array.isArray(springs) || !restBaseline || typeof restBaseline.length !== 'number') return 0;
+
+  const k = clamp(Number(recoverRate), 0, 1);
+  const minFactor = Math.max(0.05, Number(hardMinFactor) || 0.6);
+  const maxFactor = Math.max(minFactor + 1e-3, Number(hardMaxFactor) || 1.6);
+  const eps = Math.max(0, Number(jitterDeadband) || 0);
+
+  let touched = 0;
+  const n = Math.min(springs.length, restBaseline.length);
+  for (let i = 0; i < n; i++) {
+    const sp = springs[i];
+    if (!Array.isArray(sp) || sp.length < 3) continue;
+
+    const base = Math.max(1e-4, Number(restBaseline[i]) || 1e-4);
+    const current = Number(sp[2]);
+    const cur = Number.isFinite(current) ? current : base;
+    const target = clamp(cur + (base - cur) * k, base * minFactor, base * maxFactor);
+    if (Math.abs(target - cur) <= eps) continue;
+    sp[2] = Math.max(1e-4, target);
+    touched += 1;
+  }
+
+  return touched;
+}
+
 export function buildSoftClusterBoundaryLoops(nodes, springs, { blockMode = 1 } = {}) {
   const byClusterNodes = new Map();
   for (let i = 0; i < (nodes?.length || 0); i++) {

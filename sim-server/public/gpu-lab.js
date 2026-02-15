@@ -1,7 +1,7 @@
 import { parseCreatureSpec, buildBodiesFromCreatureSpec } from '/creature-spec.js';
 import { EDGE_DYE_MODE, normalizeEdgeDyeModeRGB, applyBodyEdgeFieldBarriers } from '/dye-barrier.js';
 import { resolveRigidVsSoftNodeCollision, resolveRigidVsRigidPolygonCollision, getRigidCollisionPolysWorld } from '/rigid-collision.js';
-import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops } from '/soft-xpbd.js';
+import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops, recoverSoftSpringRests } from '/soft-xpbd.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -1000,6 +1000,7 @@ function applyMiniScenarioPreset(sim, mini) {
   sim.couplingTelemetry = [];
   sim.lastRigidContacts = [];
   sim.softXPBDLambda = null;
+  sim.softSpringRestBaseline = null;
   sim.softAreaRest = null;
   sim.softAreaLambda = null;
   sim.viscMapCpu.fill(0.5);
@@ -1637,8 +1638,10 @@ function stabilizeSeverelyDeformedSoftClusters(sim, s, loops, deform) {
     const len = Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0));
     if (!Number.isFinite(len)) continue;
     const rest = Math.max(1e-4, Number(sp[2]) || 1e-4);
+    const baseRest = Math.max(1e-4, Number(sim.softSpringRestBaseline?.[si]) || rest);
     if (len > rest * 3.2 || len < rest * 0.15) {
-      sp[2] = Math.max(1e-4, rest * 0.65, Math.min(rest * 2.0, len));
+      const boundedTarget = Math.max(baseRest * 0.65, Math.min(baseRest * 1.55, len));
+      sp[2] = Math.max(1e-4, rest + (boundedTarget - rest) * 0.35);
       if (sim.softXPBDLambda && Number.isFinite(sim.softXPBDLambda[si])) sim.softXPBDLambda[si] = 0;
     }
   }
@@ -1799,6 +1802,12 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   if (!sim.softXPBDLambda || sim.softXPBDLambda.length !== s.springs.length) {
     sim.softXPBDLambda = ensureLambdaCacheSize(sim.softXPBDLambda, s.springs.length, 20);
   }
+  if (!sim.softSpringRestBaseline || sim.softSpringRestBaseline.length !== s.springs.length) {
+    sim.softSpringRestBaseline = new Float32Array(s.springs.length);
+    for (let i = 0; i < s.springs.length; i++) {
+      sim.softSpringRestBaseline[i] = Math.max(1e-4, Number(s.springs[i]?.[2]) || 1e-4);
+    }
+  }
   applySoftSpringsXPBDVelocity(s, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT, sim.softXPBDLambda);
 
   const softClusterLoops = buildSoftClusterBoundaryLoops(s.nodes, s.springs, {
@@ -1934,6 +1943,15 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   if (deform.severeCount > 0) {
     stabilizeSeverelyDeformedSoftClusters(sim, s, softClusterLoops, deform);
     deform = buildSoftDeformationState(sim, s, softClusterLoops);
+  }
+  if (sim.softSpringRestBaseline && sim.softSpringRestBaseline.length === s.springs.length) {
+    const recovering = deform.severeCount === 0;
+    recoverSoftSpringRests(s.springs, sim.softSpringRestBaseline, {
+      recoverRate: recovering ? 0.045 : 0.015,
+      hardMinFactor: 0.7,
+      hardMaxFactor: 1.45,
+      jitterDeadband: 1e-5,
+    });
   }
   sim.softDeformationState = deform;
 

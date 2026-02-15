@@ -6,6 +6,7 @@ import {
   ensureLambdaCacheSize,
   buildSoftClusterBoundaryLoops,
   decayLambdaCache,
+  recoverSoftSpringRests,
 } from '../../sim-server/public/soft-xpbd.js';
 import { compileFieldToMesh } from '../../sim-server/public/field-to-structure-core.js';
 import { createCreatureSpecFromMesh, buildBodiesFromCreatureSpec } from '../../sim-server/public/creature-spec.js';
@@ -378,4 +379,194 @@ test('1000-step pure-soft mesh scenario (scale 0.5) is more stable with spring s
     `expected lower post-shock peak speed with strain clamp (before=${before.postShockMaxSpeed}, after=${after.postShockMaxSpeed})`);
   assert.ok(after.maxAreaDeviation < before.maxAreaDeviation,
     `expected lower area drift with strain clamp (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+});
+
+function runRestDriftRecoveryScenario({ useRestRecovery }) {
+  const soft = buildPureSoftMeshScenario({ grid: 100, scale: 0.5 });
+  const baseline = new Float32Array(soft.springs.length);
+  for (let i = 0; i < soft.springs.length; i++) baseline[i] = Math.max(1e-4, Number(soft.springs[i][2]) || 1e-4);
+
+  const springLambda = new Float32Array(soft.springs.length);
+  const areaRest = new Map();
+  const areaLambda = new Map();
+
+  const dt = 0.03;
+  const dtPos = dt * 24;
+  const springAlpha = (0.0012 / 3.0) / (dtPos * dtPos);
+  const areaAlpha = (0.0009 / 3.0) / (dtPos * dtPos);
+
+  let recoveryAt200 = 0;
+  let recoveryAt500 = 0;
+  let recoveryAt1000 = 0;
+  let maxAreaDeviation = 0;
+  let maxRestScaleDrift = 0;
+  let finalRestScaleDrift = 0;
+
+  for (let step = 0; step < 1000; step++) {
+    // deterministic adversarial drift pulse similar to severe-topology rest mutation.
+    if (step === 120) {
+      for (let i = 0; i < soft.springs.length; i++) {
+        const rest = Number(soft.springs[i][2]) || baseline[i];
+        soft.springs[i][2] = (i % 3 === 0) ? rest * 1.45 : rest * 0.72;
+      }
+      springLambda.fill(0);
+    }
+
+    for (let i = 0; i < soft.nodes.length; i++) {
+      const n = soft.nodes[i];
+      const phase = step * 0.11 + i * 0.29;
+      n.vx += Math.cos(phase) * 0.006;
+      n.vy += Math.sin(phase * 1.27) * 0.006;
+      n.vx *= 0.994;
+      n.vy *= 0.994;
+    }
+
+    for (let iter = 0; iter < 8; iter++) {
+      for (let si = 0; si < soft.springs.length; si++) {
+        const [ia, ib, rest] = soft.springs[si];
+        const a = soft.nodes[ia];
+        const b = soft.nodes[ib];
+        const ax = a.x + a.vx * dtPos;
+        const ay = a.y + a.vy * dtPos;
+        const bx = b.x + b.vx * dtPos;
+        const by = b.y + b.vy * dtPos;
+        const dx = bx - ax;
+        const dy = by - ay;
+        const d = Math.max(1e-6, Math.hypot(dx, dy));
+        const nx = dx / d;
+        const ny = dy / d;
+        const strainCap = Math.max(0.05, Math.abs(rest) * 0.45);
+        const C = Math.max(-strainCap, Math.min(strainCap, d - rest));
+        const wA = 1 / Math.max(0.02, a.mass || 1);
+        const wB = 1 / Math.max(0.02, b.mass || 1);
+        const wSum = wA + wB;
+        if (wSum <= 1e-9) continue;
+
+        const lambdaPrev = Number(springLambda[si]) || 0;
+        let dl = (-C - springAlpha * lambdaPrev) / (wSum + springAlpha);
+        if (!Number.isFinite(dl)) continue;
+        const lambdaNext = Math.max(-20, Math.min(20, lambdaPrev + dl));
+        dl = lambdaNext - lambdaPrev;
+        springLambda[si] = lambdaNext;
+
+        a.vx += (-wA * dl * nx) / dtPos;
+        a.vy += (-wA * dl * ny) / dtPos;
+        b.vx += (wB * dl * nx) / dtPos;
+        b.vy += (wB * dl * ny) / dtPos;
+      }
+    }
+
+    const loops = buildSoftClusterBoundaryLoops(soft.nodes, soft.springs, { blockMode: 1 });
+    for (const loop of loops) {
+      if (!areaRest.has(loop.clusterId)) {
+        const a0 = signedAreaPred(soft.nodes, loop.indices, dtPos);
+        areaRest.set(loop.clusterId, Math.abs(a0) > 1e-4 ? a0 : 1e-4);
+      }
+      if (!areaLambda.has(loop.clusterId)) areaLambda.set(loop.clusterId, 0);
+    }
+
+    for (let iter = 0; iter < 4; iter++) {
+      for (const loop of loops) {
+        const ids = loop.indices;
+        const m = ids.length;
+        const rest = areaRest.get(loop.clusterId);
+        const area = signedAreaPred(soft.nodes, ids, dtPos);
+        const C = area - rest;
+
+        const gx = new Array(m);
+        const gy = new Array(m);
+        let sum = 0;
+        for (let k = 0; k < m; k++) {
+          const p = soft.nodes[ids[(k - 1 + m) % m]];
+          const n = soft.nodes[ids[(k + 1) % m]];
+          const px = p.x + p.vx * dtPos;
+          const py = p.y + p.vy * dtPos;
+          const nx = n.x + n.vx * dtPos;
+          const ny = n.y + n.vy * dtPos;
+          gx[k] = 0.5 * (ny - py);
+          gy[k] = 0.5 * (px - nx);
+          const node = soft.nodes[ids[k]];
+          const w = 1 / Math.max(0.02, node.mass || 1);
+          sum += w * (gx[k] * gx[k] + gy[k] * gy[k]);
+        }
+        if (sum <= 1e-10) continue;
+
+        const lp = Number(areaLambda.get(loop.clusterId)) || 0;
+        let dl = (-C - areaAlpha * lp) / (sum + areaAlpha);
+        dl = Math.max(-2, Math.min(2, dl));
+        const ln = Math.max(-20, Math.min(20, lp + dl));
+        dl = ln - lp;
+        areaLambda.set(loop.clusterId, ln);
+
+        for (let k = 0; k < m; k++) {
+          const node = soft.nodes[ids[k]];
+          const w = 1 / Math.max(0.02, node.mass || 1);
+          node.vx += (w * gx[k] * dl) / dtPos;
+          node.vy += (w * gy[k] * dl) / dtPos;
+        }
+      }
+    }
+
+    for (const node of soft.nodes) {
+      const vm = Math.hypot(node.vx, node.vy);
+      if (vm > 4) {
+        node.vx = (node.vx / vm) * 4;
+        node.vy = (node.vy / vm) * 4;
+      }
+      node.x += node.vx * dtPos;
+      node.y += node.vy * dtPos;
+    }
+
+    if (useRestRecovery && step >= 121) {
+      recoverSoftSpringRests(soft.springs, baseline, {
+        recoverRate: 0.045,
+        hardMinFactor: 0.7,
+        hardMaxFactor: 1.45,
+      });
+    }
+
+    let meanScaleError = 0;
+    for (let i = 0; i < soft.springs.length; i++) {
+      const cur = Math.max(1e-4, Number(soft.springs[i][2]) || baseline[i]);
+      const base = Math.max(1e-4, baseline[i]);
+      meanScaleError += Math.abs(cur / base - 1);
+    }
+    meanScaleError /= Math.max(1, soft.springs.length);
+    const recovery = Math.max(0, 1 - meanScaleError);
+    if (step === 199) recoveryAt200 = recovery;
+    if (step === 499) recoveryAt500 = recovery;
+    if (step === 999) recoveryAt1000 = recovery;
+    maxRestScaleDrift = Math.max(maxRestScaleDrift, meanScaleError);
+    if (step === 999) finalRestScaleDrift = meanScaleError;
+
+    const ratios = [];
+    for (const [cid, rest] of areaRest.entries()) {
+      const loop = loops.find((l) => l.clusterId === cid);
+      if (!loop) continue;
+      ratios.push(Math.abs(signedAreaPred(soft.nodes, loop.indices, 0) / rest));
+    }
+    const areaDeviation = ratios.length ? Math.max(...ratios.map((r) => Math.abs(1 - r))) : 0;
+    maxAreaDeviation = Math.max(maxAreaDeviation, areaDeviation);
+  }
+
+  return { recoveryAt200, recoveryAt500, recoveryAt1000, maxAreaDeviation, maxRestScaleDrift, finalRestScaleDrift };
+}
+
+test('adversarial pure-soft rest drift recovers shape memory with bounded spring-rest restoration', () => {
+  const before = runRestDriftRecoveryScenario({ useRestRecovery: false });
+  const after = runRestDriftRecoveryScenario({ useRestRecovery: true });
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-metrics]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryAt200 > before.recoveryAt200,
+    `expected better early recovery (before=${before.recoveryAt200}, after=${after.recoveryAt200})`);
+  assert.ok(after.recoveryAt500 > before.recoveryAt500,
+    `expected better mid recovery (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
+  assert.ok(after.recoveryAt1000 > before.recoveryAt1000,
+    `expected better long recovery (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 5e-5,
+    `expected bounded area-deviation drift under recovery guardrail (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+  assert.ok(after.finalRestScaleDrift < before.finalRestScaleDrift,
+    `expected lower final spring-rest drift (before=${before.finalRestScaleDrift}, after=${after.finalRestScaleDrift})`);
 });

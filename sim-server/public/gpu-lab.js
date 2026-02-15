@@ -9,6 +9,7 @@ const stopBtn = document.getElementById('stopBtn');
 const clearViscBtn = document.getElementById('clearViscBtn');
 const importSpecBtn = document.getElementById('importSpecBtn');
 const importSpecFile = document.getElementById('importSpecFile');
+const importScaleEl = document.getElementById('importScale');
 const fpsHud = document.getElementById('fpsHud');
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
@@ -64,6 +65,12 @@ function readControls() {
     bodyDrag: Math.max(0, Number(bodyDragEl.value) || 0.55),
     bodyFeedback: Math.max(0, Number(bodyFeedbackEl.value) || 0.012),
   };
+}
+
+function readImportScale() {
+  const raw = Number(importScaleEl?.value);
+  if (!Number.isFinite(raw)) return 0.1;
+  return Math.max(0.05, Math.min(2, raw));
 }
 
 function createBuffer(device, bytes, usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC) {
@@ -1958,6 +1965,61 @@ function focusCameraOnBodies(sim, bodies) {
   clampCamera(sim);
 }
 
+function scaleImportedBodies(bodies, scale) {
+  const s = Number(scale);
+  if (!Number.isFinite(s) || Math.abs(s - 1) < 1e-6) return bodies;
+  if (!bodies) return bodies;
+
+  const b = getBodiesBounds(bodies);
+  const cx = b?.cx ?? 0;
+  const cy = b?.cy ?? 0;
+
+  const scalePoint = (x, y) => ({
+    x: cx + (x - cx) * s,
+    y: cy + (y - cy) * s,
+  });
+
+  for (const rb of bodies.rigid || []) {
+    const p = scalePoint(Number(rb.x) || 0, Number(rb.y) || 0);
+    rb.x = p.x;
+    rb.y = p.y;
+    rb.r = Math.max(0.5, (Number(rb.r) || 0) * s);
+    if (Number.isFinite(Number(rb.inertia))) rb.inertia = Number(rb.inertia) * s * s;
+    if (Array.isArray(rb.verticesLocal)) {
+      rb.verticesLocal = rb.verticesLocal.map((v) => ({ x: (Number(v?.x) || 0) * s, y: (Number(v?.y) || 0) * s }));
+    }
+    if (Array.isArray(rb.subPolysLocal)) {
+      rb.subPolysLocal = rb.subPolysLocal.map((poly) => (Array.isArray(poly)
+        ? poly.map((v) => ({ x: (Number(v?.x) || 0) * s, y: (Number(v?.y) || 0) * s }))
+        : []));
+    }
+    delete rb._collisionPolysLocal;
+    delete rb._collisionPolyCacheKey;
+  }
+
+  for (const n of bodies.soft?.nodes || []) {
+    const p = scalePoint(Number(n.x) || 0, Number(n.y) || 0);
+    n.x = p.x;
+    n.y = p.y;
+    n.r = Math.max(0.1, (Number(n.r) || 0) * s);
+  }
+
+  if (Array.isArray(bodies.soft?.springs)) {
+    for (const sp of bodies.soft.springs) {
+      if (!Array.isArray(sp) || sp.length < 3) continue;
+      const rest = Number(sp[2]);
+      sp[2] = Number.isFinite(rest) ? Math.max(1e-4, rest * s) : rest;
+    }
+  }
+
+  for (const h of bodies.hybrid || []) {
+    if (Number.isFinite(Number(h.restA))) h.restA = Math.max(0.1, Number(h.restA) * s);
+    if (Number.isFinite(Number(h.restB))) h.restB = Math.max(0.1, Number(h.restB) * s);
+  }
+
+  return bodies;
+}
+
 function mergeBodiesIntoSim(target, incoming) {
   if (!target || !incoming) return;
   target.rigid = target.rigid || [];
@@ -2437,8 +2499,11 @@ async function start() {
   applyScenarioPreset(sim, selectedPreset);
   if (pendingImportedSpecs.length) {
     let lastImported = null;
-    for (const spec of pendingImportedSpecs) {
+    for (const entry of pendingImportedSpecs) {
+      const spec = entry?.spec || entry;
+      const importScale = entry?.importScale ?? 0.1;
       const imported = buildBodiesFromCreatureSpec(spec, sim.controls.n, sim.controls);
+      scaleImportedBodies(imported, importScale);
       mergeBodiesIntoSim(sim.bodies, imported);
       lastImported = imported;
     }
@@ -2490,8 +2555,10 @@ if (importSpecBtn && importSpecFile) {
       // importing directly into it gets wiped by the next reinit.
       const simMatchesTargetGrid = !!sim && sim.controls.n === targetN;
 
+      const importScale = readImportScale();
       if (simMatchesTargetGrid) {
         const imported = buildBodiesFromCreatureSpec(spec, sim.controls.n, sim.controls);
+        scaleImportedBodies(imported, importScale);
         mergeBodiesIntoSim(sim.bodies, imported);
         focusCameraOnBodies(sim, imported);
         log({
@@ -2499,17 +2566,19 @@ if (importSpecBtn && importSpecFile) {
           msg: 'CreatureSpec imported (appended)',
           name: spec.name || 'unnamed',
           grid: sim.controls.n,
+          importScale,
           rigidAdded: imported.rigid?.length || 0,
           softNodesAdded: imported.soft?.nodes?.length || 0,
         });
       } else {
-        pendingImportedSpecs.push(spec);
+        pendingImportedSpecs.push({ spec, importScale });
         log({
           ok: true,
           msg: 'CreatureSpec queued for import on next start/reinit at selected grid',
           name: spec.name || 'unnamed',
           selectedGrid: targetN,
           currentGrid: sim?.controls?.n ?? null,
+          importScale,
         });
       }
     } catch (e) {

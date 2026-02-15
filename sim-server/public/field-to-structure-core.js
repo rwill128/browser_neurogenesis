@@ -216,23 +216,16 @@ export function compileFieldToMesh({
   }
 
   const filtered = enforceConnectivity({ triangles, mode: connectivityMode, minComponentTriangles });
-  const rigidDecomp = hasDensityMap
-    ? extractRigidContoursFromAdaptiveCells({
-        rigidCells: adaptive?.rigidCells,
-        nodes,
-        keptTriangles: filtered.triangles,
-        threshold,
-      })
-    : extractRigidContoursFromField({
-        width,
-        height,
-        rigidField,
-        threshold,
-        cellSize: step,
-        nodes,
-        keptTriangles: filtered.triangles,
-        rigidMaskOverride,
-      });
+  const rigidDecomp = extractRigidContoursFromField({
+    width,
+    height,
+    rigidField,
+    threshold,
+    cellSize: step,
+    nodes,
+    keptTriangles: filtered.triangles,
+    rigidMaskOverride,
+  });
 
   const noOverlap = removeSoftTrianglesOverlappingRigidContours(filtered.triangles, nodes, rigidDecomp.pieces);
   const densityApplied = hasDensityMap
@@ -471,6 +464,7 @@ function extractRigidContoursFromField({ width, height, rigidField, threshold, c
   let rows = Math.max(1, Math.ceil(height / step));
 
   let mask = null;
+  let usingMaskOverride = false;
   if (rigidMaskOverride && rigidMaskOverride.mask instanceof Uint8Array) {
     const m = rigidMaskOverride.mask;
     const c = Number(rigidMaskOverride.cols) | 0;
@@ -481,6 +475,7 @@ function extractRigidContoursFromField({ width, height, rigidField, threshold, c
       cols = c;
       rows = r;
       step = Math.max(1, s);
+      usingMaskOverride = true;
     }
   }
 
@@ -527,7 +522,8 @@ function extractRigidContoursFromField({ width, height, rigidField, threshold, c
     }
 
     let hull = simplifyCollinear(bestLoop);
-    hull = simplifyDouglasPeucker(hull, Math.max(0.75, step * 0.42));
+    const simplifyEps = usingMaskOverride ? 0.08 : Math.max(0.75, step * 0.42);
+    hull = simplifyDouglasPeucker(hull, simplifyEps);
     hull = simplifyCollinear(hull);
 
     if (hull.length < 3) continue;

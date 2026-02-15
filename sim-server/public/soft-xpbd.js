@@ -199,6 +199,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   localDirectionalCouplingMax = 1.1,
   localImbalanceCouplingMax = 1.1,
   localConsensusCouplingMax = 1.08,
+  localOutlierCouplingMax = 1,
+  localOutlierErrorPivot = 0.85,
   localErrorPivot = 0.2,
   polarityCouplingMax = 1.08,
   counterPolarityCouplingMax = 1,
@@ -241,6 +243,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const localDirectionalMax = Math.max(1, Number(localDirectionalCouplingMax) || 1);
   const localImbalanceMax = Math.max(1, Number(localImbalanceCouplingMax) || 1);
   const localConsensusMax = Math.max(1, Number(localConsensusCouplingMax) || 1);
+  const localOutlierMax = Math.max(1, Number(localOutlierCouplingMax) || 1);
+  const localOutlierPivot = Math.max(1e-6, Number(localOutlierErrorPivot) || 0.85);
   const localPivot = Math.max(1e-6, Number(localErrorPivot) || 0.2);
   const polarityMax = Math.max(1, Number(polarityCouplingMax) || 1);
   const counterPolarityMax = Math.max(1, Number(counterPolarityCouplingMax) || 1);
@@ -377,7 +381,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
     let localDirectionalBoost = 1;
     let localImbalanceBoost = 1;
     let localConsensusBoost = 1;
-    if (adaptiveMode && nodeErrAbsSum && (localEndpointMax > 1.0001 || localDirectionalMax > 1.0001 || localImbalanceMax > 1.0001 || localConsensusMax > 1.0001)) {
+    let localOutlierBoost = 1;
+    if (adaptiveMode && nodeErrAbsSum && (localEndpointMax > 1.0001 || localDirectionalMax > 1.0001 || localImbalanceMax > 1.0001 || localConsensusMax > 1.0001 || localOutlierMax > 1.0001)) {
       const a = Number(sp[0]);
       const b = Number(sp[1]);
       const validA = Number.isInteger(a) && a >= 0 && a < nodeErrAbsSum.length && nodeErrCount[a] > 0;
@@ -417,6 +422,13 @@ export function recoverSoftSpringRests(springs, restBaseline, {
         const consensusAlpha = clamp(consensusMag / localPivot, 0, 1);
         const balanceAlpha = clamp(1 - (imbalanceErr / localPivot), 0, 1);
         localConsensusBoost = 1 + (localConsensusMax - 1) * consensusAlpha * balanceAlpha * endpointAligned * springAligned;
+
+        const localOutlierRatio = errNorm / Math.max(1e-6, endpointAbs);
+        const localOutlierAlpha = clamp((localOutlierRatio - 1) / localOutlierPivot, 0, 1);
+        const localOutlierAligned = (signedErrNorm === 0 || endpointSigned === 0)
+          ? 0
+          : (Math.sign(signedErrNorm) === Math.sign(endpointSigned) ? 1 : 0);
+        localOutlierBoost = 1 + (localOutlierMax - 1) * localOutlierAlpha * localOutlierAligned;
       }
     }
 
@@ -433,7 +445,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       * localBoost
       * localDirectionalBoost
       * localImbalanceBoost
-      * localConsensusBoost;
+      * localConsensusBoost
+      * localOutlierBoost;
     const recover = clamp(k * boost, 0, 1);
 
     // As we approach baseline, gradually tighten allowable rest-length range to reduce

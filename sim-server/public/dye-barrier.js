@@ -16,27 +16,25 @@ export function normalizeEdgeDyeModeChannel(mode) {
 }
 
 export function normalizeEdgeDyeModeRGB(mode) {
-  if (Array.isArray(mode)) {
-    return [
-      normalizeEdgeDyeModeChannel(mode[0]),
-      normalizeEdgeDyeModeChannel(mode[1]),
-      normalizeEdgeDyeModeChannel(mode[2]),
-    ];
+  if (!Array.isArray(mode) || mode.length < 3) {
+    return [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT];
   }
-  const c = normalizeEdgeDyeModeChannel(mode);
-  return [c, c, c];
+  return [
+    normalizeEdgeDyeModeChannel(mode[0]),
+    normalizeEdgeDyeModeChannel(mode[1]),
+    normalizeEdgeDyeModeChannel(mode[2]),
+  ];
 }
 
 export function normalizePermeabilityRGB(mode) {
-  if (Array.isArray(mode)) {
-    return [
-      Number(mode[0]) > 0 ? 1 : 0,
-      Number(mode[1]) > 0 ? 1 : 0,
-      Number(mode[2]) > 0 ? 1 : 0,
-    ];
+  if (!Array.isArray(mode) || mode.length < 3) {
+    return [0, 0, 0];
   }
-  const c = Number(mode) > 0 ? 1 : 0;
-  return [c, c, c];
+  return [
+    Number(mode[0]) > 0 ? 1 : 0,
+    Number(mode[1]) > 0 ? 1 : 0,
+    Number(mode[2]) > 0 ? 1 : 0,
+  ];
 }
 
 export function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, vx, vy, thickness = 1.4, dyeMode = EDGE_DYE_MODE.DEFLECT, bodyMode = EDGE_BODY_MODE.BLOCK) {

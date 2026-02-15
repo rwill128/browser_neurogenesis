@@ -14,12 +14,13 @@ test('sanitizeSoftSprings drops malformed/out-of-range entries deterministically
     [1, -2, 1.0, 1, [1, 1, 1]],  // drop (b out of range)
     [1, 1, 1.0, 1, [1, 1, 1]],   // drop (degenerate)
     ['x', 2, 1.0, 1, [1, 1, 1]], // drop (non-integer)
+    { a: 0, b: 2, rest: 1.2, edgeBodyMode: 1, edgeDyeMode: [1,1,1] }, // drop (non-array strict mode)
     [2, 3, NaN, 0, [0, 0, 0]],   // keep with rest fallback
   ];
 
   const out = sanitizeSoftSprings(raw, 5, { edgeBodyPass: 0, edgeBodyBlock: 1, restFloor: 1e-3 });
   assert.equal(out.springs.length, 2);
-  assert.equal(out.dropped, 4);
+  assert.equal(out.dropped, 5);
 
   assert.deepEqual(out.springs[0].slice(0, 4), [0, 1, 2.5, 1]);
   assert.deepEqual(out.springs[1].slice(0, 2), [2, 3]);

@@ -105,9 +105,11 @@ export function sanitizeSoftSprings(rawSprings, nodeCount, {
   let dropped = 0;
 
   for (const sp of (Array.isArray(rawSprings) ? rawSprings : [])) {
-    const [aRaw, bRaw, restRaw, edgeBodyRaw, edgeDyeRaw] = Array.isArray(sp)
-      ? sp
-      : [sp?.a, sp?.b, sp?.rest, sp?.edgeBodyMode, sp?.edgeDyeMode];
+    if (!Array.isArray(sp)) {
+      dropped += 1;
+      continue;
+    }
+    const [aRaw, bRaw, restRaw, edgeBodyRaw, edgeDyeRaw] = sp;
 
     const a = Number(aRaw);
     const b = Number(bRaw);

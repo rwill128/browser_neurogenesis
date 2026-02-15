@@ -203,8 +203,8 @@ test('buildBodiesFromCreatureSpec ignores invalid joint references safely', () =
 test('buildBodiesFromCreatureSpec clamps unknown edge dye modes to DEFLECT guardrail', () => {
   const spec = createCreatureSpecFromMesh(sampleMesh());
 
-  // Unknown scalar modes should not create silent non-pass/non-behavioral edges.
-  spec.rigidBodies[0].edgeDyeMode = [99, 0, 2];
+  // Strict mode: per-edge RGB tuples only; invalid channels clamp to DEFLECT.
+  spec.rigidBodies[0].edgeDyeMode = [[99, 99, 99], [0, 0, 0], [2, 2, 2]];
 
   // Unknown per-channel values on soft springs should clamp channel-wise.
   const firstSpring = spec.softBodies[0].springs[0];

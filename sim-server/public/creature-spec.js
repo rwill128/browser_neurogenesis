@@ -159,9 +159,8 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
     }
 
     for (const sp of sb.springs) {
-      const [aRaw, bRaw, restRaw, edgeBodyRaw, edgeDyeRaw] = Array.isArray(sp)
-        ? sp
-        : [sp?.a, sp?.b, sp?.rest, sp?.edgeBodyMode, sp?.edgeDyeMode];
+      if (!Array.isArray(sp)) continue;
+      const [aRaw, bRaw, restRaw, edgeBodyRaw, edgeDyeRaw] = sp;
       const a = Number(aRaw);
       const b = Number(bRaw);
       if (!Number.isInteger(a) || !Number.isInteger(b)) continue;
@@ -730,11 +729,6 @@ function normalizeEdgeDyeMode(v) {
       normalizeEdgeDyeModeChannel(v[1]),
       normalizeEdgeDyeModeChannel(v[2]),
     ];
-  }
-  const n = Number(v);
-  if (Number.isFinite(n)) {
-    const c = normalizeEdgeDyeModeChannel(n);
-    return [c, c, c];
   }
   return [...EDGE_DYE_DEFLECT_RGB];
 }

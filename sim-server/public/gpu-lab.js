@@ -53,7 +53,7 @@ const EDGE_BODY_MODE = {
 function readControls() {
   return {
     n: Math.max(32, Number(gridEl.value) || 256),
-    dt: Number(dtEl.value) || 0.03,
+    dt: Number(dtEl.value) || 0.01,
     fade: Number(fadeEl.value) || 0.9999,
     viscosity: Number(viscosityEl.value) || 0.00001,
     impulse: Number(impulseEl.value) || 2.5,
@@ -729,6 +729,8 @@ function initEmitters(n) {
       cb: c[2],
       strength: n >= 2048 ? 1.6 : 1.2,
       spin: (Math.random() < 0.5 ? -1 : 1) * (0.45 + Math.random() * 0.55),
+      curlGain: 1.1,
+      driftGain: 0.014,
       swirlJitter: Math.random() * Math.PI * 2,
     });
   }
@@ -737,7 +739,7 @@ function initEmitters(n) {
 
 function buildPresetEmitters(n, preset) {
   const emitters = [];
-  const mk = (xf, yf, vxf, vyf, color, radius, strength, spin = 0.8) => ({
+  const mk = (xf, yf, vxf, vyf, color, radius, strength, spin = 0.8, curlGain = 1.25, driftGain = 0.012) => ({
     x: n * xf,
     y: n * yf,
     vx: vxf,
@@ -748,6 +750,8 @@ function buildPresetEmitters(n, preset) {
     cb: color[2],
     strength,
     spin,
+    curlGain,
+    driftGain,
     swirlJitter: Math.random() * Math.PI * 2,
   });
 
@@ -765,7 +769,9 @@ function buildPresetEmitters(n, preset) {
         colors[i % colors.length],
         Math.max(8, n / 42),
         1.35,
-        (i % 2 ? 1 : -1) * 1.0
+        (i % 2 ? 1 : -1) * 1.15,
+        1.35,
+        0.01,
       ));
     }
   } else if (preset === 'shearCanals') {
@@ -773,15 +779,15 @@ function buildPresetEmitters(n, preset) {
     for (let i = 0; i < lanes; i++) {
       const y = 0.16 + (i / (lanes - 1)) * 0.68;
       const dir = i % 2 === 0 ? 1 : -1;
-      emitters.push(mk(0.08, y, 0.36 * dir, 0, [255,150,80], Math.max(7, n / 55), 1.05, 0.55 * dir));
-      emitters.push(mk(0.92, y, -0.36 * dir, 0, [90,180,255], Math.max(7, n / 55), 1.05, -0.55 * dir));
+      emitters.push(mk(0.08, y, 0.36 * dir, 0, [255,150,80], Math.max(7, n / 55), 1.05, 1.35 * dir, 1.5, 0.006));
+      emitters.push(mk(0.92, y, -0.36 * dir, 0, [90,180,255], Math.max(7, n / 55), 1.05, -1.35 * dir, 1.5, 0.006));
     }
   } else if (preset === 'islands') {
     const centers = [[0.22,0.24],[0.78,0.28],[0.30,0.75],[0.75,0.72],[0.52,0.50]];
     const colors = [[255,110,80],[70,160,255],[255,220,90],[180,90,255],[90,255,180]];
     for (let i = 0; i < centers.length; i++) {
       const c = centers[i];
-      emitters.push(mk(c[0], c[1], (Math.random()*2-1)*0.12, (Math.random()*2-1)*0.12, colors[i], Math.max(10, n / 35), 1.45, (i%2?1:-1)*0.9));
+      emitters.push(mk(c[0], c[1], (Math.random()*2-1)*0.12, (Math.random()*2-1)*0.12, colors[i], Math.max(10, n / 35), 1.45, (i%2?1:-1)*1.2, 1.4, 0.009));
     }
   } else if (preset === 'checkerPlumes') {
     const cols = 4, rows = 4;
@@ -791,7 +797,7 @@ function buildPresetEmitters(n, preset) {
         const yf = 0.16 + y * 0.22;
         const odd = (x + y) % 2 === 1;
         const color = odd ? [255,120,70] : [90,170,255];
-        emitters.push(mk(xf, yf, odd ? 0.15 : -0.15, odd ? -0.08 : 0.08, color, Math.max(6, n / 65), 0.95, odd ? 0.7 : -0.7));
+        emitters.push(mk(xf, yf, odd ? 0.15 : -0.15, odd ? -0.08 : 0.08, color, Math.max(6, n / 65), 0.95, odd ? 1.25 : -1.25, 1.45, 0.008));
       }
     }
   } else {
@@ -1083,10 +1089,14 @@ function applyEmitters(sim, r, g, b, vx, vy) {
 
         const tx = d > 1e-6 ? (-dy / d) : 0;
         const ty = d > 1e-6 ? (dx / d) : 0;
-        const swirlProfile = (1 - nd) * (0.35 + 0.65 * nd);
-        const swirl = e.spin * 0.11 * swirlProfile;
-        vx[i] += (e.vx * 0.028 + tx * swirl) * w;
-        vy[i] += (e.vy * 0.028 + ty * swirl) * w;
+        const spin = Number.isFinite(Number(e.spin)) ? Number(e.spin) : 0.9;
+        const curlGain = Number.isFinite(Number(e.curlGain)) ? Number(e.curlGain) : 1.0;
+        const driftGain = Number.isFinite(Number(e.driftGain)) ? Number(e.driftGain) : 0.016;
+        const swirlProfile = (1 - nd) * (0.45 + 0.55 * nd);
+        const swirlOsc = 0.92 + 0.08 * Math.sin(sim.frame * 0.07 + e.swirlJitter * 1.7);
+        const swirl = spin * 0.16 * swirlProfile * swirlOsc * curlGain;
+        vx[i] += (e.vx * driftGain + tx * swirl) * w;
+        vy[i] += (e.vy * driftGain + ty * swirl) * w;
       }
     }
   }

@@ -221,6 +221,9 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
         pressureGain: Math.max(0.001, Number(sb?.pressureGain) || MEMBRANE_DEFAULT_PRESSURE_GAIN),
         radialDamping: Math.max(0, Math.min(0.2, Number(sb?.radialDamping) || MEMBRANE_DEFAULT_RADIAL_DAMPING)),
         shapeMemoryGain: Math.max(0, Math.min(0.35, Number(sb?.shapeMemoryGain) || MEMBRANE_DEFAULT_SHAPE_MEMORY_GAIN)),
+        insideCorrectionEnabled: Number.isFinite(Number(sb?.insideCorrectionEnabled))
+          ? (Number(sb.insideCorrectionEnabled) > 0 ? 1 : 0)
+          : 1,
         solverMode,
       });
     }
@@ -819,6 +822,10 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
       softBody.pressureGain = Math.max(0.001, Number(options?.membranePressureGain) || MEMBRANE_DEFAULT_PRESSURE_GAIN);
       softBody.radialDamping = Math.max(0, Math.min(0.2, Number(options?.membraneRadialDamping) || MEMBRANE_DEFAULT_RADIAL_DAMPING));
       softBody.shapeMemoryGain = Math.max(0, Math.min(0.35, Number(options?.membraneShapeMemoryGain) || MEMBRANE_DEFAULT_SHAPE_MEMORY_GAIN));
+      const membraneInsideRaw = Number(options?.membraneInsideCorrectionEnabled);
+      softBody.insideCorrectionEnabled = Number.isFinite(membraneInsideRaw)
+        ? (membraneInsideRaw > 0 ? 1 : 0)
+        : 1;
     }
 
     softBodies.push(softBody);

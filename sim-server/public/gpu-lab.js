@@ -611,6 +611,7 @@ function pushMembraneCellCluster({
     pressureGain: MEMBRANE_CELL_BASE_PRESSURE_GAIN,
     radialDamping: MEMBRANE_CELL_BASE_RADIAL_DAMPING,
     shapeMemoryGain: MEMBRANE_SHAPE_MEMORY_GAIN,
+    insideCorrectionEnabled: 1,
   };
 }
 
@@ -1079,6 +1080,7 @@ function cloneMiniBodies(miniBodies, controls) {
           pressureGain: Number(c?.pressureGain),
           radialDamping: Number(c?.radialDamping),
           shapeMemoryGain: Number(c?.shapeMemoryGain),
+          insideCorrectionEnabled: Number(c?.insideCorrectionEnabled),
         }))
         .filter((c) => Number.isInteger(c.clusterId))
         .map((c) => ({
@@ -1087,6 +1089,7 @@ function cloneMiniBodies(miniBodies, controls) {
           pressureGain: Number.isFinite(c.pressureGain) && c.pressureGain > 0 ? c.pressureGain : MEMBRANE_CELL_BASE_PRESSURE_GAIN,
           radialDamping: Number.isFinite(c.radialDamping) ? clamp(c.radialDamping, 0, 0.2) : MEMBRANE_CELL_BASE_RADIAL_DAMPING,
           shapeMemoryGain: Number.isFinite(c.shapeMemoryGain) ? clamp(c.shapeMemoryGain, 0, 0.35) : MEMBRANE_SHAPE_MEMORY_GAIN,
+          insideCorrectionEnabled: Number.isFinite(c.insideCorrectionEnabled) ? (c.insideCorrectionEnabled > 0 ? 1 : 0) : 1,
         }))
     : [];
 
@@ -1542,6 +1545,117 @@ function applyRigidInsideCorrectionPass(bodies, soft, hybridAttachedByRigid) {
           if (resolveRigidInsideProjection(rb, node, poly)) corrected += 1;
           break;
         }
+      }
+    }
+  }
+
+  return corrected;
+}
+
+function applyMembraneInsideCorrectionPass(sim, soft, loops) {
+  if (!soft?.nodes?.length || !Array.isArray(loops) || loops.length === 0) return 0;
+  const clusterMap = sim?.softMembraneClusterMap;
+  if (!(clusterMap instanceof Map) || clusterMap.size === 0) return 0;
+
+  const candidates = [];
+  for (const loop of loops) {
+    const cid = Number(loop?.clusterId);
+    if (!Number.isInteger(cid)) continue;
+    const membrane = clusterMap.get(cid);
+    if (!membrane) continue;
+    if (Number(membrane?.insideCorrectionEnabled) <= 0) continue;
+
+    const ids = Array.isArray(loop?.indices) ? loop.indices : [];
+    if (ids.length < 3) continue;
+
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    let area = 0;
+    const poly = [];
+
+    for (let i = 0; i < ids.length; i++) {
+      const node = soft.nodes[ids[i]];
+      if (!node) continue;
+      poly.push({ x: node.x, y: node.y });
+      minX = Math.min(minX, node.x);
+      minY = Math.min(minY, node.y);
+      maxX = Math.max(maxX, node.x);
+      maxY = Math.max(maxY, node.y);
+
+      const next = soft.nodes[ids[(i + 1) % ids.length]];
+      if (next) area += node.x * next.y - next.x * node.y;
+    }
+
+    if (poly.length < 3 || !Number.isFinite(area) || Math.abs(area) < 1e-8) continue;
+    candidates.push({ cid, ids, poly, minX, minY, maxX, maxY, areaSign: area >= 0 ? 1 : -1 });
+  }
+
+  if (candidates.length === 0) return 0;
+
+  let corrected = 0;
+  for (let iter = 0; iter < RIGID_INSIDE_CORRECTION_ITERS; iter++) {
+    for (let ni = 0; ni < soft.nodes.length; ni++) {
+      const node = soft.nodes[ni];
+      if (!node) continue;
+
+      for (const c of candidates) {
+        if (Number(node.clusterId) === c.cid) continue;
+        const pad = Math.max(0.2, Number(node.r) || 1) + RIGID_INSIDE_CORRECTION_SLOP;
+        if (node.x < c.minX - pad || node.x > c.maxX + pad || node.y < c.minY - pad || node.y > c.maxY + pad) continue;
+        if (!pointInPolygonInclusive(node.x, node.y, c.poly)) continue;
+
+        let best = null;
+        for (let i = 0; i < c.ids.length; i++) {
+          const ai = c.ids[i];
+          const bi = c.ids[(i + 1) % c.ids.length];
+          const a = soft.nodes[ai];
+          const b = soft.nodes[bi];
+          if (!a || !b) continue;
+
+          const cp = closestPointOnSegment(node.x, node.y, a.x, a.y, b.x, b.y);
+          const dx = node.x - cp.x;
+          const dy = node.y - cp.y;
+          const d2 = dx * dx + dy * dy;
+          if (!best || d2 < best.d2) {
+            const ex = b.x - a.x;
+            const ey = b.y - a.y;
+            const len = Math.max(1e-6, Math.hypot(ex, ey));
+            let nx = c.areaSign >= 0 ? (ey / len) : (-ey / len);
+            let ny = c.areaSign >= 0 ? (-ex / len) : (ex / len);
+            best = { d2, cp, nx, ny, ai, bi };
+          }
+        }
+        if (!best) continue;
+
+        const tx = best.cp.x + best.nx * pad;
+        const ty = best.cp.y + best.ny * pad;
+        const corrX = tx - node.x;
+        const corrY = ty - node.y;
+        const corrLen = Math.hypot(corrX, corrY);
+        if (!Number.isFinite(corrLen) || corrLen < 1e-8) continue;
+
+        node.x += corrX * 0.95;
+        node.y += corrY * 0.95;
+
+        const a = soft.nodes[best.ai];
+        const b = soft.nodes[best.bi];
+        if (a && b) {
+          a.x -= corrX * 0.02;
+          a.y -= corrY * 0.02;
+          b.x -= corrX * 0.02;
+          b.y -= corrY * 0.02;
+        }
+
+        const vn = node.vx * best.nx + node.vy * best.ny;
+        if (vn < 0) {
+          node.vx -= best.nx * vn;
+          node.vy -= best.ny * vn;
+        }
+
+        corrected += 1;
+        break;
       }
     }
   }
@@ -2554,6 +2668,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   }
 
   const rigidInsideCorrections = applyRigidInsideCorrectionPass(bodies, s, hybridAttachedByRigid);
+  const membraneInsideCorrections = applyMembraneInsideCorrectionPass(sim, s, softClusterLoops);
   for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
   for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
 
@@ -2684,6 +2799,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     membraneShapeClusters,
     membranePressureClusters,
     rigidInsideCorrections,
+    membraneInsideCorrections,
     softDtUsed: dt,
     softDtRaw: dtRaw,
   };
@@ -2707,6 +2823,7 @@ function summarizeCouplingTelemetry(telemetry) {
       softDeformWorstStretchAvg: 1,
       softDeformWorstAreaRatioAvg: 1,
       rigidInsideCorrectionsAvg: 0,
+      membraneInsideCorrectionsAvg: 0,
     };
   }
   const acc = {
@@ -2720,6 +2837,7 @@ function summarizeCouplingTelemetry(telemetry) {
     softDeformWorstStretch: 0,
     softDeformWorstAreaRatio: 0,
     rigidInsideCorrections: 0,
+    membraneInsideCorrections: 0,
   };
   for (const t of telemetry) {
     acc.rigidCenterDelta += t.rigidCenterDelta || 0;
@@ -2732,6 +2850,7 @@ function summarizeCouplingTelemetry(telemetry) {
     acc.softDeformWorstStretch += t.softDeformWorstStretch || 1;
     acc.softDeformWorstAreaRatio += t.softDeformWorstAreaRatio || 1;
     acc.rigidInsideCorrections += t.rigidInsideCorrections || 0;
+    acc.membraneInsideCorrections += t.membraneInsideCorrections || 0;
   }
   const k = 1 / telemetry.length;
   return {
@@ -2745,6 +2864,7 @@ function summarizeCouplingTelemetry(telemetry) {
     softDeformWorstStretchAvg: +(acc.softDeformWorstStretch * k).toFixed(3),
     softDeformWorstAreaRatioAvg: +(acc.softDeformWorstAreaRatio * k).toFixed(3),
     rigidInsideCorrectionsAvg: +(acc.rigidInsideCorrections * k).toFixed(3),
+    membraneInsideCorrectionsAvg: +(acc.membraneInsideCorrections * k).toFixed(3),
   };
 }
 
@@ -2996,6 +3116,7 @@ function mergeBodiesIntoSim(target, incoming) {
       pressureGain: Number.isFinite(Number(c?.pressureGain)) ? Math.max(0.001, Number(c.pressureGain)) : MEMBRANE_CELL_BASE_PRESSURE_GAIN,
       radialDamping: Number.isFinite(Number(c?.radialDamping)) ? clamp(Number(c.radialDamping), 0, 0.2) : MEMBRANE_CELL_BASE_RADIAL_DAMPING,
       shapeMemoryGain: Number.isFinite(Number(c?.shapeMemoryGain)) ? clamp(Number(c.shapeMemoryGain), 0, 0.35) : MEMBRANE_SHAPE_MEMORY_GAIN,
+      insideCorrectionEnabled: Number.isFinite(Number(c?.insideCorrectionEnabled)) ? (Number(c.insideCorrectionEnabled) > 0 ? 1 : 0) : 1,
     });
   }
 

@@ -75,3 +75,24 @@ test('concave rigid collision: high-speed contact is guardrailed to bounded impu
   assert.ok(Math.abs(rigid.vx) < 40, `guardrail should cap rigid velocity injection, got ${rigid.vx}`);
   assert.ok(Math.abs(rigid.omega) < 3, `guardrail should cap rigid spin injection, got ${rigid.omega}`);
 });
+
+test('concave rigid collision: tiny near-edge overlap stays in slop band (no jitter impulse)', () => {
+  const rigid = makeConcaveRigid();
+  const verts = rigidVerticesWorld(rigid);
+  const node = { x: 21.01, y: 30, vx: 0.03, vy: 0, mass: 1, r: 1.0 };
+
+  const hit = resolveRigidVsSoftNodeCollision(rigid, node, verts, 0.3);
+  assert.equal(hit, false, 'tiny overlap should remain in contact slop to avoid resting-contact jitter');
+});
+
+test('concave rigid collision: malformed non-finite polygon vertex is ignored safely', () => {
+  const rigid = makeConcaveRigid();
+  const verts = rigidVerticesWorld(rigid);
+  verts[2] = { x: Number.NaN, y: Number.NaN };
+  const node = { x: 21.4, y: 30, vx: 2.0, vy: 0, mass: 1, r: 1.0 };
+
+  const hit = resolveRigidVsSoftNodeCollision(rigid, node, verts, 0.3);
+  assert.equal(hit, true, 'collision should still resolve using remaining finite edges');
+  assert.ok(Number.isFinite(node.x) && Number.isFinite(node.vx), 'node state should remain finite');
+  assert.ok(Number.isFinite(rigid.x) && Number.isFinite(rigid.vx) && Number.isFinite(rigid.omega), 'rigid state should remain finite');
+});

@@ -1608,6 +1608,15 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   }
 
   const rigidContactDebug = [];
+  const hybridAttachedByRigid = new Map();
+  for (const h of (bodies.hybrid || [])) {
+    const ri = Number(h?.rigidIndex) | 0;
+    const ni = Number(h?.nodeIndex) | 0;
+    if (ri < 0 || ri >= bodies.rigid.length) continue;
+    if (ni < 0 || ni >= s.nodes.length) continue;
+    if (!hybridAttachedByRigid.has(ri)) hybridAttachedByRigid.set(ri, new Set());
+    hybridAttachedByRigid.get(ri).add(ni);
+  }
 
   // Body-body collisions: rigid↔rigid, rigid↔soft, soft↔soft
   for (let iter = 0; iter < 2; iter++) {
@@ -1622,15 +1631,20 @@ function stepBodiesAndInject(sim, vxField, vyField) {
         });
       }
     }
-    for (const rb of bodies.rigid) {
-      for (const sn of s.nodes) {
+    for (let rbi = 0; rbi < bodies.rigid.length; rbi++) {
+      const rb = bodies.rigid[rbi];
+      const attachedNodeSet = hybridAttachedByRigid.get(rbi) || null;
+      for (let ni = 0; ni < s.nodes.length; ni++) {
+        if (attachedNodeSet && attachedNodeSet.has(ni)) continue; // avoid parent rigid fighting its own hybrid-attached node
+        const sn = s.nodes[ni];
         // Recompute rigid polygon from latest body state per-contact;
         // stale hull snapshots caused missed/odd contacts after position updates.
-        resolveRigidVsSoftNodeCollision(rb, sn, null, 0.32);
+        resolveRigidVsSoftNodeCollision(rb, sn, null, 0.18);
       }
       for (const [i, j, _rest, edgeBodyMode] of s.springs) {
         if (edgeBodyMode !== EDGE_BODY_MODE.BLOCK) continue;
-        resolveRigidVsSoftEdgeCollision(rb, s.nodes[i], s.nodes[j], 0.3);
+        if (attachedNodeSet && (attachedNodeSet.has(i) || attachedNodeSet.has(j))) continue;
+        resolveRigidVsSoftEdgeCollision(rb, s.nodes[i], s.nodes[j], 0.16);
       }
     }
     for (let i = 0; i < s.nodes.length; i++) {

@@ -103,13 +103,17 @@ export function resolveRigidVsSoftNodeCollision(rigid, node, vertsInput, restitu
     : rigidVerticesWorld(rigid);
   if (!verts.length) return false;
 
-  const centroid = polygonCentroid(verts);
+  const finiteVerts = verts.filter((v) => Number.isFinite(v?.x) && Number.isFinite(v?.y));
+  if (finiteVerts.length < 3) return false;
+
+  const centroid = polygonCentroid(finiteVerts);
 
   let best = null;
-  for (let i = 0; i < verts.length; i++) {
-    const a = verts[i];
-    const b = verts[(i + 1) % verts.length];
+  for (let i = 0; i < finiteVerts.length; i++) {
+    const a = finiteVerts[i];
+    const b = finiteVerts[(i + 1) % finiteVerts.length];
     const cp = closestPointOnSegment(node.x, node.y, a.x, a.y, b.x, b.y);
+    if (!Number.isFinite(cp.x) || !Number.isFinite(cp.y)) continue;
     const dx = node.x - cp.x;
     const dy = node.y - cp.y;
     const d2 = dx * dx + dy * dy;
@@ -131,8 +135,9 @@ export function resolveRigidVsSoftNodeCollision(rigid, node, vertsInput, restitu
   if (!best) return false;
 
   const r = Math.max(0.4, node.r || 1.0);
-  const inside = pointInPolygonInclusive(node.x, node.y, verts);
-  if (!inside && best.d >= r) return false;
+  const inside = pointInPolygonInclusive(node.x, node.y, finiteVerts);
+  const contactSlop = Math.max(0.015, r * 0.04);
+  if (!inside && best.d >= (r - contactSlop)) return false;
 
   let nx = best.nx;
   let ny = best.ny;
@@ -149,7 +154,7 @@ export function resolveRigidVsSoftNodeCollision(rigid, node, vertsInput, restitu
 
   const dist = Math.max(EPS, best.d);
   const penetration = inside ? (r + dist) : (r - dist);
-  if (penetration <= 0) return false;
+  if (penetration <= contactSlop) return false;
 
   const mNode = Math.max(0.02, node.mass || 1);
   const mRigid = Math.max(0.05, rigid.mass || 1);
@@ -157,7 +162,8 @@ export function resolveRigidVsSoftNodeCollision(rigid, node, vertsInput, restitu
   const invRigid = 1 / mRigid;
   const invSum = invNode + invRigid;
 
-  const corr = (penetration / Math.max(EPS, invSum)) * 0.82;
+  const corrFactor = inside ? 0.82 : 0.68;
+  const corr = (penetration / Math.max(EPS, invSum)) * corrFactor;
   node.x += nx * corr * invNode;
   node.y += ny * corr * invNode;
   rigid.x -= nx * corr * invRigid;
@@ -173,7 +179,7 @@ export function resolveRigidVsSoftNodeCollision(rigid, node, vertsInput, restitu
   const rvx = (node.vx || 0) - rigidPointVx;
   const rvy = (node.vy || 0) - rigidPointVy;
   const vn = rvx * nx + rvy * ny;
-  if (vn >= 0) return true;
+  if (vn >= -0.02) return true;
 
   const invInertia = 1 / Math.max(0.05, rigid.inertia || (0.5 * mRigid * Math.max(1, rigid.r || 1) ** 2));
   const rn = rx * ny - ry * nx;

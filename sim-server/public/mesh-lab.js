@@ -161,31 +161,48 @@ function drawMesh(mesh) {
       mctx.lineWidth = 1;
     }
   } else {
-    // Membrane mode preview: show boundary loops (what membrane solver actually uses), not interior triangulation.
-    const edgeCount = new Map();
-    const edgeKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
-    for (const tri of mesh.triangles) {
-      if (tri.kind !== 'soft') continue;
-      const edges = [[tri.a, tri.b], [tri.b, tri.c], [tri.c, tri.a]];
-      for (const [a, b] of edges) {
-        const k = edgeKey(a, b);
-        const st = edgeCount.get(k) || { a, b, c: 0 };
-        st.c += 1;
-        edgeCount.set(k, st);
-      }
+    // Membrane mode preview: draw perimeter directly from painted soft mask so
+    // adaptive triangulation seams cannot appear as fake interior "infill".
+    const thr = Math.max(0, Math.min(1, Number(thresholdEl?.value) || 0.35));
+    const filled = new Uint8Array(W * H);
+    for (let i = 0; i < filled.length; i++) {
+      filled[i] = (Number(soft[i]) || 0) >= thr ? 1 : 0;
     }
+    const at = (x, y) => {
+      if (x < 0 || y < 0 || x >= W || y >= H) return 0;
+      return filled[y * W + x] ? 1 : 0;
+    };
 
     mctx.strokeStyle = 'rgba(120,220,255,0.95)';
     mctx.lineWidth = 2;
-    for (const e of edgeCount.values()) {
-      if (e.c !== 1) continue;
-      const a = mesh.nodes[e.a];
-      const b = mesh.nodes[e.b];
-      if (!a || !b) continue;
-      mctx.beginPath();
-      mctx.moveTo(a.x * sx, a.y * sy);
-      mctx.lineTo(b.x * sx, b.y * sy);
-      mctx.stroke();
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (!at(x, y)) continue;
+        if (!at(x, y - 1)) {
+          mctx.beginPath();
+          mctx.moveTo(x * sx, y * sy);
+          mctx.lineTo((x + 1) * sx, y * sy);
+          mctx.stroke();
+        }
+        if (!at(x + 1, y)) {
+          mctx.beginPath();
+          mctx.moveTo((x + 1) * sx, y * sy);
+          mctx.lineTo((x + 1) * sx, (y + 1) * sy);
+          mctx.stroke();
+        }
+        if (!at(x, y + 1)) {
+          mctx.beginPath();
+          mctx.moveTo((x + 1) * sx, (y + 1) * sy);
+          mctx.lineTo(x * sx, (y + 1) * sy);
+          mctx.stroke();
+        }
+        if (!at(x - 1, y)) {
+          mctx.beginPath();
+          mctx.moveTo(x * sx, (y + 1) * sy);
+          mctx.lineTo(x * sx, y * sy);
+          mctx.stroke();
+        }
+      }
     }
     mctx.lineWidth = 1;
   }

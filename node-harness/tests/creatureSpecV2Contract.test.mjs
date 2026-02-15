@@ -193,10 +193,7 @@ test('buildBodiesFromCreatureSpec ignores invalid joint references safely', () =
   spec.hybridJoints.push({ rigidBodyIndex: 999, softBodyIndex: 999, softNodeIndex: 999, edgeA: 0, edgeB: 1, restA: 1, restB: 1 });
 
   const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
-  for (const w of bodies.rigidWelds) {
-    assert.ok(w.a >= 0 && w.a < bodies.rigid.length);
-    assert.ok(w.b >= 0 && w.b < bodies.rigid.length);
-  }
+  assert.equal(bodies.rigidWelds, undefined);
   for (const h of bodies.hybrid) {
     assert.ok(h.rigidIndex >= 0 && h.rigidIndex < bodies.rigid.length);
     assert.ok(h.nodeIndex >= 0 && h.nodeIndex < bodies.soft.nodes.length);

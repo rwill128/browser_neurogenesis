@@ -101,7 +101,6 @@ test('rigid decomposition quality: brushed L-shape should avoid excessive tiny p
   assert.ok(mesh.rigidPieces.length >= 1, 'expected at least one rigid contour piece');
   assert.ok(mesh.rigidPieces.length <= 8, `too many rigid pieces: ${mesh.rigidPieces.length}`);
   assert.ok(totalHullVerts <= 40, `too many hull vertices across rigid pieces: ${totalHullVerts}`);
-  assert.ok(mesh.rigidWelds.length <= 8, `too many rigid weld seams after decomposition: ${mesh.rigidWelds.length}`);
   assert.ok(areaRatio >= 0.8 && areaRatio <= 1.2, `rigid contour area drift too large: ratio=${areaRatio.toFixed(3)}`);
   assert.ok(isConcave(mesh.rigidPieces[0].hull), 'expected concave rigid contour for L-shape field');
 });

@@ -36,7 +36,7 @@ test('CreatureSpec v2 roundtrip parse and build bodies', () => {
   assert.ok(Array.isArray(bodies.soft.nodes));
   assert.ok(Array.isArray(bodies.soft.springs));
   assert.ok(Array.isArray(bodies.hybrid));
-  assert.ok(Array.isArray(bodies.rigidWelds));
+  assert.equal(bodies.rigidWelds, undefined);
   assert.equal(bodies.rigid.length, 1);
   assert.ok(bodies.soft.nodes.length >= 3);
   for (const [a, b] of bodies.soft.springs) {
@@ -93,7 +93,7 @@ test('hybrid links anchor to nearest rigid hull edge for irregular rigid meshes'
 
   const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
   assert.equal(bodies.rigid.length, 1);
-  assert.equal(bodies.rigidWelds.length, 0);
+  assert.equal(bodies.rigidWelds, undefined);
   assert.ok(bodies.hybrid.length >= 2);
 
   for (const h of bodies.hybrid) {

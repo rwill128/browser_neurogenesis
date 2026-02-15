@@ -120,26 +120,6 @@ function drawMesh(mesh) {
     }
   }
 
-  if (Array.isArray(mesh.rigidWelds) && Array.isArray(mesh.rigidPieces)) {
-    for (const w of mesh.rigidWelds) {
-      const a = mesh.rigidPieces[w.a];
-      const b = mesh.rigidPieces[w.b];
-      if (!a?.hull?.length || !b?.hull?.length) continue;
-      const a0 = a.hull[w.a0 % a.hull.length];
-      const a1 = a.hull[w.a1 % a.hull.length];
-      const b0 = b.hull[w.b0 % b.hull.length];
-      const b1 = b.hull[w.b1 % b.hull.length];
-      if (!a0 || !a1 || !b0 || !b1) continue;
-      const ma = { x: (a0.x + a1.x) * 0.5, y: (a0.y + a1.y) * 0.5 };
-      const mb = { x: (b0.x + b1.x) * 0.5, y: (b0.y + b1.y) * 0.5 };
-      mctx.strokeStyle = 'rgba(255,180,60,0.95)';
-      mctx.beginPath();
-      mctx.moveTo(ma.x * sx, ma.y * sy);
-      mctx.lineTo(mb.x * sx, mb.y * sy);
-      mctx.stroke();
-    }
-  }
-
   out.textContent = JSON.stringify(mesh.meta, null, 2);
 }
 

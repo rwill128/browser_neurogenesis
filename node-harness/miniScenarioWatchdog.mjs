@@ -158,7 +158,7 @@ function makeScenario(seedBase) {
   const createdAt = new Date().toISOString();
   const id = `mini-${Math.floor(seedBase % 1_000_000)}-${combo}`;
 
-  const bodies = { rigid: [], soft: { nodes: [], springs: [] }, hybrid: [], rigidWelds: [] };
+  const bodies = { rigid: [], soft: { nodes: [], springs: [] }, hybrid: [] };
 
   if (combo === 'rigid-rigid') {
     bodies.rigid.push(makeRigid(rng, 0));

@@ -95,7 +95,6 @@ export function compileFieldToMesh({
     triangles: final.triangles,
     softCrossBeams,
     rigidPieces: rigidDecomp.pieces,
-    rigidWelds: rigidDecomp.welds,
     meta: {
       width,
       height,
@@ -109,7 +108,6 @@ export function compileFieldToMesh({
       rigidTriangles: final.triangles.filter((t) => t.kind === 'rigid').length,
       softTriangles: final.triangles.filter((t) => t.kind === 'soft').length,
       rigidPieces: rigidDecomp.pieces.length,
-      rigidWelds: rigidDecomp.welds.length,
       softInfillMode: infillMode,
       softCrossBeams: softCrossBeams.length,
       droppedTriangles: triangles.length - final.triangles.length,
@@ -194,7 +192,7 @@ function extractRigidContoursFromField({ width, height, rigidField, threshold, c
   }
 
   const components = collectMaskComponents(mask, cols, rows);
-  if (!components.length) return { pieces: [], welds: [] };
+  if (!components.length) return { pieces: [] };
 
   const keptRigidNodeIds = new Set();
   for (const t of keptTriangles || []) {
@@ -249,7 +247,7 @@ function extractRigidContoursFromField({ width, height, rigidField, threshold, c
     });
   }
 
-  return { pieces, welds: [] };
+  return { pieces };
 }
 
 function removeSoftTrianglesOverlappingRigidContours(triangles, nodes, rigidPieces) {
@@ -557,232 +555,6 @@ function pointOnSegment(px, py, ax, ay, bx, by, eps = 1e-6) {
   if (dot > len2 + eps) return false;
 
   return true;
-}
-
-function decomposeRigidTriangles(triangles, nodes) {
-  const rigidIndices = [];
-  for (let i = 0; i < triangles.length; i++) {
-    if (triangles[i].kind === 'rigid') rigidIndices.push(i);
-  }
-  if (!rigidIndices.length) return { pieces: [], welds: [] };
-
-  const rigidComps = collectTriangleComponents(triangles, rigidIndices);
-  const pieces = [];
-  const welds = [];
-
-  for (let compIdx = 0; compIdx < rigidComps.length; compIdx++) {
-    const compTriIdx = rigidComps[compIdx];
-    const triPieces = [];
-    for (const ti of compTriIdx) {
-      const t = triangles[ti];
-      const ids = [t.a, t.b, t.c];
-      triPieces.push({
-        nodeIds: new Set(ids),
-        area: triangleAreaAbs(nodes[ids[0]], nodes[ids[1]], nodes[ids[2]]),
-      });
-    }
-
-    const mergedPieces = mergeConvexPieces(triPieces, nodes);
-    const localPieces = [];
-
-    for (const mp of mergedPieces) {
-      const hullWithIds = convexHullWithIds([...mp.nodeIds].map((id) => ({ id, x: nodes[id].x, y: nodes[id].y })));
-      if (hullWithIds.length < 3) continue;
-      const pieceIndex = pieces.length;
-      pieces.push({
-        id: `rigid_piece_${pieceIndex}`,
-        compoundId: `rigid_compound_${compIdx}`,
-        hull: hullWithIds.map((p) => ({ x: p.x, y: p.y })),
-        sourceNodeIds: hullWithIds.map((p) => p.id),
-      });
-      localPieces.push({
-        globalIndex: pieceIndex,
-        nodeIds: new Set(mp.nodeIds),
-        hullSourceIds: hullWithIds.map((p) => p.id),
-      });
-    }
-
-    for (let i = 0; i < localPieces.length; i++) {
-      for (let j = i + 1; j < localPieces.length; j++) {
-        const a = localPieces[i];
-        const b = localPieces[j];
-        const shared = [...a.nodeIds].filter((id) => b.nodeIds.has(id));
-        if (shared.length < 2) continue;
-
-        const aHullSet = new Set(a.hullSourceIds);
-        const bHullSet = new Set(b.hullSourceIds);
-        const sharedHull = shared.filter((id) => aHullSet.has(id) && bHullSet.has(id));
-
-        if (sharedHull.length >= 2) {
-          let bestA = sharedHull[0];
-          let bestB = sharedHull[1];
-          let bestDist2 = -1;
-          for (let p = 0; p < sharedHull.length; p++) {
-            for (let q = p + 1; q < sharedHull.length; q++) {
-              const idA = sharedHull[p];
-              const idB = sharedHull[q];
-              const dx = nodes[idA].x - nodes[idB].x;
-              const dy = nodes[idA].y - nodes[idB].y;
-              const d2 = dx * dx + dy * dy;
-              if (d2 > bestDist2) {
-                bestDist2 = d2;
-                bestA = idA;
-                bestB = idB;
-              }
-            }
-          }
-
-          const a0 = a.hullSourceIds.indexOf(bestA);
-          const a1 = a.hullSourceIds.indexOf(bestB);
-          const b0 = b.hullSourceIds.indexOf(bestA);
-          const b1 = b.hullSourceIds.indexOf(bestB);
-          if ([a0, a1, b0, b1].some((x) => x < 0)) continue;
-
-          welds.push({ a: a.globalIndex, b: b.globalIndex, a0, a1, b0, b1 });
-          continue;
-        }
-
-        const aHull = pieces[a.globalIndex].hull;
-        const bHull = pieces[b.globalIndex].hull;
-        const ca = centroid(aHull);
-        const cb = centroid(bHull);
-        const ea = nearestHullEdgeForPoint(aHull, cb.x, cb.y);
-        const eb = nearestHullEdgeForPoint(bHull, ca.x, ca.y);
-        welds.push({
-          a: a.globalIndex,
-          b: b.globalIndex,
-          a0: ea.vA,
-          a1: ea.vB,
-          b0: eb.vA,
-          b1: eb.vB,
-        });
-      }
-    }
-  }
-
-  return { pieces, welds };
-}
-
-function mergeConvexPieces(triPieces, nodes) {
-  const pieces = triPieces.map((p) => ({ nodeIds: new Set(p.nodeIds), area: p.area }));
-  let changed = true;
-  while (changed) {
-    changed = false;
-    outer: for (let i = 0; i < pieces.length; i++) {
-      for (let j = i + 1; j < pieces.length; j++) {
-        const a = pieces[i];
-        const b = pieces[j];
-        const shared = [...a.nodeIds].filter((id) => b.nodeIds.has(id));
-        if (shared.length < 2) continue;
-
-        const mergedIds = new Set([...a.nodeIds, ...b.nodeIds]);
-        const hull = convexHull([...mergedIds].map((id) => ({ x: nodes[id].x, y: nodes[id].y })));
-        const hullArea = polygonAreaAbs(hull);
-        const sumArea = a.area + b.area;
-        const eps = Math.max(1e-4, sumArea * 0.02);
-        const convexCompatible = Math.abs(hullArea - sumArea) <= eps;
-        const smallSliverMerge = Math.min(a.area, b.area) <= sumArea * 0.24 && hullArea <= sumArea * 1.22;
-        if (convexCompatible || smallSliverMerge) {
-          pieces[i] = { nodeIds: mergedIds, area: sumArea };
-          pieces.splice(j, 1);
-          changed = true;
-          break outer;
-        }
-      }
-    }
-  }
-  return pieces;
-}
-
-function nearestHullEdgeForPoint(hull, px, py) {
-  if (!hull?.length) return { vA: 0, vB: 0 };
-  if (hull.length === 1) return { vA: 0, vB: 0 };
-  let bestIdx = 0;
-  let bestD2 = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < hull.length; i++) {
-    const a = hull[i];
-    const b = hull[(i + 1) % hull.length];
-    const cp = closestPointOnSegment(px, py, a.x, a.y, b.x, b.y);
-    const dx = px - cp.x;
-    const dy = py - cp.y;
-    const d2 = dx * dx + dy * dy;
-    if (d2 < bestD2) {
-      bestD2 = d2;
-      bestIdx = i;
-    }
-  }
-  return { vA: bestIdx, vB: (bestIdx + 1) % hull.length };
-}
-
-function closestPointOnSegment(px, py, ax, ay, bx, by) {
-  const abx = bx - ax;
-  const aby = by - ay;
-  const apx = px - ax;
-  const apy = py - ay;
-  const den = Math.max(1e-9, abx * abx + aby * aby);
-  const t = Math.max(0, Math.min(1, (apx * abx + apy * aby) / den));
-  return { x: ax + abx * t, y: ay + aby * t };
-}
-
-function convexHullWithIds(pointsWithIds) {
-  if (!pointsWithIds || pointsWithIds.length < 3) return pointsWithIds || [];
-  const pts = [...pointsWithIds]
-    .map((p) => ({ id: p.id, x: p.x, y: p.y }))
-    .sort((a, b) => (a.x - b.x) || (a.y - b.y));
-
-  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-  const lower = [];
-  for (const p of pts) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
-    lower.push(p);
-  }
-  const upper = [];
-  for (let i = pts.length - 1; i >= 0; i--) {
-    const p = pts[i];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
-    upper.push(p);
-  }
-  lower.pop();
-  upper.pop();
-  return [...lower, ...upper];
-}
-
-function convexHull(points) {
-  if (!points || points.length < 3) return points || [];
-  const pts = [...points]
-    .map((p) => ({ x: p.x, y: p.y }))
-    .sort((a, b) => (a.x - b.x) || (a.y - b.y));
-
-  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-  const lower = [];
-  for (const p of pts) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
-    lower.push(p);
-  }
-  const upper = [];
-  for (let i = pts.length - 1; i >= 0; i--) {
-    const p = pts[i];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
-    upper.push(p);
-  }
-  lower.pop();
-  upper.pop();
-  return [...lower, ...upper];
-}
-
-function triangleAreaAbs(a, b, c) {
-  return Math.abs((a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y)) * 0.5);
-}
-
-function polygonAreaAbs(poly) {
-  if (!poly || poly.length < 3) return 0;
-  let s = 0;
-  for (let i = 0; i < poly.length; i++) {
-    const p = poly[i];
-    const q = poly[(i + 1) % poly.length];
-    s += p.x * q.y - q.x * p.y;
-  }
-  return Math.abs(s * 0.5);
 }
 
 function centroid(points) {

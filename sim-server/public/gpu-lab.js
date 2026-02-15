@@ -1,5 +1,4 @@
 import { parseCreatureSpec, buildBodiesFromCreatureSpec } from '/creature-spec.js';
-import { applyRigidWeldConstraints, buildRigidWeldPairSet } from '/rigid-weld.js';
 import { EDGE_DYE_MODE, normalizeEdgeDyeModeRGB, applyBodyEdgeFieldBarriers } from '/dye-barrier.js';
 import { resolveRigidVsSoftNodeCollision, resolveRigidVsRigidPolygonCollision, getRigidCollisionPolysWorld } from '/rigid-collision.js';
 import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops } from '/soft-xpbd.js';
@@ -694,7 +693,7 @@ function initBodies(n, controls) {
     });
   }
 
-  return { rigid, soft: { nodes: softNodes, springs }, hybrid, rigidWelds: [] };
+  return { rigid, soft: { nodes: softNodes, springs }, hybrid };
 }
 
 function initEmitters(n) {
@@ -914,19 +913,10 @@ function cloneMiniBodies(miniBodies, controls) {
       }))
     : [];
 
-  const rigidWelds = Array.isArray(miniBodies?.rigidWelds)
-    ? miniBodies.rigidWelds.map((w) => ({
-        a: Number(w?.a) | 0,
-        b: Number(w?.b) | 0,
-        rest: Number(w?.rest) || 0,
-      }))
-    : [];
-
   return {
     rigid,
     soft: { nodes: softNodes, springs: softSprings },
     hybrid,
-    rigidWelds,
     topologyGuardrails: {
       droppedSoftSprings: sanitized.dropped,
     },
@@ -1432,19 +1422,10 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     vmax: Math.max(0.4, vmaxBase / (1 + 0.28 * honey)),
   });
 
-  if ((bodies.rigidWelds || []).length === 0) {
-    if (bodies.rigid[0]) {
-      bodies.rigid[0].mass = sim.controls.massLight;
-      bodies.rigid[0].inertia = 0.5 * bodies.rigid[0].mass * bodies.rigid[0].r * bodies.rigid[0].r;
-    }
-    if (bodies.rigid[1]) {
-      bodies.rigid[1].mass = sim.controls.massHeavy;
-      bodies.rigid[1].inertia = 0.5 * bodies.rigid[1].mass * bodies.rigid[1].r * bodies.rigid[1].r;
-    }
-  } else {
-    for (const rb of bodies.rigid) {
-      rb.inertia = 0.5 * rb.mass * rb.r * rb.r;
-    }
+  if (bodies.rigid[0]) bodies.rigid[0].mass = sim.controls.massLight;
+  if (bodies.rigid[1]) bodies.rigid[1].mass = sim.controls.massHeavy;
+  for (const rb of bodies.rigid) {
+    rb.inertia = 0.5 * rb.mass * rb.r * rb.r;
   }
   for (const node of bodies.soft.nodes) node.mass = sim.controls.massSoft;
 
@@ -1456,8 +1437,6 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     return { x: sx / arr.length, y: sy / arr.length };
   };
   const rigidCenterBefore = computeRigidCenter(bodies.rigid);
-
-  const rigidWeldPairSet = buildRigidWeldPairSet(bodies.rigidWelds);
 
   let rigidCarryTransfer = 0;
   let softCarryTransfer = 0;
@@ -1572,13 +1551,6 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   applySoftAreaXPBDVelocity(sim, s, softClusterLoops, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT);
 
   for (let iter = 0; iter < 7; iter++) {
-    // Rigid-rigid weld constraints for compound rigid shapes.
-    applyRigidWeldConstraints({
-      rigid: bodies.rigid,
-      rigidWelds: bodies.rigidWelds,
-      rigidVertexWorld,
-    });
-
     // Hybrid rigid-soft attachment constraints (weld-like springs to rigid edge vertices).
     for (const h of (bodies.hybrid || [])) {
       const rb = bodies.rigid[h.rigidIndex];
@@ -1615,7 +1587,6 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   for (let iter = 0; iter < 2; iter++) {
     for (let i = 0; i < bodies.rigid.length; i++) {
       for (let j = i + 1; j < bodies.rigid.length; j++) {
-        if (rigidWeldPairSet.has(`${i}:${j}`)) continue;
         resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
           contacts: rigidContactDebug,
           aIndex: i,
@@ -1656,7 +1627,6 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     // Re-run rigid-rigid contacts after rigid-soft pushes to avoid late interpenetration.
     for (let i = 0; i < bodies.rigid.length; i++) {
       for (let j = i + 1; j < bodies.rigid.length; j++) {
-        if (rigidWeldPairSet.has(`${i}:${j}`)) continue;
         resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
           contacts: rigidContactDebug,
           aIndex: i,
@@ -1911,7 +1881,6 @@ function mergeBodiesIntoSim(target, incoming) {
   target.rigid = target.rigid || [];
   target.soft = target.soft || { nodes: [], springs: [] };
   target.hybrid = target.hybrid || [];
-  target.rigidWelds = target.rigidWelds || [];
 
   const rigidOffset = target.rigid.length;
   const nodeOffset = target.soft.nodes.length;
@@ -1936,13 +1905,6 @@ function mergeBodiesIntoSim(target, incoming) {
     });
   }
 
-  for (const w of incoming.rigidWelds || []) {
-    target.rigidWelds.push({
-      ...w,
-      a: (w.a || 0) + rigidOffset,
-      b: (w.b || 0) + rigidOffset,
-    });
-  }
 }
 
 function isConcavePolygon(verts) {
@@ -2046,23 +2008,6 @@ function drawBodiesOverlay(sim) {
       }
       ctx.restore();
     }
-  }
-
-  for (const w of (sim.bodies.rigidWelds || [])) {
-    const ra = sim.bodies.rigid[w.a];
-    const rb = sim.bodies.rigid[w.b];
-    if (!ra || !rb) continue;
-    const a0 = rigidVertexWorld(ra, w.a0);
-    const a1 = rigidVertexWorld(ra, w.a1);
-    const b0 = rigidVertexWorld(rb, w.b0);
-    const b1 = rigidVertexWorld(rb, w.b1);
-    const ma = worldToScreen(sim, (a0.x + a1.x) * 0.5, (a0.y + a1.y) * 0.5);
-    const mb = worldToScreen(sim, (b0.x + b1.x) * 0.5, (b0.y + b1.y) * 0.5);
-    ctx.strokeStyle = 'rgba(255,200,80,0.9)';
-    ctx.beginPath();
-    ctx.moveTo(ma.x, ma.y);
-    ctx.lineTo(mb.x, mb.y);
-    ctx.stroke();
   }
 
   const s = sim.bodies.soft;

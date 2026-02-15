@@ -24,7 +24,7 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
   }
 
   const rigidBuild = Array.isArray(mesh?.rigidPieces)
-    ? buildRigidExportFromCompilerPieces(mesh.rigidPieces, mesh.rigidWelds || [], nodes, options)
+    ? buildRigidExportFromCompilerPieces(mesh.rigidPieces, nodes, options)
     : buildRigidExport(triByKind.rigid, nodes, options);
   const softBuild = buildSoftExport(triByKind.soft, nodes, options, mesh?.softCrossBeams || []);
   const hybridJoints = buildHybridExport({
@@ -134,8 +134,6 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
     });
   }
 
-  const rigidWelds = [];
-
   const soft = { nodes: [], springs: [] };
   const softNodeMap = new Map();
   let clusterId = 0;
@@ -215,10 +213,10 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
     });
   }
 
-  return { rigid, soft, hybrid, rigidWelds };
+  return { rigid, soft, hybrid };
 }
 
-function buildRigidExportFromCompilerPieces(rigidPieces, rigidWelds, nodes, options) {
+function buildRigidExportFromCompilerPieces(rigidPieces, nodes, options) {
   const grouped = new Map();
   for (let i = 0; i < rigidPieces.length; i++) {
     const rp = rigidPieces[i] || {};
@@ -284,13 +282,12 @@ function buildRigidExportFromCompilerPieces(rigidPieces, rigidWelds, nodes, opti
   }
 
   // Compound fusion path: no runtime inter-piece spring/weld constraints.
-  return { rigidBodies, rigidWelds: [], components };
+  return { rigidBodies, components };
 }
 
 function buildRigidExport(tris, nodes, options) {
   const comps = triangleComponents(tris);
   const rigidBodies = [];
-  const rigidWelds = [];
   const components = [];
 
   for (let compIdx = 0; compIdx < comps.length; compIdx++) {
@@ -308,7 +305,6 @@ function buildRigidExport(tris, nodes, options) {
     }
 
     const mergedPieces = mergeRigidPiecesConvex(triPieces, nodes);
-    const localPieces = [];
 
     for (const piece of mergedPieces) {
       const hullWithIds = convexHullWithIds([...piece.nodeIds].map((id) => ({ id, x: nodes[id].x, y: nodes[id].y })));
@@ -340,70 +336,11 @@ function buildRigidExport(tris, nodes, options) {
         radius: r,
       });
 
-      localPieces.push({ rigidIndex, nodeIds: new Set(piece.nodeIds), hullSourceIds });
     }
 
-    // Weld neighboring rigid pieces that share an edge (two common hull vertices).
-    for (let i = 0; i < localPieces.length; i++) {
-      for (let j = i + 1; j < localPieces.length; j++) {
-        const a = localPieces[i];
-        const b = localPieces[j];
-        const shared = [...a.nodeIds].filter((id) => b.nodeIds.has(id));
-        if (shared.length < 2) continue;
-
-        const aHullSet = new Set(a.hullSourceIds);
-        const bHullSet = new Set(b.hullSourceIds);
-        const sharedHull = shared.filter((id) => aHullSet.has(id) && bHullSet.has(id));
-
-        if (sharedHull.length >= 2) {
-          let bestA = sharedHull[0];
-          let bestB = sharedHull[1];
-          let bestDist2 = -1;
-          for (let p = 0; p < sharedHull.length; p++) {
-            for (let q = p + 1; q < sharedHull.length; q++) {
-              const idA = sharedHull[p];
-              const idB = sharedHull[q];
-              const dx = nodes[idA].x - nodes[idB].x;
-              const dy = nodes[idA].y - nodes[idB].y;
-              const d2 = dx * dx + dy * dy;
-              if (d2 > bestDist2) {
-                bestDist2 = d2;
-                bestA = idA;
-                bestB = idB;
-              }
-            }
-          }
-
-          const a0 = a.hullSourceIds.indexOf(bestA);
-          const a1 = a.hullSourceIds.indexOf(bestB);
-          const b0 = b.hullSourceIds.indexOf(bestA);
-          const b1 = b.hullSourceIds.indexOf(bestB);
-          if ([a0, a1, b0, b1].some((x) => x < 0)) continue;
-          rigidWelds.push({ a: a.rigidIndex, b: b.rigidIndex, a0, a1, b0, b1 });
-          continue;
-        }
-
-        // Fallback: if merged hull simplification removed shared source vertices,
-        // still weld nearest-facing hull edges so compound pieces stay coherent.
-        const aHull = rigidBodies[a.rigidIndex].hull;
-        const bHull = rigidBodies[b.rigidIndex].hull;
-        const ca = centroid(aHull);
-        const cb = centroid(bHull);
-        const ea = nearestHullEdgeForPoint(aHull, cb.x, cb.y);
-        const eb = nearestHullEdgeForPoint(bHull, ca.x, ca.y);
-        rigidWelds.push({
-          a: a.rigidIndex,
-          b: b.rigidIndex,
-          a0: ea.vA,
-          a1: ea.vB,
-          b0: eb.vA,
-          b1: eb.vB,
-        });
-      }
-    }
   }
 
-  return { rigidBodies, rigidWelds, components };
+  return { rigidBodies, components };
 }
 
 function mergeRigidPiecesConvex(triPieces, nodes) {

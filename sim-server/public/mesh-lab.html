@@ -25,8 +25,8 @@
     </label>
     <label>Brush <input id="brush" type="number" value="14" min="1" max="80" /></label>
     <label>Threshold <input id="threshold" type="number" value="0.35" min="0" max="1" step="0.01" /></label>
-    <label>Density paint (0..1) <input id="softDensityPaint" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
-    <span style="opacity:0.82">Density pane controls primitive size (rigid+soft): darker green = finer/smaller, brighter green = coarser/larger</span>
+    <label>Resolution paint (0..1) <input id="softDensityPaint" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
+    <span style="opacity:0.82">Resolution map controls primitive size (rigid+soft): darker green = finer/smaller, brighter green = coarser/larger</span>
     <label>Soft in-fill
       <select id="softInfillMode">
         <option value="triangles" selected>Triangles (canonical stable)</option>
@@ -46,7 +46,7 @@
       <canvas id="paint" width="512" height="512"></canvas>
     </div>
     <div>
-      <div>In-fill density field (separate plane)</div>
+      <div>Resolution map (separate plane)</div>
       <canvas id="densityPaint" width="512" height="512"></canvas>
     </div>
     <div>

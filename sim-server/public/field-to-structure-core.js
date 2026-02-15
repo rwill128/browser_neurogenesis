@@ -214,16 +214,18 @@ export function compileFieldToMesh({
   }
 
   const filtered = enforceConnectivity({ triangles, mode: connectivityMode, minComponentTriangles });
-  const rigidDecomp = extractRigidContoursFromField({
-    width,
-    height,
-    rigidField,
-    threshold,
-    cellSize: step,
-    nodes,
-    keptTriangles: filtered.triangles,
-    rigidMaskOverride,
-  });
+  const rigidDecomp = hasDensityMap
+    ? extractRigidContoursFromTriangles({ triangles: filtered.triangles, nodes })
+    : extractRigidContoursFromField({
+        width,
+        height,
+        rigidField,
+        threshold,
+        cellSize: step,
+        nodes,
+        keptTriangles: filtered.triangles,
+        rigidMaskOverride,
+      });
 
   const noOverlap = removeSoftTrianglesOverlappingRigidContours(filtered.triangles, nodes, rigidDecomp.pieces);
   const densityApplied = hasDensityMap
@@ -324,6 +326,120 @@ function pickComponentsToKeep(components, mode, minComponentTriangles) {
   if (!components.length) return [];
   if (mode === 'largest') return [components[0]];
   return components;
+}
+
+function extractRigidContoursFromTriangles({ triangles, nodes }) {
+  const rigidIdx = [];
+  for (let i = 0; i < (triangles?.length || 0); i++) {
+    if (triangles[i]?.kind === 'rigid') rigidIdx.push(i);
+  }
+  if (!rigidIdx.length) return { pieces: [] };
+
+  const comps = collectTriangleComponents(triangles, rigidIdx);
+  const pieces = [];
+
+  for (let ci = 0; ci < comps.length; ci++) {
+    const comp = comps[ci];
+    const edgeCounts = new Map();
+    const edgeDir = new Map();
+    const addEdge = (u, v) => {
+      const key = u < v ? `${u}:${v}` : `${v}:${u}`;
+      edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+      if (!edgeDir.has(key)) edgeDir.set(key, [u, v]);
+    };
+
+    for (const ti of comp) {
+      const t = triangles[ti];
+      addEdge(t.a, t.b);
+      addEdge(t.b, t.c);
+      addEdge(t.c, t.a);
+    }
+
+    const boundaryEdges = [];
+    for (const [key, count] of edgeCounts.entries()) {
+      if (count !== 1) continue;
+      const [u, v] = edgeDir.get(key);
+      boundaryEdges.push([u, v]);
+    }
+    if (!boundaryEdges.length) continue;
+
+    const adj = new Map();
+    const edgeSet = new Set();
+    const edgeKey = (u, v) => u < v ? `${u}:${v}` : `${v}:${u}`;
+    for (const [u, v] of boundaryEdges) {
+      if (!adj.has(u)) adj.set(u, new Set());
+      if (!adj.has(v)) adj.set(v, new Set());
+      adj.get(u).add(v);
+      adj.get(v).add(u);
+      edgeSet.add(edgeKey(u, v));
+    }
+
+    const visited = new Set();
+    const loops = [];
+
+    for (const [startU, startV] of boundaryEdges) {
+      const startKey = edgeKey(startU, startV);
+      if (visited.has(startKey)) continue;
+
+      const loopIds = [startU];
+      let prev = startU;
+      let curr = startV;
+      visited.add(startKey);
+      let guard = boundaryEdges.length * 3 + 16;
+
+      while (guard-- > 0) {
+        loopIds.push(curr);
+        if (curr === startU) break;
+        const nbs = [...(adj.get(curr) || [])].filter((id) => id !== prev);
+        if (!nbs.length) break;
+        nbs.sort((a, b) => a - b);
+        const next = nbs[0];
+        const ek = edgeKey(curr, next);
+        if (visited.has(ek) && next !== startU) break;
+        visited.add(ek);
+        prev = curr;
+        curr = next;
+      }
+
+      if (loopIds.length >= 4 && loopIds[0] === loopIds[loopIds.length - 1]) {
+        loopIds.pop();
+        loops.push(loopIds);
+      }
+    }
+
+    if (!loops.length) continue;
+
+    let bestIds = loops[0];
+    let bestArea = Math.abs(signedPolygonArea(bestIds.map((id) => ({ x: nodes[id].x, y: nodes[id].y }))));
+    for (let i = 1; i < loops.length; i++) {
+      const poly = loops[i].map((id) => ({ x: nodes[id].x, y: nodes[id].y }));
+      const area = Math.abs(signedPolygonArea(poly));
+      if (area > bestArea) {
+        bestArea = area;
+        bestIds = loops[i];
+      }
+    }
+
+    let hull = bestIds
+      .map((id) => ({ x: Number(nodes[id]?.x), y: Number(nodes[id]?.y), id }))
+      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+
+    hull = simplifyCollinear(hull).map((p) => ({ x: p.x, y: p.y, id: p.id }));
+    hull = simplifyDouglasPeucker(hull, 0.2).map((p) => ({ x: p.x, y: p.y, id: p.id }));
+    hull = simplifyCollinear(hull).map((p) => ({ x: p.x, y: p.y, id: p.id }));
+
+    if (hull.length < 3) continue;
+    if (signedPolygonArea(hull) < 0) hull = [...hull].reverse();
+
+    pieces.push({
+      id: `rigid_piece_${pieces.length}`,
+      compoundId: `rigid_compound_${ci}`,
+      hull: hull.map((p) => ({ x: p.x, y: p.y })),
+      sourceNodeIds: [...new Set(hull.map((p) => p.id))],
+    });
+  }
+
+  return { pieces };
 }
 
 function extractRigidContoursFromField({ width, height, rigidField, threshold, cellSize, nodes, keptTriangles, rigidMaskOverride = null }) {

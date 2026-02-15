@@ -128,6 +128,46 @@ test('compiler can use triangle-only soft in-fill mode (no cross-beams)', () => 
   assert.ok(mesh.meta.softTriangles > 0, 'triangle-only mode should still produce soft triangles');
 });
 
+test('triangles+cross differs from triangles even under resolution-map adaptive cells', () => {
+  const w = 64, h = 64;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+  const resolution = new Float32Array(w * h).fill(0.5);
+
+  for (let y = 8; y <= 56; y++) {
+    for (let x = 8; x <= 56; x++) {
+      soft[y * w + x] = 1;
+      // Create local primitive-size variation so adaptive meshing is active.
+      if (x < 28 && y < 36) resolution[y * w + x] = 0.1;
+      if (x > 36 && y > 24) resolution[y * w + x] = 0.9;
+    }
+  }
+
+  const triOnly = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: resolution,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles',
+  });
+
+  const withCross = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: resolution,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles+cross',
+  });
+
+  assert.equal(triOnly.softCrossBeams.length, 0, 'triangle-only must not emit cross-beams');
+  assert.ok(withCross.softCrossBeams.length > 0, 'triangles+cross should emit additional beams');
+});
 
 
 test('compiler applies soft density map as local primitive-size control with seam continuity', () => {

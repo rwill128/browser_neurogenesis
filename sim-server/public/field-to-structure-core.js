@@ -112,6 +112,7 @@ function buildAdaptiveDensityCells({ width, height, rigidField, softField, thres
 
   return {
     cells,
+    rigidCells: cells.filter((c) => c.kind === 'rigid'),
     rigidMask: { mask: rigidMask, cols: cw, rows: ch, step: 1 },
   };
 }
@@ -182,10 +183,11 @@ export function compileFieldToMesh({
   };
 
   let rigidMaskOverride = null;
+  let adaptive = null;
   const hasDensityMap = (softDensityField instanceof Float32Array) && softDensityField.length >= width * height;
 
   if (hasDensityMap) {
-    const adaptive = buildAdaptiveDensityCells({
+    adaptive = buildAdaptiveDensityCells({
       width,
       height,
       rigidField,
@@ -215,7 +217,12 @@ export function compileFieldToMesh({
 
   const filtered = enforceConnectivity({ triangles, mode: connectivityMode, minComponentTriangles });
   const rigidDecomp = hasDensityMap
-    ? extractRigidContoursFromTriangles({ triangles: filtered.triangles, nodes })
+    ? extractRigidContoursFromAdaptiveCells({
+        rigidCells: adaptive?.rigidCells,
+        nodes,
+        keptTriangles: filtered.triangles,
+        threshold,
+      })
     : extractRigidContoursFromField({
         width,
         height,
@@ -328,114 +335,130 @@ function pickComponentsToKeep(components, mode, minComponentTriangles) {
   return components;
 }
 
-function extractRigidContoursFromTriangles({ triangles, nodes }) {
-  const rigidIdx = [];
-  for (let i = 0; i < (triangles?.length || 0); i++) {
-    if (triangles[i]?.kind === 'rigid') rigidIdx.push(i);
+function extractRigidContoursFromAdaptiveCells({ rigidCells, nodes, keptTriangles, threshold }) {
+  const cells = (rigidCells || []).filter((c) => c && c.kind === 'rigid' && c.size > 0);
+  if (!cells.length) return { pieces: [] };
+
+  const segMap = new Map();
+  const segKey = (ax, ay, bx, by) => {
+    if (ax < bx || (ax === bx && ay <= by)) return `${ax},${ay}|${bx},${by}`;
+    return `${bx},${by}|${ax},${ay}`;
+  };
+
+  const addSeg = (ax, ay, bx, by) => {
+    const key = segKey(ax, ay, bx, by);
+    const entry = segMap.get(key);
+    if (!entry) {
+      segMap.set(key, { count: 1, ax, ay, bx, by });
+    } else {
+      entry.count += 1;
+    }
+  };
+
+  for (const c of cells) {
+    const x0 = c.x;
+    const y0 = c.y;
+    const x1 = c.x + c.size;
+    const y1 = c.y + c.size;
+
+    for (let x = x0; x < x1; x++) {
+      addSeg(x, y0, x + 1, y0);
+      addSeg(x + 1, y1, x, y1);
+    }
+    for (let y = y0; y < y1; y++) {
+      addSeg(x1, y, x1, y + 1);
+      addSeg(x0, y + 1, x0, y);
+    }
   }
-  if (!rigidIdx.length) return { pieces: [] };
 
-  const comps = collectTriangleComponents(triangles, rigidIdx);
+  const boundary = [...segMap.values()].filter((e) => e.count === 1);
+  if (!boundary.length) return { pieces: [] };
+
+  const outByFrom = new Map();
+  const fromKey = (x, y) => `${x},${y}`;
+  for (let i = 0; i < boundary.length; i++) {
+    const e = boundary[i];
+    const fk = fromKey(e.ax, e.ay);
+    if (!outByFrom.has(fk)) outByFrom.set(fk, []);
+    outByFrom.get(fk).push({ id: i, ax: e.ax, ay: e.ay, bx: e.bx, by: e.by });
+  }
+
+  const used = new Uint8Array(boundary.length);
+  const loops = [];
+
+  for (let i = 0; i < boundary.length; i++) {
+    if (used[i]) continue;
+    const start = boundary[i];
+    const loop = [{ x: start.ax, y: start.ay }];
+    let cx = start.ax;
+    let cy = start.ay;
+    let nx = start.bx;
+    let ny = start.by;
+    used[i] = 1;
+    let guard = boundary.length * 4 + 32;
+
+    while (guard-- > 0) {
+      loop.push({ x: nx, y: ny });
+      cx = nx;
+      cy = ny;
+      if (cx === start.ax && cy === start.ay) break;
+      const fk = fromKey(cx, cy);
+      const options = (outByFrom.get(fk) || []).filter((e) => !used[e.id]);
+      if (!options.length) break;
+      options.sort((a, b) => {
+        const aa = Math.atan2(a.by - a.ay, a.bx - a.ax);
+        const bb = Math.atan2(b.by - b.ay, b.bx - b.ax);
+        return aa - bb;
+      });
+      const e = options[0];
+      used[e.id] = 1;
+      nx = e.bx;
+      ny = e.by;
+    }
+
+    if (loop.length >= 4 && loop[0].x === loop[loop.length - 1].x && loop[0].y === loop[loop.length - 1].y) {
+      loop.pop();
+      loops.push(loop);
+    }
+  }
+
+  if (!loops.length) return { pieces: [] };
+
+  const keptRigidNodeIds = new Set();
+  for (const t of keptTriangles || []) {
+    if (t.kind !== 'rigid') continue;
+    keptRigidNodeIds.add(t.a);
+    keptRigidNodeIds.add(t.b);
+    keptRigidNodeIds.add(t.c);
+  }
+
   const pieces = [];
-
-  for (let ci = 0; ci < comps.length; ci++) {
-    const comp = comps[ci];
-    const edgeCounts = new Map();
-    const edgeDir = new Map();
-    const addEdge = (u, v) => {
-      const key = u < v ? `${u}:${v}` : `${v}:${u}`;
-      edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
-      if (!edgeDir.has(key)) edgeDir.set(key, [u, v]);
-    };
-
-    for (const ti of comp) {
-      const t = triangles[ti];
-      addEdge(t.a, t.b);
-      addEdge(t.b, t.c);
-      addEdge(t.c, t.a);
-    }
-
-    const boundaryEdges = [];
-    for (const [key, count] of edgeCounts.entries()) {
-      if (count !== 1) continue;
-      const [u, v] = edgeDir.get(key);
-      boundaryEdges.push([u, v]);
-    }
-    if (!boundaryEdges.length) continue;
-
-    const adj = new Map();
-    const edgeSet = new Set();
-    const edgeKey = (u, v) => u < v ? `${u}:${v}` : `${v}:${u}`;
-    for (const [u, v] of boundaryEdges) {
-      if (!adj.has(u)) adj.set(u, new Set());
-      if (!adj.has(v)) adj.set(v, new Set());
-      adj.get(u).add(v);
-      adj.get(v).add(u);
-      edgeSet.add(edgeKey(u, v));
-    }
-
-    const visited = new Set();
-    const loops = [];
-
-    for (const [startU, startV] of boundaryEdges) {
-      const startKey = edgeKey(startU, startV);
-      if (visited.has(startKey)) continue;
-
-      const loopIds = [startU];
-      let prev = startU;
-      let curr = startV;
-      visited.add(startKey);
-      let guard = boundaryEdges.length * 3 + 16;
-
-      while (guard-- > 0) {
-        loopIds.push(curr);
-        if (curr === startU) break;
-        const nbs = [...(adj.get(curr) || [])].filter((id) => id !== prev);
-        if (!nbs.length) break;
-        nbs.sort((a, b) => a - b);
-        const next = nbs[0];
-        const ek = edgeKey(curr, next);
-        if (visited.has(ek) && next !== startU) break;
-        visited.add(ek);
-        prev = curr;
-        curr = next;
-      }
-
-      if (loopIds.length >= 4 && loopIds[0] === loopIds[loopIds.length - 1]) {
-        loopIds.pop();
-        loops.push(loopIds);
-      }
-    }
-
-    if (!loops.length) continue;
-
-    let bestIds = loops[0];
-    let bestArea = Math.abs(signedPolygonArea(bestIds.map((id) => ({ x: nodes[id].x, y: nodes[id].y }))));
-    for (let i = 1; i < loops.length; i++) {
-      const poly = loops[i].map((id) => ({ x: nodes[id].x, y: nodes[id].y }));
-      const area = Math.abs(signedPolygonArea(poly));
-      if (area > bestArea) {
-        bestArea = area;
-        bestIds = loops[i];
-      }
-    }
-
-    let hull = bestIds
-      .map((id) => ({ x: Number(nodes[id]?.x), y: Number(nodes[id]?.y), id }))
-      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-
-    hull = simplifyCollinear(hull).map((p) => ({ x: p.x, y: p.y, id: p.id }));
-    hull = simplifyDouglasPeucker(hull, 0.2).map((p) => ({ x: p.x, y: p.y, id: p.id }));
-    hull = simplifyCollinear(hull).map((p) => ({ x: p.x, y: p.y, id: p.id }));
+  for (let li = 0; li < loops.length; li++) {
+    let hull = simplifyCollinear(loops[li]);
+    hull = simplifyDouglasPeucker(hull, 0.05);
+    hull = simplifyCollinear(hull);
 
     if (hull.length < 3) continue;
     if (signedPolygonArea(hull) < 0) hull = [...hull].reverse();
 
+    const sourceNodeIds = [];
+    for (const n of nodes || []) {
+      if (!Number.isFinite(n?.x) || !Number.isFinite(n?.y)) continue;
+      if ((Number(n.rigid) || 0) < threshold * 0.75) continue;
+      if (!pointInPolygon(n.x, n.y, hull)) continue;
+      sourceNodeIds.push(n.id);
+    }
+
+    if (keptRigidNodeIds.size > 0) {
+      const touchesKeptRigid = sourceNodeIds.some((id) => keptRigidNodeIds.has(id));
+      if (!touchesKeptRigid) continue;
+    }
+
     pieces.push({
       id: `rigid_piece_${pieces.length}`,
-      compoundId: `rigid_compound_${ci}`,
-      hull: hull.map((p) => ({ x: p.x, y: p.y })),
-      sourceNodeIds: [...new Set(hull.map((p) => p.id))],
+      compoundId: `rigid_compound_${li}`,
+      hull,
+      sourceNodeIds,
     });
   }
 
@@ -681,70 +704,49 @@ function buildSoftCrossBeams(triangles, nodes) {
   const softTris = (triangles || []).filter((t) => t?.kind === 'soft');
   if (!softTris.length) return [];
 
-  const edgeSet = new Set();
-  const softNodeIds = new Set();
-  for (const t of softTris) {
-    softNodeIds.add(t.a); softNodeIds.add(t.b); softNodeIds.add(t.c);
+  const edgeKey = (a, b) => (a < b ? `${a}:${b}` : `${b}:${a}`);
+  const parseEdge = (k) => k.split(':').map((v) => Number(v));
+
+  const existingEdges = new Set();
+  const edgeToTris = new Map();
+
+  for (let ti = 0; ti < softTris.length; ti++) {
+    const t = softTris[ti];
     for (const [u, v] of [[t.a, t.b], [t.b, t.c], [t.c, t.a]]) {
-      const key = u < v ? `${u}:${v}` : `${v}:${u}`;
-      edgeSet.add(key);
+      const k = edgeKey(u, v);
+      existingEdges.add(k);
+      if (!edgeToTris.has(k)) edgeToTris.set(k, []);
+      edgeToTris.get(k).push(ti);
     }
   }
-
-  const quant = (v) => Math.round((Number(v) || 0) * 1e6) / 1e6;
-  const posKey = (x, y) => `${quant(x)},${quant(y)}`;
-
-  const nodeByPos = new Map();
-  const xs = new Set();
-  const ys = new Set();
-  for (const id of softNodeIds) {
-    const p = nodes[id];
-    if (!p) continue;
-    nodeByPos.set(posKey(p.x, p.y), id);
-    xs.add(quant(p.x));
-    ys.add(quant(p.y));
-  }
-
-  const minDelta = (vals) => {
-    const arr = [...vals].sort((a, b) => a - b);
-    let best = Number.POSITIVE_INFINITY;
-    for (let i = 1; i < arr.length; i++) {
-      const d = arr[i] - arr[i - 1];
-      if (d > 1e-6) best = Math.min(best, d);
-    }
-    return Number.isFinite(best) ? best : 0;
-  };
-
-  const stepX = minDelta(xs);
-  const stepY = minDelta(ys);
-  if (!(stepX > 0 && stepY > 0)) return [];
 
   const beams = [];
   const beamSet = new Set();
-  const edgeKey = (a, b) => (a < b ? `${a}:${b}` : `${b}:${a}`);
 
-  for (const id of softNodeIds) {
-    const tl = nodes[id];
-    if (!tl) continue;
-    const tr = nodeByPos.get(posKey(tl.x + stepX, tl.y));
-    const bl = nodeByPos.get(posKey(tl.x, tl.y + stepY));
-    const br = nodeByPos.get(posKey(tl.x + stepX, tl.y + stepY));
-    if (![tr, bl, br].every((v) => Number.isInteger(v))) continue;
+  for (const [sharedKey, triIds] of edgeToTris.entries()) {
+    if (!Array.isArray(triIds) || triIds.length !== 2) continue;
+    const [s0, s1] = parseEdge(sharedKey);
+    const tA = softTris[triIds[0]];
+    const tB = softTris[triIds[1]];
+    if (!tA || !tB) continue;
 
-    // Require full square occupancy from existing soft mesh with one diagonal (TR-BL).
-    const requiredEdges = [
-      edgeKey(id, tr),
-      edgeKey(id, bl),
-      edgeKey(tr, br),
-      edgeKey(bl, br),
-      edgeKey(tr, bl),
-    ];
-    if (!requiredEdges.every((k) => edgeSet.has(k))) continue;
+    const idsA = [tA.a, tA.b, tA.c];
+    const idsB = [tB.a, tB.b, tB.c];
+    const oppA = idsA.find((id) => id !== s0 && id !== s1);
+    const oppB = idsB.find((id) => id !== s0 && id !== s1);
+    if (!Number.isInteger(oppA) || !Number.isInteger(oppB) || oppA === oppB) continue;
 
-    const diag2 = edgeKey(id, br);
-    if (edgeSet.has(diag2) || beamSet.has(diag2)) continue;
-    beamSet.add(diag2);
-    beams.push([id, br]);
+    const beamKey = edgeKey(oppA, oppB);
+    if (existingEdges.has(beamKey) || beamSet.has(beamKey)) continue;
+
+    const a = nodes[oppA];
+    const b = nodes[oppB];
+    if (!a || !b) continue;
+    const len = Math.hypot((b.x - a.x), (b.y - a.y));
+    if (!(len > 1e-6)) continue;
+
+    beamSet.add(beamKey);
+    beams.push([oppA, oppB]);
   }
 
   return beams;

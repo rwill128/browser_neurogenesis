@@ -519,6 +519,8 @@ function buildBoundaryLoopsFromEdgeList(edges, nodeCount) {
 
 function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
   const enableBoundaryRing = options?.softBoundaryRingSprings !== false;
+  const enableSeamWeldSprings = options?.softSeamWeldSprings !== false;
+  const seamAxisEps = Math.max(1e-9, Number(options?.softSeamAxisEpsilon) || 1e-6);
   const boundaryRingStrideRaw = Math.max(2, Math.round(Number(options?.softBoundaryRingStride) || 2));
   const boundaryRingMaxSpanFactor = Math.max(1.5, Number(options?.softBoundaryRingMaxSpanFactor) || 2.75);
   const crossBeamMaxSpanFactor = Math.max(1.25, Number(options?.softCrossBeamMaxSpanFactor) || 2.75);
@@ -548,10 +550,18 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
     });
 
     const edgeCount = new Map();
+    const edgeOpposites = new Map();
     for (const t of comp) {
-      for (const [u, v] of [[t.a, t.b], [t.b, t.c], [t.c, t.a]]) {
+      const edges = [
+        [t.a, t.b, t.c],
+        [t.b, t.c, t.a],
+        [t.c, t.a, t.b],
+      ];
+      for (const [u, v, opp] of edges) {
         const k = u < v ? `${u}-${v}` : `${v}-${u}`;
         edgeCount.set(k, (edgeCount.get(k) || 0) + 1);
+        if (!edgeOpposites.has(k)) edgeOpposites.set(k, []);
+        edgeOpposites.get(k).push(opp);
       }
     }
 
@@ -579,6 +589,44 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
       ]);
       if (boundary) boundaryEdges.push([a, b]);
       springSet.add(springKey(a, b));
+    }
+
+    if (enableSeamWeldSprings) {
+      for (const [k, c] of edgeCount.entries()) {
+        if (c !== 2) continue;
+        const [ua, ub] = k.split('-').map((x) => Number(x));
+        const pu = nodes?.[ua];
+        const pv = nodes?.[ub];
+        if (!pu || !pv) continue;
+
+        const axisAligned = Math.abs((pu.x || 0) - (pv.x || 0)) <= seamAxisEps
+          || Math.abs((pu.y || 0) - (pv.y || 0)) <= seamAxisEps;
+        if (!axisAligned) continue;
+
+        const oppRaw = edgeOpposites.get(k) || [];
+        const oppUnique = [...new Set(oppRaw.filter((x) => Number.isInteger(Number(x))).map((x) => Number(x)))].sort((a, b) => a - b);
+        if (oppUnique.length < 2) continue;
+
+        const a = remap.get(oppUnique[0]);
+        const b = remap.get(oppUnique[1]);
+        if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
+
+        const springId = springKey(a, b);
+        if (springSet.has(springId)) continue;
+
+        const pa = softNodes[a];
+        const pb = softNodes[b];
+        if (!pa || !pb) continue;
+
+        springs.push([
+          a,
+          b,
+          Math.max(1e-3, Math.hypot(pb.x - pa.x, pb.y - pa.y)),
+          0,
+          [0, 0, 0],
+        ]);
+        springSet.add(springId);
+      }
     }
 
     const structuralRest = springs.map((sp) => Number(sp?.[2])).filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b);

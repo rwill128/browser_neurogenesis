@@ -131,6 +131,50 @@ test('createCreatureSpecFromMesh can reinforce soft perimeter with border-ring s
   assert.ok(hasOpposingDiag(withRing.softBodies[0].springs || []), 'perimeter ring should add reinforcing opposite diagonal spring');
 });
 
+test('createCreatureSpecFromMesh can add seam-weld springs across axis-aligned shared soft edges', () => {
+  const mesh = {
+    nodes: [
+      { id: 0, x: 0, y: 0, rigid: 0, soft: 1 },
+      { id: 1, x: 4, y: 0, rigid: 0, soft: 1 },
+      { id: 2, x: 4, y: 4, rigid: 0, soft: 1 },
+      { id: 3, x: 0, y: 4, rigid: 0, soft: 1 },
+      { id: 4, x: 8, y: 0, rigid: 0, soft: 1 },
+      { id: 5, x: 8, y: 4, rigid: 0, soft: 1 },
+    ],
+    triangles: [
+      { kind: 'soft', a: 0, b: 1, c: 3 },
+      { kind: 'soft', a: 1, b: 2, c: 3 },
+      { kind: 'soft', a: 1, b: 4, c: 2 },
+      { kind: 'soft', a: 4, b: 5, c: 2 },
+    ],
+    meta: { width: 16, height: 8 },
+  };
+
+  const withoutSeamWeld = createCreatureSpecFromMesh(mesh, {
+    softBoundaryRingSprings: false,
+    softSeamWeldSprings: false,
+  });
+  const withSeamWeld = createCreatureSpecFromMesh(mesh, {
+    softBoundaryRingSprings: false,
+    softSeamWeldSprings: true,
+  });
+
+  const edgeKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
+  const withoutEdges = new Set((withoutSeamWeld.softBodies[0].springs || []).map((s) => edgeKey(Number(s[0]), Number(s[1]))));
+  const withSprings = withSeamWeld.softBodies[0].springs || [];
+  const withEdges = new Set(withSprings.map((s) => edgeKey(Number(s[0]), Number(s[1]))));
+
+  const added = [...withEdges].filter((k) => !withoutEdges.has(k));
+  assert.ok(withEdges.size > withoutEdges.size, 'expected seam weld mode to add at least one additional spring');
+  assert.ok(added.length >= 1, 'expected at least one new seam weld spring edge');
+
+  const addedRests = withSprings
+    .filter((s) => added.includes(edgeKey(Number(s[0]), Number(s[1]))))
+    .map((s) => Number(s[2]))
+    .filter((v) => Number.isFinite(v));
+  assert.ok(addedRests.some((r) => r > 4.5), `expected seam weld spring to span across seam, added rests=${JSON.stringify(addedRests)}`);
+});
+
 test('adversarial pure-soft cross-beam reinforcement bounds long-span springs on thin strips', () => {
   const cols = 11;
   const top = Array.from({ length: cols }, (_, i) => ({ id: i, x: i * 4, y: 0, rigid: 0, soft: 1 }));

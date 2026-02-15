@@ -177,6 +177,7 @@ function buildPureSoftMeshScenario({ grid = 100, scale = 0.5 } = {}) {
     name: 'soft-xpbd-long-run-adversarial',
     includeAuthoring: false,
     fields: { rigidField, softField, softDensityField },
+    softSeamWeldSprings: false,
   });
 
   const bodies = buildBodiesFromCreatureSpec(spec, grid, { massLight: 1.2, massHeavy: 3, massSoft: 0.6 });

@@ -382,7 +382,7 @@ test('1000-step pure-soft mesh scenario (scale 0.5) is more stable with spring s
     `expected lower area drift with strain clamp (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });
 
-function runRestDriftRecoveryScenario({ useRestRecovery, adaptiveRecovery = false }) {
+function runRestDriftRecoveryScenario({ useRestRecovery, adaptiveRecovery = false, recoveryOverrides = null }) {
   const soft = buildPureSoftMeshScenario({ grid: 100, scale: 0.5 });
   const baseline = new Float32Array(soft.springs.length);
   for (let i = 0; i < soft.springs.length; i++) baseline[i] = Math.max(1e-4, Number(soft.springs[i][2]) || 1e-4);
@@ -532,6 +532,7 @@ function runRestDriftRecoveryScenario({ useRestRecovery, adaptiveRecovery = fals
         elongationBiasMax: adaptiveRecovery ? 1.22 : 1,
         compressionBiasMax: adaptiveRecovery ? 1.12 : 1,
         errorPivot: 0.16,
+        ...(recoveryOverrides || {}),
       });
     }
 
@@ -605,4 +606,37 @@ test('adversarial pure-soft rest drift recovers shape memory with bounded spring
     `expected lower final spring-rest drift (before=${before.finalRestScaleDrift}, after=${after.finalRestScaleDrift})`);
   assert.ok(after.tailMeanRestScaleDrift < before.tailMeanRestScaleDrift,
     `expected lower late-tail spring-rest drift (before=${before.tailMeanRestScaleDrift}, after=${after.tailMeanRestScaleDrift})`);
+});
+
+test('near-baseline adaptive snap eliminates deterministic tail drift without topology regression', () => {
+  const before = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      jitterDeadband: 4e-4,
+      nearBaselineSnapWindow: 0,
+      nearBaselineSnapBlend: 0,
+    },
+  });
+  const after = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      jitterDeadband: 4e-4,
+      nearBaselineSnapWindow: 0.004,
+      nearBaselineSnapBlend: 0.9,
+    },
+  });
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-tail-snap]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryAt1000 > before.recoveryAt1000,
+    `expected better late recovery with snap (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.finalRestScaleDrift < before.finalRestScaleDrift,
+    `expected smaller final rest-scale drift with snap (before=${before.finalRestScaleDrift}, after=${after.finalRestScaleDrift})`);
+  assert.ok(after.maxRestScaleDrift <= before.maxRestScaleDrift + 1e-9,
+    `expected no increase in peak rest-scale excursion (before=${before.maxRestScaleDrift}, after=${after.maxRestScaleDrift})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 5e-5,
+    `expected bounded area-deviation guardrail under snap recovery (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });

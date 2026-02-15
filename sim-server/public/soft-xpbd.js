@@ -189,6 +189,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   convergenceWindow = 0.12,
   convergenceBiasMax = 0.96,
   convergenceNudge = 0.35,
+  nearBaselineSnapWindow = 0.003,
+  nearBaselineSnapBlend = 0.85,
 } = {}) {
   if (!Array.isArray(springs) || !restBaseline || typeof restBaseline.length !== 'number') return 0;
 
@@ -205,6 +207,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const window = Math.max(1e-6, Number(convergenceWindow) || 0.12);
   const biasMax = clamp(Number(convergenceBiasMax) || 0, 0, 0.999);
   const nudge = clamp(Number(convergenceNudge) || 0, 0, 1);
+  const snapWindow = Math.max(0, Number(nearBaselineSnapWindow) || 0);
+  const snapBlend = clamp(Number(nearBaselineSnapBlend) || 0, 0, 1);
 
   let touched = 0;
   const n = Math.min(springs.length, restBaseline.length);
@@ -228,7 +232,16 @@ export function recoverSoftSpringRests(springs, restBaseline, {
     const localMinFactor = minFactor + (1 - minFactor) * tighten;
     const localMaxFactor = maxFactor - (maxFactor - 1) * tighten;
     const convergedRecover = clamp(recover + (1 - recover) * convergeAlpha * nudge, 0, 1);
-    const target = clamp(cur + (base - cur) * convergedRecover, base * localMinFactor, base * localMaxFactor);
+    let target = clamp(cur + (base - cur) * convergedRecover, base * localMinFactor, base * localMaxFactor);
+
+    if (adaptiveMode && snapWindow > 0) {
+      const targetErrNorm = Math.abs(base - target) / base;
+      if (targetErrNorm <= snapWindow) {
+        target = clamp(target + (base - target) * snapBlend, base * localMinFactor, base * localMaxFactor);
+        if (Math.abs(base - target) / base <= (eps / base)) target = base;
+      }
+    }
+
     if (Math.abs(target - cur) <= eps) continue;
     sp[2] = Math.max(1e-4, target);
     touched += 1;

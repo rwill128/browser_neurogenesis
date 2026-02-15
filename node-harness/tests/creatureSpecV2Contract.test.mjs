@@ -62,6 +62,15 @@ test('createCreatureSpecFromMesh exports solver-ready v2 sections', () => {
   assert.ok(Array.isArray(sb.springs));
 });
 
+test('createCreatureSpecFromMesh compacts default rigid edge arrays', () => {
+  const spec = createCreatureSpecFromMesh(sampleMesh());
+  const rb = spec.rigidBodies[0];
+  assert.ok(rb, 'expected rigid body export');
+  assert.equal(rb.edgeBodyMode, undefined);
+  assert.equal(rb.edgeDyeMode, undefined);
+  assert.equal(rb.edgePermeabilityRGB, undefined);
+});
+
 test('createCreatureSpecFromMesh carries compiler soft cross-beams into soft spring export', () => {
   const mesh = {
     nodes: [

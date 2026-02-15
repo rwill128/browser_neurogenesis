@@ -39,7 +39,7 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
     createdAt: new Date().toISOString(),
     name: options.name || 'unnamed-creature',
     space: { width, height },
-    rigidBodies: rigidBuild.rigidBodies,
+    rigidBodies: rigidBuild.rigidBodies.map((rb) => compactRigidBodyEdgeDefaults(rb)),
     softBodies: softBuild.softBodies,
     hybridJoints,
   };
@@ -60,6 +60,34 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
         },
       };
     }
+  }
+
+  return out;
+}
+
+function compactRigidBodyEdgeDefaults(rb) {
+  if (!rb || typeof rb !== 'object') return rb;
+  const out = { ...rb };
+
+  if (Array.isArray(out.edgeBodyMode) && out.edgeBodyMode.length > 0) {
+    const allBlock = out.edgeBodyMode.every((m) => Number(m) === EDGE_BODY_BLOCK);
+    if (allBlock) delete out.edgeBodyMode;
+  }
+
+  if (Array.isArray(out.edgeDyeMode) && out.edgeDyeMode.length > 0) {
+    const allDeflect = out.edgeDyeMode.every((m) => Array.isArray(m)
+      && Number(m[0]) === EDGE_DYE_DEFLECT
+      && Number(m[1]) === EDGE_DYE_DEFLECT
+      && Number(m[2]) === EDGE_DYE_DEFLECT);
+    if (allDeflect) delete out.edgeDyeMode;
+  }
+
+  if (Array.isArray(out.edgePermeabilityRGB) && out.edgePermeabilityRGB.length > 0) {
+    const allBlocked = out.edgePermeabilityRGB.every((m) => Array.isArray(m)
+      && Number(m[0]) <= 0
+      && Number(m[1]) <= 0
+      && Number(m[2]) <= 0);
+    if (allBlocked) delete out.edgePermeabilityRGB;
   }
 
   return out;

@@ -935,6 +935,48 @@ test('higher solver recovery rate accelerates adversarial pure-soft shape-memory
     `expected bounded area guardrail with higher recoverRate (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });
 
+test('default near-baseline snap profile removes deterministic pure-soft tail drift under adaptive recovery settings', () => {
+  const runtimeRecovery = {
+    recoverRate: 0.045,
+    adaptiveGainMax: 2.4,
+    adaptiveExponent: 0.8,
+    elongationBiasMax: 1.22,
+    compressionBiasMax: 1.12,
+    errorPivot: 0.16,
+  };
+
+  const before = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      ...runtimeRecovery,
+      nearBaselineSnapWindow: 0.003,
+      nearBaselineSnapBlend: 0.85,
+    },
+  });
+
+  const after = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: runtimeRecovery,
+  });
+
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-default-snap-profile]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryAt500 >= before.recoveryAt500,
+    `expected non-regressing mid recovery with stronger default snap (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
+  assert.ok(after.recoveryAt1000 >= before.recoveryAt1000,
+    `expected non-regressing late recovery with stronger default snap (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.finalRestScaleDrift <= before.finalRestScaleDrift + 1e-9,
+    `expected non-regressing final rest drift with stronger default snap (before=${before.finalRestScaleDrift}, after=${after.finalRestScaleDrift})`);
+  assert.ok(after.baselineRestSpanRatio <= before.baselineRestSpanRatio + 1e-9,
+    `expected non-regressing baseline rest-span topology under stronger default snap (before=${before.baselineRestSpanRatio}, after=${after.baselineRestSpanRatio})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation,
+    `expected lower peak area deviation under stronger default snap (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+});
+
 test('default pure-soft neighbor step cap improves adversarial recovery vs legacy uncapped adaptive jumps', () => {
   const recoveryOverrides = {
     recoverRate: 0.02,

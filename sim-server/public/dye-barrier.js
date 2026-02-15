@@ -115,6 +115,7 @@ export function applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVertices
         && dyeModeRGB[2] === EDGE_DYE_MODE.PASS) continue;
       const a = verts[i];
       const b2 = verts[(i + 1) % sides];
+      if (!isFinitePoint(a) || !isFinitePoint(b2)) continue;
       applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, rigidThickness, dyeModeRGB, bodyMode);
     }
   }
@@ -127,9 +128,15 @@ export function applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVertices
       && dyeModeRGB[0] === EDGE_DYE_MODE.PASS
       && dyeModeRGB[1] === EDGE_DYE_MODE.PASS
       && dyeModeRGB[2] === EDGE_DYE_MODE.PASS) continue;
-    const a = s.nodes[i], b2 = s.nodes[j];
+    const a = s.nodes?.[i];
+    const b2 = s.nodes?.[j];
+    if (!isFinitePoint(a) || !isFinitePoint(b2)) continue;
     applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, softThickness, dyeModeRGB, bodyMode);
   }
+}
+
+function isFinitePoint(p) {
+  return Number.isFinite(Number(p?.x)) && Number.isFinite(Number(p?.y));
 }
 
 function closestPointOnSegment(px, py, ax, ay, bx, by) {

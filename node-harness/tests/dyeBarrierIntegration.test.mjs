@@ -158,3 +158,64 @@ test('rigid edge permeability RGB overrides channel pass/blocked behavior', () =
   assert.ok(g[i] < 120, 'impermeable green channel should be blocked/deflected');
   assert.ok(g[ti] > 0, 'impermeable green channel should deflect tangentially');
 });
+
+test('applyBodyEdgeFieldBarriers skips malformed rigid edges with non-finite vertices', () => {
+  const n = 16;
+  const size = n * n;
+  const r = new Float32Array(size);
+  const g = new Float32Array(size);
+  const b = new Float32Array(size);
+  const vx = new Float32Array(size);
+  const vy = new Float32Array(size);
+
+  const sim = {
+    controls: { n },
+    bodies: {
+      rigid: [
+        {
+          x: 8,
+          y: 8,
+          theta: 0,
+          verticesLocal: [
+            { x: -2, y: 0 },
+            { x: Number.NaN, y: 2 },
+            { x: 2, y: 0 },
+          ],
+          edgeBodyMode: [EDGE_BODY_MODE.BLOCK, EDGE_BODY_MODE.BLOCK, EDGE_BODY_MODE.BLOCK],
+          edgeDyeMode: [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT],
+        },
+      ],
+      soft: { nodes: [], springs: [] },
+    },
+  };
+
+  assert.doesNotThrow(() => applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld }));
+});
+
+test('applyBodyEdgeFieldBarriers skips malformed soft springs with missing node indices', () => {
+  const n = 16;
+  const size = n * n;
+  const r = new Float32Array(size);
+  const g = new Float32Array(size);
+  const b = new Float32Array(size);
+  const vx = new Float32Array(size);
+  const vy = new Float32Array(size);
+
+  const sim = {
+    controls: { n },
+    bodies: {
+      rigid: [],
+      soft: {
+        nodes: [
+          { x: 6, y: 8 },
+          { x: 10, y: 8 },
+        ],
+        springs: [
+          [0, 999, 4, EDGE_BODY_MODE.BLOCK, [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT]],
+        ],
+      },
+    },
+  };
+
+  assert.doesNotThrow(() => applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld }));
+});

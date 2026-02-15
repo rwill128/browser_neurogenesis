@@ -125,28 +125,59 @@ function drawMesh(mesh) {
   mctx.clearRect(0, 0, meshCanvas.width, meshCanvas.height);
   const sx = meshCanvas.width / W;
   const sy = meshCanvas.height / H;
+  const membranePreview = (softSolverModeEl?.value || 'spring') === 'membrane';
 
-  // Soft-body debug mesh stays visible; rigid now renders via contour hull only.
-  for (const tri of mesh.triangles) {
-    if (tri.kind !== 'soft') continue;
-    const a = mesh.nodes[tri.a], b = mesh.nodes[tri.b], c = mesh.nodes[tri.c];
-    mctx.beginPath();
-    mctx.moveTo(a.x * sx, a.y * sy);
-    mctx.lineTo(b.x * sx, b.y * sy);
-    mctx.lineTo(c.x * sx, c.y * sy);
-    mctx.closePath();
-    mctx.fillStyle = 'rgba(90,130,255,0.18)';
-    mctx.strokeStyle = 'rgba(120,170,255,0.55)';
-    mctx.fill();
-    mctx.stroke();
-  }
+  if (!membranePreview) {
+    // Spring mode preview: show compiled soft triangles + optional cross-beams.
+    for (const tri of mesh.triangles) {
+      if (tri.kind !== 'soft') continue;
+      const a = mesh.nodes[tri.a], b = mesh.nodes[tri.b], c = mesh.nodes[tri.c];
+      mctx.beginPath();
+      mctx.moveTo(a.x * sx, a.y * sy);
+      mctx.lineTo(b.x * sx, b.y * sy);
+      mctx.lineTo(c.x * sx, c.y * sy);
+      mctx.closePath();
+      mctx.fillStyle = 'rgba(90,130,255,0.18)';
+      mctx.strokeStyle = 'rgba(120,170,255,0.55)';
+      mctx.fill();
+      mctx.stroke();
+    }
 
-  if (Array.isArray(mesh.softCrossBeams)) {
-    mctx.strokeStyle = 'rgba(140,220,255,0.92)';
-    mctx.lineWidth = 1.5;
-    for (const [ai, bi] of mesh.softCrossBeams) {
-      const a = mesh.nodes[ai];
-      const b = mesh.nodes[bi];
+    if (Array.isArray(mesh.softCrossBeams)) {
+      mctx.strokeStyle = 'rgba(140,220,255,0.92)';
+      mctx.lineWidth = 1.5;
+      for (const [ai, bi] of mesh.softCrossBeams) {
+        const a = mesh.nodes[ai];
+        const b = mesh.nodes[bi];
+        if (!a || !b) continue;
+        mctx.beginPath();
+        mctx.moveTo(a.x * sx, a.y * sy);
+        mctx.lineTo(b.x * sx, b.y * sy);
+        mctx.stroke();
+      }
+      mctx.lineWidth = 1;
+    }
+  } else {
+    // Membrane mode preview: show boundary loops (what membrane solver actually uses), not interior triangulation.
+    const edgeCount = new Map();
+    const edgeKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
+    for (const tri of mesh.triangles) {
+      if (tri.kind !== 'soft') continue;
+      const edges = [[tri.a, tri.b], [tri.b, tri.c], [tri.c, tri.a]];
+      for (const [a, b] of edges) {
+        const k = edgeKey(a, b);
+        const st = edgeCount.get(k) || { a, b, c: 0 };
+        st.c += 1;
+        edgeCount.set(k, st);
+      }
+    }
+
+    mctx.strokeStyle = 'rgba(120,220,255,0.95)';
+    mctx.lineWidth = 2;
+    for (const e of edgeCount.values()) {
+      if (e.c !== 1) continue;
+      const a = mesh.nodes[e.a];
+      const b = mesh.nodes[e.b];
       if (!a || !b) continue;
       mctx.beginPath();
       mctx.moveTo(a.x * sx, a.y * sy);
@@ -176,7 +207,13 @@ function drawMesh(mesh) {
     }
   }
 
-  out.textContent = JSON.stringify(mesh.meta, null, 2);
+  out.textContent = JSON.stringify({
+    ...mesh.meta,
+    softSolverMode: softSolverModeEl?.value || 'spring',
+    softPreview: ((softSolverModeEl?.value || 'spring') === 'membrane')
+      ? 'boundary-loops (interior triangles hidden)'
+      : 'triangulated soft mesh',
+  }, null, 2);
 }
 
 function compileNow() {
@@ -222,6 +259,7 @@ clearBtn.addEventListener('click', () => { rigid.fill(0); soft.fill(0); softDens
 compileBtn.addEventListener('click', compileNow);
 if (softInfillModeEl) softInfillModeEl.addEventListener('change', compileNow);
 if (softMinCellSizeEl) softMinCellSizeEl.addEventListener('change', compileNow);
+if (softSolverModeEl) softSolverModeEl.addEventListener('change', compileNow);
 
 exportBtn.addEventListener('click', () => {
   if (!lastMesh) compileNow();

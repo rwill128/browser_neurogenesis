@@ -30,6 +30,7 @@ const massHeavyEl = document.getElementById('massHeavy');
 const massSoftEl = document.getElementById('massSoft');
 const bodyDragEl = document.getElementById('bodyDrag');
 const bodyFeedbackEl = document.getElementById('bodyFeedback');
+const spawnMembraneCellsEl = document.getElementById('spawnMembraneCells');
 
 const GENERATED_MINI_SCENARIOS_URL = '/generated-mini-scenarios.json';
 let generatedMiniScenarios = new Map();
@@ -52,6 +53,9 @@ const SOFT_DEFORM_WARN_AREA_RATIO_MIN = 0.45;
 const SOFT_DEFORM_WARN_AREA_RATIO_MAX = 2.2;
 const SOFT_DEFORM_SEVERE_AREA_RATIO_MIN = 0.2;
 const SOFT_DEFORM_SEVERE_AREA_RATIO_MAX = 5.0;
+const MEMBRANE_CELL_BASE_COUNT = 4;
+const MEMBRANE_CELL_BASE_PRESSURE_GAIN = 0.08;
+const MEMBRANE_CELL_BASE_RADIAL_DAMPING = 0.06;
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
@@ -75,6 +79,7 @@ function readControls() {
     massSoft: Math.max(0.02, Number(massSoftEl.value) || 0.6),
     bodyDrag: Math.max(0, Number(bodyDragEl.value) || 0.55),
     bodyFeedback: Math.max(0, Number(bodyFeedbackEl.value) || 0.012),
+    spawnMembraneCells: !!spawnMembraneCellsEl?.checked,
   };
 }
 
@@ -526,6 +531,108 @@ function rigidVertexWorld(b, vertexIndex) {
   return verts[((vertexIndex % n) + n) % n];
 }
 
+function polygonSignedAreaPoints(points) {
+  let s = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    s += a.x * b.y - b.x * a.y;
+  }
+  return 0.5 * s;
+}
+
+function pushMembraneCellCluster({
+  softNodes,
+  springs,
+  clusterId,
+  cx,
+  cy,
+  radius,
+  nodeCount,
+  controls,
+  scale,
+  bodyScale,
+}) {
+  const base = softNodes.length;
+  const ring = [];
+
+  for (let i = 0; i < nodeCount; i++) {
+    const a = (i / nodeCount) * Math.PI * 2;
+    const wobble = 1 + 0.08 * Math.sin(i * 1.7 + clusterId * 0.61) + (Math.random() - 0.5) * 0.04;
+    const rr = Math.max(0.5, radius * wobble);
+    ring.push({ x: cx + Math.cos(a) * rr, y: cy + Math.sin(a) * rr });
+  }
+
+  const digestRGB = (clusterId % 3 === 0)
+    ? [0.95, 0.3, 0.3]
+    : ((clusterId % 3 === 1) ? [0.3, 0.95, 0.3] : [0.3, 0.3, 0.95]);
+
+  for (const p of ring) {
+    softNodes.push({
+      x: p.x,
+      y: p.y,
+      vx: 0,
+      vy: 0,
+      mass: controls.massSoft,
+      r: 1.35 * scale * bodyScale,
+      clusterId,
+      digestEnabled: false,
+      digestRGB,
+      membraneCell: true,
+    });
+  }
+
+  // Membrane ring (BLOCK for contact, mixed dye permeability profile for semi-permeable feel).
+  for (let i = 0; i < nodeCount; i++) {
+    const j = (i + 1) % nodeCount;
+    const a = ring[i];
+    const b = ring[j];
+    springs.push([
+      base + i,
+      base + j,
+      Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)),
+      EDGE_BODY_MODE.BLOCK,
+      [EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.PASS],
+    ]);
+  }
+
+  // Bending/tension support for membrane smoothness.
+  for (let i = 0; i < nodeCount; i++) {
+    const j = (i + 2) % nodeCount;
+    const a = ring[i];
+    const b = ring[j];
+    springs.push([
+      base + i,
+      base + j,
+      Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)),
+      EDGE_BODY_MODE.PASS,
+      [EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS],
+    ]);
+  }
+
+  // Sparse long-bend supports to suppress skinny-fold modes without dense lattice fill.
+  for (let i = 0; i < nodeCount; i++) {
+    const j = (i + 3) % nodeCount;
+    if (i >= j) continue;
+    const a = ring[i];
+    const b = ring[j];
+    springs.push([
+      base + i,
+      base + j,
+      Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)),
+      EDGE_BODY_MODE.PASS,
+      [EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS],
+    ]);
+  }
+
+  return {
+    clusterId,
+    restArea: Math.max(1e-4, Math.abs(polygonSignedAreaPoints(ring))),
+    pressureGain: MEMBRANE_CELL_BASE_PRESSURE_GAIN,
+    radialDamping: MEMBRANE_CELL_BASE_RADIAL_DAMPING,
+  };
+}
+
 function initBodies(n, controls) {
   const scale = n / 256;
   const bigMode = n >= 1024;
@@ -574,6 +681,7 @@ function initBodies(n, controls) {
 
   const softNodes = [];
   const springs = [];
+  const softMembraneClusters = [];
   const softShapeCycle = [3, 4, 6];
 
   for (let c = 0; c < softClusterCount; c++) {
@@ -665,6 +773,30 @@ function initBodies(n, controls) {
     }
   }
 
+  if (controls.spawnMembraneCells) {
+    const membraneCount = Math.max(2, Math.round(MEMBRANE_CELL_BASE_COUNT * Math.min(2.0, Math.max(0.7, scale))));
+    for (let ci = 0; ci < membraneCount; ci++) {
+      const cx = n * (0.16 + 0.68 * Math.random());
+      const cy = n * (0.16 + 0.68 * Math.random());
+      const nodeCount = 10 + ((ci % 3) * 2);
+      const radius = (7.2 + (ci % 2) * 1.8) * scale * bodyScale;
+      const clusterId = softClusterCount + ci;
+      const membrane = pushMembraneCellCluster({
+        softNodes,
+        springs,
+        clusterId,
+        cx,
+        cy,
+        radius,
+        nodeCount,
+        controls,
+        scale,
+        bodyScale,
+      });
+      softMembraneClusters.push(membrane);
+    }
+  }
+
   const hybrid = [];
   // Minimal hybrid archetype: rigid triangle edge-attached to a soft triangle with one free soft apex.
   const triangleCandidates = rigid
@@ -722,7 +854,7 @@ function initBodies(n, controls) {
     });
   }
 
-  return { rigid, soft: { nodes: softNodes, springs }, hybrid };
+  return { rigid, soft: { nodes: softNodes, springs }, hybrid, softMembraneClusters };
 }
 
 function initEmitters(n) {
@@ -1007,6 +1139,7 @@ function applyMiniScenarioPreset(sim, mini) {
   sim.softSpringRestBaseline = null;
   sim.softAreaRest = null;
   sim.softAreaLambda = null;
+  sim.softMembraneAreaBaseline = null;
   sim.viscMapCpu.fill(0.5);
   uploadViscMap();
   focusCameraOnBodies(sim, sim.bodies);
@@ -1477,6 +1610,89 @@ function signedAreaCurrent(nodes, indices) {
   return 0.5 * s;
 }
 
+function applySoftMembraneCellPressure(sim, s, loops, dtPos) {
+  const membranes = sim?.bodies?.softMembraneClusters;
+  if (!Array.isArray(membranes) || membranes.length === 0) return 0;
+  if (!(sim.softMembraneAreaBaseline instanceof Map)) sim.softMembraneAreaBaseline = new Map();
+
+  const loopByCluster = new Map();
+  for (const loop of loops || []) {
+    loopByCluster.set(loop.clusterId ?? 0, loop);
+  }
+
+  let touched = 0;
+  for (const membrane of membranes) {
+    const cid = Number(membrane?.clusterId);
+    if (!Number.isInteger(cid)) continue;
+    const loop = loopByCluster.get(cid);
+    if (!loop || !Array.isArray(loop.indices) || loop.indices.length < 3) continue;
+
+    const areaNow = Math.abs(signedAreaCurrent(s.nodes, loop.indices));
+    if (!Number.isFinite(areaNow) || areaNow < 1e-6) continue;
+
+    const seededBase = Math.max(1e-4, Number(membrane?.restArea) || areaNow);
+    if (!sim.softMembraneAreaBaseline.has(cid)) {
+      sim.softMembraneAreaBaseline.set(cid, seededBase);
+    }
+    const areaBase = Math.max(1e-4, Number(sim.softMembraneAreaBaseline.get(cid)) || seededBase);
+    const err = clamp((areaBase - areaNow) / areaBase, -0.65, 0.65);
+    if (Math.abs(err) < 1e-4) continue;
+
+    const pressureGain = Math.max(0.005, Number(membrane?.pressureGain) || MEMBRANE_CELL_BASE_PRESSURE_GAIN);
+    const radialDamping = clamp(Number(membrane?.radialDamping) || MEMBRANE_CELL_BASE_RADIAL_DAMPING, 0, 0.2);
+    const gain = pressureGain * (1 + Math.min(1.4, Math.abs(err) * 2.2));
+
+    let cx = 0;
+    let cy = 0;
+    for (const ni of loop.indices) {
+      const node = s.nodes[ni];
+      if (!node) continue;
+      cx += node.x;
+      cy += node.y;
+    }
+    cx /= loop.indices.length;
+    cy /= loop.indices.length;
+
+    for (let k = 0; k < loop.indices.length; k++) {
+      const iPrev = loop.indices[(k - 1 + loop.indices.length) % loop.indices.length];
+      const iCurr = loop.indices[k];
+      const iNext = loop.indices[(k + 1) % loop.indices.length];
+      const prev = s.nodes[iPrev];
+      const curr = s.nodes[iCurr];
+      const next = s.nodes[iNext];
+      if (!prev || !curr || !next) continue;
+
+      // Outward normal for CCW loop via right-normal accumulation.
+      let nx = (curr.y - prev.y) + (next.y - curr.y);
+      let ny = -((curr.x - prev.x) + (next.x - curr.x));
+      let nLen = Math.hypot(nx, ny);
+      if (!Number.isFinite(nLen) || nLen < 1e-6) {
+        nx = curr.x - cx;
+        ny = curr.y - cy;
+        nLen = Math.hypot(nx, ny);
+      }
+      if (!Number.isFinite(nLen) || nLen < 1e-6) continue;
+      nx /= nLen;
+      ny /= nLen;
+
+      const invMass = 1 / Math.max(0.02, curr.mass || 1);
+      const impulse = err * gain * dtPos * invMass;
+      curr.vx += nx * impulse;
+      curr.vy += ny * impulse;
+
+      if (radialDamping > 0) {
+        const rv = curr.vx * nx + curr.vy * ny;
+        curr.vx -= nx * rv * radialDamping;
+        curr.vy -= ny * rv * radialDamping;
+      }
+    }
+
+    touched += 1;
+  }
+
+  return touched;
+}
+
 function buildSoftDeformationState(sim, s, loops) {
   const clusters = new Map();
   const ensureCluster = (cid) => {
@@ -1819,6 +2035,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   });
   ensureSoftAreaRestState(sim, s, softClusterLoops, dtPos);
   applySoftAreaXPBDVelocity(sim, s, softClusterLoops, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT);
+  const membranePressureClusters = applySoftMembraneCellPressure(sim, s, softClusterLoops, dtPos);
 
   for (let iter = 0; iter < 5; iter++) {
     // Hybrid rigid-soft attachment constraints (weld-like springs to rigid edge vertices).
@@ -2046,6 +2263,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     softDeformSevereCount: deform.severeCount || 0,
     softDeformWorstStretch: Number.isFinite(deform.worstStretch) ? deform.worstStretch : 1,
     softDeformWorstAreaRatio: Number.isFinite(deform.worstAreaRatio) ? deform.worstAreaRatio : 1,
+    membraneCellClusters: Array.isArray(sim?.bodies?.softMembraneClusters) ? sim.bodies.softMembraneClusters.length : 0,
+    membranePressureClusters,
     softDtUsed: dt,
     softDtRaw: dtRaw,
   };
@@ -2637,6 +2856,14 @@ async function stepAndRender() {
     await start();
     return;
   }
+  // Body archetype selection changes require body re-seeding.
+  if (uiControls.spawnMembraneCells !== s.controls.spawnMembraneCells) {
+    running = false;
+    sim = null;
+    log({ ok: true, msg: `reinitializing for membrane-cell mode ${uiControls.spawnMembraneCells ? 'ON' : 'OFF'}` });
+    await start();
+    return;
+  }
 
   s.controls = { ...s.controls, ...uiControls, n: s.controls.n };
   uploadUniforms(s.device, s.uniform, s.controls);
@@ -2784,6 +3011,8 @@ async function stepAndRender() {
       massSoft: s.controls.massSoft,
       bodyDrag: s.controls.bodyDrag,
       bodyFeedback: s.controls.bodyFeedback,
+      spawnMembraneCells: !!s.controls.spawnMembraneCells,
+      membraneClusters: Array.isArray(s.bodies?.softMembraneClusters) ? s.bodies.softMembraneClusters.length : 0,
       paintValue: Number(paintValueEl.value) || 0.85,
       brushSize: Number(brushSizeEl.value) || 12,
       digestiveCapture: +((s.digestiveCapture || 0).toFixed(2)),

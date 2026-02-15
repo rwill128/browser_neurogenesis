@@ -45,6 +45,7 @@ const SOFT_AREA_XPBD_ITERS = 6;
 const SOFT_AREA_BASE_COMPLIANCE = 0.0009;
 const SOFT_INTEGRATION_SCALE = 24;
 const FLUID_COUPLING_COMPONENT_LIMIT = 12;
+const ENABLE_HYBRID_BODY_LINKS = false;
 
 const EDGE_BODY_MODE = {
   PASS: 0,
@@ -663,7 +664,7 @@ function initBodies(n, controls) {
       return mb - ma;
     });
 
-  if (triangleCandidates.length > 0) {
+  if (ENABLE_HYBRID_BODY_LINKS && triangleCandidates.length > 0) {
     const triRigidIndex = triangleCandidates[0].idx;
     const rb = rigid[triRigidIndex];
     const va = rigidVertexWorld(rb, 1);
@@ -932,7 +933,7 @@ function cloneMiniBodies(miniBodies, controls) {
     normalizeEdgeDyeModeRGB(sp[4]),
   ]);
 
-  const hybrid = Array.isArray(miniBodies?.hybrid)
+  const hybrid = (ENABLE_HYBRID_BODY_LINKS && Array.isArray(miniBodies?.hybrid))
     ? miniBodies.hybrid.map((h) => ({
         rigidIndex: Number(h?.rigidIndex) | 0,
         nodeIndex: Number(h?.nodeIndex) | 0,
@@ -2248,7 +2249,9 @@ function drawBodiesOverlay(sim) {
   ctx.fillStyle = 'rgba(0,255,208,0.95)';
   const line2 = collisionDebug
     ? 'Body edges: BLOCK (bright) vs PASS (dim) | dashed green/cyan=solver hull, dashed amber=rigid-rigid convex proxies | Alt+drag/right-drag pan, wheel zoom'
-    : 'Body edges: BLOCK (bright) vs PASS (dim) | hybrid links=magenta | Alt+drag/right-drag pan, wheel zoom';
+    : (ENABLE_HYBRID_BODY_LINKS
+      ? 'Body edges: BLOCK (bright) vs PASS (dim) | hybrid links=magenta | Alt+drag/right-drag pan, wheel zoom'
+      : 'Body edges: BLOCK (bright) vs PASS (dim) | hybrids disabled (rigid/soft separated) | Alt+drag/right-drag pan, wheel zoom');
   ctx.fillText(line2, 10, canvas.height - 12);
   ctx.restore();
 }
@@ -2503,6 +2506,7 @@ async function start() {
       const spec = entry?.spec || entry;
       const importScale = entry?.importScale ?? 0.1;
       const imported = buildBodiesFromCreatureSpec(spec, sim.controls.n, sim.controls);
+      if (!ENABLE_HYBRID_BODY_LINKS) imported.hybrid = [];
       scaleImportedBodies(imported, importScale);
       mergeBodiesIntoSim(sim.bodies, imported);
       lastImported = imported;
@@ -2558,6 +2562,7 @@ if (importSpecBtn && importSpecFile) {
       const importScale = readImportScale();
       if (simMatchesTargetGrid) {
         const imported = buildBodiesFromCreatureSpec(spec, sim.controls.n, sim.controls);
+        if (!ENABLE_HYBRID_BODY_LINKS) imported.hybrid = [];
         scaleImportedBodies(imported, importScale);
         mergeBodiesIntoSim(sim.bodies, imported);
         focusCameraOnBodies(sim, imported);

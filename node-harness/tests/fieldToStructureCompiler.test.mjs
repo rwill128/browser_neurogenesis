@@ -128,6 +128,67 @@ test('compiler can use triangle-only soft in-fill mode (no cross-beams)', () => 
   assert.ok(mesh.meta.softTriangles > 0, 'triangle-only mode should still produce soft triangles');
 });
 
+
+
+test('compiler applies soft in-fill density map with seam-preserving transition handling', () => {
+  const w = 64, h = 64;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+  const softDensity = new Float32Array(w * h).fill(1);
+
+  for (let y = 8; y <= 56; y++) {
+    for (let x = 8; x <= 56; x++) {
+      soft[y * w + x] = 1;
+      if (x >= 32) softDensity[y * w + x] = 0.0; // sparse half
+    }
+  }
+
+  const baseline = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    threshold: 0.35,
+    density: 2,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles',
+  });
+
+  const mapped = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: softDensity,
+    threshold: 0.35,
+    density: 2,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles',
+  });
+
+  assert.ok(mapped.meta.softDensityCulled > 0, 'expected density map to cull some interior soft triangles');
+  assert.ok(mapped.meta.softTriangles < baseline.meta.softTriangles, 'density map should reduce soft triangle count');
+
+  const seamBand = mapped.triangles.filter((t) => {
+    if (t.kind !== 'soft') return false;
+    const a = mapped.nodes[t.a], b = mapped.nodes[t.b], c = mapped.nodes[t.c];
+    const cx = (a.x + b.x + c.x) / 3;
+    const cy = (a.y + b.y + c.y) / 3;
+    return cx >= 30 && cx <= 34 && cy >= 12 && cy <= 52;
+  });
+  assert.ok(seamBand.length > 0, 'expected seam transition belt triangles to remain across density shift boundary');
+
+  const outerSkin = mapped.triangles.filter((t) => {
+    if (t.kind !== 'soft') return false;
+    const a = mapped.nodes[t.a], b = mapped.nodes[t.b], c = mapped.nodes[t.c];
+    const cx = (a.x + b.x + c.x) / 3;
+    const cy = (a.y + b.y + c.y) / 3;
+    const nearOuter = (cx <= 11 || cx >= 53 || cy <= 11 || cy >= 53);
+    return nearOuter;
+  });
+  assert.ok(outerSkin.length > 0, 'expected outer boundary skin triangles to remain preserved');
+});
+
 test('connectivity largest mode drops disconnected islands', () => {
   const w = 20, h = 20;
   const rigid = new Float32Array(w * h);

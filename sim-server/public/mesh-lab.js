@@ -9,6 +9,7 @@ const modeEl = document.getElementById('paintMode');
 const brushEl = document.getElementById('brush');
 const densityEl = document.getElementById('density');
 const thresholdEl = document.getElementById('threshold');
+const softDensityPaintEl = document.getElementById('softDensityPaint');
 const softInfillModeEl = document.getElementById('softInfillMode');
 const clearBtn = document.getElementById('clearBtn');
 const compileBtn = document.getElementById('compileBtn');
@@ -20,6 +21,7 @@ const out = document.getElementById('out');
 const W = 128, H = 128;
 const rigid = new Float32Array(W * H);
 const soft = new Float32Array(W * H);
+const softDensity = new Float32Array(W * H).fill(1);
 let painting = false;
 let lastMesh = null;
 
@@ -29,7 +31,7 @@ function drawFields() {
   const img = pctx.createImageData(W, H);
   for (let i = 0; i < rigid.length; i++) {
     img.data[i * 4] = Math.min(255, rigid[i] * 255);
-    img.data[i * 4 + 1] = 0;
+    img.data[i * 4 + 1] = Math.min(255, softDensity[i] * 160);
     img.data[i * 4 + 2] = Math.min(255, soft[i] * 255);
     img.data[i * 4 + 3] = 255;
   }
@@ -59,7 +61,11 @@ function paint(clientX, clientY) {
       const i = idx(xx, yy);
       if (mode === 'rigid') rigid[i] = Math.max(rigid[i], t);
       else if (mode === 'soft') soft[i] = Math.max(soft[i], t);
-      else { rigid[i] *= (1 - t); soft[i] *= (1 - t); }
+      else if (mode === 'softDensity') {
+        const target = Math.max(0, Math.min(1, Number(softDensityPaintEl?.value) || 1));
+        softDensity[i] = softDensity[i] * (1 - t) + target * t;
+      }
+      else { rigid[i] *= (1 - t); soft[i] *= (1 - t); softDensity[i] = softDensity[i] * (1 - t) + 1 * t; }
     }
   }
   drawFields();
@@ -134,6 +140,7 @@ function compileNow() {
     connectivityMode: 'largest',
     minComponentTriangles: 0,
     softInfillMode: softInfillModeEl?.value || 'triangles',
+    softDensityField: softDensity,
   });
   lastMesh = mesh;
   drawMesh(mesh);
@@ -142,7 +149,7 @@ function compileNow() {
 paintCanvas.addEventListener('mousedown', (e) => { painting = true; paint(e.clientX, e.clientY); });
 window.addEventListener('mouseup', () => { painting = false; });
 paintCanvas.addEventListener('mousemove', (e) => { if (painting) paint(e.clientX, e.clientY); });
-clearBtn.addEventListener('click', () => { rigid.fill(0); soft.fill(0); drawFields(); compileNow(); });
+clearBtn.addEventListener('click', () => { rigid.fill(0); soft.fill(0); softDensity.fill(1); drawFields(); compileNow(); });
 compileBtn.addEventListener('click', compileNow);
 if (softInfillModeEl) softInfillModeEl.addEventListener('change', compileNow);
 
@@ -150,7 +157,7 @@ exportBtn.addEventListener('click', () => {
   if (!lastMesh) compileNow();
   const spec = createCreatureSpecFromMesh(lastMesh, {
     name: 'mesh-lab-creature',
-    fields: { rigidField: rigid, softField: soft },
+    fields: { rigidField: rigid, softField: soft, softDensityField: softDensity },
   });
   const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -171,6 +178,8 @@ importFile.addEventListener('change', async () => {
   if (authoring && Number(authoring.width) === W && Number(authoring.height) === H && Array.isArray(authoring.rigid) && Array.isArray(authoring.soft)) {
     rigid.set(authoring.rigid);
     soft.set(authoring.soft);
+    if (Array.isArray(authoring.softDensity) && authoring.softDensity.length === W * H) softDensity.set(authoring.softDensity);
+    else softDensity.fill(1);
     drawFields();
     compileNow();
     return;

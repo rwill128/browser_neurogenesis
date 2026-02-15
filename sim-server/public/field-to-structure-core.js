@@ -22,6 +22,7 @@ export function compileFieldToMesh({
   connectivityMode = 'none', // none | largest (strict single connected body)
   minComponentTriangles = 0,
   softInfillMode = 'triangles+cross', // triangles | triangles+cross
+  softDensityField = null, // 0..1, controls soft infill retention (1=dense)
 }) {
   const infillMode = softInfillMode === 'triangles' ? 'triangles' : 'triangles+cross';
   const step = Math.max(1, density | 0);
@@ -86,7 +87,13 @@ export function compileFieldToMesh({
   });
 
   const noOverlap = removeSoftTrianglesOverlappingRigidContours(filtered.triangles, nodes, rigidDecomp.pieces);
-  const final = enforceConnectivity({ triangles: noOverlap.triangles, mode: connectivityMode, minComponentTriangles });
+  const densityApplied = applySoftInfillDensityMap(noOverlap.triangles, nodes, {
+    width,
+    height,
+    softDensityField,
+    step,
+  });
+  const final = enforceConnectivity({ triangles: densityApplied.triangles, mode: connectivityMode, minComponentTriangles });
   const useSoftCrossBeams = infillMode === 'triangles+cross';
   const softCrossBeams = useSoftCrossBeams ? buildSoftCrossBeams(final.triangles, nodes) : [];
 
@@ -112,6 +119,7 @@ export function compileFieldToMesh({
       softCrossBeams: softCrossBeams.length,
       droppedTriangles: triangles.length - final.triangles.length,
       softOverlapTrimmed: noOverlap.removed,
+      softDensityCulled: densityApplied.culled,
     },
   };
 }
@@ -294,6 +302,83 @@ function removeSoftTrianglesOverlappingRigidContours(triangles, nodes, rigidPiec
   return { triangles: keep, removed };
 }
 
+function hash01FromTri(a, b, c) {
+  const x = [a, b, c].sort((m, n) => m - n);
+  let h = ((x[0] * 73856093) ^ (x[1] * 19349663) ^ (x[2] * 83492791)) >>> 0;
+  h = (Math.imul(h ^ (h >>> 16), 2246822519) + 3266489917) >>> 0;
+  return h / 4294967295;
+}
+
+function applySoftInfillDensityMap(triangles, nodes, { width, height, softDensityField, step }) {
+  if (!(softDensityField instanceof Float32Array) || softDensityField.length < width * height) {
+    return { triangles, culled: 0 };
+  }
+
+  const softIds = [];
+  for (let i = 0; i < triangles.length; i++) {
+    if (triangles[i]?.kind === 'soft') softIds.push(i);
+  }
+  if (!softIds.length) return { triangles, culled: 0 };
+
+  const edgeCount = new Map();
+  const addEdge = (u, v) => {
+    const key = u < v ? `${u}:${v}` : `${v}:${u}`;
+    edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
+  };
+
+  for (const ti of softIds) {
+    const t = triangles[ti];
+    addEdge(t.a, t.b);
+    addEdge(t.b, t.c);
+    addEdge(t.c, t.a);
+  }
+
+  const keep = [];
+  let culled = 0;
+
+  for (const t of triangles) {
+    if (!t || t.kind !== 'soft') {
+      keep.push(t);
+      continue;
+    }
+
+    const edgeKeys = [
+      t.a < t.b ? `${t.a}:${t.b}` : `${t.b}:${t.a}`,
+      t.b < t.c ? `${t.b}:${t.c}` : `${t.c}:${t.b}`,
+      t.c < t.a ? `${t.c}:${t.a}` : `${t.a}:${t.c}`,
+    ];
+    const isBoundaryTri = edgeKeys.some((k) => (edgeCount.get(k) || 0) <= 1);
+    if (isBoundaryTri) {
+      keep.push(t);
+      continue;
+    }
+
+    const a = nodes[t.a];
+    const b = nodes[t.b];
+    const c = nodes[t.c];
+    const cx = (a.x + b.x + c.x) / 3;
+    const cy = (a.y + b.y + c.y) / 3;
+
+    const densCenter = Math.max(0, Math.min(1, sampleBilinear(softDensityField, width, height, cx, cy)));
+    const gx = sampleBilinear(softDensityField, width, height, cx + step, cy) - sampleBilinear(softDensityField, width, height, cx - step, cy);
+    const gy = sampleBilinear(softDensityField, width, height, cx, cy + step) - sampleBilinear(softDensityField, width, height, cx, cy - step);
+    const grad = Math.hypot(gx, gy) * 0.5;
+
+    // Dense map=1 keeps all; sparse map=0 still keeps some lattice for stability.
+    let keepProb = 0.22 + densCenter * 0.78;
+
+    // Boundary handling between density shifts: keep a transition belt where gradients are high.
+    const transitionBoost = Math.max(0, Math.min(1, grad * 1.8));
+    keepProb = Math.max(keepProb, 0.55 * transitionBoost + 0.35);
+    keepProb = Math.max(0.22, Math.min(1, keepProb));
+
+    const h = hash01FromTri(t.a, t.b, t.c);
+    if (h <= keepProb) keep.push(t);
+    else culled += 1;
+  }
+
+  return { triangles: keep, culled };
+}
 function buildSoftCrossBeams(triangles, nodes) {
   const softTris = (triangles || []).filter((t) => t?.kind === 'soft');
   if (!softTris.length) return [];

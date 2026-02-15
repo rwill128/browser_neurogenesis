@@ -48,6 +48,7 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
   if (options.includeAuthoring !== false) {
     const rigidField = options?.fields?.rigidField;
     const softField = options?.fields?.softField;
+    const softDensityField = options?.fields?.softDensityField;
     if (rigidField && softField) {
       out.authoring = {
         fields: {
@@ -55,6 +56,7 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
           height,
           rigid: Array.from(rigidField),
           soft: Array.from(softField),
+          softDensity: softDensityField ? Array.from(softDensityField) : undefined,
         },
       };
     }

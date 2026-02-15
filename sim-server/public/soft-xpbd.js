@@ -208,6 +208,9 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   midErrorRecoveryCouplingMax = 1,
   midErrorRecoveryCenter = 0.22,
   midErrorRecoveryHalfWidth = 0.22,
+  farErrorRecoveryCouplingMax = 1.12,
+  farErrorRecoveryStart = 0.2,
+  farErrorRecoveryWidth = 0.35,
   lowErrorRecoveryCouplingMax = 1.1,
   lowErrorRecoveryGate = 0.08,
   highRateSnapRecoverThreshold = 0.055,
@@ -247,6 +250,9 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const midErrorCouplingMax = Math.max(1, Number(midErrorRecoveryCouplingMax) || 1);
   const midErrorCenter = Math.max(1e-6, Number(midErrorRecoveryCenter) || 0.22);
   const midErrorHalfWidth = Math.max(1e-6, Number(midErrorRecoveryHalfWidth) || 0.22);
+  const farErrorCouplingMax = Math.max(1, Number(farErrorRecoveryCouplingMax) || 1);
+  const farErrorStart = Math.max(0, Number(farErrorRecoveryStart) || 0.2);
+  const farErrorWidth = Math.max(1e-6, Number(farErrorRecoveryWidth) || 0.35);
   const lowErrorCouplingMax = Math.max(1, Number(lowErrorRecoveryCouplingMax) || 1);
   const lowErrorGate = Math.max(1e-6, Number(lowErrorRecoveryGate) || 0.08);
   const highRateSnapRateThreshold = Math.max(0, Number(highRateSnapRecoverThreshold) || 0);
@@ -362,6 +368,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
     const midErrorDistance = Math.abs(errNorm - midErrorCenter);
     const midErrorAlpha = clamp(1 - (midErrorDistance / midErrorHalfWidth), 0, 1);
     const midErrorBoost = 1 + (midErrorCouplingMax - 1) * midErrorAlpha;
+    const farErrorAlpha = clamp((errNorm - farErrorStart) / farErrorWidth, 0, 1);
+    const farErrorBoost = 1 + (farErrorCouplingMax - 1) * farErrorAlpha;
     const lowErrorAlpha = clamp(1 - (errNorm / lowErrorGate), 0, 1);
     const lowErrorBoost = 1 + (lowErrorCouplingMax - 1) * lowErrorAlpha;
 
@@ -420,6 +428,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       * outlierBoost
       * shortRestBoost
       * midErrorBoost
+      * farErrorBoost
       * lowErrorBoost
       * localBoost
       * localDirectionalBoost

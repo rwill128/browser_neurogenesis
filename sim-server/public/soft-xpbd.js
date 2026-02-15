@@ -201,6 +201,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   polarityCouplingMax = 1.08,
   smallRestRecoveryCouplingMax = 1.03,
   smallRestPivot = 0.9,
+  highRateSnapRecoverThreshold = 0.055,
+  highRateSnapErrorThreshold = 0.002,
 } = {}) {
   if (!Array.isArray(springs) || !restBaseline || typeof restBaseline.length !== 'number') return 0;
 
@@ -229,6 +231,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const polarityMax = Math.max(1, Number(polarityCouplingMax) || 1);
   const smallRestCouplingMax = Math.max(1, Number(smallRestRecoveryCouplingMax) || 1);
   const smallRestErrPivot = Math.max(1e-6, Number(smallRestPivot) || 0.9);
+  const highRateSnapRateThreshold = Math.max(0, Number(highRateSnapRecoverThreshold) || 0);
+  const highRateSnapErrThreshold = Math.max(0, Number(highRateSnapErrorThreshold) || 0);
 
   let touched = 0;
   const n = Math.min(springs.length, restBaseline.length);
@@ -384,6 +388,13 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       if (targetErrNorm <= snapWindow) {
         target = clamp(target + (base - target) * snapBlend, base * localMinFactor, base * localMaxFactor);
       }
+    }
+
+    // High recover-rate near-baseline lock: prevent tiny residual oscillation/undershoot
+    // under aggressive adaptive recovery by snapping exactly to baseline once error is small.
+    if (adaptiveMode && k >= highRateSnapRateThreshold && highRateSnapErrThreshold > 0) {
+      const targetErrNorm = Math.abs(base - target) / base;
+      if (targetErrNorm <= highRateSnapErrThreshold) target = base;
     }
 
     // Deterministic tail lock: if we're already inside the configured jitter deadband,

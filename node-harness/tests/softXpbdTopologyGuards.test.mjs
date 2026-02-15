@@ -885,6 +885,56 @@ test('local endpoint coupling accelerates pure-soft shape-memory recovery withou
     `expected bounded area drift under local coupling (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });
 
+test('higher solver recovery rate accelerates adversarial pure-soft shape-memory return with bounded area drift', () => {
+  const common = {
+    adaptiveGainMax: 1.7,
+    adaptiveExponent: 0.95,
+    nearBaselineSnapWindow: 0,
+    nearBaselineSnapBlend: 0,
+    globalErrorCouplingMax: 1.25,
+    globalDirectionalCouplingMax: 1.18,
+    outlierRecoveryCouplingMax: 1.22,
+    outlierErrorPivot: 0.75,
+    localEndpointCouplingMax: 1.16,
+    localDirectionalCouplingMax: 1.1,
+    localErrorPivot: 0.2,
+    polarityCouplingMax: 1.08,
+  };
+
+  const before = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      ...common,
+      recoverRate: 0.045,
+    },
+  });
+
+  const after = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      ...common,
+      recoverRate: 0.052,
+    },
+  });
+
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-rate-stepup]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryHalfLifeSteps <= before.recoveryHalfLifeSteps,
+    `expected non-regressing half-life with higher recoverRate (before=${before.recoveryHalfLifeSteps}, after=${after.recoveryHalfLifeSteps})`);
+  assert.ok(after.recoveryAt200 >= before.recoveryAt200,
+    `expected non-regressing early recovery with higher recoverRate (before=${before.recoveryAt200}, after=${after.recoveryAt200})`);
+  assert.ok(after.recoveryAt500 >= before.recoveryAt500,
+    `expected non-regressing mid recovery with higher recoverRate (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
+  assert.ok(after.recoveryAt1000 >= before.recoveryAt1000,
+    `expected non-regressing late recovery with higher recoverRate (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 7e-5,
+    `expected bounded area guardrail with higher recoverRate (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+});
+
 test('default pure-soft neighbor step cap improves adversarial recovery vs legacy uncapped adaptive jumps', () => {
   const recoveryOverrides = {
     recoverRate: 0.02,

@@ -208,7 +208,7 @@ export function compileFieldToMesh({
   softMinCellSize = 1, // lower bound on adaptive soft primitive size (cell units)
   softMaxCellSize = 6, // upper bound on adaptive soft primitive size (cell units)
   softBoundaryCellCap = 2, // cap soft primitive size on paint boundary to avoid seam stretch/fit loss
-  softNeighborStepDeltaCap = 0, // max coarse-step delta between neighboring soft cells (0 disables)
+  softNeighborStepDeltaCap = 1, // max coarse-step delta between neighboring soft cells (0 disables)
 }) {
   const infillMode = softInfillMode === 'triangles' ? 'triangles' : 'triangles+cross';
   const fallbackStep = Math.max(1, density | 0);

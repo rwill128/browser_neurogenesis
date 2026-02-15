@@ -1063,10 +1063,28 @@ function cloneMiniBodies(miniBodies, controls) {
       }))
     : [];
 
+  const softMembraneClusters = Array.isArray(miniBodies?.softMembraneClusters)
+    ? miniBodies.softMembraneClusters
+        .map((c) => ({
+          clusterId: Number(c?.clusterId),
+          restArea: Number(c?.restArea),
+          pressureGain: Number(c?.pressureGain),
+          radialDamping: Number(c?.radialDamping),
+        }))
+        .filter((c) => Number.isInteger(c.clusterId))
+        .map((c) => ({
+          clusterId: c.clusterId,
+          restArea: Number.isFinite(c.restArea) && c.restArea > 0 ? c.restArea : 1,
+          pressureGain: Number.isFinite(c.pressureGain) && c.pressureGain > 0 ? c.pressureGain : MEMBRANE_CELL_BASE_PRESSURE_GAIN,
+          radialDamping: Number.isFinite(c.radialDamping) ? clamp(c.radialDamping, 0, 0.2) : MEMBRANE_CELL_BASE_RADIAL_DAMPING,
+        }))
+    : [];
+
   return {
     rigid,
     soft: { nodes: softNodes, springs: softSprings },
     hybrid,
+    softMembraneClusters,
     topologyGuardrails: {
       droppedSoftSprings: sanitized.dropped,
     },
@@ -2684,6 +2702,12 @@ function scaleImportedBodies(bodies, scale) {
     if (Number.isFinite(Number(h.restB))) h.restB = Math.max(0.1, Number(h.restB) * s);
   }
 
+  for (const c of bodies.softMembraneClusters || []) {
+    if (Number.isFinite(Number(c?.restArea))) {
+      c.restArea = Math.max(1e-4, Number(c.restArea) * s * s);
+    }
+  }
+
   return bodies;
 }
 
@@ -2692,6 +2716,7 @@ function mergeBodiesIntoSim(target, incoming) {
   target.rigid = target.rigid || [];
   target.soft = target.soft || { nodes: [], springs: [] };
   target.hybrid = target.hybrid || [];
+  target.softMembraneClusters = target.softMembraneClusters || [];
 
   const rigidOffset = target.rigid.length;
   const nodeOffset = target.soft.nodes.length;
@@ -2713,6 +2738,17 @@ function mergeBodiesIntoSim(target, incoming) {
       ...h,
       rigidIndex: (h.rigidIndex || 0) + rigidOffset,
       nodeIndex: (h.nodeIndex || 0) + nodeOffset,
+    });
+  }
+
+  for (const c of incoming.softMembraneClusters || []) {
+    const cid = Number(c?.clusterId);
+    if (!Number.isInteger(cid)) continue;
+    target.softMembraneClusters.push({
+      clusterId: cid + clusterOffset,
+      restArea: Number.isFinite(Number(c?.restArea)) ? Math.max(1e-4, Number(c.restArea)) : 1,
+      pressureGain: Number.isFinite(Number(c?.pressureGain)) ? Math.max(0.001, Number(c.pressureGain)) : MEMBRANE_CELL_BASE_PRESSURE_GAIN,
+      radialDamping: Number.isFinite(Number(c?.radialDamping)) ? clamp(Number(c.radialDamping), 0, 0.2) : MEMBRANE_CELL_BASE_RADIAL_DAMPING,
     });
   }
 

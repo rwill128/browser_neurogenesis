@@ -14,6 +14,7 @@ const softDensityPaintEl = document.getElementById('softDensityPaint');
 const softInfillModeEl = document.getElementById('softInfillMode');
 const softMinCellSizeEl = document.getElementById('softMinCellSize');
 const softBoundaryRingEl = document.getElementById('softBoundaryRing');
+const softSolverModeEl = document.getElementById('softSolverMode');
 const clearBtn = document.getElementById('clearBtn');
 const compileBtn = document.getElementById('compileBtn');
 const exportBtn = document.getElementById('exportBtn');
@@ -228,6 +229,7 @@ exportBtn.addEventListener('click', () => {
     name: 'mesh-lab-creature',
     fields: { rigidField: rigid, softField: soft, softDensityField: softDensity },
     softBoundaryRingSprings: !!softBoundaryRingEl?.checked,
+    softSolverMode: softSolverModeEl?.value || 'spring',
   });
   const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -243,6 +245,10 @@ importFile.addEventListener('change', async () => {
   if (!f) return;
   const text = await f.text();
   const spec = parseCreatureSpec(text);
+  if (softSolverModeEl) {
+    const mode = (spec.softBodies?.[0]?.solverMode === 'membrane') ? 'membrane' : 'spring';
+    softSolverModeEl.value = mode;
+  }
 
   const authoring = spec.authoring?.fields;
   if (authoring && Number(authoring.width) === W && Number(authoring.height) === H && Array.isArray(authoring.rigid) && Array.isArray(authoring.soft)) {

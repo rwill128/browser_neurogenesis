@@ -6,6 +6,10 @@ const EDGE_DYE_DEFLECT = 1;
 const EDGE_DYE_ABSORB = 2;
 const EDGE_DYE_DEFLECT_RGB = [EDGE_DYE_DEFLECT, EDGE_DYE_DEFLECT, EDGE_DYE_DEFLECT];
 
+function normalizeSoftSolverMode(mode) {
+  return String(mode || '').toLowerCase() === 'membrane' ? 'membrane' : 'spring';
+}
+
 export function createCreatureSpecFromMesh(mesh, options = {}) {
   const width = mesh?.meta?.width || options.width || 128;
   const height = mesh?.meta?.height || options.height || 128;
@@ -167,10 +171,12 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
   }
 
   const soft = { nodes: [], springs: [] };
+  const softMembraneClusters = [];
   const softNodeMap = new Map();
   let clusterId = 0;
   for (let sbi = 0; sbi < (spec.softBodies || []).length; sbi++) {
     const sb = spec.softBodies[sbi];
+    const solverMode = normalizeSoftSolverMode(sb?.solverMode);
     const base = soft.nodes.length;
     for (let i = 0; i < sb.nodes.length; i++) {
       const p = sb.nodes[i] || {};
@@ -202,6 +208,16 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
         normalizeEdgeBodyMode(edgeBodyRaw),
         normalizeEdgeDyeMode(edgeDyeRaw),
       ]);
+    }
+
+    if (solverMode === 'membrane') {
+      softMembraneClusters.push({
+        clusterId,
+        restArea: Math.max(1e-4, Number(sb?.restArea) || 0),
+        pressureGain: Math.max(0.001, Number(sb?.pressureGain) || 0.08),
+        radialDamping: Math.max(0, Number(sb?.radialDamping) || 0.06),
+        solverMode,
+      });
     }
 
     clusterId += 1;
@@ -244,7 +260,7 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
     });
   }
 
-  return { rigid, soft, hybrid };
+  return { rigid, soft, hybrid, softMembraneClusters };
 }
 
 function buildRigidExportFromCompilerPieces(rigidPieces, nodes, options) {
@@ -521,6 +537,8 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
   const enableBoundaryRing = options?.softBoundaryRingSprings !== false;
   const enableSeamWeldSprings = options?.softSeamWeldSprings !== false;
   const seamAxisEps = Math.max(1e-9, Number(options?.softSeamAxisEpsilon) || 1e-6);
+  const softSolverModeDefault = normalizeSoftSolverMode(options?.softSolverMode);
+  const softSolverModesByComponent = options?.softSolverModesByComponent || null;
   const boundaryRingStrideRaw = Math.max(2, Math.round(Number(options?.softBoundaryRingStride) || 2));
   const boundaryRingMaxSpanFactor = Math.max(1.5, Number(options?.softBoundaryRingMaxSpanFactor) || 2.75);
   const crossBeamMaxSpanFactor = Math.max(1.25, Number(options?.softCrossBeamMaxSpanFactor) || 2.75);
@@ -715,8 +733,16 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
     }
 
     const bodyIndex = softBodies.length;
+    const modeRaw = Array.isArray(softSolverModesByComponent)
+      ? softSolverModesByComponent[bodyIndex]
+      : (softSolverModesByComponent && typeof softSolverModesByComponent === 'object'
+        ? softSolverModesByComponent[bodyIndex]
+        : softSolverModeDefault);
+    const solverMode = normalizeSoftSolverMode(modeRaw);
+
     softBodies.push({
       id: `soft_${bodyIndex}`,
+      solverMode,
       nodes: softNodes,
       springs,
     });

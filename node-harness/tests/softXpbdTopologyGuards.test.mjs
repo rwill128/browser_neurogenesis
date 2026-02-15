@@ -2068,3 +2068,70 @@ test('local outlier coupling improves adversarial pure-soft recovery speed witho
   assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 7e-5,
     `expected bounded area guardrail under local outlier coupling (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });
+
+test('terminal tip mesh cap improves adversarial pure-soft recovery without area regression', () => {
+  const recoveryProfile = {
+    recoverRate: 0.02,
+    adaptiveGainMax: 1.35,
+    adaptiveExponent: 1.05,
+    nearBaselineSnapWindow: 0,
+    nearBaselineSnapBlend: 0,
+    smallRestRecoveryCouplingMax: 1,
+    globalErrorCouplingMax: 1,
+    globalDirectionalCouplingMax: 1,
+    outlierRecoveryCouplingMax: 1,
+    polarityCouplingMax: 1,
+    localEndpointCouplingMax: 1.16,
+    localDirectionalCouplingMax: 1.1,
+    localImbalanceCouplingMax: 1.12,
+    localConsensusCouplingMax: 1.08,
+    localOutlierCouplingMax: 1.18,
+    localOutlierErrorPivot: 0.35,
+    localErrorPivot: 0.2,
+  };
+
+  const compileBase = {
+    softNeighborStepDeltaCap: 0,
+    softBoundaryCellCap: 6,
+    softMaxCellSize: 10,
+    softThinFeatureCellCap: 0,
+    softBridgeCellCap: 3,
+    softBridgeNeighborMax: 2,
+  };
+
+  const before = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: recoveryProfile,
+    compileOverrides: {
+      ...compileBase,
+      softTerminalTipCellCap: 0,
+    },
+  });
+
+  const after = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: recoveryProfile,
+    compileOverrides: {
+      ...compileBase,
+      softTerminalTipCellCap: 2,
+    },
+  });
+
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-terminal-tip-cap]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryAt200 >= (before.recoveryAt200 - 1e-5),
+    `expected near-par early recovery with terminal tip cap (before=${before.recoveryAt200}, after=${after.recoveryAt200})`);
+  assert.ok(after.recoveryAt500 >= (before.recoveryAt500 - 1e-5),
+    `expected near-par mid recovery with terminal tip cap (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
+  assert.ok(after.recoveryAt1000 >= (before.recoveryAt1000 - 1e-5),
+    `expected near-par late recovery with terminal tip cap (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.baselineRestSpanRatio <= before.baselineRestSpanRatio,
+    `expected tighter/non-regressing rest-span topology with terminal tip cap (before=${before.baselineRestSpanRatio}, after=${after.baselineRestSpanRatio})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 7e-5,
+    `expected bounded area guardrail with terminal tip cap (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+});
+

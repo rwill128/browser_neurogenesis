@@ -71,6 +71,38 @@ test('createCreatureSpecFromMesh compacts default rigid edge arrays', () => {
   assert.equal(rb.edgePermeabilityRGB, undefined);
 });
 
+test('soft solver mode is exported and membrane mode is mapped on import bodies', () => {
+  const mesh = {
+    nodes: [
+      { id: 0, x: 0, y: 0, rigid: 0, soft: 1 },
+      { id: 1, x: 4, y: 0, rigid: 0, soft: 1 },
+      { id: 2, x: 2, y: 4, rigid: 0, soft: 1 },
+    ],
+    triangles: [
+      { kind: 'soft', a: 0, b: 1, c: 2 },
+    ],
+    meta: { width: 8, height: 8 },
+  };
+
+  const membraneSpec = createCreatureSpecFromMesh(mesh, {
+    softSolverMode: 'membrane',
+    softBoundaryRingSprings: false,
+  });
+  assert.equal(membraneSpec.softBodies[0].solverMode, 'membrane');
+
+  const importedMembrane = buildBodiesFromCreatureSpec(membraneSpec, 64, CONTROLS);
+  assert.ok(Array.isArray(importedMembrane.softMembraneClusters));
+  assert.equal(importedMembrane.softMembraneClusters.length, 1);
+  assert.equal(importedMembrane.softMembraneClusters[0].clusterId, 0);
+
+  const springSpec = createCreatureSpecFromMesh(mesh, {
+    softSolverMode: 'spring',
+    softBoundaryRingSprings: false,
+  });
+  const importedSpring = buildBodiesFromCreatureSpec(springSpec, 64, CONTROLS);
+  assert.equal(importedSpring.softMembraneClusters.length, 0);
+});
+
 test('createCreatureSpecFromMesh carries compiler soft cross-beams into soft spring export', () => {
   const mesh = {
     nodes: [

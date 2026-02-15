@@ -1381,6 +1381,62 @@ test('default pure-soft bridge cap improves adversarial narrow-bridge recovery w
 });
 
 
+test('default bridge neighbor-max (3) improves adversarial pure-soft endpoint recovery without area regression', () => {
+  const recoveryOverrides = {
+    recoverRate: 0.056,
+    adaptiveGainMax: 2.4,
+    adaptiveExponent: 0.8,
+    elongationBiasMax: 1.22,
+    compressionBiasMax: 1.12,
+    errorPivot: 0.16,
+    nearBaselineSnapWindow: 0.004,
+    nearBaselineSnapBlend: 0.9,
+  };
+
+  const compileBase = {
+    softNeighborStepDeltaCap: 0,
+    softBoundaryCellCap: 6,
+    softMaxCellSize: 10,
+    softThinFeatureCellCap: 0,
+    softBridgeCellCap: 2,
+  };
+
+  const before = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides,
+    compileOverrides: {
+      ...compileBase,
+      softBridgeNeighborMax: 2,
+    },
+  });
+
+  const after = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides,
+    compileOverrides: {
+      ...compileBase,
+      softBridgeNeighborMax: 3,
+    },
+  });
+
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-default-bridge-neighbor-max]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryAt200 >= before.recoveryAt200,
+    `expected non-regressing early recovery with bridge neighbor-max 3 (before=${before.recoveryAt200}, after=${after.recoveryAt200})`);
+  assert.ok(after.recoveryAt500 >= before.recoveryAt500,
+    `expected non-regressing mid recovery with bridge neighbor-max 3 (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
+  assert.ok(after.recoveryAt1000 >= before.recoveryAt1000,
+    `expected non-regressing late recovery with bridge neighbor-max 3 (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.baselineRestSpanRatio <= before.baselineRestSpanRatio,
+    `expected non-regressing baseline rest-span topology under bridge neighbor-max 3 (before=${before.baselineRestSpanRatio}, after=${after.baselineRestSpanRatio})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation,
+    `expected improved area guardrail under bridge neighbor-max 3 (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+});
+
 test('tighter default bridge cap (3 -> 2) improves coarse pure-soft mesh span without recovery regression', () => {
   const recoveryOverrides = {
     recoverRate: 0.02,

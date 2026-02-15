@@ -42,7 +42,7 @@ function deriveBaseStepFromDensityField({ width, height, rigidField, softField, 
   return densityValueToStep(meanDensity);
 }
 
-function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField, softMinCellSize = 1, softMaxCellSize = 6, softBoundaryCellCap = 2, softNeighborStepDeltaCap = 0, softThinFeatureCellCap = 0, softBridgeCellCap = 2 }) {
+function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField, softMinCellSize = 1, softMaxCellSize = 6, softBoundaryCellCap = 2, softNeighborStepDeltaCap = 0, softThinFeatureCellCap = 0, softBridgeCellCap = 2, softBridgeNeighborMax = 2 }) {
   const minSoftStep = Math.max(1, Math.round(Number(softMinCellSize) || 1));
   const maxSoftStep = Math.max(minSoftStep, Math.round(Number(softMaxCellSize) || 6));
   const boundaryCap = Number.isFinite(Number(softBoundaryCellCap))
@@ -57,6 +57,9 @@ function buildAdaptiveDensityCells({ width, height, rigidField, softField, thres
   const bridgeCap = Number.isFinite(Number(softBridgeCellCap))
     ? Math.max(0, Math.round(Number(softBridgeCellCap)))
     : 3;
+  const bridgeNeighborMax = Number.isFinite(Number(softBridgeNeighborMax))
+    ? Math.max(1, Math.min(4, Math.round(Number(softBridgeNeighborMax))))
+    : 2;
   const cw = Math.max(1, width - 1);
   const ch = Math.max(1, height - 1);
   const cellCount = cw * ch;
@@ -150,9 +153,9 @@ function buildAdaptiveDensityCells({ width, height, rigidField, softField, thres
         if (y > 0 && kindGrid[cIdx(x, y - 1)] === 2) cardinalSoft += 1;
         if (y + 1 < ch && kindGrid[cIdx(x, y + 1)] === 2) cardinalSoft += 1;
 
-        // 1-cell bridges can look well-supported diagonally while still acting like
+        // 1-cell/branch necks can look well-supported diagonally while still acting like
         // long tendrils in the solver. Cap primitive scale by cardinal connectivity.
-        if (cardinalSoft <= 2) {
+        if (bridgeCap > 0 && cardinalSoft <= bridgeNeighborMax) {
           stepGrid[i] = Math.max(minSoftStep, Math.min(stepGrid[i], bridgeCap));
         }
       }
@@ -262,6 +265,7 @@ export function compileFieldToMesh({
   softNeighborStepDeltaCap = 1, // max coarse-step delta between neighboring soft cells (0 disables)
   softThinFeatureCellCap = 2, // cap primitive size in narrow/tendril soft regions to preserve shape memory topology
   softBridgeCellCap = 2, // cap primitive size in low-cardinality bridge cells to reduce soft rest-span outliers
+  softBridgeNeighborMax = 2, // max cardinal neighbors counted as bridge-like (legacy/default=2)
 }) {
   const infillMode = softInfillMode === 'triangles' ? 'triangles' : 'triangles+cross';
   const fallbackStep = Math.max(1, density | 0);
@@ -277,6 +281,9 @@ export function compileFieldToMesh({
   const softBridgeCap = Number.isFinite(Number(softBridgeCellCap))
     ? Math.max(0, Math.round(Number(softBridgeCellCap)))
     : 3;
+  const softBridgeNeighborLimit = Number.isFinite(Number(softBridgeNeighborMax))
+    ? Math.max(1, Math.min(4, Math.round(Number(softBridgeNeighborMax))))
+    : 2;
   const step = deriveBaseStepFromDensityField({
     width,
     height,
@@ -344,6 +351,7 @@ export function compileFieldToMesh({
       softNeighborStepDeltaCap: softNeighborDeltaCap,
       softThinFeatureCellCap: softThinFeatureCap,
       softBridgeCellCap: softBridgeCap,
+      softBridgeNeighborMax: softBridgeNeighborLimit,
     });
     for (const c of adaptive.cells) {
       const x0 = c.x;
@@ -422,6 +430,7 @@ export function compileFieldToMesh({
       softNeighborStepDeltaCap: softNeighborDeltaCap,
       softThinFeatureCellCap: softThinFeatureCap,
       softBridgeCellCap: softBridgeCap,
+      softBridgeNeighborMax: softBridgeNeighborLimit,
     },
   };
 }

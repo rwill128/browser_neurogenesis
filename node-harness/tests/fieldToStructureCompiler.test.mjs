@@ -819,3 +819,95 @@ test('soft overlap trim treats rigid hull boundary as blocking (no seam-hugging 
 
   assert.ok((mesh.meta.softOverlapTrimmed || 0) > 0, 'expected seam-hugging overlap to be trimmed');
 });
+
+test('pure-soft bridge neighbor-max includes branch necks to bound adversarial tip primitive scale', () => {
+  const w = 96, h = 96;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+  const softDensity = new Float32Array(w * h).fill(0.98);
+
+  // Large body + thin rightward tendril ending in a terminal bulb (pure-soft adversarial tip).
+  for (let y = 18; y <= 78; y++) {
+    for (let x = 16; x <= 62; x++) soft[y * w + x] = 1;
+  }
+  for (let y = 44; y <= 51; y++) {
+    for (let x = 62; x <= 90; x++) {
+      soft[y * w + x] = 1;
+      softDensity[y * w + x] = 0.99;
+    }
+  }
+  for (let y = 40; y <= 55; y++) {
+    for (let x = 86; x <= 92; x++) {
+      soft[y * w + x] = 1;
+      softDensity[y * w + x] = 0.99;
+    }
+  }
+
+  const beforeLegacyBridgeNeighborMax2 = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: softDensity,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles+cross',
+    softNeighborStepDeltaCap: 0,
+    softBoundaryCellCap: 6,
+    softThinFeatureCellCap: 0,
+    softBridgeCellCap: 2,
+    softBridgeNeighborMax: 2,
+  });
+
+  const afterDefaultBridgeNeighborMax3 = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: softDensity,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles+cross',
+    softNeighborStepDeltaCap: 0,
+    softBoundaryCellCap: 6,
+    softThinFeatureCellCap: 0,
+    softBridgeCellCap: 2,
+    // compare new default branch-sensitive bridge threshold vs legacy <=2
+    softBridgeNeighborMax: 3,
+  });
+
+  const tipEdgeStats = (mesh) => {
+    const tipEdges = [];
+    for (const t of mesh.triangles) {
+      if (t.kind !== 'soft') continue;
+      const a = mesh.nodes[t.a];
+      const b = mesh.nodes[t.b];
+      const c = mesh.nodes[t.c];
+      const cx = (a.x + b.x + c.x) / 3;
+      const cy = (a.y + b.y + c.y) / 3;
+      if (cx < 80 || cy < 36 || cy > 60) continue;
+      tipEdges.push(
+        Math.hypot(a.x - b.x, a.y - b.y),
+        Math.hypot(b.x - c.x, b.y - c.y),
+        Math.hypot(c.x - a.x, c.y - a.y),
+      );
+    }
+    tipEdges.sort((m, n) => m - n);
+    const p95 = tipEdges.length ? tipEdges[Math.floor((tipEdges.length - 1) * 0.95)] : 0;
+    const max = tipEdges.length ? tipEdges[tipEdges.length - 1] : 0;
+    return { tipEdgeP95: p95, tipEdgeMax: max, samples: tipEdges.length };
+  };
+
+  const before = tipEdgeStats(beforeLegacyBridgeNeighborMax2);
+  const after = tipEdgeStats(afterDefaultBridgeNeighborMax3);
+
+  assert.ok(afterDefaultBridgeNeighborMax3.meta.softTriangles > 0, 'bridge-neighbor-cap mesh should still produce soft triangles');
+  assert.ok(after.samples > 0 && before.samples > 0, 'expected non-empty tip-edge samples');
+  assert.ok(afterDefaultBridgeNeighborMax3.meta.softTriangles > beforeLegacyBridgeNeighborMax2.meta.softTriangles,
+    `expected denser branch-neck topology with bridge neighbor-max 3 (before=${beforeLegacyBridgeNeighborMax2.meta.softTriangles}, after=${afterDefaultBridgeNeighborMax3.meta.softTriangles})`);
+  assert.ok(after.tipEdgeP95 <= before.tipEdgeP95,
+    `expected non-regressing endpoint p95 edge with bridge neighbor-max 3 (before=${before.tipEdgeP95}, after=${after.tipEdgeP95})`);
+  assert.ok(after.tipEdgeMax <= before.tipEdgeMax,
+    `expected non-regressing endpoint max edge with bridge neighbor-max 3 (before=${before.tipEdgeMax}, after=${after.tipEdgeMax})`);
+  assert.equal(afterDefaultBridgeNeighborMax3.meta.softBridgeNeighborMax, 3);
+});

@@ -42,6 +42,80 @@ function deriveBaseStepFromDensityField({ width, height, rigidField, softField, 
   return densityValueToStep(meanDensity);
 }
 
+function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField }) {
+  const cw = Math.max(1, width - 1);
+  const ch = Math.max(1, height - 1);
+  const cellCount = cw * ch;
+  const kindGrid = new Uint8Array(cellCount); // 0 empty, 1 rigid, 2 soft
+  const stepGrid = new Uint8Array(cellCount);
+  const used = new Uint8Array(cellCount);
+  const rigidMask = new Uint8Array(cellCount);
+
+  const cIdx = (x, y) => y * cw + x;
+
+  for (let y = 0; y < ch; y++) {
+    for (let x = 0; x < cw; x++) {
+      const i = cIdx(x, y);
+      const sx = Math.min(width - 1.001, x + 0.5);
+      const sy = Math.min(height - 1.001, y + 0.5);
+      const rv = sampleBilinear(rigidField, width, height, sx, sy);
+      const sv = sampleBilinear(softField, width, height, sx, sy);
+      kindGrid[i] = rv >= threshold ? 1 : (sv >= threshold ? 2 : 0);
+      const d = sampleBilinear(densityField, width, height, sx, sy);
+      stepGrid[i] = densityValueToStep(d);
+    }
+  }
+
+  const cells = [];
+
+  const canPlace = (kind, x0, y0, size) => {
+    if (x0 + size > cw || y0 + size > ch) return false;
+    for (let y = y0; y < y0 + size; y++) {
+      for (let x = x0; x < x0 + size; x++) {
+        const i = cIdx(x, y);
+        if (used[i]) return false;
+        if (kindGrid[i] !== kind) return false;
+        if ((stepGrid[i] || 1) < size) return false;
+      }
+    }
+    return true;
+  };
+
+  for (let y = 0; y < ch; y++) {
+    for (let x = 0; x < cw; x++) {
+      const i = cIdx(x, y);
+      if (used[i]) continue;
+      const kind = kindGrid[i];
+      if (!kind) continue;
+
+      const target = Math.max(1, stepGrid[i] || 1);
+      let size = target;
+      while (size > 1 && !canPlace(kind, x, y, size)) size -= 1;
+      if (!canPlace(kind, x, y, size)) continue;
+
+      for (let yy = y; yy < y + size; yy++) {
+        for (let xx = x; xx < x + size; xx++) {
+          const ii = cIdx(xx, yy);
+          used[ii] = 1;
+          if (kind === 1) rigidMask[ii] = 1;
+        }
+      }
+
+      cells.push({
+        kind: kind === 1 ? 'rigid' : 'soft',
+        x,
+        y,
+        size,
+      });
+    }
+  }
+
+  return {
+    cells,
+    rigidMask: { mask: rigidMask, cols: cw, rows: ch, step: 1 },
+  };
+}
+
 export function compileFieldToMesh({
   width,
   height,
@@ -54,7 +128,7 @@ export function compileFieldToMesh({
   connectivityMode = 'none', // none | largest (strict single connected body)
   minComponentTriangles = 0,
   softInfillMode = 'triangles+cross', // triangles | triangles+cross
-  softDensityField = null, // 0..1, controls rigid+soft infill retention/resolution bias (darker=denser, brighter=sparser)
+  softDensityField = null, // 0..1, controls local rigid+soft primitive size (darker=finer, brighter=coarser)
 }) {
   const infillMode = softInfillMode === 'triangles' ? 'triangles' : 'triangles+cross';
   const fallbackStep = Math.max(1, density | 0);
@@ -107,12 +181,35 @@ export function compileFieldToMesh({
     });
   };
 
-  for (let y = 0; y < height - step; y += step) {
-    for (let x = 0; x < width - step; x += step) {
-      const x1 = x + step;
-      const y1 = y + step;
-      addTri(x, y, x1, y, x, y1);
-      addTri(x1, y, x1, y1, x, y1);
+  let rigidMaskOverride = null;
+  const hasDensityMap = (softDensityField instanceof Float32Array) && softDensityField.length >= width * height;
+
+  if (hasDensityMap) {
+    const adaptive = buildAdaptiveDensityCells({
+      width,
+      height,
+      rigidField,
+      softField,
+      threshold,
+      densityField: softDensityField,
+    });
+    for (const c of adaptive.cells) {
+      const x0 = c.x;
+      const y0 = c.y;
+      const x1 = c.x + c.size;
+      const y1 = c.y + c.size;
+      addTri(x0, y0, x1, y0, x0, y1);
+      addTri(x1, y0, x1, y1, x0, y1);
+    }
+    rigidMaskOverride = adaptive.rigidMask;
+  } else {
+    for (let y = 0; y < height - step; y += step) {
+      for (let x = 0; x < width - step; x += step) {
+        const x1 = x + step;
+        const y1 = y + step;
+        addTri(x, y, x1, y, x, y1);
+        addTri(x1, y, x1, y1, x, y1);
+      }
     }
   }
 
@@ -125,15 +222,18 @@ export function compileFieldToMesh({
     cellSize: step,
     nodes,
     keptTriangles: filtered.triangles,
+    rigidMaskOverride,
   });
 
   const noOverlap = removeSoftTrianglesOverlappingRigidContours(filtered.triangles, nodes, rigidDecomp.pieces);
-  const densityApplied = applyInfillDensityMap(noOverlap.triangles, nodes, {
-    width,
-    height,
-    densityField: softDensityField,
-    step,
-  });
+  const densityApplied = hasDensityMap
+    ? { triangles: noOverlap.triangles, culledSoft: 0, culledRigid: 0 }
+    : applyInfillDensityMap(noOverlap.triangles, nodes, {
+        width,
+        height,
+        densityField: softDensityField,
+        step,
+      });
   const final = enforceConnectivity({ triangles: densityApplied.triangles, mode: connectivityMode, minComponentTriangles });
   const useSoftCrossBeams = infillMode === 'triangles+cross';
   const softCrossBeams = useSoftCrossBeams ? buildSoftCrossBeams(final.triangles, nodes) : [];
@@ -226,20 +326,36 @@ function pickComponentsToKeep(components, mode, minComponentTriangles) {
   return components;
 }
 
-function extractRigidContoursFromField({ width, height, rigidField, threshold, cellSize, nodes, keptTriangles }) {
-  const step = Math.max(1, cellSize | 0);
-  const cols = Math.max(1, Math.ceil(width / step));
-  const rows = Math.max(1, Math.ceil(height / step));
+function extractRigidContoursFromField({ width, height, rigidField, threshold, cellSize, nodes, keptTriangles, rigidMaskOverride = null }) {
+  let step = Math.max(1, cellSize | 0);
+  let cols = Math.max(1, Math.ceil(width / step));
+  let rows = Math.max(1, Math.ceil(height / step));
 
-  const mask = new Uint8Array(cols * rows);
-  const mIdx = (x, y) => y * cols + x;
+  let mask = null;
+  if (rigidMaskOverride && rigidMaskOverride.mask instanceof Uint8Array) {
+    const m = rigidMaskOverride.mask;
+    const c = Number(rigidMaskOverride.cols) | 0;
+    const r = Number(rigidMaskOverride.rows) | 0;
+    const s = Number(rigidMaskOverride.step) || 1;
+    if (c > 0 && r > 0 && m.length >= c * r) {
+      mask = m;
+      cols = c;
+      rows = r;
+      step = Math.max(1, s);
+    }
+  }
 
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const sx = Math.min(width - 0.501, x * step + step * 0.5);
-      const sy = Math.min(height - 0.501, y * step + step * 0.5);
-      const rv = sampleBilinear(rigidField, width, height, sx, sy);
-      if (rv >= threshold) mask[mIdx(x, y)] = 1;
+  if (!mask) {
+    mask = new Uint8Array(cols * rows);
+    const mIdx = (x, y) => y * cols + x;
+
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const sx = Math.min(width - 0.501, x * step + step * 0.5);
+        const sy = Math.min(height - 0.501, y * step + step * 0.5);
+        const rv = sampleBilinear(rigidField, width, height, sx, sy);
+        if (rv >= threshold) mask[mIdx(x, y)] = 1;
+      }
     }
   }
 

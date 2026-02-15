@@ -130,7 +130,7 @@ test('compiler can use triangle-only soft in-fill mode (no cross-beams)', () => 
 
 
 
-test('compiler applies soft in-fill density map with seam-preserving transition handling', () => {
+test('compiler applies soft density map as local primitive-size control with seam continuity', () => {
   const w = 64, h = 64;
   const rigid = new Float32Array(w * h);
   const soft = new Float32Array(w * h);
@@ -139,7 +139,7 @@ test('compiler applies soft in-fill density map with seam-preserving transition 
   for (let y = 8; y <= 56; y++) {
     for (let x = 8; x <= 56; x++) {
       soft[y * w + x] = 1;
-      if (x >= 32) softDensity[y * w + x] = 1.0; // brighter half => sparser
+      if (x >= 32) softDensity[y * w + x] = 1.0; // brighter half => coarser primitives
     }
   }
 
@@ -166,9 +166,23 @@ test('compiler applies soft in-fill density map with seam-preserving transition 
     softInfillMode: 'triangles',
   });
 
-  assert.ok(mapped.meta.softDensityCulled > 0, 'expected density map to cull some interior soft triangles');
+  assert.equal(mapped.meta.densitySource, 'map', 'density map should drive primitive-size mode');
+  assert.equal(mapped.meta.softDensityCulled, 0, 'size-control map should not sparse-cull soft triangles');
   assert.equal(mapped.meta.rigidDensityCulled, 0, 'no rigid fill present, so rigid cull count should remain zero');
-  assert.ok(mapped.meta.softTriangles < baseline.meta.softTriangles, 'density map should reduce soft triangle count');
+
+  const softLeftFine = mapped.triangles.filter((t) => {
+    if (t.kind !== 'soft') return false;
+    const a = mapped.nodes[t.a], b = mapped.nodes[t.b], c = mapped.nodes[t.c];
+    const cx = (a.x + b.x + c.x) / 3;
+    return cx < 30;
+  }).length;
+  const softRightCoarse = mapped.triangles.filter((t) => {
+    if (t.kind !== 'soft') return false;
+    const a = mapped.nodes[t.a], b = mapped.nodes[t.b], c = mapped.nodes[t.c];
+    const cx = (a.x + b.x + c.x) / 3;
+    return cx > 34;
+  }).length;
+  assert.ok(softLeftFine > softRightCoarse, `expected darker/finer side to contain more primitives (left=${softLeftFine}, right=${softRightCoarse})`);
 
   const seamBand = mapped.triangles.filter((t) => {
     if (t.kind !== 'soft') return false;
@@ -199,7 +213,7 @@ test('density map also modulates rigid infill resolution (not soft-only)', () =>
   for (let y = 8; y <= 56; y++) {
     for (let x = 8; x <= 56; x++) {
       rigid[y * w + x] = 1;
-      if (x >= 32) softDensity[y * w + x] = 1.0; // brighter => sparser retention
+      if (x >= 32) softDensity[y * w + x] = 1.0; // brighter => coarser primitives
     }
   }
 
@@ -227,9 +241,22 @@ test('density map also modulates rigid infill resolution (not soft-only)', () =>
   });
 
   assert.equal(mapped.meta.densitySource, 'map', 'density map should own effective infill step source');
-  assert.ok(mapped.meta.rigidDensityCulled > 0, 'expected density map to cull rigid interior infill triangles too');
-  assert.ok(mapped.meta.rigidTriangles < baseline.meta.rigidTriangles, 'density map should reduce rigid triangle count in sparse regions');
+  assert.equal(mapped.meta.rigidDensityCulled, 0, 'size-control map should not sparse-cull rigid triangles');
   assert.ok(mapped.meta.rigidPieces > 0, 'rigid contour extraction should remain available/authoritative');
+
+  const rigidLeftFine = mapped.triangles.filter((t) => {
+    if (t.kind !== 'rigid') return false;
+    const a = mapped.nodes[t.a], b = mapped.nodes[t.b], c = mapped.nodes[t.c];
+    const cx = (a.x + b.x + c.x) / 3;
+    return cx < 30;
+  }).length;
+  const rigidRightCoarse = mapped.triangles.filter((t) => {
+    if (t.kind !== 'rigid') return false;
+    const a = mapped.nodes[t.a], b = mapped.nodes[t.b], c = mapped.nodes[t.c];
+    const cx = (a.x + b.x + c.x) / 3;
+    return cx > 34;
+  }).length;
+  assert.ok(rigidLeftFine > rigidRightCoarse, `expected darker/finer rigid side to contain more primitives (left=${rigidLeftFine}, right=${rigidRightCoarse})`);
 });
 
 test('density map controls effective infill step (darker=>smaller, brighter=>larger)', () => {

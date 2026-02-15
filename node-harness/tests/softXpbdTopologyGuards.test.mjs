@@ -1672,3 +1672,63 @@ test('default low-error coupling improves adversarial pure-soft tail recovery wi
   assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 7e-5,
     `expected bounded area guardrail under default low-error coupling (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });
+
+test('local consensus coupling improves adversarial pure-soft shape-memory recovery without area regression', () => {
+  const recoveryProfile = {
+    recoverRate: 0.02,
+    adaptiveGainMax: 1.35,
+    adaptiveExponent: 1.05,
+    nearBaselineSnapWindow: 0,
+    nearBaselineSnapBlend: 0,
+    smallRestRecoveryCouplingMax: 1,
+    globalErrorCouplingMax: 1,
+    globalDirectionalCouplingMax: 1,
+    outlierRecoveryCouplingMax: 1,
+    polarityCouplingMax: 1,
+    localEndpointCouplingMax: 1.16,
+    localDirectionalCouplingMax: 1.1,
+    localImbalanceCouplingMax: 1.12,
+    localErrorPivot: 0.2,
+  };
+
+  const compileOverrides = {
+    softNeighborStepDeltaCap: 0,
+    softBoundaryCellCap: 6,
+    softMaxCellSize: 10,
+    softThinFeatureCellCap: 0,
+    softBridgeCellCap: 0,
+  };
+
+  const before = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      ...recoveryProfile,
+      localConsensusCouplingMax: 1,
+    },
+    compileOverrides,
+  });
+
+  const after = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      ...recoveryProfile,
+      localConsensusCouplingMax: 1.08,
+    },
+    compileOverrides,
+  });
+
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-local-consensus-coupling]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryHalfLifeSteps <= before.recoveryHalfLifeSteps,
+    `expected non-regressing half-life under local consensus coupling (before=${before.recoveryHalfLifeSteps}, after=${after.recoveryHalfLifeSteps})`);
+  assert.ok(after.recoveryAt500 > before.recoveryAt500,
+    `expected better mid recovery under local consensus coupling (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
+  assert.ok(after.recoveryAt1000 >= before.recoveryAt1000,
+    `expected non-regressing late recovery under local consensus coupling (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 7e-5,
+    `expected bounded area guardrail under local consensus coupling (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+});

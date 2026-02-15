@@ -2182,6 +2182,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       localEndpointCouplingMax: recovering ? 1.16 : 1.03,
       localDirectionalCouplingMax: recovering ? 1.1 : 1.02,
       localImbalanceCouplingMax: recovering ? 1.12 : 1.02,
+      localConsensusCouplingMax: recovering ? 1.08 : 1.01,
       localErrorPivot: recovering ? 0.2 : 0.3,
       counterPolarityCouplingMax: recovering ? 1.07 : 1.02,
       smallRestRecoveryCouplingMax: recovering ? 1.14 : 1.0,

@@ -2179,6 +2179,9 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       errorPivot: 0.16,
       outlierRecoveryCouplingMax: recovering ? 1.22 : 1.05,
       outlierErrorPivot: recovering ? 0.75 : 0.95,
+      localEndpointCouplingMax: recovering ? 1.16 : 1.03,
+      localDirectionalCouplingMax: recovering ? 1.1 : 1.02,
+      localErrorPivot: recovering ? 0.2 : 0.3,
     });
   }
   sim.softDeformationState = deform;

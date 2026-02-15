@@ -195,6 +195,9 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   globalDirectionalCouplingMax = 1.18,
   outlierRecoveryCouplingMax = 1.22,
   outlierErrorPivot = 0.75,
+  localEndpointCouplingMax = 1.16,
+  localDirectionalCouplingMax = 1.1,
+  localErrorPivot = 0.2,
 } = {}) {
   if (!Array.isArray(springs) || !restBaseline || typeof restBaseline.length !== 'number') return 0;
 
@@ -217,13 +220,29 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const directionalCouplingMax = Math.max(1, Number(globalDirectionalCouplingMax) || 1);
   const outlierCouplingMax = Math.max(1, Number(outlierRecoveryCouplingMax) || 1);
   const outlierPivot = Math.max(1e-6, Number(outlierErrorPivot) || 0.75);
+  const localEndpointMax = Math.max(1, Number(localEndpointCouplingMax) || 1);
+  const localDirectionalMax = Math.max(1, Number(localDirectionalCouplingMax) || 1);
+  const localPivot = Math.max(1e-6, Number(localErrorPivot) || 0.2);
 
   let touched = 0;
   const n = Math.min(springs.length, restBaseline.length);
+  let maxNodeIndex = -1;
+  for (let i = 0; i < n; i++) {
+    const sp = springs[i];
+    if (!Array.isArray(sp) || sp.length < 2) continue;
+    const a = Number(sp[0]);
+    const b = Number(sp[1]);
+    if (Number.isInteger(a) && a >= 0) maxNodeIndex = Math.max(maxNodeIndex, a);
+    if (Number.isInteger(b) && b >= 0) maxNodeIndex = Math.max(maxNodeIndex, b);
+  }
+  const nodeErrAbsSum = maxNodeIndex >= 0 ? new Float64Array(maxNodeIndex + 1) : null;
+  const nodeErrSignedSum = maxNodeIndex >= 0 ? new Float64Array(maxNodeIndex + 1) : null;
+  const nodeErrCount = maxNodeIndex >= 0 ? new Uint32Array(maxNodeIndex + 1) : null;
+
   let meanErrNorm = 0;
   let meanSignedErrNorm = 0;
   let meanErrCount = 0;
-  if (adaptiveMode && globalCouplingMax > 1.0001 && n > 0) {
+  if (n > 0 && (adaptiveMode || nodeErrAbsSum)) {
     for (let i = 0; i < n; i++) {
       const sp = springs[i];
       if (!Array.isArray(sp) || sp.length < 3) continue;
@@ -231,9 +250,28 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       const current = Number(sp[2]);
       const cur = Number.isFinite(current) ? current : base;
       const signedErrNorm = (cur - base) / base;
-      meanErrNorm += Math.abs(signedErrNorm);
-      meanSignedErrNorm += signedErrNorm;
-      meanErrCount += 1;
+      const absErrNorm = Math.abs(signedErrNorm);
+
+      if (adaptiveMode && globalCouplingMax > 1.0001) {
+        meanErrNorm += absErrNorm;
+        meanSignedErrNorm += signedErrNorm;
+        meanErrCount += 1;
+      }
+
+      if (nodeErrAbsSum) {
+        const a = Number(sp[0]);
+        const b = Number(sp[1]);
+        if (Number.isInteger(a) && a >= 0 && a < nodeErrAbsSum.length) {
+          nodeErrAbsSum[a] += absErrNorm;
+          nodeErrSignedSum[a] += signedErrNorm;
+          nodeErrCount[a] += 1;
+        }
+        if (Number.isInteger(b) && b >= 0 && b < nodeErrAbsSum.length) {
+          nodeErrAbsSum[b] += absErrNorm;
+          nodeErrSignedSum[b] += signedErrNorm;
+          nodeErrCount[b] += 1;
+        }
+      }
     }
     meanErrNorm = meanErrCount > 0 ? (meanErrNorm / meanErrCount) : 0;
     meanSignedErrNorm = meanErrCount > 0 ? (meanSignedErrNorm / meanErrCount) : 0;
@@ -262,7 +300,40 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       : 1;
     const outlierAlpha = clamp((outlierRatio - 1) / outlierPivot, 0, 1);
     const outlierBoost = 1 + (outlierCouplingMax - 1) * outlierAlpha;
-    const boost = (1 + (gainMax - 1) * adaptiveErr * dirBoost) * globalBoost * directionalBoost * outlierBoost;
+
+    let localBoost = 1;
+    let localDirectionalBoost = 1;
+    if (adaptiveMode && nodeErrAbsSum && (localEndpointMax > 1.0001 || localDirectionalMax > 1.0001)) {
+      const a = Number(sp[0]);
+      const b = Number(sp[1]);
+      const validA = Number.isInteger(a) && a >= 0 && a < nodeErrAbsSum.length && nodeErrCount[a] > 0;
+      const validB = Number.isInteger(b) && b >= 0 && b < nodeErrAbsSum.length && nodeErrCount[b] > 0;
+      if (validA || validB) {
+        const absA = validA ? (nodeErrAbsSum[a] / nodeErrCount[a]) : 0;
+        const absB = validB ? (nodeErrAbsSum[b] / nodeErrCount[b]) : 0;
+        const signedA = validA ? (nodeErrSignedSum[a] / nodeErrCount[a]) : 0;
+        const signedB = validB ? (nodeErrSignedSum[b] / nodeErrCount[b]) : 0;
+        const denom = (validA && validB) ? 2 : 1;
+        const endpointAbs = (absA + absB) / denom;
+        const endpointSigned = (signedA + signedB) / denom;
+
+        const localAlpha = clamp(endpointAbs / localPivot, 0, 1);
+        localBoost = 1 + (localEndpointMax - 1) * localAlpha;
+
+        const localSignAligned = (signedErrNorm === 0 || endpointSigned === 0)
+          ? 0
+          : (Math.sign(signedErrNorm) === Math.sign(endpointSigned) ? 1 : 0);
+        const localDirAlpha = clamp(Math.abs(endpointSigned) / localPivot, 0, 1);
+        localDirectionalBoost = 1 + (localDirectionalMax - 1) * localDirAlpha * localSignAligned;
+      }
+    }
+
+    const boost = (1 + (gainMax - 1) * adaptiveErr * dirBoost)
+      * globalBoost
+      * directionalBoost
+      * outlierBoost
+      * localBoost
+      * localDirectionalBoost;
     const recover = clamp(k * boost, 0, 1);
 
     // As we approach baseline, gradually tighten allowable rest-length range to reduce

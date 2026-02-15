@@ -159,6 +159,52 @@ test('rigid edge permeability RGB overrides channel pass/blocked behavior', () =
   assert.ok(g[ti] > 0, 'impermeable green channel should deflect tangentially');
 });
 
+test('rigid global RGB tuple permeability is broadcast to every edge (no channel widening)', () => {
+  const n = 24;
+  const size = n * n;
+  const r = new Float32Array(size);
+  const g = new Float32Array(size);
+  const b = new Float32Array(size);
+  const vx = new Float32Array(size);
+  const vy = new Float32Array(size);
+
+  const i = 12 * n + 12;
+  r[i] = 80;
+  g[i] = 80;
+  b[i] = 80;
+  vx[i] = 1.0;
+
+  const sim = {
+    controls: { n },
+    bodies: {
+      rigid: [
+        {
+          x: 12,
+          y: 12,
+          theta: 0,
+          verticesLocal: [
+            { x: -4, y: 0 },
+            { x: 4, y: 0 },
+            { x: 4, y: 5 },
+            { x: -4, y: 5 },
+          ],
+          // Broadcast tuple (not per-edge list).
+          edgeBodyMode: EDGE_BODY_MODE.BLOCK,
+          edgeDyeMode: [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT],
+          edgePermeabilityRGB: [1, 0, 0],
+        },
+      ],
+      soft: { nodes: [], springs: [] },
+    },
+  };
+
+  applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld });
+
+  assert.ok(Math.abs(r[i] - 80) < 1e-6, 'red should PASS via broadcast tuple');
+  assert.ok(g[i] < 80, 'green should be blocked via broadcast tuple');
+  assert.ok(b[i] < 80, 'blue should be blocked via broadcast tuple');
+});
+
 test('applyBodyEdgeFieldBarriers skips malformed rigid edges with non-finite vertices', () => {
   const n = 16;
   const size = n * n;

@@ -101,14 +101,16 @@ export function applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVertices
     const verts = rigidVerticesWorld(rb);
     const sides = verts.length;
     for (let i = 0; i < sides; i++) {
-      const rawModeRGB = normalizeEdgeDyeModeRGB(!rb.edgeDyeMode ? EDGE_DYE_MODE.DEFLECT : rb.edgeDyeMode[i]);
-      const permeabilityRGB = normalizePermeabilityRGB(!rb.edgePermeabilityRGB ? [0, 0, 0] : rb.edgePermeabilityRGB[i]);
+      const rawModeRGB = normalizeEdgeDyeModeRGB(resolveRigidEdgeRGBValue(rb?.edgeDyeMode, i, EDGE_DYE_MODE.DEFLECT));
+      const permeabilityRGB = normalizePermeabilityRGB(resolveRigidEdgeRGBValue(rb?.edgePermeabilityRGB, i, [0, 0, 0]));
       const dyeModeRGB = [0, 0, 0].map((_, ci) => {
         if (permeabilityRGB[ci] > 0) return EDGE_DYE_MODE.PASS;
         // If impermeable, preserve ABSORB semantics when explicitly requested; otherwise DEFLECT.
         return rawModeRGB[ci] === EDGE_DYE_MODE.ABSORB ? EDGE_DYE_MODE.ABSORB : EDGE_DYE_MODE.DEFLECT;
       });
-      const bodyMode = !rb.edgeBodyMode ? EDGE_BODY_MODE.BLOCK : Number(rb.edgeBodyMode[i]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK;
+      const bodyMode = Number(resolveRigidEdgeValue(rb?.edgeBodyMode, i, EDGE_BODY_MODE.BLOCK)) === EDGE_BODY_MODE.PASS
+        ? EDGE_BODY_MODE.PASS
+        : EDGE_BODY_MODE.BLOCK;
       if (bodyMode === EDGE_BODY_MODE.PASS
         && dyeModeRGB[0] === EDGE_DYE_MODE.PASS
         && dyeModeRGB[1] === EDGE_DYE_MODE.PASS
@@ -137,6 +139,26 @@ export function applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVertices
 
 function isFinitePoint(p) {
   return Number.isFinite(Number(p?.x)) && Number.isFinite(Number(p?.y));
+}
+
+function resolveRigidEdgeValue(spec, edgeIndex, fallback) {
+  if (spec == null) return fallback;
+  if (!Array.isArray(spec)) return spec;
+  const edgeValue = spec[edgeIndex];
+  if (edgeValue !== undefined) return edgeValue;
+  if (spec.length === 1) return spec[0];
+  return fallback;
+}
+
+function resolveRigidEdgeRGBValue(spec, edgeIndex, fallback) {
+  if (spec == null) return fallback;
+  if (!Array.isArray(spec)) return spec;
+
+  // Back-compat: callers may provide a single RGB/mode tuple for all rigid edges.
+  const looksLikeTuple = spec.length === 3 && spec.every((v) => Number.isFinite(Number(v)));
+  if (looksLikeTuple) return spec;
+
+  return resolveRigidEdgeValue(spec, edgeIndex, fallback);
 }
 
 function closestPointOnSegment(px, py, ax, ay, bx, by) {

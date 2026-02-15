@@ -226,9 +226,51 @@ test('density map also modulates rigid infill resolution (not soft-only)', () =>
     softInfillMode: 'triangles',
   });
 
+  assert.equal(mapped.meta.densitySource, 'map', 'density map should own effective infill step source');
   assert.ok(mapped.meta.rigidDensityCulled > 0, 'expected density map to cull rigid interior infill triangles too');
   assert.ok(mapped.meta.rigidTriangles < baseline.meta.rigidTriangles, 'density map should reduce rigid triangle count in sparse regions');
   assert.ok(mapped.meta.rigidPieces > 0, 'rigid contour extraction should remain available/authoritative');
+});
+
+test('density map controls effective infill step (darker=>smaller, brighter=>larger)', () => {
+  const w = 64, h = 64;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+  const dark = new Float32Array(w * h).fill(0.05);
+  const bright = new Float32Array(w * h).fill(0.95);
+
+  for (let y = 10; y <= 54; y++) {
+    for (let x = 10; x <= 54; x++) {
+      rigid[y * w + x] = 1;
+    }
+  }
+
+  const denseMesh = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: dark,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles',
+  });
+
+  const sparseMesh = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: bright,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles',
+  });
+
+  assert.ok(denseMesh.meta.density < sparseMesh.meta.density,
+    `expected darker map to produce smaller step, got dense=${denseMesh.meta.density} sparse=${sparseMesh.meta.density}`);
+  assert.ok(denseMesh.meta.rigidTriangles > sparseMesh.meta.rigidTriangles,
+    'smaller step should produce denser rigid triangle coverage than brighter/sparser map');
 });
 
 test('connectivity largest mode drops disconnected islands', () => {

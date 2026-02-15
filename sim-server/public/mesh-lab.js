@@ -9,7 +9,6 @@ const dctx = densityCanvas.getContext('2d');
 const mctx = meshCanvas.getContext('2d');
 const modeEl = document.getElementById('paintMode');
 const brushEl = document.getElementById('brush');
-const densityEl = document.getElementById('density');
 const thresholdEl = document.getElementById('threshold');
 const softDensityPaintEl = document.getElementById('softDensityPaint');
 const softInfillModeEl = document.getElementById('softInfillMode');
@@ -183,7 +182,7 @@ function compileNow() {
     height: H,
     rigidField: rigid,
     softField: soft,
-    density: Math.max(1, Number(densityEl.value) || 4),
+    density: 1,
     threshold: Math.max(0, Math.min(1, Number(thresholdEl.value) || 0.35)),
     connectivityMode: 'largest',
     minComponentTriangles: 0,

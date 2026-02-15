@@ -10,6 +10,38 @@ export function sampleBilinear(field, width, height, x, y) {
   return a * (1 - sy) + b * sy;
 }
 
+const DENSITY_STEP_MIN = 1;
+const DENSITY_STEP_MAX = 12;
+
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function densityValueToStep(v) {
+  const d = clamp(Number(v) || 0, 0, 1);
+  return DENSITY_STEP_MIN + Math.round(d * (DENSITY_STEP_MAX - DENSITY_STEP_MIN));
+}
+
+function deriveBaseStepFromDensityField({ width, height, rigidField, softField, threshold, densityField, fallbackStep }) {
+  if (!(densityField instanceof Float32Array) || densityField.length < width * height) {
+    return fallbackStep;
+  }
+
+  let sum = 0;
+  let count = 0;
+  const occThreshold = Math.max(0.02, threshold * 0.5);
+  for (let i = 0; i < width * height; i++) {
+    if ((Number(rigidField?.[i]) || 0) < occThreshold && (Number(softField?.[i]) || 0) < occThreshold) continue;
+    const d = clamp(Number(densityField[i]) || 0, 0, 1);
+    sum += d;
+    count += 1;
+  }
+  if (!count) return fallbackStep;
+
+  const meanDensity = sum / count;
+  return densityValueToStep(meanDensity);
+}
+
 export function compileFieldToMesh({
   width,
   height,
@@ -25,7 +57,16 @@ export function compileFieldToMesh({
   softDensityField = null, // 0..1, controls rigid+soft infill retention/resolution bias (darker=denser, brighter=sparser)
 }) {
   const infillMode = softInfillMode === 'triangles' ? 'triangles' : 'triangles+cross';
-  const step = Math.max(1, density | 0);
+  const fallbackStep = Math.max(1, density | 0);
+  const step = deriveBaseStepFromDensityField({
+    width,
+    height,
+    rigidField,
+    softField,
+    threshold,
+    densityField: softDensityField,
+    fallbackStep,
+  });
   const nodeMap = new Map();
   const nodes = [];
   const triangles = [];
@@ -106,6 +147,7 @@ export function compileFieldToMesh({
       width,
       height,
       density: step,
+      densitySource: (softDensityField instanceof Float32Array) ? 'map' : 'fixed',
       threshold,
       connectivityMode,
       components: filtered.componentCount,
@@ -378,14 +420,17 @@ function applyInfillDensityMap(triangles, nodes, { width, height, densityField, 
     const gy = sampleBilinear(densityField, width, height, cx, cy + step) - sampleBilinear(densityField, width, height, cx, cy - step);
     const grad = Math.hypot(gx, gy) * 0.5;
 
-    // Local level 1..15 from green intensity:
-    // darker green (0.0) => level 1 => denser,
-    // brighter green (1.0) => level 15 => sparser.
-    const localDensityLevel = 1 + Math.round(densCenter * 14);
+    // Local step target from green intensity:
+    // darker green => denser => smaller local step, brighter => sparser => larger local step.
+    const localStepTarget = densityValueToStep(densCenter);
     const baseStep = Math.max(1, step | 0);
 
-    // Approximate local step-density ratio with deterministic retention probability.
-    let keepProb = Math.min(1, (baseStep * baseStep) / (localDensityLevel * localDensityLevel));
+    // If local step is denser-or-equal than base, keep all.
+    // Only sparse regions (> base step) are probabilistically thinned.
+    let keepProb = 1;
+    if (localStepTarget > baseStep) {
+      keepProb = Math.min(1, (baseStep * baseStep) / (localStepTarget * localStepTarget));
+    }
 
     // Keep a transition belt where gradients are high to avoid seam tearing.
     const transitionBoost = Math.max(0, Math.min(1, grad * 1.8));

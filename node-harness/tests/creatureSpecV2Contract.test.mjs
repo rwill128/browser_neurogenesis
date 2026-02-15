@@ -108,6 +108,45 @@ test('soft solver mode is exported and membrane mode is mapped on import bodies'
   assert.equal(importedSpring.softMembraneClusters.length, 0);
 });
 
+test('membrane export from authoring soft field is perimeter-only (no interior infill springs)', () => {
+  const w = 24;
+  const h = 24;
+  const rigidField = new Float32Array(w * h);
+  const softField = new Float32Array(w * h);
+
+  for (let y = 6; y <= 18; y++) {
+    for (let x = 7; x <= 19; x++) {
+      const dx = x - 13;
+      const dy = y - 12;
+      if ((dx * dx) / 36 + (dy * dy) / 25 <= 1) {
+        softField[y * w + x] = 1;
+      }
+    }
+  }
+
+  const spec = createCreatureSpecFromMesh({
+    nodes: [],
+    triangles: [],
+    meta: { width: w, height: h },
+  }, {
+    name: 'field-membrane',
+    softSolverMode: 'membrane',
+    fields: { rigidField, softField },
+    threshold: 0.35,
+  });
+
+  assert.ok(Array.isArray(spec.softBodies));
+  assert.equal(spec.softBodies.length, 1);
+  const sb = spec.softBodies[0];
+  assert.equal(sb.solverMode, 'membrane');
+  assert.ok(sb.nodes.length >= 8, 'expected perimeter loop nodes from painted field contour');
+  assert.equal(sb.springs.length, sb.nodes.length, 'perimeter-only membrane should have one ring spring per node');
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 64, CONTROLS);
+  assert.equal(bodies.softMembraneClusters.length, 1);
+  assert.ok(bodies.soft.springs.length >= 8);
+});
+
 test('createCreatureSpecFromMesh carries compiler soft cross-beams into soft spring export', () => {
   const mesh = {
     nodes: [

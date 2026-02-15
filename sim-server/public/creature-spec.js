@@ -33,7 +33,20 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
   const rigidBuild = Array.isArray(mesh?.rigidPieces)
     ? buildRigidExportFromCompilerPieces(mesh.rigidPieces, nodes, options)
     : buildRigidExport(triByKind.rigid, nodes, options);
-  const softBuild = buildSoftExport(triByKind.soft, nodes, options, mesh?.softCrossBeams || []);
+
+  const solverMode = normalizeSoftSolverMode(options?.softSolverMode);
+  const hasAuthoringSoftField = Array.isArray(options?.fields?.softField)
+    || (options?.fields?.softField instanceof Float32Array);
+  const softBuild = (solverMode === 'membrane' && hasAuthoringSoftField)
+    ? buildSoftMembraneExportFromField({
+        width,
+        height,
+        softField: options?.fields?.softField,
+        threshold: Number(mesh?.meta?.threshold) || Number(options?.threshold) || 0.35,
+        options,
+      })
+    : buildSoftExport(triByKind.soft, nodes, options, mesh?.softCrossBeams || []);
+
   const hybridJoints = buildHybridExport({
     rigidComps: rigidBuild.components,
     softComps: softBuild.components,
@@ -539,6 +552,191 @@ function buildBoundaryLoopsFromEdgeList(edges, nodeCount) {
   }
 
   return loops;
+}
+
+function collectMaskComponents(mask, width, height) {
+  const seen = new Uint8Array(mask.length);
+  const idx = (x, y) => y * width + x;
+  const comps = [];
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = idx(x, y);
+      if (!mask[i] || seen[i]) continue;
+
+      const stack = [[x, y]];
+      seen[i] = 1;
+      const cells = new Set();
+
+      while (stack.length) {
+        const [cx, cy] = stack.pop();
+        cells.add(`${cx},${cy}`);
+        const n4 = [[cx - 1, cy], [cx + 1, cy], [cx, cy - 1], [cx, cy + 1]];
+        for (const [nx, ny] of n4) {
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+          const ni = idx(nx, ny);
+          if (!mask[ni] || seen[ni]) continue;
+          seen[ni] = 1;
+          stack.push([nx, ny]);
+        }
+      }
+
+      if (cells.size) comps.push(cells);
+    }
+  }
+
+  comps.sort((a, b) => b.size - a.size);
+  return comps;
+}
+
+function traceMaskComponentLoops(cellSet, step = 1) {
+  const edgeMap = new Map();
+  const addEdge = (x0, y0, x1, y1) => {
+    const p0 = `${x0},${y0}`;
+    const p1 = `${x1},${y1}`;
+    if (!edgeMap.has(p0)) edgeMap.set(p0, []);
+    edgeMap.get(p0).push({ from: p0, to: p1 });
+  };
+
+  const hasCell = (x, y) => cellSet.has(`${x},${y}`);
+  for (const key of cellSet) {
+    const [cx, cy] = key.split(',').map((v) => Number(v));
+    const x0 = cx * step;
+    const y0 = cy * step;
+    const x1 = x0 + step;
+    const y1 = y0 + step;
+
+    if (!hasCell(cx, cy - 1)) addEdge(x0, y0, x1, y0);
+    if (!hasCell(cx + 1, cy)) addEdge(x1, y0, x1, y1);
+    if (!hasCell(cx, cy + 1)) addEdge(x1, y1, x0, y1);
+    if (!hasCell(cx - 1, cy)) addEdge(x0, y1, x0, y0);
+  }
+
+  const loops = [];
+  while (true) {
+    const startEntry = [...edgeMap.entries()].find(([, arr]) => arr.length > 0);
+    if (!startEntry) break;
+
+    const [start] = startEntry;
+    let current = start;
+    const loop = [];
+    const guard = edgeMap.size * 8 + 64;
+    let steps = 0;
+
+    while (steps++ < guard) {
+      const outgoing = edgeMap.get(current);
+      if (!outgoing || outgoing.length === 0) break;
+      const edge = outgoing.pop();
+      const [x, y] = edge.from.split(',').map((v) => Number(v));
+      loop.push({ x, y });
+      current = edge.to;
+      if (current === start) break;
+    }
+
+    if (loop.length >= 3) loops.push(loop);
+  }
+
+  return loops;
+}
+
+function signedArea(poly) {
+  let s = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    s += a.x * b.y - b.x * a.y;
+  }
+  return s * 0.5;
+}
+
+function simplifyCollinearLoop(poly, eps = 1e-6) {
+  if (!Array.isArray(poly) || poly.length < 3) return poly || [];
+  const out = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[(i - 1 + poly.length) % poly.length];
+    const b = poly[i];
+    const c = poly[(i + 1) % poly.length];
+    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+    if (Math.abs(cross) <= eps) continue;
+    out.push(b);
+  }
+  return out.length >= 3 ? out : poly;
+}
+
+function buildSoftMembraneExportFromField({ width, height, softField, threshold, options }) {
+  const total = Math.max(1, width * height);
+  const mask = new Uint8Array(total);
+  const th = Math.max(0, Math.min(1, Number(threshold) || 0.35));
+  for (let i = 0; i < total; i++) {
+    mask[i] = (Number(softField?.[i]) || 0) >= th ? 1 : 0;
+  }
+
+  const comps = collectMaskComponents(mask, width, height);
+  const softBodies = [];
+  const components = [];
+
+  for (const comp of comps) {
+    const loops = traceMaskComponentLoops(comp, 1);
+    if (!loops.length) continue;
+
+    let hull = loops[0];
+    let bestArea = Math.abs(signedArea(hull));
+    for (let i = 1; i < loops.length; i++) {
+      const a = Math.abs(signedArea(loops[i]));
+      if (a > bestArea) {
+        bestArea = a;
+        hull = loops[i];
+      }
+    }
+
+    hull = simplifyCollinearLoop(hull, 1e-6);
+    if (!Array.isArray(hull) || hull.length < 3) continue;
+    if (signedArea(hull) < 0) hull = [...hull].reverse();
+
+    const softNodes = hull.map((p) => ({
+      x: p.x,
+      y: p.y,
+      mass: finiteOr(Number(options.massSoft), 0.6),
+      r: 1.6,
+      digestEnabled: false,
+      digestRGB: [1, 1, 1],
+    }));
+
+    const springs = [];
+    for (let i = 0; i < softNodes.length; i++) {
+      const a = softNodes[i];
+      const b = softNodes[(i + 1) % softNodes.length];
+      springs.push([
+        i,
+        (i + 1) % softNodes.length,
+        Math.max(1e-3, Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0))),
+        EDGE_BODY_BLOCK,
+        [...EDGE_DYE_DEFLECT_RGB],
+      ]);
+    }
+
+    const bodyIndex = softBodies.length;
+    softBodies.push({
+      id: `soft_${bodyIndex}`,
+      solverMode: 'membrane',
+      restArea: Math.max(1e-4, polygonAreaAbs(softNodes)),
+      pressureGain: Math.max(0.001, Number(options?.membranePressureGain) || MEMBRANE_DEFAULT_PRESSURE_GAIN),
+      radialDamping: Math.max(0, Math.min(0.2, Number(options?.membraneRadialDamping) || MEMBRANE_DEFAULT_RADIAL_DAMPING)),
+      shapeMemoryGain: Math.max(0, Math.min(0.35, Number(options?.membraneShapeMemoryGain) || MEMBRANE_DEFAULT_SHAPE_MEMORY_GAIN)),
+      insideCorrectionEnabled: 1,
+      nodes: softNodes,
+      springs,
+    });
+
+    // Field-derived membrane export does not currently map hybrid source-node links.
+    components.push({
+      index: bodyIndex,
+      nodeIds: new Set(),
+      sourceToLocal: new Map(),
+    });
+  }
+
+  return { softBodies, components };
 }
 
 function buildSoftExport(tris, nodes, options, softCrossBeams = []) {

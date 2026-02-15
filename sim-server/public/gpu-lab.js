@@ -1,6 +1,6 @@
 import { parseCreatureSpec, buildBodiesFromCreatureSpec } from '/creature-spec.js';
 import { EDGE_DYE_MODE, normalizeEdgeDyeModeRGB, applyBodyEdgeFieldBarriers } from '/dye-barrier.js';
-import { resolveRigidVsSoftNodeCollision, resolveRigidVsRigidPolygonCollision, getRigidCollisionPolysWorld } from '/rigid-collision.js';
+import { resolveRigidVsSoftNodeCollision, resolveRigidVsRigidPolygonCollision, getRigidCollisionPolysWorld, pointInPolygonInclusive } from '/rigid-collision.js';
 import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops, recoverSoftSpringRests } from '/soft-xpbd.js';
 
 const out = document.getElementById('out');
@@ -63,6 +63,8 @@ const MEMBRANE_EDGE_XPBD_ITERS = 8;
 const MEMBRANE_EDGE_BASE_COMPLIANCE = 0.0007;
 const MEMBRANE_BEND_XPBD_ITERS = 4;
 const MEMBRANE_BEND_BASE_COMPLIANCE = 0.0022;
+const RIGID_INSIDE_CORRECTION_ITERS = 2;
+const RIGID_INSIDE_CORRECTION_SLOP = 0.04;
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
@@ -651,6 +653,7 @@ function initBodies(n, controls) {
       digestEnabled: (i % 2) === 0,
       digestRGB,
       consumeDyeRGB,
+      insideCorrectionEnabled: true,
       mass,
       theta: Math.random() * Math.PI * 2,
       omega: 0,
@@ -1020,6 +1023,7 @@ function cloneMiniBodies(miniBodies, controls) {
           digestEnabled: Boolean(rb?.digestEnabled),
           digestRGB: Array.isArray(rb?.digestRGB) ? [Number(rb.digestRGB[0]) || 0, Number(rb.digestRGB[1]) || 0, Number(rb.digestRGB[2]) || 0] : [0, 0, 0],
           consumeDyeRGB: Array.isArray(rb?.consumeDyeRGB) ? [Number(rb.consumeDyeRGB[0]) > 0 ? 1 : 0, Number(rb.consumeDyeRGB[1]) > 0 ? 1 : 0, Number(rb.consumeDyeRGB[2]) > 0 ? 1 : 0] : [0, 0, 0],
+          insideCorrectionEnabled: rb?.insideCorrectionEnabled !== false,
           mass,
           inertia: Math.max(0.05, Number(rb?.inertia) || (0.5 * mass * r * r)),
           verticesLocal: Array.isArray(rb?.verticesLocal)
@@ -1442,6 +1446,107 @@ function resolveSoftNodeVsSoftEdgeCollision(node, a, b, restitution = 0.12) {
     node.vx += nx * j;
     node.vy += ny * j;
   }
+}
+
+function resolveRigidInsideProjection(rb, node, poly) {
+  if (!rb || !node || !Array.isArray(poly) || poly.length < 3) return false;
+  if (!pointInPolygonInclusive(node.x, node.y, poly)) return false;
+
+  let cx = 0;
+  let cy = 0;
+  for (const p of poly) {
+    cx += p.x;
+    cy += p.y;
+  }
+  cx /= Math.max(1, poly.length);
+  cy /= Math.max(1, poly.length);
+
+  let best = null;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const cp = closestPointOnSegment(node.x, node.y, a.x, a.y, b.x, b.y);
+
+    const ex = b.x - a.x;
+    const ey = b.y - a.y;
+    const eLen = Math.max(1e-6, Math.hypot(ex, ey));
+    let nx = -ey / eLen;
+    let ny = ex / eLen;
+    const mx = (a.x + b.x) * 0.5;
+    const my = (a.y + b.y) * 0.5;
+    const toCenterX = cx - mx;
+    const toCenterY = cy - my;
+    if (toCenterX * nx + toCenterY * ny > 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+
+    const dx = node.x - cp.x;
+    const dy = node.y - cp.y;
+    const d2 = dx * dx + dy * dy;
+    if (!best || d2 < best.d2) best = { cp, d2, nx, ny };
+  }
+  if (!best) return false;
+
+  const pad = Math.max(0.25, Number(node.r) || 1) + RIGID_INSIDE_CORRECTION_SLOP;
+  const tx = best.cp.x + best.nx * pad;
+  const ty = best.cp.y + best.ny * pad;
+
+  const corrX = tx - node.x;
+  const corrY = ty - node.y;
+  const corrLen = Math.hypot(corrX, corrY);
+  if (!Number.isFinite(corrLen) || corrLen < 1e-8) return false;
+
+  const mNode = Math.max(0.02, Number(node.mass) || 1);
+  const mRigid = Math.max(0.05, Number(rb.mass) || 1);
+  const invNode = 1 / mNode;
+  const invRigid = 1 / mRigid;
+  const invSum = invNode + invRigid;
+
+  const nodeShare = invNode / Math.max(1e-8, invSum);
+  const rigidShare = invRigid / Math.max(1e-8, invSum);
+
+  node.x += corrX * nodeShare;
+  node.y += corrY * nodeShare;
+  rb.x -= corrX * rigidShare * 0.45;
+  rb.y -= corrY * rigidShare * 0.45;
+
+  const vn = node.vx * best.nx + node.vy * best.ny;
+  if (vn < 0) {
+    node.vx -= best.nx * vn;
+    node.vy -= best.ny * vn;
+  }
+
+  return true;
+}
+
+function applyRigidInsideCorrectionPass(bodies, soft, hybridAttachedByRigid) {
+  if (!bodies?.rigid?.length || !soft?.nodes?.length) return 0;
+  let corrected = 0;
+
+  for (let iter = 0; iter < RIGID_INSIDE_CORRECTION_ITERS; iter++) {
+    for (let rbi = 0; rbi < bodies.rigid.length; rbi++) {
+      const rb = bodies.rigid[rbi];
+      if (!rb || rb.insideCorrectionEnabled === false) continue;
+      const polys = getRigidCollisionPolysWorld(rb);
+      if (!Array.isArray(polys) || polys.length === 0) continue;
+      const attachedNodeSet = hybridAttachedByRigid.get(rbi) || null;
+
+      for (let ni = 0; ni < soft.nodes.length; ni++) {
+        if (attachedNodeSet && attachedNodeSet.has(ni)) continue;
+        const node = soft.nodes[ni];
+        if (!node) continue;
+        for (const poly of polys) {
+          if (!Array.isArray(poly) || poly.length < 3) continue;
+          if (!pointInPolygonInclusive(node.x, node.y, poly)) continue;
+          if (resolveRigidInsideProjection(rb, node, poly)) corrected += 1;
+          break;
+        }
+      }
+    }
+  }
+
+  return corrected;
 }
 
 function enforceFluidEdgeBoundariesCpu(vxField, vyField, n) {
@@ -2448,6 +2553,10 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
   }
 
+  const rigidInsideCorrections = applyRigidInsideCorrectionPass(bodies, s, hybridAttachedByRigid);
+  for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
+  for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
+
   sim.lastRigidContacts = rigidContactDebug.length > 64 ? rigidContactDebug.slice(0, 64) : rigidContactDebug;
 
   let deform = buildSoftDeformationState(sim, s, softClusterLoops);
@@ -2574,6 +2683,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     membraneBoundaryClusters,
     membraneShapeClusters,
     membranePressureClusters,
+    rigidInsideCorrections,
     softDtUsed: dt,
     softDtRaw: dtRaw,
   };
@@ -2596,6 +2706,7 @@ function summarizeCouplingTelemetry(telemetry) {
       softDeformSevereCountAvg: 0,
       softDeformWorstStretchAvg: 1,
       softDeformWorstAreaRatioAvg: 1,
+      rigidInsideCorrectionsAvg: 0,
     };
   }
   const acc = {
@@ -2608,6 +2719,7 @@ function summarizeCouplingTelemetry(telemetry) {
     softDeformSevereCount: 0,
     softDeformWorstStretch: 0,
     softDeformWorstAreaRatio: 0,
+    rigidInsideCorrections: 0,
   };
   for (const t of telemetry) {
     acc.rigidCenterDelta += t.rigidCenterDelta || 0;
@@ -2619,6 +2731,7 @@ function summarizeCouplingTelemetry(telemetry) {
     acc.softDeformSevereCount += t.softDeformSevereCount || 0;
     acc.softDeformWorstStretch += t.softDeformWorstStretch || 1;
     acc.softDeformWorstAreaRatio += t.softDeformWorstAreaRatio || 1;
+    acc.rigidInsideCorrections += t.rigidInsideCorrections || 0;
   }
   const k = 1 / telemetry.length;
   return {
@@ -2631,6 +2744,7 @@ function summarizeCouplingTelemetry(telemetry) {
     softDeformSevereCountAvg: +(acc.softDeformSevereCount * k).toFixed(3),
     softDeformWorstStretchAvg: +(acc.softDeformWorstStretch * k).toFixed(3),
     softDeformWorstAreaRatioAvg: +(acc.softDeformWorstAreaRatio * k).toFixed(3),
+    rigidInsideCorrectionsAvg: +(acc.rigidInsideCorrections * k).toFixed(3),
   };
 }
 

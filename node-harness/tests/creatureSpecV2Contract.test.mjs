@@ -416,6 +416,18 @@ test('buildBodiesFromCreatureSpec clamps unknown edge dye modes to DEFLECT guard
   assert.deepEqual(softSpringMode, [1, 1, 2]);
 });
 
+test('buildBodiesFromCreatureSpec honors rigid inside-correction toggle per body', () => {
+  const spec = createCreatureSpecFromMesh(sampleMesh());
+  spec.rigidBodies[0].insideCorrectionEnabled = false;
+
+  const bodiesOff = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+  assert.equal(bodiesOff.rigid[0].insideCorrectionEnabled, false);
+
+  spec.rigidBodies[0].insideCorrectionEnabled = true;
+  const bodiesOn = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+  assert.equal(bodiesOn.rigid[0].insideCorrectionEnabled, true);
+});
+
 test('buildBodiesFromCreatureSpec preserves rigid per-edge permeability and interior consume-dye masks', () => {
   const spec = createCreatureSpecFromMesh(sampleMesh());
   spec.rigidBodies[0].edgePermeabilityRGB = [

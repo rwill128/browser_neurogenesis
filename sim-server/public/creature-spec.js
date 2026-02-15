@@ -166,6 +166,7 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
       digestEnabled: !!rb.digestEnabled,
       digestRGB: normalizeRGB(rb.digestRGB),
       consumeDyeRGB: normalizeBinaryRGB(rb.consumeDyeRGB ?? (rb.digestEnabled ? [1, 1, 1] : [0, 0, 0])),
+      insideCorrectionEnabled: rb?.insideCorrectionEnabled !== false,
       mass,
       theta: 0,
       omega: 0,

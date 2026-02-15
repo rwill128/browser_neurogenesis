@@ -244,6 +244,48 @@ test('compiler applies soft density map as local primitive-size control with sea
   assert.ok(outerSkin.length > 0, 'expected outer boundary skin triangles to remain preserved');
 });
 
+test('soft minimum primitive size clamps adaptive tiny triangles', () => {
+  const w = 64, h = 64;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+  const resolution = new Float32Array(w * h).fill(0.0); // darkest => finest requested
+
+  for (let y = 10; y <= 54; y++) {
+    for (let x = 10; x <= 54; x++) soft[y * w + x] = 1;
+  }
+
+  const tinyAllowed = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: resolution,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles',
+    softMinCellSize: 1,
+  });
+
+  const clamped = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: resolution,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles',
+    softMinCellSize: 4,
+  });
+
+  assert.equal(tinyAllowed.meta.softMinCellSize, 1);
+  assert.equal(clamped.meta.softMinCellSize, 4);
+  assert.ok(
+    clamped.meta.softTriangles < tinyAllowed.meta.softTriangles,
+    `expected soft primitive floor to reduce triangle count (tiny=${tinyAllowed.meta.softTriangles}, clamped=${clamped.meta.softTriangles})`,
+  );
+});
+
 test('density map also modulates rigid infill resolution (not soft-only)', () => {
   const w = 64, h = 64;
   const rigid = new Float32Array(w * h);

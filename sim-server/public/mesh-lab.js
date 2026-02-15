@@ -12,6 +12,7 @@ const brushEl = document.getElementById('brush');
 const thresholdEl = document.getElementById('threshold');
 const softDensityPaintEl = document.getElementById('softDensityPaint');
 const softInfillModeEl = document.getElementById('softInfillMode');
+const softMinCellSizeEl = document.getElementById('softMinCellSize');
 const clearBtn = document.getElementById('clearBtn');
 const compileBtn = document.getElementById('compileBtn');
 const exportBtn = document.getElementById('exportBtn');
@@ -188,6 +189,7 @@ function compileNow() {
     minComponentTriangles: 0,
     softInfillMode: softInfillModeEl?.value || 'triangles',
     softDensityField: softDensity,
+    softMinCellSize: Math.max(1, Math.min(12, Math.round(Number(softMinCellSizeEl?.value) || 3))),
   });
   lastMesh = mesh;
   drawMesh(mesh);
@@ -217,6 +219,7 @@ window.addEventListener('mouseup', () => {
 clearBtn.addEventListener('click', () => { rigid.fill(0); soft.fill(0); softDensity.fill(0.5); drawFields(); compileNow(); });
 compileBtn.addEventListener('click', compileNow);
 if (softInfillModeEl) softInfillModeEl.addEventListener('change', compileNow);
+if (softMinCellSizeEl) softMinCellSizeEl.addEventListener('change', compileNow);
 
 exportBtn.addEventListener('click', () => {
   if (!lastMesh) compileNow();

@@ -42,7 +42,7 @@ function deriveBaseStepFromDensityField({ width, height, rigidField, softField, 
   return densityValueToStep(meanDensity);
 }
 
-function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField }) {
+function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField, softMinCellSize = 1 }) {
   const cw = Math.max(1, width - 1);
   const ch = Math.max(1, height - 1);
   const cellCount = cw * ch;
@@ -60,9 +60,14 @@ function buildAdaptiveDensityCells({ width, height, rigidField, softField, thres
       const sy = Math.min(height - 1.001, y + 0.5);
       const rv = sampleBilinear(rigidField, width, height, sx, sy);
       const sv = sampleBilinear(softField, width, height, sx, sy);
-      kindGrid[i] = rv >= threshold ? 1 : (sv >= threshold ? 2 : 0);
+      const kind = rv >= threshold ? 1 : (sv >= threshold ? 2 : 0);
+      kindGrid[i] = kind;
       const d = sampleBilinear(densityField, width, height, sx, sy);
-      stepGrid[i] = densityValueToStep(d);
+      const localStep = densityValueToStep(d);
+      const minSoftStep = Math.max(1, Math.min(DENSITY_STEP_MAX, Math.round(Number(softMinCellSize) || 1)));
+      stepGrid[i] = kind === 2
+        ? Math.max(localStep, minSoftStep)
+        : localStep;
     }
   }
 
@@ -130,9 +135,11 @@ export function compileFieldToMesh({
   minComponentTriangles = 0,
   softInfillMode = 'triangles+cross', // triangles | triangles+cross
   softDensityField = null, // 0..1, controls local rigid+soft primitive size (darker=finer, brighter=coarser)
+  softMinCellSize = 1, // lower bound on adaptive soft primitive size (cell units)
 }) {
   const infillMode = softInfillMode === 'triangles' ? 'triangles' : 'triangles+cross';
   const fallbackStep = Math.max(1, density | 0);
+  const softMinStep = Math.max(1, Math.min(DENSITY_STEP_MAX, Math.round(Number(softMinCellSize) || 1)));
   const step = deriveBaseStepFromDensityField({
     width,
     height,
@@ -194,6 +201,7 @@ export function compileFieldToMesh({
       softField,
       threshold,
       densityField: softDensityField,
+      softMinCellSize: softMinStep,
     });
     for (const c of adaptive.cells) {
       const x0 = c.x;
@@ -266,6 +274,7 @@ export function compileFieldToMesh({
       softDensityCulled: densityApplied.culledSoft,
       rigidDensityCulled: densityApplied.culledRigid,
       softDensityLevels: softDensityField ? 15 : 0,
+      softMinCellSize: softMinStep,
     },
   };
 }

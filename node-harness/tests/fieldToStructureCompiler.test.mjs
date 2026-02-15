@@ -479,6 +479,82 @@ test('pure-soft boundary cap prevents oversized seam triangles in adversarial pa
   assert.equal(defaultBoundaryCap.meta.softBoundaryCellCap, 2);
 });
 
+test('pure-soft neighbor step-gradient cap smooths abrupt adaptive-cell jumps in adversarial bridge fields', () => {
+  const w = 96, h = 96;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+  const softDensity = new Float32Array(w * h).fill(0.98);
+
+  for (let y = 12; y <= 84; y++) {
+    for (let x = 12; x <= 84; x++) soft[y * w + x] = 1;
+  }
+  // Thin bridge through abrupt dark-to-bright transition.
+  for (let y = 44; y <= 52; y++) {
+    for (let x = 18; x <= 78; x++) {
+      soft[y * w + x] = 1;
+      softDensity[y * w + x] = 0.03;
+    }
+  }
+  for (let y = 12; y <= 84; y++) {
+    for (let x = 12; x <= 34; x++) softDensity[y * w + x] = 0.03;
+  }
+
+  const uncappedGradient = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: softDensity,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles+cross',
+    softNeighborStepDeltaCap: 0,
+  });
+
+  const cappedGradient = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: softDensity,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles+cross',
+    softNeighborStepDeltaCap: 1,
+  });
+
+  const seamMetrics = (mesh) => {
+    const seamEdges = [];
+    for (const t of mesh.triangles) {
+      if (t.kind !== 'soft') continue;
+      const a = mesh.nodes[t.a];
+      const b = mesh.nodes[t.b];
+      const c = mesh.nodes[t.c];
+      const cx = (a.x + b.x + c.x) / 3;
+      const cy = (a.y + b.y + c.y) / 3;
+      // Transition zone around interior abrupt density jump + bridge.
+      if (cx < 30 || cx > 50 || cy < 30 || cy > 66) continue;
+      seamEdges.push(
+        Math.hypot(a.x - b.x, a.y - b.y),
+        Math.hypot(b.x - c.x, b.y - c.y),
+        Math.hypot(c.x - a.x, c.y - a.y),
+      );
+    }
+    seamEdges.sort((m, n) => m - n);
+    const p99 = seamEdges.length ? seamEdges[Math.floor((seamEdges.length - 1) * 0.99)] : 0;
+    return { seamEdgeP99: p99, seamSamples: seamEdges.length };
+  };
+
+  const before = seamMetrics(uncappedGradient);
+  const after = seamMetrics(cappedGradient);
+
+  assert.ok(cappedGradient.meta.softTriangles > 0, 'gradient-capped mesh should preserve soft output');
+  assert.ok(after.seamSamples > 0, 'expected deterministic seam sample population');
+  assert.ok(after.seamEdgeP99 < before.seamEdgeP99,
+    `expected lower seam p99-edge under neighbor-gradient cap (before=${before.seamEdgeP99}, after=${after.seamEdgeP99})`);
+  assert.equal(cappedGradient.meta.softNeighborStepDeltaCap, 1);
+});
+
 test('density map also modulates rigid infill resolution (not soft-only)', () => {
   const w = 64, h = 64;
   const rigid = new Float32Array(w * h);

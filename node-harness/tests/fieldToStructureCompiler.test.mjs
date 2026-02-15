@@ -98,6 +98,34 @@ test('compiler emits soft cross-beams for square soft cells', () => {
   assert.ok(Array.isArray(mesh.softCrossBeams));
   assert.ok(mesh.softCrossBeams.length > 0, 'expected diagonal cross-beams for square soft lattice');
   assert.ok((mesh.meta.softCrossBeams || 0) === mesh.softCrossBeams.length);
+  assert.equal(mesh.meta.softInfillMode, 'triangles+cross');
+});
+
+test('compiler can use triangle-only soft in-fill mode (no cross-beams)', () => {
+  const w = 16, h = 16;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+
+  for (let y = 4; y <= 11; y++) {
+    for (let x = 4; x <= 11; x++) soft[y * w + x] = 1;
+  }
+
+  const mesh = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    threshold: 0.35,
+    density: 2,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles',
+  });
+
+  assert.ok(Array.isArray(mesh.softCrossBeams));
+  assert.equal(mesh.softCrossBeams.length, 0, 'triangle-only mode should not emit cross-beams');
+  assert.equal(mesh.meta.softCrossBeams, 0);
+  assert.equal(mesh.meta.softInfillMode, 'triangles');
+  assert.ok(mesh.meta.softTriangles > 0, 'triangle-only mode should still produce soft triangles');
 });
 
 test('connectivity largest mode drops disconnected islands', () => {

@@ -21,7 +21,9 @@ export function compileFieldToMesh({
   density = 1,
   connectivityMode = 'none', // none | largest (strict single connected body)
   minComponentTriangles = 0,
+  softInfillMode = 'triangles+cross', // triangles | triangles+cross
 }) {
+  const infillMode = softInfillMode === 'triangles' ? 'triangles' : 'triangles+cross';
   const step = Math.max(1, density | 0);
   const nodeMap = new Map();
   const nodes = [];
@@ -85,7 +87,8 @@ export function compileFieldToMesh({
 
   const noOverlap = removeSoftTrianglesOverlappingRigidContours(filtered.triangles, nodes, rigidDecomp.pieces);
   const final = enforceConnectivity({ triangles: noOverlap.triangles, mode: connectivityMode, minComponentTriangles });
-  const softCrossBeams = buildSoftCrossBeams(final.triangles, nodes);
+  const useSoftCrossBeams = infillMode === 'triangles+cross';
+  const softCrossBeams = useSoftCrossBeams ? buildSoftCrossBeams(final.triangles, nodes) : [];
 
   return {
     nodes,
@@ -107,6 +110,7 @@ export function compileFieldToMesh({
       softTriangles: final.triangles.filter((t) => t.kind === 'soft').length,
       rigidPieces: rigidDecomp.pieces.length,
       rigidWelds: rigidDecomp.welds.length,
+      softInfillMode: infillMode,
       softCrossBeams: softCrossBeams.length,
       droppedTriangles: triangles.length - final.triangles.length,
       softOverlapTrimmed: noOverlap.removed,

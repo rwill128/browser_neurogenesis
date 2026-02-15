@@ -9,6 +9,7 @@ const modeEl = document.getElementById('paintMode');
 const brushEl = document.getElementById('brush');
 const densityEl = document.getElementById('density');
 const thresholdEl = document.getElementById('threshold');
+const softInfillModeEl = document.getElementById('softInfillMode');
 const clearBtn = document.getElementById('clearBtn');
 const compileBtn = document.getElementById('compileBtn');
 const exportBtn = document.getElementById('exportBtn');
@@ -152,6 +153,7 @@ function compileNow() {
     threshold: Math.max(0, Math.min(1, Number(thresholdEl.value) || 0.35)),
     connectivityMode: 'largest',
     minComponentTriangles: 0,
+    softInfillMode: softInfillModeEl?.value || 'triangles',
   });
   lastMesh = mesh;
   drawMesh(mesh);
@@ -162,6 +164,7 @@ window.addEventListener('mouseup', () => { painting = false; });
 paintCanvas.addEventListener('mousemove', (e) => { if (painting) paint(e.clientX, e.clientY); });
 clearBtn.addEventListener('click', () => { rigid.fill(0); soft.fill(0); drawFields(); compileNow(); });
 compileBtn.addEventListener('click', compileNow);
+if (softInfillModeEl) softInfillModeEl.addEventListener('change', compileNow);
 
 exportBtn.addEventListener('click', () => {
   if (!lastMesh) compileNow();

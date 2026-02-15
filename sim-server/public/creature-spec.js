@@ -520,6 +520,7 @@ function buildBoundaryLoopsFromEdgeList(edges, nodeCount) {
 function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
   const enableBoundaryRing = options?.softBoundaryRingSprings !== false;
   const boundaryRingStrideRaw = Math.max(2, Math.round(Number(options?.softBoundaryRingStride) || 2));
+  const boundaryRingMaxSpanFactor = Math.max(1.5, Number(options?.softBoundaryRingMaxSpanFactor) || 2.75);
   const comps = triangleComponents(tris);
   const softBodies = [];
   const components = [];
@@ -603,10 +604,31 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
 
     if (enableBoundaryRing) {
       const loops = buildBoundaryLoopsFromEdgeList(boundaryEdges, softNodes.length);
+      const boundaryEdgeRestByKey = new Map();
+      for (const [a, b] of boundaryEdges) {
+        if (!Number.isInteger(a) || !Number.isInteger(b) || a === b) continue;
+        const pa = softNodes[a];
+        const pb = softNodes[b];
+        if (!pa || !pb) continue;
+        boundaryEdgeRestByKey.set(springKey(a, b), Math.max(1e-3, Math.hypot(pb.x - pa.x, pb.y - pa.y)));
+      }
+
       for (const loop of loops) {
         if (!Array.isArray(loop) || loop.length < 4) continue;
         const stride = Math.max(2, Math.min(Math.floor(loop.length / 2), boundaryRingStrideRaw));
         if (!Number.isInteger(stride) || stride < 2) continue;
+
+        const loopEdgeRest = [];
+        for (let i = 0; i < loop.length; i++) {
+          const eKey = springKey(loop[i], loop[(i + 1) % loop.length]);
+          const rest = Number(boundaryEdgeRestByKey.get(eKey));
+          if (Number.isFinite(rest) && rest > 0) loopEdgeRest.push(rest);
+        }
+        loopEdgeRest.sort((a, b) => a - b);
+        const medianEdgeRest = loopEdgeRest.length
+          ? loopEdgeRest[Math.floor(loopEdgeRest.length * 0.5)]
+          : 1;
+        const maxAllowedRingRest = Math.max(1e-3, medianEdgeRest * boundaryRingMaxSpanFactor);
 
         for (let i = 0; i < loop.length; i++) {
           const a = loop[i];
@@ -620,10 +642,13 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
           const pb = softNodes[b];
           if (!pa || !pb) continue;
 
+          const rest = Math.max(1e-3, Math.hypot(pb.x - pa.x, pb.y - pa.y));
+          if (rest > maxAllowedRingRest + 1e-6) continue;
+
           springs.push([
             a,
             b,
-            Math.max(1e-3, Math.hypot(pb.x - pa.x, pb.y - pa.y)),
+            rest,
             0,
             [0, 0, 0],
           ]);

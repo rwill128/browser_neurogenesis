@@ -131,6 +131,47 @@ test('createCreatureSpecFromMesh can reinforce soft perimeter with border-ring s
   assert.ok(hasOpposingDiag(withRing.softBodies[0].springs || []), 'perimeter ring should add reinforcing opposite diagonal spring');
 });
 
+test('adversarial pure-soft ring reinforcement bounds long-span springs on thin strips', () => {
+  const cols = 11;
+  const top = Array.from({ length: cols }, (_, i) => ({ id: i, x: i * 4, y: 0, rigid: 0, soft: 1 }));
+  const bottom = Array.from({ length: cols }, (_, i) => ({ id: cols + i, x: i * 4, y: 1, rigid: 0, soft: 1 }));
+  const nodes = [...top, ...bottom];
+
+  const triangles = [];
+  for (let i = 0; i < cols - 1; i++) {
+    const t0 = i;
+    const t1 = i + 1;
+    const b0 = cols + i;
+    const b1 = cols + i + 1;
+    triangles.push({ kind: 'soft', a: t0, b: t1, c: b0 });
+    triangles.push({ kind: 'soft', a: t1, b: b1, c: b0 });
+  }
+
+  const mesh = {
+    nodes,
+    triangles,
+    meta: { width: 64, height: 16 },
+  };
+
+  const unbounded = createCreatureSpecFromMesh(mesh, {
+    softBoundaryRingSprings: true,
+    softBoundaryRingStride: 8,
+    softBoundaryRingMaxSpanFactor: Number.POSITIVE_INFINITY,
+  });
+  const bounded = createCreatureSpecFromMesh(mesh, {
+    softBoundaryRingSprings: true,
+    softBoundaryRingStride: 8,
+  });
+
+  const maxRest = (springs) => springs.reduce((m, sp) => Math.max(m, Number(sp?.[2]) || 0), 0);
+  const maxUnbounded = maxRest(unbounded.softBodies[0].springs || []);
+  const maxBounded = maxRest(bounded.softBodies[0].springs || []);
+
+  assert.ok(maxUnbounded >= 30, `expected adversarial long spring in unbounded mode, saw ${maxUnbounded}`);
+  assert.ok(maxBounded < maxUnbounded, `expected bounded mode to reduce long-span springs (${maxUnbounded} -> ${maxBounded})`);
+  assert.ok(maxBounded <= 11 + 1e-6, `expected bounded long-span cap near 2.75x median boundary edge (~11), saw ${maxBounded}`);
+});
+
 test('createCreatureSpecFromMesh merges adjacent rigid triangles into a single convex rigid body', () => {
   const mesh = {
     nodes: [

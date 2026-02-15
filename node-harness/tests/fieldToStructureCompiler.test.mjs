@@ -134,12 +134,12 @@ test('compiler applies soft in-fill density map with seam-preserving transition 
   const w = 64, h = 64;
   const rigid = new Float32Array(w * h);
   const soft = new Float32Array(w * h);
-  const softDensity = new Float32Array(w * h).fill(1);
+  const softDensity = new Float32Array(w * h).fill(0.0);
 
   for (let y = 8; y <= 56; y++) {
     for (let x = 8; x <= 56; x++) {
       soft[y * w + x] = 1;
-      if (x >= 32) softDensity[y * w + x] = 0.0; // sparse half
+      if (x >= 32) softDensity[y * w + x] = 1.0; // brighter half => sparser
     }
   }
 
@@ -167,6 +167,7 @@ test('compiler applies soft in-fill density map with seam-preserving transition 
   });
 
   assert.ok(mapped.meta.softDensityCulled > 0, 'expected density map to cull some interior soft triangles');
+  assert.equal(mapped.meta.rigidDensityCulled, 0, 'no rigid fill present, so rigid cull count should remain zero');
   assert.ok(mapped.meta.softTriangles < baseline.meta.softTriangles, 'density map should reduce soft triangle count');
 
   const seamBand = mapped.triangles.filter((t) => {
@@ -187,6 +188,47 @@ test('compiler applies soft in-fill density map with seam-preserving transition 
     return nearOuter;
   });
   assert.ok(outerSkin.length > 0, 'expected outer boundary skin triangles to remain preserved');
+});
+
+test('density map also modulates rigid infill resolution (not soft-only)', () => {
+  const w = 64, h = 64;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+  const softDensity = new Float32Array(w * h).fill(0.0);
+
+  for (let y = 8; y <= 56; y++) {
+    for (let x = 8; x <= 56; x++) {
+      rigid[y * w + x] = 1;
+      if (x >= 32) softDensity[y * w + x] = 1.0; // brighter => sparser retention
+    }
+  }
+
+  const baseline = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    threshold: 0.35,
+    density: 2,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles',
+  });
+
+  const mapped = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: softDensity,
+    threshold: 0.35,
+    density: 2,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles',
+  });
+
+  assert.ok(mapped.meta.rigidDensityCulled > 0, 'expected density map to cull rigid interior infill triangles too');
+  assert.ok(mapped.meta.rigidTriangles < baseline.meta.rigidTriangles, 'density map should reduce rigid triangle count in sparse regions');
+  assert.ok(mapped.meta.rigidPieces > 0, 'rigid contour extraction should remain available/authoritative');
 });
 
 test('connectivity largest mode drops disconnected islands', () => {

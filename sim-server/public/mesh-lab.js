@@ -2,8 +2,10 @@ import { compileFieldToMesh } from '/field-to-structure-core.js';
 import { createCreatureSpecFromMesh, parseCreatureSpec } from '/creature-spec.js';
 
 const paintCanvas = document.getElementById('paint');
+const densityCanvas = document.getElementById('densityPaint');
 const meshCanvas = document.getElementById('mesh');
 const pctx = paintCanvas.getContext('2d');
+const dctx = densityCanvas.getContext('2d');
 const mctx = meshCanvas.getContext('2d');
 const modeEl = document.getElementById('paintMode');
 const brushEl = document.getElementById('brush');
@@ -21,28 +23,47 @@ const out = document.getElementById('out');
 const W = 128, H = 128;
 const rigid = new Float32Array(W * H);
 const soft = new Float32Array(W * H);
-const softDensity = new Float32Array(W * H).fill(1);
-let painting = false;
+const softDensity = new Float32Array(W * H).fill(0.5);
 let lastMesh = null;
 
 function idx(x, y) { return y * W + x; }
 
 function drawFields() {
-  const img = pctx.createImageData(W, H);
+  const traitImg = pctx.createImageData(W, H);
+  const densityImg = dctx.createImageData(W, H);
+
   for (let i = 0; i < rigid.length; i++) {
-    img.data[i * 4] = Math.min(255, rigid[i] * 255);
-    img.data[i * 4 + 1] = Math.min(255, softDensity[i] * 160);
-    img.data[i * 4 + 2] = Math.min(255, soft[i] * 255);
-    img.data[i * 4 + 3] = 255;
+    const r = Math.max(0, Math.min(1, rigid[i]));
+    const s = Math.max(0, Math.min(1, soft[i]));
+    const dens = Math.max(0, Math.min(1, softDensity[i]));
+
+    // Trait plane: rigid red, soft blue, no density overlay.
+    traitImg.data[i * 4] = Math.min(255, r * 255);
+    traitImg.data[i * 4 + 1] = 0;
+    traitImg.data[i * 4 + 2] = Math.min(255, s * 255);
+    traitImg.data[i * 4 + 3] = 255;
+
+    // Density plane: green-only, default mid-green around 0.5.
+    densityImg.data[i * 4] = 0;
+    densityImg.data[i * 4 + 1] = Math.round(40 + dens * 180);
+    densityImg.data[i * 4 + 2] = 0;
+    densityImg.data[i * 4 + 3] = 255;
   }
-  const tmp = document.createElement('canvas');
-  tmp.width = W; tmp.height = H;
-  tmp.getContext('2d').putImageData(img, 0, 0);
+
+  const traitTmp = document.createElement('canvas');
+  traitTmp.width = W; traitTmp.height = H;
+  traitTmp.getContext('2d').putImageData(traitImg, 0, 0);
   pctx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
-  pctx.drawImage(tmp, 0, 0, W, H, 0, 0, paintCanvas.width, paintCanvas.height);
+  pctx.drawImage(traitTmp, 0, 0, W, H, 0, 0, paintCanvas.width, paintCanvas.height);
+
+  const densTmp = document.createElement('canvas');
+  densTmp.width = W; densTmp.height = H;
+  densTmp.getContext('2d').putImageData(densityImg, 0, 0);
+  dctx.clearRect(0, 0, densityCanvas.width, densityCanvas.height);
+  dctx.drawImage(densTmp, 0, 0, W, H, 0, 0, densityCanvas.width, densityCanvas.height);
 }
 
-function paint(clientX, clientY) {
+function paintTrait(clientX, clientY) {
   const rect = paintCanvas.getBoundingClientRect();
   const x = ((clientX - rect.left) / rect.width) * W;
   const y = ((clientY - rect.top) / rect.height) * H;
@@ -59,13 +80,40 @@ function paint(clientX, clientY) {
       if (d > r) continue;
       const t = 1 - d / r;
       const i = idx(xx, yy);
-      if (mode === 'rigid') rigid[i] = Math.max(rigid[i], t);
-      else if (mode === 'soft') soft[i] = Math.max(soft[i], t);
-      else if (mode === 'softDensity') {
-        const target = Math.max(0, Math.min(1, Number(softDensityPaintEl?.value) || 1));
-        softDensity[i] = softDensity[i] * (1 - t) + target * t;
+      if (mode === 'rigid') {
+        rigid[i] = Math.max(rigid[i], t);
+        soft[i] *= (1 - t);
+      } else if (mode === 'soft') {
+        soft[i] = Math.max(soft[i], t);
+        rigid[i] *= (1 - t);
+      } else {
+        rigid[i] *= (1 - t);
+        soft[i] *= (1 - t);
       }
-      else { rigid[i] *= (1 - t); soft[i] *= (1 - t); softDensity[i] = softDensity[i] * (1 - t) + 1 * t; }
+    }
+  }
+  drawFields();
+}
+
+function paintDensity(clientX, clientY, erase = false) {
+  const rect = densityCanvas.getBoundingClientRect();
+  const x = ((clientX - rect.left) / rect.width) * W;
+  const y = ((clientY - rect.top) / rect.height) * H;
+  const r = Math.max(1, Number(brushEl.value) || 14) * (W / densityCanvas.width);
+  const target = erase ? 0.5 : Math.max(0, Math.min(1, Number(softDensityPaintEl?.value) || 0.5));
+
+  const minX = Math.max(0, Math.floor(x - r));
+  const maxX = Math.min(W - 1, Math.ceil(x + r));
+  const minY = Math.max(0, Math.floor(y - r));
+  const maxY = Math.min(H - 1, Math.ceil(y + r));
+
+  for (let yy = minY; yy <= maxY; yy++) {
+    for (let xx = minX; xx <= maxX; xx++) {
+      const d = Math.hypot(xx - x, yy - y);
+      if (d > r) continue;
+      const t = 1 - d / r;
+      const i = idx(xx, yy);
+      softDensity[i] = softDensity[i] * (1 - t) + target * t;
     }
   }
   drawFields();
@@ -146,10 +194,28 @@ function compileNow() {
   drawMesh(mesh);
 }
 
-paintCanvas.addEventListener('mousedown', (e) => { painting = true; paint(e.clientX, e.clientY); });
-window.addEventListener('mouseup', () => { painting = false; });
-paintCanvas.addEventListener('mousemove', (e) => { if (painting) paint(e.clientX, e.clientY); });
-clearBtn.addEventListener('click', () => { rigid.fill(0); soft.fill(0); softDensity.fill(1); drawFields(); compileNow(); });
+let traitPainting = false;
+let densityPainting = false;
+
+paintCanvas.addEventListener('mousedown', (e) => { traitPainting = true; paintTrait(e.clientX, e.clientY); });
+paintCanvas.addEventListener('mousemove', (e) => { if (traitPainting) paintTrait(e.clientX, e.clientY); });
+
+densityCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+densityCanvas.addEventListener('mousedown', (e) => {
+  densityPainting = true;
+  paintDensity(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
+});
+densityCanvas.addEventListener('mousemove', (e) => {
+  if (!densityPainting) return;
+  paintDensity(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
+});
+
+window.addEventListener('mouseup', () => {
+  traitPainting = false;
+  densityPainting = false;
+});
+
+clearBtn.addEventListener('click', () => { rigid.fill(0); soft.fill(0); softDensity.fill(0.5); drawFields(); compileNow(); });
 compileBtn.addEventListener('click', compileNow);
 if (softInfillModeEl) softInfillModeEl.addEventListener('change', compileNow);
 
@@ -179,7 +245,7 @@ importFile.addEventListener('change', async () => {
     rigid.set(authoring.rigid);
     soft.set(authoring.soft);
     if (Array.isArray(authoring.softDensity) && authoring.softDensity.length === W * H) softDensity.set(authoring.softDensity);
-    else softDensity.fill(1);
+    else softDensity.fill(0.5);
     drawFields();
     compileNow();
     return;

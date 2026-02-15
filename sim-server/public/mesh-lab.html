@@ -16,19 +16,18 @@
 <body>
   <h2>Field→Structure Compiler Lab</h2>
   <div class="row">
-    <label>Paint mode
+    <label>Trait paint mode
       <select id="paintMode">
         <option value="rigid" selected>Rigid region (red)</option>
         <option value="soft">Soft region (blue)</option>
-        <option value="softDensity">Soft in-fill density map (green)</option>
-        <option value="erase">Erase</option>
+        <option value="erase">Erase trait field</option>
       </select>
     </label>
     <label>Brush <input id="brush" type="number" value="14" min="1" max="80" /></label>
     <label>Density(step) <input id="density" type="number" value="4" min="1" max="16" /></label>
     <label>Threshold <input id="threshold" type="number" value="0.35" min="0" max="1" step="0.01" /></label>
-    <label>In-fill paint (0..1) <input id="softDensityPaint" type="number" value="1.0" min="0" max="1" step="0.05" /></label>
-    <span style="opacity:0.82">soft density map converts intensity to local level 1..15 (1=dense, 15=sparse)</span>
+    <label>Density paint (0..1) <input id="softDensityPaint" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
+    <span style="opacity:0.82">Density pane applies to rigid+soft in-fill: darker green = level 1 (dense), brighter green = level 15 (sparse)</span>
     <label>Soft in-fill
       <select id="softInfillMode">
         <option value="triangles" selected>Triangles (canonical stable)</option>
@@ -44,8 +43,12 @@
   </div>
   <div class="pane">
     <div>
-      <div>Trait fields (paint here)</div>
+      <div>Trait fields (rigid/soft; mutually exclusive)</div>
       <canvas id="paint" width="512" height="512"></canvas>
+    </div>
+    <div>
+      <div>In-fill density field (separate plane)</div>
+      <canvas id="densityPaint" width="512" height="512"></canvas>
     </div>
     <div>
       <div>Compiled mesh</div>

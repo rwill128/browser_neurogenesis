@@ -43,6 +43,7 @@ function deriveBaseStepFromDensityField({ width, height, rigidField, softField, 
 }
 
 function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField, softMinCellSize = 1 }) {
+  const minSoftStep = Math.max(1, Math.round(Number(softMinCellSize) || 1));
   const cw = Math.max(1, width - 1);
   const ch = Math.max(1, height - 1);
   const cellCount = cw * ch;
@@ -64,7 +65,6 @@ function buildAdaptiveDensityCells({ width, height, rigidField, softField, thres
       kindGrid[i] = kind;
       const d = sampleBilinear(densityField, width, height, sx, sy);
       const localStep = densityValueToStep(d);
-      const minSoftStep = Math.max(1, Math.min(DENSITY_STEP_MAX, Math.round(Number(softMinCellSize) || 1)));
       stepGrid[i] = kind === 2
         ? Math.max(localStep, minSoftStep)
         : localStep;
@@ -94,8 +94,9 @@ function buildAdaptiveDensityCells({ width, height, rigidField, softField, thres
       if (!kind) continue;
 
       const target = Math.max(1, stepGrid[i] || 1);
+      const minAllowed = kind === 2 ? minSoftStep : 1;
       let size = target;
-      while (size > 1 && !canPlace(kind, x, y, size)) size -= 1;
+      while (size > minAllowed && !canPlace(kind, x, y, size)) size -= 1;
       if (!canPlace(kind, x, y, size)) continue;
 
       for (let yy = y; yy < y + size; yy++) {
@@ -139,7 +140,8 @@ export function compileFieldToMesh({
 }) {
   const infillMode = softInfillMode === 'triangles' ? 'triangles' : 'triangles+cross';
   const fallbackStep = Math.max(1, density | 0);
-  const softMinStep = Math.max(1, Math.min(DENSITY_STEP_MAX, Math.round(Number(softMinCellSize) || 1)));
+  const maxAdaptiveStep = Math.max(1, Math.min(width - 1, height - 1));
+  const softMinStep = Math.max(1, Math.min(maxAdaptiveStep, Math.round(Number(softMinCellSize) || 1)));
   const step = deriveBaseStepFromDensityField({
     width,
     height,

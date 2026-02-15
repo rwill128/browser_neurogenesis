@@ -280,10 +280,23 @@ test('soft minimum primitive size clamps adaptive tiny triangles', () => {
 
   assert.equal(tinyAllowed.meta.softMinCellSize, 1);
   assert.equal(clamped.meta.softMinCellSize, 4);
+  assert.ok(clamped.meta.softTriangles > 0, 'clamped mesh should retain at least some soft triangles');
   assert.ok(
     clamped.meta.softTriangles < tinyAllowed.meta.softTriangles,
     `expected soft primitive floor to reduce triangle count (tiny=${tinyAllowed.meta.softTriangles}, clamped=${clamped.meta.softTriangles})`,
   );
+
+  for (const t of clamped.triangles) {
+    if (t.kind !== 'soft') continue;
+    const a = clamped.nodes[t.a];
+    const b = clamped.nodes[t.b];
+    const c = clamped.nodes[t.c];
+    const ab = Math.hypot(a.x - b.x, a.y - b.y);
+    const bc = Math.hypot(b.x - c.x, b.y - c.y);
+    const ca = Math.hypot(c.x - a.x, c.y - a.y);
+    const minEdge = Math.min(ab, bc, ca);
+    assert.ok(minEdge >= 4 - 1e-6, `expected strict min soft edge >=4, saw ${minEdge}`);
+  }
 });
 
 test('density map also modulates rigid infill resolution (not soft-only)', () => {

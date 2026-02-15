@@ -189,7 +189,7 @@ function compileNow() {
     minComponentTriangles: 0,
     softInfillMode: softInfillModeEl?.value || 'triangles',
     softDensityField: softDensity,
-    softMinCellSize: Math.max(1, Math.min(12, Math.round(Number(softMinCellSizeEl?.value) || 3))),
+    softMinCellSize: Math.max(1, Math.min(Math.max(1, W - 1), Math.round(Number(softMinCellSizeEl?.value) || 3))),
   });
   lastMesh = mesh;
   drawMesh(mesh);

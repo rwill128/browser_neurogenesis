@@ -199,6 +199,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   localDirectionalCouplingMax = 1.1,
   localErrorPivot = 0.2,
   polarityCouplingMax = 1.08,
+  smallRestRecoveryCouplingMax = 1,
+  smallRestPivot = 0.9,
 } = {}) {
   if (!Array.isArray(springs) || !restBaseline || typeof restBaseline.length !== 'number') return 0;
 
@@ -225,6 +227,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const localDirectionalMax = Math.max(1, Number(localDirectionalCouplingMax) || 1);
   const localPivot = Math.max(1e-6, Number(localErrorPivot) || 0.2);
   const polarityMax = Math.max(1, Number(polarityCouplingMax) || 1);
+  const smallRestCouplingMax = Math.max(1, Number(smallRestRecoveryCouplingMax) || 1);
+  const smallRestErrPivot = Math.max(1e-6, Number(smallRestPivot) || 0.9);
 
   let touched = 0;
   const n = Math.min(springs.length, restBaseline.length);
@@ -248,11 +252,15 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   let meanNegativeErrNorm = 0;
   let positiveErrCount = 0;
   let negativeErrCount = 0;
+  let meanBaseRest = 0;
+  let meanBaseRestCount = 0;
   if (n > 0 && (adaptiveMode || nodeErrAbsSum)) {
     for (let i = 0; i < n; i++) {
       const sp = springs[i];
       if (!Array.isArray(sp) || sp.length < 3) continue;
       const base = Math.max(1e-4, Number(restBaseline[i]) || 1e-4);
+      meanBaseRest += base;
+      meanBaseRestCount += 1;
       const current = Number(sp[2]);
       const cur = Number.isFinite(current) ? current : base;
       const signedErrNorm = (cur - base) / base;
@@ -290,6 +298,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
     meanSignedErrNorm = meanErrCount > 0 ? (meanSignedErrNorm / meanErrCount) : 0;
     meanPositiveErrNorm = positiveErrCount > 0 ? (meanPositiveErrNorm / positiveErrCount) : 0;
     meanNegativeErrNorm = negativeErrCount > 0 ? (meanNegativeErrNorm / negativeErrCount) : 0;
+    meanBaseRest = meanBaseRestCount > 0 ? (meanBaseRest / meanBaseRestCount) : 0;
   }
 
   for (let i = 0; i < n; i++) {
@@ -318,6 +327,11 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       : 1;
     const outlierAlpha = clamp((outlierRatio - 1) / outlierPivot, 0, 1);
     const outlierBoost = 1 + (outlierCouplingMax - 1) * outlierAlpha;
+    const shortRestRatio = (adaptiveMode && smallRestCouplingMax > 1.0001 && meanBaseRest > 1e-6)
+      ? (meanBaseRest / base)
+      : 1;
+    const shortRestAlpha = clamp((shortRestRatio - 1) / smallRestErrPivot, 0, 1);
+    const shortRestBoost = 1 + (smallRestCouplingMax - 1) * shortRestAlpha;
 
     let localBoost = 1;
     let localDirectionalBoost = 1;
@@ -351,6 +365,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       * directionalBoost
       * polarityBoost
       * outlierBoost
+      * shortRestBoost
       * localBoost
       * localDirectionalBoost;
     const recover = clamp(k * boost, 0, 1);

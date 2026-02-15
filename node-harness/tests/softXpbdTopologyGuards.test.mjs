@@ -1118,3 +1118,57 @@ test('default pure-soft thin-feature cap improves adversarial recovery without a
   assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 7e-5,
     `expected bounded area guardrail under default thin-feature cap (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });
+
+test('short-rest recovery coupling improves coarse-topology pure-soft form-memory return without area regression', () => {
+  const recoveryOverrides = {
+    recoverRate: 0.02,
+    adaptiveGainMax: 1.35,
+    adaptiveExponent: 1.05,
+    nearBaselineSnapWindow: 0,
+    nearBaselineSnapBlend: 0,
+  };
+
+  const compileOverrides = {
+    softNeighborStepDeltaCap: 0,
+    softBoundaryCellCap: 6,
+    softMaxCellSize: 10,
+    softThinFeatureCellCap: 0,
+  };
+
+  const before = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      ...recoveryOverrides,
+      smallRestRecoveryCouplingMax: 1,
+      smallRestPivot: 0.9,
+    },
+    compileOverrides,
+  });
+
+  const after = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      ...recoveryOverrides,
+      smallRestRecoveryCouplingMax: 1.12,
+      smallRestPivot: 0.9,
+    },
+    compileOverrides,
+  });
+
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-short-rest-coupling]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryHalfLifeSteps <= before.recoveryHalfLifeSteps,
+    `expected non-regressing half-life under short-rest coupling (before=${before.recoveryHalfLifeSteps}, after=${after.recoveryHalfLifeSteps})`);
+  assert.ok(after.recoveryAt200 > before.recoveryAt200,
+    `expected better early recovery under short-rest coupling (before=${before.recoveryAt200}, after=${after.recoveryAt200})`);
+  assert.ok(after.recoveryAt500 > before.recoveryAt500,
+    `expected better mid recovery under short-rest coupling (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
+  assert.ok(after.recoveryAt1000 >= before.recoveryAt1000,
+    `expected non-regressing late recovery under short-rest coupling (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 7e-5,
+    `expected bounded area guardrail under short-rest coupling (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+});

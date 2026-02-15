@@ -42,9 +42,12 @@ function deriveBaseStepFromDensityField({ width, height, rigidField, softField, 
   return densityValueToStep(meanDensity);
 }
 
-function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField, softMinCellSize = 1, softMaxCellSize = 6 }) {
+function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField, softMinCellSize = 1, softMaxCellSize = 6, softBoundaryCellCap = 2 }) {
   const minSoftStep = Math.max(1, Math.round(Number(softMinCellSize) || 1));
   const maxSoftStep = Math.max(minSoftStep, Math.round(Number(softMaxCellSize) || 6));
+  const boundaryCap = Number.isFinite(Number(softBoundaryCellCap))
+    ? Math.max(0, Math.round(Number(softBoundaryCellCap)))
+    : 2;
   const cw = Math.max(1, width - 1);
   const ch = Math.max(1, height - 1);
   const cellCount = cw * ch;
@@ -69,6 +72,36 @@ function buildAdaptiveDensityCells({ width, height, rigidField, softField, thres
       stepGrid[i] = kind === 2
         ? Math.min(maxSoftStep, Math.max(localStep, minSoftStep))
         : localStep;
+    }
+  }
+
+  if (boundaryCap > 0) {
+    for (let y = 0; y < ch; y++) {
+      for (let x = 0; x < cw; x++) {
+        const i = cIdx(x, y);
+        if (kindGrid[i] !== 2) continue;
+
+        let touchesBoundary = (x === 0 || y === 0 || x === cw - 1 || y === ch - 1);
+        if (!touchesBoundary) {
+          for (let ny = y - 1; ny <= y + 1 && !touchesBoundary; ny++) {
+            for (let nx = x - 1; nx <= x + 1; nx++) {
+              if (nx === x && ny === y) continue;
+              if (nx < 0 || ny < 0 || nx >= cw || ny >= ch) {
+                touchesBoundary = true;
+                break;
+              }
+              if (kindGrid[cIdx(nx, ny)] !== 2) {
+                touchesBoundary = true;
+                break;
+              }
+            }
+          }
+        }
+
+        if (touchesBoundary) {
+          stepGrid[i] = Math.max(minSoftStep, Math.min(stepGrid[i], boundaryCap));
+        }
+      }
     }
   }
 
@@ -139,6 +172,7 @@ export function compileFieldToMesh({
   softDensityField = null, // 0..1, controls local rigid+soft primitive size (darker=finer, brighter=coarser)
   softMinCellSize = 1, // lower bound on adaptive soft primitive size (cell units)
   softMaxCellSize = 6, // upper bound on adaptive soft primitive size (cell units)
+  softBoundaryCellCap = 2, // cap soft primitive size on paint boundary to avoid seam stretch/fit loss
 }) {
   const infillMode = softInfillMode === 'triangles' ? 'triangles' : 'triangles+cross';
   const fallbackStep = Math.max(1, density | 0);
@@ -208,6 +242,7 @@ export function compileFieldToMesh({
       densityField: softDensityField,
       softMinCellSize: softMinStep,
       softMaxCellSize: softMaxStep,
+      softBoundaryCellCap,
     });
     for (const c of adaptive.cells) {
       const x0 = c.x;
@@ -282,6 +317,7 @@ export function compileFieldToMesh({
       softDensityLevels: softDensityField ? 15 : 0,
       softMinCellSize: softMinStep,
       softMaxCellSize: softMaxStep,
+      softBoundaryCellCap: Number.isFinite(Number(softBoundaryCellCap)) ? Math.max(0, Math.round(Number(softBoundaryCellCap))) : 2,
     },
   };
 }

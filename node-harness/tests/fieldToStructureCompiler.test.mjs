@@ -69,6 +69,43 @@ function softQualityMetrics(mesh) {
   };
 }
 
+function softBoundaryStretchMetrics(mesh, fieldWidth, fieldHeight) {
+  const softTris = mesh.triangles.filter((t) => t.kind === 'soft');
+  const boundaryEdges = [];
+  const boundaryAreas = [];
+
+  for (const t of softTris) {
+    const a = mesh.nodes[t.a];
+    const b = mesh.nodes[t.b];
+    const c = mesh.nodes[t.c];
+    const cx = (a.x + b.x + c.x) / 3;
+    const cy = (a.y + b.y + c.y) / 3;
+    const nearFieldBoundary = cx <= 14 || cx >= fieldWidth - 14 || cy <= 14 || cy >= fieldHeight - 14;
+    if (!nearFieldBoundary) continue;
+
+    boundaryEdges.push(
+      Math.hypot(a.x - b.x, a.y - b.y),
+      Math.hypot(b.x - c.x, b.y - c.y),
+      Math.hypot(c.x - a.x, c.y - a.y),
+    );
+
+    const area = Math.abs((a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y)) * 0.5);
+    boundaryAreas.push(area);
+  }
+
+  const percentile = (arr, p) => {
+    if (!arr.length) return 0;
+    const sorted = [...arr].sort((m, n) => m - n);
+    return sorted[Math.floor((sorted.length - 1) * p)];
+  };
+
+  return {
+    boundaryMaxEdge: boundaryEdges.length ? Math.max(...boundaryEdges) : 0,
+    boundaryEdgeP95: percentile(boundaryEdges, 0.95),
+    boundaryAreaP95: percentile(boundaryAreas, 0.95),
+  };
+}
+
 test('field-to-structure compiler creates rigid and soft triangles from painted regions', () => {
   const w = 16, h = 16;
   const rigid = new Float32Array(w * h);
@@ -386,6 +423,60 @@ test('adversarial pure-soft density map bounds coarse primitive scale to reduce 
   assert.ok(after.areaRatio < before.areaRatio, `expected bounded area ratio reduction (before=${before.areaRatio}, after=${after.areaRatio})`);
   assert.ok(after.maxEdge <= 9, `default soft max-cell bound should cap soft edge span, saw ${after.maxEdge}`);
   assert.equal(boundedDefault.meta.softMaxCellSize, 6);
+});
+
+test('pure-soft boundary cap prevents oversized seam triangles in adversarial painted-edge fields', () => {
+  const w = 96, h = 96;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+  const softDensity = new Float32Array(w * h).fill(0.95);
+
+  for (let y = 10; y <= 86; y++) {
+    for (let x = 10; x <= 86; x++) soft[y * w + x] = 1;
+  }
+  // Keep a thin, high-curvature appendage that is sensitive to coarse boundary cells.
+  for (let y = 18; y <= 30; y++) {
+    for (let x = 70; x <= 89; x++) {
+      soft[y * w + x] = 1;
+      softDensity[y * w + x] = 0.98;
+    }
+  }
+  for (let y = 10; y <= 86; y++) {
+    for (let x = 10; x <= 32; x++) softDensity[y * w + x] = 0.05;
+  }
+
+  const noBoundaryCap = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: softDensity,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles+cross',
+    softBoundaryCellCap: 0,
+  });
+
+  const defaultBoundaryCap = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: softDensity,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles+cross',
+  });
+
+  const before = softBoundaryStretchMetrics(noBoundaryCap, w, h);
+  const after = softBoundaryStretchMetrics(defaultBoundaryCap, w, h);
+
+  assert.ok(defaultBoundaryCap.meta.softTriangles > 0, 'cap must preserve soft mesh output');
+  assert.ok(after.boundaryEdgeP95 < before.boundaryEdgeP95,
+    `expected seam p95-edge reduction (before=${before.boundaryEdgeP95}, after=${after.boundaryEdgeP95})`);
+  assert.ok(after.boundaryAreaP95 <= before.boundaryAreaP95,
+    `expected seam p95-area non-regression (before=${before.boundaryAreaP95}, after=${after.boundaryAreaP95})`);
+  assert.equal(defaultBoundaryCap.meta.softBoundaryCellCap, 2);
 });
 
 test('density map also modulates rigid infill resolution (not soft-only)', () => {

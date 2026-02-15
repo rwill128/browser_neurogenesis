@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { makeScenario } from '../miniScenarioWatchdog.mjs';
+import { makeScenario, sanitizeFlowSample } from '../miniScenarioWatchdog.mjs';
 
 function expectComboCounts(combo, summary) {
   if (combo === 'rigid-rigid') {
@@ -28,4 +28,14 @@ test('mini watchdog scenarios are generated from mesh-lab field/spec pipeline', 
       `seed=${seed} should produce non-empty compiler output`);
     expectComboCounts(scenario.combo, scenario.specSummary);
   }
+});
+
+test('sanitizeFlowSample clamps non-finite and extreme fluid samples deterministically', () => {
+  const nanFlow = sanitizeFlowSample({ vx: Number.NaN, vy: Number.POSITIVE_INFINITY }, 2.5);
+  assert.deepEqual(nanFlow, { vx: 0, vy: 0, speed: 0 });
+
+  const capped = sanitizeFlowSample({ vx: 30, vy: 40 }, 2.5);
+  assert.ok(Math.abs(capped.speed - 2.5) < 1e-9);
+  assert.ok(Math.abs(capped.vx - 1.5) < 1e-9);
+  assert.ok(Math.abs(capped.vy - 2.0) < 1e-9);
 });

@@ -567,6 +567,20 @@ function softClusterAreaRatios(nodes, restMap) {
   return out;
 }
 
+function sanitizeFlowSample(flow, maxSpeed = 3.5) {
+  const vxRaw = Number(flow?.vx);
+  const vyRaw = Number(flow?.vy);
+  let vx = Number.isFinite(vxRaw) ? vxRaw : 0;
+  let vy = Number.isFinite(vyRaw) ? vyRaw : 0;
+  const mag = Math.hypot(vx, vy);
+  if (mag > maxSpeed) {
+    const s = maxSpeed / Math.max(1e-9, mag);
+    vx *= s;
+    vy *= s;
+  }
+  return { vx, vy, speed: Math.hypot(vx, vy) };
+}
+
 function runScenario(scenario) {
   const sim = {
     n: scenario.grid,
@@ -602,8 +616,8 @@ function runScenario(scenario) {
 
     for (let i = 0; i < sim.bodies.rigid.length; i++) {
       const rb = sim.bodies.rigid[i];
-      const flow = sim.fluid.getVelocityAtWorld(rb.x, rb.y);
-      maxFluidSampleSpeed = Math.max(maxFluidSampleSpeed, Math.hypot(flow.vx, flow.vy));
+      const flow = sanitizeFlowSample(sim.fluid.getVelocityAtWorld(rb.x, rb.y));
+      maxFluidSampleSpeed = Math.max(maxFluidSampleSpeed, flow.speed);
       rb.vx += (flow.vx - rb.vx) * 0.045;
       rb.vy += (flow.vy - rb.vy) * 0.045;
       rb.vx += Math.cos(step * 0.08 + i * 1.37) * 0.01;
@@ -614,8 +628,8 @@ function runScenario(scenario) {
     }
     for (let i = 0; i < sim.bodies.soft.nodes.length; i++) {
       const node = sim.bodies.soft.nodes[i];
-      const flow = sim.fluid.getVelocityAtWorld(node.x, node.y);
-      maxFluidSampleSpeed = Math.max(maxFluidSampleSpeed, Math.hypot(flow.vx, flow.vy));
+      const flow = sanitizeFlowSample(sim.fluid.getVelocityAtWorld(node.x, node.y));
+      maxFluidSampleSpeed = Math.max(maxFluidSampleSpeed, flow.speed);
       node.vx += (flow.vx - node.vx) * 0.05;
       node.vy += (flow.vy - node.vy) * 0.05;
       node.vx += Math.cos(step * 0.07 + i * 0.5) * 0.004;
@@ -858,6 +872,7 @@ export {
   makeScenario,
   makeBodiesFromMeshLabField,
   buildAuthoringFieldsForCombo,
+  sanitizeFlowSample,
 };
 
 const isDirectRun = (() => {

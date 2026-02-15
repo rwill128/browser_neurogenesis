@@ -695,17 +695,26 @@ function convexHull(points) {
 
 function normalizeEdgeBodyModeList(list, count) {
   if (!Array.isArray(list) || !list.length) return Array.from({ length: count }, () => EDGE_BODY_BLOCK);
-  return Array.from({ length: count }, (_, i) => normalizeEdgeBodyMode(list[i % list.length]));
+  return Array.from({ length: count }, (_, i) => {
+    const v = list[i];
+    return v === undefined ? EDGE_BODY_BLOCK : normalizeEdgeBodyMode(v);
+  });
 }
 
 function normalizeEdgeDyeModeList(list, count) {
   if (!Array.isArray(list) || !list.length) return Array.from({ length: count }, () => [...EDGE_DYE_DEFLECT_RGB]);
-  return Array.from({ length: count }, (_, i) => normalizeEdgeDyeMode(list[i % list.length]));
+  return Array.from({ length: count }, (_, i) => {
+    const v = list[i];
+    return v === undefined ? [...EDGE_DYE_DEFLECT_RGB] : normalizeEdgeDyeMode(v);
+  });
 }
 
 function normalizeEdgePermeabilityList(list, count) {
   if (!Array.isArray(list) || !list.length) return Array.from({ length: count }, () => [0, 0, 0]);
-  return Array.from({ length: count }, (_, i) => normalizeBinaryRGB(list[i % list.length]));
+  return Array.from({ length: count }, (_, i) => {
+    const v = list[i];
+    return v === undefined ? [0, 0, 0] : normalizeBinaryRGB(v);
+  });
 }
 
 function normalizeEdgeBodyMode(v) {

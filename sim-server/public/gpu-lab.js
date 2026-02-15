@@ -1955,6 +1955,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       hardMinFactor: 0.7,
       hardMaxFactor: 1.45,
       jitterDeadband: 1e-5,
+      adaptiveGainMax: recovering ? 2.4 : 1.35,
+      errorPivot: 0.16,
     });
   }
   sim.softDeformationState = deform;

@@ -381,7 +381,7 @@ test('1000-step pure-soft mesh scenario (scale 0.5) is more stable with spring s
     `expected lower area drift with strain clamp (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });
 
-function runRestDriftRecoveryScenario({ useRestRecovery }) {
+function runRestDriftRecoveryScenario({ useRestRecovery, adaptiveRecovery = false }) {
   const soft = buildPureSoftMeshScenario({ grid: 100, scale: 0.5 });
   const baseline = new Float32Array(soft.springs.length);
   for (let i = 0; i < soft.springs.length; i++) baseline[i] = Math.max(1e-4, Number(soft.springs[i][2]) || 1e-4);
@@ -398,9 +398,11 @@ function runRestDriftRecoveryScenario({ useRestRecovery }) {
   let recoveryAt200 = 0;
   let recoveryAt500 = 0;
   let recoveryAt1000 = 0;
+  let recoveryHalfLifeSteps = 1000;
   let maxAreaDeviation = 0;
   let maxRestScaleDrift = 0;
   let finalRestScaleDrift = 0;
+  let driftAtPulse = 0;
 
   for (let step = 0; step < 1000; step++) {
     // deterministic adversarial drift pulse similar to severe-topology rest mutation.
@@ -522,6 +524,8 @@ function runRestDriftRecoveryScenario({ useRestRecovery }) {
         recoverRate: 0.045,
         hardMinFactor: 0.7,
         hardMaxFactor: 1.45,
+        adaptiveGainMax: adaptiveRecovery ? 2.4 : 1,
+        errorPivot: 0.16,
       });
     }
 
@@ -532,7 +536,12 @@ function runRestDriftRecoveryScenario({ useRestRecovery }) {
       meanScaleError += Math.abs(cur / base - 1);
     }
     meanScaleError /= Math.max(1, soft.springs.length);
+    if (step === 120) driftAtPulse = meanScaleError;
     const recovery = Math.max(0, 1 - meanScaleError);
+    const halfDriftThreshold = driftAtPulse * 0.5;
+    if (step > 120 && recoveryHalfLifeSteps === 1000 && meanScaleError <= halfDriftThreshold) {
+      recoveryHalfLifeSteps = step - 120;
+    }
     if (step === 199) recoveryAt200 = recovery;
     if (step === 499) recoveryAt500 = recovery;
     if (step === 999) recoveryAt1000 = recovery;
@@ -549,22 +558,24 @@ function runRestDriftRecoveryScenario({ useRestRecovery }) {
     maxAreaDeviation = Math.max(maxAreaDeviation, areaDeviation);
   }
 
-  return { recoveryAt200, recoveryAt500, recoveryAt1000, maxAreaDeviation, maxRestScaleDrift, finalRestScaleDrift };
+  return { recoveryHalfLifeSteps, recoveryAt200, recoveryAt500, recoveryAt1000, maxAreaDeviation, maxRestScaleDrift, finalRestScaleDrift };
 }
 
 test('adversarial pure-soft rest drift recovers shape memory with bounded spring-rest restoration', () => {
-  const before = runRestDriftRecoveryScenario({ useRestRecovery: false });
-  const after = runRestDriftRecoveryScenario({ useRestRecovery: true });
+  const before = runRestDriftRecoveryScenario({ useRestRecovery: true, adaptiveRecovery: false });
+  const after = runRestDriftRecoveryScenario({ useRestRecovery: true, adaptiveRecovery: true });
   if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
     console.log('[soft-recovery-metrics]', JSON.stringify({ before, after }));
   }
 
+  assert.ok(after.recoveryHalfLifeSteps < before.recoveryHalfLifeSteps,
+    `expected faster half-life recovery (before=${before.recoveryHalfLifeSteps}, after=${after.recoveryHalfLifeSteps})`);
   assert.ok(after.recoveryAt200 > before.recoveryAt200,
     `expected better early recovery (before=${before.recoveryAt200}, after=${after.recoveryAt200})`);
   assert.ok(after.recoveryAt500 > before.recoveryAt500,
     `expected better mid recovery (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
-  assert.ok(after.recoveryAt1000 > before.recoveryAt1000,
-    `expected better long recovery (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.recoveryAt1000 >= before.recoveryAt1000,
+    `expected non-regressing long recovery (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
   assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 5e-5,
     `expected bounded area-deviation drift under recovery guardrail (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
   assert.ok(after.finalRestScaleDrift < before.finalRestScaleDrift,

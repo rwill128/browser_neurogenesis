@@ -181,6 +181,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   hardMinFactor = 0.6,
   hardMaxFactor = 1.6,
   jitterDeadband = 1e-4,
+  adaptiveGainMax = 2.4,
+  errorPivot = 0.16,
 } = {}) {
   if (!Array.isArray(springs) || !restBaseline || typeof restBaseline.length !== 'number') return 0;
 
@@ -188,6 +190,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const minFactor = Math.max(0.05, Number(hardMinFactor) || 0.6);
   const maxFactor = Math.max(minFactor + 1e-3, Number(hardMaxFactor) || 1.6);
   const eps = Math.max(0, Number(jitterDeadband) || 0);
+  const gainMax = Math.max(1, Number(adaptiveGainMax) || 1);
+  const pivot = Math.max(1e-6, Number(errorPivot) || 0.16);
 
   let touched = 0;
   const n = Math.min(springs.length, restBaseline.length);
@@ -198,7 +202,10 @@ export function recoverSoftSpringRests(springs, restBaseline, {
     const base = Math.max(1e-4, Number(restBaseline[i]) || 1e-4);
     const current = Number(sp[2]);
     const cur = Number.isFinite(current) ? current : base;
-    const target = clamp(cur + (base - cur) * k, base * minFactor, base * maxFactor);
+    const errNorm = Math.abs(base - cur) / base;
+    const boost = 1 + (gainMax - 1) * Math.min(1, errNorm / pivot);
+    const recover = clamp(k * boost, 0, 1);
+    const target = clamp(cur + (base - cur) * recover, base * minFactor, base * maxFactor);
     if (Math.abs(target - cur) <= eps) continue;
     sp[2] = Math.max(1e-4, target);
     touched += 1;

@@ -1173,6 +1173,59 @@ test('default pure-soft thin-feature cap improves adversarial recovery without a
 
 
 
+test('default pure-soft bridge cap improves adversarial narrow-bridge recovery without area regression', () => {
+  const recoveryOverrides = {
+    recoverRate: 0.02,
+    adaptiveGainMax: 1.35,
+    adaptiveExponent: 1.05,
+    nearBaselineSnapWindow: 0,
+    nearBaselineSnapBlend: 0,
+  };
+
+  const before = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides,
+    compileOverrides: {
+      softNeighborStepDeltaCap: 0,
+      softBoundaryCellCap: 6,
+      softMaxCellSize: 10,
+      softThinFeatureCellCap: 0,
+      softBridgeCellCap: 0,
+    },
+  });
+
+  const after = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides,
+    compileOverrides: {
+      softNeighborStepDeltaCap: 0,
+      softBoundaryCellCap: 6,
+      softMaxCellSize: 10,
+      softThinFeatureCellCap: 0,
+      // isolate low-cardinality bridge cap effect
+      softBridgeCellCap: 3,
+    },
+  });
+
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-default-bridge-cap]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryAt200 >= (before.recoveryAt200 - 8e-6),
+    `expected near-par early recovery with bridge cap (before=${before.recoveryAt200}, after=${after.recoveryAt200})`);
+  assert.ok(after.recoveryAt500 >= (before.recoveryAt500 - 8e-6),
+    `expected near-par mid recovery with bridge cap (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
+  assert.ok(after.recoveryAt1000 >= (before.recoveryAt1000 - 8e-6),
+    `expected near-par late recovery with bridge cap (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.baselineRestSpanRatio < before.baselineRestSpanRatio,
+    `expected tighter spring-rest topology span under bridge cap (before=${before.baselineRestSpanRatio}, after=${after.baselineRestSpanRatio})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 7e-5,
+    `expected bounded area guardrail under bridge cap (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+});
+
+
 test('default small-rest coupling improves coarse-topology pure-soft recovery vs legacy uncoupled baseline', () => {
   const recoveryOverrides = {
     recoverRate: 0.02,

@@ -96,3 +96,25 @@ test('concave rigid collision: malformed non-finite polygon vertex is ignored sa
   assert.ok(Number.isFinite(node.x) && Number.isFinite(node.vx), 'node state should remain finite');
   assert.ok(Number.isFinite(rigid.x) && Number.isFinite(rigid.vx) && Number.isFinite(rigid.omega), 'rigid state should remain finite');
 });
+
+test('concave rigid collision: duplicate contour vertices are de-duplicated to avoid over-correction jitter', () => {
+  const cleanRigid = makeConcaveRigid();
+  const dupRigid = makeConcaveRigid();
+  dupRigid.verticesLocal = [
+    cleanRigid.verticesLocal[0],
+    cleanRigid.verticesLocal[1],
+    cleanRigid.verticesLocal[1], // duplicated edge vertex (can happen with contour resampling)
+    ...cleanRigid.verticesLocal.slice(2),
+  ];
+
+  const cleanNode = { x: 24, y: 30, vx: 0, vy: 0, mass: 1, r: 1.2 };
+  const dupNode = { x: 24, y: 30, vx: 0, vy: 0, mass: 1, r: 1.2 };
+
+  const cleanHit = resolveRigidVsSoftNodeCollision(cleanRigid, cleanNode, rigidVerticesWorld(cleanRigid), 0.25);
+  const dupHit = resolveRigidVsSoftNodeCollision(dupRigid, dupNode, rigidVerticesWorld(dupRigid), 0.25);
+
+  assert.equal(cleanHit, true);
+  assert.equal(dupHit, true);
+  assert.ok(Math.abs(cleanNode.x - dupNode.x) < 1e-6, `duplicate vertex changed node correction (clean=${cleanNode.x}, dup=${dupNode.x})`);
+  assert.ok(Math.abs(cleanRigid.x - dupRigid.x) < 1e-6, `duplicate vertex changed rigid correction (clean=${cleanRigid.x}, dup=${dupRigid.x})`);
+});

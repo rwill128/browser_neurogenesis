@@ -69,6 +69,25 @@ function polygonCentroid(verts) {
   return { x: sx * k, y: sy * k };
 }
 
+function sanitizeFinitePolygonVerts(verts, eps = EPS) {
+  if (!Array.isArray(verts) || verts.length < 3) return [];
+  const out = [];
+  for (const v of verts) {
+    const x = Number(v?.x);
+    const y = Number(v?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    const prev = out[out.length - 1];
+    if (prev && Math.hypot(x - prev.x, y - prev.y) <= eps) continue;
+    out.push({ x, y });
+  }
+  if (out.length >= 2) {
+    const first = out[0];
+    const last = out[out.length - 1];
+    if (Math.hypot(first.x - last.x, first.y - last.y) <= eps) out.pop();
+  }
+  return out.length >= 3 ? out : [];
+}
+
 function closestPointOnSegment(px, py, ax, ay, bx, by) {
   const abx = bx - ax;
   const aby = by - ay;
@@ -106,7 +125,7 @@ export function resolveRigidVsSoftNodeCollision(rigid, node, vertsInput, restitu
     : rigidVerticesWorld(rigid);
   if (!verts.length) return false;
 
-  const finiteVerts = verts.filter((v) => Number.isFinite(v?.x) && Number.isFinite(v?.y));
+  const finiteVerts = sanitizeFinitePolygonVerts(verts);
   if (finiteVerts.length < 3) return false;
 
   const centroid = polygonCentroid(finiteVerts);

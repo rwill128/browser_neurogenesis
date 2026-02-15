@@ -42,7 +42,7 @@ function deriveBaseStepFromDensityField({ width, height, rigidField, softField, 
   return densityValueToStep(meanDensity);
 }
 
-function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField, softMinCellSize = 1, softMaxCellSize = 6, softBoundaryCellCap = 2, softNeighborStepDeltaCap = 0 }) {
+function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField, softMinCellSize = 1, softMaxCellSize = 6, softBoundaryCellCap = 2, softNeighborStepDeltaCap = 0, softThinFeatureCellCap = 0 }) {
   const minSoftStep = Math.max(1, Math.round(Number(softMinCellSize) || 1));
   const maxSoftStep = Math.max(minSoftStep, Math.round(Number(softMaxCellSize) || 6));
   const boundaryCap = Number.isFinite(Number(softBoundaryCellCap))
@@ -50,6 +50,9 @@ function buildAdaptiveDensityCells({ width, height, rigidField, softField, thres
     : 2;
   const neighborDeltaCap = Number.isFinite(Number(softNeighborStepDeltaCap))
     ? Math.max(0, Math.round(Number(softNeighborStepDeltaCap)))
+    : 0;
+  const thinFeatureCap = Number.isFinite(Number(softThinFeatureCellCap))
+    ? Math.max(0, Math.round(Number(softThinFeatureCellCap)))
     : 0;
   const cw = Math.max(1, width - 1);
   const ch = Math.max(1, height - 1);
@@ -103,6 +106,30 @@ function buildAdaptiveDensityCells({ width, height, rigidField, softField, thres
 
         if (touchesBoundary) {
           stepGrid[i] = Math.max(minSoftStep, Math.min(stepGrid[i], boundaryCap));
+        }
+      }
+    }
+  }
+
+  if (thinFeatureCap > 0) {
+    for (let y = 0; y < ch; y++) {
+      for (let x = 0; x < cw; x++) {
+        const i = cIdx(x, y);
+        if (kindGrid[i] !== 2) continue;
+
+        let softNeighborCount = 0;
+        for (let ny = y - 1; ny <= y + 1; ny++) {
+          for (let nx = x - 1; nx <= x + 1; nx++) {
+            if (nx === x && ny === y) continue;
+            if (nx < 0 || ny < 0 || nx >= cw || ny >= ch) continue;
+            if (kindGrid[cIdx(nx, ny)] === 2) softNeighborCount += 1;
+          }
+        }
+
+        // Narrow tendrils/bridges have sparse 8-neighborhood support; cap their
+        // primitive scale to preserve painted-shape fit and reduce long rest-span tails.
+        if (softNeighborCount <= 5) {
+          stepGrid[i] = Math.max(minSoftStep, Math.min(stepGrid[i], thinFeatureCap));
         }
       }
     }
@@ -209,6 +236,7 @@ export function compileFieldToMesh({
   softMaxCellSize = 6, // upper bound on adaptive soft primitive size (cell units)
   softBoundaryCellCap = 2, // cap soft primitive size on paint boundary to avoid seam stretch/fit loss
   softNeighborStepDeltaCap = 1, // max coarse-step delta between neighboring soft cells (0 disables)
+  softThinFeatureCellCap = 2, // cap primitive size in narrow/tendril soft regions to preserve shape memory topology
 }) {
   const infillMode = softInfillMode === 'triangles' ? 'triangles' : 'triangles+cross';
   const fallbackStep = Math.max(1, density | 0);
@@ -217,6 +245,9 @@ export function compileFieldToMesh({
   const softMaxStep = Math.max(softMinStep, Math.min(maxAdaptiveStep, Math.round(Number(softMaxCellSize) || 6)));
   const softNeighborDeltaCap = Number.isFinite(Number(softNeighborStepDeltaCap))
     ? Math.max(0, Math.round(Number(softNeighborStepDeltaCap)))
+    : 0;
+  const softThinFeatureCap = Number.isFinite(Number(softThinFeatureCellCap))
+    ? Math.max(0, Math.round(Number(softThinFeatureCellCap)))
     : 0;
   const step = deriveBaseStepFromDensityField({
     width,
@@ -283,6 +314,7 @@ export function compileFieldToMesh({
       softMaxCellSize: softMaxStep,
       softBoundaryCellCap,
       softNeighborStepDeltaCap: softNeighborDeltaCap,
+      softThinFeatureCellCap: softThinFeatureCap,
     });
     for (const c of adaptive.cells) {
       const x0 = c.x;
@@ -359,6 +391,7 @@ export function compileFieldToMesh({
       softMaxCellSize: softMaxStep,
       softBoundaryCellCap: Number.isFinite(Number(softBoundaryCellCap)) ? Math.max(0, Math.round(Number(softBoundaryCellCap))) : 2,
       softNeighborStepDeltaCap: softNeighborDeltaCap,
+      softThinFeatureCellCap: softThinFeatureCap,
     },
   };
 }

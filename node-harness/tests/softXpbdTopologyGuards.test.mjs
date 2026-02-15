@@ -1069,3 +1069,52 @@ test('default pure-soft neighbor step cap improves adversarial recovery vs legac
   assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 7e-5,
     `expected bounded area guardrail under default neighbor-step cap (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });
+
+test('default pure-soft thin-feature cap improves adversarial recovery without area guardrail regressions', () => {
+  const recoveryOverrides = {
+    recoverRate: 0.02,
+    adaptiveGainMax: 1.35,
+    adaptiveExponent: 1.05,
+    nearBaselineSnapWindow: 0,
+    nearBaselineSnapBlend: 0,
+  };
+
+  const before = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides,
+    compileOverrides: {
+      softNeighborStepDeltaCap: 0,
+      softBoundaryCellCap: 6,
+      softMaxCellSize: 10,
+      softThinFeatureCellCap: 0,
+    },
+  });
+
+  const after = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides,
+    // isolate thin-feature cap effect against deliberately coarse legacy topology
+    compileOverrides: {
+      softNeighborStepDeltaCap: 0,
+      softBoundaryCellCap: 6,
+      softMaxCellSize: 10,
+    },
+  });
+
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-default-thin-feature-cap]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryAt200 >= before.recoveryAt200,
+    `expected non-regressing early recovery with thin-feature cap (before=${before.recoveryAt200}, after=${after.recoveryAt200})`);
+  assert.ok(after.recoveryAt500 >= before.recoveryAt500,
+    `expected non-regressing mid recovery with thin-feature cap (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
+  assert.ok(after.recoveryAt1000 >= before.recoveryAt1000,
+    `expected non-regressing late recovery with thin-feature cap (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.baselineRestSpanRatio < before.baselineRestSpanRatio,
+    `expected tighter spring-rest span from bounded thin-feature topology (before=${before.baselineRestSpanRatio}, after=${after.baselineRestSpanRatio})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 7e-5,
+    `expected bounded area guardrail under default thin-feature cap (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+});

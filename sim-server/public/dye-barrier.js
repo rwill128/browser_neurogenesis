@@ -38,12 +38,17 @@ export function normalizePermeabilityRGB(mode) {
 }
 
 export function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, vx, vy, thickness = 1.4, dyeMode = EDGE_DYE_MODE.DEFLECT, bodyMode = EDGE_BODY_MODE.BLOCK) {
+  const ex = bx - ax;
+  const ey = by - ay;
+  const segLenSq = ex * ex + ey * ey;
+  // Guardrail: collapsed/near-collapsed edges should not behave like point barriers,
+  // which can over-attenuate dye and velocity when a spring temporarily degenerates.
+  if (!Number.isFinite(segLenSq) || segLenSq < 1e-9) return;
+
   const minX = Math.max(0, Math.floor(Math.min(ax, bx) - thickness - 1));
   const maxX = Math.min(n - 1, Math.ceil(Math.max(ax, bx) + thickness + 1));
   const minY = Math.max(0, Math.floor(Math.min(ay, by) - thickness - 1));
   const maxY = Math.min(n - 1, Math.ceil(Math.max(ay, by) + thickness + 1));
-  const ex = bx - ax;
-  const ey = by - ay;
   const el = Math.max(1e-6, Math.hypot(ex, ey));
   const nx = -ey / el;
   const ny = ex / el;

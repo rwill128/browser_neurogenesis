@@ -265,3 +265,93 @@ test('applyBodyEdgeFieldBarriers skips malformed soft springs with missing node 
 
   assert.doesNotThrow(() => applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld }));
 });
+
+test('collapsed soft spring edge is ignored (no point-barrier dye/velocity sink)', () => {
+  const n = 16;
+  const size = n * n;
+  const r = new Float32Array(size);
+  const g = new Float32Array(size);
+  const b = new Float32Array(size);
+  const vx = new Float32Array(size);
+  const vy = new Float32Array(size);
+
+  const i = 8 * n + 8;
+  r[i] = 120;
+  g[i] = 90;
+  b[i] = 60;
+  vx[i] = 1.5;
+  vy[i] = -0.8;
+
+  const sim = {
+    controls: { n },
+    bodies: {
+      rigid: [],
+      soft: {
+        nodes: [
+          { x: 8, y: 8 },
+          { x: 8, y: 8 },
+        ],
+        springs: [
+          [0, 1, 0, EDGE_BODY_MODE.BLOCK, [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.ABSORB, EDGE_DYE_MODE.DEFLECT]],
+        ],
+      },
+    },
+  };
+
+  applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld });
+
+  assert.ok(Math.abs(r[i] - 120) < 1e-6, 'collapsed edge should not deflect/passively alter red dye');
+  assert.ok(Math.abs(g[i] - 90) < 1e-6, 'collapsed edge should not absorb green dye');
+  assert.ok(Math.abs(b[i] - 60) < 1e-6, 'collapsed edge should not alter blue dye');
+  assert.ok(Math.abs(vx[i] - 1.5) < 1e-6, 'collapsed edge should not project velocity');
+  assert.ok(Math.abs(vy[i] + 0.8) < 1e-6, 'collapsed edge should not project velocity');
+});
+
+test('collapsed rigid edge is ignored (does not attenuate local field)', () => {
+  const n = 20;
+  const size = n * n;
+  const r = new Float32Array(size);
+  const g = new Float32Array(size);
+  const b = new Float32Array(size);
+  const vx = new Float32Array(size);
+  const vy = new Float32Array(size);
+
+  const i = 10 * n + 10;
+  r[i] = 100;
+  g[i] = 100;
+  b[i] = 100;
+  vx[i] = 0.7;
+  vy[i] = 1.2;
+
+  const sim = {
+    controls: { n },
+    bodies: {
+      rigid: [
+        {
+          x: 10,
+          y: 10,
+          theta: 0,
+          // Two identical vertices => both traversed edges are collapsed.
+          verticesLocal: [
+            { x: 0, y: 0 },
+            { x: 0, y: 0 },
+          ],
+          edgeBodyMode: [EDGE_BODY_MODE.BLOCK, EDGE_BODY_MODE.BLOCK],
+          edgeDyeMode: [
+            [EDGE_DYE_MODE.ABSORB, EDGE_DYE_MODE.ABSORB, EDGE_DYE_MODE.ABSORB],
+            [EDGE_DYE_MODE.ABSORB, EDGE_DYE_MODE.ABSORB, EDGE_DYE_MODE.ABSORB],
+          ],
+        },
+      ],
+      soft: { nodes: [], springs: [] },
+    },
+  };
+
+  applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld });
+
+  assert.ok(Math.abs(r[i] - 100) < 1e-6, 'collapsed rigid edge should not absorb red dye');
+  assert.ok(Math.abs(g[i] - 100) < 1e-6, 'collapsed rigid edge should not absorb green dye');
+  assert.ok(Math.abs(b[i] - 100) < 1e-6, 'collapsed rigid edge should not absorb blue dye');
+  assert.ok(Math.abs(vx[i] - 0.7) < 1e-6, 'collapsed rigid edge should not change vx');
+  assert.ok(Math.abs(vy[i] - 1.2) < 1e-6, 'collapsed rigid edge should not change vy');
+});

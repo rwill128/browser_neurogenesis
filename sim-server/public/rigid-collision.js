@@ -1,4 +1,5 @@
 const EPS = 1e-6;
+const RIGID_CONTACT_SLOP = 0.015;
 
 export function rigidVerticesWorld(body) {
   if (!body) return [];
@@ -571,6 +572,7 @@ export function resolveRigidVsRigidPolygonCollision(a, b, restitution = 0.3, deb
     }
   }
   if (!best) return false;
+  if (best.overlap <= RIGID_CONTACT_SLOP) return false;
 
   const ma = Math.max(0.05, a.mass || 1);
   const mb = Math.max(0.05, b.mass || 1);

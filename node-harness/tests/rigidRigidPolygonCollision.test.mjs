@@ -103,6 +103,25 @@ test('rigid-rigid polygon collision: no force when bodies are clearly separated'
   assert.equal(b.vx, bvx);
 });
 
+test('rigid-rigid polygon collision: tiny overlap stays in slop band (no jitter correction)', () => {
+  const a = makeBox(20, 20, 3);
+  const b = makeBox(25.99, 20, 3); // overlap 0.01 < rigid contact slop
+  a.vx = 0.2;
+  b.vx = -0.1;
+
+  const ax = a.x;
+  const bx = b.x;
+  const avx = a.vx;
+  const bvx = b.vx;
+
+  const hit = resolveRigidVsRigidPolygonCollision(a, b, 0.3);
+  assert.equal(hit, false, 'tiny overlap should be ignored to prevent jitter at rest');
+  assert.equal(a.x, ax);
+  assert.equal(b.x, bx);
+  assert.equal(a.vx, avx);
+  assert.equal(b.vx, bvx);
+});
+
 test('rigid-rigid proxy decomposition stays inside concave hull and logs triggering proxy pair', () => {
   const a = makeConcaveL(32, 32);
   const b = makeBox(26, 26, 2.5);

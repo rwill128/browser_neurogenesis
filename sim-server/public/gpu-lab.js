@@ -56,6 +56,10 @@ const SOFT_DEFORM_SEVERE_AREA_RATIO_MAX = 5.0;
 const MEMBRANE_CELL_BASE_COUNT = 4;
 const MEMBRANE_CELL_BASE_PRESSURE_GAIN = 0.08;
 const MEMBRANE_CELL_BASE_RADIAL_DAMPING = 0.06;
+const MEMBRANE_EDGE_XPBD_ITERS = 8;
+const MEMBRANE_EDGE_BASE_COMPLIANCE = 0.0007;
+const MEMBRANE_BEND_XPBD_ITERS = 4;
+const MEMBRANE_BEND_BASE_COMPLIANCE = 0.0022;
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
@@ -596,35 +600,6 @@ function pushMembraneCellCluster({
     ]);
   }
 
-  // Bending/tension support for membrane smoothness.
-  for (let i = 0; i < nodeCount; i++) {
-    const j = (i + 2) % nodeCount;
-    const a = ring[i];
-    const b = ring[j];
-    springs.push([
-      base + i,
-      base + j,
-      Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)),
-      EDGE_BODY_MODE.PASS,
-      [EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS],
-    ]);
-  }
-
-  // Sparse long-bend supports to suppress skinny-fold modes without dense lattice fill.
-  for (let i = 0; i < nodeCount; i++) {
-    const j = (i + 3) % nodeCount;
-    if (i >= j) continue;
-    const a = ring[i];
-    const b = ring[j];
-    springs.push([
-      base + i,
-      base + j,
-      Math.max(1e-3, Math.hypot(b.x - a.x, b.y - a.y)),
-      EDGE_BODY_MODE.PASS,
-      [EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS],
-    ]);
-  }
-
   return {
     clusterId,
     restArea: Math.max(1e-4, Math.abs(polygonSignedAreaPoints(ring))),
@@ -1140,6 +1115,8 @@ function applyMiniScenarioPreset(sim, mini) {
   sim.softAreaRest = null;
   sim.softAreaLambda = null;
   sim.softMembraneAreaBaseline = null;
+  sim.softMembraneLoopState = null;
+  sim.softMembraneClusterSet = null;
   sim.viscMapCpu.fill(0.5);
   uploadViscMap();
   focusCameraOnBodies(sim, sim.bodies);
@@ -1462,7 +1439,7 @@ function enforceFluidEdgeBoundariesCpu(vxField, vyField, n) {
   }
 }
 
-function applySoftSpringsXPBDVelocity(s, dtPos, stiffnessScale, lambdaCache) {
+function applySoftSpringsXPBDVelocity(s, dtPos, stiffnessScale, lambdaCache, { skipClusterSet = null } = {}) {
   if (!s?.nodes?.length || !s?.springs?.length) return;
   const alpha = (SOFT_XPBD_BASE_COMPLIANCE / Math.max(0.2, stiffnessScale)) / Math.max(1e-8, dtPos * dtPos);
 
@@ -1472,6 +1449,7 @@ function applySoftSpringsXPBDVelocity(s, dtPos, stiffnessScale, lambdaCache) {
       const a = s.nodes[i];
       const b = s.nodes[j];
       if (!a || !b) continue;
+      if (skipClusterSet && (skipClusterSet.has(a.clusterId ?? 0) || skipClusterSet.has(b.clusterId ?? 0))) continue;
 
       const ax = a.x + a.vx * dtPos;
       const ay = a.y + a.vy * dtPos;
@@ -1608,6 +1586,164 @@ function signedAreaCurrent(nodes, indices) {
     s += a.x * b.y - b.x * a.y;
   }
   return 0.5 * s;
+}
+
+function ensureSoftMembraneClusterSet(sim) {
+  const set = new Set();
+  for (const c of (sim?.bodies?.softMembraneClusters || [])) {
+    const cid = Number(c?.clusterId);
+    if (Number.isInteger(cid)) set.add(cid);
+  }
+  sim.softMembraneClusterSet = set;
+  return set;
+}
+
+function ensureSoftMembraneLoopState(sim, s, loops) {
+  sim.softMembraneLoopState = sim.softMembraneLoopState || new Map();
+  const live = new Set();
+  const membraneSet = ensureSoftMembraneClusterSet(sim);
+
+  for (const loop of loops || []) {
+    const cid = loop.clusterId ?? 0;
+    if (!membraneSet.has(cid)) continue;
+    const ids = loop.indices || [];
+    if (ids.length < 3) continue;
+    live.add(cid);
+
+    const key = ids.join(',');
+    let st = sim.softMembraneLoopState.get(cid);
+    const needsReset = !st || st.key !== key || st.edgeRest.length !== ids.length;
+    if (needsReset) {
+      st = {
+        key,
+        edgeRest: new Float32Array(ids.length),
+        edgeLambda: new Float32Array(ids.length),
+        bendRest: new Float32Array(ids.length),
+        bendLambda: new Float32Array(ids.length),
+      };
+      for (let i = 0; i < ids.length; i++) {
+        const a = s.nodes[ids[i]];
+        const b = s.nodes[ids[(i + 1) % ids.length]];
+        if (!a || !b) continue;
+        st.edgeRest[i] = Math.max(1e-4, Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0)));
+
+        const p = s.nodes[ids[(i - 1 + ids.length) % ids.length]];
+        const n = s.nodes[ids[(i + 1) % ids.length]];
+        if (!p || !n) continue;
+        st.bendRest[i] = Math.max(1e-4, Math.hypot((n.x || 0) - (p.x || 0), (n.y || 0) - (p.y || 0)));
+      }
+      sim.softMembraneLoopState.set(cid, st);
+    }
+  }
+
+  for (const cid of [...sim.softMembraneLoopState.keys()]) {
+    if (!live.has(cid)) sim.softMembraneLoopState.delete(cid);
+  }
+}
+
+function applySoftMembraneBoundaryXPBDVelocity(sim, s, loops, dtPos) {
+  const membraneSet = ensureSoftMembraneClusterSet(sim);
+  if (!membraneSet.size) return 0;
+  ensureSoftMembraneLoopState(sim, s, loops);
+
+  const edgeAlpha = MEMBRANE_EDGE_BASE_COMPLIANCE / Math.max(1e-8, dtPos * dtPos);
+  const bendAlpha = MEMBRANE_BEND_BASE_COMPLIANCE / Math.max(1e-8, dtPos * dtPos);
+  let touched = 0;
+
+  for (let iter = 0; iter < MEMBRANE_EDGE_XPBD_ITERS; iter++) {
+    for (const loop of loops || []) {
+      const cid = loop.clusterId ?? 0;
+      if (!membraneSet.has(cid)) continue;
+      const ids = loop.indices || [];
+      if (ids.length < 3) continue;
+      const st = sim.softMembraneLoopState?.get(cid);
+      if (!st) continue;
+
+      for (let i = 0; i < ids.length; i++) {
+        const a = s.nodes[ids[i]];
+        const b = s.nodes[ids[(i + 1) % ids.length]];
+        if (!a || !b) continue;
+
+        const ax = a.x + a.vx * dtPos;
+        const ay = a.y + a.vy * dtPos;
+        const bx = b.x + b.vx * dtPos;
+        const by = b.y + b.vy * dtPos;
+        const dx = bx - ax;
+        const dy = by - ay;
+        const d = Math.max(1e-6, Math.hypot(dx, dy));
+        const nx = dx / d;
+        const ny = dy / d;
+
+        const rest = Math.max(1e-4, Number(st.edgeRest[i]) || d);
+        const C = clamp(d - rest, -Math.max(0.08, rest * 0.28), Math.max(0.08, rest * 0.28));
+        const wA = 1 / Math.max(0.02, a.mass || 1);
+        const wB = 1 / Math.max(0.02, b.mass || 1);
+        const wSum = wA + wB;
+        if (wSum <= 1e-9) continue;
+
+        const lambdaPrev = Number(st.edgeLambda[i]) || 0;
+        let dl = (-C - edgeAlpha * lambdaPrev) / (wSum + edgeAlpha);
+        if (!Number.isFinite(dl)) continue;
+        const lambdaNext = clamp(lambdaPrev + dl, -20, 20);
+        dl = lambdaNext - lambdaPrev;
+        st.edgeLambda[i] = lambdaNext;
+
+        a.vx += (-wA * dl * nx) / dtPos;
+        a.vy += (-wA * dl * ny) / dtPos;
+        b.vx += (wB * dl * nx) / dtPos;
+        b.vy += (wB * dl * ny) / dtPos;
+        touched += 1;
+      }
+    }
+  }
+
+  for (let iter = 0; iter < MEMBRANE_BEND_XPBD_ITERS; iter++) {
+    for (const loop of loops || []) {
+      const cid = loop.clusterId ?? 0;
+      if (!membraneSet.has(cid)) continue;
+      const ids = loop.indices || [];
+      if (ids.length < 4) continue;
+      const st = sim.softMembraneLoopState?.get(cid);
+      if (!st) continue;
+
+      for (let i = 0; i < ids.length; i++) {
+        const prev = s.nodes[ids[(i - 1 + ids.length) % ids.length]];
+        const next = s.nodes[ids[(i + 1) % ids.length]];
+        if (!prev || !next) continue;
+
+        const px = prev.x + prev.vx * dtPos;
+        const py = prev.y + prev.vy * dtPos;
+        const nxp = next.x + next.vx * dtPos;
+        const nyp = next.y + next.vy * dtPos;
+        const dx = nxp - px;
+        const dy = nyp - py;
+        const d = Math.max(1e-6, Math.hypot(dx, dy));
+        const ux = dx / d;
+        const uy = dy / d;
+
+        const rest = Math.max(1e-4, Number(st.bendRest[i]) || d);
+        const C = clamp(d - rest, -Math.max(0.1, rest * 0.35), Math.max(0.1, rest * 0.35));
+        const wP = 1 / Math.max(0.02, prev.mass || 1);
+        const wN = 1 / Math.max(0.02, next.mass || 1);
+        const wSum = wP + wN;
+        if (wSum <= 1e-9) continue;
+
+        const lambdaPrev = Number(st.bendLambda[i]) || 0;
+        let dl = (-C - bendAlpha * lambdaPrev) / (wSum + bendAlpha);
+        if (!Number.isFinite(dl)) continue;
+        const lambdaNext = clamp(lambdaPrev + dl, -20, 20);
+        dl = lambdaNext - lambdaPrev;
+        st.bendLambda[i] = lambdaNext;
+
+        prev.vx += (-wP * dl * ux) / dtPos;
+        prev.vy += (-wP * dl * uy) / dtPos;
+        next.vx += (wN * dl * ux) / dtPos;
+        next.vy += (wN * dl * uy) / dtPos;
+      }
+    }
+  }
+
+  return touched;
 }
 
 function applySoftMembraneCellPressure(sim, s, loops, dtPos) {
@@ -2028,11 +2164,16 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       sim.softSpringRestBaseline[i] = Math.max(1e-4, Number(s.springs[i]?.[2]) || 1e-4);
     }
   }
-  applySoftSpringsXPBDVelocity(s, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT, sim.softXPBDLambda);
+
+  const softMembraneClusterSet = ensureSoftMembraneClusterSet(sim);
+  applySoftSpringsXPBDVelocity(s, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT, sim.softXPBDLambda, {
+    skipClusterSet: softMembraneClusterSet,
+  });
 
   const softClusterLoops = buildSoftClusterBoundaryLoops(s.nodes, s.springs, {
     blockMode: EDGE_BODY_MODE.BLOCK,
   });
+  const membraneBoundaryClusters = applySoftMembraneBoundaryXPBDVelocity(sim, s, softClusterLoops, dtPos);
   ensureSoftAreaRestState(sim, s, softClusterLoops, dtPos);
   applySoftAreaXPBDVelocity(sim, s, softClusterLoops, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT);
   const membranePressureClusters = applySoftMembraneCellPressure(sim, s, softClusterLoops, dtPos);
@@ -2281,6 +2422,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     softDeformWorstStretch: Number.isFinite(deform.worstStretch) ? deform.worstStretch : 1,
     softDeformWorstAreaRatio: Number.isFinite(deform.worstAreaRatio) ? deform.worstAreaRatio : 1,
     membraneCellClusters: Array.isArray(sim?.bodies?.softMembraneClusters) ? sim.bodies.softMembraneClusters.length : 0,
+    membraneBoundaryClusters,
     membranePressureClusters,
     softDtUsed: dt,
     softDtRaw: dtRaw,

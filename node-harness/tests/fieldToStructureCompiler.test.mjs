@@ -106,6 +106,30 @@ function softBoundaryStretchMetrics(mesh, fieldWidth, fieldHeight) {
   };
 }
 
+function countSharedPolygonEdges(pieces) {
+  const edgeKey = (a, b) => {
+    const q = (v) => Math.round(v * 1000) / 1000;
+    const ax = q(a.x), ay = q(a.y), bx = q(b.x), by = q(b.y);
+    if (ax < bx || (ax === bx && ay <= by)) return `${ax},${ay}|${bx},${by}`;
+    return `${bx},${by}|${ax},${ay}`;
+  };
+
+  const counts = new Map();
+  for (const p of pieces || []) {
+    const hull = Array.isArray(p?.hull) ? p.hull : [];
+    for (let i = 0; i < hull.length; i++) {
+      const a = hull[i];
+      const b = hull[(i + 1) % hull.length];
+      const k = edgeKey(a, b);
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+  }
+
+  let shared = 0;
+  for (const c of counts.values()) if (c >= 2) shared += 1;
+  return shared;
+}
+
 test('field-to-structure compiler creates rigid and soft triangles from painted regions', () => {
   const w = 16, h = 16;
   const rigid = new Float32Array(w * h);
@@ -144,6 +168,49 @@ test('higher threshold reduces generated triangles', () => {
   const high = compileFieldToMesh({ width: w, height: h, rigidField: rigid, softField: soft, threshold: 0.6, density: 2 });
 
   assert.ok(low.triangles.length > high.triangles.length);
+});
+
+test('rigid primitive-tiling mode fits red mask with edge-sharing tri/square/pent pieces', () => {
+  const w = 72, h = 72;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+
+  // Plus-shape blob to force multi-piece tiling with shared edges.
+  for (let y = 16; y <= 56; y++) {
+    for (let x = 30; x <= 42; x++) rigid[y * w + x] = 1;
+  }
+  for (let y = 28; y <= 44; y++) {
+    for (let x = 14; x <= 58; x++) rigid[y * w + x] = 1;
+  }
+
+  const mesh = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    rigidCompileMode: 'primitive-tiling',
+    rigidPrimitiveSideMin: 4,
+    rigidPrimitiveSideMax: 9,
+  });
+
+  assert.equal(mesh.meta.rigidCompileMode, 'primitive-tiling');
+  assert.ok(mesh.meta.rigidPrimitiveTiles > 0, 'expected primitive tiling to emit rigid pieces');
+  assert.ok(Array.isArray(mesh.rigidPieces) && mesh.rigidPieces.length > 1);
+
+  for (const p of mesh.rigidPieces) {
+    assert.ok(p.hull.length >= 3 && p.hull.length <= 5, `expected tri/square/pent hull, got ${p.hull.length}`);
+    for (let i = 0; i < p.hull.length; i++) {
+      const a = p.hull[i];
+      const b = p.hull[(i + 1) % p.hull.length];
+      const edgeLen = Math.hypot(a.x - b.x, a.y - b.y);
+      assert.ok(edgeLen >= 3.2 && edgeLen <= 10.2, `edge length out of bounded side-range: ${edgeLen}`);
+    }
+  }
+
+  const sharedEdges = countSharedPolygonEdges(mesh.rigidPieces);
+  assert.ok(sharedEdges >= 1, 'expected at least one exact shared edge between neighboring rigid primitive tiles');
 });
 
 test('compiler emits soft cross-beams for square soft cells', () => {
@@ -912,4 +979,94 @@ test('pure-soft bridge neighbor-max includes branch necks to bound adversarial t
   assert.ok(after.tipEdgeMax <= before.tipEdgeMax,
     `expected non-regressing endpoint max edge with bridge neighbor-max 3 (before=${before.tipEdgeMax}, after=${after.tipEdgeMax})`);
   assert.equal(afterDefaultBridgeNeighborMax3.meta.softBridgeNeighborMax, 3);
+});
+
+test('pure-soft terminal tip cap bounds adversarial endpoint primitive scale', () => {
+  const w = 96, h = 96;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+  const softDensity = new Float32Array(w * h).fill(0.98);
+
+  for (let y = 18; y <= 78; y++) {
+    for (let x = 16; x <= 62; x++) soft[y * w + x] = 1;
+  }
+  for (let y = 44; y <= 51; y++) {
+    for (let x = 62; x <= 90; x++) {
+      soft[y * w + x] = 1;
+      softDensity[y * w + x] = 0.99;
+    }
+  }
+  for (let y = 40; y <= 55; y++) {
+    for (let x = 86; x <= 92; x++) {
+      soft[y * w + x] = 1;
+      softDensity[y * w + x] = 0.99;
+    }
+  }
+
+  const before = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: softDensity,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles+cross',
+    softNeighborStepDeltaCap: 0,
+    softBoundaryCellCap: 6,
+    softThinFeatureCellCap: 0,
+    softBridgeCellCap: 2,
+    softBridgeNeighborMax: 3,
+    softTerminalTipCellCap: 0,
+  });
+
+  const after = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    softDensityField: softDensity,
+    threshold: 0.35,
+    connectivityMode: 'largest',
+    softInfillMode: 'triangles+cross',
+    softNeighborStepDeltaCap: 0,
+    softBoundaryCellCap: 6,
+    softThinFeatureCellCap: 0,
+    softBridgeCellCap: 2,
+    softBridgeNeighborMax: 3,
+    softTerminalTipCellCap: 1,
+  });
+
+  const tipEdgeStats = (mesh) => {
+    const tipEdges = [];
+    for (const t of mesh.triangles) {
+      if (t.kind !== 'soft') continue;
+      const a = mesh.nodes[t.a];
+      const b = mesh.nodes[t.b];
+      const c = mesh.nodes[t.c];
+      const cx = (a.x + b.x + c.x) / 3;
+      const cy = (a.y + b.y + c.y) / 3;
+      if (cx < 82 || cy < 36 || cy > 60) continue;
+      tipEdges.push(
+        Math.hypot(a.x - b.x, a.y - b.y),
+        Math.hypot(b.x - c.x, b.y - c.y),
+        Math.hypot(c.x - a.x, c.y - a.y),
+      );
+    }
+    tipEdges.sort((m, n) => m - n);
+    const p95 = tipEdges.length ? tipEdges[Math.floor((tipEdges.length - 1) * 0.95)] : 0;
+    const max = tipEdges.length ? tipEdges[tipEdges.length - 1] : 0;
+    return { tipEdgeP95: p95, tipEdgeMax: max, samples: tipEdges.length };
+  };
+
+  const beforeStats = tipEdgeStats(before);
+  const afterStats = tipEdgeStats(after);
+
+  assert.ok(after.meta.softTriangles > 0, 'terminal-tip-cap mesh should still produce soft triangles');
+  assert.ok(beforeStats.samples > 0 && afterStats.samples > 0, 'expected non-empty tip-edge samples');
+  assert.ok(afterStats.tipEdgeP95 < beforeStats.tipEdgeP95,
+    `expected tighter tip p95 edge with terminal cap (before=${beforeStats.tipEdgeP95}, after=${afterStats.tipEdgeP95})`);
+  assert.ok(afterStats.tipEdgeMax <= beforeStats.tipEdgeMax,
+    `expected bounded tip max edge with terminal cap (before=${beforeStats.tipEdgeMax}, after=${afterStats.tipEdgeMax})`);
+  assert.equal(after.meta.softTerminalTipCellCap, 1);
 });

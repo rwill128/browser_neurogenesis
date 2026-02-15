@@ -42,7 +42,7 @@ function deriveBaseStepFromDensityField({ width, height, rigidField, softField, 
   return densityValueToStep(meanDensity);
 }
 
-function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField, softMinCellSize = 1, softMaxCellSize = 6, softBoundaryCellCap = 2, softNeighborStepDeltaCap = 0, softThinFeatureCellCap = 0, softBridgeCellCap = 2, softBridgeNeighborMax = 3 }) {
+function buildAdaptiveDensityCells({ width, height, rigidField, softField, threshold, densityField, softMinCellSize = 1, softMaxCellSize = 6, softBoundaryCellCap = 2, softNeighborStepDeltaCap = 0, softThinFeatureCellCap = 0, softBridgeCellCap = 2, softBridgeNeighborMax = 3, softTerminalTipCellCap = 0 }) {
   const minSoftStep = Math.max(1, Math.round(Number(softMinCellSize) || 1));
   const maxSoftStep = Math.max(minSoftStep, Math.round(Number(softMaxCellSize) || 6));
   const boundaryCap = Number.isFinite(Number(softBoundaryCellCap))
@@ -60,6 +60,9 @@ function buildAdaptiveDensityCells({ width, height, rigidField, softField, thres
   const bridgeNeighborMax = Number.isFinite(Number(softBridgeNeighborMax))
     ? Math.max(1, Math.min(4, Math.round(Number(softBridgeNeighborMax))))
     : 3;
+  const terminalTipCap = Number.isFinite(Number(softTerminalTipCellCap))
+    ? Math.max(0, Math.round(Number(softTerminalTipCellCap)))
+    : 0;
   const cw = Math.max(1, width - 1);
   const ch = Math.max(1, height - 1);
   const cellCount = cw * ch;
@@ -157,6 +160,12 @@ function buildAdaptiveDensityCells({ width, height, rigidField, softField, thres
         // long tendrils in the solver. Cap primitive scale by cardinal connectivity.
         if (bridgeCap > 0 && cardinalSoft <= bridgeNeighborMax) {
           stepGrid[i] = Math.max(minSoftStep, Math.min(stepGrid[i], bridgeCap));
+        }
+
+        // Terminal tip region (<=2 cardinal neighbors) is highly prone to oversized
+        // primitives and long rest-span tails; allow an explicit tighter cap here.
+        if (terminalTipCap > 0 && cardinalSoft <= 2) {
+          stepGrid[i] = Math.max(minSoftStep, Math.min(stepGrid[i], terminalTipCap));
         }
       }
     }
@@ -257,6 +266,9 @@ export function compileFieldToMesh({
   density = 1,
   connectivityMode = 'none', // none | largest (strict single connected body)
   minComponentTriangles = 0,
+  rigidCompileMode = 'contours', // contours | primitive-tiling
+  rigidPrimitiveSideMin = 4,
+  rigidPrimitiveSideMax = 10,
   softInfillMode = 'triangles+cross', // triangles | triangles+cross
   softDensityField = null, // 0..1, controls local rigid+soft primitive size (darker=finer, brighter=coarser)
   softMinCellSize = 1, // lower bound on adaptive soft primitive size (cell units)
@@ -266,8 +278,12 @@ export function compileFieldToMesh({
   softThinFeatureCellCap = 2, // cap primitive size in narrow/tendril soft regions to preserve shape memory topology
   softBridgeCellCap = 2, // cap primitive size in low-cardinality bridge cells to reduce soft rest-span outliers
   softBridgeNeighborMax = 3, // max cardinal neighbors counted as bridge-like (default=3 narrows broad bridge cells less aggressively)
+  softTerminalTipCellCap = 0, // optional tighter cap for terminal tips (<=1 cardinal soft neighbor)
 }) {
   const infillMode = softInfillMode === 'triangles' ? 'triangles' : 'triangles+cross';
+  const rigidMode = String(rigidCompileMode || 'contours') === 'primitive-tiling' ? 'primitive-tiling' : 'contours';
+  const primitiveSideMin = Math.max(2, Math.round(Number(rigidPrimitiveSideMin) || 4));
+  const primitiveSideMax = Math.max(primitiveSideMin, Math.round(Number(rigidPrimitiveSideMax) || 10));
   const fallbackStep = Math.max(1, density | 0);
   const maxAdaptiveStep = Math.max(1, Math.min(width - 1, height - 1));
   const softMinStep = Math.max(1, Math.min(maxAdaptiveStep, Math.round(Number(softMinCellSize) || 1)));
@@ -284,6 +300,9 @@ export function compileFieldToMesh({
   const softBridgeNeighborLimit = Number.isFinite(Number(softBridgeNeighborMax))
     ? Math.max(1, Math.min(4, Math.round(Number(softBridgeNeighborMax))))
     : 3;
+  const softTerminalTipCap = Number.isFinite(Number(softTerminalTipCellCap))
+    ? Math.max(0, Math.round(Number(softTerminalTipCellCap)))
+    : 0;
   const step = deriveBaseStepFromDensityField({
     width,
     height,
@@ -352,6 +371,7 @@ export function compileFieldToMesh({
       softThinFeatureCellCap: softThinFeatureCap,
       softBridgeCellCap: softBridgeCap,
       softBridgeNeighborMax: softBridgeNeighborLimit,
+      softTerminalTipCellCap: softTerminalTipCap,
     });
     for (const c of adaptive.cells) {
       const x0 = c.x;
@@ -374,16 +394,26 @@ export function compileFieldToMesh({
   }
 
   const filtered = enforceConnectivity({ triangles, mode: connectivityMode, minComponentTriangles });
-  const rigidDecomp = extractRigidContoursFromField({
-    width,
-    height,
-    rigidField,
-    threshold,
-    cellSize: step,
-    nodes,
-    keptTriangles: filtered.triangles,
-    rigidMaskOverride,
-  });
+  const rigidDecomp = rigidMode === 'primitive-tiling'
+    ? extractRigidPrimitiveTilingFromField({
+        width,
+        height,
+        rigidField,
+        threshold,
+        sideMin: primitiveSideMin,
+        sideMax: primitiveSideMax,
+        connectivityMode,
+      })
+    : extractRigidContoursFromField({
+        width,
+        height,
+        rigidField,
+        threshold,
+        cellSize: step,
+        nodes,
+        keptTriangles: filtered.triangles,
+        rigidMaskOverride,
+      });
 
   const noOverlap = removeSoftTrianglesOverlappingRigidContours(filtered.triangles, nodes, rigidDecomp.pieces);
   const densityApplied = hasDensityMap
@@ -417,6 +447,10 @@ export function compileFieldToMesh({
       rigidTriangles: final.triangles.filter((t) => t.kind === 'rigid').length,
       softTriangles: final.triangles.filter((t) => t.kind === 'soft').length,
       rigidPieces: rigidDecomp.pieces.length,
+      rigidCompileMode: rigidMode,
+      rigidPrimitiveSideMin: primitiveSideMin,
+      rigidPrimitiveSideMax: primitiveSideMax,
+      rigidPrimitiveTiles: Number(rigidDecomp?.tileCount) || 0,
       softInfillMode: infillMode,
       softCrossBeams: softCrossBeams.length,
       droppedTriangles: triangles.length - final.triangles.length,
@@ -431,6 +465,7 @@ export function compileFieldToMesh({
       softThinFeatureCellCap: softThinFeatureCap,
       softBridgeCellCap: softBridgeCap,
       softBridgeNeighborMax: softBridgeNeighborLimit,
+      softTerminalTipCellCap: softTerminalTipCap,
     },
   };
 }
@@ -716,6 +751,355 @@ function extractRigidContoursFromField({ width, height, rigidField, threshold, c
   }
 
   return { pieces };
+}
+
+function extractRigidPrimitiveTilingFromField({
+  width,
+  height,
+  rigidField,
+  threshold,
+  sideMin = 4,
+  sideMax = 10,
+  connectivityMode = 'none',
+}) {
+  const pixelCount = width * height;
+  if (!(rigidField instanceof Float32Array) || rigidField.length < pixelCount) {
+    return { pieces: [], tileCount: 0 };
+  }
+
+  const mask = new Uint8Array(pixelCount);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      mask[i] = (Number(rigidField[i]) || 0) >= threshold ? 1 : 0;
+    }
+  }
+
+  if (connectivityMode === 'largest') {
+    const comps = collectMaskComponents(mask, width, height);
+    if (comps.length > 0) {
+      const keep = comps[0];
+      const nextMask = new Uint8Array(pixelCount);
+      for (const key of keep) {
+        const [x, y] = key.split(',').map((v) => Number(v));
+        if (x < 0 || y < 0 || x >= width || y >= height) continue;
+        nextMask[y * width + x] = 1;
+      }
+      mask.set(nextMask);
+    }
+  }
+
+  let paintedCount = 0;
+  for (let i = 0; i < pixelCount; i++) paintedCount += mask[i] ? 1 : 0;
+  if (!paintedCount) return { pieces: [], tileCount: 0 };
+
+  const minSide = Math.max(2, Math.round(Number(sideMin) || 4));
+  const maxSide = Math.max(minSide, Math.round(Number(sideMax) || 10));
+  const sideChoices = [];
+  if (maxSide - minSide <= 3) {
+    for (let s = minSide; s <= maxSide; s++) sideChoices.push(s);
+  } else {
+    const mid = Math.round((minSide + maxSide) * 0.5);
+    const q1 = Math.round((minSide + mid) * 0.5);
+    const q3 = Math.round((mid + maxSide) * 0.5);
+    for (const s of [minSide, q1, mid, q3, maxSide]) {
+      if (!sideChoices.includes(s)) sideChoices.push(s);
+    }
+  }
+
+  let best = null;
+  for (const side of sideChoices) {
+    const run = buildRigidPrimitiveTilingForSide({
+      width,
+      height,
+      rigidMask: mask,
+      side,
+      maxTiles: Math.max(8, Math.min(220, Math.round(paintedCount / Math.max(6, side * side * 0.52)))),
+    });
+    if (!run || !run.tiles?.length) continue;
+    if (!best || run.score > best.score) best = { ...run, side };
+  }
+
+  if (!best || !best.tiles?.length) return { pieces: [], tileCount: 0 };
+
+  const pieces = best.tiles.map((tile, i) => {
+    let hull = simplifyCollinear(tile.poly);
+    hull = simplifyDouglasPeucker(hull, 0.04);
+    hull = simplifyCollinear(hull);
+    if (signedPolygonArea(hull) < 0) hull = [...hull].reverse();
+    return {
+      id: `rigid_piece_${i}`,
+      // Keep each primitive separate so the runtime preserves triangle/square/pentagon visuals.
+      compoundId: `rigid_primitive_tile_${i}`,
+      hull,
+      sourceNodeIds: [],
+    };
+  }).filter((p) => Array.isArray(p.hull) && p.hull.length >= 3);
+
+  return {
+    pieces,
+    tileCount: pieces.length,
+    side: best.side,
+    coveredPixels: best.covered,
+    spilledPixels: best.spill,
+  };
+}
+
+function buildRigidPrimitiveTilingForSide({ width, height, rigidMask, side, maxTiles = 120 }) {
+  const seed = findBestRigidPrimitiveSeed({ width, height, rigidMask, side });
+  if (!seed) return null;
+
+  const covered = new Uint8Array(width * height);
+  const edgeMap = new Map();
+  const tiles = [];
+  let coveredCount = 0;
+  let spillCount = 0;
+
+  const addTile = (tile) => {
+    tiles.push(tile);
+    const fit = rasterizePolygonFit(tile.poly, width, height, rigidMask, covered, true);
+    coveredCount += fit.newInside;
+    spillCount += fit.outside;
+
+    const edges = buildPolygonEdges(tile.poly);
+    for (const e of edges) {
+      const k = canonicalEdgeKey(e.a, e.b);
+      if (edgeMap.has(k)) edgeMap.delete(k);
+      else edgeMap.set(k, e);
+    }
+  };
+
+  addTile(seed.tile);
+
+  for (let iter = 0; iter < maxTiles; iter++) {
+    let bestCand = null;
+    const frontier = [...edgeMap.values()];
+    if (!frontier.length) break;
+
+    for (const edge of frontier) {
+      for (const sides of [3, 4, 5]) {
+        const poly = buildAttachedRegularPolygon(edge, sides, side);
+        if (!poly) continue;
+
+        const center = centroid(poly);
+        if (!Number.isFinite(center.x) || !Number.isFinite(center.y)) continue;
+        if (center.x < -side || center.y < -side || center.x > width + side || center.y > height + side) continue;
+
+        let overlaps = false;
+        for (const t of tiles) {
+          if (pointInPolygon(center.x, center.y, t.poly)) {
+            overlaps = true;
+            break;
+          }
+          if (pointInPolygon(t.center.x, t.center.y, poly)) {
+            overlaps = true;
+            break;
+          }
+        }
+        if (overlaps) continue;
+
+        const fit = rasterizePolygonFit(poly, width, height, rigidMask, covered, false);
+        if (fit.inside < 3) continue;
+        if (fit.newInside <= 0) continue;
+
+        const spillPenalty = 2.6;
+        const overlapPenalty = 0.45;
+        const score = fit.newInside - fit.outside * spillPenalty - (fit.inside - fit.newInside) * overlapPenalty;
+        if (score <= 0) continue;
+
+        if (!bestCand || score > bestCand.score) {
+          bestCand = {
+            score,
+            tile: {
+              poly,
+              center,
+              sides,
+              side,
+            },
+          };
+        }
+      }
+    }
+
+    if (!bestCand) break;
+    addTile(bestCand.tile);
+  }
+
+  const score = coveredCount - spillCount * 2.2 + tiles.length * 0.12;
+  return {
+    tiles,
+    covered: coveredCount,
+    spill: spillCount,
+    score,
+  };
+}
+
+function findBestRigidPrimitiveSeed({ width, height, rigidMask, side }) {
+  const scan = Math.max(1, Math.round(side * 0.5));
+  let best = null;
+
+  for (let y = 1; y < height - 1; y += scan) {
+    for (let x = 1; x < width - 1; x += scan) {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      for (const sides of [3, 4, 5]) {
+        const poly = buildRegularPolygon(cx, cy, sides, side, 0);
+        const fit = rasterizePolygonFit(poly, width, height, rigidMask, null);
+        if (fit.inside < 3) continue;
+        const score = fit.inside - fit.outside * 2.4;
+        if (!best || score > best.score) {
+          best = {
+            score,
+            tile: {
+              poly,
+              center: { x: cx, y: cy },
+              sides,
+              side,
+            },
+          };
+        }
+      }
+    }
+  }
+
+  return best;
+}
+
+function buildRegularPolygon(cx, cy, sides, side, rotation = 0) {
+  const n = Math.max(3, Math.round(Number(sides) || 3));
+  const s = Math.max(1e-3, Number(side) || 1);
+  const r = s / (2 * Math.sin(Math.PI / n));
+  const poly = [];
+  for (let i = 0; i < n; i++) {
+    const a = rotation + (i * Math.PI * 2) / n;
+    poly.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+  }
+  if (signedPolygonArea(poly) < 0) poly.reverse();
+  return poly;
+}
+
+function buildPolygonEdges(poly) {
+  const edges = [];
+  if (!Array.isArray(poly) || poly.length < 3) return edges;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (!(len > 1e-6)) continue;
+    edges.push({
+      a,
+      b,
+      outward: { x: dy / len, y: -dx / len },
+    });
+  }
+  return edges;
+}
+
+function canonicalEdgeKey(a, b) {
+  const q = (v) => Math.round(v * 1000) / 1000;
+  const ax = q(a.x), ay = q(a.y), bx = q(b.x), by = q(b.y);
+  if (ax < bx || (ax === bx && ay <= by)) return `${ax},${ay}|${bx},${by}`;
+  return `${bx},${by}|${ax},${ay}`;
+}
+
+function buildAttachedRegularPolygon(edge, sides, side) {
+  if (!edge?.a || !edge?.b || !edge?.outward) return null;
+  const a = edge.a;
+  const b = edge.b;
+  const n = Math.max(3, Math.round(Number(sides) || 3));
+  const s = Math.max(1e-3, Number(side) || 1);
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  if (Math.abs(len - s) > Math.max(0.35, s * 0.28)) return null;
+
+  const mx = (a.x + b.x) * 0.5;
+  const my = (a.y + b.y) * 0.5;
+  const apothem = s / (2 * Math.tan(Math.PI / n));
+  const cx = mx + edge.outward.x * apothem;
+  const cy = my + edge.outward.y * apothem;
+  const radius = s / (2 * Math.sin(Math.PI / n));
+
+  const thetaMid = Math.atan2(my - cy, mx - cx);
+  const theta0 = thetaMid - Math.PI / n;
+  const poly = [];
+  for (let i = 0; i < n; i++) {
+    const th = theta0 + (i * Math.PI * 2) / n;
+    poly.push({ x: cx + Math.cos(th) * radius, y: cy + Math.sin(th) * radius });
+  }
+
+  let best = null;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const vi = poly[i];
+    const vj = poly[j];
+    const dAB = Math.hypot(vi.x - a.x, vi.y - a.y) + Math.hypot(vj.x - b.x, vj.y - b.y);
+    const dBA = Math.hypot(vi.x - b.x, vi.y - b.y) + Math.hypot(vj.x - a.x, vj.y - a.y);
+    const direct = dAB <= dBA;
+    const err = direct ? dAB : dBA;
+    if (!best || err < best.err) best = { i, j, direct, err };
+  }
+
+  if (!best || best.err > Math.max(0.6, s * 0.5)) return null;
+  if (best.direct) {
+    poly[best.i] = { x: a.x, y: a.y };
+    poly[best.j] = { x: b.x, y: b.y };
+  } else {
+    poly[best.i] = { x: b.x, y: b.y };
+    poly[best.j] = { x: a.x, y: a.y };
+  }
+
+  if (signedPolygonArea(poly) < 0) poly.reverse();
+  return poly;
+}
+
+function rasterizePolygonFit(poly, width, height, rigidMask, coveredMask, writeCovered = false) {
+  if (!Array.isArray(poly) || poly.length < 3) return { inside: 0, outside: 0, newInside: 0 };
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const p of poly) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+
+  const x0 = Math.max(0, Math.floor(minX));
+  const y0 = Math.max(0, Math.floor(minY));
+  const x1 = Math.min(width - 1, Math.ceil(maxX));
+  const y1 = Math.min(height - 1, Math.ceil(maxY));
+
+  let inside = 0;
+  let outside = 0;
+  let newInside = 0;
+
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const px = x + 0.5;
+      const py = y + 0.5;
+      if (!pointInPolygon(px, py, poly)) continue;
+
+      const idx = y * width + x;
+      if (rigidMask[idx]) {
+        inside += 1;
+        if (coveredMask) {
+          if (!coveredMask[idx]) {
+            if (writeCovered) coveredMask[idx] = 1;
+            newInside += 1;
+          }
+        } else {
+          newInside += 1;
+        }
+      } else {
+        outside += 1;
+      }
+    }
+  }
+
+  return { inside, outside, newInside };
 }
 
 function removeSoftTrianglesOverlappingRigidContours(triangles, nodes, rigidPieces) {

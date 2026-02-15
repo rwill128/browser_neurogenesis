@@ -27,6 +27,14 @@
     <label>Threshold <input id="threshold" type="number" value="0.35" min="0" max="1" step="0.01" /></label>
     <label>Resolution paint (0..1) <input id="softDensityPaint" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
     <span style="opacity:0.82">Resolution map controls primitive size (rigid+soft): darker green = finer/smaller, brighter green = coarser/larger</span>
+    <label>Rigid compile mode
+      <select id="rigidCompileMode">
+        <option value="contours" selected>Contours (existing)</option>
+        <option value="primitive-tiling">Primitive tiling (tri/square/pent)</option>
+      </select>
+    </label>
+    <label>Rigid tile edge min <input id="rigidPrimitiveSideMin" type="number" value="4" min="2" max="32" step="1" /></label>
+    <label>Rigid tile edge max <input id="rigidPrimitiveSideMax" type="number" value="10" min="2" max="48" step="1" /></label>
     <label>Soft in-fill
       <select id="softInfillMode">
         <option value="triangles" selected>Triangles (canonical stable)</option>

@@ -11,6 +11,9 @@ const modeEl = document.getElementById('paintMode');
 const brushEl = document.getElementById('brush');
 const thresholdEl = document.getElementById('threshold');
 const softDensityPaintEl = document.getElementById('softDensityPaint');
+const rigidCompileModeEl = document.getElementById('rigidCompileMode');
+const rigidPrimitiveSideMinEl = document.getElementById('rigidPrimitiveSideMin');
+const rigidPrimitiveSideMaxEl = document.getElementById('rigidPrimitiveSideMax');
 const softInfillModeEl = document.getElementById('softInfillMode');
 const softMinCellSizeEl = document.getElementById('softMinCellSize');
 const softBoundaryRingEl = document.getElementById('softBoundaryRing');
@@ -226,6 +229,9 @@ function compileNow() {
     threshold: Math.max(0, Math.min(1, Number(thresholdEl.value) || 0.35)),
     connectivityMode: 'largest',
     minComponentTriangles: 0,
+    rigidCompileMode: rigidCompileModeEl?.value || 'contours',
+    rigidPrimitiveSideMin: Math.max(2, Math.min(64, Math.round(Number(rigidPrimitiveSideMinEl?.value) || 4))),
+    rigidPrimitiveSideMax: Math.max(2, Math.min(96, Math.round(Number(rigidPrimitiveSideMaxEl?.value) || 10))),
     softInfillMode: softInfillModeEl?.value || 'triangles',
     softDensityField: softDensity,
     softMinCellSize: Math.max(1, Math.min(Math.max(1, W - 1), Math.round(Number(softMinCellSizeEl?.value) || 3))),
@@ -260,6 +266,9 @@ compileBtn.addEventListener('click', compileNow);
 if (softInfillModeEl) softInfillModeEl.addEventListener('change', compileNow);
 if (softMinCellSizeEl) softMinCellSizeEl.addEventListener('change', compileNow);
 if (softSolverModeEl) softSolverModeEl.addEventListener('change', compileNow);
+if (rigidCompileModeEl) rigidCompileModeEl.addEventListener('change', compileNow);
+if (rigidPrimitiveSideMinEl) rigidPrimitiveSideMinEl.addEventListener('change', compileNow);
+if (rigidPrimitiveSideMaxEl) rigidPrimitiveSideMaxEl.addEventListener('change', compileNow);
 
 exportBtn.addEventListener('click', () => {
   if (!lastMesh) compileNow();

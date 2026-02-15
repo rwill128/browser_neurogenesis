@@ -402,6 +402,8 @@ function runRestDriftRecoveryScenario({ useRestRecovery, adaptiveRecovery = fals
   let maxAreaDeviation = 0;
   let maxRestScaleDrift = 0;
   let finalRestScaleDrift = 0;
+  let tailRestScaleDriftSum = 0;
+  let tailRestScaleDriftCount = 0;
   let driftAtPulse = 0;
 
   for (let step = 0; step < 1000; step++) {
@@ -546,6 +548,10 @@ function runRestDriftRecoveryScenario({ useRestRecovery, adaptiveRecovery = fals
     if (step === 499) recoveryAt500 = recovery;
     if (step === 999) recoveryAt1000 = recovery;
     maxRestScaleDrift = Math.max(maxRestScaleDrift, meanScaleError);
+    if (step >= 700) {
+      tailRestScaleDriftSum += meanScaleError;
+      tailRestScaleDriftCount += 1;
+    }
     if (step === 999) finalRestScaleDrift = meanScaleError;
 
     const ratios = [];
@@ -558,7 +564,20 @@ function runRestDriftRecoveryScenario({ useRestRecovery, adaptiveRecovery = fals
     maxAreaDeviation = Math.max(maxAreaDeviation, areaDeviation);
   }
 
-  return { recoveryHalfLifeSteps, recoveryAt200, recoveryAt500, recoveryAt1000, maxAreaDeviation, maxRestScaleDrift, finalRestScaleDrift };
+  const tailMeanRestScaleDrift = tailRestScaleDriftCount > 0
+    ? (tailRestScaleDriftSum / tailRestScaleDriftCount)
+    : finalRestScaleDrift;
+
+  return {
+    recoveryHalfLifeSteps,
+    recoveryAt200,
+    recoveryAt500,
+    recoveryAt1000,
+    maxAreaDeviation,
+    maxRestScaleDrift,
+    finalRestScaleDrift,
+    tailMeanRestScaleDrift,
+  };
 }
 
 test('adversarial pure-soft rest drift recovers shape memory with bounded spring-rest restoration', () => {
@@ -580,4 +599,6 @@ test('adversarial pure-soft rest drift recovers shape memory with bounded spring
     `expected bounded area-deviation drift under recovery guardrail (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
   assert.ok(after.finalRestScaleDrift < before.finalRestScaleDrift,
     `expected lower final spring-rest drift (before=${before.finalRestScaleDrift}, after=${after.finalRestScaleDrift})`);
+  assert.ok(after.tailMeanRestScaleDrift < before.tailMeanRestScaleDrift,
+    `expected lower late-tail spring-rest drift (before=${before.tailMeanRestScaleDrift}, after=${after.tailMeanRestScaleDrift})`);
 });

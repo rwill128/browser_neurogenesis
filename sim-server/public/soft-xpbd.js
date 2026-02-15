@@ -183,6 +183,9 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   jitterDeadband = 1e-4,
   adaptiveGainMax = 2.4,
   errorPivot = 0.16,
+  convergenceWindow = 0.12,
+  convergenceBiasMax = 0.96,
+  convergenceNudge = 0.35,
 } = {}) {
   if (!Array.isArray(springs) || !restBaseline || typeof restBaseline.length !== 'number') return 0;
 
@@ -191,7 +194,11 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const maxFactor = Math.max(minFactor + 1e-3, Number(hardMaxFactor) || 1.6);
   const eps = Math.max(0, Number(jitterDeadband) || 0);
   const gainMax = Math.max(1, Number(adaptiveGainMax) || 1);
+  const adaptiveMode = gainMax > 1.0001;
   const pivot = Math.max(1e-6, Number(errorPivot) || 0.16);
+  const window = Math.max(1e-6, Number(convergenceWindow) || 0.12);
+  const biasMax = clamp(Number(convergenceBiasMax) || 0, 0, 0.999);
+  const nudge = clamp(Number(convergenceNudge) || 0, 0, 1);
 
   let touched = 0;
   const n = Math.min(springs.length, restBaseline.length);
@@ -205,7 +212,15 @@ export function recoverSoftSpringRests(springs, restBaseline, {
     const errNorm = Math.abs(base - cur) / base;
     const boost = 1 + (gainMax - 1) * Math.min(1, errNorm / pivot);
     const recover = clamp(k * boost, 0, 1);
-    const target = clamp(cur + (base - cur) * recover, base * minFactor, base * maxFactor);
+
+    // As we approach baseline, gradually tighten allowable rest-length range to reduce
+    // long-tail spring-rest drift while preserving wide bounds during large deformations.
+    const convergeAlpha = adaptiveMode ? clamp(1 - (errNorm / window), 0, 1) : 0;
+    const tighten = convergeAlpha * biasMax;
+    const localMinFactor = minFactor + (1 - minFactor) * tighten;
+    const localMaxFactor = maxFactor - (maxFactor - 1) * tighten;
+    const convergedRecover = clamp(recover + (1 - recover) * convergeAlpha * nudge, 0, 1);
+    const target = clamp(cur + (base - cur) * convergedRecover, base * localMinFactor, base * localMaxFactor);
     if (Math.abs(target - cur) <= eps) continue;
     sp[2] = Math.max(1e-4, target);
     touched += 1;

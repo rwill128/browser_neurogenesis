@@ -198,6 +198,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   localEndpointCouplingMax = 1.16,
   localDirectionalCouplingMax = 1.1,
   localErrorPivot = 0.2,
+  polarityCouplingMax = 1.08,
 } = {}) {
   if (!Array.isArray(springs) || !restBaseline || typeof restBaseline.length !== 'number') return 0;
 
@@ -223,6 +224,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   const localEndpointMax = Math.max(1, Number(localEndpointCouplingMax) || 1);
   const localDirectionalMax = Math.max(1, Number(localDirectionalCouplingMax) || 1);
   const localPivot = Math.max(1e-6, Number(localErrorPivot) || 0.2);
+  const polarityMax = Math.max(1, Number(polarityCouplingMax) || 1);
 
   let touched = 0;
   const n = Math.min(springs.length, restBaseline.length);
@@ -242,6 +244,10 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   let meanErrNorm = 0;
   let meanSignedErrNorm = 0;
   let meanErrCount = 0;
+  let meanPositiveErrNorm = 0;
+  let meanNegativeErrNorm = 0;
+  let positiveErrCount = 0;
+  let negativeErrCount = 0;
   if (n > 0 && (adaptiveMode || nodeErrAbsSum)) {
     for (let i = 0; i < n; i++) {
       const sp = springs[i];
@@ -252,10 +258,17 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       const signedErrNorm = (cur - base) / base;
       const absErrNorm = Math.abs(signedErrNorm);
 
-      if (adaptiveMode && globalCouplingMax > 1.0001) {
+      if (adaptiveMode && (globalCouplingMax > 1.0001 || polarityMax > 1.0001)) {
         meanErrNorm += absErrNorm;
         meanSignedErrNorm += signedErrNorm;
         meanErrCount += 1;
+        if (signedErrNorm >= 0) {
+          meanPositiveErrNorm += absErrNorm;
+          positiveErrCount += 1;
+        } else {
+          meanNegativeErrNorm += absErrNorm;
+          negativeErrCount += 1;
+        }
       }
 
       if (nodeErrAbsSum) {
@@ -275,6 +288,8 @@ export function recoverSoftSpringRests(springs, restBaseline, {
     }
     meanErrNorm = meanErrCount > 0 ? (meanErrNorm / meanErrCount) : 0;
     meanSignedErrNorm = meanErrCount > 0 ? (meanSignedErrNorm / meanErrCount) : 0;
+    meanPositiveErrNorm = positiveErrCount > 0 ? (meanPositiveErrNorm / positiveErrCount) : 0;
+    meanNegativeErrNorm = negativeErrCount > 0 ? (meanNegativeErrNorm / negativeErrCount) : 0;
   }
 
   for (let i = 0; i < n; i++) {
@@ -295,6 +310,9 @@ export function recoverSoftSpringRests(springs, restBaseline, {
       ? 0
       : (Math.sign(signedErrNorm) === Math.sign(meanSignedErrNorm) ? 1 : 0);
     const directionalBoost = 1 + (directionalCouplingMax - 1) * globalDirectionalAlpha * directionalAligned;
+    const polarityMeanErrNorm = signedErrNorm >= 0 ? meanPositiveErrNorm : meanNegativeErrNorm;
+    const polarityAlpha = clamp(polarityMeanErrNorm / pivot, 0, 1);
+    const polarityBoost = 1 + (polarityMax - 1) * polarityAlpha;
     const outlierRatio = (adaptiveMode && outlierCouplingMax > 1.0001 && meanErrCount > 0)
       ? (errNorm / Math.max(1e-6, meanErrNorm || 0))
       : 1;
@@ -331,6 +349,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
     const boost = (1 + (gainMax - 1) * adaptiveErr * dirBoost)
       * globalBoost
       * directionalBoost
+      * polarityBoost
       * outlierBoost
       * localBoost
       * localDirectionalBoost;

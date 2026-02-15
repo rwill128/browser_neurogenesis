@@ -734,6 +734,57 @@ test('directional global coupling improves compression-heavy pure-soft recovery 
     `expected bounded area drift under directional coupling (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
 });
 
+test('polarity-aware coupling improves mixed-sign adversarial recovery without area regression', () => {
+  const baselineOverrides = {
+    recoverRate: 0.028,
+    adaptiveGainMax: 1.7,
+    adaptiveExponent: 0.95,
+    nearBaselineSnapWindow: 0,
+    nearBaselineSnapBlend: 0,
+    globalErrorCouplingMax: 1.25,
+    globalDirectionalCouplingMax: 1.18,
+    outlierRecoveryCouplingMax: 1.22,
+    outlierErrorPivot: 0.75,
+    localEndpointCouplingMax: 1.16,
+    localDirectionalCouplingMax: 1.1,
+    localErrorPivot: 0.2,
+  };
+
+  const before = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      ...baselineOverrides,
+      polarityCouplingMax: 1,
+    },
+  });
+
+  const after = runRestDriftRecoveryScenario({
+    useRestRecovery: true,
+    adaptiveRecovery: true,
+    recoveryOverrides: {
+      ...baselineOverrides,
+      // default enabled in recoverSoftSpringRests
+      polarityCouplingMax: 1.08,
+    },
+  });
+
+  if (process?.env?.PRINT_SOFT_RECOVERY_METRICS === '1') {
+    console.log('[soft-recovery-polarity-coupling]', JSON.stringify({ before, after }));
+  }
+
+  assert.ok(after.recoveryHalfLifeSteps < before.recoveryHalfLifeSteps,
+    `expected faster recovery half-life under polarity coupling (before=${before.recoveryHalfLifeSteps}, after=${after.recoveryHalfLifeSteps})`);
+  assert.ok(after.recoveryAt200 >= (before.recoveryAt200 - 5e-5),
+    `expected near-par early recovery under polarity coupling (before=${before.recoveryAt200}, after=${after.recoveryAt200})`);
+  assert.ok(after.recoveryAt500 >= (before.recoveryAt500 - 5e-5),
+    `expected near-par mid recovery under polarity coupling (before=${before.recoveryAt500}, after=${after.recoveryAt500})`);
+  assert.ok(after.recoveryAt1000 >= (before.recoveryAt1000 - 5e-5),
+    `expected near-par late recovery under polarity coupling (before=${before.recoveryAt1000}, after=${after.recoveryAt1000})`);
+  assert.ok(after.maxAreaDeviation <= before.maxAreaDeviation + 5e-5,
+    `expected bounded area drift under polarity coupling (before=${before.maxAreaDeviation}, after=${after.maxAreaDeviation})`);
+});
+
 test('outlier-weighted recovery coupling accelerates pure-soft shape-memory recovery without area regression', () => {
   const before = runRestDriftRecoveryScenario({
     useRestRecovery: true,

@@ -53,6 +53,10 @@ const SOFT_DEFORM_WARN_AREA_RATIO_MAX = 2.2;
 const SOFT_DEFORM_SEVERE_AREA_RATIO_MIN = 0.2;
 const SOFT_DEFORM_SEVERE_AREA_RATIO_MAX = 5.0;
 
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
 const EDGE_BODY_MODE = {
   PASS: 0,
   BLOCK: 1,

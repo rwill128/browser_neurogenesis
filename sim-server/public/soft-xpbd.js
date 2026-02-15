@@ -207,7 +207,7 @@ export function recoverSoftSpringRests(springs, restBaseline, {
   midErrorRecoveryCouplingMax = 1,
   midErrorRecoveryCenter = 0.22,
   midErrorRecoveryHalfWidth = 0.22,
-  lowErrorRecoveryCouplingMax = 1,
+  lowErrorRecoveryCouplingMax = 1.1,
   lowErrorRecoveryGate = 0.08,
   highRateSnapRecoverThreshold = 0.055,
   highRateSnapErrorThreshold = 0.002,

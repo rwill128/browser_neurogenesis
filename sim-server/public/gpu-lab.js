@@ -37,6 +37,8 @@ const JACOBI_ITERS = 20;
 const SOFT_SPRING_STIFFNESS_DEFAULT = 3.0; // requested stronger default baseline
 const SOFT_XPBD_ITERS = 10;
 const SOFT_XPBD_BASE_COMPLIANCE = 0.0012;
+const SOFT_AREA_XPBD_ITERS = 6;
+const SOFT_AREA_BASE_COMPLIANCE = 0.0009;
 const SOFT_INTEGRATION_SCALE = 24;
 
 const EDGE_BODY_MODE = {
@@ -1110,6 +1112,124 @@ function applySoftSpringsXPBDVelocity(s, dtPos, stiffnessScale, lambdaCache) {
   }
 }
 
+function buildSoftClusterLoops(nodes) {
+  const byCluster = new Map();
+  for (let i = 0; i < nodes.length; i++) {
+    const cid = nodes[i]?.clusterId ?? 0;
+    if (!byCluster.has(cid)) byCluster.set(cid, []);
+    byCluster.get(cid).push(i);
+  }
+
+  const loops = [];
+  for (const [clusterId, indices] of byCluster.entries()) {
+    if (indices.length < 3) continue;
+    let cx = 0;
+    let cy = 0;
+    for (const idx of indices) {
+      const n = nodes[idx];
+      cx += n.x;
+      cy += n.y;
+    }
+    cx /= indices.length;
+    cy /= indices.length;
+    const ordered = [...indices].sort((ia, ib) => {
+      const a = nodes[ia];
+      const b = nodes[ib];
+      const aa = Math.atan2(a.y - cy, a.x - cx);
+      const bb = Math.atan2(b.y - cy, b.x - cx);
+      return aa - bb;
+    });
+    loops.push({ clusterId, indices: ordered });
+  }
+
+  return loops;
+}
+
+function signedAreaPredicted(nodes, indices, dtPos) {
+  let s = 0;
+  for (let i = 0; i < indices.length; i++) {
+    const a = nodes[indices[i]];
+    const b = nodes[indices[(i + 1) % indices.length]];
+    const ax = a.x + a.vx * dtPos;
+    const ay = a.y + a.vy * dtPos;
+    const bx = b.x + b.vx * dtPos;
+    const by = b.y + b.vy * dtPos;
+    s += ax * by - bx * ay;
+  }
+  return 0.5 * s;
+}
+
+function ensureSoftAreaRestState(sim, s, loops, dtPos) {
+  sim.softAreaRest = sim.softAreaRest || new Map();
+  sim.softAreaLambda = sim.softAreaLambda || new Map();
+
+  const live = new Set(loops.map((l) => l.clusterId));
+  for (const key of sim.softAreaRest.keys()) if (!live.has(key)) sim.softAreaRest.delete(key);
+  for (const key of sim.softAreaLambda.keys()) if (!live.has(key)) sim.softAreaLambda.delete(key);
+
+  for (const loop of loops) {
+    if (!sim.softAreaRest.has(loop.clusterId)) {
+      const a0 = signedAreaPredicted(s.nodes, loop.indices, dtPos);
+      sim.softAreaRest.set(loop.clusterId, Math.abs(a0) > 1e-4 ? a0 : 1e-4);
+    }
+    sim.softAreaLambda.set(loop.clusterId, 0);
+  }
+}
+
+function applySoftAreaXPBDVelocity(sim, s, loops, dtPos, stiffnessScale) {
+  if (!loops.length) return;
+  const alpha = (SOFT_AREA_BASE_COMPLIANCE / Math.max(0.2, stiffnessScale)) / Math.max(1e-8, dtPos * dtPos);
+
+  for (let iter = 0; iter < SOFT_AREA_XPBD_ITERS; iter++) {
+    for (const loop of loops) {
+      const ids = loop.indices;
+      const m = ids.length;
+      if (m < 3) continue;
+      const restArea = sim.softAreaRest.get(loop.clusterId);
+      if (!Number.isFinite(restArea)) continue;
+
+      const area = signedAreaPredicted(s.nodes, ids, dtPos);
+      const C = area - restArea;
+
+      const gradX = new Array(m);
+      const gradY = new Array(m);
+      let sumWGrad2 = 0;
+
+      for (let k = 0; k < m; k++) {
+        const prev = s.nodes[ids[(k - 1 + m) % m]];
+        const next = s.nodes[ids[(k + 1) % m]];
+        const px = prev.x + prev.vx * dtPos;
+        const py = prev.y + prev.vy * dtPos;
+        const nx = next.x + next.vx * dtPos;
+        const ny = next.y + next.vy * dtPos;
+        const gx = 0.5 * (ny - py);
+        const gy = 0.5 * (px - nx);
+        gradX[k] = gx;
+        gradY[k] = gy;
+
+        const node = s.nodes[ids[k]];
+        const w = 1 / Math.max(0.02, node.mass || 1);
+        sumWGrad2 += w * (gx * gx + gy * gy);
+      }
+
+      if (sumWGrad2 <= 1e-10) continue;
+
+      const lambdaPrev = sim.softAreaLambda.get(loop.clusterId) || 0;
+      let dl = (-C - alpha * lambdaPrev) / (sumWGrad2 + alpha);
+      if (!Number.isFinite(dl)) continue;
+      dl = Math.max(-2.0, Math.min(2.0, dl));
+      sim.softAreaLambda.set(loop.clusterId, lambdaPrev + dl);
+
+      for (let k = 0; k < m; k++) {
+        const node = s.nodes[ids[k]];
+        const w = 1 / Math.max(0.02, node.mass || 1);
+        node.vx += (w * gradX[k] * dl) / dtPos;
+        node.vy += (w * gradY[k] * dl) / dtPos;
+      }
+    }
+  }
+}
+
 function stepBodiesAndInject(sim, vxField, vyField) {
   const n = sim.controls.n;
   const dt = sim.controls.dt;
@@ -1262,6 +1382,10 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     sim.softXPBDLambda.fill(0);
   }
   applySoftSpringsXPBDVelocity(s, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT, sim.softXPBDLambda);
+
+  const softClusterLoops = buildSoftClusterLoops(s.nodes);
+  ensureSoftAreaRestState(sim, s, softClusterLoops, dtPos);
+  applySoftAreaXPBDVelocity(sim, s, softClusterLoops, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT);
 
   for (let iter = 0; iter < 7; iter++) {
     // Rigid-rigid weld constraints for compound rigid shapes.

@@ -9,6 +9,7 @@ const tests = [
   'node-harness/tests/rigidRigidPolygonCollision.test.mjs',
   'node-harness/tests/rigidWeldSolver.test.mjs',
   'node-harness/tests/dyeBarrierIntegration.test.mjs',
+  'node-harness/tests/softXpbdTopologyGuards.test.mjs',
 ];
 
 const result = spawnSync(process.execPath, ['--test', ...tests], {

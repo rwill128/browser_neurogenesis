@@ -2,6 +2,7 @@ import { parseCreatureSpec, buildBodiesFromCreatureSpec } from '/creature-spec.j
 import { applyRigidWeldConstraints, buildRigidWeldPairSet } from '/rigid-weld.js';
 import { EDGE_DYE_MODE, normalizeEdgeDyeModeRGB, applyBodyEdgeFieldBarriers } from '/dye-barrier.js';
 import { resolveRigidVsSoftNodeCollision, resolveRigidVsRigidPolygonCollision, getRigidCollisionPolysWorld } from '/rigid-collision.js';
+import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops } from '/soft-xpbd.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -889,20 +890,18 @@ function cloneMiniBodies(miniBodies, controls) {
       }))
     : [];
 
-  const softSprings = Array.isArray(miniBodies?.soft?.springs)
-    ? miniBodies.soft.springs
-        .map((sp) => {
-          if (!Array.isArray(sp) || sp.length < 3) return null;
-          return [
-            Number(sp[0]) | 0,
-            Number(sp[1]) | 0,
-            Math.max(1e-3, Number(sp[2]) || 1),
-            Number(sp[3]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK,
-            normalizeEdgeDyeModeRGB(sp[4]),
-          ];
-        })
-        .filter(Boolean)
-    : [];
+  const sanitized = sanitizeSoftSprings(miniBodies?.soft?.springs, softNodes.length, {
+    edgeBodyPass: EDGE_BODY_MODE.PASS,
+    edgeBodyBlock: EDGE_BODY_MODE.BLOCK,
+    restFloor: 1e-3,
+  });
+  const softSprings = sanitized.springs.map((sp) => [
+    Number(sp[0]) | 0,
+    Number(sp[1]) | 0,
+    Math.max(1e-3, Number(sp[2]) || 1),
+    Number(sp[3]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK,
+    normalizeEdgeDyeModeRGB(sp[4]),
+  ]);
 
   const hybrid = Array.isArray(miniBodies?.hybrid)
     ? miniBodies.hybrid.map((h) => ({
@@ -923,7 +922,15 @@ function cloneMiniBodies(miniBodies, controls) {
       }))
     : [];
 
-  return { rigid, soft: { nodes: softNodes, springs: softSprings }, hybrid, rigidWelds };
+  return {
+    rigid,
+    soft: { nodes: softNodes, springs: softSprings },
+    hybrid,
+    rigidWelds,
+    topologyGuardrails: {
+      droppedSoftSprings: sanitized.dropped,
+    },
+  };
 }
 
 function getMiniScenarioFromPreset(preset) {
@@ -963,6 +970,9 @@ function applyMiniScenarioPreset(sim, mini) {
   sim.frame = 0;
   sim.couplingTelemetry = [];
   sim.lastRigidContacts = [];
+  sim.softXPBDLambda = null;
+  sim.softAreaRest = null;
+  sim.softAreaLambda = null;
   sim.viscMapCpu.fill(0.5);
   uploadViscMap();
   focusCameraOnBodies(sim, sim.bodies);
@@ -975,6 +985,7 @@ function applyMiniScenarioPreset(sim, mini) {
     seed: mini.seed,
     steps: mini.steps,
     grid: mini.grid,
+    droppedSoftSprings: sim.bodies?.topologyGuardrails?.droppedSoftSprings || 0,
   });
 }
 
@@ -1295,9 +1306,12 @@ function applySoftSpringsXPBDVelocity(s, dtPos, stiffnessScale, lambdaCache) {
       const wSum = wA + wB;
       if (wSum <= 1e-9) continue;
 
-      const lambdaPrev = lambdaCache[si] || 0;
-      const dl = (-C - alpha * lambdaPrev) / (wSum + alpha);
-      lambdaCache[si] = lambdaPrev + dl;
+      const lambdaPrev = Number(lambdaCache[si]) || 0;
+      let dl = (-C - alpha * lambdaPrev) / (wSum + alpha);
+      if (!Number.isFinite(dl)) continue;
+      const lambdaNext = Math.max(-20, Math.min(20, lambdaPrev + dl));
+      dl = lambdaNext - lambdaPrev;
+      lambdaCache[si] = lambdaNext;
 
       const corrAx = -wA * dl * nx;
       const corrAy = -wA * dl * ny;
@@ -1310,39 +1324,6 @@ function applySoftSpringsXPBDVelocity(s, dtPos, stiffnessScale, lambdaCache) {
       b.vy += corrBy / dtPos;
     }
   }
-}
-
-function buildSoftClusterLoops(nodes) {
-  const byCluster = new Map();
-  for (let i = 0; i < nodes.length; i++) {
-    const cid = nodes[i]?.clusterId ?? 0;
-    if (!byCluster.has(cid)) byCluster.set(cid, []);
-    byCluster.get(cid).push(i);
-  }
-
-  const loops = [];
-  for (const [clusterId, indices] of byCluster.entries()) {
-    if (indices.length < 3) continue;
-    let cx = 0;
-    let cy = 0;
-    for (const idx of indices) {
-      const n = nodes[idx];
-      cx += n.x;
-      cy += n.y;
-    }
-    cx /= indices.length;
-    cy /= indices.length;
-    const ordered = [...indices].sort((ia, ib) => {
-      const a = nodes[ia];
-      const b = nodes[ib];
-      const aa = Math.atan2(a.y - cy, a.x - cx);
-      const bb = Math.atan2(b.y - cy, b.x - cx);
-      return aa - bb;
-    });
-    loops.push({ clusterId, indices: ordered });
-  }
-
-  return loops;
 }
 
 function signedAreaPredicted(nodes, indices, dtPos) {
@@ -1372,7 +1353,8 @@ function ensureSoftAreaRestState(sim, s, loops, dtPos) {
       const a0 = signedAreaPredicted(s.nodes, loop.indices, dtPos);
       sim.softAreaRest.set(loop.clusterId, Math.abs(a0) > 1e-4 ? a0 : 1e-4);
     }
-    sim.softAreaLambda.set(loop.clusterId, 0);
+    const prev = Number(sim.softAreaLambda.get(loop.clusterId));
+    sim.softAreaLambda.set(loop.clusterId, Number.isFinite(prev) ? Math.max(-20, Math.min(20, prev)) : 0);
   }
 }
 
@@ -1414,11 +1396,13 @@ function applySoftAreaXPBDVelocity(sim, s, loops, dtPos, stiffnessScale) {
 
       if (sumWGrad2 <= 1e-10) continue;
 
-      const lambdaPrev = sim.softAreaLambda.get(loop.clusterId) || 0;
+      const lambdaPrev = Number(sim.softAreaLambda.get(loop.clusterId)) || 0;
       let dl = (-C - alpha * lambdaPrev) / (sumWGrad2 + alpha);
       if (!Number.isFinite(dl)) continue;
       dl = Math.max(-2.0, Math.min(2.0, dl));
-      sim.softAreaLambda.set(loop.clusterId, lambdaPrev + dl);
+      const lambdaNext = Math.max(-20, Math.min(20, lambdaPrev + dl));
+      dl = lambdaNext - lambdaPrev;
+      sim.softAreaLambda.set(loop.clusterId, lambdaNext);
 
       for (let k = 0; k < m; k++) {
         const node = s.nodes[ids[k]];
@@ -1577,13 +1561,13 @@ function stepBodiesAndInject(sim, vxField, vyField) {
 
   const dtPos = Math.max(1e-4, dt * SOFT_INTEGRATION_SCALE);
   if (!sim.softXPBDLambda || sim.softXPBDLambda.length !== s.springs.length) {
-    sim.softXPBDLambda = new Float32Array(s.springs.length);
-  } else {
-    sim.softXPBDLambda.fill(0);
+    sim.softXPBDLambda = ensureLambdaCacheSize(sim.softXPBDLambda, s.springs.length, 20);
   }
   applySoftSpringsXPBDVelocity(s, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT, sim.softXPBDLambda);
 
-  const softClusterLoops = buildSoftClusterLoops(s.nodes);
+  const softClusterLoops = buildSoftClusterBoundaryLoops(s.nodes, s.springs, {
+    blockMode: EDGE_BODY_MODE.BLOCK,
+  });
   ensureSoftAreaRestState(sim, s, softClusterLoops, dtPos);
   applySoftAreaXPBDVelocity(sim, s, softClusterLoops, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT);
 
@@ -2393,6 +2377,7 @@ async function stepAndRender() {
       coupling: couplingSnapshot,
       rigidContactCount: rigidContacts.length,
       rigidContactPairs: (showCollisionHullEl?.checked ? rigidContacts.slice(0, 8) : undefined),
+      droppedSoftSprings: s.bodies?.topologyGuardrails?.droppedSoftSprings || 0,
     });
   }
 

@@ -36,7 +36,16 @@ const spawnMembraneCellsEl = document.getElementById('spawnMembraneCells');
 const GENERATED_MINI_SCENARIOS_URL = '/generated-mini-scenarios.json';
 let generatedMiniScenarios = new Map();
 
-function log(v) { out.textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2); }
+const urlParams = new URLSearchParams(window.location.search || '');
+const EMBED_MODE = urlParams.get('embed') === '1' || urlParams.get('embedded') === '1';
+if (EMBED_MODE) {
+  document.body.classList.add('embed-mode');
+}
+
+function log(v) {
+  if (!out) return;
+  out.textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+}
 
 const WORKGROUP = 8;
 const JACOBI_ITERS = 20;
@@ -3356,6 +3365,119 @@ function mergeBodiesIntoSim(target, incoming) {
 
 }
 
+function translateBodies(bodies, dx, dy) {
+  if (!bodies) return;
+  const tx = Number(dx) || 0;
+  const ty = Number(dy) || 0;
+
+  for (const rb of bodies.rigid || []) {
+    rb.x = (Number(rb.x) || 0) + tx;
+    rb.y = (Number(rb.y) || 0) + ty;
+  }
+  for (const node of bodies.soft?.nodes || []) {
+    node.x = (Number(node.x) || 0) + tx;
+    node.y = (Number(node.y) || 0) + ty;
+  }
+}
+
+function centerBodiesInWorld(bodies, n, targetSpanFraction = 0.42) {
+  if (!bodies) return;
+  const bounds = getBodiesBounds(bodies);
+  if (!bounds) return;
+
+  const span = Math.max(1e-6, Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY));
+  const target = Math.max(6, Math.min(n * 0.8, n * Math.max(0.12, Number(targetSpanFraction) || 0.42)));
+  const scale = target / span;
+  if (Number.isFinite(scale) && Math.abs(scale - 1) > 1e-4) {
+    scaleImportedBodies(bodies, scale);
+  }
+
+  const recentered = getBodiesBounds(bodies);
+  if (!recentered) return;
+  translateBodies(bodies, n * 0.5 - recentered.cx, n * 0.5 - recentered.cy);
+}
+
+function buildWindTunnelEmitter(n, {
+  strength = 3.8,
+  radius = Math.max(7, n / 13),
+  yFraction = 0.12,
+} = {}) {
+  return {
+    x: n * 0.5,
+    y: n * Math.max(0.06, Math.min(0.35, Number(yFraction) || 0.12)),
+    vx: 0,
+    vy: 0.38,
+    r: Math.max(3, Number(radius) || (n / 13)),
+    cr: 135,
+    cg: 190,
+    cb: 255,
+    strength: Math.max(0.1, Number(strength) || 3.8),
+    spin: 0,
+    curlGain: 0,
+    driftGain: 0.09,
+    chaosGain: 0,
+    wobbleAmp: 0,
+    wobbleFreq: 0,
+    swirlJitter: 0,
+  };
+}
+
+async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
+  const spec = (typeof specInput === 'string') ? parseCreatureSpec(specInput) : parseCreatureSpec(specInput || {});
+  const grid = Math.max(32, Math.min(2048, Math.round(Number(options?.grid) || readControls().n || 128)));
+  const importScale = Number.isFinite(Number(options?.importScale)) ? Number(options.importScale) : 1;
+  const targetSpanFraction = Number.isFinite(Number(options?.targetSpanFraction))
+    ? Number(options.targetSpanFraction)
+    : 0.42;
+
+  if (gridEl) gridEl.value = String(grid);
+  if (showViscEl) showViscEl.checked = false;
+
+  running = false;
+  sim = await initSim();
+
+  sim.bodies = {
+    rigid: [],
+    soft: { nodes: [], springs: [] },
+    hybrid: [],
+    softMembraneClusters: [],
+  };
+
+  const imported = buildBodiesFromCreatureSpec(spec, sim.controls.n, sim.controls);
+  if (!ENABLE_HYBRID_BODY_LINKS) imported.hybrid = [];
+  scaleImportedBodies(imported, importScale);
+  centerBodiesInWorld(imported, sim.controls.n, targetSpanFraction);
+  mergeBodiesIntoSim(sim.bodies, imported);
+
+  sim.emitters = [buildWindTunnelEmitter(sim.controls.n, {
+    strength: Number(options?.emitterStrength) || 3.8,
+    radius: Number(options?.emitterRadius) || Math.max(7, sim.controls.n / 13),
+    yFraction: Number(options?.emitterYFraction) || 0.12,
+  })];
+
+  sim.camera.x = sim.controls.n * 0.5;
+  sim.camera.y = sim.controls.n * 0.5;
+  sim.camera.zoom = 1.0;
+  clampCamera(sim);
+
+  sim.softDeformReferenceState = null;
+
+  running = true;
+  stepAndRender().catch((e) => {
+    running = false;
+    log({ ok: false, error: String(e) });
+  });
+
+  return {
+    ok: true,
+    mode: 'embed-wind-tunnel',
+    grid: sim.controls.n,
+    rigidBodies: sim.bodies.rigid.length,
+    softNodes: sim.bodies.soft?.nodes?.length || 0,
+    emitterCount: sim.emitters.length,
+  };
+}
+
 function isConcavePolygon(verts) {
   if (!Array.isArray(verts) || verts.length < 4) return false;
   let hasPos = false;
@@ -3795,38 +3917,40 @@ async function stepAndRender() {
     window.__gpuLabCoupling = couplingSnapshot;
     window.__gpuLabRigidContacts = rigidContacts;
 
-    log({
-      ok: true,
-      mode: 'live-fluid',
-      grid: n,
-      frames: s.frame,
-      fps: fpsNow,
-      dyeEnergy: +sum.toFixed(1),
-      viscosityScale: s.controls.viscosity,
-      massLight: s.controls.massLight,
-      massHeavy: s.controls.massHeavy,
-      massSoft: s.controls.massSoft,
-      bodyDrag: s.controls.bodyDrag,
-      bodyFeedback: s.controls.bodyFeedback,
-      spawnMembraneCells: !!s.controls.spawnMembraneCells,
-      membraneClusters: Array.isArray(s.bodies?.softMembraneClusters) ? s.bodies.softMembraneClusters.length : 0,
-      paintValue: Number(paintValueEl.value) || 0.85,
-      brushSize: Number(brushSizeEl.value) || 12,
-      digestiveCapture: +((s.digestiveCapture || 0).toFixed(2)),
-      coupling: couplingSnapshot,
-      rigidContactCount: rigidContacts.length,
-      rigidContactPairs: (showCollisionHullEl?.checked ? rigidContacts.slice(0, 8) : undefined),
-      droppedSoftSprings: s.bodies?.topologyGuardrails?.droppedSoftSprings || 0,
-      softDeformation: {
-        warningClustersNow: sim.softDeformationState?.warningCount || 0,
-        severeClustersNow: sim.softDeformationState?.severeCount || 0,
-        severeCollapseClustersNow: sim.softDeformationState?.severeCollapseCount || 0,
-        worstStretchNow: +((sim.softDeformationState?.worstStretch || 1).toFixed(3)),
-        worstAreaRatioNow: +((sim.softDeformationState?.worstAreaRatio || 1).toFixed(3)),
-        worstPoseErrorNow: +((sim.softDeformationState?.worstPoseError || 0).toFixed(3)),
-        severeEventsRecent: (sim.softDeformationEvents || []).slice(-4),
-      },
-    });
+    if (!EMBED_MODE) {
+      log({
+        ok: true,
+        mode: 'live-fluid',
+        grid: n,
+        frames: s.frame,
+        fps: fpsNow,
+        dyeEnergy: +sum.toFixed(1),
+        viscosityScale: s.controls.viscosity,
+        massLight: s.controls.massLight,
+        massHeavy: s.controls.massHeavy,
+        massSoft: s.controls.massSoft,
+        bodyDrag: s.controls.bodyDrag,
+        bodyFeedback: s.controls.bodyFeedback,
+        spawnMembraneCells: !!s.controls.spawnMembraneCells,
+        membraneClusters: Array.isArray(s.bodies?.softMembraneClusters) ? s.bodies.softMembraneClusters.length : 0,
+        paintValue: Number(paintValueEl?.value) || 0.85,
+        brushSize: Number(brushSizeEl?.value) || 12,
+        digestiveCapture: +((s.digestiveCapture || 0).toFixed(2)),
+        coupling: couplingSnapshot,
+        rigidContactCount: rigidContacts.length,
+        rigidContactPairs: (showCollisionHullEl?.checked ? rigidContacts.slice(0, 8) : undefined),
+        droppedSoftSprings: s.bodies?.topologyGuardrails?.droppedSoftSprings || 0,
+        softDeformation: {
+          warningClustersNow: sim.softDeformationState?.warningCount || 0,
+          severeClustersNow: sim.softDeformationState?.severeCount || 0,
+          severeCollapseClustersNow: sim.softDeformationState?.severeCollapseCount || 0,
+          worstStretchNow: +((sim.softDeformationState?.worstStretch || 1).toFixed(3)),
+          worstAreaRatioNow: +((sim.softDeformationState?.worstAreaRatio || 1).toFixed(3)),
+          worstPoseErrorNow: +((sim.softDeformationState?.worstPoseError || 0).toFixed(3)),
+          severeEventsRecent: (sim.softDeformationEvents || []).slice(-4),
+        },
+      });
+    }
   }
 
   s.frame += 1;
@@ -3941,6 +4065,39 @@ if (importSpecBtn && importSpecFile) {
   });
 }
 
-loadGeneratedMiniScenarios().finally(() => {
-  log('ready: choose scenario, paint, then Start');
-});
+window.__gpuLabApi = {
+  start: () => start(),
+  stop: () => { stop(); return { ok: true }; },
+  resetWindTunnelFromSpec: (spec, options = {}) => resetEmbedWindTunnelFromSpec(spec, options),
+};
+
+if (EMBED_MODE) {
+  window.addEventListener('message', async (event) => {
+    if (event.origin !== window.location.origin) return;
+    const data = event.data || {};
+    if (data.type !== 'gpuLabEmbedReset') return;
+
+    try {
+      const result = await resetEmbedWindTunnelFromSpec(data.spec, data.options || {});
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'gpuLabEmbedResetAck', ok: true, result }, window.location.origin);
+      }
+    } catch (err) {
+      const msg = String(err?.message || err);
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'gpuLabEmbedResetAck', ok: false, error: msg }, window.location.origin);
+      }
+      log({ ok: false, error: msg });
+    }
+  });
+
+  if (window.parent && window.parent !== window) {
+    window.parent.postMessage({ type: 'gpuLabEmbedReady' }, window.location.origin);
+  }
+
+  log('embed ready: awaiting mesh-lab compiled spec');
+} else {
+  loadGeneratedMiniScenarios().finally(() => {
+    log('ready: choose scenario, paint, then Start');
+  });
+}

@@ -8,6 +8,7 @@
     body { font-family: system-ui; background:#111; color:#eee; padding:16px; }
     .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
     canvas { border:1px solid #333; image-rendering: pixelated; }
+    iframe { border:1px solid #333; background:#000; }
     .pane { display:flex; gap:12px; align-items:flex-start; }
     .field-panel[hidden] { display:none; }
     input, select, button { background:#222; color:#eee; border:1px solid #444; border-radius:6px; padding:4px 8px; }
@@ -127,6 +128,10 @@
     <div class="compiled-panel" id="compiledPanel">
       <div>Compiled mesh</div>
       <canvas id="mesh" width="512" height="512"></canvas>
+    </div>
+    <div class="wind-panel" id="windPanel">
+      <div>Wind tunnel preview (GPU physics)</div>
+      <iframe id="windTunnelFrame" src="/gpu-lab.html?embed=1" width="512" height="512" loading="lazy"></iframe>
     </div>
   </div>
   <pre id="out">ready</pre>

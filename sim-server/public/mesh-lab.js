@@ -8,6 +8,7 @@ const membraneShapeCanvas = document.getElementById('membraneShapePaint');
 const rigidPermeabilityCanvas = document.getElementById('rigidPermeabilityPaint');
 const rigidConsumeCanvas = document.getElementById('rigidConsumePaint');
 const meshCanvas = document.getElementById('mesh');
+const windTunnelFrame = document.getElementById('windTunnelFrame');
 const pctx = paintCanvas.getContext('2d');
 const dctx = densityCanvas.getContext('2d');
 const ectx = membraneEdgeCanvas.getContext('2d');
@@ -55,7 +56,9 @@ const rigidEdgeConsumeMapR = new Float32Array(W * H).fill(0.0);
 const rigidEdgeConsumeMapG = new Float32Array(W * H).fill(0.0);
 const rigidEdgeConsumeMapB = new Float32Array(W * H).fill(0.0);
 let lastMesh = null;
+let lastCompiledSpec = null;
 let compileRevision = 0;
+let windTunnelReady = false;
 
 const fieldPanels = Array.from(document.querySelectorAll('.field-panel'));
 
@@ -264,6 +267,50 @@ function generateRandomFields({ preset = 'sine-lines', seed = 42 } = {}) {
   drawFields();
   compileNow();
   return { seed: baseSeed, preset, rigidPattern: primary, softPattern: secondary };
+}
+
+function buildSpecFromCurrentFields(mesh) {
+  if (!mesh) return null;
+  const membraneMinEdgeLength = Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4);
+  const membraneMaxEdgeLength = Math.max(membraneMinEdgeLength, Number(membraneMaxEdgeLengthEl?.value) || 8);
+  return createCreatureSpecFromMesh(mesh, {
+    name: 'mesh-lab-creature',
+    fields: {
+      rigidField: rigid,
+      softField: soft,
+      softDensityField: softDensity,
+      membraneEdgeMap,
+      membraneShapeMap,
+      rigidPermeabilityMap,
+      rigidEdgeConsumeMapR,
+      rigidEdgeConsumeMapG,
+      rigidEdgeConsumeMapB,
+    },
+    threshold: Math.max(0, Math.min(1, Number(thresholdEl?.value) || 0.35)),
+    softBoundaryRingSprings: !!softBoundaryRingEl?.checked,
+    softSolverMode: softSolverModeEl?.value || 'spring',
+    membraneMinEdgeLength,
+    membraneMaxEdgeLength,
+  });
+}
+
+function pushSpecToWindTunnel(spec) {
+  if (!spec || !windTunnelFrame?.contentWindow) return;
+  const payload = {
+    type: 'gpuLabEmbedReset',
+    spec,
+    options: {
+      grid: W,
+      targetSpanFraction: 0.42,
+      importScale: 1,
+      emitterStrength: 3.8,
+      emitterRadius: Math.max(7, W / 13),
+      emitterYFraction: 0.12,
+    },
+  };
+
+  // Same-origin iframe; no wildcard posting.
+  windTunnelFrame.contentWindow.postMessage(payload, window.location.origin);
 }
 
 function drawFields() {
@@ -693,8 +740,10 @@ function compileNow() {
       softBoundaryCellCap: membraneMode ? 1 : 2,
     });
     lastMesh = mesh;
+    lastCompiledSpec = buildSpecFromCurrentFields(mesh);
     compileRevision += 1;
     drawMesh(mesh);
+    pushSpecToWindTunnel(lastCompiledSpec);
     return mesh;
   } catch (err) {
     const msg = `Compile failed: ${String(err?.message || err)}`;
@@ -811,27 +860,8 @@ if (rigidPrimitiveSideMaxEl) rigidPrimitiveSideMaxEl.addEventListener('change', 
 exportBtn.addEventListener('click', () => {
   const mesh = compileNow();
   if (!mesh) return;
-  const membraneMinEdgeLength = Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4);
-  const membraneMaxEdgeLength = Math.max(membraneMinEdgeLength, Number(membraneMaxEdgeLengthEl?.value) || 8);
-  const spec = createCreatureSpecFromMesh(mesh, {
-    name: 'mesh-lab-creature',
-    fields: {
-      rigidField: rigid,
-      softField: soft,
-      softDensityField: softDensity,
-      membraneEdgeMap,
-      membraneShapeMap,
-      rigidPermeabilityMap,
-      rigidEdgeConsumeMapR,
-      rigidEdgeConsumeMapG,
-      rigidEdgeConsumeMapB,
-    },
-    threshold: Math.max(0, Math.min(1, Number(thresholdEl?.value) || 0.35)),
-    softBoundaryRingSprings: !!softBoundaryRingEl?.checked,
-    softSolverMode: softSolverModeEl?.value || 'spring',
-    membraneMinEdgeLength,
-    membraneMaxEdgeLength,
-  });
+  const spec = lastCompiledSpec || buildSpecFromCurrentFields(mesh);
+  if (!spec) return;
   const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -918,6 +948,23 @@ importFile.addEventListener('change', async () => {
     note: 'No authoring fields embedded; showing solver-structure preview.',
   }, null, 2);
 });
+
+if (windTunnelFrame) {
+  windTunnelFrame.addEventListener('load', () => {
+    windTunnelReady = false;
+    // In case embed-ready message is missed, try a direct push shortly after load.
+    setTimeout(() => pushSpecToWindTunnel(lastCompiledSpec), 250);
+  });
+
+  window.addEventListener('message', (event) => {
+    if (event.origin !== window.location.origin) return;
+    const data = event.data || {};
+    if (data.type === 'gpuLabEmbedReady') {
+      windTunnelReady = true;
+      pushSpecToWindTunnel(lastCompiledSpec);
+    }
+  });
+}
 
 syncFieldPanelVisibility();
 drawFields();

@@ -15,6 +15,34 @@
     pre { background: #1b1b1b; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
     canvas { border: 1px solid #333; image-rendering: pixelated; image-rendering: crisp-edges; }
     #viscMap { cursor: crosshair; }
+
+    body.embed-mode {
+      padding: 0;
+      margin: 0;
+      overflow: hidden;
+      background: #0b0b0b;
+    }
+    body.embed-mode h2,
+    body.embed-mode .row,
+    body.embed-mode #out,
+    body.embed-mode .pane-title,
+    body.embed-mode label,
+    body.embed-mode #fpsHud {
+      display: none !important;
+    }
+    body.embed-mode .pane-row {
+      margin: 0;
+      gap: 0;
+    }
+    body.embed-mode .pane {
+      gap: 0;
+    }
+    body.embed-mode #view {
+      display: block;
+      width: 512px;
+      height: 512px;
+      border: 1px solid #333;
+    }
   </style>
 </head>
 <body>

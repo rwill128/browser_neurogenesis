@@ -14,6 +14,17 @@ Primary API surface:
 - `buildBodiesFromCreatureSpec(spec, n, controls)`
 - `buildMembraneRingsFromSoftField({...})`
 
+### Project scope boundaries (for this contract)
+
+This document is intentionally constrained to **geometry and trait transport**:
+
+- ✅ In scope: schema fields, import/export normalization, deterministic edge/node semantics.
+- ✅ In scope: what mutators can safely edit today (JSON-level patches against existing fields).
+- ❌ Out of scope: policy/fitness functions, breeding loops, or search strategy details.
+- ❌ Out of scope: broad runtime behavior redesign unrelated to geometry/trait representation.
+
+That boundary keeps evolvability work implementation-adjacent: new mutators should target these existing trait surfaces first, and only then introduce new schema fields when a concrete phenotype need cannot be represented by current body/segment/vertex traits.
+
 ---
 
 ## Trait levels: body vs segment(line) vs vertex
@@ -209,3 +220,15 @@ This matrix is intentionally implementation-adjacent: each row points to a concr
 4. Finally mutate topology (spring add/remove, perimeter rewiring), while preserving existing span and membrane-ring guardrails.
 
 This order maximizes phenotype diversity while minimizing catastrophic solver regressions.
+
+## "Mutable later" upgrade checklist (body/segment/vertex)
+
+When introducing a new evolvable trait, keep it on the same deterministic rails as existing ones:
+
+1. **Storage level chosen explicitly** (body vs segment/line vs vertex).
+2. **Round-trip field defined in `creature-spec.v2`** (export + parse + build).
+3. **Deterministic normalization defined** (clamp/default/coercion rule, no implicit runtime magic).
+4. **Sparse payload behavior defined** (how missing indices/fields backfill).
+5. **Contract test added** in `node-harness/tests/creatureSpecV2Contract.test.mjs`.
+
+This checklist is the concrete bridge from “fixed today” to “evolvable tomorrow”: traits become mutable by gaining explicit schema representation and deterministic import behavior before any search/mutation policy starts touching them.

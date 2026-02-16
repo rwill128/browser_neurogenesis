@@ -72,10 +72,11 @@ When using membrane field authoring, `shapeMemoryWeight` is sampled from `fields
 
 `buildBodiesFromCreatureSpec` applies predictable normalization/clamping to keep segment/vertex mutations safe:
 
+- **Rigid edge body modes** are normalized to binary semantics (`1` = block, anything else = pass/`0`).
 - **Rigid edge dye modes** are normalized per channel to enum `{0:pass, 1:deflect, 2:absorb}`; invalid values clamp to safe defaults.
 - **Rigid edge permeability** is normalized per channel into binary-like behavior (`<=0` blocked, `>0` pass).
 - **Rigid consume-dye masks** are normalized to binary RGB masks.
-- **Soft spring tuples** preserve indices `[a,b,rest,edgeBodyMode,edgeDyeModeRGB]` and normalize channel modes the same way as rigid edges.
+- **Soft spring tuples** preserve indices `[a,b,rest,edgeBodyMode,edgeDyeModeRGB]` and normalize `edgeBodyMode` with the same binary rule plus the same per-channel dye-mode normalization used by rigid edges.
 - **Hybrid joints** are repaired when degenerate (`edgeA===edgeB`) and oversized `restA/restB` values are capped against rigid-body scale.
 - **Soft vertex `shapeMemoryWeight`** is clamped to `0..1` and imported/exported as explicit per-node scalar state.
 

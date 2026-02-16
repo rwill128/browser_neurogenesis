@@ -694,6 +694,25 @@ test('buildBodiesFromCreatureSpec clamps unknown edge dye modes to DEFLECT guard
   assert.deepEqual(softSpringMode, [1, 1, 2]);
 });
 
+test('buildBodiesFromCreatureSpec normalizes per-edge body modes to binary pass/block', () => {
+  const spec = createCreatureSpecFromMesh(sampleMesh());
+
+  // Rigid edges: only mode=1 should remain blocking; everything else coerces to pass (0).
+  spec.rigidBodies[0].edgeBodyMode = [1, 0, 42];
+
+  // Soft spring edge body mode follows the same binary normalization.
+  const firstSpring = spec.softBodies[0].springs[0];
+  const secondSpring = spec.softBodies[0].springs[1];
+  if (Array.isArray(firstSpring)) firstSpring[3] = 999;
+  if (Array.isArray(secondSpring)) secondSpring[3] = 1;
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+
+  assert.deepEqual(bodies.rigid[0].edgeBodyMode, [1, 0, 0]);
+  assert.equal(Number(bodies.soft.springs[0][3]), 0);
+  assert.equal(Number(bodies.soft.springs[1][3]), 1);
+});
+
 test('buildBodiesFromCreatureSpec honors rigid inside-correction toggle per body', () => {
   const spec = createCreatureSpecFromMesh(sampleMesh());
   spec.rigidBodies[0].insideCorrectionEnabled = false;

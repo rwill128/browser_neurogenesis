@@ -111,6 +111,7 @@ These guardrails allow richer mutation while preserving solver stability.
 - unknown/experimental `solverMode` fallback to spring semantics,
 - ring-only membrane perimeter sanitization,
 - per-edge trait normalization and sparse backfilling,
+- malformed soft-spring dye tuples channel-wise clamping/defaulting (`[pass|deflect|absorb]` enum),
 - per-vertex `shapeMemoryWeight` clamping.
 
 Run targeted contract checks with:

@@ -829,6 +829,24 @@ test('buildBodiesFromCreatureSpec deterministically defaults malformed soft spri
   assert.deepEqual(imported[4], [1, 1, 1]);
 });
 
+test('buildBodiesFromCreatureSpec deterministically normalizes malformed soft spring dye tuples', () => {
+  const spec = createCreatureSpecFromMesh(sampleMesh(), { softBoundaryRingSprings: false });
+  const sb = spec.softBodies[0];
+  assert.ok(sb?.springs?.length >= 3, 'sample soft body should include multiple springs');
+
+  // Per-channel coercion should handle mixed invalid payloads deterministically.
+  sb.springs[0][4] = null;
+  sb.springs[1][4] = [2, 'oops', -99];
+  sb.springs[2][4] = [0, 1, 2];
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+  const imported = bodies.soft.springs;
+
+  assert.deepEqual(imported[0][4], [1, 1, 1], 'missing tuple should default to DEFLECT RGB');
+  assert.deepEqual(imported[1][4], [2, 1, 1], 'invalid channels should clamp to DEFLECT without disturbing valid channels');
+  assert.deepEqual(imported[2][4], [0, 1, 2], 'valid dye tuple should survive normalization intact');
+});
+
 test('buildBodiesFromCreatureSpec deterministically backfills sparse rigid edge arrays with safe defaults', () => {
   const spec = createCreatureSpecFromMesh(sampleMesh());
   const rb = spec.rigidBodies[0];

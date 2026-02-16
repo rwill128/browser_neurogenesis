@@ -159,6 +159,55 @@ test('soft solver mode is exported and membrane mode is mapped on import bodies'
   assert.equal(importedSpring.softMembraneClusters.length, 0);
 });
 
+test('buildBodiesFromCreatureSpec sanitizes membrane imports to perimeter-only springs', () => {
+  const spec = {
+    schemaVersion: CREATURE_SPEC_VERSION,
+    space: { width: 16, height: 16 },
+    rigidBodies: [],
+    hybridJoints: [],
+    softBodies: [{
+      id: 'membrane_0',
+      solverMode: 'membrane',
+      nodes: [
+        { x: 2, y: 2 },
+        { x: 14, y: 2 },
+        { x: 14, y: 14 },
+        { x: 2, y: 14 },
+      ],
+      // Includes one interior chord (0-2) that should be dropped on import.
+      springs: [
+        [0, 1, 12, 1, [1, 1, 1]],
+        [1, 2, 12, 1, [1, 1, 1]],
+        [2, 3, 12, 1, [1, 1, 1]],
+        [3, 0, 12, 1, [1, 1, 1]],
+        [0, 2, 17, 1, [1, 1, 1]],
+      ],
+      restArea: 144,
+      pressureGain: 0.08,
+      radialDamping: 0.05,
+      shapeMemoryGain: 0.04,
+      insideCorrectionEnabled: 1,
+    }],
+  };
+
+  const imported = buildBodiesFromCreatureSpec(spec, 64, CONTROLS);
+  assert.equal(imported.softMembraneClusters.length, 1, 'expected membrane cluster metadata');
+  assert.equal(imported.soft.nodes.length, 4);
+
+  const importedBody = {
+    nodes: imported.soft.nodes,
+    springs: imported.soft.springs.map(([a, b, rest, edgeBodyMode, edgeDyeMode]) => [a, b, rest, edgeBodyMode, edgeDyeMode]),
+  };
+  assertMembraneRingOnly(importedBody);
+
+  const edgeKeys = new Set(importedBody.springs.map((sp) => {
+    const a = Number(sp[0]);
+    const b = Number(sp[1]);
+    return a < b ? `${a}-${b}` : `${b}-${a}`;
+  }));
+  assert.equal(edgeKeys.has('0-2'), false, 'membrane import should drop interior chord springs');
+});
+
 test('membrane export from authoring soft field is perimeter-only (no interior infill springs)', () => {
   const w = 24;
   const h = 24;

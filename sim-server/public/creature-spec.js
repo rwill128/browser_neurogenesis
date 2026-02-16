@@ -20,6 +20,47 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+function buildMembranePerimeterSpringsFromNodes(nodes) {
+  const pts = (nodes || []).map((p, idx) => ({
+    id: idx,
+    x: Number(p?.x),
+    y: Number(p?.y),
+  })).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+
+  if (pts.length < 3) return [];
+
+  const hull = convexHullWithIds(pts);
+  if (!Array.isArray(hull) || hull.length < 3) return [];
+
+  const ring = [];
+  const seen = new Set();
+  for (const hp of hull) {
+    const idx = Number(hp?.id);
+    if (!Number.isInteger(idx) || seen.has(idx) || idx < 0 || idx >= nodes.length) continue;
+    seen.add(idx);
+    ring.push(idx);
+  }
+  if (ring.length < 3) return [];
+
+  const springs = [];
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i];
+    const b = ring[(i + 1) % ring.length];
+    const pa = nodes[a];
+    const pb = nodes[b];
+    if (!pa || !pb || a === b) continue;
+    springs.push([
+      a,
+      b,
+      Math.max(1e-4, Math.hypot((Number(pb.x) || 0) - (Number(pa.x) || 0), (Number(pb.y) || 0) - (Number(pa.y) || 0))),
+      EDGE_BODY_BLOCK,
+      [...EDGE_DYE_DEFLECT_RGB],
+    ]);
+  }
+
+  return springs.length >= 3 ? springs : [];
+}
+
 export function createCreatureSpecFromMesh(mesh, options = {}) {
   const width = mesh?.meta?.width || options.width || 128;
   const height = mesh?.meta?.height || options.height || 128;
@@ -225,7 +266,11 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
       softNodeMap.set(`${sbi}:${i}`, base + i);
     }
 
-    for (const sp of sb.springs) {
+    const springSource = (solverMode === 'membrane')
+      ? buildMembranePerimeterSpringsFromNodes(sb.nodes)
+      : sb.springs;
+
+    for (const sp of (springSource || [])) {
       if (!Array.isArray(sp)) continue;
       const [aRaw, bRaw, restRaw, edgeBodyRaw, edgeDyeRaw] = sp;
       const a = Number(aRaw);

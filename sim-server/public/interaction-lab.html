@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Interaction Lab</title>
+  <style>
+    body { font-family: system-ui; background:#111; color:#eee; padding:16px; }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+    .pane { display:flex; gap:12px; align-items:flex-start; }
+    .card { border:1px solid #2f2f2f; border-radius:8px; background:#151515; padding:10px; }
+    label { font-size:13px; color:#ddd; }
+    input, select, button { background:#222; color:#eee; border:1px solid #444; border-radius:6px; padding:4px 8px; }
+    iframe { border:1px solid #333; background:#000; }
+    pre { background:#1b1b1b; padding:10px; border-radius:8px; max-height:640px; overflow:auto; }
+    .hint { color:#aaa; font-size:12px; }
+  </style>
+</head>
+<body>
+  <h2>Interaction Lab (truth-table confrontation)</h2>
+
+  <div class="card">
+    <div class="row">
+      <label>Body fixture
+        <select id="fixtureType">
+          <option value="rigid-line" selected>Rigid line segment (thin rectangle)</option>
+          <option value="soft-line">Soft line segment (single spring)</option>
+        </select>
+      </label>
+      <label>Motion
+        <select id="motionMode">
+          <option value="pinned" selected>Pinned (immobile)</option>
+          <option value="circle">Dragged in circle</option>
+        </select>
+      </label>
+      <label>Circle radius <input id="circleRadius" type="number" step="1" min="0" max="48" value="12" /></label>
+      <label>Circle speed(rad/s) <input id="circleSpeed" type="number" step="0.05" min="0" max="6" value="0.8" /></label>
+    </div>
+
+    <div class="row">
+      <label>Dye channel
+        <select id="dyeChannel">
+          <option value="r" selected>Red</option>
+          <option value="g">Green</option>
+          <option value="b">Blue</option>
+        </select>
+      </label>
+      <label>Dye mode
+        <select id="dyeMode">
+          <option value="block" selected>BLOCK</option>
+          <option value="pass">PASS</option>
+          <option value="eat">EAT</option>
+        </select>
+      </label>
+      <label>Velocity mode
+        <select id="velocityMode">
+          <option value="block" selected>BLOCK</option>
+          <option value="pass">PASS</option>
+        </select>
+      </label>
+      <label>Momentum coupling <input id="momentum" type="number" min="0" max="1" step="0.05" value="1" /></label>
+      <button id="applyBtn">Apply scenario</button>
+      <label><input id="autoApply" type="checkbox" checked /> Auto-apply</label>
+    </div>
+
+    <div class="row">
+      <span class="hint">Goal: visually confront each truth-table row under a controlled micro setup while keeping full GPU solver path active.</span>
+    </div>
+  </div>
+
+  <div class="pane" style="margin-top:12px;">
+    <div class="card">
+      <div>Wind tunnel confrontation view</div>
+      <iframe id="windFrame" src="/gpu-lab.html?embed=1" width="640" height="640" loading="lazy"></iframe>
+    </div>
+    <div class="card" style="width:520px;">
+      <div>Scenario payload + current truth-table row</div>
+      <pre id="scenarioOut">ready</pre>
+    </div>
+  </div>
+
+  <script type="module" src="/interaction-lab.js"></script>
+</body>
+</html>

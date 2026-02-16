@@ -106,6 +106,40 @@ test('gpu-lab attempts storage-buffer stage limits 10 then 9 before default devi
   );
 });
 
+test('gpu-lab supports interaction-lab scripted motion fixtures (pinned/circle)', () => {
+  assert.match(
+    source,
+    /function configureInteractionLab\(sim, options = \{\}\)/,
+    'expected interaction-lab config helper in gpu-lab runtime',
+  );
+
+  assert.match(
+    source,
+    /function applyInteractionLabBodyMotion\(sim\)/,
+    'expected scripted motion application helper for pinned/circle fixtures',
+  );
+
+  assert.match(
+    source,
+    /applyInteractionLabBodyMotion\(sim\);[\s\S]*let injectedMomentum = 0;/,
+    'expected motion override to be re-applied before body->fluid injection',
+  );
+});
+
+test('gpu-lab overlay labels rigid/soft segment IDs for confrontation debugging', () => {
+  assert.match(
+    source,
+    /drawSegmentIdLabel\(`R\$\{i\}:\$\{ei\}`/,
+    'expected rigid segment id labels (R<body>:<edge>) in overlay',
+  );
+
+  assert.match(
+    source,
+    /drawSegmentIdLabel\(`S\$\{sgi\}`/,
+    'expected soft segment id labels (S<spring>) in overlay',
+  );
+});
+
 test('gpu-lab obstacle mask is edge-velocity BLOCK based for both rigid and soft (no post-pass barrier)', () => {
   assert.match(
     source,

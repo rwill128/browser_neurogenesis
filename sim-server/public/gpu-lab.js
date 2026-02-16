@@ -3201,6 +3201,9 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   const s = bodies.soft;
   const obstacleMask = sim?.obstacleMaskCpu;
 
+  // Optional interaction-lab scripted body motion (pinned / circular drag).
+  applyInteractionLabBodyMotion(sim);
+
   const rigidEdgeMomentumScale = (rb) => {
     const arr = Array.isArray(rb?.edgeMomentumCoupling) ? rb.edgeMomentumCoupling : (Array.isArray(rb?.edgeMomentumTransfer) ? rb.edgeMomentumTransfer : null);
     if (!arr || arr.length === 0) return 1;
@@ -3678,6 +3681,10 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     }
   }
   sim.softDeformationPrevSevereSet = new Set(deform.severeClusters);
+
+  // Re-apply scripted motion after collisions/integration so pinned/circle
+  // bodies remain exact confrontation fixtures frame-to-frame.
+  applyInteractionLabBodyMotion(sim);
 
   let injectedMomentum = 0;
   const injectPoint = (px, py, pvx, pvy, localFluidX, localFluidY, mass, rad=3.0, swimInjectX = 0, swimInjectY = 0, momentumScale = 1) => {
@@ -4235,6 +4242,119 @@ function centerBodiesInWorld(bodies, n, targetSpanFraction = 0.42) {
   translateBodies(bodies, n * 0.5 - recentered.cx, n * 0.5 - recentered.cy);
 }
 
+function configureInteractionLab(sim, options = {}) {
+  const cfg = options?.interactionLab;
+  if (!cfg || typeof cfg !== 'object') {
+    sim.interactionLab = null;
+    return;
+  }
+
+  const targetType = String(cfg.targetType || 'rigid').toLowerCase() === 'soft' ? 'soft' : 'rigid';
+  const mode = String(cfg.mode || 'pinned').toLowerCase() === 'circle' ? 'circle' : 'pinned';
+  const dt = Math.max(1e-4, Number(sim?.controls?.dt) || 0.01);
+
+  const defaultRigid = sim?.bodies?.rigid?.[0] || { x: sim.controls.n * 0.5, y: sim.controls.n * 0.5, theta: 0 };
+  const anchorX = Number.isFinite(Number(cfg.anchorX)) ? Number(cfg.anchorX) : (Number(defaultRigid.x) || sim.controls.n * 0.5);
+  const anchorY = Number.isFinite(Number(cfg.anchorY)) ? Number(cfg.anchorY) : (Number(defaultRigid.y) || sim.controls.n * 0.5);
+  const anchorTheta = Number.isFinite(Number(cfg.anchorTheta)) ? Number(cfg.anchorTheta) : (Number(defaultRigid.theta) || 0);
+
+  const circleCenterX = Number.isFinite(Number(cfg.circleCenterX)) ? Number(cfg.circleCenterX) : anchorX;
+  const circleCenterY = Number.isFinite(Number(cfg.circleCenterY)) ? Number(cfg.circleCenterY) : anchorY;
+  const circleRadius = Math.max(0, Number.isFinite(Number(cfg.circleRadius)) ? Number(cfg.circleRadius) : 12);
+  const circleAngularSpeed = Number.isFinite(Number(cfg.circleAngularSpeed)) ? Number(cfg.circleAngularSpeed) : (Math.PI * 0.22);
+  const thetaSpin = Number.isFinite(Number(cfg.thetaSpin)) ? Number(cfg.thetaSpin) : 0;
+
+  const softNodeIndices = Array.isArray(cfg.softNodeIndices)
+    ? cfg.softNodeIndices.map((v) => Number(v) | 0).filter((v) => v >= 0 && v < (sim?.bodies?.soft?.nodes?.length || 0))
+    : null;
+
+  const softBasePositions = Array.isArray(cfg.softBasePositions)
+    ? cfg.softBasePositions.map((p) => ({ x: Number(p?.x) || 0, y: Number(p?.y) || 0 }))
+    : null;
+
+  sim.interactionLab = {
+    enabled: cfg.enabled !== false,
+    targetType,
+    mode,
+    rigidIndex: Number.isInteger(Number(cfg.rigidIndex)) ? (Number(cfg.rigidIndex) | 0) : 0,
+    softNodeIndices,
+    softBasePositions,
+    anchorX,
+    anchorY,
+    anchorTheta,
+    circleCenterX,
+    circleCenterY,
+    circleRadius,
+    circleAngularSpeed,
+    thetaSpin,
+    dt,
+  };
+}
+
+function applyInteractionLabBodyMotion(sim) {
+  const cfg = sim?.interactionLab;
+  if (!cfg || cfg.enabled === false) return;
+
+  const dt = Math.max(1e-4, Number(sim?.controls?.dt) || Number(cfg.dt) || 0.01);
+  const t = (Number(sim?.frame) || 0) * dt;
+  const isCircle = cfg.mode === 'circle';
+
+  const tx = isCircle
+    ? (cfg.circleCenterX + cfg.circleRadius * Math.cos(cfg.circleAngularSpeed * t))
+    : cfg.anchorX;
+  const ty = isCircle
+    ? (cfg.circleCenterY + cfg.circleRadius * Math.sin(cfg.circleAngularSpeed * t))
+    : cfg.anchorY;
+  const tvx = isCircle
+    ? (-cfg.circleRadius * cfg.circleAngularSpeed * Math.sin(cfg.circleAngularSpeed * t))
+    : 0;
+  const tvy = isCircle
+    ? (cfg.circleRadius * cfg.circleAngularSpeed * Math.cos(cfg.circleAngularSpeed * t))
+    : 0;
+  const ttheta = cfg.anchorTheta + (cfg.thetaSpin || 0) * t;
+  const tomega = isCircle ? (cfg.thetaSpin || 0) : 0;
+
+  if (cfg.targetType === 'soft') {
+    const nodes = sim?.bodies?.soft?.nodes || [];
+    const indices = (Array.isArray(cfg.softNodeIndices) && cfg.softNodeIndices.length > 0)
+      ? cfg.softNodeIndices
+      : nodes.map((_, i) => i);
+
+    if (!Array.isArray(cfg.softBasePositions) || cfg.softBasePositions.length !== indices.length) {
+      cfg.softBasePositions = indices.map((idx) => {
+        const node = nodes[idx];
+        return { x: Number(node?.x) || 0, y: Number(node?.y) || 0 };
+      });
+    }
+
+    // Anchor offsets are derived from first base point against anchor.
+    const ref = cfg.softBasePositions[0] || { x: tx, y: ty };
+    const ox = tx - (Number(ref.x) || 0);
+    const oy = ty - (Number(ref.y) || 0);
+
+    for (let i = 0; i < indices.length; i++) {
+      const idx = indices[i];
+      const node = nodes[idx];
+      const base = cfg.softBasePositions[i] || node;
+      if (!node || !base) continue;
+      node.x = (Number(base.x) || 0) + ox;
+      node.y = (Number(base.y) || 0) + oy;
+      node.vx = tvx;
+      node.vy = tvy;
+    }
+    return;
+  }
+
+  const rb = sim?.bodies?.rigid?.[cfg.rigidIndex | 0];
+  if (!rb) return;
+  rb.x = tx;
+  rb.y = ty;
+  rb.theta = ttheta;
+  rb.vx = tvx;
+  rb.vy = tvy;
+  rb.omega = tomega;
+}
+
 function buildWindTunnelEmitter(n, {
   strength = 3.8,
   radius = Math.max(7, n / 13),
@@ -4300,6 +4420,7 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
   scaleImportedBodies(imported, importScale);
   centerBodiesInWorld(imported, sim.controls.n, targetSpanFraction);
   mergeBodiesIntoSim(sim.bodies, imported);
+  configureInteractionLab(sim, options);
 
   sim.emitters = [buildWindTunnelEmitter(sim.controls.n, {
     strength: Number(options?.emitterStrength) || 3.8,
@@ -4337,6 +4458,11 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
     rigidBodies: sim.bodies.rigid.length,
     softNodes: sim.bodies.soft?.nodes?.length || 0,
     emitterCount: sim.emitters.length,
+    interactionLab: sim.interactionLab ? {
+      enabled: sim.interactionLab.enabled !== false,
+      targetType: sim.interactionLab.targetType,
+      motion: sim.interactionLab.mode,
+    } : null,
   };
 }
 

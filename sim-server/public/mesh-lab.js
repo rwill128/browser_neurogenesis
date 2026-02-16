@@ -195,6 +195,15 @@ function winnerModeScalar(block, pass, eat) {
   return EDGE_DYE_BLOCK_SCALAR;
 }
 
+function winnerTakeAllDyeMode(block, pass, eat) {
+  const b = Math.max(0, Math.min(1, Number(block) || 0));
+  const p = Math.max(0, Math.min(1, Number(pass) || 0));
+  const e = Math.max(0, Math.min(1, Number(eat) || 0));
+  if (e > p && e > b) return 2; // EAT
+  if (p > b && p > e) return 0; // PASS
+  return 1; // BLOCK (tie fallback)
+}
+
 function syncSoftDyeModeMapsFromWinnerFields() {
   for (let i = 0; i < W * H; i++) {
     softEdgeDyeModeMapR[i] = winnerModeScalar(softEdgeDyeBlockMapR[i], softEdgeDyePassMapR[i], softEdgeDyeEatMapR[i]);

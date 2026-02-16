@@ -10,6 +10,7 @@ const softEdgeDyeModeCanvas = document.getElementById('softEdgeDyeModePaint');
 const softEdgeVelocityModeCanvas = document.getElementById('softEdgeVelocityModePaint');
 const softEdgeMomentumModeCanvas = document.getElementById('softEdgeMomentumModePaint');
 const rigidPermeabilityCanvas = document.getElementById('rigidPermeabilityPaint');
+const rigidEdgeVelocityModeCanvas = document.getElementById('rigidEdgeVelocityModePaint');
 const rigidConsumeCanvas = document.getElementById('rigidConsumePaint');
 const meshCanvas = document.getElementById('mesh');
 const windTunnelFrame = document.getElementById('windTunnelFrame');
@@ -22,6 +23,7 @@ const sdctx = softEdgeDyeModeCanvas.getContext('2d');
 const svctx = softEdgeVelocityModeCanvas.getContext('2d');
 const smctx = softEdgeMomentumModeCanvas.getContext('2d');
 const prctx = rigidPermeabilityCanvas.getContext('2d');
+const rvctx = rigidEdgeVelocityModeCanvas.getContext('2d');
 const cctx = rigidConsumeCanvas.getContext('2d');
 const mctx = meshCanvas.getContext('2d');
 const modeEl = document.getElementById('paintMode');
@@ -37,6 +39,7 @@ const softEdgeDyeModeEl = document.getElementById('softEdgeDyeMode');
 const softEdgeVelocityModeEl = document.getElementById('softEdgeVelocityMode');
 const softEdgeMomentumPaintEl = document.getElementById('softEdgeMomentumPaintValue');
 const rigidPermeabilityPaintEl = document.getElementById('rigidPermeabilityPaintValue');
+const rigidEdgeVelocityModeEl = document.getElementById('rigidEdgeVelocityMode');
 const rigidConsumeChannelEl = document.getElementById('rigidConsumeChannel');
 const rigidConsumePaintEl = document.getElementById('rigidConsumePaintValue');
 const rigidCompileModeEl = document.getElementById('rigidCompileMode');
@@ -60,6 +63,7 @@ const randomizeSoftEdgeDyeModeBtn = document.getElementById('randomizeSoftEdgeDy
 const randomizeSoftEdgeVelocityModeBtn = document.getElementById('randomizeSoftEdgeVelocityModeBtn');
 const randomizeSoftEdgeMomentumModeBtn = document.getElementById('randomizeSoftEdgeMomentumModeBtn');
 const randomizeRigidPermeabilityBtn = document.getElementById('randomizeRigidPermeabilityBtn');
+const randomizeRigidEdgeVelocityModeBtn = document.getElementById('randomizeRigidEdgeVelocityModeBtn');
 const randomizeRigidConsumeBtn = document.getElementById('randomizeRigidConsumeBtn');
 const randomFieldPresetEl = document.getElementById('randomFieldPreset');
 const randomFieldSeedEl = document.getElementById('randomFieldSeed');
@@ -93,6 +97,7 @@ const softEdgeDyeModeMapB = new Float32Array(W * H).fill(0.0);
 const softEdgeVelocityModeMap = new Float32Array(W * H).fill(0.0);
 const softEdgeMomentumModeMap = new Float32Array(W * H).fill(1.0);
 const rigidPermeabilityMap = new Float32Array(W * H).fill(0.0);
+const rigidEdgeVelocityMap = new Float32Array(W * H).fill(0.0);
 const rigidEdgeConsumeMapR = new Float32Array(W * H).fill(0.0);
 const rigidEdgeConsumeMapG = new Float32Array(W * H).fill(0.0);
 const rigidEdgeConsumeMapB = new Float32Array(W * H).fill(0.0);
@@ -403,6 +408,7 @@ function generateRandomFields({
     softEdgeVelocityMode: true,
     softEdgeMomentumMode: true,
     rigidPermeability: true,
+    rigidEdgeVelocityMode: true,
     rigidConsume: true,
   },
 } = {}) {
@@ -424,6 +430,7 @@ function generateRandomFields({
     softEdgeVelocityMode: !!targets?.softEdgeVelocityMode,
     softEdgeMomentumMode: !!targets?.softEdgeMomentumMode,
     rigidPermeability: !!targets?.rigidPermeability,
+    rigidEdgeVelocityMode: !!targets?.rigidEdgeVelocityMode,
     rigidConsume: !!targets?.rigidConsume,
   };
 
@@ -438,6 +445,7 @@ function generateRandomFields({
   const softDyeBParams = makeRandomPatternParams(rand, 87);
   const softVelocityParams = makeRandomPatternParams(rand, 88);
   const softMomentumParams = makeRandomPatternParams(rand, 89);
+  const rigidVelocityParams = makeRandomPatternParams(rand, 93);
   const permParams = makeRandomPatternParams(rand, 97);
   const consumeRParams = makeRandomPatternParams(rand, 101);
   const consumeGParams = makeRandomPatternParams(rand, 131);
@@ -522,6 +530,11 @@ function generateRandomFields({
         rigidPermeabilityMap[i] = rigid[i] > 0.12 ? smoothstep(0.56, 0.84, permV) : 0;
       }
 
+      if (targetFlags.rigidEdgeVelocityMode) {
+        const v = samplePatternValue('sine-lines', nx, ny, rigidVelocityParams);
+        rigidEdgeVelocityMap[i] = (rigid[i] > 0.12 && v >= 0.58) ? 1 : 0;
+      }
+
       if (targetFlags.rigidConsume) {
         const consumeMask = smoothstep(0.58, 0.9, rigidSignal);
         const rV = samplePatternValue('wave-interference', nx, ny, consumeRParams);
@@ -566,6 +579,8 @@ function buildSpecFromCurrentFields(mesh, traitFields = null) {
       softEdgeVelocityModeMap,
       softEdgeMomentumModeMap,
       rigidPermeabilityMap,
+      rigidEdgeVelocityMap,
+      rigidEdgeVelocityModeMap: rigidEdgeVelocityMap,
       rigidEdgeConsumeMapR,
       rigidEdgeConsumeMapG,
       rigidEdgeConsumeMapB,
@@ -629,6 +644,7 @@ function drawFields() {
   const softEdgeVelocityModeImg = svctx.createImageData(W, H);
   const softEdgeMomentumModeImg = smctx.createImageData(W, H);
   const permeabilityImg = prctx.createImageData(W, H);
+  const rigidEdgeVelocityModeImg = rvctx.createImageData(W, H);
   const consumeImg = cctx.createImageData(W, H);
 
   for (let i = 0; i < rigid.length; i++) {
@@ -644,6 +660,7 @@ function drawFields() {
     const softVelocityMode = Math.max(0, Math.min(1, softEdgeVelocityModeMap[i]));
     const softMomentumMode = Math.max(0, Math.min(1, softEdgeMomentumModeMap[i]));
     const permeability = Math.max(0, Math.min(1, rigidPermeabilityMap[i]));
+    const rigidVelocityMode = Math.max(0, Math.min(1, rigidEdgeVelocityMap[i]));
     const consumeR = Math.max(0, Math.min(1, rigidEdgeConsumeMapR[i]));
     const consumeG = Math.max(0, Math.min(1, rigidEdgeConsumeMapG[i]));
     const consumeB = Math.max(0, Math.min(1, rigidEdgeConsumeMapB[i]));
@@ -707,6 +724,13 @@ function drawFields() {
     permeabilityImg.data[i * 4 + 2] = pg;
     permeabilityImg.data[i * 4 + 3] = 255;
 
+    // Rigid edge velocity mode: grayscale (black=BLOCK, white=PASS).
+    const rvg = Math.round(rigidVelocityMode * 255);
+    rigidEdgeVelocityModeImg.data[i * 4] = rvg;
+    rigidEdgeVelocityModeImg.data[i * 4 + 1] = rvg;
+    rigidEdgeVelocityModeImg.data[i * 4 + 2] = rvg;
+    rigidEdgeVelocityModeImg.data[i * 4 + 3] = 255;
+
     // Edge consume-dye map: RGB channels represent absorb mask by color.
     consumeImg.data[i * 4] = Math.round(consumeR * 255);
     consumeImg.data[i * 4 + 1] = Math.round(consumeG * 255);
@@ -732,6 +756,7 @@ function drawFields() {
   blit(svctx, softEdgeVelocityModeCanvas, softEdgeVelocityModeImg);
   blit(smctx, softEdgeMomentumModeCanvas, softEdgeMomentumModeImg);
   blit(prctx, rigidPermeabilityCanvas, permeabilityImg);
+  blit(rvctx, rigidEdgeVelocityModeCanvas, rigidEdgeVelocityModeImg);
   blit(cctx, rigidConsumeCanvas, consumeImg);
 }
 
@@ -896,6 +921,19 @@ function paintRigidPermeabilityMap(clientX, clientY, erase = false) {
     clientX,
     clientY,
     Number(rigidPermeabilityPaintEl?.value) || 1.0,
+    0.0,
+    erase,
+  );
+  drawFields();
+}
+
+function paintRigidEdgeVelocityModeMap(clientX, clientY, erase = false) {
+  paintScalarMap(
+    rigidEdgeVelocityMap,
+    rigidEdgeVelocityModeCanvas,
+    clientX,
+    clientY,
+    edgeVelocityModeToScalar(rigidEdgeVelocityModeEl?.value || 'block'),
     0.0,
     erase,
   );
@@ -1097,6 +1135,7 @@ function syncFieldPanelVisibility() {
   const softVelocityModeSelected = target === 'softEdgeVelocityMode';
   const softMomentumModeSelected = target === 'softEdgeMomentumMode';
   const permeabilitySelected = target === 'rigidPermeability';
+  const rigidVelocityModeSelected = target === 'rigidEdgeVelocityMode';
   const consumeSelected = target === 'rigidConsume';
 
   setWidgetEnabled(modeEl, traitSelected, 'Trait paint mode only applies when Field to paint = Trait field');
@@ -1109,6 +1148,7 @@ function syncFieldPanelVisibility() {
   setWidgetEnabled(softEdgeVelocityModeEl, softVelocityModeSelected, 'Soft velocity mode only applies when Field to paint = Soft edge velocity mode field');
   setWidgetEnabled(softEdgeMomentumPaintEl, softMomentumModeSelected, 'Soft momentum paint value only applies when Field to paint = Soft edge momentum coupling field');
   setWidgetEnabled(rigidPermeabilityPaintEl, permeabilitySelected, 'Rigid permeability paint value only applies when Field to paint = Rigid permeability field');
+  setWidgetEnabled(rigidEdgeVelocityModeEl, rigidVelocityModeSelected, 'Rigid velocity mode only applies when Field to paint = Rigid edge velocity mode field');
   setWidgetEnabled(rigidConsumeChannelEl, consumeSelected, 'Consume channel only applies when Field to paint = Rigid edge consume-dye field');
   setWidgetEnabled(rigidConsumePaintEl, consumeSelected, 'Consume paint value only applies when Field to paint = Rigid edge consume-dye field');
 
@@ -1208,6 +1248,7 @@ let softEdgeDyeModePainting = false;
 let softEdgeVelocityModePainting = false;
 let softEdgeMomentumModePainting = false;
 let rigidPermeabilityPainting = false;
+let rigidEdgeVelocityModePainting = false;
 let rigidConsumePainting = false;
 
 paintCanvas.addEventListener('mousedown', (e) => { traitPainting = true; paintTrait(e.clientX, e.clientY); });
@@ -1293,6 +1334,16 @@ rigidPermeabilityCanvas.addEventListener('mousemove', (e) => {
   paintRigidPermeabilityMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
 });
 
+rigidEdgeVelocityModeCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+rigidEdgeVelocityModeCanvas.addEventListener('mousedown', (e) => {
+  rigidEdgeVelocityModePainting = true;
+  paintRigidEdgeVelocityModeMap(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
+});
+rigidEdgeVelocityModeCanvas.addEventListener('mousemove', (e) => {
+  if (!rigidEdgeVelocityModePainting) return;
+  paintRigidEdgeVelocityModeMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
+});
+
 rigidConsumeCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
 rigidConsumeCanvas.addEventListener('mousedown', (e) => {
   rigidConsumePainting = true;
@@ -1313,6 +1364,7 @@ window.addEventListener('mouseup', () => {
   softEdgeVelocityModePainting = false;
   softEdgeMomentumModePainting = false;
   rigidPermeabilityPainting = false;
+  rigidEdgeVelocityModePainting = false;
   rigidConsumePainting = false;
 });
 
@@ -1329,6 +1381,7 @@ clearBtn.addEventListener('click', () => {
   softEdgeVelocityModeMap.fill(0.0);
   softEdgeMomentumModeMap.fill(1.0);
   rigidPermeabilityMap.fill(0.0);
+  rigidEdgeVelocityMap.fill(0.0);
   rigidEdgeConsumeMapR.fill(0.0);
   rigidEdgeConsumeMapG.fill(0.0);
   rigidEdgeConsumeMapB.fill(0.0);
@@ -1359,6 +1412,7 @@ if (randomizeBtn) {
       softEdgeVelocityMode: true,
       softEdgeMomentumMode: true,
       rigidPermeability: true,
+      rigidEdgeVelocityMode: true,
       rigidConsume: true,
     });
   });
@@ -1389,6 +1443,9 @@ if (randomizeSoftEdgeMomentumModeBtn) {
 }
 if (randomizeRigidPermeabilityBtn) {
   randomizeRigidPermeabilityBtn.addEventListener('click', () => randomizeWithTargets({ rigidPermeability: true }));
+}
+if (randomizeRigidEdgeVelocityModeBtn) {
+  randomizeRigidEdgeVelocityModeBtn.addEventListener('click', () => randomizeWithTargets({ rigidEdgeVelocityMode: true }));
 }
 if (randomizeRigidConsumeBtn) {
   randomizeRigidConsumeBtn.addEventListener('click', () => randomizeWithTargets({ rigidConsume: true }));
@@ -1483,6 +1540,9 @@ importFile.addEventListener('change', async () => {
     else softEdgeMomentumModeMap.fill(1.0);
     if (Array.isArray(authoring.rigidPermeabilityMap) && authoring.rigidPermeabilityMap.length === W * H) rigidPermeabilityMap.set(authoring.rigidPermeabilityMap);
     else rigidPermeabilityMap.fill(0.0);
+    if (Array.isArray(authoring.rigidEdgeVelocityMap) && authoring.rigidEdgeVelocityMap.length === W * H) rigidEdgeVelocityMap.set(authoring.rigidEdgeVelocityMap);
+    else if (Array.isArray(authoring.rigidEdgeVelocityModeMap) && authoring.rigidEdgeVelocityModeMap.length === W * H) rigidEdgeVelocityMap.set(authoring.rigidEdgeVelocityModeMap);
+    else rigidEdgeVelocityMap.fill(0.0);
     if (Array.isArray(authoring.rigidEdgeConsumeMapR) && authoring.rigidEdgeConsumeMapR.length === W * H) rigidEdgeConsumeMapR.set(authoring.rigidEdgeConsumeMapR);
     else rigidEdgeConsumeMapR.fill(0.0);
     if (Array.isArray(authoring.rigidEdgeConsumeMapG) && authoring.rigidEdgeConsumeMapG.length === W * H) rigidEdgeConsumeMapG.set(authoring.rigidEdgeConsumeMapG);

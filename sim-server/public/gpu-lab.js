@@ -4362,6 +4362,28 @@ function drawBodiesOverlay(sim) {
   const collisionDebug = !!showCollisionHullEl?.checked;
   let concaveCount = 0;
 
+  const drawSegmentIdLabel = (id, pa, pb, color = 'rgba(255,255,255,0.92)') => {
+    if (!id || !pa || !pb) return;
+    const dx = pb.x - pa.x;
+    const dy = pb.y - pa.y;
+    const len = Math.hypot(dx, dy);
+    if (!Number.isFinite(len) || len < 1e-3) return;
+    const nx = -dy / len;
+    const ny = dx / len;
+    const mx = 0.5 * (pa.x + pb.x);
+    const my = 0.5 * (pa.y + pb.y);
+    const off = 7;
+
+    ctx.save();
+    ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.fillStyle = color;
+    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+    ctx.lineWidth = 3;
+    ctx.strokeText(id, mx + nx * off, my + ny * off);
+    ctx.fillText(id, mx + nx * off, my + ny * off);
+    ctx.restore();
+  };
+
   ctx.save();
   ctx.lineWidth = 1.5;
   for (let i = 0; i < sim.bodies.rigid.length; i++) {
@@ -4408,6 +4430,7 @@ function drawBodiesOverlay(sim) {
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b2.x, b2.y);
       ctx.stroke();
+      drawSegmentIdLabel(`R${i}:${ei}`, a, b2, 'rgba(255,245,200,0.96)');
       ctx.setLineDash([]);
       ctx.lineWidth = prevWidth;
     }
@@ -4498,7 +4521,10 @@ function drawBodiesOverlay(sim) {
     ctx.closePath();
     ctx.fill();
   }
-  for (const [i, j, _rest, edgeBodyMode, edgeDyeMode, edgeVelocityMode, edgeMomentumCoupling] of s.springs) {
+  for (let sgi = 0; sgi < (s.springs || []).length; sgi++) {
+    const spring = s.springs[sgi];
+    if (!Array.isArray(spring) || spring.length < 2) continue;
+    const [i, j, _rest, edgeBodyMode, edgeDyeMode, edgeVelocityMode, edgeMomentumCoupling] = spring;
     const a = s.nodes[i], b = s.nodes[j];
     if (!a || !b) continue;
     const pa = worldToScreen(sim, a._rx, a._ry);
@@ -4541,6 +4567,7 @@ function drawBodiesOverlay(sim) {
     ctx.moveTo(pa.x, pa.y);
     ctx.lineTo(pb.x, pb.y);
     ctx.stroke();
+    drawSegmentIdLabel(`S${sgi}`, pa, pb, 'rgba(180,255,220,0.96)');
 
     ctx.setLineDash([]);
     ctx.lineWidth = lineWidthPrev;
@@ -4590,10 +4617,10 @@ function drawBodiesOverlay(sim) {
   ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, ABSORB=amber, MIXED=violet | obstacle mask overlay=red | zoom ${sim.camera.zoom.toFixed(2)}x${collisionDebugSuffix}`, 10, canvas.height - 28);
   ctx.fillStyle = 'rgba(0,255,208,0.95)';
   const line2 = collisionDebug
-    ? 'Body edges: BLOCK solid vs PASS dashed | soft momentum: thin→thick (0→1) | dashed green/cyan=solver hull, dashed amber=rigid-rigid convex proxies | soft deform warn=orange, severe=red'
+    ? 'Body edges: BLOCK solid vs PASS dashed | segment IDs: R<body>:<edge>, S<soft-spring> | soft momentum: thin→thick (0→1) | dashed green/cyan=solver hull, dashed amber=rigid-rigid convex proxies | soft deform warn=orange, severe=red'
     : (ENABLE_HYBRID_BODY_LINKS
-      ? 'Body edges: BLOCK solid vs PASS dashed | soft momentum: thin→thick (0→1) | hybrid links=magenta | soft deform warn=orange, severe=red'
-      : 'Body edges: BLOCK solid vs PASS dashed | soft momentum: thin→thick (0→1) | hybrids disabled (rigid/soft separated) | soft deform warn=orange, severe=red');
+      ? 'Body edges: BLOCK solid vs PASS dashed | segment IDs: R<body>:<edge>, S<soft-spring> | soft momentum: thin→thick (0→1) | hybrid links=magenta | soft deform warn=orange, severe=red'
+      : 'Body edges: BLOCK solid vs PASS dashed | segment IDs: R<body>:<edge>, S<soft-spring> | soft momentum: thin→thick (0→1) | hybrids disabled (rigid/soft separated) | soft deform warn=orange, severe=red');
   ctx.fillText(line2, 10, canvas.height - 12);
   ctx.restore();
 }

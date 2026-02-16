@@ -28,6 +28,7 @@
     .field-panel[hidden] { display:none; }
     input, select, button { background:#222; color:#eee; border:1px solid #444; border-radius:6px; padding:4px 8px; }
     pre { background:#1b1b1b; padding:10px; border-radius:8px; }
+    #segmentStatsOut { width:420px; max-height:384px; overflow:auto; white-space:pre; }
   </style>
 </head>
 <body>
@@ -313,6 +314,10 @@
     <div class="wind-panel" id="windPanel">
       <div>Wind tunnel preview (GPU physics)</div>
       <iframe id="windTunnelFrame" src="/gpu-lab.html?embed=1" width="384" height="384" loading="lazy"></iframe>
+    </div>
+    <div class="segment-panel" id="segmentPanel">
+      <div>Segment stats (ID aligns with wind tunnel labels)</div>
+      <pre id="segmentStatsOut">ready</pre>
     </div>
   </div>
   <pre id="out">ready</pre>

@@ -91,6 +91,7 @@ const exportBtn = document.getElementById('exportBtn');
 const importBtn = document.getElementById('importBtn');
 const importFile = document.getElementById('importFile');
 const out = document.getElementById('out');
+const segmentStatsOut = document.getElementById('segmentStatsOut');
 const windEmitterStrengthEl = document.getElementById('windEmitterStrength');
 const windEmitterJetVyEl = document.getElementById('windEmitterJetVy');
 const windEmitterRadiusEl = document.getElementById('windEmitterRadius');
@@ -227,6 +228,156 @@ function populateWinnerFieldsFromModeScalarMap(modeMap, blockMap, passMap, eatMa
       blockMap[i] = Math.max(blockMap[i], 1 - s); passMap[i] = 0; eatMap[i] = 0;
     }
   }
+}
+
+function sampleSegmentAverageMap(field, ax, ay, bx, by, fallback = 0) {
+  if (!(field instanceof Float32Array) || field.length !== W * H) return fallback;
+  const x0 = Number(ax) || 0;
+  const y0 = Number(ay) || 0;
+  const x1 = Number(bx) || 0;
+  const y1 = Number(by) || 0;
+  const len = Math.hypot(x1 - x0, y1 - y0);
+  const samples = Math.max(2, Math.min(256, Math.ceil(len * 2) + 1));
+  let sum = 0;
+  for (let i = 0; i < samples; i++) {
+    const t = samples <= 1 ? 0 : (i / (samples - 1));
+    const x = x0 + (x1 - x0) * t;
+    const y = y0 + (y1 - y0) * t;
+    sum += sampleMapBilinear(field, x, y, fallback);
+  }
+  return sum / samples;
+}
+
+function dyeModeNameFromCode(mode) {
+  const m = Number(mode);
+  if (m === 2) return 'EAT';
+  if (m === 0) return 'PASS';
+  return 'BLOCK';
+}
+
+function velocityModeNameFromCode(mode) {
+  return Number(mode) === 0 ? 'PASS' : 'BLOCK';
+}
+
+function computeChannelWinnerStats(ax, ay, bx, by, blockMap, passMap, eatMap) {
+  const blockAvg = sampleSegmentAverageMap(blockMap, ax, ay, bx, by, 0);
+  const passAvg = sampleSegmentAverageMap(passMap, ax, ay, bx, by, 0);
+  const eatAvg = sampleSegmentAverageMap(eatMap, ax, ay, bx, by, 0);
+  const winner = winnerTakeAllDyeMode(blockAvg, passAvg, eatAvg);
+  return {
+    blockAvg: +blockAvg.toFixed(4),
+    passAvg: +passAvg.toFixed(4),
+    eatAvg: +eatAvg.toFixed(4),
+    winner: dyeModeNameFromCode(winner),
+  };
+}
+
+function updateSegmentStatsPreview(spec) {
+  if (!segmentStatsOut) return;
+  if (!spec || !Array.isArray(spec.rigidBodies) || !Array.isArray(spec.softBodies)) {
+    segmentStatsOut.textContent = 'No segment stats yet. Compile a mesh first.';
+    return;
+  }
+
+  const segments = [];
+  let softGlobalIndex = 0;
+
+  for (let rbi = 0; rbi < (spec.rigidBodies || []).length; rbi++) {
+    const rb = spec.rigidBodies[rbi];
+    const hull = rb?.hull || [];
+    for (let ei = 0; ei < hull.length; ei++) {
+      const a = hull[ei];
+      const b = hull[(ei + 1) % hull.length];
+      if (!a || !b) continue;
+      const ax = Number(a.x) || 0;
+      const ay = Number(a.y) || 0;
+      const bx = Number(b.x) || 0;
+      const by = Number(b.y) || 0;
+      const dye = Array.isArray(rb?.edgeDyeMode?.[ei]) ? rb.edgeDyeMode[ei] : [1, 1, 1];
+      const vel = Array.isArray(rb?.edgeVelocityMode) ? Number(rb.edgeVelocityMode[ei]) : 1;
+      const momentum = Array.isArray(rb?.edgeMomentumCoupling)
+        ? Number(rb.edgeMomentumCoupling[ei])
+        : (Array.isArray(rb?.edgeMomentumTransfer) ? Number(rb.edgeMomentumTransfer[ei]) : 1);
+
+      segments.push({
+        id: `R${rbi}:${ei}`,
+        type: 'rigid',
+        bodyIndex: rbi,
+        segmentIndex: ei,
+        midpoint: { x: +(((ax + bx) * 0.5).toFixed(3)), y: +(((ay + by) * 0.5).toFixed(3)) },
+        length: +(Math.hypot(bx - ax, by - ay).toFixed(3)),
+        velocityMode: velocityModeNameFromCode(vel),
+        momentumCoupling: +(Math.max(0, Math.min(1, Number.isFinite(momentum) ? momentum : 1)).toFixed(3)),
+        dyeMode: {
+          r: dyeModeNameFromCode(dye[0]),
+          g: dyeModeNameFromCode(dye[1]),
+          b: dyeModeNameFromCode(dye[2]),
+        },
+        winnerStats: {
+          r: computeChannelWinnerStats(ax, ay, bx, by, rigidEdgeDyeBlockMapR, rigidEdgeDyePassMapR, rigidEdgeDyeEatMapR),
+          g: computeChannelWinnerStats(ax, ay, bx, by, rigidEdgeDyeBlockMapG, rigidEdgeDyePassMapG, rigidEdgeDyeEatMapG),
+          b: computeChannelWinnerStats(ax, ay, bx, by, rigidEdgeDyeBlockMapB, rigidEdgeDyePassMapB, rigidEdgeDyeEatMapB),
+        },
+      });
+    }
+  }
+
+  for (let sbi = 0; sbi < (spec.softBodies || []).length; sbi++) {
+    const sb = spec.softBodies[sbi];
+    const nodes = sb?.nodes || [];
+    const springs = sb?.springs || [];
+    for (let spi = 0; spi < springs.length; spi++) {
+      const sp = springs[spi];
+      if (!Array.isArray(sp) || sp.length < 2) continue;
+      const a = nodes[Number(sp[0])];
+      const b = nodes[Number(sp[1])];
+      if (!a || !b) continue;
+      const ax = Number(a.x) || 0;
+      const ay = Number(a.y) || 0;
+      const bx = Number(b.x) || 0;
+      const by = Number(b.y) || 0;
+      const dye = Array.isArray(sp[4]) ? sp[4] : [1, 1, 1];
+      const vel = Number(sp[5]);
+      const momentum = Number(sp[6]);
+
+      segments.push({
+        id: `S${softGlobalIndex}`,
+        type: 'soft',
+        softBodyIndex: sbi,
+        springIndex: spi,
+        midpoint: { x: +(((ax + bx) * 0.5).toFixed(3)), y: +(((ay + by) * 0.5).toFixed(3)) },
+        length: +(Math.hypot(bx - ax, by - ay).toFixed(3)),
+        velocityMode: velocityModeNameFromCode(vel),
+        momentumCoupling: +(Math.max(0, Math.min(1, Number.isFinite(momentum) ? momentum : 1)).toFixed(3)),
+        dyeMode: {
+          r: dyeModeNameFromCode(dye[0]),
+          g: dyeModeNameFromCode(dye[1]),
+          b: dyeModeNameFromCode(dye[2]),
+        },
+        winnerStats: {
+          r: computeChannelWinnerStats(ax, ay, bx, by, softEdgeDyeBlockMapR, softEdgeDyePassMapR, softEdgeDyeEatMapR),
+          g: computeChannelWinnerStats(ax, ay, bx, by, softEdgeDyeBlockMapG, softEdgeDyePassMapG, softEdgeDyeEatMapG),
+          b: computeChannelWinnerStats(ax, ay, bx, by, softEdgeDyeBlockMapB, softEdgeDyePassMapB, softEdgeDyeEatMapB),
+        },
+      });
+      softGlobalIndex += 1;
+    }
+  }
+
+  segmentStatsOut.textContent = JSON.stringify({
+    segmentIdLegend: {
+      rigid: 'R<rigidBodyIndex>:<edgeIndex>',
+      soft: 'S<globalSoftSpringIndex>',
+    },
+    summary: {
+      rigidBodies: spec.rigidBodies.length,
+      softBodies: spec.softBodies.length,
+      segments: segments.length,
+      rigidSegments: segments.filter((s) => s.type === 'rigid').length,
+      softSegments: segments.filter((s) => s.type === 'soft').length,
+    },
+    segments,
+  }, null, 2);
 }
 
 function isolateLargestContiguousTraitBody(rigidField, softField, threshold = 0.35) {
@@ -1393,6 +1544,7 @@ function drawMesh(mesh) {
     ok: false,
     error: 'No compiled CreatureSpec available',
   }, null, 2);
+  updateSegmentStatsPreview(specForJsonPreview);
 }
 
 function setWidgetEnabled(el, enabled, disabledTitle = '') {
@@ -1527,6 +1679,7 @@ function compileNow() {
     const msg = `Compile failed: ${String(err?.message || err)}`;
     console.error('[mesh-lab] compileNow failed', err);
     out.textContent = msg;
+    if (segmentStatsOut) segmentStatsOut.textContent = msg;
     return null;
   }
 }
@@ -2013,6 +2166,7 @@ importFile.addEventListener('change', async () => {
     hybridJoints: spec.hybridJoints?.length || 0,
     note: 'No authoring fields embedded; showing solver-structure preview.',
   }, null, 2);
+  updateSegmentStatsPreview(spec);
 });
 
 if (windTunnelFrame) {

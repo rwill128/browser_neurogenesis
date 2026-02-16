@@ -238,10 +238,6 @@ test('exported rigid permeability traits survive import and drive runtime barrie
 
   const rb = bodies.rigid[0];
   const edgeMask = rb.edgePermeabilityRGB || [];
-  const permeableEdge = edgeMask.findIndex((rgb) => Array.isArray(rgb) && rgb[0] > 0 && rgb[1] > 0 && rgb[2] > 0);
-  const blockedEdge = edgeMask.findIndex((rgb) => Array.isArray(rgb) && rgb[0] <= 0 && rgb[1] <= 0 && rgb[2] <= 0);
-  assert.ok(permeableEdge >= 0, 'expected at least one permeable edge from painted map');
-  assert.ok(blockedEdge >= 0, 'expected at least one blocked edge to compare against');
 
   const verts = rigidVerticesWorld(rb);
   const midCell = (edgeIdx) => {
@@ -251,6 +247,32 @@ test('exported rigid permeability traits survive import and drive runtime barrie
     const y = Math.max(0, Math.min(n - 1, Math.round((a.y + b2.y) * 0.5)));
     return y * n + x;
   };
+  const midPoint = (edgeIdx) => {
+    const a = verts[edgeIdx];
+    const b2 = verts[(edgeIdx + 1) % verts.length];
+    return { x: (a.x + b2.x) * 0.5, y: (a.y + b2.y) * 0.5 };
+  };
+
+  const permeableEdges = edgeMask
+    .map((rgb, i) => ({ rgb, i }))
+    .filter(({ rgb }) => Array.isArray(rgb) && rgb[0] > 0 && rgb[1] > 0 && rgb[2] > 0)
+    .map(({ i }) => i);
+  const blockedEdge = edgeMask.findIndex((rgb) => Array.isArray(rgb) && rgb[0] <= 0 && rgb[1] <= 0 && rgb[2] <= 0);
+  assert.ok(permeableEdges.length > 0, 'expected at least one permeable edge from painted map');
+  assert.ok(blockedEdge >= 0, 'expected at least one blocked edge to compare against');
+
+  const paintTarget = { x: 16, y: 8 };
+  let permeableEdge = permeableEdges[0];
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const edgeIdx of permeableEdges) {
+    const m = midPoint(edgeIdx);
+    const d = Math.hypot(m.x - paintTarget.x, m.y - paintTarget.y);
+    if (d < bestDist) {
+      bestDist = d;
+      permeableEdge = edgeIdx;
+    }
+  }
+  assert.ok(bestDist <= 2.1, `painted permeability should map to top-edge segment near (16,8), nearest permeable midpoint distance=${bestDist.toFixed(3)}`);
 
   const permeableCell = midCell(permeableEdge);
   const blockedCell = midCell(blockedEdge);

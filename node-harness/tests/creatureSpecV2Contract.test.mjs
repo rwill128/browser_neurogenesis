@@ -121,6 +121,40 @@ test('createCreatureSpecFromMesh compacts default rigid edge arrays', () => {
   assert.equal(rb.edgePermeabilityRGB, undefined);
 });
 
+test('buildBodiesFromCreatureSpec deterministically restores compacted rigid edge defaults', () => {
+  const spec = createCreatureSpecFromMesh(sampleMesh());
+  const rb = spec.rigidBodies[0];
+  assert.ok(rb, 'expected rigid body export');
+  // Export should omit default arrays for compactness.
+  assert.equal(rb.edgeBodyMode, undefined);
+  assert.equal(rb.edgeDyeMode, undefined);
+  assert.equal(rb.edgePermeabilityRGB, undefined);
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+  assert.equal(bodies.rigid.length, 1);
+
+  const imported = bodies.rigid[0];
+  assert.equal(imported.sides, imported.verticesLocal.length);
+
+  // Missing arrays in spec must normalize to stable solver defaults.
+  assert.equal(imported.edgeBodyMode.length, imported.sides);
+  assert.ok(imported.edgeBodyMode.every((m) => Number(m) === 1));
+
+  assert.equal(imported.edgeDyeMode.length, imported.sides);
+  assert.ok(imported.edgeDyeMode.every((rgb) => Array.isArray(rgb)
+    && rgb.length === 3
+    && Number(rgb[0]) === 1
+    && Number(rgb[1]) === 1
+    && Number(rgb[2]) === 1));
+
+  assert.equal(imported.edgePermeabilityRGB.length, imported.sides);
+  assert.ok(imported.edgePermeabilityRGB.every((rgb) => Array.isArray(rgb)
+    && rgb.length === 3
+    && Number(rgb[0]) === 0
+    && Number(rgb[1]) === 0
+    && Number(rgb[2]) === 0));
+});
+
 test('soft solver mode is exported and membrane mode is mapped on import bodies', () => {
   const mesh = {
     nodes: [

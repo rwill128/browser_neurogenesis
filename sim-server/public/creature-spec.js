@@ -51,6 +51,20 @@ function buildMembranePerimeterSpringsFromNodes(nodes) {
   return springs.length >= 3 ? springs : [];
 }
 
+/**
+ * Build a normalized creature-spec.v2 document from mesh/compiler output.
+ *
+ * The exporter keeps solver-facing geometry deterministic and optionally carries
+ * authoring fields (`rigidField`, `softField`, membrane maps) for later mutation
+ * or re-editing workflows.
+ *
+ * @param {object} mesh
+ * @param {Array<object>} [mesh.nodes]
+ * @param {Array<object>} [mesh.triangles]
+ * @param {object} [mesh.meta]
+ * @param {object} [options]
+ * @returns {object}
+ */
 export function createCreatureSpecFromMesh(mesh, options = {}) {
   const width = mesh?.meta?.width || options.width || 128;
   const height = mesh?.meta?.height || options.height || 128;
@@ -157,6 +171,16 @@ function compactRigidBodyEdgeDefaults(rb) {
   return out;
 }
 
+/**
+ * Parse and validate creature-spec.v2 JSON text.
+ *
+ * Validation is intentionally strict so downstream body construction can assume
+ * required arrays/sections exist.
+ *
+ * @param {string} jsonText
+ * @returns {object}
+ * @throws {Error} When schemaVersion or required sections are invalid.
+ */
 export function parseCreatureSpec(jsonText) {
   const obj = JSON.parse(jsonText);
   if (!obj || typeof obj !== 'object') throw new Error('Invalid JSON object');
@@ -178,6 +202,17 @@ export function parseCreatureSpec(jsonText) {
   return obj;
 }
 
+/**
+ * Convert a validated creature spec into runtime rigid/soft/hybrid body arrays.
+ *
+ * Coordinates are scaled into an `n x n` simulation domain while preserving
+ * relative morphology and solver-ready edge/node attributes.
+ *
+ * @param {object} spec Parsed creature spec object.
+ * @param {number} n Target simulation domain size.
+ * @param {object} controls Mass defaults and runtime control constants.
+ * @returns {object}
+ */
 export function buildBodiesFromCreatureSpec(spec, n, controls) {
   const srcW = Math.max(1, Number(spec.space?.width) || n);
   const srcH = Math.max(1, Number(spec.space?.height) || n);
@@ -850,6 +885,24 @@ function resampleClosedLoopByEdgeMap({
   return positions.map((arc) => sampleClosedArcPoint(poly, segLen, cumLen, perimeter, arc));
 }
 
+/**
+ * Extract perimeter rings from a thresholded soft occupancy field.
+ *
+ * Rings are simplified and re-sampled with optional edge-length modulation,
+ * producing deterministic membrane node loops for export.
+ *
+ * @param {object} params
+ * @param {number} params.width
+ * @param {number} params.height
+ * @param {ArrayLike<number>} params.softField
+ * @param {ArrayLike<number>|null} [params.edgeLengthField]
+ * @param {number} [params.threshold]
+ * @param {number} [params.minEdgeLength]
+ * @param {number} [params.maxEdgeLength]
+ * @param {number} [params.maxNodes]
+ * @param {number} [params.simplifyEpsilon]
+ * @returns {Array<Array<{x:number,y:number}>>}
+ */
 export function buildMembraneRingsFromSoftField({
   width,
   height,

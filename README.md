@@ -58,6 +58,10 @@ Shared infra:
 - `sim-server/` — server + API + static hosting for labs and app
 - `node-harness/` — deterministic scenario runs, regressions, tests
 
+Specification docs:
+- `docs/CHEMOFLUID_ENERGY_BIOLOGY_SPEC.md` — ecosystem/energy model
+- `docs/CREATURE_GEOMETRY_EVOLVABILITY.md` — body/edge/vertex trait contract and mutation-ready knobs
+
 See `WORKSTREAMS.md` for strict scope boundaries and test split commands.
 
 ---

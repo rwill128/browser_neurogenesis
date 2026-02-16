@@ -75,7 +75,7 @@ These traits govern localized deformability.
 
 When using membrane field authoring, `shapeMemoryWeight` is sampled from `fields.membraneShapeMap` and stored per vertex.
 
-**Evolvability note:** per-vertex mutation of `shapeMemoryWeight` is a low-risk path to heterogeneous tissues before introducing new solver modes.
+**Evolvability note:** per-vertex mutation of `shapeMemoryWeight` is a low-risk first step for heterogeneous tissues before introducing new solver modes.
 
 ---
 
@@ -212,14 +212,17 @@ So mutation code can stay simple and expressive, while build-time normalization 
 
 This matrix is intentionally implementation-adjacent: each row points to a concrete JSON field that already round-trips through `createCreatureSpecFromMesh` → `buildBodiesFromCreatureSpec` with deterministic projection.
 
-## Practical evolvability progression (recommended)
+## Engineering rollout order for trait mutability (recommended)
 
-1. Mutate scalar coefficients first (`shapeMemoryGain`, `pressureGain`, etc.).
-2. Then mutate per-vertex weights (`shapeMemoryWeight`).
-3. Then mutate edge semantics/permeability arrays.
-4. Finally mutate topology (spring add/remove, perimeter rewiring), while preserving existing span and membrane-ring guardrails.
+> This is an implementation-order recommendation for introducing new mutable knobs safely.
+> It is **not** a prescribed evolutionary trajectory.
 
-This order maximizes phenotype diversity while minimizing catastrophic solver regressions.
+1. Enable scalar coefficient mutability first (`shapeMemoryGain`, `pressureGain`, etc.).
+2. Then enable per-vertex weights (`shapeMemoryWeight`).
+3. Then enable edge semantics/permeability arrays.
+4. Finally enable topology mutation (spring add/remove, perimeter rewiring), while preserving existing span and membrane-ring guardrails.
+
+This order minimizes catastrophic solver regressions while expanding available phenotype variation.
 
 ## "Mutable later" upgrade checklist (body/segment/vertex)
 

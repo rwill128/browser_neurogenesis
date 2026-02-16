@@ -9,6 +9,7 @@ const tests = [
   'node-harness/tests/rigidRigidPolygonCollision.test.mjs',
   'node-harness/tests/dyeBarrierIntegration.test.mjs',
   'node-harness/tests/softXpbdTopologyGuards.test.mjs',
+  'node-harness/tests/softDeformationMetrics.test.mjs',
   'node-harness/tests/miniScenarioWatchdogSource.test.mjs',
 ];
 

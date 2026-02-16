@@ -2,6 +2,7 @@ import { parseCreatureSpec, buildBodiesFromCreatureSpec } from '/creature-spec.j
 import { EDGE_DYE_MODE, normalizeEdgeDyeModeRGB, applyBodyEdgeFieldBarriers } from '/dye-barrier.js';
 import { resolveRigidVsSoftNodeCollision, resolveRigidVsRigidPolygonCollision, getRigidCollisionPolysWorld, pointInPolygonInclusive } from '/rigid-collision.js';
 import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops, recoverSoftSpringRests } from '/soft-xpbd.js';
+import { computeVectorRms, computeRigidAlignedPoseResidual } from '/soft-deformation-metrics.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -56,6 +57,10 @@ const SOFT_DEFORM_WARN_AREA_RATIO_MIN = 0.45;
 const SOFT_DEFORM_WARN_AREA_RATIO_MAX = 2.2;
 const SOFT_DEFORM_SEVERE_AREA_RATIO_MIN = 0.2;
 const SOFT_DEFORM_SEVERE_AREA_RATIO_MAX = 5.0;
+const SOFT_DEFORM_WARN_POSE_RMS = 0.18;
+const SOFT_DEFORM_SEVERE_POSE_RMS = 0.32;
+const SOFT_DEFORM_WARN_POSE_MAX = 0.34;
+const SOFT_DEFORM_SEVERE_POSE_MAX = 0.58;
 const MEMBRANE_CELL_BASE_COUNT = 4;
 const MEMBRANE_CELL_BASE_PRESSURE_GAIN = 0.08;
 const MEMBRANE_CELL_BASE_RADIAL_DAMPING = 0.06;
@@ -1154,6 +1159,7 @@ function applyMiniScenarioPreset(sim, mini) {
   sim.softMembraneLoopState = null;
   sim.softMembraneClusterSet = null;
   sim.softMembraneClusterMap = null;
+  sim.softDeformReferenceState = null;
   sim.viscMapCpu.fill(0.5);
   uploadViscMap();
   focusCameraOnBodies(sim, sim.bodies);
@@ -2203,6 +2209,76 @@ function applySoftMembraneCellPressure(sim, s, loops, dtPos) {
   return touched;
 }
 
+function ensureSoftDeformationReferenceState(sim, s) {
+  sim.softDeformReferenceState = sim.softDeformReferenceState || new Map();
+  const refs = sim.softDeformReferenceState;
+
+  const clusterIndices = new Map();
+  for (let i = 0; i < (s.nodes || []).length; i++) {
+    const node = s.nodes[i];
+    const cid = node?.clusterId ?? 0;
+    if (!clusterIndices.has(cid)) clusterIndices.set(cid, []);
+    clusterIndices.get(cid).push(i);
+  }
+
+  const live = new Set();
+  for (const [cid, indices] of clusterIndices.entries()) {
+    const key = indices.join(',');
+    let st = refs.get(cid);
+    if (!st || st.key !== key) {
+      let cx = 0;
+      let cy = 0;
+      let count = 0;
+      for (const idx of indices) {
+        const node = s.nodes[idx];
+        const x = Number(node?.x);
+        const y = Number(node?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        cx += x;
+        cy += y;
+        count += 1;
+      }
+      if (count < 3) {
+        refs.delete(cid);
+        continue;
+      }
+      cx /= count;
+      cy /= count;
+
+      const validIndices = [];
+      const local = [];
+      for (const idx of indices) {
+        const node = s.nodes[idx];
+        const x = Number(node?.x);
+        const y = Number(node?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        validIndices.push(idx);
+        local.push(x - cx, y - cy);
+      }
+      if (validIndices.length < 3) {
+        refs.delete(cid);
+        continue;
+      }
+
+      const refLocal = Float32Array.from(local);
+      st = {
+        key,
+        indices: Int32Array.from(validIndices),
+        refLocal,
+        refRms: Math.max(1e-3, computeVectorRms(refLocal)),
+        curLocal: new Float32Array(refLocal.length),
+      };
+      refs.set(cid, st);
+    }
+    live.add(cid);
+  }
+
+  for (const cid of [...refs.keys()]) {
+    if (!live.has(cid)) refs.delete(cid);
+  }
+  return refs;
+}
+
 function buildSoftDeformationState(sim, s, loops) {
   const clusters = new Map();
   const ensureCluster = (cid) => {
@@ -2213,6 +2289,8 @@ function buildSoftDeformationState(sim, s, loops) {
         stretchMax: 1,
         stretchMin: 1,
         areaRatio: 1,
+        poseErrorRms: 0,
+        poseErrorMax: 0,
         severe: false,
         warning: false,
       });
@@ -2260,26 +2338,95 @@ function buildSoftDeformationState(sim, s, loops) {
     c.areaRatio = areaRatio;
   }
 
+  const refState = ensureSoftDeformationReferenceState(sim, s);
+  for (const [cid, st] of refState.entries()) {
+    const c = ensureCluster(cid);
+    const ids = st.indices;
+    if (!(ids instanceof Int32Array) || ids.length < 3) continue;
+
+    let cx = 0;
+    let cy = 0;
+    let count = 0;
+    for (let k = 0; k < ids.length; k++) {
+      const node = s.nodes[ids[k]];
+      const x = Number(node?.x);
+      const y = Number(node?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      cx += x;
+      cy += y;
+      count += 1;
+    }
+    if (count < 3) {
+      c.warning = true;
+      c.severe = true;
+      continue;
+    }
+    cx /= count;
+    cy /= count;
+
+    if (!(st.curLocal instanceof Float32Array) || st.curLocal.length !== st.refLocal.length) {
+      st.curLocal = new Float32Array(st.refLocal.length);
+    }
+    let valid = 0;
+    for (let k = 0; k < ids.length; k++) {
+      const node = s.nodes[ids[k]];
+      const x = Number(node?.x);
+      const y = Number(node?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        st.curLocal[k * 2] = 0;
+        st.curLocal[k * 2 + 1] = 0;
+        continue;
+      }
+      st.curLocal[k * 2] = x - cx;
+      st.curLocal[k * 2 + 1] = y - cy;
+      valid += 1;
+    }
+    if (valid < 3) {
+      c.warning = true;
+      c.severe = true;
+      continue;
+    }
+
+    const pose = computeRigidAlignedPoseResidual(st.refLocal, st.curLocal, st.refRms);
+    if (!pose) {
+      c.warning = true;
+      c.severe = true;
+      continue;
+    }
+    c.poseErrorRms = Number.isFinite(pose.normalizedRms) ? pose.normalizedRms : 0;
+    c.poseErrorMax = Number.isFinite(pose.normalizedMax) ? pose.normalizedMax : 0;
+  }
+
   const clusterList = [...clusters.values()];
   let worstStretch = 1;
   let worstAreaRatio = 1;
+  let worstPoseError = 0;
   const warningClusters = [];
   const severeClusters = [];
 
   for (const c of clusterList) {
-    c.warning = c.warning
-      || c.stretchMax >= SOFT_DEFORM_WARN_STRETCH
+    const legacyWarn = c.stretchMax >= SOFT_DEFORM_WARN_STRETCH
       || c.areaRatio <= SOFT_DEFORM_WARN_AREA_RATIO_MIN
       || c.areaRatio >= SOFT_DEFORM_WARN_AREA_RATIO_MAX;
-    c.severe = c.severe
-      || c.stretchMax >= SOFT_DEFORM_SEVERE_STRETCH
+    const legacySevere = c.stretchMax >= SOFT_DEFORM_SEVERE_STRETCH
       || c.stretchMin <= 0.12
       || c.areaRatio <= SOFT_DEFORM_SEVERE_AREA_RATIO_MIN
       || c.areaRatio >= SOFT_DEFORM_SEVERE_AREA_RATIO_MAX;
+
+    const poseAvailable = Number.isFinite(c.poseErrorRms) && Number.isFinite(c.poseErrorMax);
+    const poseWarn = c.poseErrorRms >= SOFT_DEFORM_WARN_POSE_RMS
+      || c.poseErrorMax >= SOFT_DEFORM_WARN_POSE_MAX;
+    const poseSevere = c.poseErrorRms >= SOFT_DEFORM_SEVERE_POSE_RMS
+      || c.poseErrorMax >= SOFT_DEFORM_SEVERE_POSE_MAX;
+
+    c.warning = c.warning || (poseAvailable ? poseWarn : legacyWarn);
+    c.severe = c.severe || (poseAvailable ? poseSevere : legacySevere);
+
     if (c.warning) warningClusters.push(c.clusterId);
     if (c.severe) severeClusters.push(c.clusterId);
     worstStretch = Math.max(worstStretch, c.stretchMax);
     worstAreaRatio = Math.max(worstAreaRatio, Math.max(c.areaRatio, c.areaRatio > 0 ? 1 / c.areaRatio : 1));
+    worstPoseError = Math.max(worstPoseError, c.poseErrorRms);
   }
 
   return {
@@ -2292,6 +2439,7 @@ function buildSoftDeformationState(sim, s, loops) {
     severeCount: severeClusters.length,
     worstStretch,
     worstAreaRatio,
+    worstPoseError,
   };
 }
 
@@ -2778,6 +2926,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       const evt = {
         frame: sim.frame,
         clusterId: cid,
+        poseErrorRms: +((c?.poseErrorRms || 0).toFixed(3)),
+        poseErrorMax: +((c?.poseErrorMax || 0).toFixed(3)),
         stretchMax: +((c?.stretchMax || 0).toFixed(3)),
         areaRatio: +((c?.areaRatio || 0).toFixed(3)),
       };
@@ -2854,6 +3004,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     softDeformSevereCount: deform.severeCount || 0,
     softDeformWorstStretch: Number.isFinite(deform.worstStretch) ? deform.worstStretch : 1,
     softDeformWorstAreaRatio: Number.isFinite(deform.worstAreaRatio) ? deform.worstAreaRatio : 1,
+    softDeformWorstPoseError: Number.isFinite(deform.worstPoseError) ? deform.worstPoseError : 0,
     membraneCellClusters: Array.isArray(sim?.bodies?.softMembraneClusters) ? sim.bodies.softMembraneClusters.length : 0,
     membraneBoundaryClusters,
     membraneShapeClusters,
@@ -2882,6 +3033,7 @@ function summarizeCouplingTelemetry(telemetry) {
       softDeformSevereCountAvg: 0,
       softDeformWorstStretchAvg: 1,
       softDeformWorstAreaRatioAvg: 1,
+      softDeformWorstPoseErrorAvg: 0,
       rigidInsideCorrectionsAvg: 0,
       membraneInsideCorrectionsAvg: 0,
     };
@@ -2896,6 +3048,7 @@ function summarizeCouplingTelemetry(telemetry) {
     softDeformSevereCount: 0,
     softDeformWorstStretch: 0,
     softDeformWorstAreaRatio: 0,
+    softDeformWorstPoseError: 0,
     rigidInsideCorrections: 0,
     membraneInsideCorrections: 0,
   };
@@ -2909,6 +3062,7 @@ function summarizeCouplingTelemetry(telemetry) {
     acc.softDeformSevereCount += t.softDeformSevereCount || 0;
     acc.softDeformWorstStretch += t.softDeformWorstStretch || 1;
     acc.softDeformWorstAreaRatio += t.softDeformWorstAreaRatio || 1;
+    acc.softDeformWorstPoseError += t.softDeformWorstPoseError || 0;
     acc.rigidInsideCorrections += t.rigidInsideCorrections || 0;
     acc.membraneInsideCorrections += t.membraneInsideCorrections || 0;
   }
@@ -2923,6 +3077,7 @@ function summarizeCouplingTelemetry(telemetry) {
     softDeformSevereCountAvg: +(acc.softDeformSevereCount * k).toFixed(3),
     softDeformWorstStretchAvg: +(acc.softDeformWorstStretch * k).toFixed(3),
     softDeformWorstAreaRatioAvg: +(acc.softDeformWorstAreaRatio * k).toFixed(3),
+    softDeformWorstPoseErrorAvg: +(acc.softDeformWorstPoseError * k).toFixed(3),
     rigidInsideCorrectionsAvg: +(acc.rigidInsideCorrections * k).toFixed(3),
     membraneInsideCorrectionsAvg: +(acc.membraneInsideCorrections * k).toFixed(3),
   };
@@ -3648,6 +3803,7 @@ async function stepAndRender() {
         severeClustersNow: sim.softDeformationState?.severeCount || 0,
         worstStretchNow: +((sim.softDeformationState?.worstStretch || 1).toFixed(3)),
         worstAreaRatioNow: +((sim.softDeformationState?.worstAreaRatio || 1).toFixed(3)),
+        worstPoseErrorNow: +((sim.softDeformationState?.worstPoseError || 0).toFixed(3)),
         severeEventsRecent: (sim.softDeformationEvents || []).slice(-4),
       },
     });
@@ -3735,6 +3891,7 @@ if (importSpecBtn && importSpecFile) {
         if (!ENABLE_HYBRID_BODY_LINKS) imported.hybrid = [];
         scaleImportedBodies(imported, importScale);
         mergeBodiesIntoSim(sim.bodies, imported);
+        sim.softDeformReferenceState = null;
         focusCameraOnBodies(sim, imported);
         log({
           ok: true,

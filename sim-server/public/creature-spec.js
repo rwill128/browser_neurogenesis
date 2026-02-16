@@ -128,7 +128,7 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
         threshold: Number(mesh?.meta?.threshold) || Number(options?.threshold) || 0.35,
         options,
       })
-    : buildSoftExport(triByKind.soft, nodes, options, mesh?.softCrossBeams || []);
+    : buildSoftExport(triByKind.soft, nodes, options, width, height, mesh?.softCrossBeams || []);
 
   const hybridJoints = buildHybridExport({
     rigidComps: rigidBuild.components,
@@ -154,6 +154,7 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
     const softDensityField = options?.fields?.softDensityField;
     const membraneEdgeMap = options?.fields?.membraneEdgeMap;
     const membraneShapeMap = options?.fields?.membraneShapeMap;
+    const softPermeabilityMap = options?.fields?.softPermeabilityMap;
     const rigidPermeabilityMap = options?.fields?.rigidPermeabilityMap;
     const rigidEdgeConsumeMapR = options?.fields?.rigidEdgeConsumeMapR;
     const rigidEdgeConsumeMapG = options?.fields?.rigidEdgeConsumeMapG;
@@ -168,6 +169,7 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
           softDensity: softDensityField ? Array.from(softDensityField) : undefined,
           membraneEdgeMap: membraneEdgeMap ? Array.from(membraneEdgeMap) : undefined,
           membraneShapeMap: membraneShapeMap ? Array.from(membraneShapeMap) : undefined,
+          softPermeabilityMap: softPermeabilityMap ? Array.from(softPermeabilityMap) : undefined,
           rigidPermeabilityMap: rigidPermeabilityMap ? Array.from(rigidPermeabilityMap) : undefined,
           rigidEdgeConsumeMapR: rigidEdgeConsumeMapR ? Array.from(rigidEdgeConsumeMapR) : undefined,
           rigidEdgeConsumeMapG: rigidEdgeConsumeMapG ? Array.from(rigidEdgeConsumeMapG) : undefined,
@@ -439,6 +441,40 @@ function normalizeOptionalScalarField(raw) {
   if (raw instanceof Float32Array) return raw;
   if (Array.isArray(raw)) return Float32Array.from(raw);
   return null;
+}
+
+function applySoftEdgePermeabilityFromField(springs, nodes, field, width, height, threshold = 0.5) {
+  const permeabilityField = normalizeOptionalScalarField(field);
+  if (!Array.isArray(springs) || !Array.isArray(nodes) || !permeabilityField) return;
+
+  const rawThreshold = Number(threshold);
+  const th = clamp(Number.isFinite(rawThreshold) ? rawThreshold : 0.5, 0, 1);
+
+  const normalizeDye = (raw) => {
+    if (!Array.isArray(raw) || raw.length < 3) return [...EDGE_DYE_DEFLECT_RGB];
+    return [0, 1, 2].map((ci) => {
+      const v = Number(raw[ci]);
+      return (v === EDGE_DYE_PASS || v === EDGE_DYE_DEFLECT || v === EDGE_DYE_ABSORB) ? v : EDGE_DYE_DEFLECT;
+    });
+  };
+
+  for (const sp of springs) {
+    if (!Array.isArray(sp) || sp.length < 2) continue;
+    const ai = Number(sp[0]);
+    const bi = Number(sp[1]);
+    const a = nodes[ai];
+    const b = nodes[bi];
+    if (!a || !b) continue;
+
+    const mx = ((Number(a?.x) || 0) + (Number(b?.x) || 0)) * 0.5;
+    const my = ((Number(a?.y) || 0) + (Number(b?.y) || 0)) * 0.5;
+    const v = clamp(sampleBilinearField(permeabilityField, width, height, mx, my, 0), 0, 1);
+
+    const base = normalizeDye(sp[4]);
+    sp[4] = (v >= th)
+      ? [EDGE_DYE_PASS, EDGE_DYE_PASS, EDGE_DYE_PASS]
+      : base;
+  }
 }
 
 function buildRigidEdgeConsumeDyeFromFields(hull, fieldR, fieldG, fieldB, width, height, threshold = 0.5) {
@@ -1107,6 +1143,9 @@ export function buildMembraneRingsFromSoftField({
 }
 
 function buildSoftMembraneExportFromField({ width, height, softField, edgeLengthField, shapeMemoryField, threshold, options }) {
+  const softPermeabilityField = normalizeOptionalScalarField(options?.fields?.softPermeabilityMap);
+  const softPermeabilityThreshold = Number(options?.softPermeabilityThreshold);
+
   const rings = buildMembraneRingsFromSoftField({
     width,
     height,
@@ -1149,6 +1188,15 @@ function buildSoftMembraneExportFromField({ width, height, softField, edgeLength
       ]);
     }
 
+    applySoftEdgePermeabilityFromField(
+      springs,
+      softNodes,
+      softPermeabilityField,
+      width,
+      height,
+      softPermeabilityThreshold,
+    );
+
     const bodyIndex = softBodies.length;
     softBodies.push({
       id: `soft_${bodyIndex}`,
@@ -1172,7 +1220,9 @@ function buildSoftMembraneExportFromField({ width, height, softField, edgeLength
   return { softBodies, components };
 }
 
-function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
+function buildSoftExport(tris, nodes, options, width, height, softCrossBeams = []) {
+  const softPermeabilityField = normalizeOptionalScalarField(options?.fields?.softPermeabilityMap);
+  const softPermeabilityThreshold = Number(options?.softPermeabilityThreshold);
   const enableBoundaryRing = options?.softBoundaryRingSprings !== false;
   const enableSeamWeldSprings = options?.softSeamWeldSprings !== false;
   const seamAxisEps = Math.max(1e-9, Number(options?.softSeamAxisEpsilon) || 1e-6);
@@ -1493,6 +1543,15 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
         membraneRestArea = Math.max(1e-4, polygonAreaAbs(exportNodes));
       }
     }
+
+    applySoftEdgePermeabilityFromField(
+      exportSprings,
+      exportNodes,
+      softPermeabilityField,
+      width,
+      height,
+      softPermeabilityThreshold,
+    );
 
     const softBody = {
       id: `soft_${bodyIndex}`,

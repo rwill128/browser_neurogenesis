@@ -5,6 +5,7 @@ const paintCanvas = document.getElementById('paint');
 const densityCanvas = document.getElementById('densityPaint');
 const membraneEdgeCanvas = document.getElementById('membraneEdgePaint');
 const membraneShapeCanvas = document.getElementById('membraneShapePaint');
+const softPermeabilityCanvas = document.getElementById('softPermeabilityPaint');
 const rigidPermeabilityCanvas = document.getElementById('rigidPermeabilityPaint');
 const rigidConsumeCanvas = document.getElementById('rigidConsumePaint');
 const meshCanvas = document.getElementById('mesh');
@@ -13,6 +14,7 @@ const pctx = paintCanvas.getContext('2d');
 const dctx = densityCanvas.getContext('2d');
 const ectx = membraneEdgeCanvas.getContext('2d');
 const sctx = membraneShapeCanvas.getContext('2d');
+const spctx = softPermeabilityCanvas.getContext('2d');
 const prctx = rigidPermeabilityCanvas.getContext('2d');
 const cctx = rigidConsumeCanvas.getContext('2d');
 const mctx = meshCanvas.getContext('2d');
@@ -23,6 +25,7 @@ const thresholdEl = document.getElementById('threshold');
 const softDensityPaintEl = document.getElementById('softDensityPaint');
 const membraneEdgePaintEl = document.getElementById('membraneEdgePaintValue');
 const membraneShapePaintEl = document.getElementById('membraneShapePaintValue');
+const softPermeabilityPaintEl = document.getElementById('softPermeabilityPaintValue');
 const rigidPermeabilityPaintEl = document.getElementById('rigidPermeabilityPaintValue');
 const rigidConsumeChannelEl = document.getElementById('rigidConsumeChannel');
 const rigidConsumePaintEl = document.getElementById('rigidConsumePaintValue');
@@ -42,6 +45,7 @@ const randomizeTraitBtn = document.getElementById('randomizeTraitBtn');
 const randomizeDensityBtn = document.getElementById('randomizeDensityBtn');
 const randomizeMembraneEdgeBtn = document.getElementById('randomizeMembraneEdgeBtn');
 const randomizeMembraneShapeBtn = document.getElementById('randomizeMembraneShapeBtn');
+const randomizeSoftPermeabilityBtn = document.getElementById('randomizeSoftPermeabilityBtn');
 const randomizeRigidPermeabilityBtn = document.getElementById('randomizeRigidPermeabilityBtn');
 const randomizeRigidConsumeBtn = document.getElementById('randomizeRigidConsumeBtn');
 const randomFieldPresetEl = document.getElementById('randomFieldPreset');
@@ -57,6 +61,7 @@ const soft = new Float32Array(W * H);
 const softDensity = new Float32Array(W * H).fill(0.5);
 const membraneEdgeMap = new Float32Array(W * H).fill(0.5);
 const membraneShapeMap = new Float32Array(W * H).fill(1.0);
+const softPermeabilityMap = new Float32Array(W * H).fill(0.0);
 const rigidPermeabilityMap = new Float32Array(W * H).fill(0.0);
 const rigidEdgeConsumeMapR = new Float32Array(W * H).fill(0.0);
 const rigidEdgeConsumeMapG = new Float32Array(W * H).fill(0.0);
@@ -341,6 +346,7 @@ function generateRandomFields({
     density: true,
     membraneEdge: true,
     membraneShape: true,
+    softPermeability: true,
     rigidPermeability: true,
     rigidConsume: true,
   },
@@ -358,6 +364,7 @@ function generateRandomFields({
     density: !!targets?.density,
     membraneEdge: !!targets?.membraneEdge,
     membraneShape: !!targets?.membraneShape,
+    softPermeability: !!targets?.softPermeability,
     rigidPermeability: !!targets?.rigidPermeability,
     rigidConsume: !!targets?.rigidConsume,
   };
@@ -367,6 +374,7 @@ function generateRandomFields({
   const densityParams = makeRandomPatternParams(rand, 37);
   const edgeParams = makeRandomPatternParams(rand, 53);
   const shapeParams = makeRandomPatternParams(rand, 71);
+  const softPermParams = makeRandomPatternParams(rand, 79);
   const permParams = makeRandomPatternParams(rand, 89);
   const consumeRParams = makeRandomPatternParams(rand, 101);
   const consumeGParams = makeRandomPatternParams(rand, 131);
@@ -414,6 +422,11 @@ function generateRandomFields({
         membraneShapeMap[i] = Math.max(0, Math.min(1, 0.15 + 0.85 * shapeV));
       }
 
+      if (targetFlags.softPermeability) {
+        const softPermV = samplePatternValue('flow-ridges', nx, ny, softPermParams);
+        softPermeabilityMap[i] = soft[i] > 0.12 ? smoothstep(0.54, 0.82, softPermV) : 0;
+      }
+
       if (targetFlags.rigidPermeability) {
         const permV = samplePatternValue('sine-lines', nx, ny, permParams);
         rigidPermeabilityMap[i] = rigid[i] > 0.12 ? smoothstep(0.56, 0.84, permV) : 0;
@@ -456,6 +469,7 @@ function buildSpecFromCurrentFields(mesh, traitFields = null) {
       softDensityField: softDensity,
       membraneEdgeMap,
       membraneShapeMap,
+      softPermeabilityMap,
       rigidPermeabilityMap,
       rigidEdgeConsumeMapR,
       rigidEdgeConsumeMapG,
@@ -493,6 +507,7 @@ function drawFields() {
   const densityImg = dctx.createImageData(W, H);
   const edgeImg = ectx.createImageData(W, H);
   const shapeImg = sctx.createImageData(W, H);
+  const softPermeabilityImg = spctx.createImageData(W, H);
   const permeabilityImg = prctx.createImageData(W, H);
   const consumeImg = cctx.createImageData(W, H);
 
@@ -502,6 +517,7 @@ function drawFields() {
     const dens = Math.max(0, Math.min(1, softDensity[i]));
     const edge = Math.max(0, Math.min(1, membraneEdgeMap[i]));
     const shape = Math.max(0, Math.min(1, membraneShapeMap[i]));
+    const softPermeability = Math.max(0, Math.min(1, softPermeabilityMap[i]));
     const permeability = Math.max(0, Math.min(1, rigidPermeabilityMap[i]));
     const consumeR = Math.max(0, Math.min(1, rigidEdgeConsumeMapR[i]));
     const consumeG = Math.max(0, Math.min(1, rigidEdgeConsumeMapG[i]));
@@ -532,6 +548,13 @@ function drawFields() {
     shapeImg.data[i * 4 + 2] = Math.round(120 + 120 * shape);
     shapeImg.data[i * 4 + 3] = 255;
 
+    // Soft edge permeability map: grayscale (black=blocked, white=permeable).
+    const spg = Math.round(softPermeability * 255);
+    softPermeabilityImg.data[i * 4] = spg;
+    softPermeabilityImg.data[i * 4 + 1] = spg;
+    softPermeabilityImg.data[i * 4 + 2] = spg;
+    softPermeabilityImg.data[i * 4 + 3] = 255;
+
     // Rigid edge permeability map: grayscale (black=blocked, white=permeable).
     const pg = Math.round(permeability * 255);
     permeabilityImg.data[i * 4] = pg;
@@ -559,6 +582,7 @@ function drawFields() {
   blit(dctx, densityCanvas, densityImg);
   blit(ectx, membraneEdgeCanvas, edgeImg);
   blit(sctx, membraneShapeCanvas, shapeImg);
+  blit(spctx, softPermeabilityCanvas, softPermeabilityImg);
   blit(prctx, rigidPermeabilityCanvas, permeabilityImg);
   blit(cctx, rigidConsumeCanvas, consumeImg);
 }
@@ -654,6 +678,19 @@ function paintMembraneShapeMap(clientX, clientY, erase = false) {
     clientY,
     Number(membraneShapePaintEl?.value) || 1.0,
     1.0,
+    erase,
+  );
+  drawFields();
+}
+
+function paintSoftPermeabilityMap(clientX, clientY, erase = false) {
+  paintScalarMap(
+    softPermeabilityMap,
+    softPermeabilityCanvas,
+    clientX,
+    clientY,
+    Number(softPermeabilityPaintEl?.value) || 1.0,
+    0.0,
     erase,
   );
   drawFields();
@@ -862,6 +899,7 @@ function syncFieldPanelVisibility() {
   const densitySelected = target === 'density';
   const edgeSelected = target === 'membraneEdge';
   const shapeSelected = target === 'membraneShape';
+  const softPermeabilitySelected = target === 'softPermeability';
   const permeabilitySelected = target === 'rigidPermeability';
   const consumeSelected = target === 'rigidConsume';
 
@@ -869,6 +907,7 @@ function syncFieldPanelVisibility() {
   setWidgetEnabled(softDensityPaintEl, densitySelected, 'Resolution paint value only applies when Field to paint = Resolution field');
   setWidgetEnabled(membraneEdgePaintEl, edgeSelected, 'Perimeter edge paint value only applies when Field to paint = Membrane edge-length field');
   setWidgetEnabled(membraneShapePaintEl, shapeSelected, 'Membrane stiffness paint value only applies when Field to paint = Membrane stiffness field');
+  setWidgetEnabled(softPermeabilityPaintEl, softPermeabilitySelected, 'Soft permeability paint value only applies when Field to paint = Soft permeability field');
   setWidgetEnabled(rigidPermeabilityPaintEl, permeabilitySelected, 'Rigid permeability paint value only applies when Field to paint = Rigid permeability field');
   setWidgetEnabled(rigidConsumeChannelEl, consumeSelected, 'Consume channel only applies when Field to paint = Rigid edge consume-dye field');
   setWidgetEnabled(rigidConsumePaintEl, consumeSelected, 'Consume paint value only applies when Field to paint = Rigid edge consume-dye field');
@@ -964,6 +1003,7 @@ let traitPainting = false;
 let densityPainting = false;
 let membraneEdgePainting = false;
 let membraneShapePainting = false;
+let softPermeabilityPainting = false;
 let rigidPermeabilityPainting = false;
 let rigidConsumePainting = false;
 
@@ -1000,6 +1040,16 @@ membraneShapeCanvas.addEventListener('mousemove', (e) => {
   paintMembraneShapeMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
 });
 
+softPermeabilityCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+softPermeabilityCanvas.addEventListener('mousedown', (e) => {
+  softPermeabilityPainting = true;
+  paintSoftPermeabilityMap(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
+});
+softPermeabilityCanvas.addEventListener('mousemove', (e) => {
+  if (!softPermeabilityPainting) return;
+  paintSoftPermeabilityMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
+});
+
 rigidPermeabilityCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
 rigidPermeabilityCanvas.addEventListener('mousedown', (e) => {
   rigidPermeabilityPainting = true;
@@ -1025,6 +1075,7 @@ window.addEventListener('mouseup', () => {
   densityPainting = false;
   membraneEdgePainting = false;
   membraneShapePainting = false;
+  softPermeabilityPainting = false;
   rigidPermeabilityPainting = false;
   rigidConsumePainting = false;
 });
@@ -1035,6 +1086,7 @@ clearBtn.addEventListener('click', () => {
   softDensity.fill(0.5);
   membraneEdgeMap.fill(0.5);
   membraneShapeMap.fill(1.0);
+  softPermeabilityMap.fill(0.0);
   rigidPermeabilityMap.fill(0.0);
   rigidEdgeConsumeMapR.fill(0.0);
   rigidEdgeConsumeMapG.fill(0.0);
@@ -1061,6 +1113,7 @@ if (randomizeBtn) {
       density: true,
       membraneEdge: true,
       membraneShape: true,
+      softPermeability: true,
       rigidPermeability: true,
       rigidConsume: true,
     });
@@ -1077,6 +1130,9 @@ if (randomizeMembraneEdgeBtn) {
 }
 if (randomizeMembraneShapeBtn) {
   randomizeMembraneShapeBtn.addEventListener('click', () => randomizeWithTargets({ membraneShape: true }));
+}
+if (randomizeSoftPermeabilityBtn) {
+  randomizeSoftPermeabilityBtn.addEventListener('click', () => randomizeWithTargets({ softPermeability: true }));
 }
 if (randomizeRigidPermeabilityBtn) {
   randomizeRigidPermeabilityBtn.addEventListener('click', () => randomizeWithTargets({ rigidPermeability: true }));
@@ -1130,6 +1186,8 @@ importFile.addEventListener('change', async () => {
     else membraneEdgeMap.fill(0.5);
     if (Array.isArray(authoring.membraneShapeMap) && authoring.membraneShapeMap.length === W * H) membraneShapeMap.set(authoring.membraneShapeMap);
     else membraneShapeMap.fill(1.0);
+    if (Array.isArray(authoring.softPermeabilityMap) && authoring.softPermeabilityMap.length === W * H) softPermeabilityMap.set(authoring.softPermeabilityMap);
+    else softPermeabilityMap.fill(0.0);
     if (Array.isArray(authoring.rigidPermeabilityMap) && authoring.rigidPermeabilityMap.length === W * H) rigidPermeabilityMap.set(authoring.rigidPermeabilityMap);
     else rigidPermeabilityMap.fill(0.0);
     if (Array.isArray(authoring.rigidEdgeConsumeMapR) && authoring.rigidEdgeConsumeMapR.length === W * H) rigidEdgeConsumeMapR.set(authoring.rigidEdgeConsumeMapR);

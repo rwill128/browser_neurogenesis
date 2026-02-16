@@ -236,6 +236,39 @@ test('createCreatureSpecFromMesh honors rigid permeability threshold=0 during ed
   assert.equal(passCount, 3, 'threshold=0 should mark every positive sampled edge as pass-through');
 });
 
+test('createCreatureSpecFromMesh samples soft permeability paint map into soft edge dye traits (spring+membrane)', () => {
+  const w = 16;
+  const softPermeabilityMap = new Float32Array(w * w).fill(0);
+  // sampleMesh soft triangle edge midpoint includes (5,4)
+  softPermeabilityMap[4 * w + 5] = 1;
+
+  const countPassEdges = (springs) => (springs || []).filter((sp) => {
+    const rgb = sp?.[4];
+    return Array.isArray(rgb)
+      && Number(rgb[0]) === 0
+      && Number(rgb[1]) === 0
+      && Number(rgb[2]) === 0;
+  }).length;
+
+  const springSpec = createCreatureSpecFromMesh(sampleMesh(), {
+    fields: { softPermeabilityMap },
+    softSolverMode: 'spring',
+  });
+  const springPass = countPassEdges(springSpec.softBodies?.[0]?.springs);
+  assert.ok(springPass >= 1, `expected >=1 permeable soft spring edge in spring mode, got ${springPass}`);
+
+  const importedSpring = buildBodiesFromCreatureSpec(springSpec, 64, CONTROLS);
+  const importedSpringPass = countPassEdges(importedSpring.soft?.springs);
+  assert.ok(importedSpringPass >= 1, `imported spring edges should keep permeability-derived PASS dye mode, got ${importedSpringPass}`);
+
+  const membraneSpec = createCreatureSpecFromMesh(sampleMesh(), {
+    fields: { softPermeabilityMap },
+    softSolverMode: 'membrane',
+  });
+  const membranePass = countPassEdges(membraneSpec.softBodies?.[0]?.springs);
+  assert.ok(membranePass >= 1, `expected >=1 permeable membrane ring edge, got ${membranePass}`);
+});
+
 test('soft solver mode is exported and membrane mode is mapped on import bodies', () => {
   const mesh = {
     nodes: [
@@ -1171,19 +1204,21 @@ test('createCreatureSpecFromMesh preserves optional authoring field payload', ()
   const w = 16;
   const rigidField = new Float32Array(w * w);
   const softField = new Float32Array(w * w);
+  const softPermeabilityMap = new Float32Array(w * w);
   const rigidPermeabilityMap = new Float32Array(w * w);
   const rigidEdgeConsumeMapR = new Float32Array(w * w);
   const rigidEdgeConsumeMapG = new Float32Array(w * w);
   const rigidEdgeConsumeMapB = new Float32Array(w * w);
   rigidField[3] = 0.75;
   softField[8] = 0.25;
+  softPermeabilityMap[7] = 1;
   rigidPermeabilityMap[9] = 1;
   rigidEdgeConsumeMapR[10] = 1;
   rigidEdgeConsumeMapG[11] = 0.5;
   rigidEdgeConsumeMapB[12] = 0.25;
 
   const spec = createCreatureSpecFromMesh(sampleMesh(), {
-    fields: { rigidField, softField, rigidPermeabilityMap, rigidEdgeConsumeMapR, rigidEdgeConsumeMapG, rigidEdgeConsumeMapB },
+    fields: { rigidField, softField, softPermeabilityMap, rigidPermeabilityMap, rigidEdgeConsumeMapR, rigidEdgeConsumeMapG, rigidEdgeConsumeMapB },
   });
 
   assert.ok(spec.authoring?.fields);
@@ -1191,12 +1226,14 @@ test('createCreatureSpecFromMesh preserves optional authoring field payload', ()
   assert.equal(spec.authoring.fields.height, 16);
   assert.equal(spec.authoring.fields.rigid.length, w * w);
   assert.equal(spec.authoring.fields.soft.length, w * w);
+  assert.equal(spec.authoring.fields.softPermeabilityMap.length, w * w);
   assert.equal(spec.authoring.fields.rigidPermeabilityMap.length, w * w);
   assert.equal(spec.authoring.fields.rigidEdgeConsumeMapR.length, w * w);
   assert.equal(spec.authoring.fields.rigidEdgeConsumeMapG.length, w * w);
   assert.equal(spec.authoring.fields.rigidEdgeConsumeMapB.length, w * w);
   assert.equal(spec.authoring.fields.rigid[3], 0.75);
   assert.equal(spec.authoring.fields.soft[8], 0.25);
+  assert.equal(spec.authoring.fields.softPermeabilityMap[7], 1);
   assert.equal(spec.authoring.fields.rigidPermeabilityMap[9], 1);
   assert.equal(spec.authoring.fields.rigidEdgeConsumeMapR[10], 1);
   assert.equal(spec.authoring.fields.rigidEdgeConsumeMapG[11], 0.5);

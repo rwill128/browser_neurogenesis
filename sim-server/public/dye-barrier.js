@@ -95,7 +95,7 @@ export function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, 
   }
 }
 
-export function applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld, skipSoftEdges = false }) {
+export function applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld, skipSoftEdges = false, softBodyModeOverride = null }) {
   const n = sim.controls.n;
   const softThickness = Math.max(1.2, 1.1 * (n / 256));
   const rigidThickness = Math.max(1.4, 1.2 * (n / 256));
@@ -127,9 +127,18 @@ export function applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVertices
 
   if (!skipSoftEdges) {
     const s = sim.bodies.soft;
+    const overrideRaw = softBodyModeOverride;
+    const hasSoftBodyOverride = overrideRaw !== null
+      && overrideRaw !== undefined
+      && (Number(overrideRaw) === EDGE_BODY_MODE.PASS || Number(overrideRaw) === EDGE_BODY_MODE.BLOCK);
+    const softBodyModeResolved = hasSoftBodyOverride
+      ? (Number(overrideRaw) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK)
+      : null;
+
     for (const [i, j, _rest, edgeBodyMode, edgeDyeMode] of (s?.springs || [])) {
       const dyeModeRGB = normalizeEdgeDyeModeRGB(edgeDyeMode);
-      const bodyMode = Number(edgeBodyMode) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK;
+      const bodyModeFromEdge = Number(edgeBodyMode) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK;
+      const bodyMode = softBodyModeResolved ?? bodyModeFromEdge;
       if (bodyMode === EDGE_BODY_MODE.PASS
         && dyeModeRGB[0] === EDGE_DYE_MODE.PASS
         && dyeModeRGB[1] === EDGE_DYE_MODE.PASS

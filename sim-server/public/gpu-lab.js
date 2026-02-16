@@ -395,34 +395,15 @@ const advectDyeWgsl = commonWgsl + `
 @group(0) @binding(6) var<storage, read_write> r1: array<f32>;
 @group(0) @binding(7) var<storage, read_write> g1: array<f32>;
 @group(0) @binding(8) var<storage, read_write> b1: array<f32>;
-@group(0) @binding(9) var<storage, read> obstacleMask: array<f32>;
 
 @compute @workgroup_size(${WORKGROUP}, ${WORKGROUP})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (gid.x >= p.n || gid.y >= p.n) { return; }
   let i = idx(gid.x, gid.y);
-  if (obstacleMask[i] > 0.5) {
-    r1[i] = 0.0;
-    g1[i] = 0.0;
-    b1[i] = 0.0;
-    return;
-  }
-
   let x = f32(gid.x);
   let y = f32(gid.y);
   let px = x - p.dt * vx[i];
   let py = y - p.dt * vy[i];
-  let n1 = f32(p.n - 1u);
-  let sx = u32(clamp(round(px), 0.0, n1));
-  let sy = u32(clamp(round(py), 0.0, n1));
-
-  if (obstacleMask[idx(sx, sy)] > 0.5) {
-    r1[i] = r0[i] * p.fade;
-    g1[i] = g0[i] * p.fade;
-    b1[i] = b0[i] * p.fade;
-    return;
-  }
-
   r1[i] = sampleBilinear(&r0, px, py) * p.fade;
   g1[i] = sampleBilinear(&g0, px, py) * p.fade;
   b1[i] = sampleBilinear(&b0, px, py) * p.fade;
@@ -3992,8 +3973,8 @@ async function initSim() {
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) throw new Error('No WebGPU adapter');
 
-  // We use 9 storage buffers in the obstacle-aware dye advection pipeline.
-  // Many adapters support >8 but require explicit requestDevice(requiredLimits).
+  // Some hardware supports raising storage-buffer limits only when explicitly
+  // requested at device creation time; request 9 when available.
   const requestedLimits = {};
   const maxStoragePerStage = Number(adapter.limits?.maxStorageBuffersPerShaderStage || 8);
   if (maxStoragePerStage >= 9) {
@@ -4134,7 +4115,7 @@ async function stepAndRender() {
 
   pass = enc.beginComputePass();
   pass.setPipeline(s.advDye.pipeline);
-  pass.setBindGroup(0, s.advDye.bg([s.uniform, s.vx0, s.vy0, s.rr0, s.gg0, s.bb0, s.rr1, s.gg1, s.bb1, s.obstacleMaskGpu]));
+  pass.setBindGroup(0, s.advDye.bg([s.uniform, s.vx0, s.vy0, s.rr0, s.gg0, s.bb0, s.rr1, s.gg1, s.bb1]));
   pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
   pass.end();
   [s.rr0, s.rr1] = [s.rr1, s.rr0];
@@ -4181,9 +4162,9 @@ async function stepAndRender() {
       vx,
       vy,
       rigidVerticesWorld,
-      // Membrane edges are now enforced directly in the fluid solver via obstacle mask.
-      // Skip legacy post-pass soft-edge barrier to avoid double-attenuation/extra dye loss.
-      skipSoftEdges: obstacleEdgesNow > 0,
+      // Velocity no-through is enforced in-solver when obstacle mask is active;
+      // keep soft-edge dye traits (pass/deflect/absorb) without double velocity damping.
+      softBodyModeOverride: obstacleEdgesNow > 0 ? 0 : null,
     });
     applyDigestiveCapture(s, r, g, b);
     enforceFluidEdgeBoundariesCpu(vx, vy, s.controls.n);

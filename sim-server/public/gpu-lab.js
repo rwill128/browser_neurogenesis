@@ -2292,6 +2292,7 @@ function buildSoftDeformationState(sim, s, loops) {
         poseErrorRms: 0,
         poseErrorMax: 0,
         severe: false,
+        severeCollapse: false,
         warning: false,
       });
     }
@@ -2302,6 +2303,7 @@ function buildSoftDeformationState(sim, s, loops) {
     const c = ensureCluster(n.clusterId ?? 0);
     if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) {
       c.severe = true;
+      c.severeCollapse = true;
       c.warning = true;
     }
   }
@@ -2319,6 +2321,7 @@ function buildSoftDeformationState(sim, s, loops) {
     const len = Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0));
     if (!Number.isFinite(len)) {
       c.severe = true;
+      c.severeCollapse = true;
       c.warning = true;
       continue;
     }
@@ -2359,6 +2362,7 @@ function buildSoftDeformationState(sim, s, loops) {
     if (count < 3) {
       c.warning = true;
       c.severe = true;
+      c.severeCollapse = true;
       continue;
     }
     cx /= count;
@@ -2384,6 +2388,7 @@ function buildSoftDeformationState(sim, s, loops) {
     if (valid < 3) {
       c.warning = true;
       c.severe = true;
+      c.severeCollapse = true;
       continue;
     }
 
@@ -2391,6 +2396,7 @@ function buildSoftDeformationState(sim, s, loops) {
     if (!pose) {
       c.warning = true;
       c.severe = true;
+      c.severeCollapse = true;
       continue;
     }
     c.poseErrorRms = Number.isFinite(pose.normalizedRms) ? pose.normalizedRms : 0;
@@ -2403,6 +2409,7 @@ function buildSoftDeformationState(sim, s, loops) {
   let worstPoseError = 0;
   const warningClusters = [];
   const severeClusters = [];
+  const severeCollapseClusters = [];
 
   for (const c of clusterList) {
     const legacyWarn = c.stretchMax >= SOFT_DEFORM_WARN_STRETCH
@@ -2419,11 +2426,13 @@ function buildSoftDeformationState(sim, s, loops) {
     const poseSevere = c.poseErrorRms >= SOFT_DEFORM_SEVERE_POSE_RMS
       || c.poseErrorMax >= SOFT_DEFORM_SEVERE_POSE_MAX;
 
-    c.warning = c.warning || (poseAvailable ? poseWarn : legacyWarn);
-    c.severe = c.severe || (poseAvailable ? poseSevere : legacySevere);
+    c.warning = c.warning || legacyWarn || (poseAvailable && poseWarn);
+    c.severeCollapse = c.severeCollapse || legacySevere;
+    c.severe = c.severe || c.severeCollapse || (poseAvailable && poseSevere);
 
     if (c.warning) warningClusters.push(c.clusterId);
     if (c.severe) severeClusters.push(c.clusterId);
+    if (c.severeCollapse) severeCollapseClusters.push(c.clusterId);
     worstStretch = Math.max(worstStretch, c.stretchMax);
     worstAreaRatio = Math.max(worstAreaRatio, Math.max(c.areaRatio, c.areaRatio > 0 ? 1 / c.areaRatio : 1));
     worstPoseError = Math.max(worstPoseError, c.poseErrorRms);
@@ -2433,10 +2442,13 @@ function buildSoftDeformationState(sim, s, loops) {
     clusters: clusterList,
     warningClusters,
     severeClusters,
+    severeCollapseClusters,
     warningSet: new Set(warningClusters),
     severeSet: new Set(severeClusters),
+    severeCollapseSet: new Set(severeCollapseClusters),
     warningCount: warningClusters.length,
     severeCount: severeClusters.length,
+    severeCollapseCount: severeCollapseClusters.length,
     worstStretch,
     worstAreaRatio,
     worstPoseError,
@@ -2444,9 +2456,9 @@ function buildSoftDeformationState(sim, s, loops) {
 }
 
 function stabilizeSeverelyDeformedSoftClusters(sim, s, loops, deform) {
-  if (!deform?.severeSet || deform.severeSet.size === 0) return;
+  if (!deform?.severeCollapseSet || deform.severeCollapseSet.size === 0) return;
 
-  const severeSet = deform.severeSet;
+  const severeSet = deform.severeCollapseSet;
   const centroids = new Map();
   for (const node of s.nodes || []) {
     const cid = node.clusterId ?? 0;
@@ -2883,12 +2895,12 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   sim.lastRigidContacts = rigidContactDebug.length > 64 ? rigidContactDebug.slice(0, 64) : rigidContactDebug;
 
   let deform = buildSoftDeformationState(sim, s, softClusterLoops);
-  if (deform.severeCount > 0) {
+  if (deform.severeCollapseCount > 0) {
     stabilizeSeverelyDeformedSoftClusters(sim, s, softClusterLoops, deform);
     deform = buildSoftDeformationState(sim, s, softClusterLoops);
   }
   if (sim.softSpringRestBaseline && sim.softSpringRestBaseline.length === s.springs.length) {
-    const recovering = deform.severeCount === 0;
+    const recovering = deform.severeCollapseCount === 0;
     recoverSoftSpringRests(s.springs, sim.softSpringRestBaseline, {
       recoverRate: recovering ? 0.056 : 0.015,
       hardMinFactor: 0.7,
@@ -3002,6 +3014,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     injectedMomentum,
     softDeformWarningCount: deform.warningCount || 0,
     softDeformSevereCount: deform.severeCount || 0,
+    softDeformSevereCollapseCount: deform.severeCollapseCount || 0,
     softDeformWorstStretch: Number.isFinite(deform.worstStretch) ? deform.worstStretch : 1,
     softDeformWorstAreaRatio: Number.isFinite(deform.worstAreaRatio) ? deform.worstAreaRatio : 1,
     softDeformWorstPoseError: Number.isFinite(deform.worstPoseError) ? deform.worstPoseError : 0,
@@ -3031,6 +3044,7 @@ function summarizeCouplingTelemetry(telemetry) {
       injectedMomentumAvg: 0,
       softDeformWarningCountAvg: 0,
       softDeformSevereCountAvg: 0,
+      softDeformSevereCollapseCountAvg: 0,
       softDeformWorstStretchAvg: 1,
       softDeformWorstAreaRatioAvg: 1,
       softDeformWorstPoseErrorAvg: 0,
@@ -3046,6 +3060,7 @@ function summarizeCouplingTelemetry(telemetry) {
     injectedMomentum: 0,
     softDeformWarningCount: 0,
     softDeformSevereCount: 0,
+    softDeformSevereCollapseCount: 0,
     softDeformWorstStretch: 0,
     softDeformWorstAreaRatio: 0,
     softDeformWorstPoseError: 0,
@@ -3060,6 +3075,7 @@ function summarizeCouplingTelemetry(telemetry) {
     acc.injectedMomentum += t.injectedMomentum || 0;
     acc.softDeformWarningCount += t.softDeformWarningCount || 0;
     acc.softDeformSevereCount += t.softDeformSevereCount || 0;
+    acc.softDeformSevereCollapseCount += t.softDeformSevereCollapseCount || 0;
     acc.softDeformWorstStretch += t.softDeformWorstStretch || 1;
     acc.softDeformWorstAreaRatio += t.softDeformWorstAreaRatio || 1;
     acc.softDeformWorstPoseError += t.softDeformWorstPoseError || 0;
@@ -3075,6 +3091,7 @@ function summarizeCouplingTelemetry(telemetry) {
     injectedMomentumAvg: +(acc.injectedMomentum * k).toFixed(4),
     softDeformWarningCountAvg: +(acc.softDeformWarningCount * k).toFixed(3),
     softDeformSevereCountAvg: +(acc.softDeformSevereCount * k).toFixed(3),
+    softDeformSevereCollapseCountAvg: +(acc.softDeformSevereCollapseCount * k).toFixed(3),
     softDeformWorstStretchAvg: +(acc.softDeformWorstStretch * k).toFixed(3),
     softDeformWorstAreaRatioAvg: +(acc.softDeformWorstAreaRatio * k).toFixed(3),
     softDeformWorstPoseErrorAvg: +(acc.softDeformWorstPoseError * k).toFixed(3),
@@ -3801,6 +3818,7 @@ async function stepAndRender() {
       softDeformation: {
         warningClustersNow: sim.softDeformationState?.warningCount || 0,
         severeClustersNow: sim.softDeformationState?.severeCount || 0,
+        severeCollapseClustersNow: sim.softDeformationState?.severeCollapseCount || 0,
         worstStretchNow: +((sim.softDeformationState?.worstStretch || 1).toFixed(3)),
         worstAreaRatioNow: +((sim.softDeformationState?.worstAreaRatio || 1).toFixed(3)),
         worstPoseErrorNow: +((sim.softDeformationState?.worstPoseError || 0).toFixed(3)),

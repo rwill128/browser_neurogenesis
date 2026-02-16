@@ -112,8 +112,8 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
   }
 
   const rigidBuild = Array.isArray(mesh?.rigidPieces)
-    ? buildRigidExportFromCompilerPieces(mesh.rigidPieces, nodes, options)
-    : buildRigidExport(triByKind.rigid, nodes, options);
+    ? buildRigidExportFromCompilerPieces(mesh.rigidPieces, nodes, options, width, height)
+    : buildRigidExport(triByKind.rigid, nodes, options, width, height);
 
   const solverMode = normalizeSoftSolverMode(options?.softSolverMode);
   const hasAuthoringSoftField = Array.isArray(options?.fields?.softField)
@@ -154,6 +154,7 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
     const softDensityField = options?.fields?.softDensityField;
     const membraneEdgeMap = options?.fields?.membraneEdgeMap;
     const membraneShapeMap = options?.fields?.membraneShapeMap;
+    const rigidPermeabilityMap = options?.fields?.rigidPermeabilityMap;
     if (rigidField && softField) {
       out.authoring = {
         fields: {
@@ -164,6 +165,7 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
           softDensity: softDensityField ? Array.from(softDensityField) : undefined,
           membraneEdgeMap: membraneEdgeMap ? Array.from(membraneEdgeMap) : undefined,
           membraneShapeMap: membraneShapeMap ? Array.from(membraneShapeMap) : undefined,
+          rigidPermeabilityMap: rigidPermeabilityMap ? Array.from(rigidPermeabilityMap) : undefined,
         },
       };
     }
@@ -406,7 +408,34 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
   return { rigid, soft, hybrid, softMembraneClusters };
 }
 
-function buildRigidExportFromCompilerPieces(rigidPieces, nodes, options) {
+function buildRigidEdgePermeabilityFromField(hull, field, width, height, threshold = 0.5) {
+  if (!(field instanceof Float32Array) || !Number.isFinite(width) || !Number.isFinite(height)) {
+    return Array.from({ length: Math.max(0, hull?.length || 0) }, () => [0, 0, 0]);
+  }
+
+  const th = clamp(Number(threshold) || 0.5, 0, 1);
+  const sides = Math.max(0, hull?.length || 0);
+  const out = [];
+  for (let i = 0; i < sides; i++) {
+    const a = hull[i];
+    const b = hull[(i + 1) % sides];
+    const mx = ((Number(a?.x) || 0) + (Number(b?.x) || 0)) * 0.5;
+    const my = ((Number(a?.y) || 0) + (Number(b?.y) || 0)) * 0.5;
+    const v = clamp(sampleBilinearField(field, width, height, mx, my, 0), 0, 1);
+    const pass = v >= th ? 1 : 0;
+    out.push([pass, pass, pass]);
+  }
+  return out;
+}
+
+function buildRigidExportFromCompilerPieces(rigidPieces, nodes, options, width, height) {
+  const rigidPermeabilityField = (options?.fields?.rigidPermeabilityMap instanceof Float32Array)
+    ? options.fields.rigidPermeabilityMap
+    : (Array.isArray(options?.fields?.rigidPermeabilityMap)
+      ? Float32Array.from(options.fields.rigidPermeabilityMap)
+      : null);
+  const rigidPermeabilityThreshold = Number(options?.rigidPermeabilityThreshold);
+
   const grouped = new Map();
   for (let i = 0; i < rigidPieces.length; i++) {
     const rp = rigidPieces[i] || {};
@@ -458,7 +487,13 @@ function buildRigidExportFromCompilerPieces(rigidPieces, nodes, options) {
       mass: finiteOr(Number(options.massHeavy), 5),
       edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
       edgeDyeMode: Array.from({ length: sides }, () => [...EDGE_DYE_DEFLECT_RGB]),
-      edgePermeabilityRGB: Array.from({ length: sides }, () => [0, 0, 0]),
+      edgePermeabilityRGB: buildRigidEdgePermeabilityFromField(
+        outerHull,
+        rigidPermeabilityField,
+        width,
+        height,
+        rigidPermeabilityThreshold,
+      ),
       digestEnabled: false,
       digestRGB: [1, 1, 1],
       consumeDyeRGB: [0, 0, 0],
@@ -475,7 +510,14 @@ function buildRigidExportFromCompilerPieces(rigidPieces, nodes, options) {
   return { rigidBodies, components };
 }
 
-function buildRigidExport(tris, nodes, options) {
+function buildRigidExport(tris, nodes, options, width, height) {
+  const rigidPermeabilityField = (options?.fields?.rigidPermeabilityMap instanceof Float32Array)
+    ? options.fields.rigidPermeabilityMap
+    : (Array.isArray(options?.fields?.rigidPermeabilityMap)
+      ? Float32Array.from(options.fields.rigidPermeabilityMap)
+      : null);
+  const rigidPermeabilityThreshold = Number(options?.rigidPermeabilityThreshold);
+
   const comps = triangleComponents(tris);
   const rigidBodies = [];
   const components = [];
@@ -514,7 +556,13 @@ function buildRigidExport(tris, nodes, options) {
         mass: finiteOr(Number(options.massHeavy), 5),
         edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
         edgeDyeMode: Array.from({ length: sides }, () => [...EDGE_DYE_DEFLECT_RGB]),
-        edgePermeabilityRGB: Array.from({ length: sides }, () => [0, 0, 0]),
+        edgePermeabilityRGB: buildRigidEdgePermeabilityFromField(
+          hull,
+          rigidPermeabilityField,
+          width,
+          height,
+          rigidPermeabilityThreshold,
+        ),
         digestEnabled: false,
         digestRGB: [1, 1, 1],
         consumeDyeRGB: [0, 0, 0],

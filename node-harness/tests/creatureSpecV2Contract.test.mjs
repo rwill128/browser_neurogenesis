@@ -166,6 +166,29 @@ test('buildBodiesFromCreatureSpec deterministically restores compacted rigid edg
     && Number(rgb[2]) === 0));
 });
 
+test('createCreatureSpecFromMesh samples rigid permeability paint map into rigid edge traits', () => {
+  const w = 16;
+  const permeabilityMap = new Float32Array(w * w).fill(0);
+  // For sampleMesh rigid triangle, edge midpoints are (4,2), (5,4), (3,4).
+  permeabilityMap[2 * w + 4] = 1;
+  permeabilityMap[4 * w + 3] = 1;
+
+  const spec = createCreatureSpecFromMesh(sampleMesh(), {
+    fields: { rigidPermeabilityMap: permeabilityMap },
+  });
+
+  const rb = spec.rigidBodies[0];
+  assert.ok(Array.isArray(rb.edgePermeabilityRGB), 'painted permeability should prevent full default compaction');
+  const passCount = rb.edgePermeabilityRGB.filter((rgb) => Number(rgb?.[0]) === 1 && Number(rgb?.[1]) === 1 && Number(rgb?.[2]) === 1).length;
+  const blockCount = rb.edgePermeabilityRGB.filter((rgb) => Number(rgb?.[0]) === 0 && Number(rgb?.[1]) === 0 && Number(rgb?.[2]) === 0).length;
+  assert.equal(passCount, 2);
+  assert.equal(blockCount, 1);
+
+  const imported = buildBodiesFromCreatureSpec(spec, 64, CONTROLS).rigid[0];
+  const importedPassCount = imported.edgePermeabilityRGB.filter((rgb) => Number(rgb?.[0]) === 1 && Number(rgb?.[1]) === 1 && Number(rgb?.[2]) === 1).length;
+  assert.equal(importedPassCount, 2);
+});
+
 test('soft solver mode is exported and membrane mode is mapped on import bodies', () => {
   const mesh = {
     nodes: [
@@ -1053,11 +1076,13 @@ test('createCreatureSpecFromMesh preserves optional authoring field payload', ()
   const w = 16;
   const rigidField = new Float32Array(w * w);
   const softField = new Float32Array(w * w);
+  const rigidPermeabilityMap = new Float32Array(w * w);
   rigidField[3] = 0.75;
   softField[8] = 0.25;
+  rigidPermeabilityMap[9] = 1;
 
   const spec = createCreatureSpecFromMesh(sampleMesh(), {
-    fields: { rigidField, softField },
+    fields: { rigidField, softField, rigidPermeabilityMap },
   });
 
   assert.ok(spec.authoring?.fields);
@@ -1065,6 +1090,8 @@ test('createCreatureSpecFromMesh preserves optional authoring field payload', ()
   assert.equal(spec.authoring.fields.height, 16);
   assert.equal(spec.authoring.fields.rigid.length, w * w);
   assert.equal(spec.authoring.fields.soft.length, w * w);
+  assert.equal(spec.authoring.fields.rigidPermeabilityMap.length, w * w);
   assert.equal(spec.authoring.fields.rigid[3], 0.75);
   assert.equal(spec.authoring.fields.soft[8], 0.25);
+  assert.equal(spec.authoring.fields.rigidPermeabilityMap[9], 1);
 });

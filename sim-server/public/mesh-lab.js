@@ -5,11 +5,13 @@ const paintCanvas = document.getElementById('paint');
 const densityCanvas = document.getElementById('densityPaint');
 const membraneEdgeCanvas = document.getElementById('membraneEdgePaint');
 const membraneShapeCanvas = document.getElementById('membraneShapePaint');
+const rigidPermeabilityCanvas = document.getElementById('rigidPermeabilityPaint');
 const meshCanvas = document.getElementById('mesh');
 const pctx = paintCanvas.getContext('2d');
 const dctx = densityCanvas.getContext('2d');
 const ectx = membraneEdgeCanvas.getContext('2d');
 const sctx = membraneShapeCanvas.getContext('2d');
+const prctx = rigidPermeabilityCanvas.getContext('2d');
 const mctx = meshCanvas.getContext('2d');
 const modeEl = document.getElementById('paintMode');
 const brushEl = document.getElementById('brush');
@@ -17,6 +19,7 @@ const thresholdEl = document.getElementById('threshold');
 const softDensityPaintEl = document.getElementById('softDensityPaint');
 const membraneEdgePaintEl = document.getElementById('membraneEdgePaintValue');
 const membraneShapePaintEl = document.getElementById('membraneShapePaintValue');
+const rigidPermeabilityPaintEl = document.getElementById('rigidPermeabilityPaintValue');
 const rigidCompileModeEl = document.getElementById('rigidCompileMode');
 const rigidPrimitiveSideMinEl = document.getElementById('rigidPrimitiveSideMin');
 const rigidPrimitiveSideMaxEl = document.getElementById('rigidPrimitiveSideMax');
@@ -39,6 +42,7 @@ const soft = new Float32Array(W * H);
 const softDensity = new Float32Array(W * H).fill(0.5);
 const membraneEdgeMap = new Float32Array(W * H).fill(0.5);
 const membraneShapeMap = new Float32Array(W * H).fill(1.0);
+const rigidPermeabilityMap = new Float32Array(W * H).fill(0.0);
 let lastMesh = null;
 let compileRevision = 0;
 
@@ -49,6 +53,7 @@ function drawFields() {
   const densityImg = dctx.createImageData(W, H);
   const edgeImg = ectx.createImageData(W, H);
   const shapeImg = sctx.createImageData(W, H);
+  const permeabilityImg = prctx.createImageData(W, H);
 
   for (let i = 0; i < rigid.length; i++) {
     const r = Math.max(0, Math.min(1, rigid[i]));
@@ -56,6 +61,7 @@ function drawFields() {
     const dens = Math.max(0, Math.min(1, softDensity[i]));
     const edge = Math.max(0, Math.min(1, membraneEdgeMap[i]));
     const shape = Math.max(0, Math.min(1, membraneShapeMap[i]));
+    const permeability = Math.max(0, Math.min(1, rigidPermeabilityMap[i]));
 
     // Trait plane: rigid red, soft blue.
     traitImg.data[i * 4] = Math.min(255, r * 255);
@@ -81,6 +87,13 @@ function drawFields() {
     shapeImg.data[i * 4 + 1] = Math.round(180 + 60 * shape);
     shapeImg.data[i * 4 + 2] = Math.round(120 + 120 * shape);
     shapeImg.data[i * 4 + 3] = 255;
+
+    // Rigid edge permeability map: grayscale (black=blocked, white=permeable).
+    const pg = Math.round(permeability * 255);
+    permeabilityImg.data[i * 4] = pg;
+    permeabilityImg.data[i * 4 + 1] = pg;
+    permeabilityImg.data[i * 4 + 2] = pg;
+    permeabilityImg.data[i * 4 + 3] = 255;
   }
 
   const blit = (ctx, canvas, img) => {
@@ -96,6 +109,7 @@ function drawFields() {
   blit(dctx, densityCanvas, densityImg);
   blit(ectx, membraneEdgeCanvas, edgeImg);
   blit(sctx, membraneShapeCanvas, shapeImg);
+  blit(prctx, rigidPermeabilityCanvas, permeabilityImg);
 }
 
 function paintTrait(clientX, clientY) {
@@ -189,6 +203,19 @@ function paintMembraneShapeMap(clientX, clientY, erase = false) {
     clientY,
     Number(membraneShapePaintEl?.value) || 1.0,
     1.0,
+    erase,
+  );
+  drawFields();
+}
+
+function paintRigidPermeabilityMap(clientX, clientY, erase = false) {
+  paintScalarMap(
+    rigidPermeabilityMap,
+    rigidPermeabilityCanvas,
+    clientX,
+    clientY,
+    Number(rigidPermeabilityPaintEl?.value) || 1.0,
+    0.0,
     erase,
   );
   drawFields();
@@ -372,6 +399,7 @@ let traitPainting = false;
 let densityPainting = false;
 let membraneEdgePainting = false;
 let membraneShapePainting = false;
+let rigidPermeabilityPainting = false;
 
 paintCanvas.addEventListener('mousedown', (e) => { traitPainting = true; paintTrait(e.clientX, e.clientY); });
 paintCanvas.addEventListener('mousemove', (e) => { if (traitPainting) paintTrait(e.clientX, e.clientY); });
@@ -406,11 +434,22 @@ membraneShapeCanvas.addEventListener('mousemove', (e) => {
   paintMembraneShapeMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
 });
 
+rigidPermeabilityCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+rigidPermeabilityCanvas.addEventListener('mousedown', (e) => {
+  rigidPermeabilityPainting = true;
+  paintRigidPermeabilityMap(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
+});
+rigidPermeabilityCanvas.addEventListener('mousemove', (e) => {
+  if (!rigidPermeabilityPainting) return;
+  paintRigidPermeabilityMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
+});
+
 window.addEventListener('mouseup', () => {
   traitPainting = false;
   densityPainting = false;
   membraneEdgePainting = false;
   membraneShapePainting = false;
+  rigidPermeabilityPainting = false;
 });
 
 clearBtn.addEventListener('click', () => {
@@ -419,6 +458,7 @@ clearBtn.addEventListener('click', () => {
   softDensity.fill(0.5);
   membraneEdgeMap.fill(0.5);
   membraneShapeMap.fill(1.0);
+  rigidPermeabilityMap.fill(0.0);
   drawFields();
   compileNow();
 });
@@ -445,6 +485,7 @@ exportBtn.addEventListener('click', () => {
       softDensityField: softDensity,
       membraneEdgeMap,
       membraneShapeMap,
+      rigidPermeabilityMap,
     },
     threshold: Math.max(0, Math.min(1, Number(thresholdEl?.value) || 0.35)),
     softBoundaryRingSprings: !!softBoundaryRingEl?.checked,
@@ -482,6 +523,8 @@ importFile.addEventListener('change', async () => {
     else membraneEdgeMap.fill(0.5);
     if (Array.isArray(authoring.membraneShapeMap) && authoring.membraneShapeMap.length === W * H) membraneShapeMap.set(authoring.membraneShapeMap);
     else membraneShapeMap.fill(1.0);
+    if (Array.isArray(authoring.rigidPermeabilityMap) && authoring.rigidPermeabilityMap.length === W * H) rigidPermeabilityMap.set(authoring.rigidPermeabilityMap);
+    else rigidPermeabilityMap.fill(0.0);
     drawFields();
     compileNow();
     return;

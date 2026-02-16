@@ -3726,6 +3726,56 @@ function summarizeCouplingTelemetry(telemetry) {
   };
 }
 
+function summarizeSoftEdgePolicies(springs) {
+  const out = {
+    edgeCount: 0,
+    velocityPassEdges: 0,
+    velocityBlockEdges: 0,
+    dyePassChannels: 0,
+    dyeDeflectChannels: 0,
+    dyeAbsorbChannels: 0,
+    momentumAvg: 1,
+    momentumMin: 1,
+    momentumMax: 1,
+  };
+  if (!Array.isArray(springs) || springs.length === 0) return out;
+
+  let momentumSum = 0;
+  let momentumCount = 0;
+  let momentumMin = 1;
+  let momentumMax = 0;
+
+  for (const sp of springs) {
+    if (!Array.isArray(sp) || sp.length < 2) continue;
+    out.edgeCount += 1;
+
+    const edgeBodyMode = Number(sp[3]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK;
+    const edgeVelocityMode = Number(sp[5]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : edgeBodyMode;
+    if (edgeVelocityMode === EDGE_BODY_MODE.PASS) out.velocityPassEdges += 1;
+    else out.velocityBlockEdges += 1;
+
+    const dye = normalizeEdgeDyeModeRGB(sp[4]);
+    for (const d of dye) {
+      if (d === EDGE_DYE_MODE.PASS) out.dyePassChannels += 1;
+      else if (d === EDGE_DYE_MODE.ABSORB) out.dyeAbsorbChannels += 1;
+      else out.dyeDeflectChannels += 1;
+    }
+
+    const m = clamp(Number.isFinite(Number(sp[6])) ? Number(sp[6]) : 1, 0, 1);
+    momentumSum += m;
+    momentumCount += 1;
+    momentumMin = Math.min(momentumMin, m);
+    momentumMax = Math.max(momentumMax, m);
+  }
+
+  if (momentumCount > 0) {
+    out.momentumAvg = +(momentumSum / momentumCount).toFixed(3);
+    out.momentumMin = +momentumMin.toFixed(3);
+    out.momentumMax = +momentumMax.toFixed(3);
+  }
+  return out;
+}
+
 function pointInPolygon(x, y, verts) {
   let inside = false;
   for (let i = 0, j = verts.length - 1; i < verts.length; j = i++) {
@@ -4262,7 +4312,7 @@ function drawBodiesOverlay(sim) {
     ctx.closePath();
     ctx.fill();
   }
-  for (const [i, j, _rest, edgeBodyMode, edgeDyeMode] of s.springs) {
+  for (const [i, j, _rest, edgeBodyMode, edgeDyeMode, edgeVelocityMode, edgeMomentumCoupling] of s.springs) {
     const a = s.nodes[i], b = s.nodes[j];
     if (!a || !b) continue;
     const pa = worldToScreen(sim, a._rx, a._ry);
@@ -4271,25 +4321,43 @@ function drawBodiesOverlay(sim) {
     const bSevere = severeClusters.has(b.clusterId ?? 0);
     const aWarn = warningClusters.has(a.clusterId ?? 0);
     const bWarn = warningClusters.has(b.clusterId ?? 0);
+    const resolvedBodyMode = Number(edgeVelocityMode) === EDGE_BODY_MODE.PASS
+      ? EDGE_BODY_MODE.PASS
+      : (Number(edgeBodyMode) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK);
+    const momentumCoupling = clamp(Number.isFinite(Number(edgeMomentumCoupling)) ? Number(edgeMomentumCoupling) : 1, 0, 1);
 
     if (aSevere || bSevere) {
       ctx.strokeStyle = 'rgba(255, 70, 70, 0.98)';
     } else if (aWarn || bWarn) {
       ctx.strokeStyle = 'rgba(255, 190, 80, 0.92)';
     } else {
-      const baseColor = edgeModeColor(edgeDyeMode, edgeBodyMode === EDGE_BODY_MODE.BLOCK);
+      const baseColor = edgeModeColor(edgeDyeMode, resolvedBodyMode === EDGE_BODY_MODE.BLOCK);
       // Keep blocked+deflect soft perimeter cyan-ish for readability.
       const m = normalizeEdgeDyeModeRGB(edgeDyeMode);
-      if (edgeBodyMode === EDGE_BODY_MODE.BLOCK && m[0] === EDGE_DYE_MODE.DEFLECT && m[1] === EDGE_DYE_MODE.DEFLECT && m[2] === EDGE_DYE_MODE.DEFLECT) {
+      if (resolvedBodyMode === EDGE_BODY_MODE.BLOCK && m[0] === EDGE_DYE_MODE.DEFLECT && m[1] === EDGE_DYE_MODE.DEFLECT && m[2] === EDGE_DYE_MODE.DEFLECT) {
         ctx.strokeStyle = '#00ffd0';
       } else {
         ctx.strokeStyle = baseColor;
       }
     }
+
+    const lineWidthPrev = ctx.lineWidth;
+    ctx.lineWidth = (aSevere || bSevere || aWarn || bWarn)
+      ? 2
+      : (0.9 + 1.8 * momentumCoupling);
+    if (resolvedBodyMode === EDGE_BODY_MODE.PASS) {
+      ctx.setLineDash([5, 4]);
+    } else {
+      ctx.setLineDash([]);
+    }
+
     ctx.beginPath();
     ctx.moveTo(pa.x, pa.y);
     ctx.lineTo(pb.x, pb.y);
     ctx.stroke();
+
+    ctx.setLineDash([]);
+    ctx.lineWidth = lineWidthPrev;
   }
   for (const node of s.nodes) {
     const p = worldToScreen(sim, node._rx, node._ry);
@@ -4336,10 +4404,10 @@ function drawBodiesOverlay(sim) {
   ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, ABSORB=amber, MIXED=violet | zoom ${sim.camera.zoom.toFixed(2)}x${collisionDebugSuffix}`, 10, canvas.height - 28);
   ctx.fillStyle = 'rgba(0,255,208,0.95)';
   const line2 = collisionDebug
-    ? 'Body edges: BLOCK (bright) vs PASS (dim) | dashed green/cyan=solver hull, dashed amber=rigid-rigid convex proxies | soft deform warn=orange, severe=red'
+    ? 'Body edges: BLOCK solid vs PASS dashed | soft momentum: thin→thick (0→1) | dashed green/cyan=solver hull, dashed amber=rigid-rigid convex proxies | soft deform warn=orange, severe=red'
     : (ENABLE_HYBRID_BODY_LINKS
-      ? 'Body edges: BLOCK (bright) vs PASS (dim) | hybrid links=magenta | soft deform warn=orange, severe=red'
-      : 'Body edges: BLOCK (bright) vs PASS (dim) | hybrids disabled (rigid/soft separated) | soft deform warn=orange, severe=red');
+      ? 'Body edges: BLOCK solid vs PASS dashed | soft momentum: thin→thick (0→1) | hybrid links=magenta | soft deform warn=orange, severe=red'
+      : 'Body edges: BLOCK solid vs PASS dashed | soft momentum: thin→thick (0→1) | hybrids disabled (rigid/soft separated) | soft deform warn=orange, severe=red');
   ctx.fillText(line2, 10, canvas.height - 12);
   ctx.restore();
 }
@@ -4605,6 +4673,7 @@ async function stepAndRender() {
     const couplingAverages = summarizeCouplingTelemetry(s.couplingTelemetry);
     const couplingSnapshot = { ...couplingAverages, ...Object.fromEntries(Object.entries(couplingInstant || {}).map(([k,v]) => [k+'Now', +((v || 0).toFixed(4))])) };
     const rigidContacts = Array.isArray(s.lastRigidContacts) ? s.lastRigidContacts : [];
+    const softEdgePoliciesNow = summarizeSoftEdgePolicies(s?.bodies?.soft?.springs || []);
     window.__gpuLabCoupling = couplingSnapshot;
     window.__gpuLabRigidContacts = rigidContacts;
 
@@ -4632,6 +4701,7 @@ async function stepAndRender() {
         membraneClusters: Array.isArray(s.bodies?.softMembraneClusters) ? s.bodies.softMembraneClusters.length : 0,
         fluidObstacleEdgesNow: obstacleEdgesNow,
         dyeMaskCellsNow: Number(s?.lastDyeMaskStats?.nonPassCells) || 0,
+        softEdgePoliciesNow,
         paintValue: Number(paintValueEl?.value) || 0.85,
         brushSize: Number(brushSizeEl?.value) || 12,
         digestiveCapture: +((s.digestiveCapture || 0).toFixed(2)),

@@ -269,6 +269,71 @@ test('createCreatureSpecFromMesh samples soft permeability paint map into soft e
   assert.ok(membranePass >= 1, `expected >=1 permeable membrane ring edge, got ${membranePass}`);
 });
 
+test('createCreatureSpecFromMesh samples explicit soft dye/velocity/momentum policy maps into spring traits', () => {
+  const w = 16;
+  const softEdgeDyeModeMapR = new Float32Array(w * w).fill(0);
+  const softEdgeDyeModeMapG = new Float32Array(w * w).fill(0);
+  const softEdgeDyeModeMapB = new Float32Array(w * w).fill(0);
+  const softEdgeVelocityModeMap = new Float32Array(w * w).fill(0);
+  const softEdgeMomentumModeMap = new Float32Array(w * w).fill(1);
+
+  // sampleMesh soft triangle edge midpoints are (5,4), (6,6), (7,4)
+  softEdgeDyeModeMapR[4 * w + 5] = 1.0;   // ABSORB
+  softEdgeDyeModeMapG[6 * w + 6] = 0.5;   // PASS
+  softEdgeDyeModeMapB[4 * w + 7] = 0.0;   // DEFLECT
+  softEdgeVelocityModeMap[6 * w + 6] = 1.0; // PASS velocity on one edge
+  softEdgeMomentumModeMap[4 * w + 5] = 0.2;
+  softEdgeMomentumModeMap[6 * w + 6] = 0.6;
+  softEdgeMomentumModeMap[4 * w + 7] = 0.9;
+
+  const spec = createCreatureSpecFromMesh(sampleMesh(), {
+    softSolverMode: 'spring',
+    fields: {
+      softEdgeDyeModeMapR,
+      softEdgeDyeModeMapG,
+      softEdgeDyeModeMapB,
+      softEdgeVelocityModeMap,
+      softEdgeMomentumModeMap,
+    },
+  });
+
+  const sb = spec.softBodies?.[0];
+  assert.ok(sb && Array.isArray(sb.springs) && sb.springs.length >= 3, 'expected spring-mode soft springs');
+
+  const midpointKey = (a, b) => `${Math.round((a.x + b.x) * 0.5)},${Math.round((a.y + b.y) * 0.5)}`;
+  const byMidpoint = new Map();
+  for (const sp of sb.springs) {
+    const a = sb.nodes?.[sp[0]];
+    const b = sb.nodes?.[sp[1]];
+    if (!a || !b) continue;
+    byMidpoint.set(midpointKey(a, b), sp);
+  }
+
+  const sp54 = byMidpoint.get('5,4');
+  const sp66 = byMidpoint.get('6,6');
+  const sp74 = byMidpoint.get('7,4');
+  assert.ok(sp54 && sp66 && sp74, 'expected all soft triangle edges by midpoint keys');
+
+  assert.deepEqual(sp54[4], [2, 1, 1]);
+  assert.equal(Number(sp54[5]), 1);
+  assert.ok(Math.abs(Number(sp54[6]) - 0.2) < 1e-6);
+
+  assert.deepEqual(sp66[4], [1, 0, 1]);
+  assert.equal(Number(sp66[5]), 0);
+  assert.ok(Math.abs(Number(sp66[6]) - 0.6) < 1e-6);
+
+  assert.deepEqual(sp74[4], [1, 1, 1]);
+  assert.equal(Number(sp74[5]), 1);
+  assert.ok(Math.abs(Number(sp74[6]) - 0.9) < 1e-6);
+
+  const imported = buildBodiesFromCreatureSpec(spec, 64, CONTROLS);
+  const importedSoft = imported.soft?.springs || [];
+  assert.ok(importedSoft.length >= 3);
+  assert.ok(importedSoft.some((sp) => Number(sp[5]) === 0), 'imported springs should preserve velocity PASS trait');
+  const importedMomentum = importedSoft.map((sp) => Number(sp[6])).filter((v) => Number.isFinite(v));
+  assert.ok(importedMomentum.some((v) => v <= 0.25) && importedMomentum.some((v) => v >= 0.85), 'imported springs should preserve momentum coupling range');
+});
+
 test('soft solver mode is exported and membrane mode is mapped on import bodies', () => {
   const mesh = {
     nodes: [
@@ -1205,6 +1270,11 @@ test('createCreatureSpecFromMesh preserves optional authoring field payload', ()
   const rigidField = new Float32Array(w * w);
   const softField = new Float32Array(w * w);
   const softPermeabilityMap = new Float32Array(w * w);
+  const softEdgeDyeModeMapR = new Float32Array(w * w);
+  const softEdgeDyeModeMapG = new Float32Array(w * w);
+  const softEdgeDyeModeMapB = new Float32Array(w * w);
+  const softEdgeVelocityModeMap = new Float32Array(w * w);
+  const softEdgeMomentumModeMap = new Float32Array(w * w);
   const rigidPermeabilityMap = new Float32Array(w * w);
   const rigidEdgeConsumeMapR = new Float32Array(w * w);
   const rigidEdgeConsumeMapG = new Float32Array(w * w);
@@ -1212,13 +1282,31 @@ test('createCreatureSpecFromMesh preserves optional authoring field payload', ()
   rigidField[3] = 0.75;
   softField[8] = 0.25;
   softPermeabilityMap[7] = 1;
+  softEdgeDyeModeMapR[13] = 1;
+  softEdgeDyeModeMapG[14] = 0.5;
+  softEdgeDyeModeMapB[15] = 0.25;
+  softEdgeVelocityModeMap[16] = 1;
+  softEdgeMomentumModeMap[17] = 0.42;
   rigidPermeabilityMap[9] = 1;
   rigidEdgeConsumeMapR[10] = 1;
   rigidEdgeConsumeMapG[11] = 0.5;
   rigidEdgeConsumeMapB[12] = 0.25;
 
   const spec = createCreatureSpecFromMesh(sampleMesh(), {
-    fields: { rigidField, softField, softPermeabilityMap, rigidPermeabilityMap, rigidEdgeConsumeMapR, rigidEdgeConsumeMapG, rigidEdgeConsumeMapB },
+    fields: {
+      rigidField,
+      softField,
+      softPermeabilityMap,
+      softEdgeDyeModeMapR,
+      softEdgeDyeModeMapG,
+      softEdgeDyeModeMapB,
+      softEdgeVelocityModeMap,
+      softEdgeMomentumModeMap,
+      rigidPermeabilityMap,
+      rigidEdgeConsumeMapR,
+      rigidEdgeConsumeMapG,
+      rigidEdgeConsumeMapB,
+    },
   });
 
   assert.ok(spec.authoring?.fields);
@@ -1227,6 +1315,11 @@ test('createCreatureSpecFromMesh preserves optional authoring field payload', ()
   assert.equal(spec.authoring.fields.rigid.length, w * w);
   assert.equal(spec.authoring.fields.soft.length, w * w);
   assert.equal(spec.authoring.fields.softPermeabilityMap.length, w * w);
+  assert.equal(spec.authoring.fields.softEdgeDyeModeMapR.length, w * w);
+  assert.equal(spec.authoring.fields.softEdgeDyeModeMapG.length, w * w);
+  assert.equal(spec.authoring.fields.softEdgeDyeModeMapB.length, w * w);
+  assert.equal(spec.authoring.fields.softEdgeVelocityModeMap.length, w * w);
+  assert.equal(spec.authoring.fields.softEdgeMomentumModeMap.length, w * w);
   assert.equal(spec.authoring.fields.rigidPermeabilityMap.length, w * w);
   assert.equal(spec.authoring.fields.rigidEdgeConsumeMapR.length, w * w);
   assert.equal(spec.authoring.fields.rigidEdgeConsumeMapG.length, w * w);
@@ -1234,6 +1327,11 @@ test('createCreatureSpecFromMesh preserves optional authoring field payload', ()
   assert.equal(spec.authoring.fields.rigid[3], 0.75);
   assert.equal(spec.authoring.fields.soft[8], 0.25);
   assert.equal(spec.authoring.fields.softPermeabilityMap[7], 1);
+  assert.equal(spec.authoring.fields.softEdgeDyeModeMapR[13], 1);
+  assert.equal(spec.authoring.fields.softEdgeDyeModeMapG[14], 0.5);
+  assert.equal(spec.authoring.fields.softEdgeDyeModeMapB[15], 0.25);
+  assert.equal(spec.authoring.fields.softEdgeVelocityModeMap[16], 1);
+  assert.ok(Math.abs(Number(spec.authoring.fields.softEdgeMomentumModeMap[17]) - 0.42) < 1e-6);
   assert.equal(spec.authoring.fields.rigidPermeabilityMap[9], 1);
   assert.equal(spec.authoring.fields.rigidEdgeConsumeMapR[10], 1);
   assert.equal(spec.authoring.fields.rigidEdgeConsumeMapG[11], 0.5);

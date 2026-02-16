@@ -103,6 +103,42 @@ test('BLOCK edge mode still deflects fluid velocity when dye channels are PASS',
   assert.ok(Math.abs(vy[i]) < 2.0, `normal velocity should be reduced by BLOCK body barrier, got vy=${vy[i]}`);
 });
 
+test('soft edge velocity mode PASS overrides legacy BLOCK body mode for fluid velocity barriering', () => {
+  const n = 16;
+  const size = n * n;
+  const r = new Float32Array(size);
+  const g = new Float32Array(size);
+  const b = new Float32Array(size);
+  const vx = new Float32Array(size);
+  const vy = new Float32Array(size);
+
+  const x = 8;
+  const y = 8;
+  const i = y * n + x;
+  vx[i] = 0.0;
+  vy[i] = 2.0; // normal to horizontal edge
+
+  const sim = {
+    controls: { n },
+    bodies: {
+      rigid: [],
+      soft: {
+        nodes: [
+          { x: 5, y: 8 },
+          { x: 11, y: 8 },
+        ],
+        springs: [
+          [0, 1, 6, EDGE_BODY_MODE.BLOCK, [EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.PASS], EDGE_BODY_MODE.PASS],
+        ],
+      },
+    },
+  };
+
+  applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld });
+
+  assert.ok(Math.abs(vy[i] - 2.0) < 1e-6, `velocity-mode PASS should skip soft velocity barrier even when legacy body mode is BLOCK, got vy=${vy[i]}`);
+});
+
 test('rigid edge permeability RGB overrides channel pass/blocked behavior', () => {
   const n = 24;
   const size = n * n;

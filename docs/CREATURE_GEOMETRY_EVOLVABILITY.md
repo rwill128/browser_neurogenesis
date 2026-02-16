@@ -208,7 +208,7 @@ Use this table when writing parser/build tests so each trait level has explicit,
 | Trait level | JSON fields | Deterministic defaults on import/build | Clamp/coercion behavior |
 | --- | --- | --- | --- |
 | Body | `softBodies[].solverMode` | unknown/non-`"membrane"` → `"spring"` path | membrane metadata omitted unless `solverMode === "membrane"` |
-| Body | `rigidBodies[].insideCorrectionEnabled`, `softBodies[].insideCorrectionEnabled` | omitted → runtime defaults (`true`/enabled) | boolean coercion via truthy/falsey import normalization |
+| Body | `rigidBodies[].insideCorrectionEnabled`, `softBodies[].insideCorrectionEnabled` | omitted → runtime defaults (`true`/enabled) | rigid: only strict `false` disables; membrane cluster: numeric coercion (`>0 => 1`, else `0`) |
 | Segment/line | `rigidBodies[].edgeBodyMode[]` | omitted/sparse entries → `1` (blocking) | strict binary coercion (`1` block, else `0` pass) |
 | Segment/line | `rigidBodies[].edgeDyeMode[]` + `softBodies[].springs[][4]` | omitted/sparse entries → `[1,1,1]` (deflect) | per-channel enum clamp to `{0,1,2}` |
 | Segment/line | `rigidBodies[].edgePermeabilityRGB[]` | omitted/sparse entries → `[0,0,0]` (blocked) | per-channel `>0 => 1`, else `0` |

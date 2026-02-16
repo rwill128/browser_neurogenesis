@@ -955,6 +955,54 @@ test('buildBodiesFromCreatureSpec honors rigid inside-correction toggle per body
   assert.equal(bodiesOn.rigid[0].insideCorrectionEnabled, true);
 });
 
+test('buildBodiesFromCreatureSpec deterministically defaults/coerces inside-correction flags across rigid and membrane bodies', () => {
+  const rigidSpec = createCreatureSpecFromMesh(sampleMesh());
+
+  delete rigidSpec.rigidBodies[0].insideCorrectionEnabled;
+  const rigidDefault = buildBodiesFromCreatureSpec(rigidSpec, 256, CONTROLS);
+  assert.equal(rigidDefault.rigid[0].insideCorrectionEnabled, true, 'missing rigid insideCorrectionEnabled should default enabled');
+
+  rigidSpec.rigidBodies[0].insideCorrectionEnabled = 0;
+  const rigidNumericZero = buildBodiesFromCreatureSpec(rigidSpec, 256, CONTROLS);
+  assert.equal(rigidNumericZero.rigid[0].insideCorrectionEnabled, true, 'rigid mode only disables on strict false');
+
+  const membraneSpec = {
+    schemaVersion: CREATURE_SPEC_VERSION,
+    space: { width: 16, height: 16 },
+    rigidBodies: [],
+    hybridJoints: [],
+    softBodies: [{
+      id: 'membrane_inside_flags',
+      solverMode: 'membrane',
+      nodes: [
+        { x: 2, y: 2 },
+        { x: 14, y: 2 },
+        { x: 14, y: 14 },
+        { x: 2, y: 14 },
+      ],
+      springs: [
+        [0, 1, 12, 1, [1, 1, 1]],
+        [1, 2, 12, 1, [1, 1, 1]],
+        [2, 3, 12, 1, [1, 1, 1]],
+        [3, 0, 12, 1, [1, 1, 1]],
+      ],
+      restArea: 144,
+      pressureGain: 0.08,
+      radialDamping: 0.05,
+      shapeMemoryGain: 0.04,
+      insideCorrectionEnabled: '0',
+    }],
+  };
+
+  const membraneOff = buildBodiesFromCreatureSpec(membraneSpec, 64, CONTROLS);
+  assert.equal(membraneOff.softMembraneClusters.length, 1);
+  assert.equal(membraneOff.softMembraneClusters[0].insideCorrectionEnabled, 0, 'numeric/string zero should disable membrane inside correction');
+
+  delete membraneSpec.softBodies[0].insideCorrectionEnabled;
+  const membraneDefault = buildBodiesFromCreatureSpec(membraneSpec, 64, CONTROLS);
+  assert.equal(membraneDefault.softMembraneClusters[0].insideCorrectionEnabled, 1, 'missing membrane insideCorrectionEnabled should default enabled');
+});
+
 test('buildBodiesFromCreatureSpec preserves rigid per-edge permeability and interior consume-dye masks', () => {
   const spec = createCreatureSpecFromMesh(sampleMesh());
   spec.rigidBodies[0].edgePermeabilityRGB = [

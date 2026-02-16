@@ -798,29 +798,46 @@ function sampleObstacleMaskNearest(mask, n, x, y) {
 }
 
 function sampleFluidForBodyCoupling(field, n, x, y, dirX, dirY, obstacleMask = null) {
-  const base = sampleFieldBilinear(field, n, x, y);
-  let best = base;
-  let bestAbs = Math.abs(base);
+  const samples = [];
+  const baseBlocked = sampleObstacleMaskNearest(obstacleMask, n, x, y) > 0.5;
+  if (!baseBlocked) {
+    samples.push({ value: sampleFieldBilinear(field, n, x, y), off: 0 });
+  }
 
   const len = Math.hypot(dirX, dirY);
-  if (!Number.isFinite(len) || len < 1e-6) return best;
+  if (!Number.isFinite(len) || len < 1e-6) {
+    if (samples.length > 0) return samples[0].value;
+    return 0;
+  }
   const nx = dirX / len;
   const ny = dirY / len;
 
-  const offsets = [1.1, 1.8, 2.6, 3.4];
+  // Robust boundary-aware read: avoid selecting extreme recirculation outliers
+  // (which can create self-propulsive bias near BLOCK edges).
+  const offsets = [1.1, 1.8, 2.6, 3.4, 4.2];
   for (const off of offsets) {
     const sx = x + nx * off;
     const sy = y + ny * off;
     if (sampleObstacleMaskNearest(obstacleMask, n, sx, sy) > 0.5) continue;
-    const v = sampleFieldBilinear(field, n, sx, sy);
-    const av = Math.abs(v);
-    if (av > bestAbs) {
-      best = v;
-      bestAbs = av;
-    }
+    samples.push({ value: sampleFieldBilinear(field, n, sx, sy), off });
   }
 
-  return best;
+  if (samples.length === 0) return 0;
+  if (samples.length === 1) return samples[0].value;
+
+  const values = samples.map((s) => s.value).sort((a, b) => a - b);
+  const mid = Math.floor(values.length / 2);
+  const median = (values.length % 2 === 1)
+    ? values[mid]
+    : 0.5 * (values[mid - 1] + values[mid]);
+
+  // Mild ambient-flow preference from farther-out valid samples.
+  const far = samples.filter((s) => s.off >= 2.6).map((s) => s.value);
+  const farMean = far.length > 0
+    ? (far.reduce((sum, v) => sum + v, 0) / far.length)
+    : median;
+
+  return median * 0.7 + farMean * 0.3;
 }
 
 function rigidVerticesWorld(b) {

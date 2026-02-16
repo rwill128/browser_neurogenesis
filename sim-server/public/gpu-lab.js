@@ -3880,7 +3880,7 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
     wobbleFreq: Number(options?.emitterWobbleFreq) || 0.11,
     swirlJitter: Number(options?.emitterSwirlJitter) || 1.17,
     jetVy: Number(options?.emitterJetVy) || 1.35,
-    lockPosition: true,
+    lockPosition: options?.emitterLockPosition !== false,
   })];
 
   sim.camera.x = sim.controls.n * 0.5;

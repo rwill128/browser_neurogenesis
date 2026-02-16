@@ -54,6 +54,18 @@ const exportBtn = document.getElementById('exportBtn');
 const importBtn = document.getElementById('importBtn');
 const importFile = document.getElementById('importFile');
 const out = document.getElementById('out');
+const windEmitterStrengthEl = document.getElementById('windEmitterStrength');
+const windEmitterJetVyEl = document.getElementById('windEmitterJetVy');
+const windEmitterRadiusEl = document.getElementById('windEmitterRadius');
+const windEmitterYFractionEl = document.getElementById('windEmitterYFraction');
+const windEmitterSpinEl = document.getElementById('windEmitterSpin');
+const windEmitterCurlGainEl = document.getElementById('windEmitterCurlGain');
+const windEmitterDriftGainEl = document.getElementById('windEmitterDriftGain');
+const windEmitterChaosGainEl = document.getElementById('windEmitterChaosGain');
+const windEmitterWobbleAmpEl = document.getElementById('windEmitterWobbleAmp');
+const windEmitterWobbleFreqEl = document.getElementById('windEmitterWobbleFreq');
+const windEmitterLockPositionEl = document.getElementById('windEmitterLockPosition');
+const applyWindEmitterBtn = document.getElementById('applyWindEmitterBtn');
 
 const W = 128, H = 128;
 const rigid = new Float32Array(W * H);
@@ -483,6 +495,30 @@ function buildSpecFromCurrentFields(mesh, traitFields = null) {
   });
 }
 
+function finiteOr(raw, fallback) {
+  const v = Number(raw);
+  return Number.isFinite(v) ? v : fallback;
+}
+
+function readWindTunnelEmitterOptions() {
+  const defaultRadius = Math.max(7, W / 13);
+  const defaultWobbleAmp = Math.max(1.4, W * 0.02);
+
+  return {
+    emitterStrength: Math.max(0.1, finiteOr(windEmitterStrengthEl?.value, 3.8)),
+    emitterJetVy: Math.max(-4, Math.min(6, finiteOr(windEmitterJetVyEl?.value, 1.35))),
+    emitterRadius: Math.max(3, finiteOr(windEmitterRadiusEl?.value, defaultRadius)),
+    emitterYFraction: Math.max(0.06, Math.min(0.35, finiteOr(windEmitterYFractionEl?.value, 0.12))),
+    emitterSpin: finiteOr(windEmitterSpinEl?.value, 1.55),
+    emitterCurlGain: Math.max(0, finiteOr(windEmitterCurlGainEl?.value, 1.95)),
+    emitterDriftGain: Math.max(0, finiteOr(windEmitterDriftGainEl?.value, 0.22)),
+    emitterChaosGain: Math.max(0, finiteOr(windEmitterChaosGainEl?.value, 1.45)),
+    emitterWobbleAmp: Math.max(0, finiteOr(windEmitterWobbleAmpEl?.value, defaultWobbleAmp)),
+    emitterWobbleFreq: Math.max(0, finiteOr(windEmitterWobbleFreqEl?.value, 0.11)),
+    emitterLockPosition: windEmitterLockPositionEl?.checked !== false,
+  };
+}
+
 function pushSpecToWindTunnel(spec) {
   if (!spec || !windTunnelFrame?.contentWindow) return;
   const payload = {
@@ -492,9 +528,7 @@ function pushSpecToWindTunnel(spec) {
       grid: W,
       targetSpanFraction: 0.42,
       importScale: 1,
-      emitterStrength: 3.8,
-      emitterRadius: Math.max(7, W / 13),
-      emitterYFraction: 0.12,
+      ...readWindTunnelEmitterOptions(),
     },
   };
 
@@ -1149,6 +1183,36 @@ if (membraneMaxEdgeLengthEl) membraneMaxEdgeLengthEl.addEventListener('change', 
 if (rigidCompileModeEl) rigidCompileModeEl.addEventListener('change', compileNow);
 if (rigidPrimitiveSideMinEl) rigidPrimitiveSideMinEl.addEventListener('change', compileNow);
 if (rigidPrimitiveSideMaxEl) rigidPrimitiveSideMaxEl.addEventListener('change', compileNow);
+
+const windEmitterInputs = [
+  windEmitterStrengthEl,
+  windEmitterJetVyEl,
+  windEmitterRadiusEl,
+  windEmitterYFractionEl,
+  windEmitterSpinEl,
+  windEmitterCurlGainEl,
+  windEmitterDriftGainEl,
+  windEmitterChaosGainEl,
+  windEmitterWobbleAmpEl,
+  windEmitterWobbleFreqEl,
+  windEmitterLockPositionEl,
+].filter(Boolean);
+
+for (const el of windEmitterInputs) {
+  el.addEventListener('change', () => {
+    if (lastCompiledSpec) pushSpecToWindTunnel(lastCompiledSpec);
+  });
+}
+
+if (applyWindEmitterBtn) {
+  applyWindEmitterBtn.addEventListener('click', () => {
+    if (!lastCompiledSpec) {
+      const mesh = compileNow();
+      if (!mesh || !lastCompiledSpec) return;
+    }
+    pushSpecToWindTunnel(lastCompiledSpec);
+  });
+}
 
 exportBtn.addEventListener('click', () => {
   const mesh = compileNow();

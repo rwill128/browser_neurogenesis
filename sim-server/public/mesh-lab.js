@@ -14,6 +14,7 @@ const sctx = membraneShapeCanvas.getContext('2d');
 const prctx = rigidPermeabilityCanvas.getContext('2d');
 const mctx = meshCanvas.getContext('2d');
 const modeEl = document.getElementById('paintMode');
+const fieldPaintTargetEl = document.getElementById('fieldPaintTarget');
 const brushEl = document.getElementById('brush');
 const thresholdEl = document.getElementById('threshold');
 const softDensityPaintEl = document.getElementById('softDensityPaint');
@@ -45,6 +46,8 @@ const membraneShapeMap = new Float32Array(W * H).fill(1.0);
 const rigidPermeabilityMap = new Float32Array(W * H).fill(0.0);
 let lastMesh = null;
 let compileRevision = 0;
+
+const fieldPanels = Array.from(document.querySelectorAll('.field-panel'));
 
 function idx(x, y) { return y * W + x; }
 
@@ -329,6 +332,26 @@ function drawMesh(mesh) {
   }, null, 2);
 }
 
+function syncFieldPanelVisibility() {
+  const target = fieldPaintTargetEl?.value || 'trait';
+  for (const panel of fieldPanels) {
+    if (!panel) continue;
+    panel.hidden = panel.dataset.fieldPanel !== target;
+  }
+
+  const traitSelected = target === 'trait';
+  if (modeEl) {
+    modeEl.disabled = !traitSelected;
+    modeEl.title = traitSelected ? '' : 'Trait paint mode applies only when painting the trait field';
+  }
+  if (softDensityPaintEl) softDensityPaintEl.disabled = target !== 'density';
+  if (membraneEdgePaintEl) membraneEdgePaintEl.disabled = target !== 'membraneEdge';
+  if (membraneShapePaintEl) membraneShapePaintEl.disabled = target !== 'membraneShape';
+  if (rigidPermeabilityPaintEl) rigidPermeabilityPaintEl.disabled = target !== 'rigidPermeability';
+
+  return target;
+}
+
 function syncSoftModeUi() {
   const membraneMode = (softSolverModeEl?.value || 'spring') === 'membrane';
   if (!softInfillModeEl) return membraneMode;
@@ -463,6 +486,7 @@ clearBtn.addEventListener('click', () => {
   compileNow();
 });
 compileBtn.addEventListener('click', compileNow);
+if (fieldPaintTargetEl) fieldPaintTargetEl.addEventListener('change', syncFieldPanelVisibility);
 if (softInfillModeEl) softInfillModeEl.addEventListener('change', compileNow);
 if (softMinCellSizeEl) softMinCellSizeEl.addEventListener('change', compileNow);
 if (softSolverModeEl) softSolverModeEl.addEventListener('change', compileNow);
@@ -574,5 +598,6 @@ importFile.addEventListener('change', async () => {
   }, null, 2);
 });
 
+syncFieldPanelVisibility();
 drawFields();
 compileNow();

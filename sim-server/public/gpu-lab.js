@@ -3468,7 +3468,9 @@ function buildWindTunnelEmitter(n, {
 }
 
 async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
-  const spec = (typeof specInput === 'string') ? parseCreatureSpec(specInput) : parseCreatureSpec(specInput || {});
+  const spec = (typeof specInput === 'string')
+    ? parseCreatureSpec(specInput)
+    : parseCreatureSpec(JSON.stringify(specInput || {}));
   const grid = Math.max(32, Math.min(2048, Math.round(Number(options?.grid) || readControls().n || 128)));
   const importScale = Number.isFinite(Number(options?.importScale)) ? Number(options.importScale) : 1;
   const targetSpanFraction = Number.isFinite(Number(options?.targetSpanFraction))

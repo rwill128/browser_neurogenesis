@@ -962,6 +962,18 @@ if (windTunnelFrame) {
     if (data.type === 'gpuLabEmbedReady') {
       windTunnelReady = true;
       pushSpecToWindTunnel(lastCompiledSpec);
+      return;
+    }
+
+    if (data.type === 'gpuLabEmbedResetAck') {
+      if (data.ok === false) {
+        out.textContent = JSON.stringify({
+          windTunnel: 'reset failed',
+          error: String(data.error || 'unknown error from embedded GPU lab'),
+          hint: 'Check browser console for stack and confirm WebGPU is available.',
+        }, null, 2);
+      }
+      return;
     }
   });
 }

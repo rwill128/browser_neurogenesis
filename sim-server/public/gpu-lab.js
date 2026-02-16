@@ -3521,6 +3521,14 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
     strength: Number(options?.emitterStrength) || 3.8,
     radius: Number(options?.emitterRadius) || Math.max(7, sim.controls.n / 13),
     yFraction: Number(options?.emitterYFraction) || 0.12,
+    // Make embed wind-tunnel jet visibly turbulent (single emitter, higher curl/chaos/wobble).
+    spin: Number(options?.emitterSpin) || 2.35,
+    curlGain: Number(options?.emitterCurlGain) || 2.55,
+    driftGain: Number(options?.emitterDriftGain) || 0.014,
+    chaosGain: Number(options?.emitterChaosGain) || 2.4,
+    wobbleAmp: Number(options?.emitterWobbleAmp) || Math.max(2.5, sim.controls.n * 0.055),
+    wobbleFreq: Number(options?.emitterWobbleFreq) || 0.13,
+    swirlJitter: Number(options?.emitterSwirlJitter) || 1.17,
   })];
 
   sim.camera.x = sim.controls.n * 0.5;

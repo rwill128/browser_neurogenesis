@@ -1187,6 +1187,14 @@ function cloneMiniBodies(miniBodies, controls) {
         const edgePermeabilityRGB = Array.isArray(rb?.edgePermeabilityRGB)
           ? rb.edgePermeabilityRGB.map((m) => [Number(m?.[0]) > 0 ? 1 : 0, Number(m?.[1]) > 0 ? 1 : 0, Number(m?.[2]) > 0 ? 1 : 0])
           : Array.from({ length: sides }, () => [0, 0, 0]);
+        const edgeVelocityMode = Array.isArray(rb?.edgeVelocityMode)
+          ? rb.edgeVelocityMode.map((m) => Number(m) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK)
+          : [...edgeBodyMode];
+        const edgeMomentumTransfer = Array.isArray(rb?.edgeMomentumCoupling)
+          ? rb.edgeMomentumCoupling.map((m) => clamp(Number(m) || 0, 0, 1))
+          : (Array.isArray(rb?.edgeMomentumTransfer)
+            ? rb.edgeMomentumTransfer.map((m) => clamp(Number(m) || 0, 0, 1))
+            : Array.from({ length: sides }, () => 1));
         const mass = Math.max(0.05, Number(rb?.mass) || controls.massHeavy || 3.5);
         const r = Math.max(1.0, Number(rb?.r) || 6);
         return {
@@ -1201,6 +1209,8 @@ function cloneMiniBodies(miniBodies, controls) {
           edgeDyeMode,
           edgeBodyMode,
           edgePermeabilityRGB,
+          edgeVelocityMode,
+          edgeMomentumTransfer,
           digestEnabled: Boolean(rb?.digestEnabled),
           digestRGB: Array.isArray(rb?.digestRGB) ? [Number(rb.digestRGB[0]) || 0, Number(rb.digestRGB[1]) || 0, Number(rb.digestRGB[2]) || 0] : [0, 0, 0],
           consumeDyeRGB: Array.isArray(rb?.consumeDyeRGB) ? [Number(rb.consumeDyeRGB[0]) > 0 ? 1 : 0, Number(rb.consumeDyeRGB[1]) > 0 ? 1 : 0, Number(rb.consumeDyeRGB[2]) > 0 ? 1 : 0] : [0, 0, 0],
@@ -1240,6 +1250,8 @@ function cloneMiniBodies(miniBodies, controls) {
     Math.max(1e-3, Number(sp[2]) || 1),
     Number(sp[3]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK,
     normalizeEdgeDyeModeRGB(sp[4]),
+    Number(sp[5]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK,
+    Number.isFinite(Number(sp[6])) ? clamp(Number(sp[6]), 0, 1) : 1,
   ]);
 
   const hybrid = (ENABLE_HYBRID_BODY_LINKS && Array.isArray(miniBodies?.hybrid))
@@ -2027,7 +2039,7 @@ function stampMembraneObstacleMask(sim) {
     const ai = Number(sp?.[0]);
     const bi = Number(sp?.[1]);
     if (!Number.isInteger(ai) || !Number.isInteger(bi)) continue;
-    const edgeBodyMode = Number(sp?.[3]) === 0 ? 0 : 1;
+    const edgeBodyMode = Number(sp?.[5]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : (Number(sp?.[3]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK);
     if (edgeBodyMode === 0) continue;
 
     const a = soft.nodes[ai];
@@ -3015,11 +3027,33 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   };
   const rigidCenterBefore = computeRigidCenter(bodies.rigid);
 
+  const rigidEdgeMomentumScale = (rb) => {
+    const arr = Array.isArray(rb?.edgeMomentumCoupling) ? rb.edgeMomentumCoupling : (Array.isArray(rb?.edgeMomentumTransfer) ? rb.edgeMomentumTransfer : null);
+    if (!arr || arr.length === 0) return 1;
+    let sum = 0; let c = 0;
+    for (const v of arr) { const n = Number(v); if (Number.isFinite(n)) { sum += clamp(n,0,1); c++; } }
+    return c > 0 ? (sum / c) : 1;
+  };
+  const softNodeMomentumScale = (() => {
+    const sums = new Float32Array(s.nodes.length);
+    const counts = new Uint16Array(s.nodes.length);
+    for (const sp of (s.springs || [])) {
+      const a = Number(sp?.[0])|0;
+      const b = Number(sp?.[1])|0;
+      if (a < 0 || b < 0 || a >= s.nodes.length || b >= s.nodes.length) continue;
+      const m = Number(sp?.[6]);
+      const mm = Number.isFinite(m) ? clamp(m,0,1) : 1;
+      sums[a] += mm; sums[b] += mm; counts[a] += 1; counts[b] += 1;
+    }
+    return (idx) => counts[idx] > 0 ? (sums[idx] / counts[idx]) : 1;
+  })();
+
   let rigidCarryTransfer = 0;
   let softCarryTransfer = 0;
 
   for (let bi = 0; bi < bodies.rigid.length; bi++) {
     const b = bodies.rigid[bi];
+    const edgeMomentumScale = rigidEdgeMomentumScale(b);
     const invMass = 1 / Math.max(0.05, b.mass);
     const invInertia = 1 / Math.max(0.05, b.inertia || 1);
     const sampleVerts = rigidVerticesWorld(b);
@@ -3040,8 +3074,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       const relX = fx - localVx;
       const relY = fy - localVy;
       const honey = localHoneyDrag(sx, sy);
-      const fpx = relX * dragK * honey;
-      const fpy = relY * dragK * honey;
+      const fpx = relX * dragK * honey * edgeMomentumScale;
+      const fpy = relY * dragK * honey * edgeMomentumScale;
       forceX += fpx;
       forceY += fpy;
       torque += rx * fpy - ry * fpx;
@@ -3471,7 +3505,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   sim.softDeformationPrevSevereSet = new Set(deform.severeClusters);
 
   let injectedMomentum = 0;
-  const injectPoint = (px, py, pvx, pvy, localFluidX, localFluidY, mass, rad=3.0, swimInjectX = 0, swimInjectY = 0) => {
+  const injectPoint = (px, py, pvx, pvy, localFluidX, localFluidY, mass, rad=3.0, swimInjectX = 0, swimInjectY = 0, momentumScale = 1) => {
     if (!Number.isFinite(px) || !Number.isFinite(py)) return;
     const radius = Math.max(0.4, Number.isFinite(rad) ? rad : 3.0);
     const minX = Math.max(0, Math.floor(px - radius));
@@ -3482,7 +3516,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const relYRaw = pvy - localFluidY + swimInjectY;
     const relX = Number.isFinite(relXRaw) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, relXRaw)) : 0;
     const relY = Number.isFinite(relYRaw) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, relYRaw)) : 0;
-    const scaleRaw = feedbackK * Math.max(0.1, Number.isFinite(mass) ? mass : 0.1);
+    const scaleRaw = feedbackK * Math.max(0.1, Number.isFinite(mass) ? mass : 0.1) * clamp(Number(momentumScale), 0, 1);
     const scale = Number.isFinite(scaleRaw) ? Math.max(0, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, scaleRaw)) : 0;
     if (scale <= 0) return;
 
@@ -3522,6 +3556,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       b.r * 0.8,
       swimGain * Math.cos(swimPhase) * 0.015,
       swimGain * Math.sin(swimPhase) * 0.012,
+      rigidEdgeMomentumScale(b),
     );
   }
   const softClusterForInjection = computeSoftClusterKinematics(s.nodes);
@@ -3555,6 +3590,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       2.2,
       swimGain * Math.cos(swimPhase) * 0.01,
       swimGain * Math.sin(swimPhase) * 0.01,
+      softNodeMomentumScale(i),
     );
   }
 
@@ -3915,8 +3951,8 @@ function mergeBodiesIntoSim(target, incoming) {
     target.soft.nodes.push({ ...n, clusterId: (n.clusterId || 0) + clusterOffset });
   }
   for (const s of incoming.soft?.springs || []) {
-    const [a, b, rest, edgeBodyMode, edgeDyeMode] = s;
-    target.soft.springs.push([a + nodeOffset, b + nodeOffset, rest, edgeBodyMode, edgeDyeMode]);
+    const [a, b, rest, edgeBodyMode, edgeDyeMode, edgeVelocityMode, edgeMomentumTransfer] = s;
+    target.soft.springs.push([a + nodeOffset, b + nodeOffset, rest, edgeBodyMode, edgeDyeMode, edgeVelocityMode, edgeMomentumTransfer]);
   }
 
   for (const h of incoming.hybrid || []) {
@@ -4130,7 +4166,7 @@ function drawBodiesOverlay(sim) {
       const a = verts[ei];
       const b2 = verts[(ei + 1) % sides];
       const dyeMode = !b.edgeDyeMode ? EDGE_DYE_MODE.DEFLECT : b.edgeDyeMode[ei];
-      const bodyMode = !b.edgeBodyMode ? EDGE_BODY_MODE.BLOCK : b.edgeBodyMode[ei];
+      const bodyMode = Array.isArray(b.edgeVelocityMode) ? b.edgeVelocityMode[ei] : (!b.edgeBodyMode ? EDGE_BODY_MODE.BLOCK : b.edgeBodyMode[ei]);
       ctx.strokeStyle = edgeModeColor(dyeMode, bodyMode === EDGE_BODY_MODE.BLOCK);
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);

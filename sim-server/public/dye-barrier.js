@@ -113,9 +113,7 @@ export function applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVertices
         // If impermeable, preserve ABSORB semantics when explicitly requested; otherwise DEFLECT.
         return rawModeRGB[ci] === EDGE_DYE_MODE.ABSORB ? EDGE_DYE_MODE.ABSORB : EDGE_DYE_MODE.DEFLECT;
       });
-      const bodyMode = Number(resolveRigidEdgeScalar(rb?.edgeBodyMode, i, EDGE_BODY_MODE.BLOCK)) === EDGE_BODY_MODE.PASS
-        ? EDGE_BODY_MODE.PASS
-        : EDGE_BODY_MODE.BLOCK;
+      const bodyMode = resolveRigidEdgeVelocityMode(rb, i);
       if (bodyMode === EDGE_BODY_MODE.PASS
         && dyeModeRGB[0] === EDGE_DYE_MODE.PASS
         && dyeModeRGB[1] === EDGE_DYE_MODE.PASS
@@ -137,9 +135,11 @@ export function applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVertices
       ? (Number(overrideRaw) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK)
       : null;
 
-    for (const [i, j, _rest, edgeBodyMode, edgeDyeMode] of (s?.springs || [])) {
+    for (const [i, j, _rest, edgeBodyMode, edgeDyeMode, edgeVelocityMode] of (s?.springs || [])) {
       const dyeModeRGB = normalizeEdgeDyeModeRGB(edgeDyeMode);
-      const bodyModeFromEdge = Number(edgeBodyMode) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK;
+      const bodyModeFromEdge = Number(edgeVelocityMode) === EDGE_BODY_MODE.PASS
+        ? EDGE_BODY_MODE.PASS
+        : (Number(edgeBodyMode) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK);
       const bodyMode = softBodyModeResolved ?? bodyModeFromEdge;
       if (bodyMode === EDGE_BODY_MODE.PASS
         && dyeModeRGB[0] === EDGE_DYE_MODE.PASS
@@ -161,6 +161,16 @@ function resolveRigidEdgeScalar(spec, edgeIndex, fallback) {
   if (!Array.isArray(spec)) return fallback;
   const edgeValue = spec[edgeIndex];
   return edgeValue === undefined ? fallback : edgeValue;
+}
+
+function resolveRigidEdgeVelocityMode(rb, edgeIndex) {
+  const vel = resolveRigidEdgeScalar(rb?.edgeVelocityMode, edgeIndex, null);
+  if (vel !== null && vel !== undefined) {
+    return Number(vel) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK;
+  }
+  return Number(resolveRigidEdgeScalar(rb?.edgeBodyMode, edgeIndex, EDGE_BODY_MODE.BLOCK)) === EDGE_BODY_MODE.PASS
+    ? EDGE_BODY_MODE.PASS
+    : EDGE_BODY_MODE.BLOCK;
 }
 
 function resolveRigidEdgeRGBTuple(spec, edgeIndex, fallback) {

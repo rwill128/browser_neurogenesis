@@ -1,10 +1,13 @@
 export const CREATURE_SPEC_VERSION = 'creature-spec.v2';
 
+const EDGE_BODY_PASS = 0;
 const EDGE_BODY_BLOCK = 1;
 const EDGE_DYE_PASS = 0;
 const EDGE_DYE_DEFLECT = 1;
 const EDGE_DYE_ABSORB = 2;
 const EDGE_DYE_DEFLECT_RGB = [EDGE_DYE_DEFLECT, EDGE_DYE_DEFLECT, EDGE_DYE_DEFLECT];
+const EDGE_VELOCITY_BLOCK = 1;
+const EDGE_VELOCITY_PASS = 0;
 const MEMBRANE_DEFAULT_PRESSURE_GAIN = 0.08;
 const MEMBRANE_DEFAULT_RADIAL_DAMPING = 0.06;
 const MEMBRANE_DEFAULT_SHAPE_MEMORY_GAIN = 0.045;
@@ -155,10 +158,32 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
     const membraneEdgeMap = options?.fields?.membraneEdgeMap;
     const membraneShapeMap = options?.fields?.membraneShapeMap;
     const softPermeabilityMap = options?.fields?.softPermeabilityMap;
+    const softPermeabilityMapR = options?.fields?.softPermeabilityMapR;
+    const softPermeabilityMapG = options?.fields?.softPermeabilityMapG;
+    const softPermeabilityMapB = options?.fields?.softPermeabilityMapB;
+    const softEdgeConsumeMapR = options?.fields?.softEdgeConsumeMapR;
+    const softEdgeConsumeMapG = options?.fields?.softEdgeConsumeMapG;
+    const softEdgeConsumeMapB = options?.fields?.softEdgeConsumeMapB;
+    const softEdgeVelocityMap = options?.fields?.softEdgeVelocityMap;
+    const softEdgeMomentumMap = options?.fields?.softEdgeMomentumMap;
     const rigidPermeabilityMap = options?.fields?.rigidPermeabilityMap;
     const rigidEdgeConsumeMapR = options?.fields?.rigidEdgeConsumeMapR;
     const rigidEdgeConsumeMapG = options?.fields?.rigidEdgeConsumeMapG;
     const rigidEdgeConsumeMapB = options?.fields?.rigidEdgeConsumeMapB;
+    const rigidEdgeVelocityMap = options?.fields?.rigidEdgeVelocityMap;
+    const rigidEdgeMomentumMap = options?.fields?.rigidEdgeMomentumMap;
+
+    // Preferred explicit edge-policy fields.
+    const softEdgeDyeModeMapR = options?.fields?.softEdgeDyeModeMapR;
+    const softEdgeDyeModeMapG = options?.fields?.softEdgeDyeModeMapG;
+    const softEdgeDyeModeMapB = options?.fields?.softEdgeDyeModeMapB;
+    const rigidEdgeDyeModeMapR = options?.fields?.rigidEdgeDyeModeMapR;
+    const rigidEdgeDyeModeMapG = options?.fields?.rigidEdgeDyeModeMapG;
+    const rigidEdgeDyeModeMapB = options?.fields?.rigidEdgeDyeModeMapB;
+    const softEdgeVelocityModeMap = options?.fields?.softEdgeVelocityModeMap;
+    const rigidEdgeVelocityModeMap = options?.fields?.rigidEdgeVelocityModeMap;
+    const softEdgeMomentumModeMap = options?.fields?.softEdgeMomentumModeMap;
+    const rigidEdgeMomentumModeMap = options?.fields?.rigidEdgeMomentumModeMap;
     if (rigidField && softField) {
       out.authoring = {
         fields: {
@@ -170,10 +195,22 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
           membraneEdgeMap: membraneEdgeMap ? Array.from(membraneEdgeMap) : undefined,
           membraneShapeMap: membraneShapeMap ? Array.from(membraneShapeMap) : undefined,
           softPermeabilityMap: softPermeabilityMap ? Array.from(softPermeabilityMap) : undefined,
+          softPermeabilityMapR: softPermeabilityMapR ? Array.from(softPermeabilityMapR) : undefined,
+          softPermeabilityMapG: softPermeabilityMapG ? Array.from(softPermeabilityMapG) : undefined,
+          softPermeabilityMapB: softPermeabilityMapB ? Array.from(softPermeabilityMapB) : undefined,
+          softEdgeConsumeMapR: softEdgeConsumeMapR ? Array.from(softEdgeConsumeMapR) : undefined,
+          softEdgeConsumeMapG: softEdgeConsumeMapG ? Array.from(softEdgeConsumeMapG) : undefined,
+          softEdgeConsumeMapB: softEdgeConsumeMapB ? Array.from(softEdgeConsumeMapB) : undefined,
+          softEdgeVelocityMap: softEdgeVelocityMap ? Array.from(softEdgeVelocityMap) : undefined,
+          softEdgeMomentumMap: softEdgeMomentumMap ? Array.from(softEdgeMomentumMap) : undefined,
           rigidPermeabilityMap: rigidPermeabilityMap ? Array.from(rigidPermeabilityMap) : undefined,
           rigidEdgeConsumeMapR: rigidEdgeConsumeMapR ? Array.from(rigidEdgeConsumeMapR) : undefined,
           rigidEdgeConsumeMapG: rigidEdgeConsumeMapG ? Array.from(rigidEdgeConsumeMapG) : undefined,
           rigidEdgeConsumeMapB: rigidEdgeConsumeMapB ? Array.from(rigidEdgeConsumeMapB) : undefined,
+          rigidEdgeVelocityMap: rigidEdgeVelocityMap ? Array.from(rigidEdgeVelocityMap) : undefined,
+          rigidEdgeMomentumMap: rigidEdgeMomentumMap ? Array.from(rigidEdgeMomentumMap) : undefined,
+          softEdgeMomentumModeMap: softEdgeMomentumModeMap ? Array.from(softEdgeMomentumModeMap) : undefined,
+          rigidEdgeMomentumModeMap: rigidEdgeMomentumModeMap ? Array.from(rigidEdgeMomentumModeMap) : undefined,
         },
       };
     }
@@ -214,6 +251,16 @@ function compactRigidBodyEdgeDefaults(rb) {
       && Number(m[1]) <= 0
       && Number(m[2]) <= 0);
     if (allBlocked) delete out.edgePermeabilityRGB;
+  }
+
+  if (Array.isArray(out.edgeVelocityMode) && out.edgeVelocityMode.length > 0) {
+    const allBlock = out.edgeVelocityMode.every((m) => Number(m) === EDGE_BODY_BLOCK);
+    if (allBlock) delete out.edgeVelocityMode;
+  }
+
+  if (Array.isArray(out.edgeMomentumCoupling) && out.edgeMomentumCoupling.length > 0) {
+    const allUnity = out.edgeMomentumCoupling.every((v) => Math.abs((Number(v) || 1) - 1) <= 1e-6);
+    if (allUnity) delete out.edgeMomentumCoupling;
   }
 
   return out;
@@ -303,6 +350,11 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
       edgeDyeMode: normalizeEdgeDyeModeList(rb.edgeDyeMode, sides),
       edgeBodyMode: normalizeEdgeBodyModeList(rb.edgeBodyMode, sides),
       edgePermeabilityRGB: normalizeEdgePermeabilityList(rb.edgePermeabilityRGB, sides),
+      edgeVelocityMode: normalizeEdgeVelocityModeList(rb.edgeVelocityMode, sides),
+      edgeMomentumCoupling: normalizeEdgeMomentumCouplingList(
+        rb.edgeMomentumCoupling ?? rb.edgeMomentumTransfer,
+        sides,
+      ),
       digestEnabled: !!rb.digestEnabled,
       digestRGB: normalizeRGB(rb.digestRGB),
       consumeDyeRGB: normalizeBinaryRGB(rb.consumeDyeRGB ?? (rb.digestEnabled ? [1, 1, 1] : [0, 0, 0])),
@@ -345,17 +397,20 @@ export function buildBodiesFromCreatureSpec(spec, n, controls) {
 
     for (const sp of (springSource || [])) {
       if (!Array.isArray(sp)) continue;
-      const [aRaw, bRaw, restRaw, edgeBodyRaw, edgeDyeRaw] = sp;
+      const [aRaw, bRaw, restRaw, edgeBodyRaw, edgeDyeRaw, edgeVelocityRaw, edgeMomentumRaw] = sp;
       const a = Number(aRaw);
       const b = Number(bRaw);
       if (!Number.isInteger(a) || !Number.isInteger(b)) continue;
       if (a < 0 || b < 0 || a >= sb.nodes.length || b >= sb.nodes.length) continue;
+      const bodyMode = normalizeEdgeBodyMode(edgeBodyRaw);
       soft.springs.push([
         base + a,
         base + b,
         Math.max(1e-4, finiteOr(Number(restRaw), 1) * sRest),
-        normalizeEdgeBodyMode(edgeBodyRaw),
+        bodyMode,
         normalizeEdgeDyeMode(edgeDyeRaw),
+        normalizeEdgeVelocityMode(edgeVelocityRaw, bodyMode),
+        normalizeMomentumCoupling(edgeMomentumRaw),
       ]);
     }
 
@@ -437,26 +492,103 @@ function buildRigidEdgePermeabilityFromField(hull, field, width, height, thresho
   return out;
 }
 
+function buildRigidEdgeVelocityModeFromField(hull, field, width, height, threshold = 0.5) {
+  if (!(field instanceof Float32Array)) return Array.from({ length: Math.max(0, hull?.length || 0) }, () => EDGE_VELOCITY_BLOCK);
+  const th = clamp(Number.isFinite(Number(threshold)) ? Number(threshold) : 0.5, 0, 1);
+  const sides = Math.max(0, hull?.length || 0);
+  const out = [];
+  for (let i = 0; i < sides; i++) {
+    const a = hull[i];
+    const b = hull[(i + 1) % sides];
+    const mx = ((Number(a?.x) || 0) + (Number(b?.x) || 0)) * 0.5;
+    const my = ((Number(a?.y) || 0) + (Number(b?.y) || 0)) * 0.5;
+    const v = clamp(sampleBilinearField(field, width, height, mx, my, 0), 0, 1);
+    out.push(v >= th ? EDGE_VELOCITY_PASS : EDGE_VELOCITY_BLOCK);
+  }
+  return out;
+}
+
+function buildRigidEdgeMomentumTransferFromField(hull, field, width, height) {
+  if (!(field instanceof Float32Array)) return Array.from({ length: Math.max(0, hull?.length || 0) }, () => 1);
+  const sides = Math.max(0, hull?.length || 0);
+  const out = [];
+  for (let i = 0; i < sides; i++) {
+    const a = hull[i];
+    const b = hull[(i + 1) % sides];
+    const mx = ((Number(a?.x) || 0) + (Number(b?.x) || 0)) * 0.5;
+    const my = ((Number(a?.y) || 0) + (Number(b?.y) || 0)) * 0.5;
+    out.push(clamp(sampleBilinearField(field, width, height, mx, my, 1), 0, 1));
+  }
+  return out;
+}
+
+function decodeDyeModeFromScalar(v, {
+  passThreshold = 0.34,
+  absorbThreshold = 0.67,
+} = {}) {
+  const value = clamp(Number.isFinite(Number(v)) ? Number(v) : 0, 0, 1);
+  const passTh = clamp(Number.isFinite(Number(passThreshold)) ? Number(passThreshold) : 0.34, 0, 1);
+  const absorbTh = clamp(Number.isFinite(Number(absorbThreshold)) ? Number(absorbThreshold) : 0.67, passTh, 1);
+  if (value >= absorbTh) return EDGE_DYE_ABSORB;
+  if (value >= passTh) return EDGE_DYE_PASS;
+  return EDGE_DYE_DEFLECT;
+}
+
+function buildRigidEdgeDyeModeFromPolicyFields(hull, fields, width, height, thresholds = {}) {
+  const modeR = normalizeOptionalScalarField(fields?.rigidEdgeDyeModeMapR);
+  const modeG = normalizeOptionalScalarField(fields?.rigidEdgeDyeModeMapG);
+  const modeB = normalizeOptionalScalarField(fields?.rigidEdgeDyeModeMapB);
+  if (!modeR && !modeG && !modeB) return null;
+
+  const sides = Math.max(0, hull?.length || 0);
+  const out = [];
+  for (let i = 0; i < sides; i++) {
+    const a = hull[i];
+    const b = hull[(i + 1) % sides];
+    const mx = ((Number(a?.x) || 0) + (Number(b?.x) || 0)) * 0.5;
+    const my = ((Number(a?.y) || 0) + (Number(b?.y) || 0)) * 0.5;
+
+    const r = modeR ? sampleBilinearField(modeR, width, height, mx, my, 0) : 0;
+    const g = modeG ? sampleBilinearField(modeG, width, height, mx, my, 0) : 0;
+    const bVal = modeB ? sampleBilinearField(modeB, width, height, mx, my, 0) : 0;
+    out.push([
+      decodeDyeModeFromScalar(r, thresholds),
+      decodeDyeModeFromScalar(g, thresholds),
+      decodeDyeModeFromScalar(bVal, thresholds),
+    ]);
+  }
+  return out;
+}
+
 function normalizeOptionalScalarField(raw) {
   if (raw instanceof Float32Array) return raw;
   if (Array.isArray(raw)) return Float32Array.from(raw);
   return null;
 }
 
-function applySoftEdgePermeabilityFromField(springs, nodes, field, width, height, threshold = 0.5) {
-  const permeabilityField = normalizeOptionalScalarField(field);
-  if (!Array.isArray(springs) || !Array.isArray(nodes) || !permeabilityField) return;
+function applySoftEdgePoliciesFromFields(springs, nodes, fields, width, height, thresholds = {}) {
+  if (!Array.isArray(springs) || !Array.isArray(nodes)) return;
 
-  const rawThreshold = Number(threshold);
-  const th = clamp(Number.isFinite(rawThreshold) ? rawThreshold : 0.5, 0, 1);
+  const passBroadcast = normalizeOptionalScalarField(fields?.softPermeabilityMap);
+  const passR = normalizeOptionalScalarField(fields?.softPermeabilityMapR) || passBroadcast;
+  const passG = normalizeOptionalScalarField(fields?.softPermeabilityMapG) || passBroadcast;
+  const passB = normalizeOptionalScalarField(fields?.softPermeabilityMapB) || passBroadcast;
+  const eatR = normalizeOptionalScalarField(fields?.softEdgeConsumeMapR);
+  const eatG = normalizeOptionalScalarField(fields?.softEdgeConsumeMapG);
+  const eatB = normalizeOptionalScalarField(fields?.softEdgeConsumeMapB);
+  const modeR = normalizeOptionalScalarField(fields?.softEdgeDyeModeMapR);
+  const modeG = normalizeOptionalScalarField(fields?.softEdgeDyeModeMapG);
+  const modeB = normalizeOptionalScalarField(fields?.softEdgeDyeModeMapB);
+  const velField = normalizeOptionalScalarField(fields?.softEdgeVelocityModeMap)
+    || normalizeOptionalScalarField(fields?.softEdgeVelocityMap);
+  const momentumField = normalizeOptionalScalarField(fields?.softEdgeMomentumModeMap)
+    || normalizeOptionalScalarField(fields?.softEdgeMomentumMap);
 
-  const normalizeDye = (raw) => {
-    if (!Array.isArray(raw) || raw.length < 3) return [...EDGE_DYE_DEFLECT_RGB];
-    return [0, 1, 2].map((ci) => {
-      const v = Number(raw[ci]);
-      return (v === EDGE_DYE_PASS || v === EDGE_DYE_DEFLECT || v === EDGE_DYE_ABSORB) ? v : EDGE_DYE_DEFLECT;
-    });
-  };
+  const passTh = clamp(Number.isFinite(Number(thresholds?.softPermeabilityThreshold)) ? Number(thresholds.softPermeabilityThreshold) : 0.5, 0, 1);
+  const eatTh = clamp(Number.isFinite(Number(thresholds?.softEdgeConsumeThreshold)) ? Number(thresholds.softEdgeConsumeThreshold) : 0.5, 0, 1);
+  const modePassTh = clamp(Number.isFinite(Number(thresholds?.softEdgeDyeModePassThreshold)) ? Number(thresholds.softEdgeDyeModePassThreshold) : 0.34, 0, 1);
+  const modeAbsorbTh = clamp(Number.isFinite(Number(thresholds?.softEdgeDyeModeAbsorbThreshold)) ? Number(thresholds.softEdgeDyeModeAbsorbThreshold) : 0.67, modePassTh, 1);
+  const velTh = clamp(Number.isFinite(Number(thresholds?.softEdgeVelocityThreshold)) ? Number(thresholds.softEdgeVelocityThreshold) : 0.5, 0, 1);
 
   for (const sp of springs) {
     if (!Array.isArray(sp) || sp.length < 2) continue;
@@ -465,15 +597,37 @@ function applySoftEdgePermeabilityFromField(springs, nodes, field, width, height
     const a = nodes[ai];
     const b = nodes[bi];
     if (!a || !b) continue;
-
     const mx = ((Number(a?.x) || 0) + (Number(b?.x) || 0)) * 0.5;
     const my = ((Number(a?.y) || 0) + (Number(b?.y) || 0)) * 0.5;
-    const v = clamp(sampleBilinearField(permeabilityField, width, height, mx, my, 0), 0, 1);
 
-    const base = normalizeDye(sp[4]);
-    sp[4] = (v >= th)
-      ? [EDGE_DYE_PASS, EDGE_DYE_PASS, EDGE_DYE_PASS]
-      : base;
+    const outDye = [0,1,2].map((ci) => {
+      const raw = Array.isArray(sp[4]) ? Number(sp[4][ci]) : EDGE_DYE_DEFLECT;
+      let mode = (raw === EDGE_DYE_PASS || raw === EDGE_DYE_DEFLECT || raw === EDGE_DYE_ABSORB) ? raw : EDGE_DYE_DEFLECT;
+
+      const modeField = ci === 0 ? modeR : (ci === 1 ? modeG : modeB);
+      if (modeField) {
+        const modeV = clamp(sampleBilinearField(modeField, width, height, mx, my, 0), 0, 1);
+        return decodeDyeModeFromScalar(modeV, {
+          passThreshold: modePassTh,
+          absorbThreshold: modeAbsorbTh,
+        });
+      }
+
+      const passField = ci === 0 ? passR : (ci === 1 ? passG : passB);
+      const eatField = ci === 0 ? eatR : (ci === 1 ? eatG : eatB);
+      const passV = passField ? clamp(sampleBilinearField(passField, width, height, mx, my, 0),0,1) : 0;
+      const eatV = eatField ? clamp(sampleBilinearField(eatField, width, height, mx, my, 0),0,1) : 0;
+      if (passV >= passTh) mode = EDGE_DYE_PASS;
+      else if (eatV >= eatTh) mode = EDGE_DYE_ABSORB;
+      return mode;
+    });
+    sp[4] = outDye;
+
+    const velV = velField ? clamp(sampleBilinearField(velField, width, height, mx, my, 0),0,1) : 0;
+    sp[5] = velV >= velTh ? EDGE_VELOCITY_PASS : EDGE_VELOCITY_BLOCK;
+
+    const momV = momentumField ? clamp(sampleBilinearField(momentumField, width, height, mx, my, 1),0,1) : 1;
+    sp[6] = momV;
   }
 }
 
@@ -515,6 +669,9 @@ function buildRigidExportFromCompilerPieces(rigidPieces, nodes, options, width, 
   const rigidConsumeFieldG = normalizeOptionalScalarField(options?.fields?.rigidEdgeConsumeMapG);
   const rigidConsumeFieldB = normalizeOptionalScalarField(options?.fields?.rigidEdgeConsumeMapB);
   const rigidConsumeThreshold = Number(options?.rigidEdgeConsumeThreshold);
+  const rigidVelocityField = normalizeOptionalScalarField(options?.fields?.rigidEdgeVelocityMap);
+  const rigidVelocityThreshold = Number(options?.rigidEdgeVelocityThreshold);
+  const rigidMomentumField = normalizeOptionalScalarField(options?.fields?.rigidEdgeMomentumMap);
 
   const grouped = new Map();
   for (let i = 0; i < rigidPieces.length; i++) {
@@ -582,6 +739,19 @@ function buildRigidExportFromCompilerPieces(rigidPieces, nodes, options, width, 
         height,
         rigidPermeabilityThreshold,
       ),
+      edgeVelocityMode: buildRigidEdgeVelocityModeFromField(
+        outerHull,
+        rigidVelocityField,
+        width,
+        height,
+        rigidVelocityThreshold,
+      ),
+      edgeMomentumTransfer: buildRigidEdgeMomentumTransferFromField(
+        outerHull,
+        rigidMomentumField,
+        width,
+        height,
+      ),
       digestEnabled: false,
       digestRGB: [1, 1, 1],
       consumeDyeRGB: [0, 0, 0],
@@ -605,6 +775,9 @@ function buildRigidExport(tris, nodes, options, width, height) {
   const rigidConsumeFieldG = normalizeOptionalScalarField(options?.fields?.rigidEdgeConsumeMapG);
   const rigidConsumeFieldB = normalizeOptionalScalarField(options?.fields?.rigidEdgeConsumeMapB);
   const rigidConsumeThreshold = Number(options?.rigidEdgeConsumeThreshold);
+  const rigidVelocityField = normalizeOptionalScalarField(options?.fields?.rigidEdgeVelocityMap);
+  const rigidVelocityThreshold = Number(options?.rigidEdgeVelocityThreshold);
+  const rigidMomentumField = normalizeOptionalScalarField(options?.fields?.rigidEdgeMomentumMap);
 
   const comps = triangleComponents(tris);
   const rigidBodies = [];
@@ -658,6 +831,19 @@ function buildRigidExport(tris, nodes, options, width, height) {
           width,
           height,
           rigidPermeabilityThreshold,
+        ),
+        edgeVelocityMode: buildRigidEdgeVelocityModeFromField(
+          hull,
+          rigidVelocityField,
+          width,
+          height,
+          rigidVelocityThreshold,
+        ),
+        edgeMomentumTransfer: buildRigidEdgeMomentumTransferFromField(
+          hull,
+          rigidMomentumField,
+          width,
+          height,
         ),
         digestEnabled: false,
         digestRGB: [1, 1, 1],
@@ -1143,7 +1329,6 @@ export function buildMembraneRingsFromSoftField({
 }
 
 function buildSoftMembraneExportFromField({ width, height, softField, edgeLengthField, shapeMemoryField, threshold, options }) {
-  const softPermeabilityField = normalizeOptionalScalarField(options?.fields?.softPermeabilityMap);
   const softPermeabilityThreshold = Number(options?.softPermeabilityThreshold);
 
   const rings = buildMembraneRingsFromSoftField({
@@ -1188,13 +1373,17 @@ function buildSoftMembraneExportFromField({ width, height, softField, edgeLength
       ]);
     }
 
-    applySoftEdgePermeabilityFromField(
+    applySoftEdgePoliciesFromFields(
       springs,
       softNodes,
-      softPermeabilityField,
+      options?.fields || {},
       width,
       height,
-      softPermeabilityThreshold,
+      {
+        softPermeabilityThreshold,
+        softEdgeConsumeThreshold: Number(options?.softEdgeConsumeThreshold),
+        softEdgeVelocityThreshold: Number(options?.softEdgeVelocityThreshold),
+      },
     );
 
     const bodyIndex = softBodies.length;
@@ -1221,7 +1410,6 @@ function buildSoftMembraneExportFromField({ width, height, softField, edgeLength
 }
 
 function buildSoftExport(tris, nodes, options, width, height, softCrossBeams = []) {
-  const softPermeabilityField = normalizeOptionalScalarField(options?.fields?.softPermeabilityMap);
   const softPermeabilityThreshold = Number(options?.softPermeabilityThreshold);
   const enableBoundaryRing = options?.softBoundaryRingSprings !== false;
   const enableSeamWeldSprings = options?.softSeamWeldSprings !== false;
@@ -1544,13 +1732,17 @@ function buildSoftExport(tris, nodes, options, width, height, softCrossBeams = [
       }
     }
 
-    applySoftEdgePermeabilityFromField(
+    applySoftEdgePoliciesFromFields(
       exportSprings,
       exportNodes,
-      softPermeabilityField,
+      options?.fields || {},
       width,
       height,
-      softPermeabilityThreshold,
+      {
+        softPermeabilityThreshold,
+        softEdgeConsumeThreshold: Number(options?.softEdgeConsumeThreshold),
+        softEdgeVelocityThreshold: Number(options?.softEdgeVelocityThreshold),
+      },
     );
 
     const softBody = {
@@ -1830,6 +2022,22 @@ function normalizeEdgePermeabilityList(list, count) {
   });
 }
 
+function normalizeEdgeVelocityModeList(list, count) {
+  if (!Array.isArray(list) || !list.length) return Array.from({ length: count }, () => EDGE_BODY_BLOCK);
+  return Array.from({ length: count }, (_, i) => {
+    const v = list[i];
+    return v === undefined ? EDGE_BODY_BLOCK : normalizeEdgeVelocityMode(v, EDGE_BODY_BLOCK);
+  });
+}
+
+function normalizeEdgeMomentumCouplingList(list, count) {
+  if (!Array.isArray(list) || !list.length) return Array.from({ length: count }, () => 1);
+  return Array.from({ length: count }, (_, i) => {
+    const v = list[i];
+    return v === undefined ? 1 : normalizeMomentumCoupling(v);
+  });
+}
+
 /**
  * Normalize one edge body mode into binary collision semantics.
  * Only explicit `1` remains blocking; all other values become pass-through.
@@ -1837,7 +2045,19 @@ function normalizeEdgePermeabilityList(list, count) {
  * @returns {0|1}
  */
 function normalizeEdgeBodyMode(v) {
-  return Number(v) === EDGE_BODY_BLOCK ? EDGE_BODY_BLOCK : 0;
+  return Number(v) === EDGE_BODY_BLOCK ? EDGE_BODY_BLOCK : EDGE_BODY_PASS;
+}
+
+function normalizeEdgeVelocityMode(v, fallback = EDGE_BODY_BLOCK) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return Number(fallback) === EDGE_BODY_PASS ? EDGE_BODY_PASS : EDGE_BODY_BLOCK;
+  return n === EDGE_BODY_PASS ? EDGE_BODY_PASS : EDGE_BODY_BLOCK;
+}
+
+function normalizeMomentumCoupling(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 1;
+  return clamp(n, 0, 1);
 }
 
 /**

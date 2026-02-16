@@ -110,7 +110,7 @@ export function sanitizeSoftSprings(rawSprings, nodeCount, {
       dropped += 1;
       continue;
     }
-    const [aRaw, bRaw, restRaw, edgeBodyRaw, edgeDyeRaw] = sp;
+    const [aRaw, bRaw, restRaw, edgeBodyRaw, edgeDyeRaw, edgeVelocityRaw, edgeMomentumRaw] = sp;
 
     const a = Number(aRaw);
     const b = Number(bRaw);
@@ -134,7 +134,7 @@ export function sanitizeSoftSprings(rawSprings, nodeCount, {
 
     const rest = Math.max(restFloor, Number.isFinite(Number(restRaw)) ? Number(restRaw) : 1);
     const edgeBodyMode = Number(edgeBodyRaw) === edgeBodyPass ? edgeBodyPass : edgeBodyBlock;
-    out.push([a, b, rest, edgeBodyMode, edgeDyeRaw]);
+    out.push([a, b, rest, edgeBodyMode, edgeDyeRaw, edgeVelocityRaw, edgeMomentumRaw]);
   }
 
   return { springs: out, dropped };

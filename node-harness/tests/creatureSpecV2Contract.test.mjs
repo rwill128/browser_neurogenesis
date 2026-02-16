@@ -5,6 +5,7 @@ import {
   createCreatureSpecFromMesh,
   parseCreatureSpec,
   buildBodiesFromCreatureSpec,
+  buildMembraneRingsFromSoftField,
 } from '../../sim-server/public/creature-spec.js';
 
 const CONTROLS = { massSoft: 0.6, massHeavy: 5.0 };
@@ -21,6 +22,16 @@ function isConcave(poly) {
     if (cross < -1e-6) hasNeg = true;
   }
   return hasPos && hasNeg;
+}
+
+function signedArea(poly) {
+  let s = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    s += a.x * b.y - b.x * a.y;
+  }
+  return s * 0.5;
 }
 
 function assertMembraneRingOnly(sb) {
@@ -480,6 +491,39 @@ test('membrane edge-length/shape maps modulate exported ring spacing and per-ver
   const importedW = bodies.soft.nodes.map((n) => Number(n?.shapeMemoryWeight) || 0);
   const importedAvg = importedW.reduce((a, b) => a + b, 0) / Math.max(1, importedW.length);
   assert.ok(importedAvg <= 0.35, `expected imported node weights to preserve low shape-memory map (avg=${importedAvg})`);
+});
+
+test('buildMembraneRingsFromSoftField emits ccw rings and enforces max-node cap', () => {
+  const w = 40;
+  const h = 40;
+  const softField = new Float32Array(w * h);
+  for (let y = 8; y <= 32; y++) {
+    for (let x = 10; x <= 30; x++) {
+      const dx = x - 20;
+      const dy = y - 20;
+      if ((dx * dx) / 144 + (dy * dy) / 100 <= 1) {
+        softField[y * w + x] = 1;
+      }
+    }
+  }
+
+  const rings = buildMembraneRingsFromSoftField({
+    width: w,
+    height: h,
+    softField,
+    threshold: 0.35,
+    minEdgeLength: 2,
+    maxEdgeLength: 6,
+    maxNodes: 10,
+    simplifyEpsilon: 0.4,
+  });
+
+  assert.equal(rings.length, 1, 'expected one connected soft component ring');
+  const ring = rings[0];
+  assert.ok(Array.isArray(ring));
+  assert.ok(ring.length >= 3, 'ring should retain polygon form');
+  assert.ok(ring.length <= 10, `ring node count should respect maxNodes cap (got ${ring.length})`);
+  assert.ok(signedArea(ring) > 0, 'ring winding should be counter-clockwise after normalization');
 });
 
 test('createCreatureSpecFromMesh carries compiler soft cross-beams into soft spring export', () => {

@@ -168,7 +168,7 @@ function paintTrait(clientX, clientY) {
   const rect = paintCanvas.getBoundingClientRect();
   const x = ((clientX - rect.left) / rect.width) * W;
   const y = ((clientY - rect.top) / rect.height) * H;
-  const r = Math.max(1, Number(brushEl.value) || 14) * (W / paintCanvas.width);
+  const r = Math.max(1, Number(brushEl.value) || 50) * (W / paintCanvas.width);
   const mode = modeEl.value;
   const minX = Math.max(0, Math.floor(x - r));
   const maxX = Math.min(W - 1, Math.ceil(x + r));
@@ -200,7 +200,7 @@ function paintScalarMap(targetArray, canvasEl, clientX, clientY, paintValue, era
   const rect = canvasEl.getBoundingClientRect();
   const x = ((clientX - rect.left) / rect.width) * W;
   const y = ((clientY - rect.top) / rect.height) * H;
-  const r = Math.max(1, Number(brushEl.value) || 14) * (W / canvasEl.width);
+  const r = Math.max(1, Number(brushEl.value) || 50) * (W / canvasEl.width);
   const target = erase
     ? Math.max(0, Math.min(1, Number(eraseValue)))
     : Math.max(0, Math.min(1, Number(paintValue)));

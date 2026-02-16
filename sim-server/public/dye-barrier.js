@@ -95,7 +95,7 @@ export function applyImpermeableSegmentFieldBarrier(n, ax, ay, bx, by, r, g, b, 
   }
 }
 
-export function applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld }) {
+export function applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld, skipSoftEdges = false }) {
   const n = sim.controls.n;
   const softThickness = Math.max(1.2, 1.1 * (n / 256));
   const rigidThickness = Math.max(1.4, 1.2 * (n / 256));
@@ -125,18 +125,20 @@ export function applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVertices
     }
   }
 
-  const s = sim.bodies.soft;
-  for (const [i, j, _rest, edgeBodyMode, edgeDyeMode] of (s?.springs || [])) {
-    const dyeModeRGB = normalizeEdgeDyeModeRGB(edgeDyeMode);
-    const bodyMode = Number(edgeBodyMode) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK;
-    if (bodyMode === EDGE_BODY_MODE.PASS
-      && dyeModeRGB[0] === EDGE_DYE_MODE.PASS
-      && dyeModeRGB[1] === EDGE_DYE_MODE.PASS
-      && dyeModeRGB[2] === EDGE_DYE_MODE.PASS) continue;
-    const a = s.nodes?.[i];
-    const b2 = s.nodes?.[j];
-    if (!isFinitePoint(a) || !isFinitePoint(b2)) continue;
-    applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, softThickness, dyeModeRGB, bodyMode);
+  if (!skipSoftEdges) {
+    const s = sim.bodies.soft;
+    for (const [i, j, _rest, edgeBodyMode, edgeDyeMode] of (s?.springs || [])) {
+      const dyeModeRGB = normalizeEdgeDyeModeRGB(edgeDyeMode);
+      const bodyMode = Number(edgeBodyMode) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK;
+      if (bodyMode === EDGE_BODY_MODE.PASS
+        && dyeModeRGB[0] === EDGE_DYE_MODE.PASS
+        && dyeModeRGB[1] === EDGE_DYE_MODE.PASS
+        && dyeModeRGB[2] === EDGE_DYE_MODE.PASS) continue;
+      const a = s.nodes?.[i];
+      const b2 = s.nodes?.[j];
+      if (!isFinitePoint(a) || !isFinitePoint(b2)) continue;
+      applyImpermeableSegmentFieldBarrier(n, a.x, a.y, b2.x, b2.y, r, g, b, vx, vy, softThickness, dyeModeRGB, bodyMode);
+    }
   }
 }
 

@@ -191,15 +191,31 @@ const advectVelWgsl = commonWgsl + `
 @group(0) @binding(3) var<storage, read_write> vx1: array<f32>;
 @group(0) @binding(4) var<storage, read_write> vy1: array<f32>;
 @group(0) @binding(5) var<storage, read> viscMap: array<f32>;
+@group(0) @binding(6) var<storage, read> obstacleMask: array<f32>;
 
 @compute @workgroup_size(${WORKGROUP}, ${WORKGROUP})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (gid.x >= p.n || gid.y >= p.n) { return; }
   let i = idx(gid.x, gid.y);
+  if (obstacleMask[i] > 0.5) {
+    vx1[i] = 0.0;
+    vy1[i] = 0.0;
+    return;
+  }
+
   let x = f32(gid.x);
   let y = f32(gid.y);
   let px = x - p.dt * vx0[i];
   let py = y - p.dt * vy0[i];
+  let n1 = f32(p.n - 1u);
+  let sx = u32(clamp(round(px), 0.0, n1));
+  let sy = u32(clamp(round(py), 0.0, n1));
+  if (obstacleMask[idx(sx, sy)] > 0.5) {
+    vx1[i] = 0.0;
+    vy1[i] = 0.0;
+    return;
+  }
+
   let localVisc = max(0.0, viscMap[i]) * p.viscosity_scale;
   let decay = 1.0 / (1.0 + 4.0 * localVisc * p.dt);
   var nx = sampleBilinear(&vx0, px, py) * decay;
@@ -220,10 +236,17 @@ const divergenceWgsl = commonWgsl + `
 @group(0) @binding(1) var<storage, read> vx: array<f32>;
 @group(0) @binding(2) var<storage, read> vy: array<f32>;
 @group(0) @binding(3) var<storage, read_write> div: array<f32>;
+@group(0) @binding(4) var<storage, read> obstacleMask: array<f32>;
 
 @compute @workgroup_size(${WORKGROUP}, ${WORKGROUP})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (gid.x >= p.n || gid.y >= p.n) { return; }
+  let i = idx(gid.x, gid.y);
+  if (obstacleMask[i] > 0.5) {
+    div[i] = 0.0;
+    return;
+  }
+
   let x = i32(gid.x);
   let y = i32(gid.y);
   let n = i32(p.n) - 1;
@@ -231,9 +254,25 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let xr = u32(clampi(x + 1, 0, n));
   let yt = u32(clampi(y - 1, 0, n));
   let yb = u32(clampi(y + 1, 0, n));
-  let dx = vx[idx(xr, gid.y)] - vx[idx(xl, gid.y)];
-  let dy = vy[idx(gid.x, yb)] - vy[idx(gid.x, yt)];
-  div[idx(gid.x, gid.y)] = 0.5 * (dx + dy);
+
+  let li = idx(xl, gid.y);
+  let ri = idx(xr, gid.y);
+  let ti = idx(gid.x, yt);
+  let bi = idx(gid.x, yb);
+
+  var vxL = vx[li];
+  var vxR = vx[ri];
+  var vyT = vy[ti];
+  var vyB = vy[bi];
+
+  if (obstacleMask[li] > 0.5) { vxL = 0.0; }
+  if (obstacleMask[ri] > 0.5) { vxR = 0.0; }
+  if (obstacleMask[ti] > 0.5) { vyT = 0.0; }
+  if (obstacleMask[bi] > 0.5) { vyB = 0.0; }
+
+  let dx = vxR - vxL;
+  let dy = vyB - vyT;
+  div[i] = 0.5 * (dx + dy);
 }
 `;
 
@@ -241,26 +280,7 @@ const jacobiPressureWgsl = commonWgsl + `
 @group(0) @binding(1) var<storage, read> pressure0: array<f32>;
 @group(0) @binding(2) var<storage, read> div: array<f32>;
 @group(0) @binding(3) var<storage, read_write> pressure1: array<f32>;
-
-@compute @workgroup_size(${WORKGROUP}, ${WORKGROUP})
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (gid.x >= p.n || gid.y >= p.n) { return; }
-  let x = i32(gid.x);
-  let y = i32(gid.y);
-  let n = i32(p.n) - 1;
-  let xl = u32(clampi(x - 1, 0, n));
-  let xr = u32(clampi(x + 1, 0, n));
-  let yt = u32(clampi(y - 1, 0, n));
-  let yb = u32(clampi(y + 1, 0, n));
-  let sumN = pressure0[idx(xl, gid.y)] + pressure0[idx(xr, gid.y)] + pressure0[idx(gid.x, yt)] + pressure0[idx(gid.x, yb)];
-  pressure1[idx(gid.x, gid.y)] = (sumN - div[idx(gid.x, gid.y)]) * 0.25;
-}
-`;
-
-const projectWgsl = commonWgsl + `
-@group(0) @binding(1) var<storage, read_write> vx: array<f32>;
-@group(0) @binding(2) var<storage, read_write> vy: array<f32>;
-@group(0) @binding(3) var<storage, read> pressure: array<f32>;
+@group(0) @binding(4) var<storage, read> obstacleMask: array<f32>;
 
 @compute @workgroup_size(${WORKGROUP}, ${WORKGROUP})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -273,8 +293,84 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let yt = u32(clampi(y - 1, 0, n));
   let yb = u32(clampi(y + 1, 0, n));
   let i = idx(gid.x, gid.y);
-  vx[i] = vx[i] - 0.5 * (pressure[idx(xr, gid.y)] - pressure[idx(xl, gid.y)]);
-  vy[i] = vy[i] - 0.5 * (pressure[idx(gid.x, yb)] - pressure[idx(gid.x, yt)]);
+
+  if (obstacleMask[i] > 0.5) {
+    pressure1[i] = 0.0;
+    return;
+  }
+
+  let pC = pressure0[i];
+  let li = idx(xl, gid.y);
+  let ri = idx(xr, gid.y);
+  let ti = idx(gid.x, yt);
+  let bi = idx(gid.x, yb);
+
+  var pL = pressure0[li];
+  var pR = pressure0[ri];
+  var pT = pressure0[ti];
+  var pB = pressure0[bi];
+  if (obstacleMask[li] > 0.5) { pL = pC; }
+  if (obstacleMask[ri] > 0.5) { pR = pC; }
+  if (obstacleMask[ti] > 0.5) { pT = pC; }
+  if (obstacleMask[bi] > 0.5) { pB = pC; }
+
+  let sumN = pL + pR + pT + pB;
+  pressure1[i] = (sumN - div[i]) * 0.25;
+}
+`;
+
+const projectWgsl = commonWgsl + `
+@group(0) @binding(1) var<storage, read_write> vx: array<f32>;
+@group(0) @binding(2) var<storage, read_write> vy: array<f32>;
+@group(0) @binding(3) var<storage, read> pressure: array<f32>;
+@group(0) @binding(4) var<storage, read> obstacleMask: array<f32>;
+
+@compute @workgroup_size(${WORKGROUP}, ${WORKGROUP})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= p.n || gid.y >= p.n) { return; }
+  let x = i32(gid.x);
+  let y = i32(gid.y);
+  let n = i32(p.n) - 1;
+  let xl = u32(clampi(x - 1, 0, n));
+  let xr = u32(clampi(x + 1, 0, n));
+  let yt = u32(clampi(y - 1, 0, n));
+  let yb = u32(clampi(y + 1, 0, n));
+  let i = idx(gid.x, gid.y);
+
+  if (obstacleMask[i] > 0.5) {
+    vx[i] = 0.0;
+    vy[i] = 0.0;
+    return;
+  }
+
+  let pC = pressure[i];
+  let li = idx(xl, gid.y);
+  let ri = idx(xr, gid.y);
+  let ti = idx(gid.x, yt);
+  let bi = idx(gid.x, yb);
+
+  var pL = pressure[li];
+  var pR = pressure[ri];
+  var pT = pressure[ti];
+  var pB = pressure[bi];
+  let obsL = obstacleMask[li] > 0.5;
+  let obsR = obstacleMask[ri] > 0.5;
+  let obsT = obstacleMask[ti] > 0.5;
+  let obsB = obstacleMask[bi] > 0.5;
+
+  if (obsL) { pL = pC; }
+  if (obsR) { pR = pC; }
+  if (obsT) { pT = pC; }
+  if (obsB) { pB = pC; }
+
+  vx[i] = vx[i] - 0.5 * (pR - pL);
+  vy[i] = vy[i] - 0.5 * (pB - pT);
+
+  // No-through boundary condition at obstacle interfaces.
+  if (obsL && vx[i] < 0.0) { vx[i] = 0.0; }
+  if (obsR && vx[i] > 0.0) { vx[i] = 0.0; }
+  if (obsT && vy[i] < 0.0) { vy[i] = 0.0; }
+  if (obsB && vy[i] > 0.0) { vy[i] = 0.0; }
 
   let edge = (gid.x == 0u) || (gid.x == p.n - 1u) || (gid.y == 0u) || (gid.y == p.n - 1u);
   if (edge) {
@@ -299,15 +395,34 @@ const advectDyeWgsl = commonWgsl + `
 @group(0) @binding(6) var<storage, read_write> r1: array<f32>;
 @group(0) @binding(7) var<storage, read_write> g1: array<f32>;
 @group(0) @binding(8) var<storage, read_write> b1: array<f32>;
+@group(0) @binding(9) var<storage, read> obstacleMask: array<f32>;
 
 @compute @workgroup_size(${WORKGROUP}, ${WORKGROUP})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (gid.x >= p.n || gid.y >= p.n) { return; }
   let i = idx(gid.x, gid.y);
+  if (obstacleMask[i] > 0.5) {
+    r1[i] = 0.0;
+    g1[i] = 0.0;
+    b1[i] = 0.0;
+    return;
+  }
+
   let x = f32(gid.x);
   let y = f32(gid.y);
   let px = x - p.dt * vx[i];
   let py = y - p.dt * vy[i];
+  let n1 = f32(p.n - 1u);
+  let sx = u32(clamp(round(px), 0.0, n1));
+  let sy = u32(clamp(round(py), 0.0, n1));
+
+  if (obstacleMask[idx(sx, sy)] > 0.5) {
+    r1[i] = r0[i] * p.fade;
+    g1[i] = g0[i] * p.fade;
+    b1[i] = b0[i] * p.fade;
+    return;
+  }
+
   r1[i] = sampleBilinear(&r0, px, py) * p.fade;
   g1[i] = sampleBilinear(&g0, px, py) * p.fade;
   b1[i] = sampleBilinear(&b0, px, py) * p.fade;
@@ -1689,6 +1804,86 @@ function applyMembraneInsideCorrectionPass(sim, soft, loops) {
   }
 
   return corrected;
+}
+
+function stampSegmentObstacleMask(mask, n, ax, ay, bx, by, thickness = 1.8) {
+  const ex = bx - ax;
+  const ey = by - ay;
+  const segLenSq = ex * ex + ey * ey;
+  if (!Number.isFinite(segLenSq) || segLenSq < 1e-9) return;
+
+  const minX = Math.max(0, Math.floor(Math.min(ax, bx) - thickness - 1));
+  const maxX = Math.min(n - 1, Math.ceil(Math.max(ax, bx) + thickness + 1));
+  const minY = Math.max(0, Math.floor(Math.min(ay, by) - thickness - 1));
+  const maxY = Math.min(n - 1, Math.ceil(Math.max(ay, by) + thickness + 1));
+
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const px = x + 0.5;
+      const py = y + 0.5;
+      const apx = px - ax;
+      const apy = py - ay;
+      const t = Math.max(0, Math.min(1, (apx * ex + apy * ey) / Math.max(1e-9, segLenSq)));
+      const cx = ax + ex * t;
+      const cy = ay + ey * t;
+      const dx = px - cx;
+      const dy = py - cy;
+      if (dx * dx + dy * dy > thickness * thickness) continue;
+      mask[y * n + x] = 1;
+    }
+  }
+}
+
+function stampMembraneObstacleMask(sim) {
+  const n = Number(sim?.controls?.n) || 0;
+  const mask = sim?.obstacleMaskCpu;
+  if (!(mask instanceof Float32Array) || mask.length !== n * n || n <= 0) {
+    return { membraneEdgeCount: 0, usedMembraneClusters: false };
+  }
+
+  mask.fill(0);
+
+  const soft = sim?.bodies?.soft;
+  if (!soft?.nodes?.length || !Array.isArray(soft?.springs) || soft.springs.length === 0) {
+    return { membraneEdgeCount: 0, usedMembraneClusters: false };
+  }
+
+  const membraneClusterSet = new Set((sim?.bodies?.softMembraneClusters || [])
+    .map((c) => Number(c?.clusterId))
+    .filter((cid) => Number.isInteger(cid)));
+  const useMembraneClusters = membraneClusterSet.size > 0;
+  const thickness = Math.max(1.5, 1.35 + 1.15 * (n / 256));
+
+  let membraneEdgeCount = 0;
+  for (const sp of soft.springs) {
+    const ai = Number(sp?.[0]);
+    const bi = Number(sp?.[1]);
+    if (!Number.isInteger(ai) || !Number.isInteger(bi)) continue;
+    const edgeBodyMode = Number(sp?.[3]) === 0 ? 0 : 1;
+    if (edgeBodyMode === 0) continue;
+
+    const a = soft.nodes[ai];
+    const b = soft.nodes[bi];
+    if (!a || !b) continue;
+
+    if (useMembraneClusters) {
+      const ca = Number(a.clusterId);
+      const cb = Number(b.clusterId);
+      if (!Number.isInteger(ca) || !Number.isInteger(cb) || ca !== cb) continue;
+      if (!membraneClusterSet.has(ca)) continue;
+    }
+
+    const ax = Number(a.x);
+    const ay = Number(a.y);
+    const bx = Number(b.x);
+    const by = Number(b.y);
+    if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
+
+    stampSegmentObstacleMask(mask, n, ax, ay, bx, by, thickness);
+    membraneEdgeCount += 1;
+  }
+
+  return { membraneEdgeCount, usedMembraneClusters: useMembraneClusters };
 }
 
 function enforceFluidEdgeBoundariesCpu(vxField, vyField, n) {
@@ -3806,6 +4001,10 @@ async function initSim() {
   const viscMapGpu = createBuffer(device, bytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
   device.queue.writeBuffer(viscMapGpu, 0, viscMapCpu);
 
+  const obstacleMaskCpu = new Float32Array(cells);
+  const obstacleMaskGpu = createBuffer(device, bytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  device.queue.writeBuffer(obstacleMaskGpu, 0, obstacleMaskCpu);
+
   const readR = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const readG = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const readB = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
@@ -3827,12 +4026,14 @@ async function initSim() {
     pr0: pA, pr1: pB,
     rr0: rA, rr1: rB, gg0: gA, gg1: gB, bb0: bA, bb1: bB,
     viscMapCpu, viscMapGpu,
+    obstacleMaskCpu, obstacleMaskGpu,
     div, readR, readG, readB, readVx, readVy,
     bodies: initBodies(controls.n, controls),
     emitters: initEmitters(controls.n),
     disableDefaultInject: false,
     camera: { x: controls.n * 0.5, y: controls.n * 0.5, zoom: controls.n >= 1024 ? 1.8 : 1.0 },
     couplingTelemetry: [],
+    lastFluidObstacleStats: { membraneEdgeCount: 0, usedMembraneClusters: false },
     frame: 0, t0: performance.now(),
   };
 }
@@ -3864,6 +4065,12 @@ async function stepAndRender() {
   s.controls = { ...s.controls, ...uiControls, n: s.controls.n };
   uploadUniforms(s.device, s.uniform, s.controls);
 
+  // Per-frame membrane obstacle stamping (moving soft-wall boundary mask).
+  s.lastFluidObstacleStats = stampMembraneObstacleMask(s);
+  if (s.obstacleMaskGpu && s.obstacleMaskCpu) {
+    s.device.queue.writeBuffer(s.obstacleMaskGpu, 0, s.obstacleMaskCpu);
+  }
+
   const enc = s.device.createCommandEncoder();
 
   let pass = null;
@@ -3877,7 +4084,7 @@ async function stepAndRender() {
 
   pass = enc.beginComputePass();
   pass.setPipeline(s.advVel.pipeline);
-  pass.setBindGroup(0, s.advVel.bg([s.uniform, s.vx0, s.vy0, s.vx1, s.vy1, s.viscMapGpu]));
+  pass.setBindGroup(0, s.advVel.bg([s.uniform, s.vx0, s.vy0, s.vx1, s.vy1, s.viscMapGpu, s.obstacleMaskGpu]));
   pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
   pass.end();
   [s.vx0, s.vx1] = [s.vx1, s.vx0];
@@ -3885,14 +4092,14 @@ async function stepAndRender() {
 
   pass = enc.beginComputePass();
   pass.setPipeline(s.divPipe.pipeline);
-  pass.setBindGroup(0, s.divPipe.bg([s.uniform, s.vx0, s.vy0, s.div]));
+  pass.setBindGroup(0, s.divPipe.bg([s.uniform, s.vx0, s.vy0, s.div, s.obstacleMaskGpu]));
   pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
   pass.end();
 
   for (let i = 0; i < JACOBI_ITERS; i++) {
     pass = enc.beginComputePass();
     pass.setPipeline(s.jacobiP.pipeline);
-    pass.setBindGroup(0, s.jacobiP.bg([s.uniform, s.pr0, s.div, s.pr1]));
+    pass.setBindGroup(0, s.jacobiP.bg([s.uniform, s.pr0, s.div, s.pr1, s.obstacleMaskGpu]));
     pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
     pass.end();
     [s.pr0, s.pr1] = [s.pr1, s.pr0];
@@ -3900,13 +4107,13 @@ async function stepAndRender() {
 
   pass = enc.beginComputePass();
   pass.setPipeline(s.project.pipeline);
-  pass.setBindGroup(0, s.project.bg([s.uniform, s.vx0, s.vy0, s.pr0]));
+  pass.setBindGroup(0, s.project.bg([s.uniform, s.vx0, s.vy0, s.pr0, s.obstacleMaskGpu]));
   pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
   pass.end();
 
   pass = enc.beginComputePass();
   pass.setPipeline(s.advDye.pipeline);
-  pass.setBindGroup(0, s.advDye.bg([s.uniform, s.vx0, s.vy0, s.rr0, s.gg0, s.bb0, s.rr1, s.gg1, s.bb1]));
+  pass.setBindGroup(0, s.advDye.bg([s.uniform, s.vx0, s.vy0, s.rr0, s.gg0, s.bb0, s.rr1, s.gg1, s.bb1, s.obstacleMaskGpu]));
   pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
   pass.end();
   [s.rr0, s.rr1] = [s.rr1, s.rr0];
@@ -3944,7 +4151,19 @@ async function stepAndRender() {
     // Rigid + soft coupling: carry/drag from flow + two-way pushback/swim impulses.
     const couplingInstant = stepBodiesAndInject(s, vx, vy);
     applyEmitters(s, r, g, b, vx, vy);
-    applyBodyEdgeFieldBarriers({ sim: s, r, g, b, vx, vy, rigidVerticesWorld });
+    const obstacleEdgesNow = Number(s?.lastFluidObstacleStats?.membraneEdgeCount) || 0;
+    applyBodyEdgeFieldBarriers({
+      sim: s,
+      r,
+      g,
+      b,
+      vx,
+      vy,
+      rigidVerticesWorld,
+      // Membrane edges are now enforced directly in the fluid solver via obstacle mask.
+      // Skip legacy post-pass soft-edge barrier to avoid double-attenuation/extra dye loss.
+      skipSoftEdges: obstacleEdgesNow > 0,
+    });
     applyDigestiveCapture(s, r, g, b);
     enforceFluidEdgeBoundariesCpu(vx, vy, s.controls.n);
 
@@ -4015,6 +4234,7 @@ async function stepAndRender() {
         warningInterventions: s.controls.enableWarningDeformInterventions !== false,
         severeInterventions: s.controls.enableSevereDeformInterventions !== false,
         membraneClusters: Array.isArray(s.bodies?.softMembraneClusters) ? s.bodies.softMembraneClusters.length : 0,
+        fluidObstacleEdgesNow: obstacleEdgesNow,
         paintValue: Number(paintValueEl?.value) || 0.85,
         brushSize: Number(brushSizeEl?.value) || 12,
         digestiveCapture: +((s.digestiveCapture || 0).toFixed(2)),

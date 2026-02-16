@@ -203,7 +203,7 @@ So mutation code can stay simple and expressive, while build-time normalization 
 
 ## Mutation surface matrix (segment/line/vertex focus)
 
-| Trait surface | Current storage | Runtime normalization | First evolvable move |
+| Trait surface | Current storage | Runtime normalization | Practical first mutation pass |
 | --- | --- | --- | --- |
 | Segment body collision (`edgeBodyMode`) | Rigid per-edge arrays + soft spring tuple slot `[3]` | binary coercion (`1` block, else pass) | mutate sparse subset of edges to pass-through |
 | Segment dye interaction (`edgeDyeMode`) | Rigid per-edge RGB arrays + soft spring tuple slot `[4]` | per-channel enum clamp to `{0,1,2}` | channel-specific deflect/pass/absorb patterning |
@@ -211,6 +211,17 @@ So mutation code can stay simple and expressive, while build-time normalization 
 | Vertex deformability (`shapeMemoryWeight`) | Soft `nodes[i].shapeMemoryWeight` | hard clamp to `0..1`, missing => `1` | regional stiffness maps and local tissue zones |
 
 This matrix is intentionally implementation-adjacent: each row points to a concrete JSON field that already round-trips through `createCreatureSpecFromMesh` → `buildBodiesFromCreatureSpec` with deterministic projection.
+
+### JSON pointer quick map (segment/line/vertex traits)
+
+- Segment body mode (rigid): `/rigidBodies/<rbIndex>/edgeBodyMode/<edgeIndex>`
+- Segment dye mode (rigid): `/rigidBodies/<rbIndex>/edgeDyeMode/<edgeIndex>`
+- Segment permeability (rigid): `/rigidBodies/<rbIndex>/edgePermeabilityRGB/<edgeIndex>`
+- Segment body mode (soft spring tuple): `/softBodies/<sbIndex>/springs/<springIndex>/3`
+- Segment dye mode (soft spring tuple): `/softBodies/<sbIndex>/springs/<springIndex>/4`
+- Vertex shape memory: `/softBodies/<sbIndex>/nodes/<nodeIndex>/shapeMemoryWeight`
+
+Use these paths for patch-based mutators and contract tests so edits stay tied to explicit solver-facing fields.
 
 ## Engineering rollout order for trait mutability (recommended)
 
@@ -234,4 +245,4 @@ When introducing a new evolvable trait, keep it on the same deterministic rails 
 4. **Sparse payload behavior defined** (how missing indices/fields backfill).
 5. **Contract test added** in `node-harness/tests/creatureSpecV2Contract.test.mjs`.
 
-This checklist is the concrete bridge from “fixed today” to “evolvable tomorrow”: traits become mutable by gaining explicit schema representation and deterministic import behavior before any search/mutation policy starts touching them.
+This checklist keeps trait changes grounded in explicit schema representation and deterministic import behavior before any search/mutation policy starts touching them.

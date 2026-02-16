@@ -38,6 +38,12 @@ const membraneMaxEdgeLengthEl = document.getElementById('membraneMaxEdgeLength')
 const clearBtn = document.getElementById('clearBtn');
 const compileBtn = document.getElementById('compileBtn');
 const randomizeBtn = document.getElementById('randomizeBtn');
+const randomizeTraitBtn = document.getElementById('randomizeTraitBtn');
+const randomizeDensityBtn = document.getElementById('randomizeDensityBtn');
+const randomizeMembraneEdgeBtn = document.getElementById('randomizeMembraneEdgeBtn');
+const randomizeMembraneShapeBtn = document.getElementById('randomizeMembraneShapeBtn');
+const randomizeRigidPermeabilityBtn = document.getElementById('randomizeRigidPermeabilityBtn');
+const randomizeRigidConsumeBtn = document.getElementById('randomizeRigidConsumeBtn');
 const randomFieldPresetEl = document.getElementById('randomFieldPreset');
 const randomFieldSeedEl = document.getElementById('randomFieldSeed');
 const exportBtn = document.getElementById('exportBtn');
@@ -327,7 +333,18 @@ function makeRandomPatternParams(rand, seedOffset = 0) {
   };
 }
 
-function generateRandomFields({ preset = 'sine-lines', seed = 42 } = {}) {
+function generateRandomFields({
+  preset = 'sine-lines',
+  seed = 42,
+  targets = {
+    trait: true,
+    density: true,
+    membraneEdge: true,
+    membraneShape: true,
+    rigidPermeability: true,
+    rigidConsume: true,
+  },
+} = {}) {
   const baseSeed = Number.isFinite(Number(seed)) ? Math.floor(Number(seed)) : (Date.now() & 0x7fffffff);
   const rand = mulberry32(baseSeed);
   const presets = ['sine-lines', 'wave-interference', 'radial-blobs', 'flow-ridges'];
@@ -335,6 +352,15 @@ function generateRandomFields({ preset = 'sine-lines', seed = 42 } = {}) {
   const secondary = preset === 'mixed'
     ? presets[Math.floor(rand() * presets.length)]
     : presets[(presets.indexOf(primary) + 1 + Math.floor(rand() * 2)) % presets.length];
+
+  const targetFlags = {
+    trait: !!targets?.trait,
+    density: !!targets?.density,
+    membraneEdge: !!targets?.membraneEdge,
+    membraneShape: !!targets?.membraneShape,
+    rigidPermeability: !!targets?.rigidPermeability,
+    rigidConsume: !!targets?.rigidConsume,
+  };
 
   const rigidParams = makeRandomPatternParams(rand, 11);
   const softParams = makeRandomPatternParams(rand, 23);
@@ -363,39 +389,57 @@ function generateRandomFields({ preset = 'sine-lines', seed = 42 } = {}) {
       const rigidWin = smoothstep(0.46, 0.78, rigidSignal - softSignal * 0.72 + 0.08);
       const softWin = smoothstep(0.46, 0.78, softSignal - rigidSignal * 0.72 + 0.08);
 
-      if (rigidWin >= softWin) {
-        rigid[i] = rigidWin * edgeFade;
-        soft[i] = 0;
-      } else {
-        soft[i] = softWin * edgeFade;
-        rigid[i] = 0;
+      if (targetFlags.trait) {
+        if (rigidWin >= softWin) {
+          rigid[i] = rigidWin * edgeFade;
+          soft[i] = 0;
+        } else {
+          soft[i] = softWin * edgeFade;
+          rigid[i] = 0;
+        }
       }
 
-      const dens = samplePatternValue('wave-interference', nx, ny, densityParams);
-      softDensity[i] = Math.max(0, Math.min(1, 0.1 + 0.8 * dens));
+      if (targetFlags.density) {
+        const dens = samplePatternValue('wave-interference', nx, ny, densityParams);
+        softDensity[i] = Math.max(0, Math.min(1, 0.1 + 0.8 * dens));
+      }
 
-      const edgeV = samplePatternValue('flow-ridges', nx, ny, edgeParams);
-      membraneEdgeMap[i] = Math.max(0, Math.min(1, edgeV));
+      if (targetFlags.membraneEdge) {
+        const edgeV = samplePatternValue('flow-ridges', nx, ny, edgeParams);
+        membraneEdgeMap[i] = Math.max(0, Math.min(1, edgeV));
+      }
 
-      const shapeV = samplePatternValue('radial-blobs', nx, ny, shapeParams);
-      membraneShapeMap[i] = Math.max(0, Math.min(1, 0.15 + 0.85 * shapeV));
+      if (targetFlags.membraneShape) {
+        const shapeV = samplePatternValue('radial-blobs', nx, ny, shapeParams);
+        membraneShapeMap[i] = Math.max(0, Math.min(1, 0.15 + 0.85 * shapeV));
+      }
 
-      const permV = samplePatternValue('sine-lines', nx, ny, permParams);
-      rigidPermeabilityMap[i] = rigid[i] > 0.12 ? smoothstep(0.56, 0.84, permV) : 0;
+      if (targetFlags.rigidPermeability) {
+        const permV = samplePatternValue('sine-lines', nx, ny, permParams);
+        rigidPermeabilityMap[i] = rigid[i] > 0.12 ? smoothstep(0.56, 0.84, permV) : 0;
+      }
 
-      const consumeMask = smoothstep(0.58, 0.9, rigidSignal);
-      const rV = samplePatternValue('wave-interference', nx, ny, consumeRParams);
-      const gV = samplePatternValue('wave-interference', nx, ny, consumeGParams);
-      const bV = samplePatternValue('wave-interference', nx, ny, consumeBParams);
-      rigidEdgeConsumeMapR[i] = rigid[i] > 0.1 ? consumeMask * smoothstep(0.72, 0.9, rV) : 0;
-      rigidEdgeConsumeMapG[i] = rigid[i] > 0.1 ? consumeMask * smoothstep(0.72, 0.9, gV) : 0;
-      rigidEdgeConsumeMapB[i] = rigid[i] > 0.1 ? consumeMask * smoothstep(0.72, 0.9, bV) : 0;
+      if (targetFlags.rigidConsume) {
+        const consumeMask = smoothstep(0.58, 0.9, rigidSignal);
+        const rV = samplePatternValue('wave-interference', nx, ny, consumeRParams);
+        const gV = samplePatternValue('wave-interference', nx, ny, consumeGParams);
+        const bV = samplePatternValue('wave-interference', nx, ny, consumeBParams);
+        rigidEdgeConsumeMapR[i] = rigid[i] > 0.1 ? consumeMask * smoothstep(0.72, 0.9, rV) : 0;
+        rigidEdgeConsumeMapG[i] = rigid[i] > 0.1 ? consumeMask * smoothstep(0.72, 0.9, gV) : 0;
+        rigidEdgeConsumeMapB[i] = rigid[i] > 0.1 ? consumeMask * smoothstep(0.72, 0.9, bV) : 0;
+      }
     }
   }
 
   drawFields();
   compileNow();
-  return { seed: baseSeed, preset, rigidPattern: primary, softPattern: secondary };
+  return {
+    seed: baseSeed,
+    preset,
+    rigidPattern: primary,
+    softPattern: secondary,
+    targets: targetFlags,
+  };
 }
 
 function buildSpecFromCurrentFields(mesh, traitFields = null) {
@@ -419,7 +463,7 @@ function buildSpecFromCurrentFields(mesh, traitFields = null) {
     },
     threshold: Math.max(0, Math.min(1, Number(thresholdEl?.value) || 0.35)),
     softBoundaryRingSprings: !!softBoundaryRingEl?.checked,
-    softSolverMode: softSolverModeEl?.value || 'spring',
+    softSolverMode: softSolverModeEl?.value || 'membrane',
     membraneMinEdgeLength,
     membraneMaxEdgeLength,
   });
@@ -651,7 +695,7 @@ function drawMesh(mesh) {
   mctx.clearRect(0, 0, meshCanvas.width, meshCanvas.height);
   const sx = meshCanvas.width / W;
   const sy = meshCanvas.height / H;
-  const membranePreview = (softSolverModeEl?.value || 'spring') === 'membrane';
+  const membranePreview = (softSolverModeEl?.value || 'membrane') === 'membrane';
   const compiledSoftField = mesh?.__compileFields?.softField || soft;
 
   if (!membranePreview) {
@@ -776,11 +820,11 @@ function drawMesh(mesh) {
   out.textContent = JSON.stringify({
     ...mesh.meta,
     compileRevision,
-    softSolverMode: softSolverModeEl?.value || 'spring',
-    softPreview: ((softSolverModeEl?.value || 'spring') === 'membrane')
+    softSolverMode: softSolverModeEl?.value || 'membrane',
+    softPreview: ((softSolverModeEl?.value || 'membrane') === 'membrane')
       ? 'resampled membrane ring from painted mask'
       : 'triangulated soft mesh',
-    membraneShapePreview: ((softSolverModeEl?.value || 'spring') === 'membrane')
+    membraneShapePreview: ((softSolverModeEl?.value || 'membrane') === 'membrane')
       ? 'ring edge/node color encodes membrane shape-memory map (give→stiff)'
       : undefined,
     rigidContourPreview: 'rigid contours are perimeter-resampled from border vertices; dots show exported vertices',
@@ -827,7 +871,7 @@ function syncFieldPanelVisibility() {
 }
 
 function syncSoftModeUi() {
-  const membraneMode = (softSolverModeEl?.value || 'spring') === 'membrane';
+  const membraneMode = (softSolverModeEl?.value || 'membrane') === 'membrane';
   if (!softInfillModeEl) return membraneMode;
   if (membraneMode) {
     softInfillModeEl.value = 'none';
@@ -993,16 +1037,46 @@ clearBtn.addEventListener('click', () => {
   compileNow();
 });
 compileBtn.addEventListener('click', compileNow);
+function randomizeWithTargets(targets) {
+  const preset = String(randomFieldPresetEl?.value || 'sine-lines');
+  const rawSeed = Number(randomFieldSeedEl?.value);
+  const seed = Number.isFinite(rawSeed) ? Math.floor(rawSeed) : (Date.now() & 0x7fffffff);
+  const info = generateRandomFields({ preset, seed, targets });
+  if (randomFieldSeedEl && Number.isFinite(Number(info?.seed))) {
+    randomFieldSeedEl.value = String(info.seed);
+  }
+  return info;
+}
+
 if (randomizeBtn) {
   randomizeBtn.addEventListener('click', () => {
-    const preset = String(randomFieldPresetEl?.value || 'sine-lines');
-    const rawSeed = Number(randomFieldSeedEl?.value);
-    const seed = Number.isFinite(rawSeed) ? Math.floor(rawSeed) : (Date.now() & 0x7fffffff);
-    const info = generateRandomFields({ preset, seed });
-    if (randomFieldSeedEl && Number.isFinite(Number(info?.seed))) {
-      randomFieldSeedEl.value = String(info.seed);
-    }
+    randomizeWithTargets({
+      trait: true,
+      density: true,
+      membraneEdge: true,
+      membraneShape: true,
+      rigidPermeability: true,
+      rigidConsume: true,
+    });
   });
+}
+if (randomizeTraitBtn) {
+  randomizeTraitBtn.addEventListener('click', () => randomizeWithTargets({ trait: true }));
+}
+if (randomizeDensityBtn) {
+  randomizeDensityBtn.addEventListener('click', () => randomizeWithTargets({ density: true }));
+}
+if (randomizeMembraneEdgeBtn) {
+  randomizeMembraneEdgeBtn.addEventListener('click', () => randomizeWithTargets({ membraneEdge: true }));
+}
+if (randomizeMembraneShapeBtn) {
+  randomizeMembraneShapeBtn.addEventListener('click', () => randomizeWithTargets({ membraneShape: true }));
+}
+if (randomizeRigidPermeabilityBtn) {
+  randomizeRigidPermeabilityBtn.addEventListener('click', () => randomizeWithTargets({ rigidPermeability: true }));
+}
+if (randomizeRigidConsumeBtn) {
+  randomizeRigidConsumeBtn.addEventListener('click', () => randomizeWithTargets({ rigidConsume: true }));
 }
 if (fieldPaintTargetEl) fieldPaintTargetEl.addEventListener('change', syncFieldPanelVisibility);
 if (softInfillModeEl) softInfillModeEl.addEventListener('change', compileNow);
@@ -1034,7 +1108,8 @@ importFile.addEventListener('change', async () => {
   const text = await f.text();
   const spec = parseCreatureSpec(text);
   if (softSolverModeEl) {
-    const mode = (spec.softBodies?.[0]?.solverMode === 'membrane') ? 'membrane' : 'spring';
+    const importedMode = String(spec.softBodies?.[0]?.solverMode || '').toLowerCase();
+    const mode = importedMode === 'spring' ? 'spring' : 'membrane';
     softSolverModeEl.value = mode;
   }
   syncSoftModeUi();

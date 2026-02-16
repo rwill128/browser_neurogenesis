@@ -3458,6 +3458,13 @@ function buildWindTunnelEmitter(n, {
   strength = 3.8,
   radius = Math.max(7, n / 13),
   yFraction = 0.12,
+  spin = 1.25,
+  curlGain = 1.65,
+  driftGain = 0.035,
+  chaosGain = 1.35,
+  wobbleAmp = Math.max(0.8, n * 0.016),
+  wobbleFreq = 0.085,
+  swirlJitter = 0.73,
 } = {}) {
   return {
     x: n * 0.5,
@@ -3469,13 +3476,13 @@ function buildWindTunnelEmitter(n, {
     cg: 190,
     cb: 255,
     strength: Math.max(0.1, Number(strength) || 3.8),
-    spin: 0,
-    curlGain: 0,
-    driftGain: 0.09,
-    chaosGain: 0,
-    wobbleAmp: 0,
-    wobbleFreq: 0,
-    swirlJitter: 0,
+    spin: Number.isFinite(Number(spin)) ? Number(spin) : 1.25,
+    curlGain: Number.isFinite(Number(curlGain)) ? Number(curlGain) : 1.65,
+    driftGain: Number.isFinite(Number(driftGain)) ? Number(driftGain) : 0.035,
+    chaosGain: Number.isFinite(Number(chaosGain)) ? Number(chaosGain) : 1.35,
+    wobbleAmp: Number.isFinite(Number(wobbleAmp)) ? Number(wobbleAmp) : Math.max(0.8, n * 0.016),
+    wobbleFreq: Number.isFinite(Number(wobbleFreq)) ? Number(wobbleFreq) : 0.085,
+    swirlJitter: Number.isFinite(Number(swirlJitter)) ? Number(swirlJitter) : 0.73,
   };
 }
 

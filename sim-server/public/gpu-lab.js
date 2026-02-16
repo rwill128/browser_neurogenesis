@@ -32,6 +32,8 @@ const massSoftEl = document.getElementById('massSoft');
 const bodyDragEl = document.getElementById('bodyDrag');
 const bodyFeedbackEl = document.getElementById('bodyFeedback');
 const spawnMembraneCellsEl = document.getElementById('spawnMembraneCells');
+const enableWarningDeformInterventionsEl = document.getElementById('enableWarningDeformInterventions');
+const enableSevereDeformInterventionsEl = document.getElementById('enableSevereDeformInterventions');
 
 const GENERATED_MINI_SCENARIOS_URL = '/generated-mini-scenarios.json';
 let generatedMiniScenarios = new Map();
@@ -110,6 +112,8 @@ function readControls() {
     bodyDrag: Math.max(0, Number(bodyDragEl.value) || 0.55),
     bodyFeedback: Math.max(0, Number(bodyFeedbackEl.value) || 0.012),
     spawnMembraneCells: !!spawnMembraneCellsEl?.checked,
+    enableWarningDeformInterventions: (enableWarningDeformInterventionsEl?.checked !== false),
+    enableSevereDeformInterventions: (enableSevereDeformInterventionsEl?.checked !== false),
   };
 }
 
@@ -2950,37 +2954,45 @@ function stepBodiesAndInject(sim, vxField, vyField) {
 
   sim.lastRigidContacts = rigidContactDebug.length > 64 ? rigidContactDebug.slice(0, 64) : rigidContactDebug;
 
+  const warningInterventionsOn = sim.controls?.enableWarningDeformInterventions !== false;
+  const severeInterventionsOn = sim.controls?.enableSevereDeformInterventions !== false;
+
   let deform = buildSoftDeformationState(sim, s, softClusterLoops);
-  if (deform.severeCollapseCount > 0) {
+  if (severeInterventionsOn && deform.severeCollapseCount > 0) {
     stabilizeSeverelyDeformedSoftClusters(sim, s, softClusterLoops, deform);
     deform = buildSoftDeformationState(sim, s, softClusterLoops);
   }
+
   if (sim.softSpringRestBaseline && sim.softSpringRestBaseline.length === s.springs.length) {
-    const recovering = deform.severeCollapseCount === 0;
+    const severeProfile = severeInterventionsOn && deform.severeCollapseCount > 0;
+    const warningProfile = warningInterventionsOn && !severeProfile && deform.warningCount > 0;
+    const profile = severeProfile ? 'severe' : (warningProfile ? 'warning' : 'baseline');
+    const pick = (baseline, warning, severe) => (profile === 'baseline' ? baseline : (profile === 'warning' ? warning : severe));
+
     recoverSoftSpringRests(s.springs, sim.softSpringRestBaseline, {
-      recoverRate: recovering ? 0.056 : 0.015,
+      recoverRate: pick(0.056, 0.036, 0.015),
       hardMinFactor: 0.7,
       hardMaxFactor: 1.45,
       jitterDeadband: 1e-5,
-      adaptiveGainMax: recovering ? 2.4 : 1.35,
-      adaptiveExponent: recovering ? 0.78 : 1.0,
-      elongationBiasMax: recovering ? 1.22 : 1.08,
-      compressionBiasMax: recovering ? 1.12 : 1.04,
+      adaptiveGainMax: pick(2.4, 1.85, 1.35),
+      adaptiveExponent: pick(0.78, 0.9, 1.0),
+      elongationBiasMax: pick(1.22, 1.14, 1.08),
+      compressionBiasMax: pick(1.12, 1.08, 1.04),
       errorPivot: 0.16,
-      outlierRecoveryCouplingMax: recovering ? 1.22 : 1.05,
-      outlierErrorPivot: recovering ? 0.75 : 0.95,
-      localEndpointCouplingMax: recovering ? 1.16 : 1.03,
-      localDirectionalCouplingMax: recovering ? 1.1 : 1.02,
-      localImbalanceCouplingMax: recovering ? 1.12 : 1.02,
-      localConsensusCouplingMax: recovering ? 1.08 : 1.01,
-      localOutlierCouplingMax: recovering ? 1.12 : 1.02,
-      localOutlierErrorPivot: recovering ? 0.85 : 1.1,
-      localErrorPivot: recovering ? 0.2 : 0.3,
-      counterPolarityCouplingMax: recovering ? 1.09 : 1.02,
-      smallRestRecoveryCouplingMax: recovering ? 1.14 : 1.0,
-      smallRestPivot: recovering ? 0.9 : 1.2,
-      lowErrorRecoveryCouplingMax: recovering ? 1.12 : 1.0,
-      lowErrorRecoveryGate: recovering ? 0.08 : 0.05,
+      outlierRecoveryCouplingMax: pick(1.22, 1.12, 1.05),
+      outlierErrorPivot: pick(0.75, 0.85, 0.95),
+      localEndpointCouplingMax: pick(1.16, 1.08, 1.03),
+      localDirectionalCouplingMax: pick(1.1, 1.06, 1.02),
+      localImbalanceCouplingMax: pick(1.12, 1.07, 1.02),
+      localConsensusCouplingMax: pick(1.08, 1.04, 1.01),
+      localOutlierCouplingMax: pick(1.12, 1.07, 1.02),
+      localOutlierErrorPivot: pick(0.85, 0.95, 1.1),
+      localErrorPivot: pick(0.2, 0.25, 0.3),
+      counterPolarityCouplingMax: pick(1.09, 1.05, 1.02),
+      smallRestRecoveryCouplingMax: pick(1.14, 1.08, 1.0),
+      smallRestPivot: pick(0.9, 1.05, 1.2),
+      lowErrorRecoveryCouplingMax: pick(1.12, 1.06, 1.0),
+      lowErrorRecoveryGate: pick(0.08, 0.065, 0.05),
     });
   }
   sim.softDeformationState = deform;
@@ -3979,6 +3991,8 @@ async function stepAndRender() {
         bodyDrag: s.controls.bodyDrag,
         bodyFeedback: s.controls.bodyFeedback,
         spawnMembraneCells: !!s.controls.spawnMembraneCells,
+        warningInterventions: s.controls.enableWarningDeformInterventions !== false,
+        severeInterventions: s.controls.enableSevereDeformInterventions !== false,
         membraneClusters: Array.isArray(s.bodies?.softMembraneClusters) ? s.bodies.softMembraneClusters.length : 0,
         paintValue: Number(paintValueEl?.value) || 0.85,
         brushSize: Number(brushSizeEl?.value) || 12,

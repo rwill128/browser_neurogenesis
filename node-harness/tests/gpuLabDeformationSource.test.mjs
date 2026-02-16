@@ -9,8 +9,8 @@ const source = readFileSync(resolve(ROOT, 'sim-server/public/gpu-lab.js'), 'utf8
 test('gpu-lab deformation stabilization is gated by collapse risk, not pose-only severity', () => {
   assert.match(
     source,
-    /if \(deform\.severeCollapseCount > 0\) \{\s*stabilizeSeverelyDeformedSoftClusters/s,
-    'expected severe stabilization to require severeCollapseCount > 0',
+    /if \((?:severeInterventionsOn && )?deform\.severeCollapseCount > 0\) \{\s*stabilizeSeverelyDeformedSoftClusters/s,
+    'expected severe stabilization to require severeCollapseCount > 0 (optionally behind severe feature flag)',
   );
 
   assert.match(

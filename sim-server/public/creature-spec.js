@@ -1625,10 +1625,22 @@ function normalizeEdgePermeabilityList(list, count) {
   });
 }
 
+/**
+ * Normalize one edge body mode into binary collision semantics.
+ * Only explicit `1` remains blocking; all other values become pass-through.
+ * @param {unknown} v
+ * @returns {0|1}
+ */
 function normalizeEdgeBodyMode(v) {
   return Number(v) === EDGE_BODY_BLOCK ? EDGE_BODY_BLOCK : 0;
 }
 
+/**
+ * Normalize one edge dye mode into strict RGB channel enums.
+ * Missing/invalid values fall back to DEFLECT per channel for safety.
+ * @param {unknown} v
+ * @returns {[number, number, number]}
+ */
 function normalizeEdgeDyeMode(v) {
   if (Array.isArray(v) && v.length >= 3) {
     return [

@@ -775,6 +775,24 @@ test('buildBodiesFromCreatureSpec normalizes per-edge body modes to binary pass/
   assert.equal(Number(bodies.soft.springs[1][3]), 1);
 });
 
+test('buildBodiesFromCreatureSpec deterministically defaults malformed soft spring trait slots', () => {
+  const spec = createCreatureSpecFromMesh(sampleMesh(), { softBoundaryRingSprings: false });
+  const sb = spec.softBodies[0];
+  assert.ok(sb?.springs?.length >= 1, 'sample soft body should include at least one spring');
+
+  // Remove optional trait slots from first spring tuple.
+  sb.springs[0] = [sb.springs[0][0], sb.springs[0][1], sb.springs[0][2]];
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+  const imported = bodies.soft.springs[0];
+  assert.ok(Array.isArray(imported), 'imported spring should be tuple-like');
+
+  // Missing edgeBodyMode defaults to pass (0) and missing edgeDyeMode defaults
+  // channel-wise to DEFLECT [1,1,1].
+  assert.equal(Number(imported[3]), 0);
+  assert.deepEqual(imported[4], [1, 1, 1]);
+});
+
 test('buildBodiesFromCreatureSpec deterministically backfills sparse rigid edge arrays with safe defaults', () => {
   const spec = createCreatureSpecFromMesh(sampleMesh());
   const rb = spec.rigidBodies[0];

@@ -145,35 +145,35 @@
   <div class="pane">
     <div class="field-panel" data-field-panel="trait">
       <div>Trait fields (rigid/soft; mutually exclusive)</div>
-      <canvas id="paint" width="512" height="512"></canvas>
+      <canvas id="paint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="density">
       <div>Resolution map (separate plane)</div>
-      <canvas id="densityPaint" width="512" height="512"></canvas>
+      <canvas id="densityPaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="membraneEdge">
       <div>Perimeter edge-length map (black=min edge, white=max edge; used by membrane + rigid contours)</div>
-      <canvas id="membraneEdgePaint" width="512" height="512"></canvas>
+      <canvas id="membraneEdgePaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="membraneShape">
       <div>Membrane shape-memory map (dark=more give, bright=stiffer)</div>
-      <canvas id="membraneShapePaint" width="512" height="512"></canvas>
+      <canvas id="membraneShapePaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="rigidPermeability">
       <div>Rigid edge permeability map (black=blocked, white=permeable)</div>
-      <canvas id="rigidPermeabilityPaint" width="512" height="512"></canvas>
+      <canvas id="rigidPermeabilityPaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="rigidConsume">
       <div>Rigid edge consume-dye map (paint RGB channels to absorb on edges)</div>
-      <canvas id="rigidConsumePaint" width="512" height="512"></canvas>
+      <canvas id="rigidConsumePaint" width="384" height="384"></canvas>
     </div>
     <div class="compiled-panel" id="compiledPanel">
       <div>Compiled mesh</div>
-      <canvas id="mesh" width="512" height="512"></canvas>
+      <canvas id="mesh" width="384" height="384"></canvas>
     </div>
     <div class="wind-panel" id="windPanel">
       <div>Wind tunnel preview (GPU physics)</div>
-      <iframe id="windTunnelFrame" src="/gpu-lab.html?embed=1" width="512" height="512" loading="lazy"></iframe>
+      <iframe id="windTunnelFrame" src="/gpu-lab.html?embed=1" width="384" height="384" loading="lazy"></iframe>
     </div>
   </div>
   <pre id="out">ready</pre>

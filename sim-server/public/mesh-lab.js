@@ -57,12 +57,141 @@ const rigidEdgeConsumeMapG = new Float32Array(W * H).fill(0.0);
 const rigidEdgeConsumeMapB = new Float32Array(W * H).fill(0.0);
 let lastMesh = null;
 let lastCompiledSpec = null;
+let lastCompiledFields = null;
 let compileRevision = 0;
 let windTunnelReady = false;
 
 const fieldPanels = Array.from(document.querySelectorAll('.field-panel'));
 
 function idx(x, y) { return y * W + x; }
+
+function isolateLargestContiguousTraitBody(rigidField, softField, threshold = 0.35) {
+  const total = W * H;
+  const th = Math.max(0, Math.min(1, Number(threshold) || 0.35));
+  const occupied = new Uint8Array(total);
+
+  for (let i = 0; i < total; i++) {
+    const rv = Number(rigidField?.[i]) || 0;
+    const sv = Number(softField?.[i]) || 0;
+    if (Math.max(rv, sv) >= th) occupied[i] = 1;
+  }
+
+  const visited = new Uint8Array(total);
+  const queue = new Int32Array(total);
+  let bestStart = -1;
+  let bestCells = 0;
+  let bestWeightedArea = -1;
+  let componentCount = 0;
+
+  const tryComponent = (start) => {
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = start;
+    visited[start] = 1;
+
+    let cells = 0;
+    let weightedArea = 0;
+    while (head < tail) {
+      const i = queue[head++];
+      cells += 1;
+      const rv = Number(rigidField?.[i]) || 0;
+      const sv = Number(softField?.[i]) || 0;
+      weightedArea += Math.max(rv, sv);
+
+      const x = i % W;
+      const y = (i / W) | 0;
+      if (x > 0) {
+        const ni = i - 1;
+        if (occupied[ni] && !visited[ni]) { visited[ni] = 1; queue[tail++] = ni; }
+      }
+      if (x + 1 < W) {
+        const ni = i + 1;
+        if (occupied[ni] && !visited[ni]) { visited[ni] = 1; queue[tail++] = ni; }
+      }
+      if (y > 0) {
+        const ni = i - W;
+        if (occupied[ni] && !visited[ni]) { visited[ni] = 1; queue[tail++] = ni; }
+      }
+      if (y + 1 < H) {
+        const ni = i + W;
+        if (occupied[ni] && !visited[ni]) { visited[ni] = 1; queue[tail++] = ni; }
+      }
+    }
+
+    return { cells, weightedArea };
+  };
+
+  for (let i = 0; i < total; i++) {
+    if (!occupied[i] || visited[i]) continue;
+    componentCount += 1;
+    const { cells, weightedArea } = tryComponent(i);
+    if (cells > bestCells || (cells === bestCells && weightedArea > bestWeightedArea)) {
+      bestCells = cells;
+      bestWeightedArea = weightedArea;
+      bestStart = i;
+    }
+  }
+
+  if (bestStart < 0) {
+    return {
+      rigidField: rigidField instanceof Float32Array ? rigidField : Float32Array.from(rigidField || []),
+      softField: softField instanceof Float32Array ? softField : Float32Array.from(softField || []),
+      keptCells: 0,
+      removedCells: 0,
+      componentCount,
+    };
+  }
+
+  const keep = new Uint8Array(total);
+  let head = 0;
+  let tail = 0;
+  queue[tail++] = bestStart;
+  keep[bestStart] = 1;
+  while (head < tail) {
+    const i = queue[head++];
+    const x = i % W;
+    const y = (i / W) | 0;
+    if (x > 0) {
+      const ni = i - 1;
+      if (occupied[ni] && !keep[ni]) { keep[ni] = 1; queue[tail++] = ni; }
+    }
+    if (x + 1 < W) {
+      const ni = i + 1;
+      if (occupied[ni] && !keep[ni]) { keep[ni] = 1; queue[tail++] = ni; }
+    }
+    if (y > 0) {
+      const ni = i - W;
+      if (occupied[ni] && !keep[ni]) { keep[ni] = 1; queue[tail++] = ni; }
+    }
+    if (y + 1 < H) {
+      const ni = i + W;
+      if (occupied[ni] && !keep[ni]) { keep[ni] = 1; queue[tail++] = ni; }
+    }
+  }
+
+  const filteredRigid = new Float32Array(total);
+  const filteredSoft = new Float32Array(total);
+  let occupiedCount = 0;
+  let keptCount = 0;
+  for (let i = 0; i < total; i++) {
+    const rv = Number(rigidField?.[i]) || 0;
+    const sv = Number(softField?.[i]) || 0;
+    if (Math.max(rv, sv) >= th) occupiedCount += 1;
+    if (keep[i]) {
+      filteredRigid[i] = rv;
+      filteredSoft[i] = sv;
+      keptCount += 1;
+    }
+  }
+
+  return {
+    rigidField: filteredRigid,
+    softField: filteredSoft,
+    keptCells: keptCount,
+    removedCells: Math.max(0, occupiedCount - keptCount),
+    componentCount,
+  };
+}
 
 function sampleMapBilinear(field, x, y, fallback = 0.5) {
   if (!(field instanceof Float32Array) || field.length < W * H) return fallback;
@@ -269,15 +398,17 @@ function generateRandomFields({ preset = 'sine-lines', seed = 42 } = {}) {
   return { seed: baseSeed, preset, rigidPattern: primary, softPattern: secondary };
 }
 
-function buildSpecFromCurrentFields(mesh) {
+function buildSpecFromCurrentFields(mesh, traitFields = null) {
   if (!mesh) return null;
+  const rigidFieldForExport = traitFields?.rigidField || rigid;
+  const softFieldForExport = traitFields?.softField || soft;
   const membraneMinEdgeLength = Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4);
   const membraneMaxEdgeLength = Math.max(membraneMinEdgeLength, Number(membraneMaxEdgeLengthEl?.value) || 8);
   return createCreatureSpecFromMesh(mesh, {
     name: 'mesh-lab-creature',
     fields: {
-      rigidField: rigid,
-      softField: soft,
+      rigidField: rigidFieldForExport,
+      softField: softFieldForExport,
       softDensityField: softDensity,
       membraneEdgeMap,
       membraneShapeMap,
@@ -521,6 +652,7 @@ function drawMesh(mesh) {
   const sx = meshCanvas.width / W;
   const sy = meshCanvas.height / H;
   const membranePreview = (softSolverModeEl?.value || 'spring') === 'membrane';
+  const compiledSoftField = mesh?.__compileFields?.softField || soft;
 
   if (!membranePreview) {
     // Spring mode preview: show compiled soft triangles + optional cross-beams.
@@ -560,7 +692,7 @@ function drawMesh(mesh) {
     const rings = buildMembraneRingsFromSoftField({
       width: W,
       height: H,
-      softField: soft,
+      softField: compiledSoftField,
       edgeLengthField: membraneEdgeMap,
       threshold: thr,
       minEdgeLength: minEdge,
@@ -652,9 +784,21 @@ function drawMesh(mesh) {
       ? 'ring edge/node color encodes membrane shape-memory map (give→stiff)'
       : undefined,
     rigidContourPreview: 'rigid contours are perimeter-resampled from border vertices; dots show exported vertices',
+    contiguousBodyFilter: {
+      keptCells: mesh?.__compileFields?.keptCells ?? null,
+      removedCells: mesh?.__compileFields?.removedCells ?? null,
+      componentCount: mesh?.__compileFields?.componentCount ?? null,
+      policy: 'largest contiguous painted body only (export + wind tunnel)',
+    },
     membraneMinEdgeLength: Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4),
     membraneMaxEdgeLength: Math.max(Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4), Number(membraneMaxEdgeLengthEl?.value) || 8),
   }, null, 2);
+}
+
+function setWidgetEnabled(el, enabled, disabledTitle = '') {
+  if (!el) return;
+  el.disabled = !enabled;
+  el.title = enabled ? '' : disabledTitle;
 }
 
 function syncFieldPanelVisibility() {
@@ -665,16 +809,19 @@ function syncFieldPanelVisibility() {
   }
 
   const traitSelected = target === 'trait';
-  if (modeEl) {
-    modeEl.disabled = !traitSelected;
-    modeEl.title = traitSelected ? '' : 'Trait paint mode applies only when painting the trait field';
-  }
-  if (softDensityPaintEl) softDensityPaintEl.disabled = target !== 'density';
-  if (membraneEdgePaintEl) membraneEdgePaintEl.disabled = target !== 'membraneEdge';
-  if (membraneShapePaintEl) membraneShapePaintEl.disabled = target !== 'membraneShape';
-  if (rigidPermeabilityPaintEl) rigidPermeabilityPaintEl.disabled = target !== 'rigidPermeability';
-  if (rigidConsumeChannelEl) rigidConsumeChannelEl.disabled = target !== 'rigidConsume';
-  if (rigidConsumePaintEl) rigidConsumePaintEl.disabled = target !== 'rigidConsume';
+  const densitySelected = target === 'density';
+  const edgeSelected = target === 'membraneEdge';
+  const shapeSelected = target === 'membraneShape';
+  const permeabilitySelected = target === 'rigidPermeability';
+  const consumeSelected = target === 'rigidConsume';
+
+  setWidgetEnabled(modeEl, traitSelected, 'Trait paint mode only applies when Field to paint = Trait field');
+  setWidgetEnabled(softDensityPaintEl, densitySelected, 'Resolution paint value only applies when Field to paint = Resolution field');
+  setWidgetEnabled(membraneEdgePaintEl, edgeSelected, 'Perimeter edge paint value only applies when Field to paint = Membrane edge-length field');
+  setWidgetEnabled(membraneShapePaintEl, shapeSelected, 'Membrane shape paint value only applies when Field to paint = Membrane shape-memory field');
+  setWidgetEnabled(rigidPermeabilityPaintEl, permeabilitySelected, 'Rigid permeability paint value only applies when Field to paint = Rigid permeability field');
+  setWidgetEnabled(rigidConsumeChannelEl, consumeSelected, 'Consume channel only applies when Field to paint = Rigid edge consume-dye field');
+  setWidgetEnabled(rigidConsumePaintEl, consumeSelected, 'Consume paint value only applies when Field to paint = Rigid edge consume-dye field');
 
   return target;
 }
@@ -716,14 +863,16 @@ function compileNow() {
     const requestedSoftMin = Math.max(1, Math.min(Math.max(1, W - 1), Math.round(Number(softMinCellSizeEl?.value) || 3)));
     const perimeterMinEdge = Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4);
     const perimeterMaxEdge = Math.max(perimeterMinEdge, Number(membraneMaxEdgeLengthEl?.value) || 8);
+    const threshold = Math.max(0, Math.min(1, Number(thresholdEl.value) || 0.35));
+    const largestBody = isolateLargestContiguousTraitBody(rigid, soft, threshold);
 
     const mesh = compileFieldToMesh({
       width: W,
       height: H,
-      rigidField: rigid,
-      softField: soft,
+      rigidField: largestBody.rigidField,
+      softField: largestBody.softField,
       density: 1,
-      threshold: Math.max(0, Math.min(1, Number(thresholdEl.value) || 0.35)),
+      threshold,
       connectivityMode: 'largest',
       minComponentTriangles: 0,
       rigidCompileMode: rigidCompileModeEl?.value || 'contours',
@@ -739,8 +888,16 @@ function compileNow() {
       softMinCellSize: membraneMode ? 1 : requestedSoftMin,
       softBoundaryCellCap: membraneMode ? 1 : 2,
     });
+    mesh.__compileFields = {
+      rigidField: largestBody.rigidField,
+      softField: largestBody.softField,
+      keptCells: largestBody.keptCells,
+      removedCells: largestBody.removedCells,
+      componentCount: largestBody.componentCount,
+    };
     lastMesh = mesh;
-    lastCompiledSpec = buildSpecFromCurrentFields(mesh);
+    lastCompiledFields = mesh.__compileFields;
+    lastCompiledSpec = buildSpecFromCurrentFields(mesh, lastCompiledFields);
     compileRevision += 1;
     drawMesh(mesh);
     pushSpecToWindTunnel(lastCompiledSpec);
@@ -860,7 +1017,7 @@ if (rigidPrimitiveSideMaxEl) rigidPrimitiveSideMaxEl.addEventListener('change', 
 exportBtn.addEventListener('click', () => {
   const mesh = compileNow();
   if (!mesh) return;
-  const spec = lastCompiledSpec || buildSpecFromCurrentFields(mesh);
+  const spec = lastCompiledSpec || buildSpecFromCurrentFields(mesh, lastCompiledFields);
   if (!spec) return;
   const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');

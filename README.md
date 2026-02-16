@@ -64,6 +64,29 @@ Specification docs:
 
 See `WORKSTREAMS.md` for strict scope boundaries and test split commands.
 
+### Geometry/evolvability quick map (implementation-adjacent)
+
+Project morphology is intentionally encoded as **data-first trait surfaces** that can be mutated later without runtime/editor side channels:
+
+- **Body traits** (`rigidBodies[]`, `softBodies[]` scalars)
+  - Scope: coarse behavior (`solverMode`, pressure/shape gains, correction toggles)
+  - Evolvable path: mutate scalar coefficients/modes before topology edits
+- **Segment/line traits** (edge arrays + spring tuple slots)
+  - Scope: collision + transport semantics (`edgeBodyMode`, `edgeDyeMode`, `edgePermeabilityRGB`)
+  - Evolvable path: sparse per-edge edits with deterministic importer backfill/clamping
+- **Vertex traits** (`softBodies[].nodes[].shapeMemoryWeight`)
+  - Scope: localized deformability/tissue heterogeneity
+  - Evolvable path: per-node maps first, then new vertex traits once contract-normalized
+
+Deterministic contract checks for these trait levels live in:
+- `node-harness/tests/creatureSpecV2Contract.test.mjs`
+
+Run the focused contract suite:
+
+```bash
+node --test node-harness/tests/creatureSpecV2Contract.test.mjs
+```
+
 ---
 
 ## Quick start

@@ -60,6 +60,10 @@ const SOFT_AREA_BASE_COMPLIANCE = 0.0009;
 const SOFT_INTEGRATION_SCALE = 24;
 const FLUID_COUPLING_COMPONENT_LIMIT = 12;
 const ENABLE_HYBRID_BODY_LINKS = false;
+
+// Soft deformation color-state thresholds:
+// - warning (yellow/orange): first-level shape drift alert
+// - severe (red): high distortion / collapse-risk escalation
 const SOFT_DEFORM_WARN_STRETCH = 3.2;
 const SOFT_DEFORM_SEVERE_STRETCH = 6.0;
 const SOFT_DEFORM_WARN_AREA_RATIO_MIN = 0.45;
@@ -2218,6 +2222,22 @@ function applySoftMembraneCellPressure(sim, s, loops, dtPos) {
   return touched;
 }
 
+/**
+ * Build/refresh per-cluster reference pose state used by deformation signals.
+ *
+ * For each live soft cluster, this caches:
+ * - `indices`: stable node index list for the cluster,
+ * - `refLocal`: centroid-local reference coordinates,
+ * - `refRms`: scalar reference size used to normalize pose residuals,
+ * - `curLocal`: reusable current-frame local coordinate buffer.
+ *
+ * The reference is reset whenever cluster membership topology changes
+ * (keyed by node-index membership string), and stale clusters are removed.
+ *
+ * @param {object} sim - Live simulation state.
+ * @param {object} s - Soft-body solver state (`nodes`, `springs`).
+ * @returns {Map<number, {key:string, indices:Int32Array, refLocal:Float32Array, refRms:number, curLocal:Float32Array}>}
+ */
 function ensureSoftDeformationReferenceState(sim, s) {
   sim.softDeformReferenceState = sim.softDeformReferenceState || new Map();
   const refs = sim.softDeformReferenceState;
@@ -2288,6 +2308,31 @@ function ensureSoftDeformationReferenceState(sim, s) {
   return refs;
 }
 
+/**
+ * Compute warning/severe deformation state for every soft cluster.
+ *
+ * Signals computed per cluster:
+ * - `stretchMax`: largest spring stretch ratio.
+ * - `stretchMin`: smallest spring stretch ratio (collapse indicator when very small).
+ * - `areaRatio`: boundary-loop area / reference area.
+ * - `poseErrorRms`: RMS rigid-aligned pose residual vs reference local shape.
+ * - `poseErrorMax`: max rigid-aligned pose residual vs reference local shape.
+ *
+ * Color-state decision policy:
+ * - warning (yellow/orange): legacy warning thresholds OR pose warning thresholds.
+ * - severe (red): collapse-risk severe (non-membrane only) OR pose severe thresholds.
+ *
+ * @param {object} sim - Live simulation state (contains deformation reference cache).
+ * @param {object} s - Soft-body solver state.
+ * @param {Array<object>} loops - Cluster boundary loops from topology analysis.
+ * @returns {{
+ *   clusters:Array<object>,
+ *   warningClusters:number[], severeClusters:number[], severeCollapseClusters:number[],
+ *   warningSet:Set<number>, severeSet:Set<number>, severeCollapseSet:Set<number>,
+ *   warningCount:number, severeCount:number, severeCollapseCount:number,
+ *   worstStretch:number, worstAreaRatio:number, worstPoseError:number,
+ * }}
+ */
 function buildSoftDeformationState(sim, s, loops) {
   const membraneSet = ensureSoftMembraneClusterSet(sim);
   const clusters = new Map();

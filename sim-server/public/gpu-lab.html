@@ -15,6 +15,25 @@
     pre { background: #1b1b1b; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
     canvas { border: 1px solid #333; image-rendering: pixelated; image-rendering: crisp-edges; }
     #viscMap { cursor: crosshair; }
+    .deformation-legend {
+      margin-top: 8px;
+      max-width: 512px;
+      padding: 10px;
+      border: 1px solid #333;
+      border-radius: 8px;
+      background: #171717;
+      color: #d8d8d8;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .deformation-legend ul {
+      margin: 6px 0 0 16px;
+      padding: 0;
+    }
+    .deformation-legend code {
+      color: #9fe3ff;
+      font-family: ui-monospace, Menlo, monospace;
+    }
 
     body.embed-mode {
       padding: 0;
@@ -27,7 +46,8 @@
     body.embed-mode #out,
     body.embed-mode .pane-title,
     body.embed-mode label,
-    body.embed-mode #fpsHud {
+    body.embed-mode #fpsHud,
+    body.embed-mode #deformationLegend {
       display: none !important;
     }
     body.embed-mode .pane-row {
@@ -115,6 +135,15 @@
     <div class="pane">
       <div class="pane-title">GPU fluid visualization + viscosity overlay</div>
       <canvas id="view" width="512" height="512"></canvas>
+      <details id="deformationLegend" class="deformation-legend">
+        <summary><strong>Soft-body deformation color signals (yellow vs red)</strong></summary>
+        <ul>
+          <li><strong>Yellow/Orange (warning):</strong> cluster crossed warning limits in any signal: spring stretch, area ratio drift, or pose error vs reference shape.</li>
+          <li><strong>Red (severe):</strong> cluster crossed severe limits; collapse-risk severe requires stretch/area collapse indicators on non-membrane clusters.</li>
+          <li><strong>Signals computed each frame:</strong> <code>stretchMax</code>, <code>stretchMin</code>, <code>areaRatio</code>, <code>poseErrorRms</code>, <code>poseErrorMax</code>.</li>
+          <li><strong>Reference pose:</strong> per-cluster local coordinates from initial valid shape, translation/rotation-aligned before pose-error comparison.</li>
+        </ul>
+      </details>
     </div>
   </div>
 

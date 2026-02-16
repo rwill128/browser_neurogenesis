@@ -132,6 +132,48 @@ The following are concrete, implementation-level mutation targets that already h
 
 ---
 
+## Mutation patch examples (implementation-adjacent)
+
+These are intentionally tiny JSON-level transforms that mutate existing traits without changing schema shape.
+
+### A) Body-level scalar mutation (soft membrane pressure)
+
+```json
+{
+  "op": "replace",
+  "path": "/softBodies/0/pressureGain",
+  "value": 0.11
+}
+```
+
+### B) Segment-level mutation (rigid edge permeability + dye behavior)
+
+```json
+[
+  { "op": "replace", "path": "/rigidBodies/0/edgePermeabilityRGB/2", "value": [1, 0, 1] },
+  { "op": "replace", "path": "/rigidBodies/0/edgeDyeMode/2", "value": [2, 1, 0] }
+]
+```
+
+### C) Vertex-level mutation (localized deformability)
+
+```json
+{
+  "op": "replace",
+  "path": "/softBodies/0/nodes/7/shapeMemoryWeight",
+  "value": 0.35
+}
+```
+
+### Why these patches are safe to explore
+
+On import/build, these values are projected into deterministic ranges:
+- `shapeMemoryWeight` clamps to `0..1`
+- unknown dye channels clamp to `{pass, deflect, absorb}` enum defaults
+- permeability channels normalize to pass/block semantics
+
+So mutation code can stay simple and expressive, while build-time normalization provides solver safety.
+
 ## Practical evolvability progression (recommended)
 
 1. Mutate scalar coefficients first (`shapeMemoryGain`, `pressureGain`, etc.).

@@ -864,6 +864,42 @@ test('buildBodiesFromCreatureSpec clamps and defaults soft per-vertex shapeMemor
   assert.deepEqual(weights, [0, 1, 1]);
 });
 
+test('buildBodiesFromCreatureSpec clamps malformed membrane shapeMemoryWeight values deterministically', () => {
+  const spec = {
+    schemaVersion: CREATURE_SPEC_VERSION,
+    space: { width: 16, height: 16 },
+    rigidBodies: [],
+    hybridJoints: [],
+    softBodies: [{
+      id: 'membrane_shape_clamp',
+      solverMode: 'membrane',
+      nodes: [
+        { x: 2, y: 2, shapeMemoryWeight: -5 },
+        { x: 14, y: 2, shapeMemoryWeight: 3.2 },
+        { x: 14, y: 14, shapeMemoryWeight: Number.NaN },
+        { x: 2, y: 14 },
+      ],
+      springs: [
+        [0, 1, 12, 1, [1, 1, 1]],
+        [1, 2, 12, 1, [1, 1, 1]],
+        [2, 3, 12, 1, [1, 1, 1]],
+        [3, 0, 12, 1, [1, 1, 1]],
+      ],
+      restArea: 144,
+      pressureGain: 0.08,
+      radialDamping: 0.05,
+      shapeMemoryGain: 0.04,
+      insideCorrectionEnabled: 1,
+    }],
+  };
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 64, CONTROLS);
+  assert.equal(bodies.softMembraneClusters.length, 1, 'expected membrane cluster metadata');
+
+  const weights = bodies.soft.nodes.slice(0, 4).map((n) => Number(n.shapeMemoryWeight));
+  assert.deepEqual(weights, [0, 1, 1, 1]);
+});
+
 test('buildBodiesFromCreatureSpec de-degenerates hybrid joints when edgeA=edgeB', () => {
   const spec = createCreatureSpecFromMesh(sampleMesh());
   const j = spec.hybridJoints[0];

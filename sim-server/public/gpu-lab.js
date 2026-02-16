@@ -32,6 +32,9 @@ const massHeavyEl = document.getElementById('massHeavy');
 const massSoftEl = document.getElementById('massSoft');
 const bodyDragEl = document.getElementById('bodyDrag');
 const bodyFeedbackEl = document.getElementById('bodyFeedback');
+const softClusterFluidTorqueCouplingEl = document.getElementById('softClusterFluidTorqueCoupling');
+const softClusterAngularProjectionEl = document.getElementById('softClusterAngularProjection');
+const softClusterCollisionAngularProjectionEl = document.getElementById('softClusterCollisionAngularProjection');
 const spawnMembraneCellsEl = document.getElementById('spawnMembraneCells');
 const enableWarningDeformInterventionsEl = document.getElementById('enableWarningDeformInterventions');
 const enableSevereDeformInterventionsEl = document.getElementById('enableSevereDeformInterventions');
@@ -119,6 +122,9 @@ function readControls() {
     massSoft: Math.max(0.02, Number(massSoftEl.value) || 0.6),
     bodyDrag: Math.max(0, Number(bodyDragEl.value) || 0.55),
     bodyFeedback: Math.max(0, Number(bodyFeedbackEl.value) || 0.012),
+    softClusterFluidTorqueCoupling: Math.max(0, Math.min(2, Number(softClusterFluidTorqueCouplingEl?.value) || SOFT_CLUSTER_FLOW_FORCE_SHARE)),
+    softClusterAngularProjection: Math.max(0, Math.min(1, Number(softClusterAngularProjectionEl?.value) || SOFT_CLUSTER_ANGULAR_PROJECTION)),
+    softClusterCollisionAngularProjection: Math.max(0, Math.min(1, Number(softClusterCollisionAngularProjectionEl?.value) || SOFT_CLUSTER_COLLISION_ANGULAR_PROJECTION)),
     spawnMembraneCells: !!spawnMembraneCellsEl?.checked,
     enableWarningDeformInterventions: (enableWarningDeformInterventionsEl?.checked !== false),
     enableSevereDeformInterventions: (enableSevereDeformInterventionsEl?.checked !== false),
@@ -2975,6 +2981,9 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   const bodies = sim.bodies;
   const dragK = sim.controls.bodyDrag;
   const feedbackK = sim.controls.bodyFeedback;
+  const softClusterFluidTorqueCoupling = Math.max(0, Number(sim.controls?.softClusterFluidTorqueCoupling) || SOFT_CLUSTER_FLOW_FORCE_SHARE);
+  const softClusterAngularProjection = Math.max(0, Number(sim.controls?.softClusterAngularProjection) || SOFT_CLUSTER_ANGULAR_PROJECTION);
+  const softClusterCollisionAngularProjection = Math.max(0, Number(sim.controls?.softClusterCollisionAngularProjection) || SOFT_CLUSTER_COLLISION_ANGULAR_PROJECTION);
   const viscMap = sim.viscMapCpu;
 
   const localHoneyDrag = (x, y) => {
@@ -3180,8 +3189,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const rx = node.x - acc.x;
     const ry = node.y - acc.y;
     const flowShare = softMembraneClusterSet.has(cid)
-      ? (SOFT_CLUSTER_FLOW_FORCE_SHARE * 0.7)
-      : SOFT_CLUSTER_FLOW_FORCE_SHARE;
+      ? (softClusterFluidTorqueCoupling * 0.7)
+      : softClusterFluidTorqueCoupling;
     node.vx += (acc.ax - acc.alpha * ry) * flowShare * dt * 60;
     node.vy += (acc.ay + acc.alpha * rx) * flowShare * dt * 60;
   }
@@ -3225,7 +3234,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   softClusterKinematics = computeSoftClusterKinematics(s.nodes);
   projectNodesTowardClusterRigidMotion(s.nodes, softClusterKinematics, {
     linearGain: SOFT_CLUSTER_LINEAR_PROJECTION * dtNorm,
-    angularGain: SOFT_CLUSTER_ANGULAR_PROJECTION * dtNorm,
+    angularGain: softClusterAngularProjection * dtNorm,
     membraneClusterSet: softMembraneClusterSet,
     membraneGainScale: 0.72,
   });
@@ -3380,7 +3389,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   const postCollisionClusterKinematics = computeSoftClusterKinematics(s.nodes);
   projectNodesTowardClusterRigidMotion(s.nodes, postCollisionClusterKinematics, {
     linearGain: SOFT_CLUSTER_COLLISION_LINEAR_PROJECTION * dtNorm,
-    angularGain: SOFT_CLUSTER_COLLISION_ANGULAR_PROJECTION * dtNorm,
+    angularGain: softClusterCollisionAngularProjection * dtNorm,
     membraneClusterSet: softMembraneClusterSet,
     membraneGainScale: 0.72,
   });
@@ -4550,6 +4559,9 @@ async function stepAndRender() {
         massSoft: s.controls.massSoft,
         bodyDrag: s.controls.bodyDrag,
         bodyFeedback: s.controls.bodyFeedback,
+        softClusterFluidTorqueCoupling: s.controls.softClusterFluidTorqueCoupling,
+        softClusterAngularProjection: s.controls.softClusterAngularProjection,
+        softClusterCollisionAngularProjection: s.controls.softClusterCollisionAngularProjection,
         spawnMembraneCells: !!s.controls.spawnMembraneCells,
         warningInterventions: s.controls.enableWarningDeformInterventions !== false,
         severeInterventions: s.controls.enableSevereDeformInterventions !== false,

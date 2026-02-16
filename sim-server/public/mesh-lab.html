@@ -24,6 +24,7 @@
         <option value="membraneEdge">Membrane edge-length field</option>
         <option value="membraneShape">Membrane shape-memory field</option>
         <option value="rigidPermeability">Rigid permeability field</option>
+        <option value="rigidConsume">Rigid edge consume-dye field</option>
       </select>
     </label>
     <label>Trait paint mode
@@ -39,6 +40,15 @@
     <label>Membrane edge paint (0..1) <input id="membraneEdgePaintValue" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
     <label>Membrane shape paint (0..1) <input id="membraneShapePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
     <label>Rigid permeability paint (0..1) <input id="rigidPermeabilityPaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
+    <label>Edge consume channel
+      <select id="rigidConsumeChannel">
+        <option value="r" selected>Red dye</option>
+        <option value="g">Green dye</option>
+        <option value="b">Blue dye</option>
+        <option value="erase">Erase (all channels)</option>
+      </select>
+    </label>
+    <label>Edge consume paint (0..1) <input id="rigidConsumePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
     <span style="opacity:0.82">Resolution map controls primitive size (rigid+soft): darker green = finer/smaller, brighter green = coarser/larger</span>
     <label>Rigid compile mode
       <select id="rigidCompileMode">
@@ -98,6 +108,10 @@
     <div class="field-panel" data-field-panel="rigidPermeability">
       <div>Rigid edge permeability map (black=blocked, white=permeable)</div>
       <canvas id="rigidPermeabilityPaint" width="512" height="512"></canvas>
+    </div>
+    <div class="field-panel" data-field-panel="rigidConsume">
+      <div>Rigid edge consume-dye map (paint RGB channels to absorb on edges)</div>
+      <canvas id="rigidConsumePaint" width="512" height="512"></canvas>
     </div>
     <div class="compiled-panel" id="compiledPanel">
       <div>Compiled mesh</div>

@@ -155,6 +155,9 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
     const membraneEdgeMap = options?.fields?.membraneEdgeMap;
     const membraneShapeMap = options?.fields?.membraneShapeMap;
     const rigidPermeabilityMap = options?.fields?.rigidPermeabilityMap;
+    const rigidEdgeConsumeMapR = options?.fields?.rigidEdgeConsumeMapR;
+    const rigidEdgeConsumeMapG = options?.fields?.rigidEdgeConsumeMapG;
+    const rigidEdgeConsumeMapB = options?.fields?.rigidEdgeConsumeMapB;
     if (rigidField && softField) {
       out.authoring = {
         fields: {
@@ -166,6 +169,9 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
           membraneEdgeMap: membraneEdgeMap ? Array.from(membraneEdgeMap) : undefined,
           membraneShapeMap: membraneShapeMap ? Array.from(membraneShapeMap) : undefined,
           rigidPermeabilityMap: rigidPermeabilityMap ? Array.from(rigidPermeabilityMap) : undefined,
+          rigidEdgeConsumeMapR: rigidEdgeConsumeMapR ? Array.from(rigidEdgeConsumeMapR) : undefined,
+          rigidEdgeConsumeMapG: rigidEdgeConsumeMapG ? Array.from(rigidEdgeConsumeMapG) : undefined,
+          rigidEdgeConsumeMapB: rigidEdgeConsumeMapB ? Array.from(rigidEdgeConsumeMapB) : undefined,
         },
       };
     }
@@ -429,13 +435,50 @@ function buildRigidEdgePermeabilityFromField(hull, field, width, height, thresho
   return out;
 }
 
+function normalizeOptionalScalarField(raw) {
+  if (raw instanceof Float32Array) return raw;
+  if (Array.isArray(raw)) return Float32Array.from(raw);
+  return null;
+}
+
+function buildRigidEdgeConsumeDyeFromFields(hull, fieldR, fieldG, fieldB, width, height, threshold = 0.5) {
+  const sides = Math.max(0, hull?.length || 0);
+  const rField = normalizeOptionalScalarField(fieldR);
+  const gField = normalizeOptionalScalarField(fieldG);
+  const bField = normalizeOptionalScalarField(fieldB);
+  if (!rField && !gField && !bField) {
+    return Array.from({ length: sides }, () => [...EDGE_DYE_DEFLECT_RGB]);
+  }
+
+  const rawThreshold = Number(threshold);
+  const th = clamp(Number.isFinite(rawThreshold) ? rawThreshold : 0.5, 0, 1);
+  const out = [];
+  for (let i = 0; i < sides; i++) {
+    const a = hull[i];
+    const b = hull[(i + 1) % sides];
+    const mx = ((Number(a?.x) || 0) + (Number(b?.x) || 0)) * 0.5;
+    const my = ((Number(a?.y) || 0) + (Number(b?.y) || 0)) * 0.5;
+
+    const rv = rField ? clamp(sampleBilinearField(rField, width, height, mx, my, 0), 0, 1) : 0;
+    const gv = gField ? clamp(sampleBilinearField(gField, width, height, mx, my, 0), 0, 1) : 0;
+    const bv = bField ? clamp(sampleBilinearField(bField, width, height, mx, my, 0), 0, 1) : 0;
+
+    out.push([
+      rv >= th ? EDGE_DYE_ABSORB : EDGE_DYE_DEFLECT,
+      gv >= th ? EDGE_DYE_ABSORB : EDGE_DYE_DEFLECT,
+      bv >= th ? EDGE_DYE_ABSORB : EDGE_DYE_DEFLECT,
+    ]);
+  }
+  return out;
+}
+
 function buildRigidExportFromCompilerPieces(rigidPieces, nodes, options, width, height) {
-  const rigidPermeabilityField = (options?.fields?.rigidPermeabilityMap instanceof Float32Array)
-    ? options.fields.rigidPermeabilityMap
-    : (Array.isArray(options?.fields?.rigidPermeabilityMap)
-      ? Float32Array.from(options.fields.rigidPermeabilityMap)
-      : null);
+  const rigidPermeabilityField = normalizeOptionalScalarField(options?.fields?.rigidPermeabilityMap);
   const rigidPermeabilityThreshold = Number(options?.rigidPermeabilityThreshold);
+  const rigidConsumeFieldR = normalizeOptionalScalarField(options?.fields?.rigidEdgeConsumeMapR);
+  const rigidConsumeFieldG = normalizeOptionalScalarField(options?.fields?.rigidEdgeConsumeMapG);
+  const rigidConsumeFieldB = normalizeOptionalScalarField(options?.fields?.rigidEdgeConsumeMapB);
+  const rigidConsumeThreshold = Number(options?.rigidEdgeConsumeThreshold);
 
   const grouped = new Map();
   for (let i = 0; i < rigidPieces.length; i++) {
@@ -487,7 +530,15 @@ function buildRigidExportFromCompilerPieces(rigidPieces, nodes, options, width, 
       subHulls,
       mass: finiteOr(Number(options.massHeavy), 5),
       edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
-      edgeDyeMode: Array.from({ length: sides }, () => [...EDGE_DYE_DEFLECT_RGB]),
+      edgeDyeMode: buildRigidEdgeConsumeDyeFromFields(
+        outerHull,
+        rigidConsumeFieldR,
+        rigidConsumeFieldG,
+        rigidConsumeFieldB,
+        width,
+        height,
+        rigidConsumeThreshold,
+      ),
       edgePermeabilityRGB: buildRigidEdgePermeabilityFromField(
         outerHull,
         rigidPermeabilityField,
@@ -512,12 +563,12 @@ function buildRigidExportFromCompilerPieces(rigidPieces, nodes, options, width, 
 }
 
 function buildRigidExport(tris, nodes, options, width, height) {
-  const rigidPermeabilityField = (options?.fields?.rigidPermeabilityMap instanceof Float32Array)
-    ? options.fields.rigidPermeabilityMap
-    : (Array.isArray(options?.fields?.rigidPermeabilityMap)
-      ? Float32Array.from(options.fields.rigidPermeabilityMap)
-      : null);
+  const rigidPermeabilityField = normalizeOptionalScalarField(options?.fields?.rigidPermeabilityMap);
   const rigidPermeabilityThreshold = Number(options?.rigidPermeabilityThreshold);
+  const rigidConsumeFieldR = normalizeOptionalScalarField(options?.fields?.rigidEdgeConsumeMapR);
+  const rigidConsumeFieldG = normalizeOptionalScalarField(options?.fields?.rigidEdgeConsumeMapG);
+  const rigidConsumeFieldB = normalizeOptionalScalarField(options?.fields?.rigidEdgeConsumeMapB);
+  const rigidConsumeThreshold = Number(options?.rigidEdgeConsumeThreshold);
 
   const comps = triangleComponents(tris);
   const rigidBodies = [];
@@ -556,7 +607,15 @@ function buildRigidExport(tris, nodes, options, width, height) {
         hull,
         mass: finiteOr(Number(options.massHeavy), 5),
         edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
-        edgeDyeMode: Array.from({ length: sides }, () => [...EDGE_DYE_DEFLECT_RGB]),
+        edgeDyeMode: buildRigidEdgeConsumeDyeFromFields(
+          hull,
+          rigidConsumeFieldR,
+          rigidConsumeFieldG,
+          rigidConsumeFieldB,
+          width,
+          height,
+          rigidConsumeThreshold,
+        ),
         edgePermeabilityRGB: buildRigidEdgePermeabilityFromField(
           hull,
           rigidPermeabilityField,

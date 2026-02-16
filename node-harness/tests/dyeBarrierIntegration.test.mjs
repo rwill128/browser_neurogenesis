@@ -277,6 +277,82 @@ test('exported rigid permeability traits survive import and drive runtime barrie
   assert.ok(r[blockedCell] < 120, `blocked edge should attenuate/deflect dye (got ${r[blockedCell]})`);
 });
 
+test('exported rigid edge consume maps survive import and absorb configured dye channels', () => {
+  const n = 32;
+  const size = n * n;
+  const consumeR = new Float32Array(n * n).fill(0);
+  const consumeG = new Float32Array(n * n).fill(0);
+  const consumeB = new Float32Array(n * n).fill(0);
+  consumeR[8 * n + 16] = 1; // top-edge midpoint consumes red
+
+  const mesh = {
+    meta: { width: n, height: n },
+    nodes: [
+      { x: 8, y: 8, rigid: 1 },
+      { x: 24, y: 8, rigid: 1 },
+      { x: 24, y: 24, rigid: 1 },
+      { x: 8, y: 24, rigid: 1 },
+    ],
+    triangles: [
+      { kind: 'rigid', a: 0, b: 1, c: 2 },
+      { kind: 'rigid', a: 0, b: 2, c: 3 },
+    ],
+  };
+
+  const spec = createCreatureSpecFromMesh(mesh, {
+    width: n,
+    height: n,
+    fields: {
+      rigidEdgeConsumeMapR: consumeR,
+      rigidEdgeConsumeMapG: consumeG,
+      rigidEdgeConsumeMapB: consumeB,
+    },
+    rigidEdgeConsumeThreshold: 0.5,
+    includeAuthoring: false,
+  });
+
+  const bodies = buildBodiesFromCreatureSpec(spec, n, { massHeavy: 5 });
+  assert.equal(bodies.rigid.length, 1);
+  const rb = bodies.rigid[0];
+
+  const absorbEdge = (rb.edgeDyeMode || []).findIndex((rgb) => Array.isArray(rgb) && Number(rgb[0]) === EDGE_DYE_MODE.ABSORB);
+  const deflectEdge = (rb.edgeDyeMode || []).findIndex((rgb) => Array.isArray(rgb) && Number(rgb[0]) === EDGE_DYE_MODE.DEFLECT);
+  assert.ok(absorbEdge >= 0, 'expected at least one edge absorbing red dye from painted consume map');
+  assert.ok(deflectEdge >= 0, 'expected at least one deflect edge for comparison');
+
+  const verts = rigidVerticesWorld(rb);
+  const midCell = (edgeIdx) => {
+    const a = verts[edgeIdx];
+    const b2 = verts[(edgeIdx + 1) % verts.length];
+    const x = Math.max(0, Math.min(n - 1, Math.round((a.x + b2.x) * 0.5)));
+    const y = Math.max(0, Math.min(n - 1, Math.round((a.y + b2.y) * 0.5)));
+    return y * n + x;
+  };
+
+  const absorbCell = midCell(absorbEdge);
+  const deflectCell = midCell(deflectEdge);
+
+  const r = new Float32Array(size);
+  const g = new Float32Array(size);
+  const b = new Float32Array(size);
+  const vx = new Float32Array(size);
+  const vy = new Float32Array(size);
+  r[absorbCell] = 120;
+  r[deflectCell] = 120;
+
+  const sim = {
+    controls: { n },
+    bodies: {
+      rigid: [rb],
+      soft: { nodes: [], springs: [] },
+    },
+  };
+
+  applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld });
+
+  assert.ok(r[absorbCell] < r[deflectCell], `absorb edge should consume more red dye than deflect edge (${r[absorbCell]} vs ${r[deflectCell]})`);
+});
+
 test('applyBodyEdgeFieldBarriers skips malformed rigid edges with non-finite vertices', () => {
   const n = 16;
   const size = n * n;

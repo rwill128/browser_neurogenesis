@@ -189,6 +189,35 @@ test('createCreatureSpecFromMesh samples rigid permeability paint map into rigid
   assert.equal(importedPassCount, 2);
 });
 
+test('createCreatureSpecFromMesh samples rigid edge consume-dye paint maps into edge dye traits', () => {
+  const w = 16;
+  const consumeR = new Float32Array(w * w).fill(0);
+  const consumeG = new Float32Array(w * w).fill(0);
+  const consumeB = new Float32Array(w * w).fill(0);
+
+  // For sampleMesh rigid triangle, edge midpoints are (4,2), (5,4), (3,4).
+  consumeR[2 * w + 4] = 1; // edge 0 absorbs red
+  consumeB[4 * w + 3] = 1; // edge 2 absorbs blue
+
+  const spec = createCreatureSpecFromMesh(sampleMesh(), {
+    fields: {
+      rigidEdgeConsumeMapR: consumeR,
+      rigidEdgeConsumeMapG: consumeG,
+      rigidEdgeConsumeMapB: consumeB,
+    },
+  });
+
+  const rb = spec.rigidBodies[0];
+  assert.ok(Array.isArray(rb.edgeDyeMode), 'consume paint should prevent all-deflect compacting');
+  assert.deepEqual(rb.edgeDyeMode[0], [2, 1, 1]);
+  assert.deepEqual(rb.edgeDyeMode[1], [1, 1, 1]);
+  assert.deepEqual(rb.edgeDyeMode[2], [1, 1, 2]);
+
+  const imported = buildBodiesFromCreatureSpec(spec, 64, CONTROLS).rigid[0];
+  assert.deepEqual(imported.edgeDyeMode[0], [2, 1, 1]);
+  assert.deepEqual(imported.edgeDyeMode[2], [1, 1, 2]);
+});
+
 test('createCreatureSpecFromMesh honors rigid permeability threshold=0 during edge trait sampling', () => {
   const w = 16;
   const permeabilityMap = new Float32Array(w * w).fill(0);
@@ -1143,12 +1172,18 @@ test('createCreatureSpecFromMesh preserves optional authoring field payload', ()
   const rigidField = new Float32Array(w * w);
   const softField = new Float32Array(w * w);
   const rigidPermeabilityMap = new Float32Array(w * w);
+  const rigidEdgeConsumeMapR = new Float32Array(w * w);
+  const rigidEdgeConsumeMapG = new Float32Array(w * w);
+  const rigidEdgeConsumeMapB = new Float32Array(w * w);
   rigidField[3] = 0.75;
   softField[8] = 0.25;
   rigidPermeabilityMap[9] = 1;
+  rigidEdgeConsumeMapR[10] = 1;
+  rigidEdgeConsumeMapG[11] = 0.5;
+  rigidEdgeConsumeMapB[12] = 0.25;
 
   const spec = createCreatureSpecFromMesh(sampleMesh(), {
-    fields: { rigidField, softField, rigidPermeabilityMap },
+    fields: { rigidField, softField, rigidPermeabilityMap, rigidEdgeConsumeMapR, rigidEdgeConsumeMapG, rigidEdgeConsumeMapB },
   });
 
   assert.ok(spec.authoring?.fields);
@@ -1157,7 +1192,13 @@ test('createCreatureSpecFromMesh preserves optional authoring field payload', ()
   assert.equal(spec.authoring.fields.rigid.length, w * w);
   assert.equal(spec.authoring.fields.soft.length, w * w);
   assert.equal(spec.authoring.fields.rigidPermeabilityMap.length, w * w);
+  assert.equal(spec.authoring.fields.rigidEdgeConsumeMapR.length, w * w);
+  assert.equal(spec.authoring.fields.rigidEdgeConsumeMapG.length, w * w);
+  assert.equal(spec.authoring.fields.rigidEdgeConsumeMapB.length, w * w);
   assert.equal(spec.authoring.fields.rigid[3], 0.75);
   assert.equal(spec.authoring.fields.soft[8], 0.25);
   assert.equal(spec.authoring.fields.rigidPermeabilityMap[9], 1);
+  assert.equal(spec.authoring.fields.rigidEdgeConsumeMapR[10], 1);
+  assert.equal(spec.authoring.fields.rigidEdgeConsumeMapG[11], 0.5);
+  assert.equal(spec.authoring.fields.rigidEdgeConsumeMapB[12], 0.25);
 });

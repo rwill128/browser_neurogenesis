@@ -31,3 +31,25 @@ test('gpu-lab deformation stabilization is gated by collapse risk, not pose-only
     'expected membrane clusters to be excluded from legacy collapse classification',
   );
 });
+
+test('gpu-lab applies soft momentum policy in fluid→soft force coupling path', () => {
+  assert.match(
+    source,
+    /const nodeMomentum = softNodeMomentumScale\(i\);[\s\S]*const flowCoupling = flowCouplingBase \* nodeMomentum;/,
+    'expected per-node soft momentum policy scaling on fluid→soft coupling',
+  );
+});
+
+test('gpu-lab membrane obstacle mask is membrane-cluster scoped (not global soft-body wall)', () => {
+  assert.match(
+    source,
+    /if \(membraneClusterSet\.size === 0\) \{\s*return \{ membraneEdgeCount: 0, usedMembraneClusters: false \};\s*\}/,
+    'expected obstacle mask to be disabled when no membrane clusters are present',
+  );
+
+  assert.match(
+    source,
+    /if \(!membraneClusterSet\.has\(ca\)\) continue;/,
+    'expected obstacle edges to be restricted to membrane cluster membership',
+  );
+});

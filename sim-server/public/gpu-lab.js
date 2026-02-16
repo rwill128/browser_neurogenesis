@@ -2031,27 +2031,32 @@ function stampMembraneObstacleMask(sim) {
   const membraneClusterSet = new Set((sim?.bodies?.softMembraneClusters || [])
     .map((c) => Number(c?.clusterId))
     .filter((cid) => Number.isInteger(cid)));
-  const useMembraneClusters = membraneClusterSet.size > 0;
-  const thickness = Math.max(1.5, 1.35 + 1.15 * (n / 256));
 
+  // Only membrane clusters participate in in-solver fluid obstacle masking.
+  // Spring clusters use edge-policy post-pass barriers instead of a global obstacle wall.
+  if (membraneClusterSet.size === 0) {
+    return { membraneEdgeCount: 0, usedMembraneClusters: false };
+  }
+
+  const thickness = Math.max(1.5, 1.35 + 1.15 * (n / 256));
   let membraneEdgeCount = 0;
   for (const sp of soft.springs) {
     const ai = Number(sp?.[0]);
     const bi = Number(sp?.[1]);
     if (!Number.isInteger(ai) || !Number.isInteger(bi)) continue;
-    const edgeBodyMode = Number(sp?.[5]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : (Number(sp?.[3]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK);
-    if (edgeBodyMode === 0) continue;
+    const edgeBodyMode = Number(sp?.[5]) === EDGE_BODY_MODE.PASS
+      ? EDGE_BODY_MODE.PASS
+      : (Number(sp?.[3]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK);
+    if (edgeBodyMode === EDGE_BODY_MODE.PASS) continue;
 
     const a = soft.nodes[ai];
     const b = soft.nodes[bi];
     if (!a || !b) continue;
 
-    if (useMembraneClusters) {
-      const ca = Number(a.clusterId);
-      const cb = Number(b.clusterId);
-      if (!Number.isInteger(ca) || !Number.isInteger(cb) || ca !== cb) continue;
-      if (!membraneClusterSet.has(ca)) continue;
-    }
+    const ca = Number(a.clusterId);
+    const cb = Number(b.clusterId);
+    if (!Number.isInteger(ca) || !Number.isInteger(cb) || ca !== cb) continue;
+    if (!membraneClusterSet.has(ca)) continue;
 
     const ax = Number(a.x);
     const ay = Number(a.y);
@@ -2063,7 +2068,7 @@ function stampMembraneObstacleMask(sim) {
     membraneEdgeCount += 1;
   }
 
-  return { membraneEdgeCount, usedMembraneClusters: useMembraneClusters };
+  return { membraneEdgeCount, usedMembraneClusters: true };
 }
 
 function enforceFluidEdgeBoundariesCpu(vxField, vyField, n) {

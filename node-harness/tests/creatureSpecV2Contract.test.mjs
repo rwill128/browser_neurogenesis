@@ -201,6 +201,37 @@ test('membrane export from authoring soft field is perimeter-only (no interior i
   assert.ok(bodies.soft.springs.length >= 3);
 });
 
+test('membrane mode enforces perimeter-only ring even when soft mesh has no detectable boundary edges', () => {
+  const mesh = {
+    nodes: [
+      { id: 0, x: 0, y: 0, rigid: 0, soft: 1 },
+      { id: 1, x: 4, y: 0, rigid: 0, soft: 1 },
+      { id: 2, x: 0, y: 4, rigid: 0, soft: 1 },
+    ],
+    triangles: [
+      // Duplicate/opposite-winding triangle soup: every undirected edge appears twice,
+      // so boundary extraction can be empty.
+      { kind: 'soft', a: 0, b: 1, c: 2 },
+      { kind: 'soft', a: 0, b: 2, c: 1 },
+    ],
+    meta: { width: 8, height: 8 },
+  };
+
+  const spec = createCreatureSpecFromMesh(mesh, {
+    softSolverMode: 'membrane',
+    softBoundaryRingSprings: false,
+    softSeamWeldSprings: false,
+  });
+
+  assert.equal(spec.softBodies.length, 1);
+  const sb = spec.softBodies[0];
+  assert.equal(sb.solverMode, 'membrane');
+  assertMembraneRingOnly(sb);
+
+  const imported = buildBodiesFromCreatureSpec(spec, 64, CONTROLS);
+  assert.equal(imported.softMembraneClusters.length, 1);
+});
+
 test('membrane edge-length/shape maps modulate exported ring spacing and per-vertex give', () => {
   const w = 32;
   const h = 32;

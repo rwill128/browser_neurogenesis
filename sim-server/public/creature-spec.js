@@ -1155,6 +1155,8 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
 
     if (solverMode === 'membrane') {
       const majorLoop = [...boundaryLoops].sort((a, b) => (b?.length || 0) - (a?.length || 0))[0] || null;
+      let ringBuilt = false;
+
       if (Array.isArray(majorLoop) && majorLoop.length >= 3) {
         const oldToNew = new Map();
         const membraneNodes = [];
@@ -1200,6 +1202,56 @@ function buildSoftExport(tris, nodes, options, softCrossBeams = []) {
           exportSprings = membraneSprings;
           exportNodeIds = membraneNodeIds;
           exportSourceToLocal = membraneSourceToLocal;
+          ringBuilt = true;
+        }
+      }
+
+      // Guardrail: membrane mode must remain perimeter-only even for malformed/non-manifold
+      // triangle soups where boundary loop extraction fails.
+      if (!ringBuilt && softNodes.length >= 3) {
+        const hull = convexHullWithIds(softNodes.map((p, idx) => ({ id: idx, x: p.x, y: p.y })));
+        if (Array.isArray(hull) && hull.length >= 3) {
+          const membraneNodes = [];
+          const membraneNodeIds = new Set();
+          const membraneSourceToLocal = new Map();
+          const oldToNew = new Map();
+
+          for (const hp of hull) {
+            const oldIdx = Number(hp?.id);
+            if (!Number.isInteger(oldIdx) || oldToNew.has(oldIdx)) continue;
+            const srcId = ids[oldIdx];
+            const srcNode = softNodes[oldIdx];
+            if (!srcNode || !Number.isInteger(srcId)) continue;
+            const newIdx = membraneNodes.length;
+            oldToNew.set(oldIdx, newIdx);
+            membraneNodes.push({ ...srcNode });
+            membraneNodeIds.add(srcId);
+            membraneSourceToLocal.set(srcId, newIdx);
+          }
+
+          const membraneSprings = [];
+          for (let i = 0; i < membraneNodes.length; i++) {
+            const a = i;
+            const b = (i + 1) % membraneNodes.length;
+            if (a === b) continue;
+            const pa = membraneNodes[a];
+            const pb = membraneNodes[b];
+            membraneSprings.push([
+              a,
+              b,
+              Math.max(1e-3, Math.hypot(pb.x - pa.x, pb.y - pa.y)),
+              EDGE_BODY_BLOCK,
+              [...EDGE_DYE_DEFLECT_RGB],
+            ]);
+          }
+
+          if (membraneNodes.length >= 3 && membraneSprings.length >= 3) {
+            membraneRestArea = Math.max(1e-4, polygonAreaAbs(membraneNodes));
+            exportNodes = membraneNodes;
+            exportSprings = membraneSprings;
+            exportNodeIds = membraneNodeIds;
+            exportSourceToLocal = membraneSourceToLocal;
+          }
         }
       }
 

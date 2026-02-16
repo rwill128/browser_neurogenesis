@@ -18,6 +18,8 @@ Primary API surface:
 
 ## Trait levels: body vs segment(line) vs vertex
 
+All trait levels are represented as explicit JSON fields in `creature-spec.v2`, so mutations can be applied as data transforms (without introducing hidden runtime/editor state).
+
 ### 1) Body-level traits
 
 These define solver behavior at a coarse level.
@@ -65,6 +67,19 @@ When using membrane field authoring, `shapeMemoryWeight` is sampled from `fields
 **Evolvability note:** per-vertex mutation of `shapeMemoryWeight` is a low-risk path to heterogeneous tissues before introducing new solver modes.
 
 ---
+
+## Runtime normalization characteristics (implementation-adjacent)
+
+`buildBodiesFromCreatureSpec` applies predictable normalization/clamping to keep segment/vertex mutations safe:
+
+- **Rigid edge dye modes** are normalized per channel to enum `{0:pass, 1:deflect, 2:absorb}`; invalid values clamp to safe defaults.
+- **Rigid edge permeability** is normalized per channel into binary-like behavior (`<=0` blocked, `>0` pass).
+- **Rigid consume-dye masks** are normalized to binary RGB masks.
+- **Soft spring tuples** preserve indices `[a,b,rest,edgeBodyMode,edgeDyeModeRGB]` and normalize channel modes the same way as rigid edges.
+- **Hybrid joints** are repaired when degenerate (`edgeA===edgeB`) and oversized `restA/restB` values are capped against rigid-body scale.
+- **Soft vertex `shapeMemoryWeight`** is clamped to `0..1` and imported/exported as explicit per-node scalar state.
+
+These characteristics are important for future mutators: exploratory edits can be aggressive, but import/build still projects the result into solver-safe ranges.
 
 ## Deterministic guardrails already in place
 

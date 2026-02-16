@@ -722,6 +722,20 @@ test('buildBodiesFromCreatureSpec preserves rigid per-edge permeability and inte
   assert.deepEqual(bodies.rigid[0].consumeDyeRGB, [1, 0, 1]);
 });
 
+test('buildBodiesFromCreatureSpec clamps and defaults soft per-vertex shapeMemoryWeight deterministically', () => {
+  const spec = createCreatureSpecFromMesh(sampleMesh());
+  const sb = spec.softBodies[0];
+  assert.ok(sb?.nodes?.length >= 3, 'sample soft body should expose multiple nodes');
+
+  sb.nodes[0].shapeMemoryWeight = -0.25; // underflow clamps to 0
+  sb.nodes[1].shapeMemoryWeight = 1.8; // overflow clamps to 1
+  delete sb.nodes[2].shapeMemoryWeight; // missing defaults to 1
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+  const weights = bodies.soft.nodes.slice(0, 3).map((n) => Number(n.shapeMemoryWeight));
+  assert.deepEqual(weights, [0, 1, 1]);
+});
+
 test('buildBodiesFromCreatureSpec de-degenerates hybrid joints when edgeA=edgeB', () => {
   const spec = createCreatureSpecFromMesh(sampleMesh());
   const j = spec.hybridJoints[0];

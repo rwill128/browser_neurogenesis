@@ -1085,6 +1085,58 @@ function drawMesh(mesh) {
     }
   }
 
+  // Velocity policy overlay for compiled preview: BLOCK=red solid, PASS=green dashed.
+  const specForPreview = lastCompiledSpec;
+  let velocityPassEdges = 0;
+  let velocityBlockEdges = 0;
+  if (specForPreview) {
+    const drawVelocityEdge = (ax, ay, bx, by, pass) => {
+      mctx.strokeStyle = pass ? 'rgba(120,255,140,0.95)' : 'rgba(255,90,90,0.98)';
+      mctx.lineWidth = pass ? 1.6 : 2.2;
+      mctx.setLineDash(pass ? [6, 4] : []);
+      mctx.beginPath();
+      mctx.moveTo(ax * sx, ay * sy);
+      mctx.lineTo(bx * sx, by * sy);
+      mctx.stroke();
+      mctx.setLineDash([]);
+      mctx.lineWidth = 1;
+    };
+
+    for (const rb of (specForPreview.rigidBodies || [])) {
+      const hull = rb?.hull || [];
+      for (let i = 0; i < hull.length; i++) {
+        const a = hull[i];
+        const b = hull[(i + 1) % hull.length];
+        if (!a || !b) continue;
+        const velRaw = Array.isArray(rb?.edgeVelocityMode) ? Number(rb.edgeVelocityMode[i]) : 1;
+        const pass = velRaw === 0;
+        if (pass) velocityPassEdges += 1;
+        else velocityBlockEdges += 1;
+        drawVelocityEdge(a.x, a.y, b.x, b.y, pass);
+      }
+    }
+
+    for (const sb of (specForPreview.softBodies || [])) {
+      const nodes = sb?.nodes || [];
+      for (const sp of (sb?.springs || [])) {
+        if (!Array.isArray(sp) || sp.length < 2) continue;
+        const a = nodes[Number(sp[0])];
+        const b = nodes[Number(sp[1])];
+        if (!a || !b) continue;
+        const bodyRaw = Number(sp[3]);
+        const velRaw = Number(sp[5]);
+        const pass = (velRaw === 0) || (Number.isNaN(velRaw) && bodyRaw === 0);
+        if (pass) velocityPassEdges += 1;
+        else velocityBlockEdges += 1;
+        drawVelocityEdge(a.x, a.y, b.x, b.y, pass);
+      }
+    }
+
+    mctx.fillStyle = 'rgba(245,245,245,0.92)';
+    mctx.font = '11px system-ui';
+    mctx.fillText('velocity overlay: BLOCK=red solid, PASS=green dashed', 10, 14);
+  }
+
   out.textContent = JSON.stringify({
     ...mesh.meta,
     compileRevision,
@@ -1096,6 +1148,11 @@ function drawMesh(mesh) {
       ? 'ring edge/node color encodes membrane stiffness map (soft→stiff)'
       : undefined,
     rigidContourPreview: 'rigid contours are perimeter-resampled from border vertices; dots show exported vertices',
+    velocityModePreview: {
+      legend: 'BLOCK=red solid, PASS=green dashed',
+      passEdges: velocityPassEdges,
+      blockEdges: velocityBlockEdges,
+    },
     contiguousBodyFilter: {
       keptCells: mesh?.__compileFields?.keptCells ?? null,
       removedCells: mesh?.__compileFields?.removedCells ?? null,

@@ -60,6 +60,26 @@ test('gpu-lab samples coupling flow outside blocked edge cells to preserve body 
   );
 });
 
+test('gpu-lab dye advection honors obstacle mask to prevent through-body leakage', () => {
+  assert.match(
+    source,
+    /const advectDyeWgsl = commonWgsl \+ `[\s\S]*@group\(0\) @binding\(9\) var<storage, read> obstacleMask: array<f32>;/,
+    'expected obstacle mask binding in dye advection shader',
+  );
+
+  assert.match(
+    source,
+    /let hereObs = obstacleMask\[i\] > 0\.5;[\s\S]*let srcObs = obstacleMask\[si\] > 0\.5;/,
+    'expected obstacle sampling in dye advection branch logic',
+  );
+
+  assert.match(
+    source,
+    /else if \(hereObs \|\| srcObs \|\| hereR == 1u \|\| srcR == 1u\)/,
+    'expected blocked-obstacle branch to retain local dye instead of crossing',
+  );
+});
+
 test('gpu-lab obstacle mask is edge-velocity BLOCK based for both rigid and soft (no post-pass barrier)', () => {
   assert.match(
     source,

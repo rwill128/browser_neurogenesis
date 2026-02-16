@@ -411,7 +411,8 @@ const advectDyeWgsl = commonWgsl + `
 @group(0) @binding(6) var<storage, read_write> r1: array<f32>;
 @group(0) @binding(7) var<storage, read_write> g1: array<f32>;
 @group(0) @binding(8) var<storage, read_write> b1: array<f32>;
-@group(0) @binding(9) var<storage, read> dyeMask: array<u32>;
+@group(0) @binding(9) var<storage, read> obstacleMask: array<f32>;
+@group(0) @binding(10) var<storage, read> dyeMask: array<u32>;
 
 fn decodeMode(mask:u32, channel:u32)->u32 {
   if (channel == 0u) { return mask % 3u; }
@@ -433,6 +434,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let sy = u32(clamp(round(py), 0.0, n1));
   let si = idx(sx, sy);
 
+  let hereObs = obstacleMask[i] > 0.5;
+  let srcObs = obstacleMask[si] > 0.5;
+
   let hereMask = dyeMask[i];
   let srcMask = dyeMask[si];
 
@@ -440,7 +444,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let srcR = decodeMode(srcMask, 0u);
   if (hereR == 2u || srcR == 2u) {
     r1[i] = 0.0;
-  } else if (hereR == 1u || srcR == 1u) {
+  } else if (hereObs || srcObs || hereR == 1u || srcR == 1u) {
     r1[i] = r0[i] * p.fade;
   } else {
     r1[i] = sampleBilinear(&r0, px, py) * p.fade;
@@ -450,7 +454,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let srcG = decodeMode(srcMask, 1u);
   if (hereG == 2u || srcG == 2u) {
     g1[i] = 0.0;
-  } else if (hereG == 1u || srcG == 1u) {
+  } else if (hereObs || srcObs || hereG == 1u || srcG == 1u) {
     g1[i] = g0[i] * p.fade;
   } else {
     g1[i] = sampleBilinear(&g0, px, py) * p.fade;
@@ -460,7 +464,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let srcB = decodeMode(srcMask, 2u);
   if (hereB == 2u || srcB == 2u) {
     b1[i] = 0.0;
-  } else if (hereB == 1u || srcB == 1u) {
+  } else if (hereObs || srcObs || hereB == 1u || srcB == 1u) {
     b1[i] = b0[i] * p.fade;
   } else {
     b1[i] = sampleBilinear(&b0, px, py) * p.fade;
@@ -4279,11 +4283,24 @@ function drawBodiesOverlay(sim) {
       const b2 = verts[(ei + 1) % sides];
       const dyeMode = !b.edgeDyeMode ? EDGE_DYE_MODE.DEFLECT : b.edgeDyeMode[ei];
       const bodyMode = Array.isArray(b.edgeVelocityMode) ? b.edgeVelocityMode[ei] : (!b.edgeBodyMode ? EDGE_BODY_MODE.BLOCK : b.edgeBodyMode[ei]);
+      const momentum = clamp(
+        Array.isArray(b.edgeMomentumCoupling)
+          ? Number(b.edgeMomentumCoupling[ei])
+          : (Array.isArray(b.edgeMomentumTransfer) ? Number(b.edgeMomentumTransfer[ei]) : 1),
+        0,
+        1,
+      );
       ctx.strokeStyle = edgeModeColor(dyeMode, bodyMode === EDGE_BODY_MODE.BLOCK);
+      const prevWidth = ctx.lineWidth;
+      ctx.lineWidth = 1.0 + 1.5 * momentum;
+      if (Number(bodyMode) === EDGE_BODY_MODE.PASS) ctx.setLineDash([6, 4]);
+      else ctx.setLineDash([]);
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b2.x, b2.y);
       ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineWidth = prevWidth;
     }
 
     if (collisionDebug) {
@@ -4461,7 +4478,7 @@ function drawBodiesOverlay(sim) {
   const collisionDebugSuffix = collisionDebug
     ? ` | solver hull debug ON (concave ${concaveCount}/${sim.bodies.rigid.length}, contacts ${(sim.lastRigidContacts || []).length})`
     : '';
-  ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, ABSORB=amber, MIXED=violet | zoom ${sim.camera.zoom.toFixed(2)}x${collisionDebugSuffix}`, 10, canvas.height - 28);
+  ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, ABSORB=amber, MIXED=violet | obstacle mask overlay=red | zoom ${sim.camera.zoom.toFixed(2)}x${collisionDebugSuffix}`, 10, canvas.height - 28);
   ctx.fillStyle = 'rgba(0,255,208,0.95)';
   const line2 = collisionDebug
     ? 'Body edges: BLOCK solid vs PASS dashed | soft momentum: thin→thick (0→1) | dashed green/cyan=solver hull, dashed amber=rigid-rigid convex proxies | soft deform warn=orange, severe=red'
@@ -4632,7 +4649,7 @@ async function stepAndRender() {
 
   pass = enc.beginComputePass();
   pass.setPipeline(s.advDye.pipeline);
-  pass.setBindGroup(0, s.advDye.bg([s.uniform, s.vx0, s.vy0, s.rr0, s.gg0, s.bb0, s.rr1, s.gg1, s.bb1, s.dyeModeMaskGpu]));
+  pass.setBindGroup(0, s.advDye.bg([s.uniform, s.vx0, s.vy0, s.rr0, s.gg0, s.bb0, s.rr1, s.gg1, s.bb1, s.obstacleMaskGpu, s.dyeModeMaskGpu]));
   pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
   pass.end();
   [s.rr0, s.rr1] = [s.rr1, s.rr0];
@@ -4697,10 +4714,18 @@ async function stepAndRender() {
       const ri = Math.max(0, Math.min(255, r[i]));
       const gi = Math.max(0, Math.min(255, g[i]));
       const bi = Math.max(0, Math.min(255, b[i]));
+      const obstacle = Number(s?.obstacleMaskCpu?.[i]) > 0.5;
       const o = i * 4;
-      px[o] = ri;
-      px[o + 1] = gi;
-      px[o + 2] = bi;
+      if (obstacle) {
+        // Obstacle-mask visualization overlay (BLOCK velocity edges influence region).
+        px[o] = Math.max(ri, 220);
+        px[o + 1] = Math.min(gi, 70);
+        px[o + 2] = Math.min(bi, 90);
+      } else {
+        px[o] = ri;
+        px[o + 1] = gi;
+        px[o + 2] = bi;
+      }
       px[o + 3] = 255;
       sum += ri + gi + bi;
     }
@@ -4747,6 +4772,7 @@ async function stepAndRender() {
         severeInterventions: s.controls.enableSevereDeformInterventions !== false,
         membraneClusters: Array.isArray(s.bodies?.softMembraneClusters) ? s.bodies.softMembraneClusters.length : 0,
         fluidObstacleEdgesNow: obstacleEdgesNow,
+        fluidObstacleCellsNow: Number(s?.lastFluidObstacleStats?.blockedCells) || 0,
         dyeMaskCellsNow: Number(s?.lastDyeMaskStats?.nonPassCells) || 0,
         softEdgePoliciesNow,
         paintValue: Number(paintValueEl?.value) || 0.85,

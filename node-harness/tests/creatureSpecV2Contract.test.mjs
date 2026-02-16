@@ -747,6 +747,35 @@ test('buildBodiesFromCreatureSpec normalizes per-edge body modes to binary pass/
   assert.equal(Number(bodies.soft.springs[1][3]), 1);
 });
 
+test('buildBodiesFromCreatureSpec deterministically backfills sparse rigid edge arrays with safe defaults', () => {
+  const spec = createCreatureSpecFromMesh(sampleMesh());
+  const rb = spec.rigidBodies[0];
+  assert.ok(rb?.hull?.length >= 3, 'sample rigid body should have at least 3 edges');
+
+  // Provide sparse arrays (fewer entries than hull edges).
+  rb.edgeBodyMode = [0];
+  rb.edgeDyeMode = [[2, 0, 1]];
+  rb.edgePermeabilityRGB = [[1, 0, 0]];
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+  const imported = bodies.rigid[0];
+  assert.equal(imported.edgeBodyMode.length, imported.sides);
+  assert.equal(imported.edgeDyeMode.length, imported.sides);
+  assert.equal(imported.edgePermeabilityRGB.length, imported.sides);
+
+  // Explicit first edge values survive normalization.
+  assert.equal(imported.edgeBodyMode[0], 0);
+  assert.deepEqual(imported.edgeDyeMode[0], [2, 0, 1]);
+  assert.deepEqual(imported.edgePermeabilityRGB[0], [1, 0, 0]);
+
+  // Missing trailing entries must backfill to deterministic solver defaults.
+  for (let i = 1; i < imported.sides; i++) {
+    assert.equal(imported.edgeBodyMode[i], 1);
+    assert.deepEqual(imported.edgeDyeMode[i], [1, 1, 1]);
+    assert.deepEqual(imported.edgePermeabilityRGB[i], [0, 0, 0]);
+  }
+});
+
 test('buildBodiesFromCreatureSpec honors rigid inside-correction toggle per body', () => {
   const spec = createCreatureSpecFromMesh(sampleMesh());
   spec.rigidBodies[0].insideCorrectionEnabled = false;

@@ -1583,6 +1583,12 @@ function convexHull(points) {
   return [...lower, ...upper];
 }
 
+/**
+ * Normalize rigid per-edge body modes to full edge count.
+ *
+ * Sparse/missing entries are backfilled as blocking (1), which preserves the
+ * strict-collision default when evolving edge arrays incrementally.
+ */
 function normalizeEdgeBodyModeList(list, count) {
   if (!Array.isArray(list) || !list.length) return Array.from({ length: count }, () => EDGE_BODY_BLOCK);
   return Array.from({ length: count }, (_, i) => {
@@ -1591,6 +1597,12 @@ function normalizeEdgeBodyModeList(list, count) {
   });
 }
 
+/**
+ * Normalize rigid per-edge dye modes to full edge count.
+ *
+ * Sparse/missing entries default to DEFLECT for all channels, matching solver
+ * safety expectations for unspecified edges.
+ */
 function normalizeEdgeDyeModeList(list, count) {
   if (!Array.isArray(list) || !list.length) return Array.from({ length: count }, () => [...EDGE_DYE_DEFLECT_RGB]);
   return Array.from({ length: count }, (_, i) => {
@@ -1599,6 +1611,12 @@ function normalizeEdgeDyeModeList(list, count) {
   });
 }
 
+/**
+ * Normalize rigid per-edge permeability masks to full edge count.
+ *
+ * Sparse/missing entries default to fully blocked RGB [0,0,0], so transport
+ * mutators can safely add permeability edges without implicit leaks.
+ */
 function normalizeEdgePermeabilityList(list, count) {
   if (!Array.isArray(list) || !list.length) return Array.from({ length: count }, () => [0, 0, 0]);
   return Array.from({ length: count }, (_, i) => {

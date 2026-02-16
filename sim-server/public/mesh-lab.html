@@ -43,6 +43,9 @@
             <option value="membraneEdge">Membrane edge-length field</option>
             <option value="membraneShape">Membrane stiffness field</option>
             <option value="softPermeability">Soft permeability field</option>
+            <option value="softEdgeDyeMode">Soft edge dye mode field (BLOCK/PASS/EAT)</option>
+            <option value="softEdgeVelocityMode">Soft edge velocity mode field (BLOCK/PASS)</option>
+            <option value="softEdgeMomentumMode">Soft edge momentum coupling field (0..1)</option>
             <option value="rigidPermeability">Rigid permeability field</option>
             <option value="rigidConsume">Rigid edge consume-dye field</option>
           </select>
@@ -85,6 +88,28 @@
       <summary>Body edge trait paint controls</summary>
       <div class="ctrl-body">
         <label>Soft permeability paint (0..1) <input id="softPermeabilityPaintValue" type="number" value="0" min="0" max="1" step="0.05" /></label>
+        <label>Soft dye channel
+          <select id="softEdgeDyeChannel">
+            <option value="r" selected>Red dye</option>
+            <option value="g">Green dye</option>
+            <option value="b">Blue dye</option>
+            <option value="erase">Erase (all channels)</option>
+          </select>
+        </label>
+        <label>Soft dye mode
+          <select id="softEdgeDyeMode">
+            <option value="block" selected>BLOCK</option>
+            <option value="pass">PASS</option>
+            <option value="eat">EAT</option>
+          </select>
+        </label>
+        <label>Soft velocity mode
+          <select id="softEdgeVelocityMode">
+            <option value="block" selected>BLOCK</option>
+            <option value="pass">PASS</option>
+          </select>
+        </label>
+        <label>Soft momentum paint (0..1) <input id="softEdgeMomentumPaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
         <label>Rigid permeability paint (0..1) <input id="rigidPermeabilityPaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
         <label>Edge consume channel
           <select id="rigidConsumeChannel">
@@ -219,6 +244,18 @@
     <div class="field-panel" data-field-panel="softPermeability">
       <div>Soft edge permeability map (black=blocked, white=permeable)</div>
       <canvas id="softPermeabilityPaint" width="384" height="384"></canvas>
+    </div>
+    <div class="field-panel" data-field-panel="softEdgeDyeMode">
+      <div>Soft edge dye mode map (per-channel policy: BLOCK/PASS/EAT)</div>
+      <canvas id="softEdgeDyeModePaint" width="384" height="384"></canvas>
+    </div>
+    <div class="field-panel" data-field-panel="softEdgeVelocityMode">
+      <div>Soft edge velocity mode map (black=BLOCK, white=PASS)</div>
+      <canvas id="softEdgeVelocityModePaint" width="384" height="384"></canvas>
+    </div>
+    <div class="field-panel" data-field-panel="softEdgeMomentumMode">
+      <div>Soft edge momentum coupling map (black=0, white=1)</div>
+      <canvas id="softEdgeMomentumModePaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="rigidPermeability">
       <div>Rigid edge permeability map (black=blocked, white=permeable)</div>

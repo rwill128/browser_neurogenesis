@@ -6,6 +6,9 @@ const densityCanvas = document.getElementById('densityPaint');
 const membraneEdgeCanvas = document.getElementById('membraneEdgePaint');
 const membraneShapeCanvas = document.getElementById('membraneShapePaint');
 const softPermeabilityCanvas = document.getElementById('softPermeabilityPaint');
+const softEdgeDyeModeCanvas = document.getElementById('softEdgeDyeModePaint');
+const softEdgeVelocityModeCanvas = document.getElementById('softEdgeVelocityModePaint');
+const softEdgeMomentumModeCanvas = document.getElementById('softEdgeMomentumModePaint');
 const rigidPermeabilityCanvas = document.getElementById('rigidPermeabilityPaint');
 const rigidConsumeCanvas = document.getElementById('rigidConsumePaint');
 const meshCanvas = document.getElementById('mesh');
@@ -15,6 +18,9 @@ const dctx = densityCanvas.getContext('2d');
 const ectx = membraneEdgeCanvas.getContext('2d');
 const sctx = membraneShapeCanvas.getContext('2d');
 const spctx = softPermeabilityCanvas.getContext('2d');
+const sdctx = softEdgeDyeModeCanvas.getContext('2d');
+const svctx = softEdgeVelocityModeCanvas.getContext('2d');
+const smctx = softEdgeMomentumModeCanvas.getContext('2d');
 const prctx = rigidPermeabilityCanvas.getContext('2d');
 const cctx = rigidConsumeCanvas.getContext('2d');
 const mctx = meshCanvas.getContext('2d');
@@ -26,6 +32,10 @@ const softDensityPaintEl = document.getElementById('softDensityPaint');
 const membraneEdgePaintEl = document.getElementById('membraneEdgePaintValue');
 const membraneShapePaintEl = document.getElementById('membraneShapePaintValue');
 const softPermeabilityPaintEl = document.getElementById('softPermeabilityPaintValue');
+const softEdgeDyeChannelEl = document.getElementById('softEdgeDyeChannel');
+const softEdgeDyeModeEl = document.getElementById('softEdgeDyeMode');
+const softEdgeVelocityModeEl = document.getElementById('softEdgeVelocityMode');
+const softEdgeMomentumPaintEl = document.getElementById('softEdgeMomentumPaintValue');
 const rigidPermeabilityPaintEl = document.getElementById('rigidPermeabilityPaintValue');
 const rigidConsumeChannelEl = document.getElementById('rigidConsumeChannel');
 const rigidConsumePaintEl = document.getElementById('rigidConsumePaintValue');
@@ -74,6 +84,11 @@ const softDensity = new Float32Array(W * H).fill(0.5);
 const membraneEdgeMap = new Float32Array(W * H).fill(0.5);
 const membraneShapeMap = new Float32Array(W * H).fill(1.0);
 const softPermeabilityMap = new Float32Array(W * H).fill(0.0);
+const softEdgeDyeModeMapR = new Float32Array(W * H).fill(0.0);
+const softEdgeDyeModeMapG = new Float32Array(W * H).fill(0.0);
+const softEdgeDyeModeMapB = new Float32Array(W * H).fill(0.0);
+const softEdgeVelocityModeMap = new Float32Array(W * H).fill(0.0);
+const softEdgeMomentumModeMap = new Float32Array(W * H).fill(1.0);
 const rigidPermeabilityMap = new Float32Array(W * H).fill(0.0);
 const rigidEdgeConsumeMapR = new Float32Array(W * H).fill(0.0);
 const rigidEdgeConsumeMapG = new Float32Array(W * H).fill(0.0);
@@ -87,6 +102,28 @@ let windTunnelReady = false;
 const fieldPanels = Array.from(document.querySelectorAll('.field-panel'));
 
 function idx(x, y) { return y * W + x; }
+
+const EDGE_DYE_BLOCK_SCALAR = 0.0;
+const EDGE_DYE_PASS_SCALAR = 0.5;
+const EDGE_DYE_EAT_SCALAR = 1.0;
+
+function edgeDyeModeToScalar(mode) {
+  const m = String(mode || 'block').toLowerCase();
+  if (m === 'eat' || m === 'absorb') return EDGE_DYE_EAT_SCALAR;
+  if (m === 'pass') return EDGE_DYE_PASS_SCALAR;
+  return EDGE_DYE_BLOCK_SCALAR;
+}
+
+function edgeVelocityModeToScalar(mode) {
+  return String(mode || 'block').toLowerCase() === 'pass' ? 1.0 : 0.0;
+}
+
+function edgeModeScalarPreview(v) {
+  const n = Math.max(0, Math.min(1, Number(v) || 0));
+  if (n >= 0.67) return 255; // EAT
+  if (n >= 0.34) return 160; // PASS
+  return 0; // BLOCK
+}
 
 function isolateLargestContiguousTraitBody(rigidField, softField, threshold = 0.35) {
   const total = W * H;
@@ -359,6 +396,9 @@ function generateRandomFields({
     membraneEdge: true,
     membraneShape: true,
     softPermeability: true,
+    softEdgeDyeMode: true,
+    softEdgeVelocityMode: true,
+    softEdgeMomentumMode: true,
     rigidPermeability: true,
     rigidConsume: true,
   },
@@ -377,6 +417,9 @@ function generateRandomFields({
     membraneEdge: !!targets?.membraneEdge,
     membraneShape: !!targets?.membraneShape,
     softPermeability: !!targets?.softPermeability,
+    softEdgeDyeMode: !!targets?.softEdgeDyeMode,
+    softEdgeVelocityMode: !!targets?.softEdgeVelocityMode,
+    softEdgeMomentumMode: !!targets?.softEdgeMomentumMode,
     rigidPermeability: !!targets?.rigidPermeability,
     rigidConsume: !!targets?.rigidConsume,
   };
@@ -387,7 +430,12 @@ function generateRandomFields({
   const edgeParams = makeRandomPatternParams(rand, 53);
   const shapeParams = makeRandomPatternParams(rand, 71);
   const softPermParams = makeRandomPatternParams(rand, 79);
-  const permParams = makeRandomPatternParams(rand, 89);
+  const softDyeRParams = makeRandomPatternParams(rand, 83);
+  const softDyeGParams = makeRandomPatternParams(rand, 85);
+  const softDyeBParams = makeRandomPatternParams(rand, 87);
+  const softVelocityParams = makeRandomPatternParams(rand, 88);
+  const softMomentumParams = makeRandomPatternParams(rand, 89);
+  const permParams = makeRandomPatternParams(rand, 97);
   const consumeRParams = makeRandomPatternParams(rand, 101);
   const consumeGParams = makeRandomPatternParams(rand, 131);
   const consumeBParams = makeRandomPatternParams(rand, 151);
@@ -439,6 +487,33 @@ function generateRandomFields({
         softPermeabilityMap[i] = soft[i] > 0.12 ? smoothstep(0.54, 0.82, softPermV) : 0;
       }
 
+      if (targetFlags.softEdgeDyeMode) {
+        const softMask = smoothstep(0.52, 0.85, softSignal);
+        const rV = samplePatternValue('wave-interference', nx, ny, softDyeRParams);
+        const gV = samplePatternValue('wave-interference', nx, ny, softDyeGParams);
+        const bV = samplePatternValue('wave-interference', nx, ny, softDyeBParams);
+        const quantizeMode = (v) => {
+          if (v >= 0.67) return EDGE_DYE_EAT_SCALAR;
+          if (v >= 0.34) return EDGE_DYE_PASS_SCALAR;
+          return EDGE_DYE_BLOCK_SCALAR;
+        };
+        softEdgeDyeModeMapR[i] = soft[i] > 0.12 ? quantizeMode(softMask * rV) : EDGE_DYE_BLOCK_SCALAR;
+        softEdgeDyeModeMapG[i] = soft[i] > 0.12 ? quantizeMode(softMask * gV) : EDGE_DYE_BLOCK_SCALAR;
+        softEdgeDyeModeMapB[i] = soft[i] > 0.12 ? quantizeMode(softMask * bV) : EDGE_DYE_BLOCK_SCALAR;
+      }
+
+      if (targetFlags.softEdgeVelocityMode) {
+        const v = samplePatternValue('sine-lines', nx, ny, softVelocityParams);
+        softEdgeVelocityModeMap[i] = (soft[i] > 0.12 && v >= 0.58) ? 1 : 0;
+      }
+
+      if (targetFlags.softEdgeMomentumMode) {
+        const m = samplePatternValue('flow-ridges', nx, ny, softMomentumParams);
+        softEdgeMomentumModeMap[i] = soft[i] > 0.12
+          ? Math.max(0, Math.min(1, 0.2 + 0.8 * m))
+          : 1;
+      }
+
       if (targetFlags.rigidPermeability) {
         const permV = samplePatternValue('sine-lines', nx, ny, permParams);
         rigidPermeabilityMap[i] = rigid[i] > 0.12 ? smoothstep(0.56, 0.84, permV) : 0;
@@ -482,6 +557,11 @@ function buildSpecFromCurrentFields(mesh, traitFields = null) {
       membraneEdgeMap,
       membraneShapeMap,
       softPermeabilityMap,
+      softEdgeDyeModeMapR,
+      softEdgeDyeModeMapG,
+      softEdgeDyeModeMapB,
+      softEdgeVelocityModeMap,
+      softEdgeMomentumModeMap,
       rigidPermeabilityMap,
       rigidEdgeConsumeMapR,
       rigidEdgeConsumeMapG,
@@ -542,6 +622,9 @@ function drawFields() {
   const edgeImg = ectx.createImageData(W, H);
   const shapeImg = sctx.createImageData(W, H);
   const softPermeabilityImg = spctx.createImageData(W, H);
+  const softEdgeDyeModeImg = sdctx.createImageData(W, H);
+  const softEdgeVelocityModeImg = svctx.createImageData(W, H);
+  const softEdgeMomentumModeImg = smctx.createImageData(W, H);
   const permeabilityImg = prctx.createImageData(W, H);
   const consumeImg = cctx.createImageData(W, H);
 
@@ -552,6 +635,11 @@ function drawFields() {
     const edge = Math.max(0, Math.min(1, membraneEdgeMap[i]));
     const shape = Math.max(0, Math.min(1, membraneShapeMap[i]));
     const softPermeability = Math.max(0, Math.min(1, softPermeabilityMap[i]));
+    const softDyeR = Math.max(0, Math.min(1, softEdgeDyeModeMapR[i]));
+    const softDyeG = Math.max(0, Math.min(1, softEdgeDyeModeMapG[i]));
+    const softDyeB = Math.max(0, Math.min(1, softEdgeDyeModeMapB[i]));
+    const softVelocityMode = Math.max(0, Math.min(1, softEdgeVelocityModeMap[i]));
+    const softMomentumMode = Math.max(0, Math.min(1, softEdgeMomentumModeMap[i]));
     const permeability = Math.max(0, Math.min(1, rigidPermeabilityMap[i]));
     const consumeR = Math.max(0, Math.min(1, rigidEdgeConsumeMapR[i]));
     const consumeG = Math.max(0, Math.min(1, rigidEdgeConsumeMapG[i]));
@@ -589,6 +677,26 @@ function drawFields() {
     softPermeabilityImg.data[i * 4 + 2] = spg;
     softPermeabilityImg.data[i * 4 + 3] = 255;
 
+    // Soft edge dye mode map (RGB channels show BLOCK/PASS/EAT quantized policy intensity).
+    softEdgeDyeModeImg.data[i * 4] = edgeModeScalarPreview(softDyeR);
+    softEdgeDyeModeImg.data[i * 4 + 1] = edgeModeScalarPreview(softDyeG);
+    softEdgeDyeModeImg.data[i * 4 + 2] = edgeModeScalarPreview(softDyeB);
+    softEdgeDyeModeImg.data[i * 4 + 3] = 255;
+
+    // Soft edge velocity mode: grayscale (black=BLOCK, white=PASS).
+    const svg = Math.round(softVelocityMode * 255);
+    softEdgeVelocityModeImg.data[i * 4] = svg;
+    softEdgeVelocityModeImg.data[i * 4 + 1] = svg;
+    softEdgeVelocityModeImg.data[i * 4 + 2] = svg;
+    softEdgeVelocityModeImg.data[i * 4 + 3] = 255;
+
+    // Soft edge momentum coupling: grayscale (black=0, white=1).
+    const smg = Math.round(softMomentumMode * 255);
+    softEdgeMomentumModeImg.data[i * 4] = smg;
+    softEdgeMomentumModeImg.data[i * 4 + 1] = smg;
+    softEdgeMomentumModeImg.data[i * 4 + 2] = smg;
+    softEdgeMomentumModeImg.data[i * 4 + 3] = 255;
+
     // Rigid edge permeability map: grayscale (black=blocked, white=permeable).
     const pg = Math.round(permeability * 255);
     permeabilityImg.data[i * 4] = pg;
@@ -617,6 +725,9 @@ function drawFields() {
   blit(ectx, membraneEdgeCanvas, edgeImg);
   blit(sctx, membraneShapeCanvas, shapeImg);
   blit(spctx, softPermeabilityCanvas, softPermeabilityImg);
+  blit(sdctx, softEdgeDyeModeCanvas, softEdgeDyeModeImg);
+  blit(svctx, softEdgeVelocityModeCanvas, softEdgeVelocityModeImg);
+  blit(smctx, softEdgeMomentumModeCanvas, softEdgeMomentumModeImg);
   blit(prctx, rigidPermeabilityCanvas, permeabilityImg);
   blit(cctx, rigidConsumeCanvas, consumeImg);
 }
@@ -725,6 +836,51 @@ function paintSoftPermeabilityMap(clientX, clientY, erase = false) {
     clientY,
     Number(softPermeabilityPaintEl?.value) || 1.0,
     0.0,
+    erase,
+  );
+  drawFields();
+}
+
+function paintSoftEdgeDyeModeMap(clientX, clientY, erase = false) {
+  const channel = String(softEdgeDyeChannelEl?.value || 'r');
+  const modeScalar = edgeDyeModeToScalar(softEdgeDyeModeEl?.value || 'block');
+
+  if (channel === 'erase') {
+    paintScalarMap(softEdgeDyeModeMapR, softEdgeDyeModeCanvas, clientX, clientY, EDGE_DYE_BLOCK_SCALAR, EDGE_DYE_BLOCK_SCALAR, true);
+    paintScalarMap(softEdgeDyeModeMapG, softEdgeDyeModeCanvas, clientX, clientY, EDGE_DYE_BLOCK_SCALAR, EDGE_DYE_BLOCK_SCALAR, true);
+    paintScalarMap(softEdgeDyeModeMapB, softEdgeDyeModeCanvas, clientX, clientY, EDGE_DYE_BLOCK_SCALAR, EDGE_DYE_BLOCK_SCALAR, true);
+    drawFields();
+    return;
+  }
+
+  const target = channel === 'g'
+    ? softEdgeDyeModeMapG
+    : (channel === 'b' ? softEdgeDyeModeMapB : softEdgeDyeModeMapR);
+  paintScalarMap(target, softEdgeDyeModeCanvas, clientX, clientY, modeScalar, EDGE_DYE_BLOCK_SCALAR, erase);
+  drawFields();
+}
+
+function paintSoftEdgeVelocityModeMap(clientX, clientY, erase = false) {
+  paintScalarMap(
+    softEdgeVelocityModeMap,
+    softEdgeVelocityModeCanvas,
+    clientX,
+    clientY,
+    edgeVelocityModeToScalar(softEdgeVelocityModeEl?.value || 'block'),
+    0.0,
+    erase,
+  );
+  drawFields();
+}
+
+function paintSoftEdgeMomentumModeMap(clientX, clientY, erase = false) {
+  paintScalarMap(
+    softEdgeMomentumModeMap,
+    softEdgeMomentumModeCanvas,
+    clientX,
+    clientY,
+    Number(softEdgeMomentumPaintEl?.value) || 1.0,
+    1.0,
     erase,
   );
   drawFields();
@@ -934,6 +1090,9 @@ function syncFieldPanelVisibility() {
   const edgeSelected = target === 'membraneEdge';
   const shapeSelected = target === 'membraneShape';
   const softPermeabilitySelected = target === 'softPermeability';
+  const softDyeModeSelected = target === 'softEdgeDyeMode';
+  const softVelocityModeSelected = target === 'softEdgeVelocityMode';
+  const softMomentumModeSelected = target === 'softEdgeMomentumMode';
   const permeabilitySelected = target === 'rigidPermeability';
   const consumeSelected = target === 'rigidConsume';
 
@@ -942,6 +1101,10 @@ function syncFieldPanelVisibility() {
   setWidgetEnabled(membraneEdgePaintEl, edgeSelected, 'Perimeter edge paint value only applies when Field to paint = Membrane edge-length field');
   setWidgetEnabled(membraneShapePaintEl, shapeSelected, 'Membrane stiffness paint value only applies when Field to paint = Membrane stiffness field');
   setWidgetEnabled(softPermeabilityPaintEl, softPermeabilitySelected, 'Soft permeability paint value only applies when Field to paint = Soft permeability field');
+  setWidgetEnabled(softEdgeDyeChannelEl, softDyeModeSelected, 'Soft dye channel only applies when Field to paint = Soft edge dye mode field');
+  setWidgetEnabled(softEdgeDyeModeEl, softDyeModeSelected, 'Soft dye mode only applies when Field to paint = Soft edge dye mode field');
+  setWidgetEnabled(softEdgeVelocityModeEl, softVelocityModeSelected, 'Soft velocity mode only applies when Field to paint = Soft edge velocity mode field');
+  setWidgetEnabled(softEdgeMomentumPaintEl, softMomentumModeSelected, 'Soft momentum paint value only applies when Field to paint = Soft edge momentum coupling field');
   setWidgetEnabled(rigidPermeabilityPaintEl, permeabilitySelected, 'Rigid permeability paint value only applies when Field to paint = Rigid permeability field');
   setWidgetEnabled(rigidConsumeChannelEl, consumeSelected, 'Consume channel only applies when Field to paint = Rigid edge consume-dye field');
   setWidgetEnabled(rigidConsumePaintEl, consumeSelected, 'Consume paint value only applies when Field to paint = Rigid edge consume-dye field');
@@ -1038,6 +1201,9 @@ let densityPainting = false;
 let membraneEdgePainting = false;
 let membraneShapePainting = false;
 let softPermeabilityPainting = false;
+let softEdgeDyeModePainting = false;
+let softEdgeVelocityModePainting = false;
+let softEdgeMomentumModePainting = false;
 let rigidPermeabilityPainting = false;
 let rigidConsumePainting = false;
 
@@ -1084,6 +1250,36 @@ softPermeabilityCanvas.addEventListener('mousemove', (e) => {
   paintSoftPermeabilityMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
 });
 
+softEdgeDyeModeCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+softEdgeDyeModeCanvas.addEventListener('mousedown', (e) => {
+  softEdgeDyeModePainting = true;
+  paintSoftEdgeDyeModeMap(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
+});
+softEdgeDyeModeCanvas.addEventListener('mousemove', (e) => {
+  if (!softEdgeDyeModePainting) return;
+  paintSoftEdgeDyeModeMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
+});
+
+softEdgeVelocityModeCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+softEdgeVelocityModeCanvas.addEventListener('mousedown', (e) => {
+  softEdgeVelocityModePainting = true;
+  paintSoftEdgeVelocityModeMap(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
+});
+softEdgeVelocityModeCanvas.addEventListener('mousemove', (e) => {
+  if (!softEdgeVelocityModePainting) return;
+  paintSoftEdgeVelocityModeMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
+});
+
+softEdgeMomentumModeCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+softEdgeMomentumModeCanvas.addEventListener('mousedown', (e) => {
+  softEdgeMomentumModePainting = true;
+  paintSoftEdgeMomentumModeMap(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
+});
+softEdgeMomentumModeCanvas.addEventListener('mousemove', (e) => {
+  if (!softEdgeMomentumModePainting) return;
+  paintSoftEdgeMomentumModeMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
+});
+
 rigidPermeabilityCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
 rigidPermeabilityCanvas.addEventListener('mousedown', (e) => {
   rigidPermeabilityPainting = true;
@@ -1110,6 +1306,9 @@ window.addEventListener('mouseup', () => {
   membraneEdgePainting = false;
   membraneShapePainting = false;
   softPermeabilityPainting = false;
+  softEdgeDyeModePainting = false;
+  softEdgeVelocityModePainting = false;
+  softEdgeMomentumModePainting = false;
   rigidPermeabilityPainting = false;
   rigidConsumePainting = false;
 });
@@ -1121,6 +1320,11 @@ clearBtn.addEventListener('click', () => {
   membraneEdgeMap.fill(0.5);
   membraneShapeMap.fill(1.0);
   softPermeabilityMap.fill(0.0);
+  softEdgeDyeModeMapR.fill(0.0);
+  softEdgeDyeModeMapG.fill(0.0);
+  softEdgeDyeModeMapB.fill(0.0);
+  softEdgeVelocityModeMap.fill(0.0);
+  softEdgeMomentumModeMap.fill(1.0);
   rigidPermeabilityMap.fill(0.0);
   rigidEdgeConsumeMapR.fill(0.0);
   rigidEdgeConsumeMapG.fill(0.0);
@@ -1148,6 +1352,9 @@ if (randomizeBtn) {
       membraneEdge: true,
       membraneShape: true,
       softPermeability: true,
+      softEdgeDyeMode: true,
+      softEdgeVelocityMode: true,
+      softEdgeMomentumMode: true,
       rigidPermeability: true,
       rigidConsume: true,
     });
@@ -1252,6 +1459,16 @@ importFile.addEventListener('change', async () => {
     else membraneShapeMap.fill(1.0);
     if (Array.isArray(authoring.softPermeabilityMap) && authoring.softPermeabilityMap.length === W * H) softPermeabilityMap.set(authoring.softPermeabilityMap);
     else softPermeabilityMap.fill(0.0);
+    if (Array.isArray(authoring.softEdgeDyeModeMapR) && authoring.softEdgeDyeModeMapR.length === W * H) softEdgeDyeModeMapR.set(authoring.softEdgeDyeModeMapR);
+    else softEdgeDyeModeMapR.fill(0.0);
+    if (Array.isArray(authoring.softEdgeDyeModeMapG) && authoring.softEdgeDyeModeMapG.length === W * H) softEdgeDyeModeMapG.set(authoring.softEdgeDyeModeMapG);
+    else softEdgeDyeModeMapG.fill(0.0);
+    if (Array.isArray(authoring.softEdgeDyeModeMapB) && authoring.softEdgeDyeModeMapB.length === W * H) softEdgeDyeModeMapB.set(authoring.softEdgeDyeModeMapB);
+    else softEdgeDyeModeMapB.fill(0.0);
+    if (Array.isArray(authoring.softEdgeVelocityModeMap) && authoring.softEdgeVelocityModeMap.length === W * H) softEdgeVelocityModeMap.set(authoring.softEdgeVelocityModeMap);
+    else softEdgeVelocityModeMap.fill(0.0);
+    if (Array.isArray(authoring.softEdgeMomentumModeMap) && authoring.softEdgeMomentumModeMap.length === W * H) softEdgeMomentumModeMap.set(authoring.softEdgeMomentumModeMap);
+    else softEdgeMomentumModeMap.fill(1.0);
     if (Array.isArray(authoring.rigidPermeabilityMap) && authoring.rigidPermeabilityMap.length === W * H) rigidPermeabilityMap.set(authoring.rigidPermeabilityMap);
     else rigidPermeabilityMap.fill(0.0);
     if (Array.isArray(authoring.rigidEdgeConsumeMapR) && authoring.rigidEdgeConsumeMapR.length === W * H) rigidEdgeConsumeMapR.set(authoring.rigidEdgeConsumeMapR);

@@ -3147,7 +3147,9 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const honey = localHoneyDrag(node.x, node.y);
     const cid = node.clusterId ?? 0;
     const isMembraneCluster = softMembraneClusterSet.has(cid);
-    const flowCoupling = isMembraneCluster ? (SOFT_NODE_FLOW_COUPLING * 0.88) : SOFT_NODE_FLOW_COUPLING;
+    const nodeMomentum = softNodeMomentumScale(i);
+    const flowCouplingBase = isMembraneCluster ? (SOFT_NODE_FLOW_COUPLING * 0.88) : SOFT_NODE_FLOW_COUPLING;
+    const flowCoupling = flowCouplingBase * nodeMomentum;
 
     const clusterKin = softClusterKinematics.get(cid);
     const clusterX = Number.isFinite(Number(clusterKin?.x)) ? Number(clusterKin.x) : softCentroid.x;

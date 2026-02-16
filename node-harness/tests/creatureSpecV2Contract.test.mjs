@@ -193,6 +193,34 @@ test('soft solver mode is exported and membrane mode is mapped on import bodies'
   assert.equal(importedSpring.softMembraneClusters.length, 0);
 });
 
+test('unknown soft solver mode deterministically normalizes to spring (no membrane metadata)', () => {
+  const mesh = {
+    nodes: [
+      { id: 0, x: 1, y: 1, rigid: 0, soft: 1 },
+      { id: 1, x: 5, y: 1, rigid: 0, soft: 1 },
+      { id: 2, x: 3, y: 5, rigid: 0, soft: 1 },
+    ],
+    triangles: [
+      { kind: 'soft', a: 0, b: 1, c: 2 },
+    ],
+    meta: { width: 8, height: 8 },
+  };
+
+  const spec = createCreatureSpecFromMesh(mesh, {
+    softSolverMode: 'future-cellular-mode',
+    softBoundaryRingSprings: false,
+  });
+
+  assert.equal(spec.softBodies.length, 1);
+  assert.equal(spec.softBodies[0].solverMode, 'spring');
+  assert.equal(spec.softBodies[0].restArea, undefined);
+
+  const imported = buildBodiesFromCreatureSpec(spec, 64, CONTROLS);
+  assert.equal(imported.softMembraneClusters.length, 0);
+  assert.ok(imported.soft.nodes.length >= 3);
+  assert.ok(imported.soft.springs.length >= 3);
+});
+
 test('buildBodiesFromCreatureSpec sanitizes membrane imports to perimeter-only springs', () => {
   const spec = {
     schemaVersion: CREATURE_SPEC_VERSION,

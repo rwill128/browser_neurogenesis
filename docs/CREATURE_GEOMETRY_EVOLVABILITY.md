@@ -82,6 +82,14 @@ When using membrane field authoring, `shapeMemoryWeight` is sampled from `fields
 
 These characteristics are important for future mutators: exploratory edits can be aggressive, but import/build still projects the result into solver-safe ranges.
 
+### Solver mode forward-compatibility rule
+
+`solverMode` is intentionally normalized as:
+- `"membrane"` → membrane path (plus membrane cluster metadata)
+- anything else (`"spring"` or unknown future strings) → spring path
+
+This keeps imports deterministic when experimental/future mutators emit unknown solver tags: simulation falls back to stable spring semantics instead of entering a partial membrane state.
+
 ## Deterministic guardrails already in place
 
 Current code enforces several anti-chaos rules that should remain active while mutation expands:

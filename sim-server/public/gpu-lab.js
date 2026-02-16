@@ -4605,10 +4605,13 @@ async function initSim() {
   if (!adapter) throw new Error('No WebGPU adapter');
 
   // Some hardware supports raising storage-buffer limits only when explicitly
-  // requested at device creation time; request 9 when available.
+  // requested at device creation time. Advect-dye now uses 10 storage buffers,
+  // so request 10 when supported (fall back to 9 for older paths).
   const requestedLimits = {};
   const maxStoragePerStage = Number(adapter.limits?.maxStorageBuffersPerShaderStage || 8);
-  if (maxStoragePerStage >= 9) {
+  if (maxStoragePerStage >= 10) {
+    requestedLimits.maxStorageBuffersPerShaderStage = 10;
+  } else if (maxStoragePerStage >= 9) {
     requestedLimits.maxStorageBuffersPerShaderStage = 9;
   }
 

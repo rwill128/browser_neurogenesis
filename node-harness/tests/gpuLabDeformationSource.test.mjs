@@ -86,6 +86,14 @@ test('gpu-lab dye advection honors obstacle mask to prevent through-body leakage
   );
 });
 
+test('gpu-lab requests storage-buffer stage limit 10 when adapter supports it', () => {
+  assert.match(
+    source,
+    /if \(maxStoragePerStage >= 10\) \{[\s\S]*requestedLimits\.maxStorageBuffersPerShaderStage = 10;/,
+    'expected device init to request maxStorageBuffersPerShaderStage=10 for 10-buffer dye pipeline',
+  );
+});
+
 test('gpu-lab obstacle mask is edge-velocity BLOCK based for both rigid and soft (no post-pass barrier)', () => {
   assert.match(
     source,

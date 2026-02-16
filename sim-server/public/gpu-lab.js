@@ -2280,6 +2280,7 @@ function ensureSoftDeformationReferenceState(sim, s) {
 }
 
 function buildSoftDeformationState(sim, s, loops) {
+  const membraneSet = ensureSoftMembraneClusterSet(sim);
   const clusters = new Map();
   const ensureCluster = (cid) => {
     if (!clusters.has(cid)) {
@@ -2426,8 +2427,9 @@ function buildSoftDeformationState(sim, s, loops) {
     const poseSevere = c.poseErrorRms >= SOFT_DEFORM_SEVERE_POSE_RMS
       || c.poseErrorMax >= SOFT_DEFORM_SEVERE_POSE_MAX;
 
+    const isMembraneCluster = membraneSet.has(c.clusterId);
     c.warning = c.warning || legacyWarn || (poseAvailable && poseWarn);
-    c.severeCollapse = c.severeCollapse || legacySevere;
+    c.severeCollapse = c.severeCollapse || (!isMembraneCluster && legacySevere);
     c.severe = c.severe || c.severeCollapse || (poseAvailable && poseSevere);
 
     if (c.warning) warningClusters.push(c.clusterId);

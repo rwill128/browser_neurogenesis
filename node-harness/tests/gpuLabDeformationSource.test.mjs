@@ -24,4 +24,10 @@ test('gpu-lab deformation stabilization is gated by collapse risk, not pose-only
     /c\.severe = c\.severe \|\| c\.severeCollapse \|\| \(poseAvailable && poseSevere\);/,
     'expected pose severity to be tracked separately from collapse severity',
   );
+
+  assert.match(
+    source,
+    /c\.severeCollapse = c\.severeCollapse \|\| \(!isMembraneCluster && legacySevere\);/,
+    'expected membrane clusters to be excluded from legacy collapse classification',
+  );
 });

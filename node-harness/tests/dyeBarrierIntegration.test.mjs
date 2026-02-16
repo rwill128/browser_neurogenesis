@@ -261,7 +261,27 @@ test('exported rigid permeability traits survive import and drive runtime barrie
   const vx = new Float32Array(size);
   const vy = new Float32Array(size);
   r[permeableCell] = 120;
+  g[permeableCell] = 90;
+  b[permeableCell] = 60;
   r[blockedCell] = 120;
+  g[blockedCell] = 90;
+  b[blockedCell] = 60;
+  // Give both cells strong edge-normal velocity so we can verify permeability only affects dye,
+  // while contact blocking still projects out normal flow.
+  const edgeNormal = (edgeIdx) => {
+    const a = verts[edgeIdx];
+    const b2 = verts[(edgeIdx + 1) % verts.length];
+    const ex = b2.x - a.x;
+    const ey = b2.y - a.y;
+    const len = Math.max(1e-6, Math.hypot(ex, ey));
+    return { nx: -ey / len, ny: ex / len };
+  };
+  const permeableNormal = edgeNormal(permeableEdge);
+  const blockedNormal = edgeNormal(blockedEdge);
+  vx[permeableCell] = permeableNormal.nx * 4.5;
+  vy[permeableCell] = permeableNormal.ny * 4.5;
+  vx[blockedCell] = blockedNormal.nx * 4.5;
+  vy[blockedCell] = blockedNormal.ny * 4.5;
 
   const sim = {
     controls: { n },
@@ -273,8 +293,18 @@ test('exported rigid permeability traits survive import and drive runtime barrie
 
   applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld });
 
-  assert.ok(r[permeableCell] >= 119.9, `permeable edge should preserve dye (got ${r[permeableCell]})`);
-  assert.ok(r[blockedCell] < 120, `blocked edge should attenuate/deflect dye (got ${r[blockedCell]})`);
+  assert.ok(r[permeableCell] >= 119.9, `permeable edge should preserve red dye (got ${r[permeableCell]})`);
+  assert.ok(g[permeableCell] >= 89.9, `permeable edge should preserve green dye (got ${g[permeableCell]})`);
+  assert.ok(b[permeableCell] >= 59.9, `permeable edge should preserve blue dye (got ${b[permeableCell]})`);
+
+  assert.ok(r[blockedCell] < 120, `blocked edge should attenuate/deflect red dye (got ${r[blockedCell]})`);
+  assert.ok(g[blockedCell] < 90, `blocked edge should attenuate/deflect green dye (got ${g[blockedCell]})`);
+  assert.ok(b[blockedCell] < 60, `blocked edge should attenuate/deflect blue dye (got ${b[blockedCell]})`);
+
+  const postPermeableNormal = vx[permeableCell] * permeableNormal.nx + vy[permeableCell] * permeableNormal.ny;
+  const postBlockedNormal = vx[blockedCell] * blockedNormal.nx + vy[blockedCell] * blockedNormal.ny;
+  assert.ok(postPermeableNormal < 4.5, `permeable dye edge should still block body-normal velocity (got ${postPermeableNormal})`);
+  assert.ok(postBlockedNormal < 4.5, `blocked edge should block body-normal velocity (got ${postBlockedNormal})`);
 });
 
 test('exported rigid edge consume maps survive import and absorb configured dye channels', () => {

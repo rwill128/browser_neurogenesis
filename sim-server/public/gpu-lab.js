@@ -4604,20 +4604,32 @@ async function initSim() {
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) throw new Error('No WebGPU adapter');
 
-  // Some hardware supports raising storage-buffer limits only when explicitly
-  // requested at device creation time. Advect-dye now uses 10 storage buffers,
-  // so request 10 when supported (fall back to 9 for older paths).
-  const requestedLimits = {};
+  // Some browsers/hardware only expose higher storage-buffer stage limits when
+  // explicitly requested at device creation time. Advect-dye now needs 10.
+  // Be robust even if adapter.limits is absent/stale by optimistic fallback tries.
+  let device = null;
   const maxStoragePerStage = Number(adapter.limits?.maxStorageBuffersPerShaderStage || 8);
-  if (maxStoragePerStage >= 10) {
-    requestedLimits.maxStorageBuffersPerShaderStage = 10;
-  } else if (maxStoragePerStage >= 9) {
-    requestedLimits.maxStorageBuffersPerShaderStage = 9;
+  const requestedStorageLimitCandidates = [10, 9].filter((limit) => Number.isFinite(limit));
+
+  for (const limit of requestedStorageLimitCandidates) {
+    // If adapter explicitly reports a lower max, skip impossible requests.
+    if (Number.isFinite(maxStoragePerStage) && maxStoragePerStage < limit) continue;
+    try {
+      device = await adapter.requestDevice({
+        requiredLimits: { maxStorageBuffersPerShaderStage: limit },
+      });
+      break;
+    } catch (err) {
+      console.warn('[gpu-lab] requestDevice with storage-buffer limit failed; falling back', {
+        limit,
+        error: String(err?.message || err),
+      });
+    }
   }
 
-  const device = await adapter.requestDevice(
-    Object.keys(requestedLimits).length ? { requiredLimits: requestedLimits } : undefined,
-  );
+  if (!device) {
+    device = await adapter.requestDevice();
+  }
 
   const cells = controls.n * controls.n;
   const bytes = cells * 4;

@@ -86,11 +86,23 @@ test('gpu-lab dye advection honors obstacle mask to prevent through-body leakage
   );
 });
 
-test('gpu-lab requests storage-buffer stage limit 10 when adapter supports it', () => {
+test('gpu-lab attempts storage-buffer stage limits 10 then 9 before default device request', () => {
   assert.match(
     source,
-    /if \(maxStoragePerStage >= 10\) \{[\s\S]*requestedLimits\.maxStorageBuffersPerShaderStage = 10;/,
-    'expected device init to request maxStorageBuffersPerShaderStage=10 for 10-buffer dye pipeline',
+    /const requestedStorageLimitCandidates = \[10, 9\]/,
+    'expected ordered storage-limit fallback candidates [10, 9]',
+  );
+
+  assert.match(
+    source,
+    /requiredLimits: \{ maxStorageBuffersPerShaderStage: limit \}/,
+    'expected requestDevice requiredLimits override for storage-buffer stage limit',
+  );
+
+  assert.match(
+    source,
+    /if \(!device\) \{[\s\S]*device = await adapter\.requestDevice\(\);/,
+    'expected fallback to default requestDevice when explicit limit requests fail',
   );
 });
 

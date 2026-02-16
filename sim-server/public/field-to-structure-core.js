@@ -269,6 +269,10 @@ export function compileFieldToMesh({
   rigidCompileMode = 'contours', // contours | primitive-tiling
   rigidPrimitiveSideMin = 4,
   rigidPrimitiveSideMax = 10,
+  rigidEdgeLengthField = null, // 0..1 edge-length map for contour mode (black=min, white=max)
+  rigidMinEdgeLength = null,
+  rigidMaxEdgeLength = null,
+  rigidMaxNodes = 512,
   softInfillMode = 'triangles+cross', // triangles | triangles+cross
   softDensityField = null, // 0..1, controls local rigid+soft primitive size (darker=finer, brighter=coarser)
   softMinCellSize = 1, // lower bound on adaptive soft primitive size (cell units)
@@ -286,6 +290,12 @@ export function compileFieldToMesh({
   const rigidMode = String(rigidCompileMode || 'contours') === 'primitive-tiling' ? 'primitive-tiling' : 'contours';
   const primitiveSideMin = Math.max(2, Math.round(Number(rigidPrimitiveSideMin) || 4));
   const primitiveSideMax = Math.max(primitiveSideMin, Math.round(Number(rigidPrimitiveSideMax) || 10));
+  const hasRigidMinEdge = rigidMinEdgeLength !== null && rigidMinEdgeLength !== undefined && Number.isFinite(Number(rigidMinEdgeLength));
+  const hasRigidMaxEdge = rigidMaxEdgeLength !== null && rigidMaxEdgeLength !== undefined && Number.isFinite(Number(rigidMaxEdgeLength));
+  const rigidEdgeMin = Math.max(0.75, hasRigidMinEdge ? Number(rigidMinEdgeLength) : primitiveSideMin);
+  const rigidEdgeMax = Math.max(rigidEdgeMin, hasRigidMaxEdge ? Number(rigidMaxEdgeLength) : primitiveSideMax);
+  const rigidEdgeNodeCap = Math.max(8, Math.min(4096, Math.round(Number(rigidMaxNodes) || 512)));
+  const hasRigidEdgeLengthMap = (rigidEdgeLengthField instanceof Float32Array) && rigidEdgeLengthField.length >= width * height;
   const fallbackStep = Math.max(1, density | 0);
   const maxAdaptiveStep = Math.max(1, Math.min(width - 1, height - 1));
   const softMinStep = Math.max(1, Math.min(maxAdaptiveStep, Math.round(Number(softMinCellSize) || 1)));
@@ -396,7 +406,7 @@ export function compileFieldToMesh({
   }
 
   const filtered = enforceConnectivity({ triangles, mode: connectivityMode, minComponentTriangles });
-  const rigidDecomp = rigidMode === 'primitive-tiling'
+  let rigidDecomp = rigidMode === 'primitive-tiling'
     ? extractRigidPrimitiveTilingFromField({
         width,
         height,
@@ -416,6 +426,21 @@ export function compileFieldToMesh({
         keptTriangles: filtered.triangles,
         rigidMaskOverride,
       });
+
+  if (rigidMode === 'contours') {
+    rigidDecomp = {
+      ...rigidDecomp,
+      pieces: resampleRigidContourPiecesByEdgeMap({
+        pieces: rigidDecomp?.pieces,
+        width,
+        height,
+        edgeLengthField: hasRigidEdgeLengthMap ? rigidEdgeLengthField : null,
+        minEdgeLength: rigidEdgeMin,
+        maxEdgeLength: rigidEdgeMax,
+        maxNodes: rigidEdgeNodeCap,
+      }),
+    };
+  }
 
   const noOverlap = removeSoftTrianglesOverlappingRigidContours(filtered.triangles, nodes, rigidDecomp.pieces);
   const densityApplied = hasDensityMap
@@ -452,6 +477,9 @@ export function compileFieldToMesh({
       rigidCompileMode: rigidMode,
       rigidPrimitiveSideMin: primitiveSideMin,
       rigidPrimitiveSideMax: primitiveSideMax,
+      rigidContourMinEdgeLength: rigidEdgeMin,
+      rigidContourMaxEdgeLength: rigidEdgeMax,
+      rigidContourEdgeLengthSource: hasRigidEdgeLengthMap ? 'map' : 'uniform',
       rigidPrimitiveTiles: Number(rigidDecomp?.tileCount) || 0,
       softInfillMode: infillMode,
       softCrossBeams: softCrossBeams.length,
@@ -470,6 +498,133 @@ export function compileFieldToMesh({
       softTerminalTipCellCap: softTerminalTipCap,
     },
   };
+}
+
+function sampleClosedArcPoint(poly, segLen, cumLen, perimeter, arcLen) {
+  let s = Number(arcLen) || 0;
+  s = ((s % perimeter) + perimeter) % perimeter;
+
+  let edge = 0;
+  while (edge + 1 < cumLen.length && cumLen[edge + 1] <= s) edge += 1;
+  const a = poly[edge % poly.length];
+  const b = poly[(edge + 1) % poly.length];
+  const len = Math.max(1e-9, segLen[edge % poly.length]);
+  const t = Math.max(0, Math.min(1, (s - cumLen[edge]) / len));
+  return {
+    x: a.x + (b.x - a.x) * t,
+    y: a.y + (b.y - a.y) * t,
+  };
+}
+
+function resampleClosedLoopByEdgeMap({
+  poly,
+  width,
+  height,
+  edgeLengthField = null,
+  minEdgeLength = 4,
+  maxEdgeLength = 10,
+  maxNodes = 512,
+}) {
+  if (!Array.isArray(poly) || poly.length < 3) return poly || [];
+
+  const minEdge = Math.max(0.75, Number(minEdgeLength) || 4);
+  const maxEdge = Math.max(minEdge, Number(maxEdgeLength) || (minEdge * 2));
+  const nodeCap = Math.max(8, Math.round(Number(maxNodes) || 512));
+
+  let perimeter = 0;
+  const segLen = new Float64Array(poly.length);
+  const cumLen = new Float64Array(poly.length + 1);
+  cumLen[0] = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const len = Math.hypot((b.x || 0) - (a.x || 0), (b.y || 0) - (a.y || 0));
+    segLen[i] = Math.max(1e-9, len);
+    perimeter += segLen[i];
+    cumLen[i + 1] = perimeter;
+  }
+  if (!Number.isFinite(perimeter) || perimeter <= 1e-6) return poly;
+
+  const positions = [0];
+  let s = 0;
+  let guard = nodeCap * 6;
+  while (positions.length < nodeCap && guard-- > 0) {
+    const p = sampleClosedArcPoint(poly, segLen, cumLen, perimeter, s);
+    const mapV = (edgeLengthField instanceof Float32Array && edgeLengthField.length >= width * height)
+      ? clamp(sampleBilinear(edgeLengthField, width, height, p.x, p.y), 0, 1)
+      : 0.5;
+    const target = minEdge + mapV * (maxEdge - minEdge);
+    const step = Math.max(minEdge, Math.min(maxEdge, target));
+    if ((s + step) >= (perimeter - minEdge * 0.35)) break;
+    s += step;
+    positions.push(s);
+  }
+
+  while (positions.length < nodeCap) {
+    const tail = perimeter - positions[positions.length - 1];
+    if (tail <= maxEdge * 1.05) break;
+    positions.push(positions[positions.length - 1] + maxEdge);
+  }
+
+  if (positions.length < 3) {
+    const fallbackN = Math.max(3, Math.min(nodeCap, Math.round(perimeter / Math.max(minEdge, 1))));
+    const out = [];
+    for (let i = 0; i < fallbackN; i++) {
+      out.push(sampleClosedArcPoint(poly, segLen, cumLen, perimeter, (i * perimeter) / fallbackN));
+    }
+    return out;
+  }
+
+  return positions.map((arc) => sampleClosedArcPoint(poly, segLen, cumLen, perimeter, arc));
+}
+
+function resampleRigidContourPiecesByEdgeMap({
+  pieces,
+  width,
+  height,
+  edgeLengthField = null,
+  minEdgeLength = 4,
+  maxEdgeLength = 10,
+  maxNodes = 512,
+}) {
+  if (!Array.isArray(pieces) || !pieces.length) return [];
+
+  const out = [];
+  for (const piece of pieces) {
+    const hull = Array.isArray(piece?.hull) ? piece.hull : null;
+    if (!hull || hull.length < 3) {
+      out.push(piece);
+      continue;
+    }
+
+    const prevSign = signedPolygonArea(hull);
+    let nextHull = resampleClosedLoopByEdgeMap({
+      poly: hull,
+      width,
+      height,
+      edgeLengthField,
+      minEdgeLength,
+      maxEdgeLength,
+      maxNodes,
+    });
+    nextHull = simplifyCollinear(nextHull);
+
+    if (!Array.isArray(nextHull) || nextHull.length < 3) {
+      out.push(piece);
+      continue;
+    }
+
+    if ((prevSign < 0 && signedPolygonArea(nextHull) > 0) || (prevSign > 0 && signedPolygonArea(nextHull) < 0)) {
+      nextHull = [...nextHull].reverse();
+    }
+
+    out.push({
+      ...piece,
+      hull: nextHull,
+    });
+  }
+
+  return out;
 }
 
 function enforceConnectivity({ triangles, mode = 'none', minComponentTriangles = 0 }) {
@@ -825,9 +980,8 @@ function extractRigidPrimitiveTilingFromField({
   if (!best || !best.tiles?.length) return { pieces: [], tileCount: 0 };
 
   const pieces = best.tiles.map((tile, i) => {
+    // Preserve primitive geometry exactly to avoid simplification-induced overlaps.
     let hull = simplifyCollinear(tile.poly);
-    hull = simplifyDouglasPeucker(hull, 0.04);
-    hull = simplifyCollinear(hull);
     if (signedPolygonArea(hull) < 0) hull = [...hull].reverse();
     return {
       id: `rigid_piece_${i}`,
@@ -889,11 +1043,7 @@ function buildRigidPrimitiveTilingForSide({ width, height, rigidMask, side, maxT
 
         let overlaps = false;
         for (const t of tiles) {
-          if (pointInPolygon(center.x, center.y, t.poly)) {
-            overlaps = true;
-            break;
-          }
-          if (pointInPolygon(t.center.x, t.center.y, poly)) {
+          if (polygonsOverlapOrIntersect(poly, t.poly)) {
             overlaps = true;
             break;
           }
@@ -1004,6 +1154,128 @@ function canonicalEdgeKey(a, b) {
   const ax = q(a.x), ay = q(a.y), bx = q(b.x), by = q(b.y);
   if (ax < bx || (ax === bx && ay <= by)) return `${ax},${ay}|${bx},${by}`;
   return `${bx},${by}|${ax},${ay}`;
+}
+
+function approxEqual(a, b, eps = 1e-5) {
+  return Math.abs((Number(a) || 0) - (Number(b) || 0)) <= eps;
+}
+
+function samePoint(a, b, eps = 1e-5) {
+  return approxEqual(a?.x, b?.x, eps) && approxEqual(a?.y, b?.y, eps);
+}
+
+function sameEdgeUnordered(a0, a1, b0, b1, eps = 1e-5) {
+  return (samePoint(a0, b0, eps) && samePoint(a1, b1, eps))
+    || (samePoint(a0, b1, eps) && samePoint(a1, b0, eps));
+}
+
+function orientationSign(a, b, c, eps = 1e-8) {
+  const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  if (cross > eps) return 1;
+  if (cross < -eps) return -1;
+  return 0;
+}
+
+function segmentProperIntersect(a, b, c, d, eps = 1e-8) {
+  const o1 = orientationSign(a, b, c, eps);
+  const o2 = orientationSign(a, b, d, eps);
+  const o3 = orientationSign(c, d, a, eps);
+  const o4 = orientationSign(c, d, b, eps);
+
+  if (o1 === 0 && o2 === 0 && o3 === 0 && o4 === 0) return false;
+  return (o1 * o2 < 0) && (o3 * o4 < 0);
+}
+
+function collinearSegmentsOverlapDisallowed(a, b, c, d, eps = 1e-6) {
+  const o1 = orientationSign(a, b, c, eps);
+  const o2 = orientationSign(a, b, d, eps);
+  if (o1 !== 0 || o2 !== 0) return false;
+
+  const useX = Math.abs((a.x - b.x)) >= Math.abs((a.y - b.y));
+  const a0 = useX ? a.x : a.y;
+  const a1 = useX ? b.x : b.y;
+  const c0 = useX ? c.x : c.y;
+  const c1 = useX ? d.x : d.y;
+
+  const minA = Math.min(a0, a1);
+  const maxA = Math.max(a0, a1);
+  const minC = Math.min(c0, c1);
+  const maxC = Math.max(c0, c1);
+  const overlap = Math.min(maxA, maxC) - Math.max(minA, minC);
+  if (overlap <= eps) return false;
+
+  // Allow exact shared-edge attachment; disallow partial/non-identical collinear overlap.
+  return !sameEdgeUnordered(a, b, c, d, 1e-4);
+}
+
+function pointInPolygonStrict(px, py, poly, eps = 1e-6) {
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[j];
+    const b = poly[i];
+    if (pointOnSegment(px, py, a.x, a.y, b.x, b.y, eps)) return false;
+  }
+
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x;
+    const yi = poly[i].y;
+    const xj = poly[j].x;
+    const yj = poly[j].y;
+    const denRaw = (yj - yi);
+    const den = Math.abs(denRaw) < 1e-9 ? (denRaw >= 0 ? 1e-9 : -1e-9) : denRaw;
+    const intersect = ((yi > py) !== (yj > py))
+      && (px < ((xj - xi) * (py - yi)) / den + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function polygonBounds(poly) {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const p of poly || []) {
+    minX = Math.min(minX, Number(p?.x) || 0);
+    minY = Math.min(minY, Number(p?.y) || 0);
+    maxX = Math.max(maxX, Number(p?.x) || 0);
+    maxY = Math.max(maxY, Number(p?.y) || 0);
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+function boundsOverlap(a, b, eps = 1e-6) {
+  return !(a.maxX < b.minX - eps
+    || b.maxX < a.minX - eps
+    || a.maxY < b.minY - eps
+    || b.maxY < a.minY - eps);
+}
+
+function polygonsOverlapOrIntersect(polyA, polyB) {
+  if (!Array.isArray(polyA) || !Array.isArray(polyB) || polyA.length < 3 || polyB.length < 3) return false;
+  const boxA = polygonBounds(polyA);
+  const boxB = polygonBounds(polyB);
+  if (!boundsOverlap(boxA, boxB)) return false;
+
+  for (let i = 0; i < polyA.length; i++) {
+    const a0 = polyA[i];
+    const a1 = polyA[(i + 1) % polyA.length];
+    for (let j = 0; j < polyB.length; j++) {
+      const b0 = polyB[j];
+      const b1 = polyB[(j + 1) % polyB.length];
+      if (segmentProperIntersect(a0, a1, b0, b1)) return true;
+      if (collinearSegmentsOverlapDisallowed(a0, a1, b0, b1)) return true;
+    }
+  }
+
+  for (const p of polyA) {
+    if (pointInPolygonStrict(p.x, p.y, polyB)) return true;
+  }
+  for (const p of polyB) {
+    if (pointInPolygonStrict(p.x, p.y, polyA)) return true;
+  }
+
+  return false;
 }
 
 function buildAttachedRegularPolygon(edge, sides, side) {
@@ -1465,8 +1737,10 @@ function pointInPolygon(px, py, poly, eps = 1e-6) {
 
     if (pointOnSegment(px, py, xi, yi, xj, yj, eps)) return true;
 
+    const denRaw = (yj - yi);
+    const den = Math.abs(denRaw) < 1e-9 ? (denRaw >= 0 ? 1e-9 : -1e-9) : denRaw;
     const intersect = ((yi > py) !== (yj > py))
-      && (px < ((xj - xi) * (py - yi)) / Math.max(1e-9, (yj - yi)) + xi);
+      && (px < ((xj - xi) * (py - yi)) / den + xi);
     if (intersect) inside = !inside;
   }
   return inside;

@@ -12,8 +12,10 @@ function pointInPolygon(px, py, poly, eps = 1e-6) {
 
     if (pointOnSegment(px, py, xi, yi, xj, yj, eps)) return true;
 
+    const denRaw = (yj - yi);
+    const den = Math.abs(denRaw) < 1e-9 ? (denRaw >= 0 ? 1e-9 : -1e-9) : denRaw;
     const intersect = ((yi > py) !== (yj > py))
-      && (px < ((xj - xi) * (py - yi)) / Math.max(1e-9, (yj - yi)) + xi);
+      && (px < ((xj - xi) * (py - yi)) / den + xi);
     if (intersect) inside = !inside;
   }
   return inside;
@@ -130,6 +132,67 @@ function countSharedPolygonEdges(pieces) {
   return shared;
 }
 
+function orientationSign(a, b, c, eps = 1e-8) {
+  const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  if (cross > eps) return 1;
+  if (cross < -eps) return -1;
+  return 0;
+}
+
+function segmentProperIntersect(a, b, c, d, eps = 1e-8) {
+  const o1 = orientationSign(a, b, c, eps);
+  const o2 = orientationSign(a, b, d, eps);
+  const o3 = orientationSign(c, d, a, eps);
+  const o4 = orientationSign(c, d, b, eps);
+
+  if (o1 === 0 && o2 === 0 && o3 === 0 && o4 === 0) return false;
+  return (o1 * o2 < 0) && (o3 * o4 < 0);
+}
+
+function pointInPolygonStrict(px, py, poly, eps = 1e-6) {
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    if (pointOnSegment(px, py, poly[j].x, poly[j].y, poly[i].x, poly[i].y, eps)) return false;
+  }
+
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x;
+    const yi = poly[i].y;
+    const xj = poly[j].x;
+    const yj = poly[j].y;
+
+    const denRaw = (yj - yi);
+    const den = Math.abs(denRaw) < 1e-9 ? (denRaw >= 0 ? 1e-9 : -1e-9) : denRaw;
+    const intersect = ((yi > py) !== (yj > py))
+      && (px < ((xj - xi) * (py - yi)) / den + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function polygonsOverlapOrIntersect(polyA, polyB) {
+  if (!Array.isArray(polyA) || !Array.isArray(polyB) || polyA.length < 3 || polyB.length < 3) return false;
+
+  for (let i = 0; i < polyA.length; i++) {
+    const a0 = polyA[i];
+    const a1 = polyA[(i + 1) % polyA.length];
+    for (let j = 0; j < polyB.length; j++) {
+      const b0 = polyB[j];
+      const b1 = polyB[(j + 1) % polyB.length];
+      if (segmentProperIntersect(a0, a1, b0, b1)) return true;
+    }
+  }
+
+  for (const p of polyA) {
+    if (pointInPolygonStrict(p.x, p.y, polyB)) return true;
+  }
+  for (const p of polyB) {
+    if (pointInPolygonStrict(p.x, p.y, polyA)) return true;
+  }
+
+  return false;
+}
+
 test('field-to-structure compiler creates rigid and soft triangles from painted regions', () => {
   const w = 16, h = 16;
   const rigid = new Float32Array(w * h);
@@ -211,6 +274,18 @@ test('rigid primitive-tiling mode fits red mask with edge-sharing tri/square/pen
 
   const sharedEdges = countSharedPolygonEdges(mesh.rigidPieces);
   assert.ok(sharedEdges >= 1, 'expected at least one exact shared edge between neighboring rigid primitive tiles');
+
+  for (let i = 0; i < mesh.rigidPieces.length; i++) {
+    const a = mesh.rigidPieces[i]?.hull || [];
+    for (let j = i + 1; j < mesh.rigidPieces.length; j++) {
+      const b = mesh.rigidPieces[j]?.hull || [];
+      assert.equal(
+        polygonsOverlapOrIntersect(a, b),
+        false,
+        `primitive tiles ${i} and ${j} overlap/intersect`,
+      );
+    }
+  }
 });
 
 test('compiler emits soft cross-beams for square soft cells', () => {
@@ -791,6 +866,61 @@ test('compiler exposes rigid decomposition pieces at compile time', () => {
     assert.ok(Array.isArray(p.hull));
     assert.ok(p.hull.length >= 3);
   }
+});
+
+test('rigid contours resample border vertices using perimeter edge-length controls/map', () => {
+  const w = 96, h = 96;
+  const rigid = new Float32Array(w * h);
+  const soft = new Float32Array(w * h);
+  const edgeFine = new Float32Array(w * h).fill(0);
+  const edgeCoarse = new Float32Array(w * h).fill(1);
+
+  const cx = 48;
+  const cy = 48;
+  const rx = 27;
+  const ry = 21;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (x - cx) / rx;
+      const dy = (y - cy) / ry;
+      if ((dx * dx + dy * dy) <= 1) rigid[y * w + x] = 1;
+    }
+  }
+
+  const fineMesh = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    threshold: 0.35,
+    density: 3,
+    connectivityMode: 'largest',
+    rigidCompileMode: 'contours',
+    rigidEdgeLengthField: edgeFine,
+    rigidMinEdgeLength: 2,
+    rigidMaxEdgeLength: 8,
+  });
+
+  const coarseMesh = compileFieldToMesh({
+    width: w,
+    height: h,
+    rigidField: rigid,
+    softField: soft,
+    threshold: 0.35,
+    density: 3,
+    connectivityMode: 'largest',
+    rigidCompileMode: 'contours',
+    rigidEdgeLengthField: edgeCoarse,
+    rigidMinEdgeLength: 2,
+    rigidMaxEdgeLength: 8,
+  });
+
+  const fineVerts = fineMesh.rigidPieces.reduce((sum, p) => sum + (p?.hull?.length || 0), 0);
+  const coarseVerts = coarseMesh.rigidPieces.reduce((sum, p) => sum + (p?.hull?.length || 0), 0);
+
+  assert.ok(fineVerts > coarseVerts, `expected finer edge map to produce denser border vertices (${fineVerts} vs ${coarseVerts})`);
+  assert.equal(fineMesh.meta.rigidContourEdgeLengthSource, 'map');
+  assert.equal(coarseMesh.meta.rigidContourEdgeLengthSource, 'map');
 });
 
 test('soft triangles do not overlap rigid contour in rigid+soft overlap zones', () => {

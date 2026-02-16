@@ -3,6 +3,7 @@ import { EDGE_DYE_MODE, normalizeEdgeDyeModeRGB, normalizePermeabilityRGB, apply
 import { resolveRigidVsSoftNodeCollision, resolveRigidVsRigidPolygonCollision, getRigidCollisionPolysWorld, pointInPolygonInclusive } from '/rigid-collision.js';
 import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops, recoverSoftSpringRests } from '/soft-xpbd.js';
 import { computeVectorRms, computeRigidAlignedPoseResidual } from '/soft-deformation-metrics.js';
+import { computeSoftClusterKinematics, projectNodesTowardClusterRigidMotion } from '/soft-cluster-kinematics.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -53,8 +54,15 @@ const WORKGROUP = 8;
 const JACOBI_ITERS = 20;
 const SOFT_SPRING_STIFFNESS_DEFAULT = 4.2; // stronger lattice resistance for spring-mode soft bodies
 const SOFT_NODE_FLOW_COUPLING = 0.42; // reduce per-vertex fluid carry so single nodes are less individually yanked
+const SOFT_NODE_LOCAL_FLOW_SHARE = 0.35; // keep local deformation response while cluster inertia handles bulk flow pull
+const SOFT_CLUSTER_FLOW_FORCE_SHARE = 0.58; // apply cluster-level linear/angular fluid acceleration back onto nodes
 const SOFT_CLUSTER_TUG_COUPLING = 0.58; // redistribute current-induced pull across the whole soft cluster
 const SOFT_CLUSTER_RELATIVE_DRAG = 0.11; // damp per-node divergence from cluster motion
+const SOFT_CLUSTER_LINEAR_PROJECTION = 0.08; // mild translation projection toward cluster COM velocity
+const SOFT_CLUSTER_ANGULAR_PROJECTION = 0.14; // mild rotation projection toward cluster omega
+const SOFT_CLUSTER_COLLISION_LINEAR_PROJECTION = 0.1; // post-collision redistribution of linear impulse
+const SOFT_CLUSTER_COLLISION_ANGULAR_PROJECTION = 0.22; // post-collision redistribution of angular impulse
+const SOFT_CLUSTER_FLUID_INJECT_BLEND = 0.55; // blend node velocity with cluster rigid-like velocity for fluid feedback
 const SOFT_XPBD_ITERS = 10;
 const SOFT_XPBD_BASE_COMPLIANCE = 0.0012;
 const SOFT_AREA_XPBD_ITERS = 6;
@@ -3068,13 +3076,22 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   const s = bodies.soft;
   const softMembraneClusterSet = ensureSoftMembraneClusterSet(sim);
   const softCentroid = computeSoftCentroid(s.nodes);
+  let softClusterKinematics = computeSoftClusterKinematics(s.nodes);
   const clusterCarryMap = new Map();
+  const clusterFluidLoadMap = new Map();
+  const ensureClusterLoad = (cid) => {
+    if (!clusterFluidLoadMap.has(cid)) {
+      clusterFluidLoadMap.set(cid, { forceX: 0, forceY: 0, torque: 0, count: 0 });
+    }
+    return clusterFluidLoadMap.get(cid);
+  };
 
   for (let i = 0; i < s.nodes.length; i++) {
     const node = s.nodes[i];
     const fx = sampleFieldBilinear(vxField, n, node.x, node.y);
     const fy = sampleFieldBilinear(vyField, n, node.x, node.y);
-    const invMass = 1 / Math.max(0.02, node.mass);
+    const mass = Math.max(0.02, node.mass);
+    const invMass = 1 / mass;
     const cx = node.x - softCentroid.x;
     const cy = node.y - softCentroid.y;
     const activeSwimPhase = sim.frame * 0.12 + i * 1.57;
@@ -3085,10 +3102,37 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const cid = node.clusterId ?? 0;
     const isMembraneCluster = softMembraneClusterSet.has(cid);
     const flowCoupling = isMembraneCluster ? (SOFT_NODE_FLOW_COUPLING * 0.88) : SOFT_NODE_FLOW_COUPLING;
-    const carryX = (fx - node.vx) * dragK * honey * invMass * flowCoupling;
-    const carryY = (fy - node.vy) * dragK * honey * invMass * flowCoupling;
-    node.vx += carryX * dt * 60 + swimX * dtNorm;
-    node.vy += carryY * dt * 60 + swimY * dtNorm;
+
+    const clusterKin = softClusterKinematics.get(cid);
+    const clusterX = Number.isFinite(Number(clusterKin?.x)) ? Number(clusterKin.x) : softCentroid.x;
+    const clusterY = Number.isFinite(Number(clusterKin?.y)) ? Number(clusterKin.y) : softCentroid.y;
+    const clusterVx = Number.isFinite(Number(clusterKin?.vx)) ? Number(clusterKin.vx) : 0;
+    const clusterVy = Number.isFinite(Number(clusterKin?.vy)) ? Number(clusterKin.vy) : 0;
+    const clusterOmega = Number.isFinite(Number(clusterKin?.omega)) ? Number(clusterKin.omega) : 0;
+
+    const rx = node.x - clusterX;
+    const ry = node.y - clusterY;
+    const clusterLocalVx = clusterVx - clusterOmega * ry;
+    const clusterLocalVy = clusterVy + clusterOmega * rx;
+
+    // Explicit soft-cluster force/torque accumulation from fluid relative motion.
+    const forceX = (fx - clusterLocalVx) * dragK * honey * flowCoupling * mass;
+    const forceY = (fy - clusterLocalVy) * dragK * honey * flowCoupling * mass;
+    const carryX = forceX * invMass;
+    const carryY = forceY * invMass;
+
+    // Keep a local deformation response path so springs still flex naturally.
+    const localCarryX = (fx - node.vx) * dragK * honey * invMass * flowCoupling * SOFT_NODE_LOCAL_FLOW_SHARE;
+    const localCarryY = (fy - node.vy) * dragK * honey * invMass * flowCoupling * SOFT_NODE_LOCAL_FLOW_SHARE;
+
+    node.vx += localCarryX * dt * 60 + swimX * dtNorm;
+    node.vy += localCarryY * dt * 60 + swimY * dtNorm;
+
+    const load = ensureClusterLoad(cid);
+    load.forceX += forceX;
+    load.forceY += forceY;
+    load.torque += rx * forceY - ry * forceX;
+    load.count += 1;
 
     const st = clusterCarryMap.get(cid) || { sumX: 0, sumY: 0, count: 0, maxX: 0, maxY: 0, maxMag: 0 };
     st.sumX += carryX;
@@ -3114,6 +3158,34 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     softCarryTransfer += Math.hypot(carryX, carryY);
   }
 
+  // Apply cluster linear/angular acceleration from accumulated fluid loads.
+  const clusterAccelMap = new Map();
+  for (const [cid, load] of clusterFluidLoadMap.entries()) {
+    const clusterKin = softClusterKinematics.get(cid);
+    const clusterMass = Math.max(0.02, Number(clusterKin?.mass) || (Math.max(1, load.count) * sim.controls.massSoft));
+    const clusterInertia = Math.max(1e-4, Number(clusterKin?.inertia) || 1e-4);
+    clusterAccelMap.set(cid, {
+      x: Number.isFinite(Number(clusterKin?.x)) ? Number(clusterKin.x) : softCentroid.x,
+      y: Number.isFinite(Number(clusterKin?.y)) ? Number(clusterKin.y) : softCentroid.y,
+      ax: load.forceX / clusterMass,
+      ay: load.forceY / clusterMass,
+      alpha: load.torque / clusterInertia,
+    });
+  }
+
+  for (const node of s.nodes) {
+    const cid = node.clusterId ?? 0;
+    const acc = clusterAccelMap.get(cid);
+    if (!acc) continue;
+    const rx = node.x - acc.x;
+    const ry = node.y - acc.y;
+    const flowShare = softMembraneClusterSet.has(cid)
+      ? (SOFT_CLUSTER_FLOW_FORCE_SHARE * 0.7)
+      : SOFT_CLUSTER_FLOW_FORCE_SHARE;
+    node.vx += (acc.ax - acc.alpha * ry) * flowShare * dt * 60;
+    node.vy += (acc.ay + acc.alpha * rx) * flowShare * dt * 60;
+  }
+
   // Redistribute flow pull across each cluster so one stretched node drags the body along.
   for (const node of s.nodes) {
     const cid = node.clusterId ?? 0;
@@ -3121,9 +3193,9 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     if (!st || st.count <= 0) continue;
     const meanX = st.sumX / st.count;
     const meanY = st.sumY / st.count;
-    const pullX = meanX * 0.45 + st.maxX * 0.55;
-    const pullY = meanY * 0.45 + st.maxY * 0.55;
-    const tugCoupling = softMembraneClusterSet.has(cid) ? (SOFT_CLUSTER_TUG_COUPLING * 0.55) : SOFT_CLUSTER_TUG_COUPLING;
+    const pullX = meanX * 0.6 + st.maxX * 0.4;
+    const pullY = meanY * 0.6 + st.maxY * 0.4;
+    const tugCoupling = softMembraneClusterSet.has(cid) ? (SOFT_CLUSTER_TUG_COUPLING * 0.45) : (SOFT_CLUSTER_TUG_COUPLING * 0.72);
     node.vx += pullX * tugCoupling * dt * 60;
     node.vy += pullY * tugCoupling * dt * 60;
   }
@@ -3148,6 +3220,15 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     node.vx -= (node.vx - meanVx) * relDamp * dtNorm;
     node.vy -= (node.vy - meanVy) * relDamp * dtNorm;
   }
+
+  // Explicit soft angular inertia response: project nodes toward cluster rigid motion field.
+  softClusterKinematics = computeSoftClusterKinematics(s.nodes);
+  projectNodesTowardClusterRigidMotion(s.nodes, softClusterKinematics, {
+    linearGain: SOFT_CLUSTER_LINEAR_PROJECTION * dtNorm,
+    angularGain: SOFT_CLUSTER_ANGULAR_PROJECTION * dtNorm,
+    membraneClusterSet: softMembraneClusterSet,
+    membraneGainScale: 0.72,
+  });
 
   const dtPos = Math.max(1e-4, dt * SOFT_INTEGRATION_SCALE);
   if (!sim.softXPBDLambda || sim.softXPBDLambda.length !== s.springs.length) {
@@ -3294,6 +3375,16 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
   }
 
+  // After collision impulses, redistribute linear/angular momentum across each
+  // soft cluster using explicit COM/inertia-derived rigid projection.
+  const postCollisionClusterKinematics = computeSoftClusterKinematics(s.nodes);
+  projectNodesTowardClusterRigidMotion(s.nodes, postCollisionClusterKinematics, {
+    linearGain: SOFT_CLUSTER_COLLISION_LINEAR_PROJECTION * dtNorm,
+    angularGain: SOFT_CLUSTER_COLLISION_ANGULAR_PROJECTION * dtNorm,
+    membraneClusterSet: softMembraneClusterSet,
+    membraneGainScale: 0.72,
+  });
+
   const rigidInsideCorrections = applyRigidInsideCorrectionPass(bodies, s, hybridAttachedByRigid);
   const membraneInsideCorrections = applyMembraneInsideCorrectionPass(sim, s, softClusterLoops);
   for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
@@ -3410,22 +3501,54 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const swimPhase = sim.frame * 0.08 + bi * 2.1;
     injectPoint(b.x, b.y, b.vx, b.vy, fx, fy, b.mass, b.r * 0.8, Math.cos(swimPhase) * 0.015, Math.sin(swimPhase) * 0.012);
   }
+  const softClusterForInjection = computeSoftClusterKinematics(s.nodes);
   for (let i = 0; i < s.nodes.length; i++) {
     const node = s.nodes[i];
     const fx = sampleFieldBilinear(vxField, n, node.x, node.y);
     const fy = sampleFieldBilinear(vyField, n, node.x, node.y);
+    const cid = node.clusterId ?? 0;
+    const c = softClusterForInjection.get(cid);
+    const cx = Number.isFinite(Number(c?.x)) ? Number(c.x) : node.x;
+    const cy = Number.isFinite(Number(c?.y)) ? Number(c.y) : node.y;
+    const cvx = Number.isFinite(Number(c?.vx)) ? Number(c.vx) : node.vx;
+    const cvy = Number.isFinite(Number(c?.vy)) ? Number(c.vy) : node.vy;
+    const omega = Number.isFinite(Number(c?.omega)) ? Number(c.omega) : 0;
+    const rx = node.x - cx;
+    const ry = node.y - cy;
+    const rigidLikeVx = cvx - omega * ry;
+    const rigidLikeVy = cvy + omega * rx;
+    const blend = SOFT_CLUSTER_FLUID_INJECT_BLEND;
+    const injectVx = node.vx * (1 - blend) + rigidLikeVx * blend;
+    const injectVy = node.vy * (1 - blend) + rigidLikeVy * blend;
     const swimPhase = sim.frame * 0.12 + i * 1.57;
-    injectPoint(node.x, node.y, node.vx, node.vy, fx, fy, node.mass, 2.2, Math.cos(swimPhase) * 0.01, Math.sin(swimPhase) * 0.01);
+    injectPoint(node.x, node.y, injectVx, injectVy, fx, fy, node.mass, 2.2, Math.cos(swimPhase) * 0.01, Math.sin(swimPhase) * 0.01);
   }
 
   const softCentroidAfter = computeSoftCentroid(s.nodes);
   const rigidCenterAfter = computeRigidCenter(bodies.rigid);
+
+  let softClusterCount = 0;
+  let softClusterInertiaSum = 0;
+  let softClusterOmegaAbsSum = 0;
+  let softClusterAngularEnergy = 0;
+  for (const c of softClusterForInjection.values()) {
+    const inertia = Math.max(1e-4, Number(c?.inertia) || 0);
+    const omega = Number(c?.omega) || 0;
+    softClusterCount += 1;
+    softClusterInertiaSum += inertia;
+    softClusterOmegaAbsSum += Math.abs(omega);
+    softClusterAngularEnergy += 0.5 * inertia * omega * omega;
+  }
 
   const metrics = {
     rigidCenterDelta: Math.hypot(rigidCenterAfter.x - rigidCenterBefore.x, rigidCenterAfter.y - rigidCenterBefore.y),
     softCentroidDelta: Math.hypot(softCentroidAfter.x - softCentroidBefore.x, softCentroidAfter.y - softCentroidBefore.y),
     rigidCarryTransfer,
     softCarryTransfer,
+    softClusterCount,
+    softClusterInertiaAvg: softClusterCount > 0 ? (softClusterInertiaSum / softClusterCount) : 0,
+    softClusterOmegaAbsAvg: softClusterCount > 0 ? (softClusterOmegaAbsSum / softClusterCount) : 0,
+    softClusterAngularEnergy,
     injectedMomentum,
     softDeformWarningCount: deform.warningCount || 0,
     softDeformSevereCount: deform.severeCount || 0,
@@ -3456,6 +3579,10 @@ function summarizeCouplingTelemetry(telemetry) {
       softCentroidDeltaAvg: 0,
       rigidCarryTransferAvg: 0,
       softCarryTransferAvg: 0,
+      softClusterCountAvg: 0,
+      softClusterInertiaAvg: 0,
+      softClusterOmegaAbsAvg: 0,
+      softClusterAngularEnergyAvg: 0,
       injectedMomentumAvg: 0,
       softDeformWarningCountAvg: 0,
       softDeformSevereCountAvg: 0,
@@ -3472,6 +3599,10 @@ function summarizeCouplingTelemetry(telemetry) {
     softCentroidDelta: 0,
     rigidCarryTransfer: 0,
     softCarryTransfer: 0,
+    softClusterCount: 0,
+    softClusterInertiaAvg: 0,
+    softClusterOmegaAbsAvg: 0,
+    softClusterAngularEnergy: 0,
     injectedMomentum: 0,
     softDeformWarningCount: 0,
     softDeformSevereCount: 0,
@@ -3487,6 +3618,10 @@ function summarizeCouplingTelemetry(telemetry) {
     acc.softCentroidDelta += t.softCentroidDelta || 0;
     acc.rigidCarryTransfer += t.rigidCarryTransfer || 0;
     acc.softCarryTransfer += t.softCarryTransfer || 0;
+    acc.softClusterCount += t.softClusterCount || 0;
+    acc.softClusterInertiaAvg += t.softClusterInertiaAvg || 0;
+    acc.softClusterOmegaAbsAvg += t.softClusterOmegaAbsAvg || 0;
+    acc.softClusterAngularEnergy += t.softClusterAngularEnergy || 0;
     acc.injectedMomentum += t.injectedMomentum || 0;
     acc.softDeformWarningCount += t.softDeformWarningCount || 0;
     acc.softDeformSevereCount += t.softDeformSevereCount || 0;
@@ -3503,6 +3638,10 @@ function summarizeCouplingTelemetry(telemetry) {
     softCentroidDeltaAvg: +(acc.softCentroidDelta * k).toFixed(4),
     rigidCarryTransferAvg: +(acc.rigidCarryTransfer * k).toFixed(4),
     softCarryTransferAvg: +(acc.softCarryTransfer * k).toFixed(4),
+    softClusterCountAvg: +(acc.softClusterCount * k).toFixed(3),
+    softClusterInertiaAvg: +(acc.softClusterInertiaAvg * k).toFixed(4),
+    softClusterOmegaAbsAvg: +(acc.softClusterOmegaAbsAvg * k).toFixed(4),
+    softClusterAngularEnergyAvg: +(acc.softClusterAngularEnergy * k).toFixed(4),
     injectedMomentumAvg: +(acc.injectedMomentum * k).toFixed(4),
     softDeformWarningCountAvg: +(acc.softDeformWarningCount * k).toFixed(3),
     softDeformSevereCountAvg: +(acc.softDeformSevereCount * k).toFixed(3),

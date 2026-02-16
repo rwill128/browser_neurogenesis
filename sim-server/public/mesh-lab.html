@@ -41,7 +41,7 @@
             <option value="trait" selected>Trait field (rigid/soft)</option>
             <option value="density">Resolution field</option>
             <option value="membraneEdge">Membrane edge-length field</option>
-            <option value="membraneShape">Membrane shape-memory field</option>
+            <option value="membraneShape">Membrane stiffness field</option>
             <option value="rigidPermeability">Rigid permeability field</option>
             <option value="rigidConsume">Rigid edge consume-dye field</option>
           </select>
@@ -69,14 +69,14 @@
     </details>
 
     <details class="ctrl-group">
-      <summary>Perimeter + membrane map paint controls</summary>
+      <summary>Perimeter + membrane stiffness map paint controls</summary>
       <div class="ctrl-body">
         <label>Perimeter edge paint (0..1) <input id="membraneEdgePaintValue" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
-        <label>Membrane shape paint (0..1) <input id="membraneShapePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
+        <label>Membrane stiffness paint (0..1) <input id="membraneShapePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
       </div>
       <div class="ctrl-body">
         <span class="ctrl-note">Perimeter edge paint controls local ring/contour edge spacing (dark = shorter edges, bright = longer edges).</span>
-        <span class="ctrl-note">Membrane shape paint controls local give vs stiffness (dark = more give, bright = stiffer shape memory).</span>
+        <span class="ctrl-note">Membrane stiffness paint controls local membrane stiffness (dark = softer/more give, bright = stiffer).</span>
       </div>
     </details>
 
@@ -158,7 +158,7 @@
         <button id="randomizeTraitBtn">Randomize trait only</button>
         <button id="randomizeDensityBtn">Randomize resolution only</button>
         <button id="randomizeMembraneEdgeBtn">Randomize perimeter edge only</button>
-        <button id="randomizeMembraneShapeBtn">Randomize membrane shape only</button>
+        <button id="randomizeMembraneShapeBtn">Randomize membrane stiffness only</button>
         <button id="randomizeRigidPermeabilityBtn">Randomize rigid permeability only</button>
         <button id="randomizeRigidConsumeBtn">Randomize rigid consume only</button>
       </div>
@@ -189,7 +189,7 @@
       <canvas id="membraneEdgePaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="membraneShape">
-      <div>Membrane shape-memory map (dark=more give, bright=stiffer)</div>
+      <div>Membrane stiffness map (dark=softer, bright=stiffer)</div>
       <canvas id="membraneShapePaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="rigidPermeability">

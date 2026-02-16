@@ -747,7 +747,7 @@ function drawMesh(mesh) {
     for (const ring of rings) {
       if (!Array.isArray(ring) || ring.length < 3) continue;
 
-      // Color each membrane edge/node by sampled shape-memory field value.
+      // Color each membrane edge/node by sampled membrane-stiffness field value.
       for (let i = 0; i < ring.length; i++) {
         const a = ring[i];
         const b = ring[(i + 1) % ring.length];
@@ -783,7 +783,7 @@ function drawMesh(mesh) {
     mctx.strokeRect(gx, gy, gw, gh);
     mctx.fillStyle = 'rgba(230,230,230,0.9)';
     mctx.font = '11px system-ui';
-    mctx.fillText('shape memory: give → stiff', gx, gy - 4);
+    mctx.fillText('membrane stiffness: soft → stiff', gx, gy - 4);
 
     mctx.lineWidth = 1;
   }
@@ -825,7 +825,7 @@ function drawMesh(mesh) {
       ? 'resampled membrane ring from painted mask'
       : 'triangulated soft mesh',
     membraneShapePreview: ((softSolverModeEl?.value || 'membrane') === 'membrane')
-      ? 'ring edge/node color encodes membrane shape-memory map (give→stiff)'
+      ? 'ring edge/node color encodes membrane stiffness map (soft→stiff)'
       : undefined,
     rigidContourPreview: 'rigid contours are perimeter-resampled from border vertices; dots show exported vertices',
     contiguousBodyFilter: {
@@ -868,7 +868,7 @@ function syncFieldPanelVisibility() {
   setWidgetEnabled(modeEl, traitSelected, 'Trait paint mode only applies when Field to paint = Trait field');
   setWidgetEnabled(softDensityPaintEl, densitySelected, 'Resolution paint value only applies when Field to paint = Resolution field');
   setWidgetEnabled(membraneEdgePaintEl, edgeSelected, 'Perimeter edge paint value only applies when Field to paint = Membrane edge-length field');
-  setWidgetEnabled(membraneShapePaintEl, shapeSelected, 'Membrane shape paint value only applies when Field to paint = Membrane shape-memory field');
+  setWidgetEnabled(membraneShapePaintEl, shapeSelected, 'Membrane stiffness paint value only applies when Field to paint = Membrane stiffness field');
   setWidgetEnabled(rigidPermeabilityPaintEl, permeabilitySelected, 'Rigid permeability paint value only applies when Field to paint = Rigid permeability field');
   setWidgetEnabled(rigidConsumeChannelEl, consumeSelected, 'Consume channel only applies when Field to paint = Rigid edge consume-dye field');
   setWidgetEnabled(rigidConsumePaintEl, consumeSelected, 'Consume paint value only applies when Field to paint = Rigid edge consume-dye field');

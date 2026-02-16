@@ -272,7 +272,16 @@ test('exported rigid permeability traits survive import and drive runtime barrie
       permeableEdge = edgeIdx;
     }
   }
-  assert.ok(bestDist <= 2.1, `painted permeability should map to top-edge segment near (16,8), nearest permeable midpoint distance=${bestDist.toFixed(3)}`);
+  assert.equal(permeableEdges.length, 1, `single painted hotspot should only open one segment, got ${permeableEdges.length}`);
+  assert.ok(bestDist <= 0.01, `painted permeability should map to exact top-edge midpoint (16,8), nearest permeable midpoint distance=${bestDist.toFixed(3)}`);
+
+  const oppositeTarget = { x: 16, y: 24 };
+  let oppositeBestDist = Number.POSITIVE_INFINITY;
+  for (const edgeIdx of permeableEdges) {
+    const m = midPoint(edgeIdx);
+    oppositeBestDist = Math.min(oppositeBestDist, Math.hypot(m.x - oppositeTarget.x, m.y - oppositeTarget.y));
+  }
+  assert.ok(oppositeBestDist >= 8, `permeability hotspot should stay localized and not leak to opposite edge, nearest opposite-edge permeable midpoint distance=${oppositeBestDist.toFixed(3)}`);
 
   const permeableCell = midCell(permeableEdge);
   const blockedCell = midCell(blockedEdge);

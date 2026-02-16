@@ -129,14 +129,20 @@ test('gpu-lab supports interaction-lab scripted motion fixtures (pinned/circle)'
 test('gpu-lab overlay labels rigid/soft segment IDs for confrontation debugging', () => {
   assert.match(
     source,
-    /drawSegmentIdLabel\(`R\$\{i\}:\$\{ei\}`/,
+    /const rigidSegId = `R\$\{i\}:\$\{ei\}`;[\s\S]*drawSegmentIdLabel\(rigidSegId,/,
     'expected rigid segment id labels (R<body>:<edge>) in overlay',
   );
 
   assert.match(
     source,
-    /drawSegmentIdLabel\(`S\$\{sgi\}`/,
+    /const softSegId = `S\$\{sgi\}`;[\s\S]*drawSegmentIdLabel\(softSegId,/,
     'expected soft segment id labels (S<spring>) in overlay',
+  );
+
+  assert.match(
+    source,
+    /if \(data\.type === 'gpuLabHighlightSegment'\)/,
+    'expected embed message hook to receive segment highlight commands',
   );
 });
 

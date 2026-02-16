@@ -4510,6 +4510,10 @@ function drawBodiesOverlay(sim) {
     ctx.restore();
   };
 
+  const highlightId = String(sim?.highlightSegmentId || '');
+  const highlightOn = !!highlightId && (Number(sim?.frame) <= Number(sim?.highlightUntilFrame || 0));
+  const segmentHighlighted = (id) => highlightOn && id === highlightId;
+
   ctx.save();
   ctx.lineWidth = 1.5;
   for (let i = 0; i < sim.bodies.rigid.length; i++) {
@@ -4556,7 +4560,19 @@ function drawBodiesOverlay(sim) {
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b2.x, b2.y);
       ctx.stroke();
-      drawSegmentIdLabel(`R${i}:${ei}`, a, b2, 'rgba(255,245,200,0.96)');
+      const rigidSegId = `R${i}:${ei}`;
+      drawSegmentIdLabel(rigidSegId, a, b2, 'rgba(255,245,200,0.96)');
+      if (segmentHighlighted(rigidSegId)) {
+        ctx.save();
+        ctx.setLineDash([]);
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = 'rgba(255,255,120,0.98)';
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b2.x, b2.y);
+        ctx.stroke();
+        ctx.restore();
+      }
       ctx.setLineDash([]);
       ctx.lineWidth = prevWidth;
     }
@@ -4693,7 +4709,19 @@ function drawBodiesOverlay(sim) {
     ctx.moveTo(pa.x, pa.y);
     ctx.lineTo(pb.x, pb.y);
     ctx.stroke();
-    drawSegmentIdLabel(`S${sgi}`, pa, pb, 'rgba(180,255,220,0.96)');
+    const softSegId = `S${sgi}`;
+    drawSegmentIdLabel(softSegId, pa, pb, 'rgba(180,255,220,0.96)');
+    if (segmentHighlighted(softSegId)) {
+      ctx.save();
+      ctx.setLineDash([]);
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(255,255,120,0.98)';
+      ctx.beginPath();
+      ctx.moveTo(pa.x, pa.y);
+      ctx.lineTo(pb.x, pb.y);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     ctx.setLineDash([]);
     ctx.lineWidth = lineWidthPrev;
@@ -4841,6 +4869,8 @@ async function initSim() {
     couplingTelemetry: [],
     lastFluidObstacleStats: { rigidBlockedEdges: 0, softBlockedEdges: 0, blockedEdgeCount: 0, blockedCells: 0 },
     lastDyeMaskStats: { rigidEdges: 0, softEdges: 0, nonPassCells: 0 },
+    highlightSegmentId: null,
+    highlightUntilFrame: 0,
     frame: 0, t0: performance.now(),
   };
 }
@@ -5194,6 +5224,18 @@ if (EMBED_MODE) {
   window.addEventListener('message', async (event) => {
     if (event.origin !== window.location.origin) return;
     const data = event.data || {};
+
+    if (data.type === 'gpuLabHighlightSegment') {
+      if (sim) {
+        sim.highlightSegmentId = String(data.segmentId || '');
+        const pulseMs = Math.max(200, Number(data.pulseMs) || 2200);
+        const dt = Math.max(1e-4, Number(sim.controls?.dt) || 0.01);
+        const pulseFrames = Math.max(1, Math.round(pulseMs / (dt * 1000)));
+        sim.highlightUntilFrame = (Number(sim.frame) || 0) + pulseFrames;
+      }
+      return;
+    }
+
     if (data.type !== 'gpuLabEmbedReset') return;
 
     try {

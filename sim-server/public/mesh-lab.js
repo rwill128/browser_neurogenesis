@@ -92,6 +92,7 @@ const importBtn = document.getElementById('importBtn');
 const importFile = document.getElementById('importFile');
 const out = document.getElementById('out');
 const segmentStatsOut = document.getElementById('segmentStatsOut');
+const segmentStatsList = document.getElementById('segmentStatsList');
 const windEmitterStrengthEl = document.getElementById('windEmitterStrength');
 const windEmitterJetVyEl = document.getElementById('windEmitterJetVy');
 const windEmitterRadiusEl = document.getElementById('windEmitterRadius');
@@ -159,6 +160,7 @@ let lastCompiledSpec = null;
 let lastCompiledFields = null;
 let compileRevision = 0;
 let windTunnelReady = false;
+let highlightedSegmentId = null;
 
 const fieldPanels = Array.from(document.querySelectorAll('.field-panel'));
 
@@ -284,6 +286,7 @@ function computeChannelWinnerStats(ax, ay, bx, by, blockMap, passMap, eatMap) {
 function updateSegmentStatsPreview(spec) {
   if (!segmentStatsOut) return;
   if (!spec || !Array.isArray(spec.rigidBodies) || !Array.isArray(spec.softBodies)) {
+    if (segmentStatsList) segmentStatsList.textContent = 'No segments yet. Compile a mesh first.';
     segmentStatsOut.textContent = 'No segment stats yet. Compile a mesh first.';
     return;
   }
@@ -372,6 +375,8 @@ function updateSegmentStatsPreview(spec) {
       softGlobalIndex += 1;
     }
   }
+
+  renderSegmentStatsList(segments);
 
   segmentStatsOut.textContent = JSON.stringify({
     segmentIdLegend: {
@@ -1001,6 +1006,63 @@ function pushSpecToWindTunnel(spec) {
 
   // Same-origin iframe; no wildcard posting.
   windTunnelFrame.contentWindow.postMessage(payload, window.location.origin);
+
+  // Re-apply active highlight after reset.
+  if (highlightedSegmentId) {
+    windTunnelFrame.contentWindow.postMessage({
+      type: 'gpuLabHighlightSegment',
+      segmentId: highlightedSegmentId,
+      pulseMs: 1800,
+    }, window.location.origin);
+  }
+}
+
+function sendSegmentHighlight(segmentId, pulseMs = 2200) {
+  highlightedSegmentId = segmentId || null;
+  if (!windTunnelFrame?.contentWindow || !highlightedSegmentId) return;
+  windTunnelFrame.contentWindow.postMessage({
+    type: 'gpuLabHighlightSegment',
+    segmentId: highlightedSegmentId,
+    pulseMs,
+  }, window.location.origin);
+}
+
+function renderSegmentStatsList(segments = []) {
+  if (!segmentStatsList) return;
+  segmentStatsList.innerHTML = '';
+  if (!Array.isArray(segments) || segments.length === 0) {
+    segmentStatsList.textContent = 'No segments yet.';
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  for (const seg of segments) {
+    const row = document.createElement('div');
+    row.className = 'segment-row';
+
+    const btn = document.createElement('button');
+    btn.className = 'segment-id-btn';
+    if (highlightedSegmentId && highlightedSegmentId === seg.id) {
+      btn.classList.add('active');
+    }
+    btn.textContent = seg.id;
+    btn.title = 'Highlight this segment in wind tunnel';
+    btn.addEventListener('click', () => {
+      highlightedSegmentId = seg.id;
+      renderSegmentStatsList(segments);
+      sendSegmentHighlight(seg.id, 2600);
+    });
+
+    const meta = document.createElement('div');
+    meta.className = 'segment-meta';
+    meta.textContent = `${seg.type} | vel=${seg.velocityMode} | dye RGB=${seg.dyeMode?.r || '-'} / ${seg.dyeMode?.g || '-'} / ${seg.dyeMode?.b || '-'}`;
+
+    row.appendChild(btn);
+    row.appendChild(meta);
+    frag.appendChild(row);
+  }
+
+  segmentStatsList.appendChild(frag);
 }
 
 function drawFields() {
@@ -1689,6 +1751,7 @@ function compileNow() {
     console.error('[mesh-lab] compileNow failed', err);
     out.textContent = msg;
     if (segmentStatsOut) segmentStatsOut.textContent = msg;
+    if (segmentStatsList) segmentStatsList.textContent = msg;
     return null;
   }
 }

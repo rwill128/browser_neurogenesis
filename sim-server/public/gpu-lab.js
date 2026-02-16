@@ -3494,6 +3494,8 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
 
   running = false;
   sim = await initSim();
+  // Wind-tunnel embed should use only the explicit configured emitter.
+  sim.disableDefaultInject = true;
 
   sim.bodies = {
     rigid: [],
@@ -3813,6 +3815,7 @@ async function initSim() {
     div, readR, readG, readB, readVx, readVy,
     bodies: initBodies(controls.n, controls),
     emitters: initEmitters(controls.n),
+    disableDefaultInject: false,
     camera: { x: controls.n * 0.5, y: controls.n * 0.5, zoom: controls.n >= 1024 ? 1.8 : 1.0 },
     couplingTelemetry: [],
     frame: 0, t0: performance.now(),
@@ -3848,11 +3851,14 @@ async function stepAndRender() {
 
   const enc = s.device.createCommandEncoder();
 
-  let pass = enc.beginComputePass();
-  pass.setPipeline(s.inject.pipeline);
-  pass.setBindGroup(0, s.inject.bg([s.uniform, s.vx0, s.vy0, s.rr0, s.gg0, s.bb0]));
-  pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
-  pass.end();
+  let pass = null;
+  if (!s.disableDefaultInject) {
+    pass = enc.beginComputePass();
+    pass.setPipeline(s.inject.pipeline);
+    pass.setBindGroup(0, s.inject.bg([s.uniform, s.vx0, s.vy0, s.rr0, s.gg0, s.bb0]));
+    pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
+    pass.end();
+  }
 
   pass = enc.beginComputePass();
   pass.setPipeline(s.advVel.pipeline);

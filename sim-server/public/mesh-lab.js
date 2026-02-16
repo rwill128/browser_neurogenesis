@@ -58,6 +58,37 @@ const fieldPanels = Array.from(document.querySelectorAll('.field-panel'));
 
 function idx(x, y) { return y * W + x; }
 
+function sampleMapBilinear(field, x, y, fallback = 0.5) {
+  if (!(field instanceof Float32Array) || field.length < W * H) return fallback;
+  const cx = Math.max(0, Math.min(W - 1.001, Number(x) || 0));
+  const cy = Math.max(0, Math.min(H - 1.001, Number(y) || 0));
+  const x0 = Math.floor(cx);
+  const y0 = Math.floor(cy);
+  const x1 = Math.min(W - 1, x0 + 1);
+  const y1 = Math.min(H - 1, y0 + 1);
+  const sx = cx - x0;
+  const sy = cy - y0;
+  const i00 = y0 * W + x0;
+  const i10 = y0 * W + x1;
+  const i01 = y1 * W + x0;
+  const i11 = y1 * W + x1;
+  const v00 = Number.isFinite(Number(field[i00])) ? Number(field[i00]) : fallback;
+  const v10 = Number.isFinite(Number(field[i10])) ? Number(field[i10]) : fallback;
+  const v01 = Number.isFinite(Number(field[i01])) ? Number(field[i01]) : fallback;
+  const v11 = Number.isFinite(Number(field[i11])) ? Number(field[i11]) : fallback;
+  const a = v00 * (1 - sx) + v10 * sx;
+  const b = v01 * (1 - sx) + v11 * sx;
+  return Math.max(0, Math.min(1, a * (1 - sy) + b * sy));
+}
+
+function membraneShapeColor(weight, alpha = 0.95) {
+  const w = Math.max(0, Math.min(1, Number(weight) || 0));
+  const r = Math.round(220 * (1 - w));
+  const g = Math.round(180 + 60 * w);
+  const b = Math.round(120 + 120 * w);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 function drawFields() {
   const traitImg = pctx.createImageData(W, H);
   const densityImg = dctx.createImageData(W, H);
@@ -312,28 +343,48 @@ function drawMesh(mesh) {
       maxEdgeLength: maxEdge,
     });
 
-    mctx.strokeStyle = 'rgba(120,220,255,0.95)';
-    mctx.fillStyle = 'rgba(120,240,255,0.95)';
     mctx.lineWidth = 2;
     for (const ring of rings) {
       if (!Array.isArray(ring) || ring.length < 3) continue;
-      mctx.beginPath();
+
+      // Color each membrane edge/node by sampled shape-memory field value.
       for (let i = 0; i < ring.length; i++) {
-        const p = ring[i];
-        const x = p.x * sx;
-        const y = p.y * sy;
-        if (i === 0) mctx.moveTo(x, y);
-        else mctx.lineTo(x, y);
+        const a = ring[i];
+        const b = ring[(i + 1) % ring.length];
+        const wa = sampleMapBilinear(membraneShapeMap, a.x, a.y, 1);
+        const wb = sampleMapBilinear(membraneShapeMap, b.x, b.y, 1);
+        const wEdge = 0.5 * (wa + wb);
+        mctx.strokeStyle = membraneShapeColor(wEdge, 0.95);
+        mctx.beginPath();
+        mctx.moveTo(a.x * sx, a.y * sy);
+        mctx.lineTo(b.x * sx, b.y * sy);
+        mctx.stroke();
       }
-      mctx.closePath();
-      mctx.stroke();
 
       for (const p of ring) {
+        const wNode = sampleMapBilinear(membraneShapeMap, p.x, p.y, 1);
+        mctx.fillStyle = membraneShapeColor(wNode, 0.98);
         mctx.beginPath();
-        mctx.arc(p.x * sx, p.y * sy, 1.8, 0, Math.PI * 2);
+        mctx.arc(p.x * sx, p.y * sy, 2.0, 0, Math.PI * 2);
         mctx.fill();
       }
     }
+
+    const gx = 10;
+    const gy = meshCanvas.height - 24;
+    const gw = 140;
+    const gh = 8;
+    const grad = mctx.createLinearGradient(gx, gy, gx + gw, gy);
+    grad.addColorStop(0, membraneShapeColor(0, 1));
+    grad.addColorStop(1, membraneShapeColor(1, 1));
+    mctx.fillStyle = grad;
+    mctx.fillRect(gx, gy, gw, gh);
+    mctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    mctx.strokeRect(gx, gy, gw, gh);
+    mctx.fillStyle = 'rgba(230,230,230,0.9)';
+    mctx.font = '11px system-ui';
+    mctx.fillText('shape memory: give → stiff', gx, gy - 4);
+
     mctx.lineWidth = 1;
   }
 
@@ -364,6 +415,9 @@ function drawMesh(mesh) {
     softPreview: ((softSolverModeEl?.value || 'spring') === 'membrane')
       ? 'resampled membrane ring from painted mask'
       : 'triangulated soft mesh',
+    membraneShapePreview: ((softSolverModeEl?.value || 'spring') === 'membrane')
+      ? 'ring edge/node color encodes membrane shape-memory map (give→stiff)'
+      : undefined,
     membraneMinEdgeLength: Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4),
     membraneMaxEdgeLength: Math.max(Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4), Number(membraneMaxEdgeLengthEl?.value) || 8),
   }, null, 2);

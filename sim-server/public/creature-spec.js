@@ -12,6 +12,16 @@ const MEMBRANE_DEFAULT_MIN_EDGE_LENGTH = 4.0;
 const MEMBRANE_DEFAULT_MAX_NODES = 96;
 const MEMBRANE_DEFAULT_SIMPLIFY_EPS = 0.8;
 
+/**
+ * Normalize solver mode strings to the stable runtime contract.
+ *
+ * Forward-compatibility rule: only the explicit `"membrane"` token enables
+ * membrane behavior; unknown/experimental values deterministically fall back to
+ * `"spring"`.
+ *
+ * @param {unknown} mode
+ * @returns {'spring'|'membrane'}
+ */
 function normalizeSoftSolverMode(mode) {
   return String(mode || '').toLowerCase() === 'membrane' ? 'membrane' : 'spring';
 }
@@ -20,6 +30,15 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+/**
+ * Build a perimeter-only spring ring from ordered membrane nodes.
+ *
+ * This intentionally emits exactly one cyclic edge per valid node (no interior
+ * chords), with blocking body mode + deflect dye defaults on each spring.
+ *
+ * @param {Array<{x:number,y:number}>} nodes
+ * @returns {Array<[number, number, number, number, [number, number, number]]>}
+ */
 function buildMembranePerimeterSpringsFromNodes(nodes) {
   const ring = [];
   for (let idx = 0; idx < (nodes || []).length; idx++) {
@@ -143,6 +162,15 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
   return out;
 }
 
+/**
+ * Remove rigid edge arrays when every entry equals deterministic solver defaults.
+ *
+ * This keeps exports compact without losing meaning, because importer-side
+ * normalization recreates these defaults by hull edge count.
+ *
+ * @param {object} rb
+ * @returns {object}
+ */
 function compactRigidBodyEdgeDefaults(rb) {
   if (!rb || typeof rb !== 'object') return rb;
   const out = { ...rb };

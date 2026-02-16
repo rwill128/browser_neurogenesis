@@ -189,6 +189,17 @@ On import/build, these values are projected into deterministic ranges:
 
 So mutation code can stay simple and expressive, while build-time normalization provides solver safety.
 
+## Mutation surface matrix (segment/line/vertex focus)
+
+| Trait surface | Current storage | Runtime normalization | First evolvable move |
+| --- | --- | --- | --- |
+| Segment body collision (`edgeBodyMode`) | Rigid per-edge arrays + soft spring tuple slot `[3]` | binary coercion (`1` block, else pass) | mutate sparse subset of edges to pass-through |
+| Segment dye interaction (`edgeDyeMode`) | Rigid per-edge RGB arrays + soft spring tuple slot `[4]` | per-channel enum clamp to `{0,1,2}` | channel-specific deflect/pass/absorb patterning |
+| Segment permeability (`edgePermeabilityRGB`) | Rigid per-edge RGB arrays | channel-wise pass/block normalization (`>0` pass) | morphogen gate experiments by color channel |
+| Vertex deformability (`shapeMemoryWeight`) | Soft `nodes[i].shapeMemoryWeight` | hard clamp to `0..1`, missing => `1` | regional stiffness maps and local tissue zones |
+
+This matrix is intentionally implementation-adjacent: each row points to a concrete JSON field that already round-trips through `createCreatureSpecFromMesh` → `buildBodiesFromCreatureSpec` with deterministic projection.
+
 ## Practical evolvability progression (recommended)
 
 1. Mutate scalar coefficients first (`shapeMemoryGain`, `pressureGain`, etc.).

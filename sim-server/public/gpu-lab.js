@@ -35,6 +35,7 @@ const bodyFeedbackEl = document.getElementById('bodyFeedback');
 const softClusterFluidTorqueCouplingEl = document.getElementById('softClusterFluidTorqueCoupling');
 const softClusterAngularProjectionEl = document.getElementById('softClusterAngularProjection');
 const softClusterCollisionAngularProjectionEl = document.getElementById('softClusterCollisionAngularProjection');
+const enableArtificialSwimEl = document.getElementById('enableArtificialSwim');
 const spawnMembraneCellsEl = document.getElementById('spawnMembraneCells');
 const enableWarningDeformInterventionsEl = document.getElementById('enableWarningDeformInterventions');
 const enableSevereDeformInterventionsEl = document.getElementById('enableSevereDeformInterventions');
@@ -125,6 +126,7 @@ function readControls() {
     softClusterFluidTorqueCoupling: Math.max(0, Math.min(2, Number(softClusterFluidTorqueCouplingEl?.value) || SOFT_CLUSTER_FLOW_FORCE_SHARE)),
     softClusterAngularProjection: Math.max(0, Math.min(1, Number(softClusterAngularProjectionEl?.value) || SOFT_CLUSTER_ANGULAR_PROJECTION)),
     softClusterCollisionAngularProjection: Math.max(0, Math.min(1, Number(softClusterCollisionAngularProjectionEl?.value) || SOFT_CLUSTER_COLLISION_ANGULAR_PROJECTION)),
+    enableArtificialSwim: !!enableArtificialSwimEl?.checked,
     spawnMembraneCells: !!spawnMembraneCellsEl?.checked,
     enableWarningDeformInterventions: (enableWarningDeformInterventionsEl?.checked !== false),
     enableSevereDeformInterventions: (enableSevereDeformInterventionsEl?.checked !== false),
@@ -2984,6 +2986,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   const softClusterFluidTorqueCoupling = Math.max(0, Number(sim.controls?.softClusterFluidTorqueCoupling) || SOFT_CLUSTER_FLOW_FORCE_SHARE);
   const softClusterAngularProjection = Math.max(0, Number(sim.controls?.softClusterAngularProjection) || SOFT_CLUSTER_ANGULAR_PROJECTION);
   const softClusterCollisionAngularProjection = Math.max(0, Number(sim.controls?.softClusterCollisionAngularProjection) || SOFT_CLUSTER_COLLISION_ANGULAR_PROJECTION);
+  const swimGain = sim.controls?.enableArtificialSwim ? 1 : 0;
   const viscMap = sim.viscMapCpu;
 
   const localHoneyDrag = (x, y) => {
@@ -3053,9 +3056,9 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const alpha = torque * invInertia;
 
     const swimPhase = sim.frame * 0.08 + bi * 2.1;
-    const swimX = Math.cos(swimPhase) * 0.012 * invMass;
-    const swimY = Math.sin(swimPhase * 1.6) * 0.009 * invMass;
-    const swimTorque = Math.sin(swimPhase * 1.1) * 0.0025;
+    const swimX = swimGain * Math.cos(swimPhase) * 0.012 * invMass;
+    const swimY = swimGain * Math.sin(swimPhase * 1.6) * 0.009 * invMass;
+    const swimTorque = swimGain * Math.sin(swimPhase * 1.1) * 0.0025;
 
     b.vx += ax * dt * 60 + swimX * dtNorm;
     b.vy += ay * dt * 60 + swimY * dtNorm;
@@ -3105,8 +3108,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const cy = node.y - softCentroid.y;
     const activeSwimPhase = sim.frame * 0.12 + i * 1.57;
     const activeSwimAmp = 0.008 * (1 + 0.2 * Math.sin(sim.frame * 0.05 + i));
-    const swimX = (-cy * activeSwimAmp + Math.cos(activeSwimPhase) * 0.004) * invMass;
-    const swimY = (cx * activeSwimAmp + Math.sin(activeSwimPhase) * 0.004) * invMass;
+    const swimX = swimGain * (-cy * activeSwimAmp + Math.cos(activeSwimPhase) * 0.004) * invMass;
+    const swimY = swimGain * (cx * activeSwimAmp + Math.sin(activeSwimPhase) * 0.004) * invMass;
     const honey = localHoneyDrag(node.x, node.y);
     const cid = node.clusterId ?? 0;
     const isMembraneCluster = softMembraneClusterSet.has(cid);
@@ -3508,7 +3511,18 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const fx = sampleFieldBilinear(vxField, n, b.x, b.y);
     const fy = sampleFieldBilinear(vyField, n, b.x, b.y);
     const swimPhase = sim.frame * 0.08 + bi * 2.1;
-    injectPoint(b.x, b.y, b.vx, b.vy, fx, fy, b.mass, b.r * 0.8, Math.cos(swimPhase) * 0.015, Math.sin(swimPhase) * 0.012);
+    injectPoint(
+      b.x,
+      b.y,
+      b.vx,
+      b.vy,
+      fx,
+      fy,
+      b.mass,
+      b.r * 0.8,
+      swimGain * Math.cos(swimPhase) * 0.015,
+      swimGain * Math.sin(swimPhase) * 0.012,
+    );
   }
   const softClusterForInjection = computeSoftClusterKinematics(s.nodes);
   for (let i = 0; i < s.nodes.length; i++) {
@@ -3530,7 +3544,18 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     const injectVx = node.vx * (1 - blend) + rigidLikeVx * blend;
     const injectVy = node.vy * (1 - blend) + rigidLikeVy * blend;
     const swimPhase = sim.frame * 0.12 + i * 1.57;
-    injectPoint(node.x, node.y, injectVx, injectVy, fx, fy, node.mass, 2.2, Math.cos(swimPhase) * 0.01, Math.sin(swimPhase) * 0.01);
+    injectPoint(
+      node.x,
+      node.y,
+      injectVx,
+      injectVy,
+      fx,
+      fy,
+      node.mass,
+      2.2,
+      swimGain * Math.cos(swimPhase) * 0.01,
+      swimGain * Math.sin(swimPhase) * 0.01,
+    );
   }
 
   const softCentroidAfter = computeSoftCentroid(s.nodes);
@@ -4559,6 +4584,7 @@ async function stepAndRender() {
         massSoft: s.controls.massSoft,
         bodyDrag: s.controls.bodyDrag,
         bodyFeedback: s.controls.bodyFeedback,
+        enableArtificialSwim: !!s.controls.enableArtificialSwim,
         softClusterFluidTorqueCoupling: s.controls.softClusterFluidTorqueCoupling,
         softClusterAngularProjection: s.controls.softClusterAngularProjection,
         softClusterCollisionAngularProjection: s.controls.softClusterCollisionAngularProjection,

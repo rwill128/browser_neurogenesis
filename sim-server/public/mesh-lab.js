@@ -11,7 +11,7 @@ const softEdgeVelocityModeCanvas = document.getElementById('softEdgeVelocityMode
 const softEdgeMomentumModeCanvas = document.getElementById('softEdgeMomentumModePaint');
 const rigidPermeabilityCanvas = document.getElementById('rigidPermeabilityPaint');
 const rigidEdgeVelocityModeCanvas = document.getElementById('rigidEdgeVelocityModePaint');
-const rigidConsumeCanvas = document.getElementById('rigidConsumePaint');
+const rigidEdgeDyeModeCanvas = document.getElementById('rigidEdgeDyeModePaint');
 const meshCanvas = document.getElementById('mesh');
 const windTunnelFrame = document.getElementById('windTunnelFrame');
 const pctx = paintCanvas.getContext('2d');
@@ -24,7 +24,7 @@ const svctx = softEdgeVelocityModeCanvas.getContext('2d');
 const smctx = softEdgeMomentumModeCanvas.getContext('2d');
 const prctx = rigidPermeabilityCanvas.getContext('2d');
 const rvctx = rigidEdgeVelocityModeCanvas.getContext('2d');
-const cctx = rigidConsumeCanvas.getContext('2d');
+const cctx = rigidEdgeDyeModeCanvas.getContext('2d');
 const mctx = meshCanvas.getContext('2d');
 const modeEl = document.getElementById('paintMode');
 const fieldPaintTargetEl = document.getElementById('fieldPaintTarget');
@@ -36,12 +36,14 @@ const membraneShapePaintEl = document.getElementById('membraneShapePaintValue');
 const softPermeabilityPaintEl = document.getElementById('softPermeabilityPaintValue');
 const softEdgeDyeChannelEl = document.getElementById('softEdgeDyeChannel');
 const softEdgeDyeModeEl = document.getElementById('softEdgeDyeMode');
+const softEdgeDyePaintEl = document.getElementById('softEdgeDyePaintValue');
 const softEdgeVelocityModeEl = document.getElementById('softEdgeVelocityMode');
 const softEdgeMomentumPaintEl = document.getElementById('softEdgeMomentumPaintValue');
 const rigidPermeabilityPaintEl = document.getElementById('rigidPermeabilityPaintValue');
 const rigidEdgeVelocityModeEl = document.getElementById('rigidEdgeVelocityMode');
-const rigidConsumeChannelEl = document.getElementById('rigidConsumeChannel');
-const rigidConsumePaintEl = document.getElementById('rigidConsumePaintValue');
+const rigidEdgeDyeChannelEl = document.getElementById('rigidEdgeDyeChannel');
+const rigidEdgeDyeModeEl = document.getElementById('rigidEdgeDyeMode');
+const rigidEdgeDyePaintEl = document.getElementById('rigidEdgeDyePaintValue');
 const rigidCompileModeEl = document.getElementById('rigidCompileMode');
 const rigidPrimitiveSideMinEl = document.getElementById('rigidPrimitiveSideMin');
 const rigidPrimitiveSideMaxEl = document.getElementById('rigidPrimitiveSideMax');
@@ -64,7 +66,25 @@ const randomizeSoftEdgeVelocityModeBtn = document.getElementById('randomizeSoftE
 const randomizeSoftEdgeMomentumModeBtn = document.getElementById('randomizeSoftEdgeMomentumModeBtn');
 const randomizeRigidPermeabilityBtn = document.getElementById('randomizeRigidPermeabilityBtn');
 const randomizeRigidEdgeVelocityModeBtn = document.getElementById('randomizeRigidEdgeVelocityModeBtn');
-const randomizeRigidConsumeBtn = document.getElementById('randomizeRigidConsumeBtn');
+const randomizeRigidEdgeDyeModeBtn = document.getElementById('randomizeRigidEdgeDyeModeBtn');
+const randomizeSoftDyeBlockRBtn = document.getElementById('randomizeSoftDyeBlockRBtn');
+const randomizeSoftDyePassRBtn = document.getElementById('randomizeSoftDyePassRBtn');
+const randomizeSoftDyeEatRBtn = document.getElementById('randomizeSoftDyeEatRBtn');
+const randomizeSoftDyeBlockGBtn = document.getElementById('randomizeSoftDyeBlockGBtn');
+const randomizeSoftDyePassGBtn = document.getElementById('randomizeSoftDyePassGBtn');
+const randomizeSoftDyeEatGBtn = document.getElementById('randomizeSoftDyeEatGBtn');
+const randomizeSoftDyeBlockBBtn = document.getElementById('randomizeSoftDyeBlockBBtn');
+const randomizeSoftDyePassBBtn = document.getElementById('randomizeSoftDyePassBBtn');
+const randomizeSoftDyeEatBBtn = document.getElementById('randomizeSoftDyeEatBBtn');
+const randomizeRigidDyeBlockRBtn = document.getElementById('randomizeRigidDyeBlockRBtn');
+const randomizeRigidDyePassRBtn = document.getElementById('randomizeRigidDyePassRBtn');
+const randomizeRigidDyeEatRBtn = document.getElementById('randomizeRigidDyeEatRBtn');
+const randomizeRigidDyeBlockGBtn = document.getElementById('randomizeRigidDyeBlockGBtn');
+const randomizeRigidDyePassGBtn = document.getElementById('randomizeRigidDyePassGBtn');
+const randomizeRigidDyeEatGBtn = document.getElementById('randomizeRigidDyeEatGBtn');
+const randomizeRigidDyeBlockBBtn = document.getElementById('randomizeRigidDyeBlockBBtn');
+const randomizeRigidDyePassBBtn = document.getElementById('randomizeRigidDyePassBBtn');
+const randomizeRigidDyeEatBBtn = document.getElementById('randomizeRigidDyeEatBBtn');
 const randomFieldPresetEl = document.getElementById('randomFieldPreset');
 const randomFieldSeedEl = document.getElementById('randomFieldSeed');
 const exportBtn = document.getElementById('exportBtn');
@@ -91,13 +111,45 @@ const softDensity = new Float32Array(W * H).fill(0.5);
 const membraneEdgeMap = new Float32Array(W * H).fill(0.5);
 const membraneShapeMap = new Float32Array(W * H).fill(1.0);
 const softPermeabilityMap = new Float32Array(W * H).fill(0.0);
+
+// Soft dye policy winner-take-all fields (3 behaviors × 3 channels).
+const softEdgeDyeBlockMapR = new Float32Array(W * H).fill(0.0);
+const softEdgeDyeBlockMapG = new Float32Array(W * H).fill(0.0);
+const softEdgeDyeBlockMapB = new Float32Array(W * H).fill(0.0);
+const softEdgeDyePassMapR = new Float32Array(W * H).fill(0.0);
+const softEdgeDyePassMapG = new Float32Array(W * H).fill(0.0);
+const softEdgeDyePassMapB = new Float32Array(W * H).fill(0.0);
+const softEdgeDyeEatMapR = new Float32Array(W * H).fill(0.0);
+const softEdgeDyeEatMapG = new Float32Array(W * H).fill(0.0);
+const softEdgeDyeEatMapB = new Float32Array(W * H).fill(0.0);
+
+// Legacy/preview packed soft dye mode maps (derived from winner fields).
 const softEdgeDyeModeMapR = new Float32Array(W * H).fill(0.0);
 const softEdgeDyeModeMapG = new Float32Array(W * H).fill(0.0);
 const softEdgeDyeModeMapB = new Float32Array(W * H).fill(0.0);
+
 const softEdgeVelocityModeMap = new Float32Array(W * H).fill(0.0);
 const softEdgeMomentumModeMap = new Float32Array(W * H).fill(1.0);
 const rigidPermeabilityMap = new Float32Array(W * H).fill(0.0);
 const rigidEdgeVelocityMap = new Float32Array(W * H).fill(0.0);
+
+// Rigid dye policy winner-take-all fields (3 behaviors × 3 channels).
+const rigidEdgeDyeBlockMapR = new Float32Array(W * H).fill(0.0);
+const rigidEdgeDyeBlockMapG = new Float32Array(W * H).fill(0.0);
+const rigidEdgeDyeBlockMapB = new Float32Array(W * H).fill(0.0);
+const rigidEdgeDyePassMapR = new Float32Array(W * H).fill(0.0);
+const rigidEdgeDyePassMapG = new Float32Array(W * H).fill(0.0);
+const rigidEdgeDyePassMapB = new Float32Array(W * H).fill(0.0);
+const rigidEdgeDyeEatMapR = new Float32Array(W * H).fill(0.0);
+const rigidEdgeDyeEatMapG = new Float32Array(W * H).fill(0.0);
+const rigidEdgeDyeEatMapB = new Float32Array(W * H).fill(0.0);
+
+// Legacy/preview packed rigid dye mode maps (derived from winner fields).
+const rigidEdgeDyeModeMapR = new Float32Array(W * H).fill(0.0);
+const rigidEdgeDyeModeMapG = new Float32Array(W * H).fill(0.0);
+const rigidEdgeDyeModeMapB = new Float32Array(W * H).fill(0.0);
+
+// Backward-compatible legacy absorb-only fields (derived from rigid EAT maps).
 const rigidEdgeConsumeMapR = new Float32Array(W * H).fill(0.0);
 const rigidEdgeConsumeMapG = new Float32Array(W * H).fill(0.0);
 const rigidEdgeConsumeMapB = new Float32Array(W * H).fill(0.0);
@@ -131,6 +183,50 @@ function edgeModeScalarPreview(v) {
   if (n >= 0.67) return 255; // EAT
   if (n >= 0.34) return 160; // PASS
   return 0; // BLOCK
+}
+
+function winnerModeScalar(block, pass, eat) {
+  const b = Math.max(0, Math.min(1, Number(block) || 0));
+  const p = Math.max(0, Math.min(1, Number(pass) || 0));
+  const e = Math.max(0, Math.min(1, Number(eat) || 0));
+  if (e > p && e > b) return EDGE_DYE_EAT_SCALAR;
+  if (p > b && p > e) return EDGE_DYE_PASS_SCALAR;
+  return EDGE_DYE_BLOCK_SCALAR;
+}
+
+function syncSoftDyeModeMapsFromWinnerFields() {
+  for (let i = 0; i < W * H; i++) {
+    softEdgeDyeModeMapR[i] = winnerModeScalar(softEdgeDyeBlockMapR[i], softEdgeDyePassMapR[i], softEdgeDyeEatMapR[i]);
+    softEdgeDyeModeMapG[i] = winnerModeScalar(softEdgeDyeBlockMapG[i], softEdgeDyePassMapG[i], softEdgeDyeEatMapG[i]);
+    softEdgeDyeModeMapB[i] = winnerModeScalar(softEdgeDyeBlockMapB[i], softEdgeDyePassMapB[i], softEdgeDyeEatMapB[i]);
+  }
+}
+
+function syncRigidDyeModeMapsFromWinnerFields() {
+  for (let i = 0; i < W * H; i++) {
+    rigidEdgeDyeModeMapR[i] = winnerModeScalar(rigidEdgeDyeBlockMapR[i], rigidEdgeDyePassMapR[i], rigidEdgeDyeEatMapR[i]);
+    rigidEdgeDyeModeMapG[i] = winnerModeScalar(rigidEdgeDyeBlockMapG[i], rigidEdgeDyePassMapG[i], rigidEdgeDyeEatMapG[i]);
+    rigidEdgeDyeModeMapB[i] = winnerModeScalar(rigidEdgeDyeBlockMapB[i], rigidEdgeDyePassMapB[i], rigidEdgeDyeEatMapB[i]);
+
+    // Back-compat absorb-only maps (legacy payloads/tests use these names).
+    rigidEdgeConsumeMapR[i] = Math.max(0, Math.min(1, Number(rigidEdgeDyeEatMapR[i]) || 0));
+    rigidEdgeConsumeMapG[i] = Math.max(0, Math.min(1, Number(rigidEdgeDyeEatMapG[i]) || 0));
+    rigidEdgeConsumeMapB[i] = Math.max(0, Math.min(1, Number(rigidEdgeDyeEatMapB[i]) || 0));
+  }
+}
+
+function populateWinnerFieldsFromModeScalarMap(modeMap, blockMap, passMap, eatMap) {
+  if (!modeMap || modeMap.length !== W * H) return;
+  for (let i = 0; i < W * H; i++) {
+    const s = Math.max(0, Math.min(1, Number(modeMap[i]) || 0));
+    if (s >= 0.67) {
+      blockMap[i] = 0; passMap[i] = 0; eatMap[i] = s;
+    } else if (s >= 0.34) {
+      blockMap[i] = 0; passMap[i] = s; eatMap[i] = 0;
+    } else {
+      blockMap[i] = Math.max(blockMap[i], 1 - s); passMap[i] = 0; eatMap[i] = 0;
+    }
+  }
 }
 
 function isolateLargestContiguousTraitBody(rigidField, softField, threshold = 0.35) {
@@ -405,11 +501,29 @@ function generateRandomFields({
     membraneShape: true,
     softPermeability: true,
     softEdgeDyeMode: true,
+    softDyeBlockR: true,
+    softDyePassR: true,
+    softDyeEatR: true,
+    softDyeBlockG: true,
+    softDyePassG: true,
+    softDyeEatG: true,
+    softDyeBlockB: true,
+    softDyePassB: true,
+    softDyeEatB: true,
     softEdgeVelocityMode: true,
     softEdgeMomentumMode: true,
     rigidPermeability: true,
+    rigidEdgeDyeMode: true,
+    rigidDyeBlockR: true,
+    rigidDyePassR: true,
+    rigidDyeEatR: true,
+    rigidDyeBlockG: true,
+    rigidDyePassG: true,
+    rigidDyeEatG: true,
+    rigidDyeBlockB: true,
+    rigidDyePassB: true,
+    rigidDyeEatB: true,
     rigidEdgeVelocityMode: true,
-    rigidConsume: true,
   },
 } = {}) {
   const baseSeed = Number.isFinite(Number(seed)) ? Math.floor(Number(seed)) : (Date.now() & 0x7fffffff);
@@ -427,11 +541,29 @@ function generateRandomFields({
     membraneShape: !!targets?.membraneShape,
     softPermeability: !!targets?.softPermeability,
     softEdgeDyeMode: !!targets?.softEdgeDyeMode,
+    softDyeBlockR: !!targets?.softDyeBlockR,
+    softDyePassR: !!targets?.softDyePassR,
+    softDyeEatR: !!targets?.softDyeEatR,
+    softDyeBlockG: !!targets?.softDyeBlockG,
+    softDyePassG: !!targets?.softDyePassG,
+    softDyeEatG: !!targets?.softDyeEatG,
+    softDyeBlockB: !!targets?.softDyeBlockB,
+    softDyePassB: !!targets?.softDyePassB,
+    softDyeEatB: !!targets?.softDyeEatB,
     softEdgeVelocityMode: !!targets?.softEdgeVelocityMode,
     softEdgeMomentumMode: !!targets?.softEdgeMomentumMode,
     rigidPermeability: !!targets?.rigidPermeability,
+    rigidEdgeDyeMode: !!targets?.rigidEdgeDyeMode,
+    rigidDyeBlockR: !!targets?.rigidDyeBlockR,
+    rigidDyePassR: !!targets?.rigidDyePassR,
+    rigidDyeEatR: !!targets?.rigidDyeEatR,
+    rigidDyeBlockG: !!targets?.rigidDyeBlockG,
+    rigidDyePassG: !!targets?.rigidDyePassG,
+    rigidDyeEatG: !!targets?.rigidDyeEatG,
+    rigidDyeBlockB: !!targets?.rigidDyeBlockB,
+    rigidDyePassB: !!targets?.rigidDyePassB,
+    rigidDyeEatB: !!targets?.rigidDyeEatB,
     rigidEdgeVelocityMode: !!targets?.rigidEdgeVelocityMode,
-    rigidConsume: !!targets?.rigidConsume,
   };
 
   const rigidParams = makeRandomPatternParams(rand, 11);
@@ -440,16 +572,28 @@ function generateRandomFields({
   const edgeParams = makeRandomPatternParams(rand, 53);
   const shapeParams = makeRandomPatternParams(rand, 71);
   const softPermParams = makeRandomPatternParams(rand, 79);
-  const softDyeRParams = makeRandomPatternParams(rand, 83);
-  const softDyeGParams = makeRandomPatternParams(rand, 85);
-  const softDyeBParams = makeRandomPatternParams(rand, 87);
-  const softVelocityParams = makeRandomPatternParams(rand, 88);
-  const softMomentumParams = makeRandomPatternParams(rand, 89);
+  const softDyeBlockRParams = makeRandomPatternParams(rand, 81);
+  const softDyePassRParams = makeRandomPatternParams(rand, 82);
+  const softDyeEatRParams = makeRandomPatternParams(rand, 83);
+  const softDyeBlockGParams = makeRandomPatternParams(rand, 84);
+  const softDyePassGParams = makeRandomPatternParams(rand, 85);
+  const softDyeEatGParams = makeRandomPatternParams(rand, 86);
+  const softDyeBlockBParams = makeRandomPatternParams(rand, 87);
+  const softDyePassBParams = makeRandomPatternParams(rand, 88);
+  const softDyeEatBParams = makeRandomPatternParams(rand, 89);
+  const softVelocityParams = makeRandomPatternParams(rand, 90);
+  const softMomentumParams = makeRandomPatternParams(rand, 91);
   const rigidVelocityParams = makeRandomPatternParams(rand, 93);
   const permParams = makeRandomPatternParams(rand, 97);
-  const consumeRParams = makeRandomPatternParams(rand, 101);
-  const consumeGParams = makeRandomPatternParams(rand, 131);
-  const consumeBParams = makeRandomPatternParams(rand, 151);
+  const rigidDyeBlockRParams = makeRandomPatternParams(rand, 101);
+  const rigidDyePassRParams = makeRandomPatternParams(rand, 102);
+  const rigidDyeEatRParams = makeRandomPatternParams(rand, 103);
+  const rigidDyeBlockGParams = makeRandomPatternParams(rand, 104);
+  const rigidDyePassGParams = makeRandomPatternParams(rand, 105);
+  const rigidDyeEatGParams = makeRandomPatternParams(rand, 106);
+  const rigidDyeBlockBParams = makeRandomPatternParams(rand, 107);
+  const rigidDyePassBParams = makeRandomPatternParams(rand, 108);
+  const rigidDyeEatBParams = makeRandomPatternParams(rand, 109);
 
   const margin = 2;
   for (let y = 0; y < H; y++) {
@@ -498,19 +642,41 @@ function generateRandomFields({
         softPermeabilityMap[i] = soft[i] > 0.12 ? smoothstep(0.54, 0.82, softPermV) : 0;
       }
 
-      if (targetFlags.softEdgeDyeMode) {
-        const softMask = smoothstep(0.52, 0.85, softSignal);
-        const rV = samplePatternValue('wave-interference', nx, ny, softDyeRParams);
-        const gV = samplePatternValue('wave-interference', nx, ny, softDyeGParams);
-        const bV = samplePatternValue('wave-interference', nx, ny, softDyeBParams);
-        const quantizeMode = (v) => {
-          if (v >= 0.67) return EDGE_DYE_EAT_SCALAR;
-          if (v >= 0.34) return EDGE_DYE_PASS_SCALAR;
-          return EDGE_DYE_BLOCK_SCALAR;
-        };
-        softEdgeDyeModeMapR[i] = soft[i] > 0.12 ? quantizeMode(softMask * rV) : EDGE_DYE_BLOCK_SCALAR;
-        softEdgeDyeModeMapG[i] = soft[i] > 0.12 ? quantizeMode(softMask * gV) : EDGE_DYE_BLOCK_SCALAR;
-        softEdgeDyeModeMapB[i] = soft[i] > 0.12 ? quantizeMode(softMask * bV) : EDGE_DYE_BLOCK_SCALAR;
+      const softMask = smoothstep(0.52, 0.85, softSignal);
+      const rigidMask = smoothstep(0.58, 0.9, rigidSignal);
+
+      const randomDyeScalar = (params, isSoft) => {
+        const base = samplePatternValue('wave-interference', nx, ny, params);
+        const gate = isSoft ? (soft[i] > 0.12 ? softMask : 0) : (rigid[i] > 0.1 ? rigidMask : 0);
+        return Math.max(0, Math.min(1, base * gate));
+      };
+
+      if (targetFlags.softEdgeDyeMode || targetFlags.softDyeBlockR) {
+        softEdgeDyeBlockMapR[i] = randomDyeScalar(softDyeBlockRParams, true);
+      }
+      if (targetFlags.softEdgeDyeMode || targetFlags.softDyePassR) {
+        softEdgeDyePassMapR[i] = randomDyeScalar(softDyePassRParams, true);
+      }
+      if (targetFlags.softEdgeDyeMode || targetFlags.softDyeEatR) {
+        softEdgeDyeEatMapR[i] = randomDyeScalar(softDyeEatRParams, true);
+      }
+      if (targetFlags.softEdgeDyeMode || targetFlags.softDyeBlockG) {
+        softEdgeDyeBlockMapG[i] = randomDyeScalar(softDyeBlockGParams, true);
+      }
+      if (targetFlags.softEdgeDyeMode || targetFlags.softDyePassG) {
+        softEdgeDyePassMapG[i] = randomDyeScalar(softDyePassGParams, true);
+      }
+      if (targetFlags.softEdgeDyeMode || targetFlags.softDyeEatG) {
+        softEdgeDyeEatMapG[i] = randomDyeScalar(softDyeEatGParams, true);
+      }
+      if (targetFlags.softEdgeDyeMode || targetFlags.softDyeBlockB) {
+        softEdgeDyeBlockMapB[i] = randomDyeScalar(softDyeBlockBParams, true);
+      }
+      if (targetFlags.softEdgeDyeMode || targetFlags.softDyePassB) {
+        softEdgeDyePassMapB[i] = randomDyeScalar(softDyePassBParams, true);
+      }
+      if (targetFlags.softEdgeDyeMode || targetFlags.softDyeEatB) {
+        softEdgeDyeEatMapB[i] = randomDyeScalar(softDyeEatBParams, true);
       }
 
       if (targetFlags.softEdgeVelocityMode) {
@@ -535,18 +701,38 @@ function generateRandomFields({
         rigidEdgeVelocityMap[i] = (rigid[i] > 0.12 && v >= 0.58) ? 1 : 0;
       }
 
-      if (targetFlags.rigidConsume) {
-        const consumeMask = smoothstep(0.58, 0.9, rigidSignal);
-        const rV = samplePatternValue('wave-interference', nx, ny, consumeRParams);
-        const gV = samplePatternValue('wave-interference', nx, ny, consumeGParams);
-        const bV = samplePatternValue('wave-interference', nx, ny, consumeBParams);
-        rigidEdgeConsumeMapR[i] = rigid[i] > 0.1 ? consumeMask * smoothstep(0.72, 0.9, rV) : 0;
-        rigidEdgeConsumeMapG[i] = rigid[i] > 0.1 ? consumeMask * smoothstep(0.72, 0.9, gV) : 0;
-        rigidEdgeConsumeMapB[i] = rigid[i] > 0.1 ? consumeMask * smoothstep(0.72, 0.9, bV) : 0;
+      if (targetFlags.rigidEdgeDyeMode || targetFlags.rigidDyeBlockR) {
+        rigidEdgeDyeBlockMapR[i] = randomDyeScalar(rigidDyeBlockRParams, false);
+      }
+      if (targetFlags.rigidEdgeDyeMode || targetFlags.rigidDyePassR) {
+        rigidEdgeDyePassMapR[i] = randomDyeScalar(rigidDyePassRParams, false);
+      }
+      if (targetFlags.rigidEdgeDyeMode || targetFlags.rigidDyeEatR) {
+        rigidEdgeDyeEatMapR[i] = randomDyeScalar(rigidDyeEatRParams, false);
+      }
+      if (targetFlags.rigidEdgeDyeMode || targetFlags.rigidDyeBlockG) {
+        rigidEdgeDyeBlockMapG[i] = randomDyeScalar(rigidDyeBlockGParams, false);
+      }
+      if (targetFlags.rigidEdgeDyeMode || targetFlags.rigidDyePassG) {
+        rigidEdgeDyePassMapG[i] = randomDyeScalar(rigidDyePassGParams, false);
+      }
+      if (targetFlags.rigidEdgeDyeMode || targetFlags.rigidDyeEatG) {
+        rigidEdgeDyeEatMapG[i] = randomDyeScalar(rigidDyeEatGParams, false);
+      }
+      if (targetFlags.rigidEdgeDyeMode || targetFlags.rigidDyeBlockB) {
+        rigidEdgeDyeBlockMapB[i] = randomDyeScalar(rigidDyeBlockBParams, false);
+      }
+      if (targetFlags.rigidEdgeDyeMode || targetFlags.rigidDyePassB) {
+        rigidEdgeDyePassMapB[i] = randomDyeScalar(rigidDyePassBParams, false);
+      }
+      if (targetFlags.rigidEdgeDyeMode || targetFlags.rigidDyeEatB) {
+        rigidEdgeDyeEatMapB[i] = randomDyeScalar(rigidDyeEatBParams, false);
       }
     }
   }
 
+  syncSoftDyeModeMapsFromWinnerFields();
+  syncRigidDyeModeMapsFromWinnerFields();
   drawFields();
   compileNow();
   return {
@@ -573,12 +759,35 @@ function buildSpecFromCurrentFields(mesh, traitFields = null) {
       membraneEdgeMap,
       membraneShapeMap,
       softPermeabilityMap,
+      softEdgeDyeBlockMapR,
+      softEdgeDyeBlockMapG,
+      softEdgeDyeBlockMapB,
+      softEdgeDyePassMapR,
+      softEdgeDyePassMapG,
+      softEdgeDyePassMapB,
+      softEdgeDyeEatMapR,
+      softEdgeDyeEatMapG,
+      softEdgeDyeEatMapB,
+      // Backward-compatible packed mode aliases.
       softEdgeDyeModeMapR,
       softEdgeDyeModeMapG,
       softEdgeDyeModeMapB,
       softEdgeVelocityModeMap,
       softEdgeMomentumModeMap,
       rigidPermeabilityMap,
+      rigidEdgeDyeBlockMapR,
+      rigidEdgeDyeBlockMapG,
+      rigidEdgeDyeBlockMapB,
+      rigidEdgeDyePassMapR,
+      rigidEdgeDyePassMapG,
+      rigidEdgeDyePassMapB,
+      rigidEdgeDyeEatMapR,
+      rigidEdgeDyeEatMapG,
+      rigidEdgeDyeEatMapB,
+      // Backward-compatible packed mode + consume aliases.
+      rigidEdgeDyeModeMapR,
+      rigidEdgeDyeModeMapG,
+      rigidEdgeDyeModeMapB,
       rigidEdgeVelocityMap,
       rigidEdgeVelocityModeMap: rigidEdgeVelocityMap,
       rigidEdgeConsumeMapR,
@@ -645,7 +854,7 @@ function drawFields() {
   const softEdgeMomentumModeImg = smctx.createImageData(W, H);
   const permeabilityImg = prctx.createImageData(W, H);
   const rigidEdgeVelocityModeImg = rvctx.createImageData(W, H);
-  const consumeImg = cctx.createImageData(W, H);
+  const rigidEdgeDyeModeImg = cctx.createImageData(W, H);
 
   for (let i = 0; i < rigid.length; i++) {
     const r = Math.max(0, Math.min(1, rigid[i]));
@@ -661,9 +870,9 @@ function drawFields() {
     const softMomentumMode = Math.max(0, Math.min(1, softEdgeMomentumModeMap[i]));
     const permeability = Math.max(0, Math.min(1, rigidPermeabilityMap[i]));
     const rigidVelocityMode = Math.max(0, Math.min(1, rigidEdgeVelocityMap[i]));
-    const consumeR = Math.max(0, Math.min(1, rigidEdgeConsumeMapR[i]));
-    const consumeG = Math.max(0, Math.min(1, rigidEdgeConsumeMapG[i]));
-    const consumeB = Math.max(0, Math.min(1, rigidEdgeConsumeMapB[i]));
+    const rigidDyeR = Math.max(0, Math.min(1, rigidEdgeDyeModeMapR[i]));
+    const rigidDyeG = Math.max(0, Math.min(1, rigidEdgeDyeModeMapG[i]));
+    const rigidDyeB = Math.max(0, Math.min(1, rigidEdgeDyeModeMapB[i]));
 
     // Trait plane: rigid red, soft blue.
     traitImg.data[i * 4] = Math.min(255, r * 255);
@@ -731,11 +940,11 @@ function drawFields() {
     rigidEdgeVelocityModeImg.data[i * 4 + 2] = rvg;
     rigidEdgeVelocityModeImg.data[i * 4 + 3] = 255;
 
-    // Edge consume-dye map: RGB channels represent absorb mask by color.
-    consumeImg.data[i * 4] = Math.round(consumeR * 255);
-    consumeImg.data[i * 4 + 1] = Math.round(consumeG * 255);
-    consumeImg.data[i * 4 + 2] = Math.round(consumeB * 255);
-    consumeImg.data[i * 4 + 3] = 255;
+    // Rigid edge dye mode map (RGB channels show BLOCK/PASS/EAT quantized policy intensity).
+    rigidEdgeDyeModeImg.data[i * 4] = edgeModeScalarPreview(rigidDyeR);
+    rigidEdgeDyeModeImg.data[i * 4 + 1] = edgeModeScalarPreview(rigidDyeG);
+    rigidEdgeDyeModeImg.data[i * 4 + 2] = edgeModeScalarPreview(rigidDyeB);
+    rigidEdgeDyeModeImg.data[i * 4 + 3] = 255;
   }
 
   const blit = (ctx, canvas, img) => {
@@ -757,7 +966,7 @@ function drawFields() {
   blit(smctx, softEdgeMomentumModeCanvas, softEdgeMomentumModeImg);
   blit(prctx, rigidPermeabilityCanvas, permeabilityImg);
   blit(rvctx, rigidEdgeVelocityModeCanvas, rigidEdgeVelocityModeImg);
-  blit(cctx, rigidConsumeCanvas, consumeImg);
+  blit(cctx, rigidEdgeDyeModeCanvas, rigidEdgeDyeModeImg);
 }
 
 function paintTrait(clientX, clientY) {
@@ -869,22 +1078,61 @@ function paintSoftPermeabilityMap(clientX, clientY, erase = false) {
   drawFields();
 }
 
+function resolveSoftDyeWinnerMap(channel, mode) {
+  const ch = String(channel || 'r').toLowerCase();
+  const m = String(mode || 'block').toLowerCase();
+  if (m === 'pass') {
+    if (ch === 'g') return softEdgeDyePassMapG;
+    if (ch === 'b') return softEdgeDyePassMapB;
+    return softEdgeDyePassMapR;
+  }
+  if (m === 'eat' || m === 'absorb') {
+    if (ch === 'g') return softEdgeDyeEatMapG;
+    if (ch === 'b') return softEdgeDyeEatMapB;
+    return softEdgeDyeEatMapR;
+  }
+  if (ch === 'g') return softEdgeDyeBlockMapG;
+  if (ch === 'b') return softEdgeDyeBlockMapB;
+  return softEdgeDyeBlockMapR;
+}
+
+function resolveRigidDyeWinnerMap(channel, mode) {
+  const ch = String(channel || 'r').toLowerCase();
+  const m = String(mode || 'block').toLowerCase();
+  if (m === 'pass') {
+    if (ch === 'g') return rigidEdgeDyePassMapG;
+    if (ch === 'b') return rigidEdgeDyePassMapB;
+    return rigidEdgeDyePassMapR;
+  }
+  if (m === 'eat' || m === 'absorb') {
+    if (ch === 'g') return rigidEdgeDyeEatMapG;
+    if (ch === 'b') return rigidEdgeDyeEatMapB;
+    return rigidEdgeDyeEatMapR;
+  }
+  if (ch === 'g') return rigidEdgeDyeBlockMapG;
+  if (ch === 'b') return rigidEdgeDyeBlockMapB;
+  return rigidEdgeDyeBlockMapR;
+}
+
 function paintSoftEdgeDyeModeMap(clientX, clientY, erase = false) {
   const channel = String(softEdgeDyeChannelEl?.value || 'r');
-  const modeScalar = edgeDyeModeToScalar(softEdgeDyeModeEl?.value || 'block');
+  const mode = String(softEdgeDyeModeEl?.value || 'block');
+  const paintValue = Number(softEdgeDyePaintEl?.value) || 1.0;
 
   if (channel === 'erase') {
-    paintScalarMap(softEdgeDyeModeMapR, softEdgeDyeModeCanvas, clientX, clientY, EDGE_DYE_BLOCK_SCALAR, EDGE_DYE_BLOCK_SCALAR, true);
-    paintScalarMap(softEdgeDyeModeMapG, softEdgeDyeModeCanvas, clientX, clientY, EDGE_DYE_BLOCK_SCALAR, EDGE_DYE_BLOCK_SCALAR, true);
-    paintScalarMap(softEdgeDyeModeMapB, softEdgeDyeModeCanvas, clientX, clientY, EDGE_DYE_BLOCK_SCALAR, EDGE_DYE_BLOCK_SCALAR, true);
+    for (const ch of ['r', 'g', 'b']) {
+      for (const m of ['block', 'pass', 'eat']) {
+        paintScalarMap(resolveSoftDyeWinnerMap(ch, m), softEdgeDyeModeCanvas, clientX, clientY, 0.0, 0.0, true);
+      }
+    }
+    syncSoftDyeModeMapsFromWinnerFields();
     drawFields();
     return;
   }
 
-  const target = channel === 'g'
-    ? softEdgeDyeModeMapG
-    : (channel === 'b' ? softEdgeDyeModeMapB : softEdgeDyeModeMapR);
-  paintScalarMap(target, softEdgeDyeModeCanvas, clientX, clientY, modeScalar, EDGE_DYE_BLOCK_SCALAR, erase);
+  const target = resolveSoftDyeWinnerMap(channel, mode);
+  paintScalarMap(target, softEdgeDyeModeCanvas, clientX, clientY, paintValue, 0.0, erase);
+  syncSoftDyeModeMapsFromWinnerFields();
   drawFields();
 }
 
@@ -940,22 +1188,25 @@ function paintRigidEdgeVelocityModeMap(clientX, clientY, erase = false) {
   drawFields();
 }
 
-function paintRigidConsumeMap(clientX, clientY, erase = false) {
-  const channel = String(rigidConsumeChannelEl?.value || 'r');
-  const paintValue = Number(rigidConsumePaintEl?.value) || 1.0;
+function paintRigidEdgeDyeModeMap(clientX, clientY, erase = false) {
+  const channel = String(rigidEdgeDyeChannelEl?.value || 'r');
+  const mode = String(rigidEdgeDyeModeEl?.value || 'block');
+  const paintValue = Number(rigidEdgeDyePaintEl?.value) || 1.0;
 
   if (channel === 'erase') {
-    paintScalarMap(rigidEdgeConsumeMapR, rigidConsumeCanvas, clientX, clientY, 0.0, 0.0, true);
-    paintScalarMap(rigidEdgeConsumeMapG, rigidConsumeCanvas, clientX, clientY, 0.0, 0.0, true);
-    paintScalarMap(rigidEdgeConsumeMapB, rigidConsumeCanvas, clientX, clientY, 0.0, 0.0, true);
+    for (const ch of ['r', 'g', 'b']) {
+      for (const m of ['block', 'pass', 'eat']) {
+        paintScalarMap(resolveRigidDyeWinnerMap(ch, m), rigidEdgeDyeModeCanvas, clientX, clientY, 0.0, 0.0, true);
+      }
+    }
+    syncRigidDyeModeMapsFromWinnerFields();
     drawFields();
     return;
   }
 
-  const target = channel === 'g'
-    ? rigidEdgeConsumeMapG
-    : (channel === 'b' ? rigidEdgeConsumeMapB : rigidEdgeConsumeMapR);
-  paintScalarMap(target, rigidConsumeCanvas, clientX, clientY, paintValue, 0.0, erase);
+  const target = resolveRigidDyeWinnerMap(channel, mode);
+  paintScalarMap(target, rigidEdgeDyeModeCanvas, clientX, clientY, paintValue, 0.0, erase);
+  syncRigidDyeModeMapsFromWinnerFields();
   drawFields();
 }
 
@@ -1137,30 +1388,10 @@ function drawMesh(mesh) {
     mctx.fillText('velocity overlay: BLOCK=red solid, PASS=green dashed', 10, 14);
   }
 
-  out.textContent = JSON.stringify({
-    ...mesh.meta,
-    compileRevision,
-    softSolverMode: softSolverModeEl?.value || 'membrane',
-    softPreview: ((softSolverModeEl?.value || 'membrane') === 'membrane')
-      ? 'resampled membrane ring from painted mask'
-      : 'triangulated soft mesh',
-    membraneShapePreview: ((softSolverModeEl?.value || 'membrane') === 'membrane')
-      ? 'ring edge/node color encodes membrane stiffness map (soft→stiff)'
-      : undefined,
-    rigidContourPreview: 'rigid contours are perimeter-resampled from border vertices; dots show exported vertices',
-    velocityModePreview: {
-      legend: 'BLOCK=red solid, PASS=green dashed',
-      passEdges: velocityPassEdges,
-      blockEdges: velocityBlockEdges,
-    },
-    contiguousBodyFilter: {
-      keptCells: mesh?.__compileFields?.keptCells ?? null,
-      removedCells: mesh?.__compileFields?.removedCells ?? null,
-      componentCount: mesh?.__compileFields?.componentCount ?? null,
-      policy: 'largest contiguous painted body only (export + wind tunnel)',
-    },
-    membraneMinEdgeLength: Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4),
-    membraneMaxEdgeLength: Math.max(Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4), Number(membraneMaxEdgeLengthEl?.value) || 8),
+  const specForJsonPreview = lastCompiledSpec || buildSpecFromCurrentFields(mesh, mesh?.__compileFields);
+  out.textContent = JSON.stringify(specForJsonPreview || {
+    ok: false,
+    error: 'No compiled CreatureSpec available',
   }, null, 2);
 }
 
@@ -1193,21 +1424,23 @@ function syncFieldPanelVisibility() {
   const softMomentumModeSelected = target === 'softEdgeMomentumMode';
   const permeabilitySelected = target === 'rigidPermeability';
   const rigidVelocityModeSelected = target === 'rigidEdgeVelocityMode';
-  const consumeSelected = target === 'rigidConsume';
+  const rigidDyeModeSelected = target === 'rigidEdgeDyeMode';
 
   setWidgetEnabled(modeEl, traitSelected, 'Trait paint mode only applies when Field to paint = Trait field');
   setWidgetEnabled(softDensityPaintEl, densitySelected, 'Resolution paint value only applies when Field to paint = Resolution field');
   setWidgetEnabled(membraneEdgePaintEl, edgeSelected, 'Perimeter edge paint value only applies when Field to paint = Membrane edge-length field');
   setWidgetEnabled(membraneShapePaintEl, shapeSelected, 'Membrane stiffness paint value only applies when Field to paint = Membrane stiffness field');
   setWidgetEnabled(softPermeabilityPaintEl, softPermeabilitySelected, 'Soft permeability paint value only applies when Field to paint = Soft permeability field');
-  setWidgetEnabled(softEdgeDyeChannelEl, softDyeModeSelected, 'Soft dye channel only applies when Field to paint = Soft edge dye mode field');
-  setWidgetEnabled(softEdgeDyeModeEl, softDyeModeSelected, 'Soft dye mode only applies when Field to paint = Soft edge dye mode field');
+  setWidgetEnabled(softEdgeDyeChannelEl, softDyeModeSelected, 'Soft dye channel only applies when Field to paint = Soft edge dye policy fields');
+  setWidgetEnabled(softEdgeDyeModeEl, softDyeModeSelected, 'Soft dye mode only applies when Field to paint = Soft edge dye policy fields');
+  setWidgetEnabled(softEdgeDyePaintEl, softDyeModeSelected, 'Soft dye field paint only applies when Field to paint = Soft edge dye policy fields');
   setWidgetEnabled(softEdgeVelocityModeEl, softVelocityModeSelected, 'Soft velocity mode only applies when Field to paint = Soft edge velocity mode field');
   setWidgetEnabled(softEdgeMomentumPaintEl, softMomentumModeSelected, 'Soft momentum paint value only applies when Field to paint = Soft edge momentum coupling field');
   setWidgetEnabled(rigidPermeabilityPaintEl, permeabilitySelected, 'Rigid permeability paint value only applies when Field to paint = Rigid permeability field');
   setWidgetEnabled(rigidEdgeVelocityModeEl, rigidVelocityModeSelected, 'Rigid velocity mode only applies when Field to paint = Rigid edge velocity mode field');
-  setWidgetEnabled(rigidConsumeChannelEl, consumeSelected, 'Consume channel only applies when Field to paint = Rigid edge consume-dye field');
-  setWidgetEnabled(rigidConsumePaintEl, consumeSelected, 'Consume paint value only applies when Field to paint = Rigid edge consume-dye field');
+  setWidgetEnabled(rigidEdgeDyeChannelEl, rigidDyeModeSelected, 'Rigid dye channel only applies when Field to paint = Rigid edge dye policy fields');
+  setWidgetEnabled(rigidEdgeDyeModeEl, rigidDyeModeSelected, 'Rigid dye mode only applies when Field to paint = Rigid edge dye policy fields');
+  setWidgetEnabled(rigidEdgeDyePaintEl, rigidDyeModeSelected, 'Rigid dye field paint only applies when Field to paint = Rigid edge dye policy fields');
 
   return target;
 }
@@ -1245,6 +1478,8 @@ function syncSoftModeUi() {
 
 function compileNow() {
   try {
+    syncSoftDyeModeMapsFromWinnerFields();
+    syncRigidDyeModeMapsFromWinnerFields();
     const membraneMode = syncSoftModeUi();
     const requestedSoftMin = Math.max(1, Math.min(Math.max(1, W - 1), Math.round(Number(softMinCellSizeEl?.value) || 3)));
     const perimeterMinEdge = Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4);
@@ -1306,7 +1541,7 @@ let softEdgeVelocityModePainting = false;
 let softEdgeMomentumModePainting = false;
 let rigidPermeabilityPainting = false;
 let rigidEdgeVelocityModePainting = false;
-let rigidConsumePainting = false;
+let rigidEdgeDyeModePainting = false;
 
 paintCanvas.addEventListener('mousedown', (e) => { traitPainting = true; paintTrait(e.clientX, e.clientY); });
 paintCanvas.addEventListener('mousemove', (e) => { if (traitPainting) paintTrait(e.clientX, e.clientY); });
@@ -1401,14 +1636,14 @@ rigidEdgeVelocityModeCanvas.addEventListener('mousemove', (e) => {
   paintRigidEdgeVelocityModeMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
 });
 
-rigidConsumeCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
-rigidConsumeCanvas.addEventListener('mousedown', (e) => {
-  rigidConsumePainting = true;
-  paintRigidConsumeMap(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
+rigidEdgeDyeModeCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+rigidEdgeDyeModeCanvas.addEventListener('mousedown', (e) => {
+  rigidEdgeDyeModePainting = true;
+  paintRigidEdgeDyeModeMap(e.clientX, e.clientY, e.button === 2 || e.shiftKey);
 });
-rigidConsumeCanvas.addEventListener('mousemove', (e) => {
-  if (!rigidConsumePainting) return;
-  paintRigidConsumeMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
+rigidEdgeDyeModeCanvas.addEventListener('mousemove', (e) => {
+  if (!rigidEdgeDyeModePainting) return;
+  paintRigidEdgeDyeModeMap(e.clientX, e.clientY, (e.buttons & 2) !== 0 || e.shiftKey);
 });
 
 window.addEventListener('mouseup', () => {
@@ -1422,7 +1657,7 @@ window.addEventListener('mouseup', () => {
   softEdgeMomentumModePainting = false;
   rigidPermeabilityPainting = false;
   rigidEdgeVelocityModePainting = false;
-  rigidConsumePainting = false;
+  rigidEdgeDyeModePainting = false;
 });
 
 clearBtn.addEventListener('click', () => {
@@ -1432,16 +1667,30 @@ clearBtn.addEventListener('click', () => {
   membraneEdgeMap.fill(0.5);
   membraneShapeMap.fill(1.0);
   softPermeabilityMap.fill(0.0);
-  softEdgeDyeModeMapR.fill(0.0);
-  softEdgeDyeModeMapG.fill(0.0);
-  softEdgeDyeModeMapB.fill(0.0);
+  softEdgeDyeBlockMapR.fill(0.0);
+  softEdgeDyeBlockMapG.fill(0.0);
+  softEdgeDyeBlockMapB.fill(0.0);
+  softEdgeDyePassMapR.fill(0.0);
+  softEdgeDyePassMapG.fill(0.0);
+  softEdgeDyePassMapB.fill(0.0);
+  softEdgeDyeEatMapR.fill(0.0);
+  softEdgeDyeEatMapG.fill(0.0);
+  softEdgeDyeEatMapB.fill(0.0);
   softEdgeVelocityModeMap.fill(0.0);
   softEdgeMomentumModeMap.fill(1.0);
   rigidPermeabilityMap.fill(0.0);
   rigidEdgeVelocityMap.fill(0.0);
-  rigidEdgeConsumeMapR.fill(0.0);
-  rigidEdgeConsumeMapG.fill(0.0);
-  rigidEdgeConsumeMapB.fill(0.0);
+  rigidEdgeDyeBlockMapR.fill(0.0);
+  rigidEdgeDyeBlockMapG.fill(0.0);
+  rigidEdgeDyeBlockMapB.fill(0.0);
+  rigidEdgeDyePassMapR.fill(0.0);
+  rigidEdgeDyePassMapG.fill(0.0);
+  rigidEdgeDyePassMapB.fill(0.0);
+  rigidEdgeDyeEatMapR.fill(0.0);
+  rigidEdgeDyeEatMapG.fill(0.0);
+  rigidEdgeDyeEatMapB.fill(0.0);
+  syncSoftDyeModeMapsFromWinnerFields();
+  syncRigidDyeModeMapsFromWinnerFields();
   drawFields();
   compileNow();
 });
@@ -1466,11 +1715,29 @@ if (randomizeBtn) {
       membraneShape: true,
       softPermeability: true,
       softEdgeDyeMode: true,
+      softDyeBlockR: true,
+      softDyePassR: true,
+      softDyeEatR: true,
+      softDyeBlockG: true,
+      softDyePassG: true,
+      softDyeEatG: true,
+      softDyeBlockB: true,
+      softDyePassB: true,
+      softDyeEatB: true,
       softEdgeVelocityMode: true,
       softEdgeMomentumMode: true,
       rigidPermeability: true,
+      rigidEdgeDyeMode: true,
+      rigidDyeBlockR: true,
+      rigidDyePassR: true,
+      rigidDyeEatR: true,
+      rigidDyeBlockG: true,
+      rigidDyePassG: true,
+      rigidDyeEatG: true,
+      rigidDyeBlockB: true,
+      rigidDyePassB: true,
+      rigidDyeEatB: true,
       rigidEdgeVelocityMode: true,
-      rigidConsume: true,
     });
   });
 }
@@ -1490,8 +1757,28 @@ if (randomizeSoftPermeabilityBtn) {
   randomizeSoftPermeabilityBtn.addEventListener('click', () => randomizeWithTargets({ softPermeability: true }));
 }
 if (randomizeSoftEdgeDyeModeBtn) {
-  randomizeSoftEdgeDyeModeBtn.addEventListener('click', () => randomizeWithTargets({ softEdgeDyeMode: true }));
+  randomizeSoftEdgeDyeModeBtn.addEventListener('click', () => randomizeWithTargets({
+    softEdgeDyeMode: true,
+    softDyeBlockR: true,
+    softDyePassR: true,
+    softDyeEatR: true,
+    softDyeBlockG: true,
+    softDyePassG: true,
+    softDyeEatG: true,
+    softDyeBlockB: true,
+    softDyePassB: true,
+    softDyeEatB: true,
+  }));
 }
+if (randomizeSoftDyeBlockRBtn) randomizeSoftDyeBlockRBtn.addEventListener('click', () => randomizeWithTargets({ softDyeBlockR: true }));
+if (randomizeSoftDyePassRBtn) randomizeSoftDyePassRBtn.addEventListener('click', () => randomizeWithTargets({ softDyePassR: true }));
+if (randomizeSoftDyeEatRBtn) randomizeSoftDyeEatRBtn.addEventListener('click', () => randomizeWithTargets({ softDyeEatR: true }));
+if (randomizeSoftDyeBlockGBtn) randomizeSoftDyeBlockGBtn.addEventListener('click', () => randomizeWithTargets({ softDyeBlockG: true }));
+if (randomizeSoftDyePassGBtn) randomizeSoftDyePassGBtn.addEventListener('click', () => randomizeWithTargets({ softDyePassG: true }));
+if (randomizeSoftDyeEatGBtn) randomizeSoftDyeEatGBtn.addEventListener('click', () => randomizeWithTargets({ softDyeEatG: true }));
+if (randomizeSoftDyeBlockBBtn) randomizeSoftDyeBlockBBtn.addEventListener('click', () => randomizeWithTargets({ softDyeBlockB: true }));
+if (randomizeSoftDyePassBBtn) randomizeSoftDyePassBBtn.addEventListener('click', () => randomizeWithTargets({ softDyePassB: true }));
+if (randomizeSoftDyeEatBBtn) randomizeSoftDyeEatBBtn.addEventListener('click', () => randomizeWithTargets({ softDyeEatB: true }));
 if (randomizeSoftEdgeVelocityModeBtn) {
   randomizeSoftEdgeVelocityModeBtn.addEventListener('click', () => randomizeWithTargets({ softEdgeVelocityMode: true }));
 }
@@ -1501,11 +1788,31 @@ if (randomizeSoftEdgeMomentumModeBtn) {
 if (randomizeRigidPermeabilityBtn) {
   randomizeRigidPermeabilityBtn.addEventListener('click', () => randomizeWithTargets({ rigidPermeability: true }));
 }
+if (randomizeRigidEdgeDyeModeBtn) {
+  randomizeRigidEdgeDyeModeBtn.addEventListener('click', () => randomizeWithTargets({
+    rigidEdgeDyeMode: true,
+    rigidDyeBlockR: true,
+    rigidDyePassR: true,
+    rigidDyeEatR: true,
+    rigidDyeBlockG: true,
+    rigidDyePassG: true,
+    rigidDyeEatG: true,
+    rigidDyeBlockB: true,
+    rigidDyePassB: true,
+    rigidDyeEatB: true,
+  }));
+}
+if (randomizeRigidDyeBlockRBtn) randomizeRigidDyeBlockRBtn.addEventListener('click', () => randomizeWithTargets({ rigidDyeBlockR: true }));
+if (randomizeRigidDyePassRBtn) randomizeRigidDyePassRBtn.addEventListener('click', () => randomizeWithTargets({ rigidDyePassR: true }));
+if (randomizeRigidDyeEatRBtn) randomizeRigidDyeEatRBtn.addEventListener('click', () => randomizeWithTargets({ rigidDyeEatR: true }));
+if (randomizeRigidDyeBlockGBtn) randomizeRigidDyeBlockGBtn.addEventListener('click', () => randomizeWithTargets({ rigidDyeBlockG: true }));
+if (randomizeRigidDyePassGBtn) randomizeRigidDyePassGBtn.addEventListener('click', () => randomizeWithTargets({ rigidDyePassG: true }));
+if (randomizeRigidDyeEatGBtn) randomizeRigidDyeEatGBtn.addEventListener('click', () => randomizeWithTargets({ rigidDyeEatG: true }));
+if (randomizeRigidDyeBlockBBtn) randomizeRigidDyeBlockBBtn.addEventListener('click', () => randomizeWithTargets({ rigidDyeBlockB: true }));
+if (randomizeRigidDyePassBBtn) randomizeRigidDyePassBBtn.addEventListener('click', () => randomizeWithTargets({ rigidDyePassB: true }));
+if (randomizeRigidDyeEatBBtn) randomizeRigidDyeEatBBtn.addEventListener('click', () => randomizeWithTargets({ rigidDyeEatB: true }));
 if (randomizeRigidEdgeVelocityModeBtn) {
   randomizeRigidEdgeVelocityModeBtn.addEventListener('click', () => randomizeWithTargets({ rigidEdgeVelocityMode: true }));
-}
-if (randomizeRigidConsumeBtn) {
-  randomizeRigidConsumeBtn.addEventListener('click', () => randomizeWithTargets({ rigidConsume: true }));
 }
 if (fieldPaintTargetEl) fieldPaintTargetEl.addEventListener('change', syncFieldPanelVisibility);
 if (softInfillModeEl) softInfillModeEl.addEventListener('change', compileNow);
@@ -1585,27 +1892,80 @@ importFile.addEventListener('change', async () => {
     else membraneShapeMap.fill(1.0);
     if (Array.isArray(authoring.softPermeabilityMap) && authoring.softPermeabilityMap.length === W * H) softPermeabilityMap.set(authoring.softPermeabilityMap);
     else softPermeabilityMap.fill(0.0);
-    if (Array.isArray(authoring.softEdgeDyeModeMapR) && authoring.softEdgeDyeModeMapR.length === W * H) softEdgeDyeModeMapR.set(authoring.softEdgeDyeModeMapR);
-    else softEdgeDyeModeMapR.fill(0.0);
-    if (Array.isArray(authoring.softEdgeDyeModeMapG) && authoring.softEdgeDyeModeMapG.length === W * H) softEdgeDyeModeMapG.set(authoring.softEdgeDyeModeMapG);
-    else softEdgeDyeModeMapG.fill(0.0);
-    if (Array.isArray(authoring.softEdgeDyeModeMapB) && authoring.softEdgeDyeModeMapB.length === W * H) softEdgeDyeModeMapB.set(authoring.softEdgeDyeModeMapB);
-    else softEdgeDyeModeMapB.fill(0.0);
+
+    softEdgeDyeBlockMapR.fill(0); softEdgeDyePassMapR.fill(0); softEdgeDyeEatMapR.fill(0);
+    softEdgeDyeBlockMapG.fill(0); softEdgeDyePassMapG.fill(0); softEdgeDyeEatMapG.fill(0);
+    softEdgeDyeBlockMapB.fill(0); softEdgeDyePassMapB.fill(0); softEdgeDyeEatMapB.fill(0);
+
+    if (Array.isArray(authoring.softEdgeDyeBlockMapR) && authoring.softEdgeDyeBlockMapR.length === W * H) softEdgeDyeBlockMapR.set(authoring.softEdgeDyeBlockMapR);
+    if (Array.isArray(authoring.softEdgeDyePassMapR) && authoring.softEdgeDyePassMapR.length === W * H) softEdgeDyePassMapR.set(authoring.softEdgeDyePassMapR);
+    if (Array.isArray(authoring.softEdgeDyeEatMapR) && authoring.softEdgeDyeEatMapR.length === W * H) softEdgeDyeEatMapR.set(authoring.softEdgeDyeEatMapR);
+    if (Array.isArray(authoring.softEdgeDyeBlockMapG) && authoring.softEdgeDyeBlockMapG.length === W * H) softEdgeDyeBlockMapG.set(authoring.softEdgeDyeBlockMapG);
+    if (Array.isArray(authoring.softEdgeDyePassMapG) && authoring.softEdgeDyePassMapG.length === W * H) softEdgeDyePassMapG.set(authoring.softEdgeDyePassMapG);
+    if (Array.isArray(authoring.softEdgeDyeEatMapG) && authoring.softEdgeDyeEatMapG.length === W * H) softEdgeDyeEatMapG.set(authoring.softEdgeDyeEatMapG);
+    if (Array.isArray(authoring.softEdgeDyeBlockMapB) && authoring.softEdgeDyeBlockMapB.length === W * H) softEdgeDyeBlockMapB.set(authoring.softEdgeDyeBlockMapB);
+    if (Array.isArray(authoring.softEdgeDyePassMapB) && authoring.softEdgeDyePassMapB.length === W * H) softEdgeDyePassMapB.set(authoring.softEdgeDyePassMapB);
+    if (Array.isArray(authoring.softEdgeDyeEatMapB) && authoring.softEdgeDyeEatMapB.length === W * H) softEdgeDyeEatMapB.set(authoring.softEdgeDyeEatMapB);
+
+    // Backward-compatible import path from packed mode maps.
+    if (Array.isArray(authoring.softEdgeDyeModeMapR) && authoring.softEdgeDyeModeMapR.length === W * H) {
+      populateWinnerFieldsFromModeScalarMap(authoring.softEdgeDyeModeMapR, softEdgeDyeBlockMapR, softEdgeDyePassMapR, softEdgeDyeEatMapR);
+    }
+    if (Array.isArray(authoring.softEdgeDyeModeMapG) && authoring.softEdgeDyeModeMapG.length === W * H) {
+      populateWinnerFieldsFromModeScalarMap(authoring.softEdgeDyeModeMapG, softEdgeDyeBlockMapG, softEdgeDyePassMapG, softEdgeDyeEatMapG);
+    }
+    if (Array.isArray(authoring.softEdgeDyeModeMapB) && authoring.softEdgeDyeModeMapB.length === W * H) {
+      populateWinnerFieldsFromModeScalarMap(authoring.softEdgeDyeModeMapB, softEdgeDyeBlockMapB, softEdgeDyePassMapB, softEdgeDyeEatMapB);
+    }
+
     if (Array.isArray(authoring.softEdgeVelocityModeMap) && authoring.softEdgeVelocityModeMap.length === W * H) softEdgeVelocityModeMap.set(authoring.softEdgeVelocityModeMap);
     else softEdgeVelocityModeMap.fill(0.0);
     if (Array.isArray(authoring.softEdgeMomentumModeMap) && authoring.softEdgeMomentumModeMap.length === W * H) softEdgeMomentumModeMap.set(authoring.softEdgeMomentumModeMap);
     else softEdgeMomentumModeMap.fill(1.0);
+
     if (Array.isArray(authoring.rigidPermeabilityMap) && authoring.rigidPermeabilityMap.length === W * H) rigidPermeabilityMap.set(authoring.rigidPermeabilityMap);
     else rigidPermeabilityMap.fill(0.0);
+
     if (Array.isArray(authoring.rigidEdgeVelocityMap) && authoring.rigidEdgeVelocityMap.length === W * H) rigidEdgeVelocityMap.set(authoring.rigidEdgeVelocityMap);
     else if (Array.isArray(authoring.rigidEdgeVelocityModeMap) && authoring.rigidEdgeVelocityModeMap.length === W * H) rigidEdgeVelocityMap.set(authoring.rigidEdgeVelocityModeMap);
     else rigidEdgeVelocityMap.fill(0.0);
-    if (Array.isArray(authoring.rigidEdgeConsumeMapR) && authoring.rigidEdgeConsumeMapR.length === W * H) rigidEdgeConsumeMapR.set(authoring.rigidEdgeConsumeMapR);
-    else rigidEdgeConsumeMapR.fill(0.0);
-    if (Array.isArray(authoring.rigidEdgeConsumeMapG) && authoring.rigidEdgeConsumeMapG.length === W * H) rigidEdgeConsumeMapG.set(authoring.rigidEdgeConsumeMapG);
-    else rigidEdgeConsumeMapG.fill(0.0);
-    if (Array.isArray(authoring.rigidEdgeConsumeMapB) && authoring.rigidEdgeConsumeMapB.length === W * H) rigidEdgeConsumeMapB.set(authoring.rigidEdgeConsumeMapB);
-    else rigidEdgeConsumeMapB.fill(0.0);
+
+    rigidEdgeDyeBlockMapR.fill(0); rigidEdgeDyePassMapR.fill(0); rigidEdgeDyeEatMapR.fill(0);
+    rigidEdgeDyeBlockMapG.fill(0); rigidEdgeDyePassMapG.fill(0); rigidEdgeDyeEatMapG.fill(0);
+    rigidEdgeDyeBlockMapB.fill(0); rigidEdgeDyePassMapB.fill(0); rigidEdgeDyeEatMapB.fill(0);
+
+    if (Array.isArray(authoring.rigidEdgeDyeBlockMapR) && authoring.rigidEdgeDyeBlockMapR.length === W * H) rigidEdgeDyeBlockMapR.set(authoring.rigidEdgeDyeBlockMapR);
+    if (Array.isArray(authoring.rigidEdgeDyePassMapR) && authoring.rigidEdgeDyePassMapR.length === W * H) rigidEdgeDyePassMapR.set(authoring.rigidEdgeDyePassMapR);
+    if (Array.isArray(authoring.rigidEdgeDyeEatMapR) && authoring.rigidEdgeDyeEatMapR.length === W * H) rigidEdgeDyeEatMapR.set(authoring.rigidEdgeDyeEatMapR);
+    if (Array.isArray(authoring.rigidEdgeDyeBlockMapG) && authoring.rigidEdgeDyeBlockMapG.length === W * H) rigidEdgeDyeBlockMapG.set(authoring.rigidEdgeDyeBlockMapG);
+    if (Array.isArray(authoring.rigidEdgeDyePassMapG) && authoring.rigidEdgeDyePassMapG.length === W * H) rigidEdgeDyePassMapG.set(authoring.rigidEdgeDyePassMapG);
+    if (Array.isArray(authoring.rigidEdgeDyeEatMapG) && authoring.rigidEdgeDyeEatMapG.length === W * H) rigidEdgeDyeEatMapG.set(authoring.rigidEdgeDyeEatMapG);
+    if (Array.isArray(authoring.rigidEdgeDyeBlockMapB) && authoring.rigidEdgeDyeBlockMapB.length === W * H) rigidEdgeDyeBlockMapB.set(authoring.rigidEdgeDyeBlockMapB);
+    if (Array.isArray(authoring.rigidEdgeDyePassMapB) && authoring.rigidEdgeDyePassMapB.length === W * H) rigidEdgeDyePassMapB.set(authoring.rigidEdgeDyePassMapB);
+    if (Array.isArray(authoring.rigidEdgeDyeEatMapB) && authoring.rigidEdgeDyeEatMapB.length === W * H) rigidEdgeDyeEatMapB.set(authoring.rigidEdgeDyeEatMapB);
+
+    // Backward-compatible import path from packed mode/consume maps.
+    if (Array.isArray(authoring.rigidEdgeDyeModeMapR) && authoring.rigidEdgeDyeModeMapR.length === W * H) {
+      populateWinnerFieldsFromModeScalarMap(authoring.rigidEdgeDyeModeMapR, rigidEdgeDyeBlockMapR, rigidEdgeDyePassMapR, rigidEdgeDyeEatMapR);
+    }
+    if (Array.isArray(authoring.rigidEdgeDyeModeMapG) && authoring.rigidEdgeDyeModeMapG.length === W * H) {
+      populateWinnerFieldsFromModeScalarMap(authoring.rigidEdgeDyeModeMapG, rigidEdgeDyeBlockMapG, rigidEdgeDyePassMapG, rigidEdgeDyeEatMapG);
+    }
+    if (Array.isArray(authoring.rigidEdgeDyeModeMapB) && authoring.rigidEdgeDyeModeMapB.length === W * H) {
+      populateWinnerFieldsFromModeScalarMap(authoring.rigidEdgeDyeModeMapB, rigidEdgeDyeBlockMapB, rigidEdgeDyePassMapB, rigidEdgeDyeEatMapB);
+    }
+    if (Array.isArray(authoring.rigidEdgeConsumeMapR) && authoring.rigidEdgeConsumeMapR.length === W * H) {
+      rigidEdgeDyeEatMapR.set(authoring.rigidEdgeConsumeMapR);
+    }
+    if (Array.isArray(authoring.rigidEdgeConsumeMapG) && authoring.rigidEdgeConsumeMapG.length === W * H) {
+      rigidEdgeDyeEatMapG.set(authoring.rigidEdgeConsumeMapG);
+    }
+    if (Array.isArray(authoring.rigidEdgeConsumeMapB) && authoring.rigidEdgeConsumeMapB.length === W * H) {
+      rigidEdgeDyeEatMapB.set(authoring.rigidEdgeConsumeMapB);
+    }
+
+    syncSoftDyeModeMapsFromWinnerFields();
+    syncRigidDyeModeMapsFromWinnerFields();
     drawFields();
     compileNow();
     return;

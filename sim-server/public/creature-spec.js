@@ -174,9 +174,27 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
     const rigidEdgeMomentumMap = options?.fields?.rigidEdgeMomentumMap;
 
     // Preferred explicit edge-policy fields.
+    const softEdgeDyeBlockMapR = options?.fields?.softEdgeDyeBlockMapR;
+    const softEdgeDyeBlockMapG = options?.fields?.softEdgeDyeBlockMapG;
+    const softEdgeDyeBlockMapB = options?.fields?.softEdgeDyeBlockMapB;
+    const softEdgeDyePassMapR = options?.fields?.softEdgeDyePassMapR;
+    const softEdgeDyePassMapG = options?.fields?.softEdgeDyePassMapG;
+    const softEdgeDyePassMapB = options?.fields?.softEdgeDyePassMapB;
+    const softEdgeDyeEatMapR = options?.fields?.softEdgeDyeEatMapR;
+    const softEdgeDyeEatMapG = options?.fields?.softEdgeDyeEatMapG;
+    const softEdgeDyeEatMapB = options?.fields?.softEdgeDyeEatMapB;
     const softEdgeDyeModeMapR = options?.fields?.softEdgeDyeModeMapR;
     const softEdgeDyeModeMapG = options?.fields?.softEdgeDyeModeMapG;
     const softEdgeDyeModeMapB = options?.fields?.softEdgeDyeModeMapB;
+    const rigidEdgeDyeBlockMapR = options?.fields?.rigidEdgeDyeBlockMapR;
+    const rigidEdgeDyeBlockMapG = options?.fields?.rigidEdgeDyeBlockMapG;
+    const rigidEdgeDyeBlockMapB = options?.fields?.rigidEdgeDyeBlockMapB;
+    const rigidEdgeDyePassMapR = options?.fields?.rigidEdgeDyePassMapR;
+    const rigidEdgeDyePassMapG = options?.fields?.rigidEdgeDyePassMapG;
+    const rigidEdgeDyePassMapB = options?.fields?.rigidEdgeDyePassMapB;
+    const rigidEdgeDyeEatMapR = options?.fields?.rigidEdgeDyeEatMapR;
+    const rigidEdgeDyeEatMapG = options?.fields?.rigidEdgeDyeEatMapG;
+    const rigidEdgeDyeEatMapB = options?.fields?.rigidEdgeDyeEatMapB;
     const rigidEdgeDyeModeMapR = options?.fields?.rigidEdgeDyeModeMapR;
     const rigidEdgeDyeModeMapG = options?.fields?.rigidEdgeDyeModeMapG;
     const rigidEdgeDyeModeMapB = options?.fields?.rigidEdgeDyeModeMapB;
@@ -209,9 +227,27 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
           rigidEdgeConsumeMapB: rigidEdgeConsumeMapB ? Array.from(rigidEdgeConsumeMapB) : undefined,
           rigidEdgeVelocityMap: rigidEdgeVelocityMap ? Array.from(rigidEdgeVelocityMap) : undefined,
           rigidEdgeMomentumMap: rigidEdgeMomentumMap ? Array.from(rigidEdgeMomentumMap) : undefined,
+          softEdgeDyeBlockMapR: softEdgeDyeBlockMapR ? Array.from(softEdgeDyeBlockMapR) : undefined,
+          softEdgeDyeBlockMapG: softEdgeDyeBlockMapG ? Array.from(softEdgeDyeBlockMapG) : undefined,
+          softEdgeDyeBlockMapB: softEdgeDyeBlockMapB ? Array.from(softEdgeDyeBlockMapB) : undefined,
+          softEdgeDyePassMapR: softEdgeDyePassMapR ? Array.from(softEdgeDyePassMapR) : undefined,
+          softEdgeDyePassMapG: softEdgeDyePassMapG ? Array.from(softEdgeDyePassMapG) : undefined,
+          softEdgeDyePassMapB: softEdgeDyePassMapB ? Array.from(softEdgeDyePassMapB) : undefined,
+          softEdgeDyeEatMapR: softEdgeDyeEatMapR ? Array.from(softEdgeDyeEatMapR) : undefined,
+          softEdgeDyeEatMapG: softEdgeDyeEatMapG ? Array.from(softEdgeDyeEatMapG) : undefined,
+          softEdgeDyeEatMapB: softEdgeDyeEatMapB ? Array.from(softEdgeDyeEatMapB) : undefined,
           softEdgeDyeModeMapR: softEdgeDyeModeMapR ? Array.from(softEdgeDyeModeMapR) : undefined,
           softEdgeDyeModeMapG: softEdgeDyeModeMapG ? Array.from(softEdgeDyeModeMapG) : undefined,
           softEdgeDyeModeMapB: softEdgeDyeModeMapB ? Array.from(softEdgeDyeModeMapB) : undefined,
+          rigidEdgeDyeBlockMapR: rigidEdgeDyeBlockMapR ? Array.from(rigidEdgeDyeBlockMapR) : undefined,
+          rigidEdgeDyeBlockMapG: rigidEdgeDyeBlockMapG ? Array.from(rigidEdgeDyeBlockMapG) : undefined,
+          rigidEdgeDyeBlockMapB: rigidEdgeDyeBlockMapB ? Array.from(rigidEdgeDyeBlockMapB) : undefined,
+          rigidEdgeDyePassMapR: rigidEdgeDyePassMapR ? Array.from(rigidEdgeDyePassMapR) : undefined,
+          rigidEdgeDyePassMapG: rigidEdgeDyePassMapG ? Array.from(rigidEdgeDyePassMapG) : undefined,
+          rigidEdgeDyePassMapB: rigidEdgeDyePassMapB ? Array.from(rigidEdgeDyePassMapB) : undefined,
+          rigidEdgeDyeEatMapR: rigidEdgeDyeEatMapR ? Array.from(rigidEdgeDyeEatMapR) : undefined,
+          rigidEdgeDyeEatMapG: rigidEdgeDyeEatMapG ? Array.from(rigidEdgeDyeEatMapG) : undefined,
+          rigidEdgeDyeEatMapB: rigidEdgeDyeEatMapB ? Array.from(rigidEdgeDyeEatMapB) : undefined,
           rigidEdgeDyeModeMapR: rigidEdgeDyeModeMapR ? Array.from(rigidEdgeDyeModeMapR) : undefined,
           rigidEdgeDyeModeMapG: rigidEdgeDyeModeMapG ? Array.from(rigidEdgeDyeModeMapG) : undefined,
           rigidEdgeDyeModeMapB: rigidEdgeDyeModeMapB ? Array.from(rigidEdgeDyeModeMapB) : undefined,
@@ -542,27 +578,85 @@ function decodeDyeModeFromScalar(v, {
   return EDGE_DYE_DEFLECT;
 }
 
+function sampleSegmentAverageField(field, width, height, ax, ay, bx, by, fallback = 0) {
+  if (!(field instanceof Float32Array) || field.length < width * height) return fallback;
+  const x0 = Number(ax) || 0;
+  const y0 = Number(ay) || 0;
+  const x1 = Number(bx) || 0;
+  const y1 = Number(by) || 0;
+  const len = Math.hypot(x1 - x0, y1 - y0);
+
+  // Approximate "all pixels under the segment" by dense sub-pixel stepping.
+  const samples = Math.max(2, Math.min(256, Math.ceil(len * 2) + 1));
+  let sum = 0;
+  for (let k = 0; k < samples; k++) {
+    const t = samples <= 1 ? 0 : (k / (samples - 1));
+    const x = x0 + (x1 - x0) * t;
+    const y = y0 + (y1 - y0) * t;
+    sum += sampleBilinearField(field, width, height, x, y, fallback);
+  }
+  return sum / samples;
+}
+
+function winnerTakeAllDyeMode(blockValue, passValue, absorbValue) {
+  const block = clamp(Number(blockValue) || 0, 0, 1);
+  const pass = clamp(Number(passValue) || 0, 0, 1);
+  const absorb = clamp(Number(absorbValue) || 0, 0, 1);
+
+  if (absorb > pass && absorb > block) return EDGE_DYE_ABSORB;
+  if (pass > block && pass > absorb) return EDGE_DYE_PASS;
+  // Deterministic tie fallback: BLOCK (safe default).
+  return EDGE_DYE_DEFLECT;
+}
+
 function buildRigidEdgeDyeModeFromPolicyFields(hull, fields, width, height, thresholds = {}) {
+  const blockR = normalizeOptionalScalarField(fields?.rigidEdgeDyeBlockMapR);
+  const blockG = normalizeOptionalScalarField(fields?.rigidEdgeDyeBlockMapG);
+  const blockB = normalizeOptionalScalarField(fields?.rigidEdgeDyeBlockMapB);
+  const passR = normalizeOptionalScalarField(fields?.rigidEdgeDyePassMapR);
+  const passG = normalizeOptionalScalarField(fields?.rigidEdgeDyePassMapG);
+  const passB = normalizeOptionalScalarField(fields?.rigidEdgeDyePassMapB);
+  const eatR = normalizeOptionalScalarField(fields?.rigidEdgeDyeEatMapR);
+  const eatG = normalizeOptionalScalarField(fields?.rigidEdgeDyeEatMapG);
+  const eatB = normalizeOptionalScalarField(fields?.rigidEdgeDyeEatMapB);
+
+  const hasWinnerMaps = !!(blockR || blockG || blockB || passR || passG || passB || eatR || eatG || eatB);
+
   const modeR = normalizeOptionalScalarField(fields?.rigidEdgeDyeModeMapR);
   const modeG = normalizeOptionalScalarField(fields?.rigidEdgeDyeModeMapG);
   const modeB = normalizeOptionalScalarField(fields?.rigidEdgeDyeModeMapB);
-  if (!modeR && !modeG && !modeB) return null;
+
+  if (!hasWinnerMaps && !modeR && !modeG && !modeB) return null;
 
   const sides = Math.max(0, hull?.length || 0);
   const out = [];
   for (let i = 0; i < sides; i++) {
     const a = hull[i];
     const b = hull[(i + 1) % sides];
-    const mx = ((Number(a?.x) || 0) + (Number(b?.x) || 0)) * 0.5;
-    const my = ((Number(a?.y) || 0) + (Number(b?.y) || 0)) * 0.5;
+    const ax = Number(a?.x) || 0;
+    const ay = Number(a?.y) || 0;
+    const bx = Number(b?.x) || 0;
+    const by = Number(b?.y) || 0;
 
-    const r = modeR ? sampleBilinearField(modeR, width, height, mx, my, 0) : 0;
-    const g = modeG ? sampleBilinearField(modeG, width, height, mx, my, 0) : 0;
-    const bVal = modeB ? sampleBilinearField(modeB, width, height, mx, my, 0) : 0;
+    const fromWinner = (blockField, passField, eatField, packedField) => {
+      if (blockField || passField || eatField) {
+        const blockV = blockField ? sampleSegmentAverageField(blockField, width, height, ax, ay, bx, by, 0) : 0;
+        const passV = passField ? sampleSegmentAverageField(passField, width, height, ax, ay, bx, by, 0) : 0;
+        const eatV = eatField ? sampleSegmentAverageField(eatField, width, height, ax, ay, bx, by, 0) : 0;
+        return winnerTakeAllDyeMode(blockV, passV, eatV);
+      }
+      if (packedField) {
+        // Backward-compatible packed mode map behavior: midpoint sample.
+        const packedV = sampleBilinearField(packedField, width, height, (ax + bx) * 0.5, (ay + by) * 0.5, 0);
+        return decodeDyeModeFromScalar(packedV, thresholds);
+      }
+      return EDGE_DYE_DEFLECT;
+    };
+
     out.push([
-      decodeDyeModeFromScalar(r, thresholds),
-      decodeDyeModeFromScalar(g, thresholds),
-      decodeDyeModeFromScalar(bVal, thresholds),
+      fromWinner(blockR, passR, eatR, modeR),
+      fromWinner(blockG, passG, eatG, modeG),
+      fromWinner(blockB, passB, eatB, modeB),
     ]);
   }
   return out;
@@ -584,6 +678,17 @@ function applySoftEdgePoliciesFromFields(springs, nodes, fields, width, height, 
   const eatR = normalizeOptionalScalarField(fields?.softEdgeConsumeMapR);
   const eatG = normalizeOptionalScalarField(fields?.softEdgeConsumeMapG);
   const eatB = normalizeOptionalScalarField(fields?.softEdgeConsumeMapB);
+
+  const blockWinnerR = normalizeOptionalScalarField(fields?.softEdgeDyeBlockMapR);
+  const blockWinnerG = normalizeOptionalScalarField(fields?.softEdgeDyeBlockMapG);
+  const blockWinnerB = normalizeOptionalScalarField(fields?.softEdgeDyeBlockMapB);
+  const passWinnerR = normalizeOptionalScalarField(fields?.softEdgeDyePassMapR);
+  const passWinnerG = normalizeOptionalScalarField(fields?.softEdgeDyePassMapG);
+  const passWinnerB = normalizeOptionalScalarField(fields?.softEdgeDyePassMapB);
+  const eatWinnerR = normalizeOptionalScalarField(fields?.softEdgeDyeEatMapR);
+  const eatWinnerG = normalizeOptionalScalarField(fields?.softEdgeDyeEatMapG);
+  const eatWinnerB = normalizeOptionalScalarField(fields?.softEdgeDyeEatMapB);
+
   const modeR = normalizeOptionalScalarField(fields?.softEdgeDyeModeMapR);
   const modeG = normalizeOptionalScalarField(fields?.softEdgeDyeModeMapG);
   const modeB = normalizeOptionalScalarField(fields?.softEdgeDyeModeMapB);
@@ -605,15 +710,30 @@ function applySoftEdgePoliciesFromFields(springs, nodes, fields, width, height, 
     const a = nodes[ai];
     const b = nodes[bi];
     if (!a || !b) continue;
-    const mx = ((Number(a?.x) || 0) + (Number(b?.x) || 0)) * 0.5;
-    const my = ((Number(a?.y) || 0) + (Number(b?.y) || 0)) * 0.5;
+    const ax = Number(a?.x) || 0;
+    const ay = Number(a?.y) || 0;
+    const bx = Number(b?.x) || 0;
+    const by = Number(b?.y) || 0;
+    const mx = (ax + bx) * 0.5;
+    const my = (ay + by) * 0.5;
 
     const outDye = [0,1,2].map((ci) => {
       const raw = Array.isArray(sp[4]) ? Number(sp[4][ci]) : EDGE_DYE_DEFLECT;
       let mode = (raw === EDGE_DYE_PASS || raw === EDGE_DYE_DEFLECT || raw === EDGE_DYE_ABSORB) ? raw : EDGE_DYE_DEFLECT;
 
+      const blockField = ci === 0 ? blockWinnerR : (ci === 1 ? blockWinnerG : blockWinnerB);
+      const passWinnerField = ci === 0 ? passWinnerR : (ci === 1 ? passWinnerG : passWinnerB);
+      const eatWinnerField = ci === 0 ? eatWinnerR : (ci === 1 ? eatWinnerG : eatWinnerB);
+      if (blockField || passWinnerField || eatWinnerField) {
+        const blockV = blockField ? sampleSegmentAverageField(blockField, width, height, ax, ay, bx, by, 0) : 0;
+        const passV = passWinnerField ? sampleSegmentAverageField(passWinnerField, width, height, ax, ay, bx, by, 0) : 0;
+        const eatV = eatWinnerField ? sampleSegmentAverageField(eatWinnerField, width, height, ax, ay, bx, by, 0) : 0;
+        return winnerTakeAllDyeMode(blockV, passV, eatV);
+      }
+
       const modeField = ci === 0 ? modeR : (ci === 1 ? modeG : modeB);
       if (modeField) {
+        // Backward-compatible packed mode map behavior: midpoint sample.
         const modeV = clamp(sampleBilinearField(modeField, width, height, mx, my, 0), 0, 1);
         return decodeDyeModeFromScalar(modeV, {
           passThreshold: modePassTh,
@@ -623,6 +743,7 @@ function applySoftEdgePoliciesFromFields(springs, nodes, fields, width, height, 
 
       const passField = ci === 0 ? passR : (ci === 1 ? passG : passB);
       const eatField = ci === 0 ? eatR : (ci === 1 ? eatG : eatB);
+      // Backward-compatible legacy permeability/consume behavior: midpoint sample.
       const passV = passField ? clamp(sampleBilinearField(passField, width, height, mx, my, 0),0,1) : 0;
       const eatV = eatField ? clamp(sampleBilinearField(eatField, width, height, mx, my, 0),0,1) : 0;
       if (passV >= passTh) mode = EDGE_DYE_PASS;
@@ -731,7 +852,10 @@ function buildRigidExportFromCompilerPieces(rigidPieces, nodes, options, width, 
       subHulls,
       mass: finiteOr(Number(options.massHeavy), 5),
       edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
-      edgeDyeMode: buildRigidEdgeConsumeDyeFromFields(
+      edgeDyeMode: buildRigidEdgeDyeModeFromPolicyFields(outerHull, options?.fields, width, height, {
+        passThreshold: 0.34,
+        absorbThreshold: 0.67,
+      }) || buildRigidEdgeConsumeDyeFromFields(
         outerHull,
         rigidConsumeFieldR,
         rigidConsumeFieldG,
@@ -824,7 +948,10 @@ function buildRigidExport(tris, nodes, options, width, height) {
         hull,
         mass: finiteOr(Number(options.massHeavy), 5),
         edgeBodyMode: Array.from({ length: sides }, () => EDGE_BODY_BLOCK),
-        edgeDyeMode: buildRigidEdgeConsumeDyeFromFields(
+        edgeDyeMode: buildRigidEdgeDyeModeFromPolicyFields(hull, options?.fields, width, height, {
+          passThreshold: 0.34,
+          absorbThreshold: 0.67,
+        }) || buildRigidEdgeConsumeDyeFromFields(
           hull,
           rigidConsumeFieldR,
           rigidConsumeFieldG,

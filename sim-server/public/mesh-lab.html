@@ -43,12 +43,12 @@
             <option value="membraneEdge">Membrane edge-length field</option>
             <option value="membraneShape">Membrane stiffness field</option>
             <option value="softPermeability">Soft permeability field</option>
-            <option value="softEdgeDyeMode">Soft edge dye mode field (BLOCK/PASS/EAT)</option>
+            <option value="softEdgeDyeMode">Soft edge dye policy fields (BLOCK/PASS/EAT × R/G/B)</option>
             <option value="softEdgeVelocityMode">Soft edge velocity mode field (BLOCK/PASS)</option>
             <option value="softEdgeMomentumMode">Soft edge momentum coupling field (0..1)</option>
             <option value="rigidPermeability">Rigid permeability field</option>
             <option value="rigidEdgeVelocityMode">Rigid edge velocity mode field (BLOCK/PASS)</option>
-            <option value="rigidConsume">Rigid edge consume-dye field</option>
+            <option value="rigidEdgeDyeMode">Rigid edge dye policy fields (BLOCK/PASS/EAT × R/G/B)</option>
           </select>
         </label>
         <label>Trait paint mode
@@ -104,6 +104,7 @@
             <option value="eat">EAT</option>
           </select>
         </label>
+        <label>Soft dye field paint (0..1) <input id="softEdgeDyePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
         <label>Soft velocity mode
           <select id="softEdgeVelocityMode">
             <option value="block" selected>BLOCK</option>
@@ -118,15 +119,22 @@
             <option value="pass">PASS</option>
           </select>
         </label>
-        <label>Edge consume channel
-          <select id="rigidConsumeChannel">
+        <label>Rigid dye channel
+          <select id="rigidEdgeDyeChannel">
             <option value="r" selected>Red dye</option>
             <option value="g">Green dye</option>
             <option value="b">Blue dye</option>
             <option value="erase">Erase (all channels)</option>
           </select>
         </label>
-        <label>Edge consume paint (0..1) <input id="rigidConsumePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
+        <label>Rigid dye mode
+          <select id="rigidEdgeDyeMode">
+            <option value="block" selected>BLOCK</option>
+            <option value="pass">PASS</option>
+            <option value="eat">EAT</option>
+          </select>
+        </label>
+        <label>Rigid dye field paint (0..1) <input id="rigidEdgeDyePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
       </div>
     </details>
 
@@ -194,12 +202,30 @@
         <button id="randomizeMembraneEdgeBtn">Randomize perimeter edge only</button>
         <button id="randomizeMembraneShapeBtn">Randomize membrane stiffness only</button>
         <button id="randomizeSoftPermeabilityBtn">Randomize soft permeability only</button>
-        <button id="randomizeSoftEdgeDyeModeBtn">Randomize soft dye mode only</button>
+        <button id="randomizeSoftEdgeDyeModeBtn">Randomize all soft dye fields (9)</button>
+        <button id="randomizeSoftDyeBlockRBtn">Soft R BLOCK</button>
+        <button id="randomizeSoftDyePassRBtn">Soft R PASS</button>
+        <button id="randomizeSoftDyeEatRBtn">Soft R EAT</button>
+        <button id="randomizeSoftDyeBlockGBtn">Soft G BLOCK</button>
+        <button id="randomizeSoftDyePassGBtn">Soft G PASS</button>
+        <button id="randomizeSoftDyeEatGBtn">Soft G EAT</button>
+        <button id="randomizeSoftDyeBlockBBtn">Soft B BLOCK</button>
+        <button id="randomizeSoftDyePassBBtn">Soft B PASS</button>
+        <button id="randomizeSoftDyeEatBBtn">Soft B EAT</button>
         <button id="randomizeSoftEdgeVelocityModeBtn">Randomize soft velocity mode only</button>
         <button id="randomizeSoftEdgeMomentumModeBtn">Randomize soft momentum only</button>
         <button id="randomizeRigidPermeabilityBtn">Randomize rigid permeability only</button>
+        <button id="randomizeRigidEdgeDyeModeBtn">Randomize all rigid dye fields (9)</button>
+        <button id="randomizeRigidDyeBlockRBtn">Rigid R BLOCK</button>
+        <button id="randomizeRigidDyePassRBtn">Rigid R PASS</button>
+        <button id="randomizeRigidDyeEatRBtn">Rigid R EAT</button>
+        <button id="randomizeRigidDyeBlockGBtn">Rigid G BLOCK</button>
+        <button id="randomizeRigidDyePassGBtn">Rigid G PASS</button>
+        <button id="randomizeRigidDyeEatGBtn">Rigid G EAT</button>
+        <button id="randomizeRigidDyeBlockBBtn">Rigid B BLOCK</button>
+        <button id="randomizeRigidDyePassBBtn">Rigid B PASS</button>
+        <button id="randomizeRigidDyeEatBBtn">Rigid B EAT</button>
         <button id="randomizeRigidEdgeVelocityModeBtn">Randomize rigid velocity mode only</button>
-        <button id="randomizeRigidConsumeBtn">Randomize rigid consume only</button>
       </div>
     </details>
 
@@ -257,7 +283,7 @@
       <canvas id="softPermeabilityPaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="softEdgeDyeMode">
-      <div>Soft edge dye mode map (per-channel policy: BLOCK/PASS/EAT)</div>
+      <div>Soft edge dye policy fields (BLOCK/PASS/EAT × R/G/B, winner-take-all per channel)</div>
       <canvas id="softEdgeDyeModePaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="softEdgeVelocityMode">
@@ -276,9 +302,9 @@
       <div>Rigid edge velocity mode map (black=BLOCK, white=PASS)</div>
       <canvas id="rigidEdgeVelocityModePaint" width="384" height="384"></canvas>
     </div>
-    <div class="field-panel" data-field-panel="rigidConsume">
-      <div>Rigid edge consume-dye map (paint RGB channels to absorb on edges)</div>
-      <canvas id="rigidConsumePaint" width="384" height="384"></canvas>
+    <div class="field-panel" data-field-panel="rigidEdgeDyeMode">
+      <div>Rigid edge dye policy fields (BLOCK/PASS/EAT × R/G/B, winner-take-all per channel)</div>
+      <canvas id="rigidEdgeDyeModePaint" width="384" height="384"></canvas>
     </div>
     <div class="compiled-panel" id="compiledPanel">
       <div>Compiled mesh</div>

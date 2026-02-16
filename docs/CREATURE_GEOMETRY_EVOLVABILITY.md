@@ -201,6 +201,19 @@ On import/build, these values are projected into deterministic ranges:
 
 So mutation code can stay simple and expressive, while build-time normalization provides solver safety.
 
+## Contract assertions by trait level (quick reference)
+
+Use this table when writing parser/build tests so each trait level has explicit, solver-facing assertions.
+
+| Trait level | JSON fields | Deterministic defaults on import/build | Clamp/coercion behavior |
+| --- | --- | --- | --- |
+| Body | `softBodies[].solverMode` | unknown/non-`"membrane"` → `"spring"` path | membrane metadata omitted unless `solverMode === "membrane"` |
+| Body | `rigidBodies[].insideCorrectionEnabled`, `softBodies[].insideCorrectionEnabled` | omitted → runtime defaults (`true`/enabled) | boolean coercion via truthy/falsey import normalization |
+| Segment/line | `rigidBodies[].edgeBodyMode[]` | omitted/sparse entries → `1` (blocking) | strict binary coercion (`1` block, else `0` pass) |
+| Segment/line | `rigidBodies[].edgeDyeMode[]` + `softBodies[].springs[][4]` | omitted/sparse entries → `[1,1,1]` (deflect) | per-channel enum clamp to `{0,1,2}` |
+| Segment/line | `rigidBodies[].edgePermeabilityRGB[]` | omitted/sparse entries → `[0,0,0]` (blocked) | per-channel `>0 => 1`, else `0` |
+| Vertex | `softBodies[].nodes[].shapeMemoryWeight` | missing/invalid → `1` | hard clamp to `0..1` |
+
 ## Mutation surface matrix (segment/line/vertex focus)
 
 | Trait surface | Current storage | Runtime normalization | Practical first mutation pass |

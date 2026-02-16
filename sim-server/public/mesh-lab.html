@@ -7,6 +7,19 @@
   <style>
     body { font-family: system-ui; background:#111; color:#eee; padding:16px; }
     .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+    .control-groups { display:grid; gap:8px; margin-bottom:12px; }
+    .ctrl-group { border:1px solid #2f2f2f; border-radius:8px; background:#151515; }
+    .ctrl-group > summary {
+      cursor:pointer;
+      list-style:none;
+      padding:8px 10px;
+      font-weight:600;
+      color:#d9d9d9;
+      user-select:none;
+    }
+    .ctrl-group > summary::-webkit-details-marker { display:none; }
+    .ctrl-body { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:0 10px 10px 10px; }
+    .ctrl-note { opacity:0.82; font-size:12px; }
     canvas { border:1px solid #333; image-rendering: pixelated; }
     iframe { border:1px solid #333; background:#000; }
     .pane { display:flex; gap:12px; align-items:flex-start; }
@@ -17,88 +30,117 @@
 </head>
 <body>
   <h2>Field→Structure Compiler Lab</h2>
-  <div class="row">
-    <label>Field to paint
-      <select id="fieldPaintTarget">
-        <option value="trait" selected>Trait field (rigid/soft)</option>
-        <option value="density">Resolution field</option>
-        <option value="membraneEdge">Membrane edge-length field</option>
-        <option value="membraneShape">Membrane shape-memory field</option>
-        <option value="rigidPermeability">Rigid permeability field</option>
-        <option value="rigidConsume">Rigid edge consume-dye field</option>
-      </select>
-    </label>
-    <label>Trait paint mode
-      <select id="paintMode">
-        <option value="rigid" selected>Rigid region (red)</option>
-        <option value="soft">Soft region (blue)</option>
-        <option value="erase">Erase trait field</option>
-      </select>
-    </label>
-    <label>Brush <input id="brush" type="number" value="50" min="1" max="80" /></label>
-    <label>Threshold <input id="threshold" type="number" value="0.35" min="0" max="1" step="0.01" /></label>
-    <label>Resolution paint (0..1) <input id="softDensityPaint" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
-    <label>Perimeter edge paint (0..1) <input id="membraneEdgePaintValue" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
-    <label>Membrane shape paint (0..1) <input id="membraneShapePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
-    <label>Rigid permeability paint (0..1) <input id="rigidPermeabilityPaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
-    <label>Edge consume channel
-      <select id="rigidConsumeChannel">
-        <option value="r" selected>Red dye</option>
-        <option value="g">Green dye</option>
-        <option value="b">Blue dye</option>
-        <option value="erase">Erase (all channels)</option>
-      </select>
-    </label>
-    <label>Edge consume paint (0..1) <input id="rigidConsumePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
-    <span style="opacity:0.82">Resolution map controls primitive size (rigid+soft): darker green = finer/smaller, brighter green = coarser/larger</span>
-    <label>Rigid compile mode
-      <select id="rigidCompileMode">
-        <option value="contours" selected>Contours (existing)</option>
-        <option value="primitive-tiling">Primitive tiling (tri/square/pent)</option>
-      </select>
-    </label>
-    <label>Rigid tile edge min <input id="rigidPrimitiveSideMin" type="number" value="4" min="2" max="32" step="1" /></label>
-    <label>Rigid tile edge max <input id="rigidPrimitiveSideMax" type="number" value="10" min="2" max="48" step="1" /></label>
-    <label>Soft in-fill
-      <select id="softInfillMode">
-        <option value="triangles" selected>Triangles (canonical stable)</option>
-        <option value="triangles+cross">Triangles + cross-beams</option>
-        <option value="none">None (perimeter-only membrane)</option>
-      </select>
-    </label>
-    <label>Min soft primitive size
-      <input id="softMinCellSize" type="number" value="3" min="1" max="127" step="1" />
-    </label>
-    <label><input id="softBoundaryRing" type="checkbox" checked /> Reinforce soft outer border</label>
-    <label>Soft solver mode
-      <select id="softSolverMode">
-        <option value="spring" selected>Spring (XPBD lattice)</option>
-        <option value="membrane">Membrane (perimeter + pressure)</option>
-      </select>
-    </label>
-    <label>Perimeter min edge
-      <input id="membraneMinEdgeLength" type="number" value="4" min="1" max="32" step="0.5" />
-    </label>
-    <label>Perimeter max edge
-      <input id="membraneMaxEdgeLength" type="number" value="8" min="1" max="64" step="0.5" />
-    </label>
-    <span style="opacity:0.9">Connectivity: single connected creature (always enforced)</span>
-    <label>Generator preset
-      <select id="randomFieldPreset">
-        <option value="sine-lines" selected>Sine lines</option>
-        <option value="wave-interference">Wave interference</option>
-        <option value="radial-blobs">Radial blobs</option>
-        <option value="flow-ridges">Flow ridges</option>
-        <option value="mixed">Mixed</option>
-      </select>
-    </label>
-    <label>Generator seed <input id="randomFieldSeed" type="number" value="42" step="1" /></label>
-    <button id="randomizeBtn">Generate random fields</button>
-    <button id="clearBtn">Clear fields</button>
-    <button id="compileBtn">Compile mesh</button>
-    <button id="exportBtn">Export CreatureSpec JSON</button>
-    <button id="importBtn">Import CreatureSpec JSON</button>
-    <input id="importFile" type="file" accept="application/json" style="display:none" />
+  <div class="control-groups">
+    <details class="ctrl-group" open>
+      <summary>Painting & field authoring</summary>
+      <div class="ctrl-body">
+        <label>Field to paint
+          <select id="fieldPaintTarget">
+            <option value="trait" selected>Trait field (rigid/soft)</option>
+            <option value="density">Resolution field</option>
+            <option value="membraneEdge">Membrane edge-length field</option>
+            <option value="membraneShape">Membrane shape-memory field</option>
+            <option value="rigidPermeability">Rigid permeability field</option>
+            <option value="rigidConsume">Rigid edge consume-dye field</option>
+          </select>
+        </label>
+        <label>Trait paint mode
+          <select id="paintMode">
+            <option value="rigid" selected>Rigid region (red)</option>
+            <option value="soft">Soft region (blue)</option>
+            <option value="erase">Erase trait field</option>
+          </select>
+        </label>
+        <label>Brush <input id="brush" type="number" value="50" min="1" max="80" /></label>
+        <label>Threshold <input id="threshold" type="number" value="0.35" min="0" max="1" step="0.01" /></label>
+        <label>Resolution paint (0..1) <input id="softDensityPaint" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
+        <label>Perimeter edge paint (0..1) <input id="membraneEdgePaintValue" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
+        <label>Membrane shape paint (0..1) <input id="membraneShapePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
+        <label>Rigid permeability paint (0..1) <input id="rigidPermeabilityPaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
+        <label>Edge consume channel
+          <select id="rigidConsumeChannel">
+            <option value="r" selected>Red dye</option>
+            <option value="g">Green dye</option>
+            <option value="b">Blue dye</option>
+            <option value="erase">Erase (all channels)</option>
+          </select>
+        </label>
+        <label>Edge consume paint (0..1) <input id="rigidConsumePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
+      </div>
+    </details>
+
+    <details class="ctrl-group" open>
+      <summary>Compiler topology & mesh generation</summary>
+      <div class="ctrl-body">
+        <label>Rigid compile mode
+          <select id="rigidCompileMode">
+            <option value="contours" selected>Contours (existing)</option>
+            <option value="primitive-tiling">Primitive tiling (tri/square/pent)</option>
+          </select>
+        </label>
+        <label>Rigid tile edge min <input id="rigidPrimitiveSideMin" type="number" value="4" min="2" max="32" step="1" /></label>
+        <label>Rigid tile edge max <input id="rigidPrimitiveSideMax" type="number" value="10" min="2" max="48" step="1" /></label>
+        <label>Soft in-fill
+          <select id="softInfillMode">
+            <option value="triangles" selected>Triangles (canonical stable)</option>
+            <option value="triangles+cross">Triangles + cross-beams</option>
+            <option value="none">None (perimeter-only membrane)</option>
+          </select>
+        </label>
+        <label>Min soft primitive size
+          <input id="softMinCellSize" type="number" value="3" min="1" max="127" step="1" />
+        </label>
+        <label><input id="softBoundaryRing" type="checkbox" checked /> Reinforce soft outer border</label>
+        <span class="ctrl-note">Connectivity: single connected creature (always enforced)</span>
+        <span class="ctrl-note">Resolution map controls primitive size (rigid+soft): darker green = finer/smaller, brighter green = coarser/larger</span>
+      </div>
+    </details>
+
+    <details class="ctrl-group" open>
+      <summary>Soft solver & perimeter controls</summary>
+      <div class="ctrl-body">
+        <label>Soft solver mode
+          <select id="softSolverMode">
+            <option value="spring" selected>Spring (XPBD lattice)</option>
+            <option value="membrane">Membrane (perimeter + pressure)</option>
+          </select>
+        </label>
+        <label>Perimeter min edge
+          <input id="membraneMinEdgeLength" type="number" value="4" min="1" max="32" step="0.5" />
+        </label>
+        <label>Perimeter max edge
+          <input id="membraneMaxEdgeLength" type="number" value="8" min="1" max="64" step="0.5" />
+        </label>
+      </div>
+    </details>
+
+    <details class="ctrl-group">
+      <summary>Random field generator</summary>
+      <div class="ctrl-body">
+        <label>Generator preset
+          <select id="randomFieldPreset">
+            <option value="sine-lines" selected>Sine lines</option>
+            <option value="wave-interference">Wave interference</option>
+            <option value="radial-blobs">Radial blobs</option>
+            <option value="flow-ridges">Flow ridges</option>
+            <option value="mixed">Mixed</option>
+          </select>
+        </label>
+        <label>Generator seed <input id="randomFieldSeed" type="number" value="42" step="1" /></label>
+        <button id="randomizeBtn">Generate random fields</button>
+      </div>
+    </details>
+
+    <details class="ctrl-group" open>
+      <summary>Actions & I/O</summary>
+      <div class="ctrl-body">
+        <button id="clearBtn">Clear fields</button>
+        <button id="compileBtn">Compile mesh</button>
+        <button id="exportBtn">Export CreatureSpec JSON</button>
+        <button id="importBtn">Import CreatureSpec JSON</button>
+        <input id="importFile" type="file" accept="application/json" style="display:none" />
+      </div>
+    </details>
   </div>
   <div class="pane">
     <div class="field-panel" data-field-panel="trait">

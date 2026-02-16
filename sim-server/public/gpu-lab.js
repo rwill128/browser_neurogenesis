@@ -3981,7 +3981,18 @@ async function initSim() {
   if (!navigator.gpu) throw new Error('WebGPU unavailable in browser');
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) throw new Error('No WebGPU adapter');
-  const device = await adapter.requestDevice();
+
+  // We use 9 storage buffers in the obstacle-aware dye advection pipeline.
+  // Many adapters support >8 but require explicit requestDevice(requiredLimits).
+  const requestedLimits = {};
+  const maxStoragePerStage = Number(adapter.limits?.maxStorageBuffersPerShaderStage || 8);
+  if (maxStoragePerStage >= 9) {
+    requestedLimits.maxStorageBuffersPerShaderStage = 9;
+  }
+
+  const device = await adapter.requestDevice(
+    Object.keys(requestedLimits).length ? { requiredLimits: requestedLimits } : undefined,
+  );
 
   const cells = controls.n * controls.n;
   const bytes = cells * 4;

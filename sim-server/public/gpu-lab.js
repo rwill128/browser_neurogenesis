@@ -1376,14 +1376,21 @@ function applyScenarioPreset(sim, preset) {
 function applyEmitters(sim, r, g, b, vx, vy) {
   const n = sim.controls.n;
   for (const e of sim.emitters || []) {
-    e.x += e.vx;
-    e.y += e.vy;
-    if (e.x < e.r || e.x > n - e.r) e.vx *= -1;
-    if (e.y < e.r || e.y > n - e.r) e.vy *= -1;
-    e.x = Math.max(e.r, Math.min(n - e.r, e.x));
-    e.y = Math.max(e.r, Math.min(n - e.r, e.y));
+    const lockedPosition = !!e.lockPosition;
+    if (!lockedPosition) {
+      e.x += e.vx;
+      e.y += e.vy;
+      if (e.x < e.r || e.x > n - e.r) e.vx *= -1;
+      if (e.y < e.r || e.y > n - e.r) e.vy *= -1;
+      e.x = Math.max(e.r, Math.min(n - e.r, e.x));
+      e.y = Math.max(e.r, Math.min(n - e.r, e.y));
+    } else {
+      e.x = Math.max(e.r, Math.min(n - e.r, Number(e.x) || (n * 0.5)));
+      e.y = Math.max(e.r, Math.min(n - e.r, Number(e.y) || (n * 0.12)));
+    }
 
-    const wobbleAmp = Number.isFinite(Number(e.wobbleAmp)) ? Number(e.wobbleAmp) : 0;
+    const wobbleAmpRaw = Number.isFinite(Number(e.wobbleAmp)) ? Number(e.wobbleAmp) : 0;
+    const wobbleAmp = lockedPosition ? 0 : wobbleAmpRaw;
     const wobbleFreq = Number.isFinite(Number(e.wobbleFreq)) ? Number(e.wobbleFreq) : 0.05;
     const wobblePhase = sim.frame * wobbleFreq + (Number(e.swirlJitter) || 0);
     const ex = e.x + Math.cos(wobblePhase * 1.31) * wobbleAmp;
@@ -3660,6 +3667,7 @@ function buildWindTunnelEmitter(n, {
   wobbleAmp = Math.max(0.8, n * 0.016),
   wobbleFreq = 0.085,
   swirlJitter = 0.73,
+  lockPosition = false,
 } = {}) {
   return {
     x: n * 0.5,
@@ -3678,6 +3686,7 @@ function buildWindTunnelEmitter(n, {
     wobbleAmp: Number.isFinite(Number(wobbleAmp)) ? Number(wobbleAmp) : Math.max(0.8, n * 0.016),
     wobbleFreq: Number.isFinite(Number(wobbleFreq)) ? Number(wobbleFreq) : 0.085,
     swirlJitter: Number.isFinite(Number(swirlJitter)) ? Number(swirlJitter) : 0.73,
+    lockPosition: !!lockPosition,
   };
 }
 
@@ -3724,6 +3733,7 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
     wobbleAmp: Number(options?.emitterWobbleAmp) || Math.max(2.5, sim.controls.n * 0.055),
     wobbleFreq: Number(options?.emitterWobbleFreq) || 0.13,
     swirlJitter: Number(options?.emitterSwirlJitter) || 1.17,
+    lockPosition: true,
   })];
 
   sim.camera.x = sim.controls.n * 0.5;

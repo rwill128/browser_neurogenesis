@@ -104,6 +104,21 @@ Current code enforces several anti-chaos rules that should remain active while m
 
 These guardrails allow richer mutation while preserving solver stability.
 
+### Deterministic verification hooks (current test coverage)
+
+`node-harness/tests/creatureSpecV2Contract.test.mjs` contains explicit invariants for the evolvability contract above, including:
+
+- unknown/experimental `solverMode` fallback to spring semantics,
+- ring-only membrane perimeter sanitization,
+- per-edge trait normalization and sparse backfilling,
+- per-vertex `shapeMemoryWeight` clamping.
+
+Run targeted contract checks with:
+
+```bash
+node --test node-harness/tests/creatureSpecV2Contract.test.mjs
+```
+
 ---
 
 ## Mutation-ready knobs (existing fields/options)

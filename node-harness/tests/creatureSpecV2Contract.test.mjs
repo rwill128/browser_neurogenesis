@@ -221,6 +221,42 @@ test('unknown soft solver mode deterministically normalizes to spring (no membra
   assert.ok(imported.soft.springs.length >= 3);
 });
 
+test('unknown imported soft solver mode falls back to spring even when membrane-only fields are present', () => {
+  const spec = {
+    schemaVersion: CREATURE_SPEC_VERSION,
+    space: { width: 24, height: 24 },
+    rigidBodies: [],
+    hybridJoints: [],
+    softBodies: [{
+      id: 'soft_unknown_solver',
+      solverMode: 'future-anisotropic-membrane',
+      nodes: [
+        { x: 2, y: 2 },
+        { x: 20, y: 2 },
+        { x: 20, y: 20 },
+        { x: 2, y: 20 },
+      ],
+      springs: [
+        [0, 1, 18, 1, [1, 1, 1]],
+        [1, 2, 18, 1, [1, 1, 1]],
+        [2, 3, 18, 1, [1, 1, 1]],
+        [3, 0, 18, 1, [1, 1, 1]],
+      ],
+      // These fields are membrane-specific and should be ignored when solverMode is unknown.
+      restArea: 324,
+      pressureGain: 0.08,
+      radialDamping: 0.05,
+      shapeMemoryGain: 0.04,
+      insideCorrectionEnabled: 1,
+    }],
+  };
+
+  const imported = buildBodiesFromCreatureSpec(spec, 96, CONTROLS);
+  assert.equal(imported.softMembraneClusters.length, 0, 'unknown solver mode must not create membrane metadata');
+  assert.equal(imported.soft.nodes.length, 4);
+  assert.equal(imported.soft.springs.length, 4);
+});
+
 test('buildBodiesFromCreatureSpec sanitizes membrane imports to perimeter-only springs', () => {
   const spec = {
     schemaVersion: CREATURE_SPEC_VERSION,

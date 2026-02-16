@@ -26,6 +26,16 @@ function normalizeSoftSolverMode(mode) {
   return String(mode || '').toLowerCase() === 'membrane' ? 'membrane' : 'spring';
 }
 
+/**
+ * Clamp a numeric value to an inclusive range.
+ *
+ * Non-finite values are expected to be sanitized by callers before use.
+ *
+ * @param {number} v
+ * @param {number} lo
+ * @param {number} hi
+ * @returns {number}
+ */
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }

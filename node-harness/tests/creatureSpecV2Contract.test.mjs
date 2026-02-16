@@ -189,6 +189,24 @@ test('createCreatureSpecFromMesh samples rigid permeability paint map into rigid
   assert.equal(importedPassCount, 2);
 });
 
+test('createCreatureSpecFromMesh honors rigid permeability threshold=0 during edge trait sampling', () => {
+  const w = 16;
+  const permeabilityMap = new Float32Array(w * w).fill(0);
+  // Keep all three edge midpoint samples below default threshold 0.5 but above 0.
+  permeabilityMap[2 * w + 4] = 0.2;
+  permeabilityMap[4 * w + 3] = 0.2;
+  permeabilityMap[4 * w + 5] = 0.2;
+
+  const spec = createCreatureSpecFromMesh(sampleMesh(), {
+    fields: { rigidPermeabilityMap: permeabilityMap },
+    rigidPermeabilityThreshold: 0,
+  });
+
+  const imported = buildBodiesFromCreatureSpec(spec, 64, CONTROLS).rigid[0];
+  const passCount = imported.edgePermeabilityRGB.filter((rgb) => Number(rgb?.[0]) === 1 && Number(rgb?.[1]) === 1 && Number(rgb?.[2]) === 1).length;
+  assert.equal(passCount, 3, 'threshold=0 should mark every positive sampled edge as pass-through');
+});
+
 test('soft solver mode is exported and membrane mode is mapped on import bodies', () => {
   const mesh = {
     nodes: [

@@ -413,7 +413,8 @@ function buildRigidEdgePermeabilityFromField(hull, field, width, height, thresho
     return Array.from({ length: Math.max(0, hull?.length || 0) }, () => [0, 0, 0]);
   }
 
-  const th = clamp(Number(threshold) || 0.5, 0, 1);
+  const rawThreshold = Number(threshold);
+  const th = clamp(Number.isFinite(rawThreshold) ? rawThreshold : 0.5, 0, 1);
   const sides = Math.max(0, hull?.length || 0);
   const out = [];
   for (let i = 0; i < sides; i++) {

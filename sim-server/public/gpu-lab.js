@@ -3026,6 +3026,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     return { x: sx / arr.length, y: sy / arr.length };
   };
   const rigidCenterBefore = computeRigidCenter(bodies.rigid);
+  const s = bodies.soft;
 
   const rigidEdgeMomentumScale = (rb) => {
     const arr = Array.isArray(rb?.edgeMomentumCoupling) ? rb.edgeMomentumCoupling : (Array.isArray(rb?.edgeMomentumTransfer) ? rb.edgeMomentumTransfer : null);
@@ -3119,7 +3120,6 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     applyBounceBoundary(b, n, 0.84);
   }
 
-  const s = bodies.soft;
   const softMembraneClusterSet = ensureSoftMembraneClusterSet(sim);
   const softCentroid = computeSoftCentroid(s.nodes);
   let softClusterKinematics = computeSoftClusterKinematics(s.nodes);

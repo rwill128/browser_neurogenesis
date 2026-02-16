@@ -1,5 +1,5 @@
 import { parseCreatureSpec, buildBodiesFromCreatureSpec } from '/creature-spec.js';
-import { EDGE_DYE_MODE, normalizeEdgeDyeModeRGB, applyBodyEdgeFieldBarriers } from '/dye-barrier.js';
+import { EDGE_DYE_MODE, normalizeEdgeDyeModeRGB, normalizePermeabilityRGB, applyBodyEdgeFieldBarriers } from '/dye-barrier.js';
 import { resolveRigidVsSoftNodeCollision, resolveRigidVsRigidPolygonCollision, getRigidCollisionPolysWorld, pointInPolygonInclusive } from '/rigid-collision.js';
 import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops, recoverSoftSpringRests } from '/soft-xpbd.js';
 import { computeVectorRms, computeRigidAlignedPoseResidual } from '/soft-deformation-metrics.js';
@@ -395,6 +395,13 @@ const advectDyeWgsl = commonWgsl + `
 @group(0) @binding(6) var<storage, read_write> r1: array<f32>;
 @group(0) @binding(7) var<storage, read_write> g1: array<f32>;
 @group(0) @binding(8) var<storage, read_write> b1: array<f32>;
+@group(0) @binding(9) var<storage, read> dyeMask: array<u32>;
+
+fn decodeMode(mask:u32, channel:u32)->u32 {
+  if (channel == 0u) { return mask % 3u; }
+  if (channel == 1u) { return (mask / 3u) % 3u; }
+  return (mask / 9u) % 3u;
+}
 
 @compute @workgroup_size(${WORKGROUP}, ${WORKGROUP})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -404,9 +411,44 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let y = f32(gid.y);
   let px = x - p.dt * vx[i];
   let py = y - p.dt * vy[i];
-  r1[i] = sampleBilinear(&r0, px, py) * p.fade;
-  g1[i] = sampleBilinear(&g0, px, py) * p.fade;
-  b1[i] = sampleBilinear(&b0, px, py) * p.fade;
+
+  let n1 = f32(p.n - 1u);
+  let sx = u32(clamp(round(px), 0.0, n1));
+  let sy = u32(clamp(round(py), 0.0, n1));
+  let si = idx(sx, sy);
+
+  let hereMask = dyeMask[i];
+  let srcMask = dyeMask[si];
+
+  let hereR = decodeMode(hereMask, 0u);
+  let srcR = decodeMode(srcMask, 0u);
+  if (hereR == 2u || srcR == 2u) {
+    r1[i] = 0.0;
+  } else if (hereR == 1u || srcR == 1u) {
+    r1[i] = r0[i] * p.fade;
+  } else {
+    r1[i] = sampleBilinear(&r0, px, py) * p.fade;
+  }
+
+  let hereG = decodeMode(hereMask, 1u);
+  let srcG = decodeMode(srcMask, 1u);
+  if (hereG == 2u || srcG == 2u) {
+    g1[i] = 0.0;
+  } else if (hereG == 1u || srcG == 1u) {
+    g1[i] = g0[i] * p.fade;
+  } else {
+    g1[i] = sampleBilinear(&g0, px, py) * p.fade;
+  }
+
+  let hereB = decodeMode(hereMask, 2u);
+  let srcB = decodeMode(srcMask, 2u);
+  if (hereB == 2u || srcB == 2u) {
+    b1[i] = 0.0;
+  } else if (hereB == 1u || srcB == 1u) {
+    b1[i] = b0[i] * p.fade;
+  } else {
+    b1[i] = sampleBilinear(&b0, px, py) * p.fade;
+  }
 }
 `;
 
@@ -1820,6 +1862,128 @@ function stampSegmentObstacleMask(mask, n, ax, ay, bx, by, thickness = 1.8) {
       mask[y * n + x] = 1;
     }
   }
+}
+
+function resolveRigidEdgeScalar(spec, edgeIndex, fallback) {
+  if (!Array.isArray(spec)) return fallback;
+  const edgeValue = spec[edgeIndex];
+  return edgeValue === undefined ? fallback : edgeValue;
+}
+
+function resolveRigidEdgeRGBTuple(spec, edgeIndex, fallback) {
+  if (!Array.isArray(spec)) return fallback;
+  const edgeValue = spec[edgeIndex];
+  if (!Array.isArray(edgeValue) || edgeValue.length < 3) return fallback;
+  return edgeValue;
+}
+
+function packDyeMaskModes(rMode, gMode, bMode) {
+  return (Number(rMode) || 0) + 3 * (Number(gMode) || 0) + 9 * (Number(bMode) || 0);
+}
+
+function unpackDyeMaskModes(packed) {
+  const p = Math.max(0, Math.min(26, Math.round(Number(packed) || 0)));
+  const r = p % 3;
+  const g = Math.floor(p / 3) % 3;
+  const b = Math.floor(p / 9) % 3;
+  return [r, g, b];
+}
+
+function stampSegmentDyeMask(mask, n, ax, ay, bx, by, thickness = 1.8, modeRGB = [0, 0, 0]) {
+  const ex = bx - ax;
+  const ey = by - ay;
+  const segLenSq = ex * ex + ey * ey;
+  if (!Number.isFinite(segLenSq) || segLenSq < 1e-9) return;
+
+  const mR = (modeRGB?.[0] === EDGE_DYE_MODE.ABSORB) ? EDGE_DYE_MODE.ABSORB
+    : ((modeRGB?.[0] === EDGE_DYE_MODE.DEFLECT) ? EDGE_DYE_MODE.DEFLECT : EDGE_DYE_MODE.PASS);
+  const mG = (modeRGB?.[1] === EDGE_DYE_MODE.ABSORB) ? EDGE_DYE_MODE.ABSORB
+    : ((modeRGB?.[1] === EDGE_DYE_MODE.DEFLECT) ? EDGE_DYE_MODE.DEFLECT : EDGE_DYE_MODE.PASS);
+  const mB = (modeRGB?.[2] === EDGE_DYE_MODE.ABSORB) ? EDGE_DYE_MODE.ABSORB
+    : ((modeRGB?.[2] === EDGE_DYE_MODE.DEFLECT) ? EDGE_DYE_MODE.DEFLECT : EDGE_DYE_MODE.PASS);
+  if (mR === EDGE_DYE_MODE.PASS && mG === EDGE_DYE_MODE.PASS && mB === EDGE_DYE_MODE.PASS) return;
+
+  const minX = Math.max(0, Math.floor(Math.min(ax, bx) - thickness - 1));
+  const maxX = Math.min(n - 1, Math.ceil(Math.max(ax, bx) + thickness + 1));
+  const minY = Math.max(0, Math.floor(Math.min(ay, by) - thickness - 1));
+  const maxY = Math.min(n - 1, Math.ceil(Math.max(ay, by) + thickness + 1));
+
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const px = x + 0.5;
+      const py = y + 0.5;
+      const apx = px - ax;
+      const apy = py - ay;
+      const t = Math.max(0, Math.min(1, (apx * ex + apy * ey) / Math.max(1e-9, segLenSq)));
+      const cx = ax + ex * t;
+      const cy = ay + ey * t;
+      const dx = px - cx;
+      const dy = py - cy;
+      if (dx * dx + dy * dy > thickness * thickness) continue;
+
+      const i = y * n + x;
+      const [cR, cG, cB] = unpackDyeMaskModes(mask[i]);
+      const nR = Math.max(cR, mR);
+      const nG = Math.max(cG, mG);
+      const nB = Math.max(cB, mB);
+      mask[i] = packDyeMaskModes(nR, nG, nB);
+    }
+  }
+}
+
+function stampPerChannelDyeMask(sim) {
+  const n = Number(sim?.controls?.n) || 0;
+  const mask = sim?.dyeModeMaskCpu;
+  if (!(mask instanceof Uint32Array) || mask.length !== n * n || n <= 0) {
+    return { rigidEdges: 0, softEdges: 0, nonPassCells: 0 };
+  }
+
+  mask.fill(0);
+  const softThickness = Math.max(1.2, 1.1 * (n / 256));
+  const rigidThickness = Math.max(1.4, 1.2 * (n / 256));
+
+  let rigidEdges = 0;
+  for (const rb of sim?.bodies?.rigid || []) {
+    const verts = rigidVerticesWorld(rb);
+    const sides = verts.length;
+    for (let ei = 0; ei < sides; ei++) {
+      const rawModeRGB = normalizeEdgeDyeModeRGB(resolveRigidEdgeRGBTuple(rb?.edgeDyeMode, ei, [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.DEFLECT]));
+      const permeabilityRGB = normalizePermeabilityRGB(resolveRigidEdgeRGBTuple(rb?.edgePermeabilityRGB, ei, [0, 0, 0]));
+      const modeRGB = [0, 0, 0].map((_, ci) => {
+        if (permeabilityRGB[ci] > 0) return EDGE_DYE_MODE.PASS;
+        return rawModeRGB[ci] === EDGE_DYE_MODE.ABSORB ? EDGE_DYE_MODE.ABSORB : EDGE_DYE_MODE.DEFLECT;
+      });
+
+      const a = verts[ei];
+      const b = verts[(ei + 1) % sides];
+      if (!a || !b) continue;
+      const ax = Number(a.x), ay = Number(a.y), bx = Number(b.x), by = Number(b.y);
+      if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
+
+      stampSegmentDyeMask(mask, n, ax, ay, bx, by, rigidThickness, modeRGB);
+      rigidEdges += 1;
+    }
+  }
+
+  let softEdges = 0;
+  const s = sim?.bodies?.soft;
+  for (const [ai, bi, _rest, _edgeBodyMode, edgeDyeMode] of (s?.springs || [])) {
+    const modeRGB = normalizeEdgeDyeModeRGB(edgeDyeMode);
+    const a = s?.nodes?.[ai];
+    const b = s?.nodes?.[bi];
+    if (!a || !b) continue;
+    const ax = Number(a.x), ay = Number(a.y), bx = Number(b.x), by = Number(b.y);
+    if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
+    stampSegmentDyeMask(mask, n, ax, ay, bx, by, softThickness, modeRGB);
+    softEdges += 1;
+  }
+
+  let nonPassCells = 0;
+  for (let i = 0; i < mask.length; i++) {
+    if ((mask[i] | 0) !== 0) nonPassCells += 1;
+  }
+
+  return { rigidEdges, softEdges, nonPassCells };
 }
 
 function stampMembraneObstacleMask(sim) {
@@ -4007,6 +4171,10 @@ async function initSim() {
   const obstacleMaskGpu = createBuffer(device, bytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
   device.queue.writeBuffer(obstacleMaskGpu, 0, obstacleMaskCpu);
 
+  const dyeModeMaskCpu = new Uint32Array(cells);
+  const dyeModeMaskGpu = createBuffer(device, bytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+  device.queue.writeBuffer(dyeModeMaskGpu, 0, dyeModeMaskCpu);
+
   const readR = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const readG = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const readB = device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
@@ -4029,6 +4197,7 @@ async function initSim() {
     rr0: rA, rr1: rB, gg0: gA, gg1: gB, bb0: bA, bb1: bB,
     viscMapCpu, viscMapGpu,
     obstacleMaskCpu, obstacleMaskGpu,
+    dyeModeMaskCpu, dyeModeMaskGpu,
     div, readR, readG, readB, readVx, readVy,
     bodies: initBodies(controls.n, controls),
     emitters: initEmitters(controls.n),
@@ -4036,6 +4205,7 @@ async function initSim() {
     camera: { x: controls.n * 0.5, y: controls.n * 0.5, zoom: controls.n >= 1024 ? 1.8 : 1.0 },
     couplingTelemetry: [],
     lastFluidObstacleStats: { membraneEdgeCount: 0, usedMembraneClusters: false },
+    lastDyeMaskStats: { rigidEdges: 0, softEdges: 0, nonPassCells: 0 },
     frame: 0, t0: performance.now(),
   };
 }
@@ -4071,6 +4241,12 @@ async function stepAndRender() {
   s.lastFluidObstacleStats = stampMembraneObstacleMask(s);
   if (s.obstacleMaskGpu && s.obstacleMaskCpu) {
     s.device.queue.writeBuffer(s.obstacleMaskGpu, 0, s.obstacleMaskCpu);
+  }
+
+  // Per-frame per-channel dye mask stamping from rigid + soft/membrane edges.
+  s.lastDyeMaskStats = stampPerChannelDyeMask(s);
+  if (s.dyeModeMaskGpu && s.dyeModeMaskCpu) {
+    s.device.queue.writeBuffer(s.dyeModeMaskGpu, 0, s.dyeModeMaskCpu);
   }
 
   const enc = s.device.createCommandEncoder();
@@ -4115,7 +4291,7 @@ async function stepAndRender() {
 
   pass = enc.beginComputePass();
   pass.setPipeline(s.advDye.pipeline);
-  pass.setBindGroup(0, s.advDye.bg([s.uniform, s.vx0, s.vy0, s.rr0, s.gg0, s.bb0, s.rr1, s.gg1, s.bb1]));
+  pass.setBindGroup(0, s.advDye.bg([s.uniform, s.vx0, s.vy0, s.rr0, s.gg0, s.bb0, s.rr1, s.gg1, s.bb1, s.dyeModeMaskGpu]));
   pass.dispatchWorkgroups(workgroups(s.controls.n), workgroups(s.controls.n));
   pass.end();
   [s.rr0, s.rr1] = [s.rr1, s.rr0];
@@ -4162,9 +4338,10 @@ async function stepAndRender() {
       vx,
       vy,
       rigidVerticesWorld,
-      // Velocity no-through is enforced in-solver when obstacle mask is active;
-      // keep soft-edge dye traits (pass/deflect/absorb) without double velocity damping.
+      // Velocity no-through is enforced in-solver when obstacle mask is active.
       softBodyModeOverride: obstacleEdgesNow > 0 ? 0 : null,
+      // Dye pass/block/absorb is handled in channel-aware advection mask; avoid double-application.
+      skipDye: true,
     });
     applyDigestiveCapture(s, r, g, b);
     enforceFluidEdgeBoundariesCpu(vx, vy, s.controls.n);
@@ -4237,6 +4414,7 @@ async function stepAndRender() {
         severeInterventions: s.controls.enableSevereDeformInterventions !== false,
         membraneClusters: Array.isArray(s.bodies?.softMembraneClusters) ? s.bodies.softMembraneClusters.length : 0,
         fluidObstacleEdgesNow: obstacleEdgesNow,
+        dyeMaskCellsNow: Number(s?.lastDyeMaskStats?.nonPassCells) || 0,
         paintValue: Number(paintValueEl?.value) || 0.85,
         brushSize: Number(brushSizeEl?.value) || 12,
         digestiveCapture: +((s.digestiveCapture || 0).toFixed(2)),

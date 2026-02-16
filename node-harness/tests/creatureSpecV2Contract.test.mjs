@@ -904,6 +904,22 @@ test('buildBodiesFromCreatureSpec preserves rigid per-edge permeability and inte
   assert.deepEqual(bodies.rigid[0].consumeDyeRGB, [1, 0, 1]);
 });
 
+test('buildBodiesFromCreatureSpec deterministically normalizes malformed rigid edge permeability payloads', () => {
+  const spec = createCreatureSpecFromMesh(sampleMesh());
+  spec.rigidBodies[0].edgePermeabilityRGB = [
+    null,
+    [2, 0.01, -5],
+    // third edge intentionally omitted to verify sparse backfill behavior
+  ];
+
+  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
+  const permeability = bodies.rigid[0].edgePermeabilityRGB;
+
+  assert.deepEqual(permeability[0], [0, 0, 0], 'non-array payload should collapse to blocked RGB');
+  assert.deepEqual(permeability[1], [1, 1, 0], 'channels should normalize by >0 permeability semantics');
+  assert.deepEqual(permeability[2], [0, 0, 0], 'missing sparse trailing entries should backfill as blocked RGB');
+});
+
 test('buildBodiesFromCreatureSpec clamps and defaults soft per-vertex shapeMemoryWeight deterministically', () => {
   const spec = createCreatureSpecFromMesh(sampleMesh());
   const sb = spec.softBodies[0];

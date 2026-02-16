@@ -1680,6 +1680,12 @@ function normalizeEdgeDyeMode(v) {
   return [...EDGE_DYE_DEFLECT_RGB];
 }
 
+/**
+ * Normalize one dye channel into the strict enum used by edge dye traits.
+ *
+ * @param {unknown} v
+ * @returns {0|1|2}
+ */
 function normalizeEdgeDyeModeChannel(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return EDGE_DYE_DEFLECT;
@@ -1687,6 +1693,16 @@ function normalizeEdgeDyeModeChannel(v) {
   return EDGE_DYE_DEFLECT;
 }
 
+/**
+ * Normalize RGB-like payloads into binary permeability semantics.
+ *
+ * Any channel strictly greater than zero becomes permeable (1); all others are
+ * treated as blocked (0). Non-array/short payloads deterministically collapse
+ * to fully blocked `[0,0,0]`.
+ *
+ * @param {unknown} v
+ * @returns {[0|1,0|1,0|1]}
+ */
 function normalizeBinaryRGB(v) {
   if (!Array.isArray(v) || v.length < 3) return [0, 0, 0];
   return [

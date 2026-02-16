@@ -40,6 +40,26 @@ test('gpu-lab applies soft momentum policy in fluid→soft force coupling path',
   );
 });
 
+test('gpu-lab samples coupling flow outside blocked edge cells to preserve body push', () => {
+  assert.match(
+    source,
+    /function sampleFluidForBodyCoupling\(field, n, x, y, dirX, dirY, obstacleMask = null\)/,
+    'expected boundary-aware fluid sampling helper for body coupling',
+  );
+
+  assert.match(
+    source,
+    /const fx = sampleFluidForBodyCoupling\(vxField, n, sx, sy, rx, ry, obstacleMask\);/,
+    'expected rigid coupling to use boundary-aware flow sampling',
+  );
+
+  assert.match(
+    source,
+    /const fx = sampleFluidForBodyCoupling\(vxField, n, node\.x, node\.y, rx, ry, obstacleMask\);/,
+    'expected soft coupling to use boundary-aware flow sampling',
+  );
+});
+
 test('gpu-lab obstacle mask is edge-velocity BLOCK based for both rigid and soft (no post-pass barrier)', () => {
   assert.match(
     source,

@@ -694,6 +694,39 @@ function sampleFieldBilinear(field, n, x, y) {
   return Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, out));
 }
 
+function sampleObstacleMaskNearest(mask, n, x, y) {
+  if (!(mask instanceof Float32Array) || mask.length !== n * n) return 0;
+  const xi = Math.max(0, Math.min(n - 1, Math.round(Number(x) || 0)));
+  const yi = Math.max(0, Math.min(n - 1, Math.round(Number(y) || 0)));
+  return Number(mask[yi * n + xi]) || 0;
+}
+
+function sampleFluidForBodyCoupling(field, n, x, y, dirX, dirY, obstacleMask = null) {
+  const base = sampleFieldBilinear(field, n, x, y);
+  let best = base;
+  let bestAbs = Math.abs(base);
+
+  const len = Math.hypot(dirX, dirY);
+  if (!Number.isFinite(len) || len < 1e-6) return best;
+  const nx = dirX / len;
+  const ny = dirY / len;
+
+  const offsets = [1.1, 1.8, 2.6, 3.4];
+  for (const off of offsets) {
+    const sx = x + nx * off;
+    const sy = y + ny * off;
+    if (sampleObstacleMaskNearest(obstacleMask, n, sx, sy) > 0.5) continue;
+    const v = sampleFieldBilinear(field, n, sx, sy);
+    const av = Math.abs(v);
+    if (av > bestAbs) {
+      best = v;
+      bestAbs = av;
+    }
+  }
+
+  return best;
+}
+
 function rigidVerticesWorld(b) {
   if (Array.isArray(b.verticesLocal) && b.verticesLocal.length >= 3) {
     const th = b.theta || 0;
@@ -3053,6 +3086,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   };
   const rigidCenterBefore = computeRigidCenter(bodies.rigid);
   const s = bodies.soft;
+  const obstacleMask = sim?.obstacleMaskCpu;
 
   const rigidEdgeMomentumScale = (rb) => {
     const arr = Array.isArray(rb?.edgeMomentumCoupling) ? rb.edgeMomentumCoupling : (Array.isArray(rb?.edgeMomentumTransfer) ? rb.edgeMomentumTransfer : null);
@@ -3094,8 +3128,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       const sy = sampleVerts[si].y;
       const rx = sx - b.x;
       const ry = sy - b.y;
-      const fx = sampleFieldBilinear(vxField, n, sx, sy);
-      const fy = sampleFieldBilinear(vyField, n, sx, sy);
+      const fx = sampleFluidForBodyCoupling(vxField, n, sx, sy, rx, ry, obstacleMask);
+      const fy = sampleFluidForBodyCoupling(vyField, n, sx, sy, rx, ry, obstacleMask);
       const localVx = b.vx + (-(b.omega || 0) * ry);
       const localVy = b.vy + ((b.omega || 0) * rx);
       const relX = fx - localVx;
@@ -3160,8 +3194,6 @@ function stepBodiesAndInject(sim, vxField, vyField) {
 
   for (let i = 0; i < s.nodes.length; i++) {
     const node = s.nodes[i];
-    const fx = sampleFieldBilinear(vxField, n, node.x, node.y);
-    const fy = sampleFieldBilinear(vyField, n, node.x, node.y);
     const mass = Math.max(0.02, node.mass);
     const invMass = 1 / mass;
     const cx = node.x - softCentroid.x;
@@ -3186,6 +3218,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
 
     const rx = node.x - clusterX;
     const ry = node.y - clusterY;
+    const fx = sampleFluidForBodyCoupling(vxField, n, node.x, node.y, rx, ry, obstacleMask);
+    const fy = sampleFluidForBodyCoupling(vyField, n, node.x, node.y, rx, ry, obstacleMask);
     const clusterLocalVx = clusterVx - clusterOmega * ry;
     const clusterLocalVy = clusterVy + clusterOmega * rx;
 

@@ -36,6 +36,9 @@ const membraneMinEdgeLengthEl = document.getElementById('membraneMinEdgeLength')
 const membraneMaxEdgeLengthEl = document.getElementById('membraneMaxEdgeLength');
 const clearBtn = document.getElementById('clearBtn');
 const compileBtn = document.getElementById('compileBtn');
+const randomizeBtn = document.getElementById('randomizeBtn');
+const randomFieldPresetEl = document.getElementById('randomFieldPreset');
+const randomFieldSeedEl = document.getElementById('randomFieldSeed');
 const exportBtn = document.getElementById('exportBtn');
 const importBtn = document.getElementById('importBtn');
 const importFile = document.getElementById('importFile');
@@ -87,6 +90,180 @@ function membraneShapeColor(weight, alpha = 0.95) {
   const g = Math.round(180 + 60 * w);
   const b = Math.round(120 + 120 * w);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function smoothstep(edge0, edge1, x) {
+  const den = Math.max(1e-9, edge1 - edge0);
+  const t = Math.max(0, Math.min(1, (x - edge0) / den));
+  return t * t * (3 - 2 * t);
+}
+
+function mulberry32(seed) {
+  let t = (seed >>> 0) || 1;
+  return () => {
+    t += 0x6D2B79F5;
+    let x = t;
+    x = Math.imul(x ^ (x >>> 15), x | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function hashNoise2D(x, y, seed = 0) {
+  let h = (Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(seed | 0, 2246822519)) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+  return (h >>> 0) / 4294967295;
+}
+
+function valueNoise2D(x, y, seed = 0) {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const x1 = x0 + 1;
+  const y1 = y0 + 1;
+  const sx = x - x0;
+  const sy = y - y0;
+  const u = sx * sx * (3 - 2 * sx);
+  const v = sy * sy * (3 - 2 * sy);
+
+  const n00 = hashNoise2D(x0, y0, seed);
+  const n10 = hashNoise2D(x1, y0, seed);
+  const n01 = hashNoise2D(x0, y1, seed);
+  const n11 = hashNoise2D(x1, y1, seed);
+  const a = n00 * (1 - u) + n10 * u;
+  const b = n01 * (1 - u) + n11 * u;
+  return a * (1 - v) + b * v;
+}
+
+function samplePatternValue(kind, nx, ny, params = {}) {
+  const TAU = Math.PI * 2;
+  const a1 = Number(params.a1) || 0;
+  const a2 = Number(params.a2) || 0;
+  const f1 = Number(params.f1) || 3;
+  const f2 = Number(params.f2) || 5;
+  const warp = Number(params.warp) || 0;
+  const phase = Number(params.phase) || 0;
+  const seed = Number(params.seed) || 1;
+  const cx = (Number(params.cx) || 0.5);
+  const cy = (Number(params.cy) || 0.5);
+
+  if (kind === 'sine-lines') {
+    const line = nx * Math.cos(a1) + ny * Math.sin(a1);
+    const cross = nx * Math.cos(a2) + ny * Math.sin(a2);
+    const warped = line + warp * Math.sin(TAU * (cross * f2 + phase));
+    return 0.5 + 0.5 * Math.sin(TAU * (warped * f1 + phase));
+  }
+
+  if (kind === 'wave-interference') {
+    const v1 = Math.sin(TAU * (f1 * (nx * Math.cos(a1) + ny * Math.sin(a1)) + phase));
+    const v2 = Math.sin(TAU * (f2 * (nx * Math.cos(a2) + ny * Math.sin(a2)) - phase * 0.7));
+    const v3 = Math.sin(TAU * ((f1 * 0.6 + f2 * 0.35) * (nx + ny * 0.7) + phase * 1.3));
+    return Math.max(0, Math.min(1, 0.5 + 0.25 * v1 + 0.2 * v2 + 0.18 * v3));
+  }
+
+  if (kind === 'radial-blobs') {
+    const dx = nx - cx;
+    const dy = ny - cy;
+    const r = Math.sqrt(dx * dx + dy * dy);
+    const ang = Math.atan2(dy, dx);
+    const ring = 0.5 + 0.5 * Math.sin(TAU * (r * (f1 + 1.2) + 0.25 * Math.sin(ang * 3 + phase)));
+    const n = valueNoise2D(nx * (f2 * 1.8 + 2.5), ny * (f2 * 1.6 + 2.1), seed + 19);
+    return Math.max(0, Math.min(1, 0.58 * ring + 0.42 * n));
+  }
+
+  if (kind === 'flow-ridges') {
+    const n1 = valueNoise2D(nx * (f1 * 2.2 + 2), ny * (f1 * 1.9 + 2), seed + 7);
+    const n2 = valueNoise2D((nx + warp * (n1 - 0.5)) * (f2 + 2), (ny - warp * (n1 - 0.5)) * (f2 + 2), seed + 31);
+    const ridges = 1 - Math.abs(2 * n2 - 1);
+    const line = Math.sin(TAU * (f1 * (nx * Math.cos(a1) + ny * Math.sin(a1)) + phase));
+    return Math.max(0, Math.min(1, 0.65 * ridges + 0.35 * (0.5 + 0.5 * line)));
+  }
+
+  return valueNoise2D(nx * 7, ny * 7, seed);
+}
+
+function makeRandomPatternParams(rand, seedOffset = 0) {
+  return {
+    a1: rand() * Math.PI * 2,
+    a2: rand() * Math.PI * 2,
+    f1: 1.4 + rand() * 6.2,
+    f2: 1.2 + rand() * 6.8,
+    warp: 0.04 + rand() * 0.22,
+    phase: rand() * Math.PI * 2,
+    seed: Math.floor(rand() * 1e9) + seedOffset,
+    cx: 0.2 + rand() * 0.6,
+    cy: 0.2 + rand() * 0.6,
+  };
+}
+
+function generateRandomFields({ preset = 'sine-lines', seed = 42 } = {}) {
+  const baseSeed = Number.isFinite(Number(seed)) ? Math.floor(Number(seed)) : (Date.now() & 0x7fffffff);
+  const rand = mulberry32(baseSeed);
+  const presets = ['sine-lines', 'wave-interference', 'radial-blobs', 'flow-ridges'];
+  const primary = preset === 'mixed' ? presets[Math.floor(rand() * presets.length)] : preset;
+  const secondary = preset === 'mixed'
+    ? presets[Math.floor(rand() * presets.length)]
+    : presets[(presets.indexOf(primary) + 1 + Math.floor(rand() * 2)) % presets.length];
+
+  const rigidParams = makeRandomPatternParams(rand, 11);
+  const softParams = makeRandomPatternParams(rand, 23);
+  const densityParams = makeRandomPatternParams(rand, 37);
+  const edgeParams = makeRandomPatternParams(rand, 53);
+  const shapeParams = makeRandomPatternParams(rand, 71);
+  const permParams = makeRandomPatternParams(rand, 89);
+  const consumeRParams = makeRandomPatternParams(rand, 101);
+  const consumeGParams = makeRandomPatternParams(rand, 131);
+  const consumeBParams = makeRandomPatternParams(rand, 151);
+
+  const margin = 2;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = idx(x, y);
+      const nx = (x + 0.5) / W;
+      const ny = (y + 0.5) / H;
+
+      const edgeFadeX = smoothstep(0, margin / W, nx) * (1 - smoothstep(1 - margin / W, 1, nx));
+      const edgeFadeY = smoothstep(0, margin / H, ny) * (1 - smoothstep(1 - margin / H, 1, ny));
+      const edgeFade = Math.max(0, Math.min(1, edgeFadeX * edgeFadeY));
+
+      const rigidSignal = samplePatternValue(primary, nx, ny, rigidParams);
+      const softSignal = samplePatternValue(secondary, nx, ny, softParams);
+
+      const rigidWin = smoothstep(0.46, 0.78, rigidSignal - softSignal * 0.72 + 0.08);
+      const softWin = smoothstep(0.46, 0.78, softSignal - rigidSignal * 0.72 + 0.08);
+
+      if (rigidWin >= softWin) {
+        rigid[i] = rigidWin * edgeFade;
+        soft[i] = 0;
+      } else {
+        soft[i] = softWin * edgeFade;
+        rigid[i] = 0;
+      }
+
+      const dens = samplePatternValue('wave-interference', nx, ny, densityParams);
+      softDensity[i] = Math.max(0, Math.min(1, 0.1 + 0.8 * dens));
+
+      const edgeV = samplePatternValue('flow-ridges', nx, ny, edgeParams);
+      membraneEdgeMap[i] = Math.max(0, Math.min(1, edgeV));
+
+      const shapeV = samplePatternValue('radial-blobs', nx, ny, shapeParams);
+      membraneShapeMap[i] = Math.max(0, Math.min(1, 0.15 + 0.85 * shapeV));
+
+      const permV = samplePatternValue('sine-lines', nx, ny, permParams);
+      rigidPermeabilityMap[i] = rigid[i] > 0.12 ? smoothstep(0.56, 0.84, permV) : 0;
+
+      const consumeMask = smoothstep(0.58, 0.9, rigidSignal);
+      const rV = samplePatternValue('wave-interference', nx, ny, consumeRParams);
+      const gV = samplePatternValue('wave-interference', nx, ny, consumeGParams);
+      const bV = samplePatternValue('wave-interference', nx, ny, consumeBParams);
+      rigidEdgeConsumeMapR[i] = rigid[i] > 0.1 ? consumeMask * smoothstep(0.72, 0.9, rV) : 0;
+      rigidEdgeConsumeMapG[i] = rigid[i] > 0.1 ? consumeMask * smoothstep(0.72, 0.9, gV) : 0;
+      rigidEdgeConsumeMapB[i] = rigid[i] > 0.1 ? consumeMask * smoothstep(0.72, 0.9, bV) : 0;
+    }
+  }
+
+  drawFields();
+  compileNow();
+  return { seed: baseSeed, preset, rigidPattern: primary, softPattern: secondary };
 }
 
 function drawFields() {
@@ -404,6 +581,15 @@ function drawMesh(mesh) {
       mctx.strokeStyle = 'rgba(255,220,130,0.95)';
       mctx.lineWidth = 2;
       mctx.stroke();
+
+      // Show explicit contour vertices so spacing differences are visible.
+      mctx.fillStyle = 'rgba(255,245,190,0.98)';
+      for (const hp of p.hull) {
+        mctx.beginPath();
+        mctx.arc(hp.x * sx, hp.y * sy, 1.8, 0, Math.PI * 2);
+        mctx.fill();
+      }
+
       mctx.lineWidth = 1;
     }
   }
@@ -418,6 +604,7 @@ function drawMesh(mesh) {
     membraneShapePreview: ((softSolverModeEl?.value || 'spring') === 'membrane')
       ? 'ring edge/node color encodes membrane shape-memory map (give→stiff)'
       : undefined,
+    rigidContourPreview: 'rigid contours are perimeter-resampled from border vertices; dots show exported vertices',
     membraneMinEdgeLength: Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4),
     membraneMaxEdgeLength: Math.max(Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4), Number(membraneMaxEdgeLengthEl?.value) || 8),
   }, null, 2);
@@ -454,23 +641,23 @@ function syncSoftModeUi() {
     softInfillModeEl.title = 'Membrane mode uses perimeter-only representation (no interior infill)';
     if (membraneMinEdgeLengthEl) {
       membraneMinEdgeLengthEl.disabled = false;
-      membraneMinEdgeLengthEl.title = 'Minimum edge length for exported membrane ring';
+      membraneMinEdgeLengthEl.title = 'Minimum perimeter edge length (membrane ring + rigid contour resampling)';
     }
     if (membraneMaxEdgeLengthEl) {
       membraneMaxEdgeLengthEl.disabled = false;
-      membraneMaxEdgeLengthEl.title = 'Maximum edge length for exported membrane ring';
+      membraneMaxEdgeLengthEl.title = 'Maximum perimeter edge length (membrane ring + rigid contour resampling)';
     }
   } else {
     if (softInfillModeEl.value === 'none') softInfillModeEl.value = 'triangles';
     softInfillModeEl.disabled = false;
     softInfillModeEl.title = '';
     if (membraneMinEdgeLengthEl) {
-      membraneMinEdgeLengthEl.disabled = true;
-      membraneMinEdgeLengthEl.title = 'Enable membrane mode to edit membrane edge spacing';
+      membraneMinEdgeLengthEl.disabled = false;
+      membraneMinEdgeLengthEl.title = 'Minimum perimeter edge length (applies to rigid contour resampling even in spring mode)';
     }
     if (membraneMaxEdgeLengthEl) {
-      membraneMaxEdgeLengthEl.disabled = true;
-      membraneMaxEdgeLengthEl.title = 'Enable membrane mode to edit membrane edge spacing';
+      membraneMaxEdgeLengthEl.disabled = false;
+      membraneMaxEdgeLengthEl.title = 'Maximum perimeter edge length (applies to rigid contour resampling even in spring mode)';
     }
   }
   return membraneMode;
@@ -480,6 +667,8 @@ function compileNow() {
   try {
     const membraneMode = syncSoftModeUi();
     const requestedSoftMin = Math.max(1, Math.min(Math.max(1, W - 1), Math.round(Number(softMinCellSizeEl?.value) || 3)));
+    const perimeterMinEdge = Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4);
+    const perimeterMaxEdge = Math.max(perimeterMinEdge, Number(membraneMaxEdgeLengthEl?.value) || 8);
 
     const mesh = compileFieldToMesh({
       width: W,
@@ -493,6 +682,10 @@ function compileNow() {
       rigidCompileMode: rigidCompileModeEl?.value || 'contours',
       rigidPrimitiveSideMin: Math.max(2, Math.min(64, Math.round(Number(rigidPrimitiveSideMinEl?.value) || 4))),
       rigidPrimitiveSideMax: Math.max(2, Math.min(96, Math.round(Number(rigidPrimitiveSideMaxEl?.value) || 10))),
+      // In contour mode, rigid hulls now follow the same perimeter-resampling model as membrane rings.
+      rigidEdgeLengthField: membraneEdgeMap,
+      rigidMinEdgeLength: perimeterMinEdge,
+      rigidMaxEdgeLength: perimeterMaxEdge,
       softInfillMode: membraneMode ? 'none' : (softInfillModeEl?.value || 'triangles'),
       softDensityField: softDensity,
       // Membrane mode should preserve boundary fidelity; coarse soft cells make boxy/square contours.
@@ -594,6 +787,17 @@ clearBtn.addEventListener('click', () => {
   compileNow();
 });
 compileBtn.addEventListener('click', compileNow);
+if (randomizeBtn) {
+  randomizeBtn.addEventListener('click', () => {
+    const preset = String(randomFieldPresetEl?.value || 'sine-lines');
+    const rawSeed = Number(randomFieldSeedEl?.value);
+    const seed = Number.isFinite(rawSeed) ? Math.floor(rawSeed) : (Date.now() & 0x7fffffff);
+    const info = generateRandomFields({ preset, seed });
+    if (randomFieldSeedEl && Number.isFinite(Number(info?.seed))) {
+      randomFieldSeedEl.value = String(info.seed);
+    }
+  });
+}
 if (fieldPaintTargetEl) fieldPaintTargetEl.addEventListener('change', syncFieldPanelVisibility);
 if (softInfillModeEl) softInfillModeEl.addEventListener('change', compileNow);
 if (softMinCellSizeEl) softMinCellSizeEl.addEventListener('change', compileNow);

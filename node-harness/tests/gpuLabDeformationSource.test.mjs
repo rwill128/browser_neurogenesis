@@ -40,16 +40,34 @@ test('gpu-lab applies soft momentum policy in fluid→soft force coupling path',
   );
 });
 
-test('gpu-lab membrane obstacle mask is membrane-cluster scoped (not global soft-body wall)', () => {
+test('gpu-lab obstacle mask is edge-velocity BLOCK based for both rigid and soft (no post-pass barrier)', () => {
   assert.match(
     source,
-    /if \(membraneClusterSet\.size === 0\) \{\s*return \{ membraneEdgeCount: 0, usedMembraneClusters: false \};\s*\}/,
-    'expected obstacle mask to be disabled when no membrane clusters are present',
+    /function stampBodyObstacleMask\(sim\)/,
+    'expected unified body obstacle-mask stamping helper',
   );
 
   assert.match(
     source,
-    /if \(!membraneClusterSet\.has\(ca\)\) continue;/,
-    'expected obstacle edges to be restricted to membrane cluster membership',
+    /for \(const rb of sim\?\.bodies\?\.rigid \|\| \[\]\)/,
+    'expected rigid edges to participate in obstacle-mask stamping',
+  );
+
+  assert.match(
+    source,
+    /for \(const sp of \(soft\?\.springs \|\| \[\]\)\)/,
+    'expected soft edges to participate in obstacle-mask stamping',
+  );
+
+  assert.match(
+    source,
+    /const edgeVelocityMode = Number\(sp\?\.\[5\]\) === EDGE_BODY_MODE\.PASS[\s\S]*if \(edgeVelocityMode === EDGE_BODY_MODE\.PASS\) continue;/,
+    'expected obstacle-mask inclusion to be controlled by per-edge velocity mode',
+  );
+
+  assert.doesNotMatch(
+    source,
+    /applyBodyEdgeFieldBarriers\s*\(/,
+    'expected runtime to stop using post-pass body barrier path',
   );
 });

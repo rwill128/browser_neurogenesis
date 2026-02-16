@@ -1,5 +1,5 @@
 import { parseCreatureSpec, buildBodiesFromCreatureSpec } from '/creature-spec.js';
-import { EDGE_DYE_MODE, normalizeEdgeDyeModeRGB, normalizePermeabilityRGB, applyBodyEdgeFieldBarriers } from '/dye-barrier.js';
+import { EDGE_DYE_MODE, normalizeEdgeDyeModeRGB, normalizePermeabilityRGB } from '/dye-barrier.js';
 import { resolveRigidVsSoftNodeCollision, resolveRigidVsRigidPolygonCollision, getRigidCollisionPolysWorld, pointInPolygonInclusive } from '/rigid-collision.js';
 import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops, recoverSoftSpringRests } from '/soft-xpbd.js';
 import { computeVectorRms, computeRigidAlignedPoseResidual } from '/soft-deformation-metrics.js';
@@ -2014,49 +2014,60 @@ function stampPerChannelDyeMask(sim) {
   return { rigidEdges, softEdges, nonPassCells };
 }
 
-function stampMembraneObstacleMask(sim) {
+function stampBodyObstacleMask(sim) {
   const n = Number(sim?.controls?.n) || 0;
   const mask = sim?.obstacleMaskCpu;
   if (!(mask instanceof Float32Array) || mask.length !== n * n || n <= 0) {
-    return { membraneEdgeCount: 0, usedMembraneClusters: false };
+    return { rigidBlockedEdges: 0, softBlockedEdges: 0, blockedEdgeCount: 0, blockedCells: 0 };
   }
 
   mask.fill(0);
+  const rigidThickness = Math.max(1.4, 1.2 * (n / 256));
+  const softThickness = Math.max(1.5, 1.35 + 1.15 * (n / 256));
 
+  let rigidBlockedEdges = 0;
+  for (const rb of sim?.bodies?.rigid || []) {
+    const verts = rigidVerticesWorld(rb);
+    const sides = verts.length;
+    for (let ei = 0; ei < sides; ei++) {
+      const edgeVelocityMode = Number(resolveRigidEdgeScalar(
+        rb?.edgeVelocityMode,
+        ei,
+        resolveRigidEdgeScalar(rb?.edgeBodyMode, ei, EDGE_BODY_MODE.BLOCK),
+      )) === EDGE_BODY_MODE.PASS
+        ? EDGE_BODY_MODE.PASS
+        : EDGE_BODY_MODE.BLOCK;
+      if (edgeVelocityMode === EDGE_BODY_MODE.PASS) continue;
+
+      const a = verts[ei];
+      const b = verts[(ei + 1) % sides];
+      if (!a || !b) continue;
+      const ax = Number(a.x);
+      const ay = Number(a.y);
+      const bx = Number(b.x);
+      const by = Number(b.y);
+      if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
+
+      stampSegmentObstacleMask(mask, n, ax, ay, bx, by, rigidThickness);
+      rigidBlockedEdges += 1;
+    }
+  }
+
+  let softBlockedEdges = 0;
   const soft = sim?.bodies?.soft;
-  if (!soft?.nodes?.length || !Array.isArray(soft?.springs) || soft.springs.length === 0) {
-    return { membraneEdgeCount: 0, usedMembraneClusters: false };
-  }
-
-  const membraneClusterSet = new Set((sim?.bodies?.softMembraneClusters || [])
-    .map((c) => Number(c?.clusterId))
-    .filter((cid) => Number.isInteger(cid)));
-
-  // Only membrane clusters participate in in-solver fluid obstacle masking.
-  // Spring clusters use edge-policy post-pass barriers instead of a global obstacle wall.
-  if (membraneClusterSet.size === 0) {
-    return { membraneEdgeCount: 0, usedMembraneClusters: false };
-  }
-
-  const thickness = Math.max(1.5, 1.35 + 1.15 * (n / 256));
-  let membraneEdgeCount = 0;
-  for (const sp of soft.springs) {
+  for (const sp of (soft?.springs || [])) {
     const ai = Number(sp?.[0]);
     const bi = Number(sp?.[1]);
     if (!Number.isInteger(ai) || !Number.isInteger(bi)) continue;
-    const edgeBodyMode = Number(sp?.[5]) === EDGE_BODY_MODE.PASS
+
+    const edgeVelocityMode = Number(sp?.[5]) === EDGE_BODY_MODE.PASS
       ? EDGE_BODY_MODE.PASS
       : (Number(sp?.[3]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK);
-    if (edgeBodyMode === EDGE_BODY_MODE.PASS) continue;
+    if (edgeVelocityMode === EDGE_BODY_MODE.PASS) continue;
 
-    const a = soft.nodes[ai];
-    const b = soft.nodes[bi];
+    const a = soft?.nodes?.[ai];
+    const b = soft?.nodes?.[bi];
     if (!a || !b) continue;
-
-    const ca = Number(a.clusterId);
-    const cb = Number(b.clusterId);
-    if (!Number.isInteger(ca) || !Number.isInteger(cb) || ca !== cb) continue;
-    if (!membraneClusterSet.has(ca)) continue;
 
     const ax = Number(a.x);
     const ay = Number(a.y);
@@ -2064,11 +2075,21 @@ function stampMembraneObstacleMask(sim) {
     const by = Number(b.y);
     if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
 
-    stampSegmentObstacleMask(mask, n, ax, ay, bx, by, thickness);
-    membraneEdgeCount += 1;
+    stampSegmentObstacleMask(mask, n, ax, ay, bx, by, softThickness);
+    softBlockedEdges += 1;
   }
 
-  return { membraneEdgeCount, usedMembraneClusters: true };
+  let blockedCells = 0;
+  for (let i = 0; i < mask.length; i++) {
+    if (mask[i] > 0) blockedCells += 1;
+  }
+
+  return {
+    rigidBlockedEdges,
+    softBlockedEdges,
+    blockedEdgeCount: rigidBlockedEdges + softBlockedEdges,
+    blockedCells,
+  };
 }
 
 function enforceFluidEdgeBoundariesCpu(vxField, vyField, n) {
@@ -4490,7 +4511,7 @@ async function initSim() {
     disableDefaultInject: false,
     camera: { x: controls.n * 0.5, y: controls.n * 0.5, zoom: controls.n >= 1024 ? 1.8 : 1.0 },
     couplingTelemetry: [],
-    lastFluidObstacleStats: { membraneEdgeCount: 0, usedMembraneClusters: false },
+    lastFluidObstacleStats: { rigidBlockedEdges: 0, softBlockedEdges: 0, blockedEdgeCount: 0, blockedCells: 0 },
     lastDyeMaskStats: { rigidEdges: 0, softEdges: 0, nonPassCells: 0 },
     frame: 0, t0: performance.now(),
   };
@@ -4523,8 +4544,8 @@ async function stepAndRender() {
   s.controls = { ...s.controls, ...uiControls, n: s.controls.n };
   uploadUniforms(s.device, s.uniform, s.controls);
 
-  // Per-frame membrane obstacle stamping (moving soft-wall boundary mask).
-  s.lastFluidObstacleStats = stampMembraneObstacleMask(s);
+  // Per-frame body obstacle stamping from BLOCK velocity edges (rigid + soft).
+  s.lastFluidObstacleStats = stampBodyObstacleMask(s);
   if (s.obstacleMaskGpu && s.obstacleMaskCpu) {
     s.device.queue.writeBuffer(s.obstacleMaskGpu, 0, s.obstacleMaskCpu);
   }
@@ -4615,20 +4636,7 @@ async function stepAndRender() {
     // Rigid + soft coupling: carry/drag from flow + two-way pushback/swim impulses.
     const couplingInstant = stepBodiesAndInject(s, vx, vy);
     applyEmitters(s, r, g, b, vx, vy);
-    const obstacleEdgesNow = Number(s?.lastFluidObstacleStats?.membraneEdgeCount) || 0;
-    applyBodyEdgeFieldBarriers({
-      sim: s,
-      r,
-      g,
-      b,
-      vx,
-      vy,
-      rigidVerticesWorld,
-      // Velocity no-through is enforced in-solver when obstacle mask is active.
-      softBodyModeOverride: obstacleEdgesNow > 0 ? 0 : null,
-      // Dye pass/block/absorb is handled in channel-aware advection mask; avoid double-application.
-      skipDye: true,
-    });
+    const obstacleEdgesNow = Number(s?.lastFluidObstacleStats?.blockedEdgeCount) || 0;
     applyDigestiveCapture(s, r, g, b);
     enforceFluidEdgeBoundariesCpu(vx, vy, s.controls.n);
 

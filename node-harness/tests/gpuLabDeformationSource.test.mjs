@@ -75,8 +75,14 @@ test('gpu-lab dye advection honors obstacle mask to prevent through-body leakage
 
   assert.match(
     source,
-    /else if \(hereObs \|\| srcObs \|\| hereR == 1u \|\| srcR == 1u\)/,
-    'expected blocked-obstacle branch to retain local dye instead of crossing',
+    /fn deflectBacktrace\(channel:u32, x:u32, y:u32, vel:vec2<f32>\)->vec2<f32>/,
+    'expected explicit deflected backtrace helper for BLOCK dye behavior',
+  );
+
+  assert.match(
+    source,
+    /let blockedR = hereObs \|\| srcObs \|\| hereR == 1u \|\| srcR == 1u;[\s\S]*let rp = deflectBacktrace\(0u, gid\.x, gid\.y, vel\);/,
+    'expected blocked red-channel branch to use deflected backtrace',
   );
 });
 

@@ -420,14 +420,64 @@ fn decodeMode(mask:u32, channel:u32)->u32 {
   return (mask / 9u) % 3u;
 }
 
+fn maskBlock(mask:u32, channel:u32)->f32 {
+  return select(0.0, 1.0, decodeMode(mask, channel) == 1u);
+}
+
+fn channelBlockGradient(channel:u32, x:u32, y:u32)->vec2<f32> {
+  var xm = x;
+  var xp = x;
+  var ym = y;
+  var yp = y;
+  if (x > 0u) { xm = x - 1u; }
+  if (x + 1u < p.n) { xp = x + 1u; }
+  if (y > 0u) { ym = y - 1u; }
+  if (y + 1u < p.n) { yp = y + 1u; }
+
+  let left = maskBlock(dyeMask[idx(xm, y)], channel);
+  let right = maskBlock(dyeMask[idx(xp, y)], channel);
+  let up = maskBlock(dyeMask[idx(x, ym)], channel);
+  let down = maskBlock(dyeMask[idx(x, yp)], channel);
+  return vec2<f32>(right - left, down - up);
+}
+
+fn obstacleGradient(x:u32, y:u32)->vec2<f32> {
+  var xm = x;
+  var xp = x;
+  var ym = y;
+  var yp = y;
+  if (x > 0u) { xm = x - 1u; }
+  if (x + 1u < p.n) { xp = x + 1u; }
+  if (y > 0u) { ym = y - 1u; }
+  if (y + 1u < p.n) { yp = y + 1u; }
+
+  let left = obstacleMask[idx(xm, y)];
+  let right = obstacleMask[idx(xp, y)];
+  let up = obstacleMask[idx(x, ym)];
+  let down = obstacleMask[idx(x, yp)];
+  return vec2<f32>(right - left, down - up);
+}
+
+fn deflectBacktrace(channel:u32, x:u32, y:u32, vel:vec2<f32>)->vec2<f32> {
+  let grad = channelBlockGradient(channel, x, y) + obstacleGradient(x, y);
+  let g2 = dot(grad, grad);
+  if (g2 <= 1e-6) {
+    return vec2<f32>(f32(x), f32(y));
+  }
+  let normal = normalize(grad);
+  let tangentVel = vel - normal * dot(vel, normal);
+  return vec2<f32>(f32(x), f32(y)) - p.dt * tangentVel;
+}
+
 @compute @workgroup_size(${WORKGROUP}, ${WORKGROUP})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (gid.x >= p.n || gid.y >= p.n) { return; }
   let i = idx(gid.x, gid.y);
   let x = f32(gid.x);
   let y = f32(gid.y);
-  let px = x - p.dt * vx[i];
-  let py = y - p.dt * vy[i];
+  let vel = vec2<f32>(vx[i], vy[i]);
+  let px = x - p.dt * vel.x;
+  let py = y - p.dt * vel.y;
 
   let n1 = f32(p.n - 1u);
   let sx = u32(clamp(round(px), 0.0, n1));
@@ -442,30 +492,72 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   let hereR = decodeMode(hereMask, 0u);
   let srcR = decodeMode(srcMask, 0u);
+  let blockedR = hereObs || srcObs || hereR == 1u || srcR == 1u;
   if (hereR == 2u || srcR == 2u) {
     r1[i] = 0.0;
-  } else if (hereObs || srcObs || hereR == 1u || srcR == 1u) {
-    r1[i] = r0[i] * p.fade;
+  } else if (blockedR) {
+    let rp = deflectBacktrace(0u, gid.x, gid.y, vel);
+    let rpx = clamp(rp.x, 0.0, n1);
+    let rpy = clamp(rp.y, 0.0, n1);
+    let rsx = u32(clamp(round(rpx), 0.0, n1));
+    let rsy = u32(clamp(round(rpy), 0.0, n1));
+    let rsi = idx(rsx, rsy);
+    let rSrcMode = decodeMode(dyeMask[rsi], 0u);
+    if (rSrcMode == 2u) {
+      r1[i] = 0.0;
+    } else if (obstacleMask[rsi] > 0.5 || rSrcMode == 1u) {
+      r1[i] = r0[i] * p.fade;
+    } else {
+      r1[i] = sampleBilinear(&r0, rpx, rpy) * p.fade;
+    }
   } else {
     r1[i] = sampleBilinear(&r0, px, py) * p.fade;
   }
 
   let hereG = decodeMode(hereMask, 1u);
   let srcG = decodeMode(srcMask, 1u);
+  let blockedG = hereObs || srcObs || hereG == 1u || srcG == 1u;
   if (hereG == 2u || srcG == 2u) {
     g1[i] = 0.0;
-  } else if (hereObs || srcObs || hereG == 1u || srcG == 1u) {
-    g1[i] = g0[i] * p.fade;
+  } else if (blockedG) {
+    let gp = deflectBacktrace(1u, gid.x, gid.y, vel);
+    let gpx = clamp(gp.x, 0.0, n1);
+    let gpy = clamp(gp.y, 0.0, n1);
+    let gsx = u32(clamp(round(gpx), 0.0, n1));
+    let gsy = u32(clamp(round(gpy), 0.0, n1));
+    let gsi = idx(gsx, gsy);
+    let gSrcMode = decodeMode(dyeMask[gsi], 1u);
+    if (gSrcMode == 2u) {
+      g1[i] = 0.0;
+    } else if (obstacleMask[gsi] > 0.5 || gSrcMode == 1u) {
+      g1[i] = g0[i] * p.fade;
+    } else {
+      g1[i] = sampleBilinear(&g0, gpx, gpy) * p.fade;
+    }
   } else {
     g1[i] = sampleBilinear(&g0, px, py) * p.fade;
   }
 
   let hereB = decodeMode(hereMask, 2u);
   let srcB = decodeMode(srcMask, 2u);
+  let blockedB = hereObs || srcObs || hereB == 1u || srcB == 1u;
   if (hereB == 2u || srcB == 2u) {
     b1[i] = 0.0;
-  } else if (hereObs || srcObs || hereB == 1u || srcB == 1u) {
-    b1[i] = b0[i] * p.fade;
+  } else if (blockedB) {
+    let bp = deflectBacktrace(2u, gid.x, gid.y, vel);
+    let bpx = clamp(bp.x, 0.0, n1);
+    let bpy = clamp(bp.y, 0.0, n1);
+    let bsx = u32(clamp(round(bpx), 0.0, n1));
+    let bsy = u32(clamp(round(bpy), 0.0, n1));
+    let bsi = idx(bsx, bsy);
+    let bSrcMode = decodeMode(dyeMask[bsi], 2u);
+    if (bSrcMode == 2u) {
+      b1[i] = 0.0;
+    } else if (obstacleMask[bsi] > 0.5 || bSrcMode == 1u) {
+      b1[i] = b0[i] * p.fade;
+    } else {
+      b1[i] = sampleBilinear(&b0, bpx, bpy) * p.fade;
+    }
   } else {
     b1[i] = sampleBilinear(&b0, px, py) * p.fade;
   }

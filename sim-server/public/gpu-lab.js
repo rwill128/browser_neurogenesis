@@ -3812,13 +3812,14 @@ function buildWindTunnelEmitter(n, {
   wobbleAmp = Math.max(0.8, n * 0.016),
   wobbleFreq = 0.085,
   swirlJitter = 0.73,
+  jetVy = 0.38,
   lockPosition = false,
 } = {}) {
   return {
     x: n * 0.5,
     y: n * Math.max(0.06, Math.min(0.35, Number(yFraction) || 0.12)),
     vx: 0,
-    vy: 0.38,
+    vy: Number.isFinite(Number(jetVy)) ? Number(jetVy) : 0.38,
     r: Math.max(3, Number(radius) || (n / 13)),
     cr: 135,
     cg: 190,
@@ -3870,14 +3871,15 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
     strength: Number(options?.emitterStrength) || 3.8,
     radius: Number(options?.emitterRadius) || Math.max(7, sim.controls.n / 13),
     yFraction: Number(options?.emitterYFraction) || 0.12,
-    // Make embed wind-tunnel jet visibly turbulent (single emitter, higher curl/chaos/wobble).
-    spin: Number(options?.emitterSpin) || 2.35,
-    curlGain: Number(options?.emitterCurlGain) || 2.55,
-    driftGain: Number(options?.emitterDriftGain) || 0.014,
-    chaosGain: Number(options?.emitterChaosGain) || 2.4,
-    wobbleAmp: Number(options?.emitterWobbleAmp) || Math.max(2.5, sim.controls.n * 0.055),
-    wobbleFreq: Number(options?.emitterWobbleFreq) || 0.13,
+    // Embed wind-tunnel: fixed top emitter with strong downward jet + moderate turbulence.
+    spin: Number(options?.emitterSpin) || 1.55,
+    curlGain: Number(options?.emitterCurlGain) || 1.95,
+    driftGain: Number(options?.emitterDriftGain) || 0.22,
+    chaosGain: Number(options?.emitterChaosGain) || 1.45,
+    wobbleAmp: Number(options?.emitterWobbleAmp) || Math.max(1.4, sim.controls.n * 0.02),
+    wobbleFreq: Number(options?.emitterWobbleFreq) || 0.11,
     swirlJitter: Number(options?.emitterSwirlJitter) || 1.17,
+    jetVy: Number(options?.emitterJetVy) || 1.35,
     lockPosition: true,
   })];
 

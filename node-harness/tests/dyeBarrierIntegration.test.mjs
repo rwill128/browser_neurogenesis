@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EDGE_DYE_MODE, EDGE_BODY_MODE, normalizeEdgeDyeModeRGB, normalizePermeabilityRGB, applyBodyEdgeFieldBarriers } from '../../sim-server/public/dye-barrier.js';
+import { createCreatureSpecFromMesh, buildBodiesFromCreatureSpec } from '../../sim-server/public/creature-spec.js';
 
 function rigidVerticesWorld(rb) {
   if (!rb?.verticesLocal?.length) return [];
@@ -203,6 +204,77 @@ test('rigid global RGB tuple permeability is ignored in strict mode (requires pe
   assert.ok(r[i] < 80, 'strict mode should not treat global tuple as per-edge override; red should be blocked/deflected');
   assert.ok(g[i] < 80, 'green should be blocked');
   assert.ok(b[i] < 80, 'blue should be blocked');
+});
+
+test('exported rigid permeability traits survive import and drive runtime barrier behavior', () => {
+  const n = 32;
+  const size = n * n;
+  const permeabilityMap = new Float32Array(n * n).fill(0);
+  permeabilityMap[8 * n + 16] = 1; // top-edge midpoint permeable
+
+  const mesh = {
+    meta: { width: n, height: n },
+    nodes: [
+      { x: 8, y: 8, rigid: 1 },
+      { x: 24, y: 8, rigid: 1 },
+      { x: 24, y: 24, rigid: 1 },
+      { x: 8, y: 24, rigid: 1 },
+    ],
+    triangles: [
+      { kind: 'rigid', a: 0, b: 1, c: 2 },
+      { kind: 'rigid', a: 0, b: 2, c: 3 },
+    ],
+  };
+
+  const spec = createCreatureSpecFromMesh(mesh, {
+    width: n,
+    height: n,
+    fields: { rigidPermeabilityMap: permeabilityMap },
+    rigidPermeabilityThreshold: 0.5,
+    includeAuthoring: false,
+  });
+  const bodies = buildBodiesFromCreatureSpec(spec, n, { massHeavy: 5 });
+  assert.equal(bodies.rigid.length, 1);
+
+  const rb = bodies.rigid[0];
+  const edgeMask = rb.edgePermeabilityRGB || [];
+  const permeableEdge = edgeMask.findIndex((rgb) => Array.isArray(rgb) && rgb[0] > 0 && rgb[1] > 0 && rgb[2] > 0);
+  const blockedEdge = edgeMask.findIndex((rgb) => Array.isArray(rgb) && rgb[0] <= 0 && rgb[1] <= 0 && rgb[2] <= 0);
+  assert.ok(permeableEdge >= 0, 'expected at least one permeable edge from painted map');
+  assert.ok(blockedEdge >= 0, 'expected at least one blocked edge to compare against');
+
+  const verts = rigidVerticesWorld(rb);
+  const midCell = (edgeIdx) => {
+    const a = verts[edgeIdx];
+    const b2 = verts[(edgeIdx + 1) % verts.length];
+    const x = Math.max(0, Math.min(n - 1, Math.round((a.x + b2.x) * 0.5)));
+    const y = Math.max(0, Math.min(n - 1, Math.round((a.y + b2.y) * 0.5)));
+    return y * n + x;
+  };
+
+  const permeableCell = midCell(permeableEdge);
+  const blockedCell = midCell(blockedEdge);
+
+  const r = new Float32Array(size);
+  const g = new Float32Array(size);
+  const b = new Float32Array(size);
+  const vx = new Float32Array(size);
+  const vy = new Float32Array(size);
+  r[permeableCell] = 120;
+  r[blockedCell] = 120;
+
+  const sim = {
+    controls: { n },
+    bodies: {
+      rigid: [rb],
+      soft: { nodes: [], springs: [] },
+    },
+  };
+
+  applyBodyEdgeFieldBarriers({ sim, r, g, b, vx, vy, rigidVerticesWorld });
+
+  assert.ok(r[permeableCell] >= 119.9, `permeable edge should preserve dye (got ${r[permeableCell]})`);
+  assert.ok(r[blockedCell] < 120, `blocked edge should attenuate/deflect dye (got ${r[blockedCell]})`);
 });
 
 test('applyBodyEdgeFieldBarriers skips malformed rigid edges with non-finite vertices', () => {

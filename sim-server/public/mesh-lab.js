@@ -843,6 +843,12 @@ function setWidgetEnabled(el, enabled, disabledTitle = '') {
   if (!el) return;
   el.disabled = !enabled;
   el.title = enabled ? '' : disabledTitle;
+
+  const ownerLabel = el.closest('label');
+  if (ownerLabel) {
+    ownerLabel.classList.toggle('control-disabled', !enabled);
+    ownerLabel.title = enabled ? '' : disabledTitle;
+  }
 }
 
 function syncFieldPanelVisibility() {

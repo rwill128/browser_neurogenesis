@@ -20,6 +20,8 @@
     .ctrl-group > summary::-webkit-details-marker { display:none; }
     .ctrl-body { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:0 10px 10px 10px; }
     .ctrl-note { opacity:0.82; font-size:12px; }
+    label { transition: opacity 120ms ease; }
+    label.control-disabled { opacity:0.45; }
     canvas { border:1px solid #333; image-rendering: pixelated; }
     iframe { border:1px solid #333; background:#000; }
     .pane { display:flex; gap:12px; align-items:flex-start; }
@@ -53,9 +55,34 @@
         </label>
         <label>Brush <input id="brush" type="number" value="50" min="1" max="80" /></label>
         <label>Threshold <input id="threshold" type="number" value="0.35" min="0" max="1" step="0.01" /></label>
+      </div>
+    </details>
+
+    <details class="ctrl-group">
+      <summary>Resolution field paint controls</summary>
+      <div class="ctrl-body">
         <label>Resolution paint (0..1) <input id="softDensityPaint" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
+      </div>
+      <div class="ctrl-body">
+        <span class="ctrl-note">Resolution paint controls local primitive size during compile: darker green tends finer/smaller, brighter green tends coarser/larger.</span>
+      </div>
+    </details>
+
+    <details class="ctrl-group">
+      <summary>Perimeter + membrane map paint controls</summary>
+      <div class="ctrl-body">
         <label>Perimeter edge paint (0..1) <input id="membraneEdgePaintValue" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
         <label>Membrane shape paint (0..1) <input id="membraneShapePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
+      </div>
+      <div class="ctrl-body">
+        <span class="ctrl-note">Perimeter edge paint controls local ring/contour edge spacing (dark = shorter edges, bright = longer edges).</span>
+        <span class="ctrl-note">Membrane shape paint controls local give vs stiffness (dark = more give, bright = stiffer shape memory).</span>
+      </div>
+    </details>
+
+    <details class="ctrl-group">
+      <summary>Rigid edge trait paint controls</summary>
+      <div class="ctrl-body">
         <label>Rigid permeability paint (0..1) <input id="rigidPermeabilityPaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
         <label>Edge consume channel
           <select id="rigidConsumeChannel">

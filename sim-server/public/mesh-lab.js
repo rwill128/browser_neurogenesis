@@ -56,6 +56,9 @@ const randomizeDensityBtn = document.getElementById('randomizeDensityBtn');
 const randomizeMembraneEdgeBtn = document.getElementById('randomizeMembraneEdgeBtn');
 const randomizeMembraneShapeBtn = document.getElementById('randomizeMembraneShapeBtn');
 const randomizeSoftPermeabilityBtn = document.getElementById('randomizeSoftPermeabilityBtn');
+const randomizeSoftEdgeDyeModeBtn = document.getElementById('randomizeSoftEdgeDyeModeBtn');
+const randomizeSoftEdgeVelocityModeBtn = document.getElementById('randomizeSoftEdgeVelocityModeBtn');
+const randomizeSoftEdgeMomentumModeBtn = document.getElementById('randomizeSoftEdgeMomentumModeBtn');
 const randomizeRigidPermeabilityBtn = document.getElementById('randomizeRigidPermeabilityBtn');
 const randomizeRigidConsumeBtn = document.getElementById('randomizeRigidConsumeBtn');
 const randomFieldPresetEl = document.getElementById('randomFieldPreset');
@@ -1374,6 +1377,15 @@ if (randomizeMembraneShapeBtn) {
 }
 if (randomizeSoftPermeabilityBtn) {
   randomizeSoftPermeabilityBtn.addEventListener('click', () => randomizeWithTargets({ softPermeability: true }));
+}
+if (randomizeSoftEdgeDyeModeBtn) {
+  randomizeSoftEdgeDyeModeBtn.addEventListener('click', () => randomizeWithTargets({ softEdgeDyeMode: true }));
+}
+if (randomizeSoftEdgeVelocityModeBtn) {
+  randomizeSoftEdgeVelocityModeBtn.addEventListener('click', () => randomizeWithTargets({ softEdgeVelocityMode: true }));
+}
+if (randomizeSoftEdgeMomentumModeBtn) {
+  randomizeSoftEdgeMomentumModeBtn.addEventListener('click', () => randomizeWithTargets({ softEdgeMomentumMode: true }));
 }
 if (randomizeRigidPermeabilityBtn) {
   randomizeRigidPermeabilityBtn.addEventListener('click', () => randomizeWithTargets({ rigidPermeability: true }));

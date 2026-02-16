@@ -21,25 +21,15 @@ function clamp(v, lo, hi) {
 }
 
 function buildMembranePerimeterSpringsFromNodes(nodes) {
-  const pts = (nodes || []).map((p, idx) => ({
-    id: idx,
-    x: Number(p?.x),
-    y: Number(p?.y),
-  })).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
-
-  if (pts.length < 3) return [];
-
-  const hull = convexHullWithIds(pts);
-  if (!Array.isArray(hull) || hull.length < 3) return [];
-
   const ring = [];
-  const seen = new Set();
-  for (const hp of hull) {
-    const idx = Number(hp?.id);
-    if (!Number.isInteger(idx) || seen.has(idx) || idx < 0 || idx >= nodes.length) continue;
-    seen.add(idx);
+  for (let idx = 0; idx < (nodes || []).length; idx++) {
+    const p = nodes[idx];
+    const x = Number(p?.x);
+    const y = Number(p?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
     ring.push(idx);
   }
+
   if (ring.length < 3) return [];
 
   const springs = [];

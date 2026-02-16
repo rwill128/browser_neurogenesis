@@ -208,6 +208,49 @@ test('buildBodiesFromCreatureSpec sanitizes membrane imports to perimeter-only s
   assert.equal(edgeKeys.has('0-2'), false, 'membrane import should drop interior chord springs');
 });
 
+test('buildBodiesFromCreatureSpec keeps concave membrane perimeter order instead of convexifying it', () => {
+  const spec = {
+    schemaVersion: CREATURE_SPEC_VERSION,
+    space: { width: 24, height: 24 },
+    rigidBodies: [],
+    hybridJoints: [],
+    softBodies: [{
+      id: 'membrane_concave',
+      solverMode: 'membrane',
+      nodes: [
+        { x: 2, y: 2 },
+        { x: 18, y: 2 },
+        { x: 18, y: 18 },
+        { x: 10, y: 10 }, // concave notch (intentionally inside convex hull edge 2->4)
+        { x: 2, y: 18 },
+      ],
+      springs: [
+        [0, 1, 16, 1, [1, 1, 1]],
+        [1, 2, 16, 1, [1, 1, 1]],
+        [2, 3, 11.3, 1, [1, 1, 1]],
+        [3, 4, 11.3, 1, [1, 1, 1]],
+        [4, 0, 16, 1, [1, 1, 1]],
+        [0, 2, 22.6, 1, [1, 1, 1]],
+      ],
+      restArea: 200,
+      pressureGain: 0.08,
+      radialDamping: 0.05,
+      shapeMemoryGain: 0.04,
+      insideCorrectionEnabled: 1,
+    }],
+  };
+
+  const imported = buildBodiesFromCreatureSpec(spec, 96, CONTROLS);
+  const importedBody = {
+    nodes: imported.soft.nodes,
+    springs: imported.soft.springs.map(([a, b, rest, edgeBodyMode, edgeDyeMode]) => [a, b, rest, edgeBodyMode, edgeDyeMode]),
+  };
+  assertMembraneRingOnly(importedBody);
+
+  const touchesNotch = importedBody.springs.filter((sp) => Number(sp[0]) === 3 || Number(sp[1]) === 3);
+  assert.equal(touchesNotch.length, 2, 'concave notch node should remain in perimeter ring with degree 2');
+});
+
 test('membrane export from authoring soft field is perimeter-only (no interior infill springs)', () => {
   const w = 24;
   const h = 24;

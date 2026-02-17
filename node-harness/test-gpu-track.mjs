@@ -12,6 +12,9 @@ const tests = [
   'node-harness/tests/softDeformationMetrics.test.mjs',
   'node-harness/tests/softClusterKinematics.test.mjs',
   'node-harness/tests/runtimeSolverRigidGpuOnlyParity.test.mjs',
+  'node-harness/tests/softIntegrateGpuOnlyParity.test.mjs',
+  'node-harness/tests/rigidCollisionGpuOnlyParity.test.mjs',
+  'node-harness/tests/rigidSoftCollisionGpuOnlyParity.test.mjs',
   'node-harness/tests/gpuLabDeformationSource.test.mjs',
   'node-harness/tests/miniScenarioWatchdogSource.test.mjs',
 ];

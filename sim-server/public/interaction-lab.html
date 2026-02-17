@@ -20,6 +20,7 @@
     .copy-btn { font-size:12px; padding:3px 8px; }
     .mini-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
     .thumb { margin-top:8px; max-width:220px; border:1px solid #333; border-radius:6px; display:none; }
+    .status-chip { font-size:12px; color:#cfefff; background:#1a2530; border:1px solid #304458; border-radius:999px; padding:3px 8px; }
   </style>
 </head>
 <body>
@@ -78,6 +79,7 @@
           <option value="pass">PASS</option>
         </select>
       </label>
+      <span id="effectiveDyeModeStatus" class="status-chip">Effective selected-channel dye behavior: NO-OP</span>
       <label>Momentum coupling <input id="momentum" type="number" min="0" max="1" step="0.05" value="1" /></label>
       <label><input id="showSegmentIds" type="checkbox" checked /> Segment IDs</label>
       <label><input id="showExtraVisuals" type="checkbox" checked /> Extra visuals</label>
@@ -116,6 +118,6 @@
     </div>
   </div>
 
-  <script type="module" src="/interaction-lab.js?v=20260217h"></script>
+  <script type="module" src="/interaction-lab.js?v=20260217i"></script>
 </body>
 </html>

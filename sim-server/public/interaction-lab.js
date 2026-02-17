@@ -18,6 +18,7 @@ const dyeModeEl = document.getElementById('dyeMode');
 const dyeModeLabelEl = document.getElementById('dyeModeLabel');
 const velocityModeEl = document.getElementById('velocityMode');
 const velocityContractHintEl = document.getElementById('velocityContractHint');
+const effectiveDyeModeStatusEl = document.getElementById('effectiveDyeModeStatus');
 const momentumEl = document.getElementById('momentum');
 const showSegmentIdsEl = document.getElementById('showSegmentIds');
 const showExtraVisualsEl = document.getElementById('showExtraVisuals');
@@ -244,6 +245,7 @@ function updateDyeControlState() {
       ? 'Current contract note: velocity=PASS allows dye mode selection (NO-OP or EAT).'
       : 'Current contract note: velocity=BLOCK is a hard boundary condition, so dye mode is locked to NO-OP.';
   }
+  updateEffectiveDyeModeStatus();
 }
 
 function applyScenarioPreset(preset, meta = null) {
@@ -383,6 +385,18 @@ function effectiveDyeMode(mode, velocityMode) {
   const vel = String(velocityMode || 'block').toLowerCase();
   if (vel !== 'pass') return 'noop';
   return String(mode || 'noop').toLowerCase() === 'eat' ? 'eat' : 'noop';
+}
+
+function updateEffectiveDyeModeStatus() {
+  if (!effectiveDyeModeStatusEl) return;
+  const requested = String(dyeModeEl?.value || 'noop').toLowerCase();
+  const velocityMode = String(velocityModeEl?.value || 'block').toLowerCase();
+  const effective = effectiveDyeMode(requested, velocityMode);
+  if (requested === 'eat' && effective !== 'eat') {
+    effectiveDyeModeStatusEl.textContent = 'Effective selected-channel dye behavior: NO-OP (EAT disabled by velocity BLOCK)';
+    return;
+  }
+  effectiveDyeModeStatusEl.textContent = `Effective selected-channel dye behavior: ${effective === 'eat' ? 'EAT' : 'NO-OP'}`;
 }
 
 function velocityModeCode(mode) {
@@ -682,6 +696,7 @@ for (const el of [
   el?.addEventListener('change', () => {
     if (el === motionModeEl) updateMotionControlState();
     if (el === velocityModeEl) updateDyeControlState();
+    else if (el === dyeModeEl) updateEffectiveDyeModeStatus();
     if (!currentScenarioMeta || currentScenarioMeta.source !== 'manual') {
       currentScenarioMeta = {
         id: currentScenarioMeta?.id || null,

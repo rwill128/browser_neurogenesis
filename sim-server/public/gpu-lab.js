@@ -5,6 +5,7 @@ import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoo
 import { computeVectorRms, computeRigidAlignedPoseResidual } from '/soft-deformation-metrics.js';
 import { computeSoftClusterKinematics, projectNodesTowardClusterRigidMotion } from '/soft-cluster-kinematics.js';
 import { stepRigidBodiesGpuOnly } from '/runtime-solvers/stepRigidGpuOnly.js';
+import { integrateSoftBodiesGpuOnly } from '/runtime-solvers/stepSoftIntegrateGpuOnly.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -3922,15 +3923,26 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   }
 
   const hybridNodeVCap = 3.2;
-  for (const node of s.nodes) {
-    const vmag = Math.hypot(node.vx, node.vy);
-    if (vmag > hybridNodeVCap) {
-      node.vx = (node.vx / vmag) * hybridNodeVCap;
-      node.vy = (node.vy / vmag) * hybridNodeVCap;
+  if (solverPath === 'gpu-only') {
+    integrateSoftBodiesGpuOnly({
+      soft: s,
+      n,
+      dt,
+      softIntegrationScale: SOFT_INTEGRATION_SCALE,
+      hybridNodeVCap,
+      applyBounceBoundary,
+    });
+  } else {
+    for (const node of s.nodes) {
+      const vmag = Math.hypot(node.vx, node.vy);
+      if (vmag > hybridNodeVCap) {
+        node.vx = (node.vx / vmag) * hybridNodeVCap;
+        node.vy = (node.vy / vmag) * hybridNodeVCap;
+      }
+      node.x = node.x + node.vx * dt * SOFT_INTEGRATION_SCALE;
+      node.y = node.y + node.vy * dt * SOFT_INTEGRATION_SCALE;
+      applyBounceBoundary(node, n, 0.78);
     }
-    node.x = node.x + node.vx * dt * SOFT_INTEGRATION_SCALE;
-    node.y = node.y + node.vy * dt * SOFT_INTEGRATION_SCALE;
-    applyBounceBoundary(node, n, 0.78);
   }
 
   for (const rb of bodies.rigid) {

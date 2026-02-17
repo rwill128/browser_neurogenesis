@@ -211,3 +211,17 @@ test('gpu-lab routes rigid stepping through isolated gpu-only runtime solver mod
     'expected explicit gpu-only rigid stepping dispatch with baseline fallback branch',
   );
 });
+
+test('gpu-lab routes soft integration stepping through isolated gpu-only runtime solver module', () => {
+  assert.match(
+    source,
+    /import \{ integrateSoftBodiesGpuOnly \} from '\/runtime-solvers\/stepSoftIntegrateGpuOnly\.js';/,
+    'expected isolated gpu-only soft integration module import',
+  );
+
+  assert.match(
+    source,
+    /const hybridNodeVCap = 3\.2;[\s\S]*if \(solverPath === 'gpu-only'\) \{[\s\S]*integrateSoftBodiesGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*for \(const node of s\.nodes\)/,
+    'expected explicit gpu-only soft integration dispatch with baseline fallback loop',
+  );
+});

@@ -30,6 +30,7 @@ const showSegmentIdsEl = document.getElementById('showSegmentIds');
 const showExtraVisualsEl = document.getElementById('showExtraVisuals');
 const applyBtn = document.getElementById('applyBtn');
 const autoApplyEl = document.getElementById('autoApply');
+const applyModeHintEl = document.getElementById('applyModeHint');
 const scenarioOut = document.getElementById('scenarioOut');
 const copyScenarioBtn = document.getElementById('copyScenarioBtn');
 const downloadScenarioBtn = document.getElementById('downloadScenarioBtn');
@@ -292,6 +293,21 @@ function updateDyeControlState() {
   }
   updateEffectiveDyeModeStatus();
   updateControlHints();
+}
+
+function updateApplyModeState() {
+  const autoApplyOn = !!autoApplyEl?.checked;
+  if (applyBtn) {
+    applyBtn.disabled = autoApplyOn;
+    applyBtn.title = autoApplyOn
+      ? 'Auto-apply is ON. Changes are pushed automatically.'
+      : 'Auto-apply is OFF. Click to push the current scenario.';
+  }
+  if (applyModeHintEl) {
+    applyModeHintEl.textContent = autoApplyOn
+      ? 'Auto-apply ON: slider drags apply automatically (debounced).'
+      : 'Auto-apply OFF: click “Apply scenario” after changing controls.';
+  }
 }
 
 function applyScenarioPreset(preset, meta = null) {
@@ -754,6 +770,10 @@ function captureWindFramePngDataUrl() {
 }
 
 applyBtn?.addEventListener('click', pushScenario);
+autoApplyEl?.addEventListener('change', () => {
+  updateApplyModeState();
+  if (autoApplyEl.checked) pushScenario();
+});
 
 if (loadPresetBtn) {
   loadPresetBtn.addEventListener('click', () => {
@@ -963,6 +983,7 @@ if (downloadScreenshotBtn) {
 updateRangeValueLabels();
 updateMotionControlState();
 updateDyeControlState();
+updateApplyModeState();
 
 window.addEventListener('beforeunload', () => {
   if (embedStatusPollTimer) {

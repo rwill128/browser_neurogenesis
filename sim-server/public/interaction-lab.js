@@ -11,6 +11,11 @@ const applyBtn = document.getElementById('applyBtn');
 const autoApplyEl = document.getElementById('autoApply');
 const scenarioOut = document.getElementById('scenarioOut');
 const copyScenarioBtn = document.getElementById('copyScenarioBtn');
+const downloadScenarioBtn = document.getElementById('downloadScenarioBtn');
+const loadScenarioBtn = document.getElementById('loadScenarioBtn');
+const loadScenarioFile = document.getElementById('loadScenarioFile');
+const downloadScreenshotBtn = document.getElementById('downloadScreenshotBtn');
+const captureThumb = document.getElementById('captureThumb');
 
 const EDGE_DYE_PASS = 0;
 const EDGE_DYE_EAT = 2;
@@ -51,6 +56,40 @@ async function copyTextToClipboard(text) {
   } catch {
     return false;
   }
+}
+
+function timestampTag() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+function downloadTextFile(filename, text, mimeType = 'application/json') {
+  const blob = new Blob([String(text || '')], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function downloadDataUrl(filename, dataUrl) {
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function flashButton(btn, ok, okText = 'Done', failText = 'Failed') {
+  if (!btn) return;
+  const prev = btn.textContent;
+  btn.textContent = ok ? okText : failText;
+  setTimeout(() => { btn.textContent = prev; }, 1100);
 }
 
 function dyeModeCode(mode) {
@@ -214,23 +253,54 @@ function buildScenarioPayload() {
   return { payload, truthRow };
 }
 
-function renderScenarioDebug(row, payload) {
+function renderScenarioDebug(row, payload, extra = {}) {
   scenarioOut.textContent = JSON.stringify({
     truthTableRow: row,
     payload,
+    ...extra,
     notes: {
       segmentLabelsInWindTunnel: 'R<body>:<edge> for rigid, S<softSpring> for soft',
       expectedSelectionRule: 'For each segment/channel: EAT=true removes dye, EAT=false is no-op',
+      screenshotWorkflow: 'Load scenario JSON -> Apply -> Download screenshot -> send screenshot for analysis',
     },
   }, null, 2);
+}
+
+function postPayloadToEmbed(payload) {
+  if (!embedReady || !windFrame?.contentWindow || !payload) return;
+  windFrame.contentWindow.postMessage(payload, window.location.origin);
 }
 
 function pushScenario() {
   const { payload, truthRow } = buildScenarioPayload();
   lastPayload = payload;
   renderScenarioDebug(truthRow, payload);
-  if (!embedReady || !windFrame?.contentWindow) return;
-  windFrame.contentWindow.postMessage(payload, window.location.origin);
+  postPayloadToEmbed(payload);
+}
+
+function extractPayloadFromScenarioJson(raw) {
+  if (raw && typeof raw === 'object') {
+    if (raw.type === 'gpuLabEmbedReset') {
+      return { payload: raw, truthRow: null, source: 'payload' };
+    }
+    if (raw.payload?.type === 'gpuLabEmbedReset') {
+      return {
+        payload: raw.payload,
+        truthRow: raw.truthTableRow || raw.row || null,
+        source: 'wrapper',
+      };
+    }
+  }
+  throw new Error('Expected JSON to be either gpuLabEmbedReset payload or { payload, truthTableRow }.');
+}
+
+function captureWindFramePngDataUrl() {
+  const frameDoc = windFrame?.contentDocument;
+  const canvas = frameDoc?.getElementById('view');
+  if (!(canvas instanceof HTMLCanvasElement)) {
+    throw new Error('Wind frame canvas not ready yet. Start/apply scenario and try again.');
+  }
+  return canvas.toDataURL('image/png');
 }
 
 applyBtn?.addEventListener('click', pushScenario);
@@ -253,9 +323,7 @@ for (const el of [
 windFrame?.addEventListener('load', () => {
   embedReady = false;
   setTimeout(() => {
-    if (lastPayload && windFrame?.contentWindow) {
-      windFrame.contentWindow.postMessage(lastPayload, window.location.origin);
-    }
+    if (lastPayload) postPayloadToEmbed(lastPayload);
   }, 250);
 });
 
@@ -264,7 +332,8 @@ window.addEventListener('message', (event) => {
   const data = event.data || {};
   if (data.type === 'gpuLabEmbedReady') {
     embedReady = true;
-    pushScenario();
+    if (lastPayload) postPayloadToEmbed(lastPayload);
+    else pushScenario();
     return;
   }
   if (data.type === 'gpuLabEmbedResetAck' && data.ok === false) {
@@ -279,9 +348,63 @@ window.addEventListener('message', (event) => {
 if (copyScenarioBtn) {
   copyScenarioBtn.addEventListener('click', async () => {
     const ok = await copyTextToClipboard(scenarioOut?.textContent || '');
-    const prev = copyScenarioBtn.textContent;
-    copyScenarioBtn.textContent = ok ? 'Copied' : 'Copy failed';
-    setTimeout(() => { copyScenarioBtn.textContent = prev; }, 1100);
+    flashButton(copyScenarioBtn, ok, 'Copied', 'Copy failed');
+  });
+}
+
+if (downloadScenarioBtn) {
+  downloadScenarioBtn.addEventListener('click', () => {
+    try {
+      const snapshot = scenarioOut?.textContent
+        ? JSON.parse(scenarioOut.textContent)
+        : { payload: lastPayload };
+      downloadTextFile(`interaction-scenario-${timestampTag()}.json`, JSON.stringify(snapshot, null, 2));
+      flashButton(downloadScenarioBtn, true, 'Downloaded', 'Download failed');
+    } catch {
+      flashButton(downloadScenarioBtn, false, 'Downloaded', 'Download failed');
+    }
+  });
+}
+
+if (loadScenarioBtn && loadScenarioFile) {
+  loadScenarioBtn.addEventListener('click', () => loadScenarioFile.click());
+  loadScenarioFile.addEventListener('change', async () => {
+    const f = loadScenarioFile.files?.[0];
+    if (!f) return;
+    try {
+      const text = await f.text();
+      const raw = JSON.parse(text);
+      const { payload, truthRow, source } = extractPayloadFromScenarioJson(raw);
+      lastPayload = payload;
+      renderScenarioDebug(truthRow || { loadedFromFile: f.name }, payload, {
+        loaded: { source, file: f.name },
+      });
+      postPayloadToEmbed(payload);
+      flashButton(loadScenarioBtn, true, 'Loaded', 'Load failed');
+    } catch (err) {
+      renderScenarioDebug({ error: 'load-failed' }, lastPayload, {
+        loadError: String(err?.message || err),
+      });
+      flashButton(loadScenarioBtn, false, 'Loaded', 'Load failed');
+    } finally {
+      loadScenarioFile.value = '';
+    }
+  });
+}
+
+if (downloadScreenshotBtn) {
+  downloadScreenshotBtn.addEventListener('click', () => {
+    try {
+      const dataUrl = captureWindFramePngDataUrl();
+      downloadDataUrl(`interaction-shot-${timestampTag()}.png`, dataUrl);
+      if (captureThumb) {
+        captureThumb.src = dataUrl;
+        captureThumb.style.display = 'block';
+      }
+      flashButton(downloadScreenshotBtn, true, 'Downloaded', 'Shot failed');
+    } catch {
+      flashButton(downloadScreenshotBtn, false, 'Downloaded', 'Shot failed');
+    }
   });
 }
 

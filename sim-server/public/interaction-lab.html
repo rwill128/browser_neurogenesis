@@ -16,6 +16,8 @@
     .hint { color:#aaa; font-size:12px; }
     .panel-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; }
     .copy-btn { font-size:12px; padding:3px 8px; }
+    .mini-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+    .thumb { margin-top:8px; max-width:220px; border:1px solid #333; border-radius:6px; display:none; }
   </style>
 </head>
 <body>
@@ -71,18 +73,27 @@
 
   <div class="pane" style="margin-top:12px;">
     <div class="card">
-      <div>Wind tunnel confrontation view</div>
+      <div class="panel-head">
+        <div>Wind tunnel confrontation view</div>
+        <button id="downloadScreenshotBtn" class="copy-btn">Download screenshot</button>
+      </div>
       <iframe id="windFrame" src="/gpu-lab.html?embed=1&v=20260216d" width="640" height="640" loading="lazy"></iframe>
+      <img id="captureThumb" class="thumb" alt="Latest interaction screenshot preview" />
     </div>
     <div class="card" style="width:520px;">
       <div class="panel-head">
         <div>Scenario payload + current truth-table row</div>
         <button id="copyScenarioBtn" class="copy-btn">Copy JSON</button>
       </div>
+      <div class="mini-actions">
+        <button id="downloadScenarioBtn" class="copy-btn">Download scenario JSON</button>
+        <button id="loadScenarioBtn" class="copy-btn">Load scenario JSON</button>
+        <input id="loadScenarioFile" type="file" accept="application/json,.json" style="display:none" />
+      </div>
       <pre id="scenarioOut">ready</pre>
     </div>
   </div>
 
-  <script type="module" src="/interaction-lab.js?v=20260216e"></script>
+  <script type="module" src="/interaction-lab.js?v=20260217a"></script>
 </body>
 </html>

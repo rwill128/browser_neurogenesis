@@ -78,7 +78,7 @@
     <details class="ctrl-group">
       <summary>Resolution field paint controls</summary>
       <div class="ctrl-body">
-        <label>Resolution paint (0..1) <input id="softDensityPaint" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
+        <label>Resolution paint (0..1) <input id="softDensityPaint" type="range" value="0.5" min="0" max="1" step="0.05" /> <span id="softDensityPaintValue">0.50</span></label>
       </div>
       <div class="ctrl-body">
         <span class="ctrl-note">Resolution paint controls local primitive size during compile: darker green tends finer/smaller, brighter green tends coarser/larger.</span>
@@ -88,8 +88,8 @@
     <details class="ctrl-group">
       <summary>Perimeter + membrane stiffness map paint controls</summary>
       <div class="ctrl-body">
-        <label>Perimeter edge paint (0..1) <input id="membraneEdgePaintValue" type="number" value="0.5" min="0" max="1" step="0.05" /></label>
-        <label>Membrane stiffness paint (0..1) <input id="membraneShapePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
+        <label>Perimeter edge paint (0..1) <input id="membraneEdgePaintValue" type="range" value="0.5" min="0" max="1" step="0.05" /> <span id="membraneEdgePaintValueLabel">0.50</span></label>
+        <label>Membrane stiffness paint (0..1) <input id="membraneShapePaintValue" type="range" value="1" min="0" max="1" step="0.05" /> <span id="membraneShapePaintValueLabel">1.00</span></label>
       </div>
       <div class="ctrl-body">
         <span class="ctrl-note">Perimeter edge paint controls local ring/contour edge spacing (dark = shorter edges, bright = longer edges).</span>
@@ -100,7 +100,7 @@
     <details class="ctrl-group">
       <summary>Body edge trait paint controls</summary>
       <div class="ctrl-body">
-        <label>Soft permeability paint (0..1) <input id="softPermeabilityPaintValue" type="number" value="0" min="0" max="1" step="0.05" /></label>
+        <label>Soft permeability paint (0..1) <input id="softPermeabilityPaintValue" type="range" value="0" min="0" max="1" step="0.05" /> <span id="softPermeabilityPaintValueLabel">0.00</span></label>
         <label>Soft dye channel
           <select id="softEdgeDyeChannel">
             <option value="r" selected>Red dye</option>
@@ -115,15 +115,15 @@
             <option value="eat">EAT (EATS=true)</option>
           </select>
         </label>
-        <label>Soft dye field paint (0..1) <input id="softEdgeDyePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
+        <label>Soft dye field paint (0..1) <input id="softEdgeDyePaintValue" type="range" value="1" min="0" max="1" step="0.05" /> <span id="softEdgeDyePaintValueLabel">1.00</span></label>
         <label>Soft velocity mode
           <select id="softEdgeVelocityMode">
             <option value="block" selected>BLOCK</option>
             <option value="pass">PASS</option>
           </select>
         </label>
-        <label>Soft momentum paint (0..1) <input id="softEdgeMomentumPaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
-        <label>Rigid permeability paint (0..1) <input id="rigidPermeabilityPaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
+        <label>Soft momentum paint (0..1) <input id="softEdgeMomentumPaintValue" type="range" value="1" min="0" max="1" step="0.05" /> <span id="softEdgeMomentumPaintValueLabel">1.00</span></label>
+        <label>Rigid permeability paint (0..1) <input id="rigidPermeabilityPaintValue" type="range" value="1" min="0" max="1" step="0.05" /> <span id="rigidPermeabilityPaintValueLabel">1.00</span></label>
         <label>Rigid velocity mode
           <select id="rigidEdgeVelocityMode">
             <option value="block" selected>BLOCK</option>
@@ -144,7 +144,7 @@
             <option value="eat">EAT (EATS=true)</option>
           </select>
         </label>
-        <label>Rigid dye field paint (0..1) <input id="rigidEdgeDyePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
+        <label>Rigid dye field paint (0..1) <input id="rigidEdgeDyePaintValue" type="range" value="1" min="0" max="1" step="0.05" /> <span id="rigidEdgeDyePaintValueLabel">1.00</span></label>
       </div>
     </details>
 
@@ -157,8 +157,8 @@
             <option value="primitive-tiling">Primitive tiling (tri/square/pent)</option>
           </select>
         </label>
-        <label>Rigid tile edge min <input id="rigidPrimitiveSideMin" type="number" value="4" min="2" max="32" step="1" /></label>
-        <label>Rigid tile edge max <input id="rigidPrimitiveSideMax" type="number" value="10" min="2" max="48" step="1" /></label>
+        <label>Rigid tile edge min <input id="rigidPrimitiveSideMin" type="range" value="4" min="2" max="32" step="1" /> <span id="rigidPrimitiveSideMinValue">4</span></label>
+        <label>Rigid tile edge max <input id="rigidPrimitiveSideMax" type="range" value="10" min="2" max="48" step="1" /> <span id="rigidPrimitiveSideMaxValue">10</span></label>
         <label>Soft in-fill
           <select id="softInfillMode">
             <option value="triangles" selected>Triangles (canonical stable)</option>
@@ -167,11 +167,14 @@
           </select>
         </label>
         <label>Min soft primitive size
-          <input id="softMinCellSize" type="number" value="3" min="1" max="127" step="1" />
+          <input id="softMinCellSize" type="range" value="3" min="1" max="127" step="1" /> <span id="softMinCellSizeValue">3</span>
         </label>
         <label><input id="softBoundaryRing" type="checkbox" checked /> Reinforce soft outer border</label>
         <span class="ctrl-note">Connectivity: single connected creature (always enforced)</span>
         <span class="ctrl-note">Resolution map controls primitive size (rigid+soft): darker green = finer/smaller, brighter green = coarser/larger</span>
+      </div>
+      <div class="ctrl-body">
+        <span class="ctrl-note">Contract: max edge count is clamped to be at least min edge count.</span>
       </div>
     </details>
 
@@ -185,11 +188,14 @@
           </select>
         </label>
         <label>Perimeter min edge
-          <input id="membraneMinEdgeLength" type="number" value="4" min="1" max="32" step="0.5" />
+          <input id="membraneMinEdgeLength" type="range" value="4" min="1" max="32" step="0.5" /> <span id="membraneMinEdgeLengthValue">4.0</span>
         </label>
         <label>Perimeter max edge
-          <input id="membraneMaxEdgeLength" type="number" value="8" min="1" max="64" step="0.5" />
+          <input id="membraneMaxEdgeLength" type="range" value="8" min="1" max="64" step="0.5" /> <span id="membraneMaxEdgeLengthValue">8.0</span>
         </label>
+      </div>
+      <div class="ctrl-body">
+        <span class="ctrl-note">Contract: max perimeter edge auto-clamps to min perimeter edge.</span>
       </div>
     </details>
 
@@ -205,7 +211,7 @@
             <option value="mixed">Mixed</option>
           </select>
         </label>
-        <label>Generator seed <input id="randomFieldSeed" type="number" value="42" step="1" /></label>
+        <label>Generator seed <input id="randomFieldSeed" type="range" value="42" min="0" max="9999" step="1" /> <span id="randomFieldSeedValue">42</span></label>
         <button id="randomizeBtn">Generate random fields</button>
         <button id="randomizeTraitBtn">Randomize trait only</button>
         <button id="randomizeDensityBtn">Randomize resolution only</button>
@@ -242,16 +248,16 @@
     <details class="ctrl-group">
       <summary>Wind tunnel emitter controls</summary>
       <div class="ctrl-body">
-        <label>Downward velocity <input id="windEmitterJetVy" type="number" value="1.35" min="-4" max="6" step="0.05" /></label>
-        <label>Strength <input id="windEmitterStrength" type="number" value="3.8" min="0.1" max="20" step="0.1" /></label>
-        <label>Radius <input id="windEmitterRadius" type="number" value="10" min="3" max="64" step="0.5" /></label>
-        <label>Top position (0.06..0.35) <input id="windEmitterYFraction" type="number" value="0.12" min="0.06" max="0.35" step="0.01" /></label>
-        <label>Spin <input id="windEmitterSpin" type="number" value="1.55" min="-6" max="6" step="0.05" /></label>
-        <label>Curl gain <input id="windEmitterCurlGain" type="number" value="1.95" min="0" max="8" step="0.05" /></label>
-        <label>Drift gain <input id="windEmitterDriftGain" type="number" value="0.22" min="0" max="2" step="0.01" /></label>
-        <label>Chaos gain <input id="windEmitterChaosGain" type="number" value="1.45" min="0" max="8" step="0.05" /></label>
-        <label>Wobble amplitude <input id="windEmitterWobbleAmp" type="number" value="2.6" min="0" max="32" step="0.1" /></label>
-        <label>Wobble frequency <input id="windEmitterWobbleFreq" type="number" value="0.11" min="0" max="1" step="0.005" /></label>
+        <label>Downward velocity <input id="windEmitterJetVy" type="range" value="1.35" min="-4" max="6" step="0.05" /> <span id="windEmitterJetVyValue">1.35</span></label>
+        <label>Strength <input id="windEmitterStrength" type="range" value="3.8" min="0.1" max="20" step="0.1" /> <span id="windEmitterStrengthValue">3.8</span></label>
+        <label>Radius <input id="windEmitterRadius" type="range" value="10" min="3" max="64" step="0.5" /> <span id="windEmitterRadiusValue">10.0</span></label>
+        <label>Top position (0.06..0.35) <input id="windEmitterYFraction" type="range" value="0.12" min="0.06" max="0.35" step="0.01" /> <span id="windEmitterYFractionValue">0.12</span></label>
+        <label>Spin <input id="windEmitterSpin" type="range" value="1.55" min="-6" max="6" step="0.05" /> <span id="windEmitterSpinValue">1.55</span></label>
+        <label>Curl gain <input id="windEmitterCurlGain" type="range" value="1.95" min="0" max="8" step="0.05" /> <span id="windEmitterCurlGainValue">1.95</span></label>
+        <label>Drift gain <input id="windEmitterDriftGain" type="range" value="0.22" min="0" max="2" step="0.01" /> <span id="windEmitterDriftGainValue">0.22</span></label>
+        <label>Chaos gain <input id="windEmitterChaosGain" type="range" value="1.45" min="0" max="8" step="0.05" /> <span id="windEmitterChaosGainValue">1.45</span></label>
+        <label>Wobble amplitude <input id="windEmitterWobbleAmp" type="range" value="2.6" min="0" max="32" step="0.1" /> <span id="windEmitterWobbleAmpValue">2.6</span></label>
+        <label>Wobble frequency <input id="windEmitterWobbleFreq" type="range" value="0.11" min="0" max="1" step="0.005" /> <span id="windEmitterWobbleFreqValue">0.110</span></label>
         <label><input id="windEmitterLockPosition" type="checkbox" checked /> Lock emitter position</label>
         <button id="applyWindEmitterBtn">Apply emitter settings</button>
       </div>

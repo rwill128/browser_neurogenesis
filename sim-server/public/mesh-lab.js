@@ -33,28 +33,41 @@ const brushValueEl = document.getElementById('brushValue');
 const thresholdEl = document.getElementById('threshold');
 const thresholdValueEl = document.getElementById('thresholdValue');
 const softDensityPaintEl = document.getElementById('softDensityPaint');
+const softDensityPaintValueEl = document.getElementById('softDensityPaintValue');
 const membraneEdgePaintEl = document.getElementById('membraneEdgePaintValue');
+const membraneEdgePaintValueEl = document.getElementById('membraneEdgePaintValueLabel');
 const membraneShapePaintEl = document.getElementById('membraneShapePaintValue');
+const membraneShapePaintValueEl = document.getElementById('membraneShapePaintValueLabel');
 const softPermeabilityPaintEl = document.getElementById('softPermeabilityPaintValue');
+const softPermeabilityPaintValueEl = document.getElementById('softPermeabilityPaintValueLabel');
 const softEdgeDyeChannelEl = document.getElementById('softEdgeDyeChannel');
 const softEdgeDyeModeEl = document.getElementById('softEdgeDyeMode');
 const softEdgeDyePaintEl = document.getElementById('softEdgeDyePaintValue');
+const softEdgeDyePaintValueEl = document.getElementById('softEdgeDyePaintValueLabel');
 const softEdgeVelocityModeEl = document.getElementById('softEdgeVelocityMode');
 const softEdgeMomentumPaintEl = document.getElementById('softEdgeMomentumPaintValue');
+const softEdgeMomentumPaintValueEl = document.getElementById('softEdgeMomentumPaintValueLabel');
 const rigidPermeabilityPaintEl = document.getElementById('rigidPermeabilityPaintValue');
+const rigidPermeabilityPaintValueEl = document.getElementById('rigidPermeabilityPaintValueLabel');
 const rigidEdgeVelocityModeEl = document.getElementById('rigidEdgeVelocityMode');
 const rigidEdgeDyeChannelEl = document.getElementById('rigidEdgeDyeChannel');
 const rigidEdgeDyeModeEl = document.getElementById('rigidEdgeDyeMode');
 const rigidEdgeDyePaintEl = document.getElementById('rigidEdgeDyePaintValue');
+const rigidEdgeDyePaintValueEl = document.getElementById('rigidEdgeDyePaintValueLabel');
 const rigidCompileModeEl = document.getElementById('rigidCompileMode');
 const rigidPrimitiveSideMinEl = document.getElementById('rigidPrimitiveSideMin');
+const rigidPrimitiveSideMinValueEl = document.getElementById('rigidPrimitiveSideMinValue');
 const rigidPrimitiveSideMaxEl = document.getElementById('rigidPrimitiveSideMax');
+const rigidPrimitiveSideMaxValueEl = document.getElementById('rigidPrimitiveSideMaxValue');
 const softInfillModeEl = document.getElementById('softInfillMode');
 const softMinCellSizeEl = document.getElementById('softMinCellSize');
+const softMinCellSizeValueEl = document.getElementById('softMinCellSizeValue');
 const softBoundaryRingEl = document.getElementById('softBoundaryRing');
 const softSolverModeEl = document.getElementById('softSolverMode');
 const membraneMinEdgeLengthEl = document.getElementById('membraneMinEdgeLength');
+const membraneMinEdgeLengthValueEl = document.getElementById('membraneMinEdgeLengthValue');
 const membraneMaxEdgeLengthEl = document.getElementById('membraneMaxEdgeLength');
+const membraneMaxEdgeLengthValueEl = document.getElementById('membraneMaxEdgeLengthValue');
 const clearBtn = document.getElementById('clearBtn');
 const compileBtn = document.getElementById('compileBtn');
 const randomizeBtn = document.getElementById('randomizeBtn');
@@ -89,6 +102,7 @@ const randomizeRigidDyePassBBtn = document.getElementById('randomizeRigidDyePass
 const randomizeRigidDyeEatBBtn = document.getElementById('randomizeRigidDyeEatBBtn');
 const randomFieldPresetEl = document.getElementById('randomFieldPreset');
 const randomFieldSeedEl = document.getElementById('randomFieldSeed');
+const randomFieldSeedValueEl = document.getElementById('randomFieldSeedValue');
 const exportBtn = document.getElementById('exportBtn');
 const importBtn = document.getElementById('importBtn');
 const importFile = document.getElementById('importFile');
@@ -98,15 +112,25 @@ const segmentStatsList = document.getElementById('segmentStatsList');
 const copySegmentStatsBtn = document.getElementById('copySegmentStatsBtn');
 const copyOutBtn = document.getElementById('copyOutBtn');
 const windEmitterStrengthEl = document.getElementById('windEmitterStrength');
+const windEmitterStrengthValueEl = document.getElementById('windEmitterStrengthValue');
 const windEmitterJetVyEl = document.getElementById('windEmitterJetVy');
+const windEmitterJetVyValueEl = document.getElementById('windEmitterJetVyValue');
 const windEmitterRadiusEl = document.getElementById('windEmitterRadius');
+const windEmitterRadiusValueEl = document.getElementById('windEmitterRadiusValue');
 const windEmitterYFractionEl = document.getElementById('windEmitterYFraction');
+const windEmitterYFractionValueEl = document.getElementById('windEmitterYFractionValue');
 const windEmitterSpinEl = document.getElementById('windEmitterSpin');
+const windEmitterSpinValueEl = document.getElementById('windEmitterSpinValue');
 const windEmitterCurlGainEl = document.getElementById('windEmitterCurlGain');
+const windEmitterCurlGainValueEl = document.getElementById('windEmitterCurlGainValue');
 const windEmitterDriftGainEl = document.getElementById('windEmitterDriftGain');
+const windEmitterDriftGainValueEl = document.getElementById('windEmitterDriftGainValue');
 const windEmitterChaosGainEl = document.getElementById('windEmitterChaosGain');
+const windEmitterChaosGainValueEl = document.getElementById('windEmitterChaosGainValue');
 const windEmitterWobbleAmpEl = document.getElementById('windEmitterWobbleAmp');
+const windEmitterWobbleAmpValueEl = document.getElementById('windEmitterWobbleAmpValue');
 const windEmitterWobbleFreqEl = document.getElementById('windEmitterWobbleFreq');
+const windEmitterWobbleFreqValueEl = document.getElementById('windEmitterWobbleFreqValue');
 const windEmitterLockPositionEl = document.getElementById('windEmitterLockPosition');
 const applyWindEmitterBtn = document.getElementById('applyWindEmitterBtn');
 
@@ -1936,6 +1960,7 @@ function randomizeWithTargets(targets) {
   const info = generateRandomFields({ preset, seed, targets });
   if (randomFieldSeedEl && Number.isFinite(Number(info?.seed))) {
     randomFieldSeedEl.value = String(info.seed);
+    syncPaintControlValueLabels();
   }
   return info;
 }
@@ -2057,10 +2082,76 @@ const syncPaintControlValueLabels = () => {
     const threshold = Math.max(0, Math.min(1, Number(thresholdEl.value) || 0.35));
     thresholdValueEl.textContent = threshold.toFixed(2);
   }
+
+  if (softDensityPaintValueEl && softDensityPaintEl) softDensityPaintValueEl.textContent = (Number(softDensityPaintEl.value) || 0).toFixed(2);
+  if (membraneEdgePaintValueEl && membraneEdgePaintEl) membraneEdgePaintValueEl.textContent = (Number(membraneEdgePaintEl.value) || 0).toFixed(2);
+  if (membraneShapePaintValueEl && membraneShapePaintEl) membraneShapePaintValueEl.textContent = (Number(membraneShapePaintEl.value) || 0).toFixed(2);
+  if (softPermeabilityPaintValueEl && softPermeabilityPaintEl) softPermeabilityPaintValueEl.textContent = (Number(softPermeabilityPaintEl.value) || 0).toFixed(2);
+  if (softEdgeDyePaintValueEl && softEdgeDyePaintEl) softEdgeDyePaintValueEl.textContent = (Number(softEdgeDyePaintEl.value) || 0).toFixed(2);
+  if (softEdgeMomentumPaintValueEl && softEdgeMomentumPaintEl) softEdgeMomentumPaintValueEl.textContent = (Number(softEdgeMomentumPaintEl.value) || 0).toFixed(2);
+  if (rigidPermeabilityPaintValueEl && rigidPermeabilityPaintEl) rigidPermeabilityPaintValueEl.textContent = (Number(rigidPermeabilityPaintEl.value) || 0).toFixed(2);
+  if (rigidEdgeDyePaintValueEl && rigidEdgeDyePaintEl) rigidEdgeDyePaintValueEl.textContent = (Number(rigidEdgeDyePaintEl.value) || 0).toFixed(2);
+
+  const rigidMin = Math.max(2, Math.round(Number(rigidPrimitiveSideMinEl?.value) || 4));
+  const rigidMaxRaw = Math.max(2, Math.round(Number(rigidPrimitiveSideMaxEl?.value) || 10));
+  const rigidMax = Math.max(rigidMin, rigidMaxRaw);
+  if (rigidPrimitiveSideMinValueEl) rigidPrimitiveSideMinValueEl.textContent = String(rigidMin);
+  if (rigidPrimitiveSideMaxValueEl) rigidPrimitiveSideMaxValueEl.textContent = String(rigidMax);
+
+  if (softMinCellSizeValueEl && softMinCellSizeEl) softMinCellSizeValueEl.textContent = String(Math.max(1, Math.round(Number(softMinCellSizeEl.value) || 3)));
+
+  const perimeterMin = Math.max(1, Number(membraneMinEdgeLengthEl?.value) || 4);
+  const perimeterMaxRaw = Math.max(1, Number(membraneMaxEdgeLengthEl?.value) || 8);
+  const perimeterMax = Math.max(perimeterMin, perimeterMaxRaw);
+  if (membraneMinEdgeLengthValueEl) membraneMinEdgeLengthValueEl.textContent = perimeterMin.toFixed(1);
+  if (membraneMaxEdgeLengthValueEl) membraneMaxEdgeLengthValueEl.textContent = perimeterMax.toFixed(1);
+
+  if (randomFieldSeedValueEl && randomFieldSeedEl) randomFieldSeedValueEl.textContent = String(Math.max(0, Math.round(Number(randomFieldSeedEl.value) || 0)));
+
+  if (windEmitterJetVyValueEl && windEmitterJetVyEl) windEmitterJetVyValueEl.textContent = (Number(windEmitterJetVyEl.value) || 0).toFixed(2);
+  if (windEmitterStrengthValueEl && windEmitterStrengthEl) windEmitterStrengthValueEl.textContent = (Number(windEmitterStrengthEl.value) || 0).toFixed(1);
+  if (windEmitterRadiusValueEl && windEmitterRadiusEl) windEmitterRadiusValueEl.textContent = (Number(windEmitterRadiusEl.value) || 0).toFixed(1);
+  if (windEmitterYFractionValueEl && windEmitterYFractionEl) windEmitterYFractionValueEl.textContent = (Number(windEmitterYFractionEl.value) || 0).toFixed(2);
+  if (windEmitterSpinValueEl && windEmitterSpinEl) windEmitterSpinValueEl.textContent = (Number(windEmitterSpinEl.value) || 0).toFixed(2);
+  if (windEmitterCurlGainValueEl && windEmitterCurlGainEl) windEmitterCurlGainValueEl.textContent = (Number(windEmitterCurlGainEl.value) || 0).toFixed(2);
+  if (windEmitterDriftGainValueEl && windEmitterDriftGainEl) windEmitterDriftGainValueEl.textContent = (Number(windEmitterDriftGainEl.value) || 0).toFixed(2);
+  if (windEmitterChaosGainValueEl && windEmitterChaosGainEl) windEmitterChaosGainValueEl.textContent = (Number(windEmitterChaosGainEl.value) || 0).toFixed(2);
+  if (windEmitterWobbleAmpValueEl && windEmitterWobbleAmpEl) windEmitterWobbleAmpValueEl.textContent = (Number(windEmitterWobbleAmpEl.value) || 0).toFixed(1);
+  if (windEmitterWobbleFreqValueEl && windEmitterWobbleFreqEl) windEmitterWobbleFreqValueEl.textContent = (Number(windEmitterWobbleFreqEl.value) || 0).toFixed(3);
 };
 
-if (brushEl) brushEl.addEventListener('input', syncPaintControlValueLabels);
-if (thresholdEl) thresholdEl.addEventListener('input', syncPaintControlValueLabels);
+const sliderReadoutInputs = [
+  brushEl,
+  thresholdEl,
+  softDensityPaintEl,
+  membraneEdgePaintEl,
+  membraneShapePaintEl,
+  softPermeabilityPaintEl,
+  softEdgeDyePaintEl,
+  softEdgeMomentumPaintEl,
+  rigidPermeabilityPaintEl,
+  rigidEdgeDyePaintEl,
+  rigidPrimitiveSideMinEl,
+  rigidPrimitiveSideMaxEl,
+  softMinCellSizeEl,
+  membraneMinEdgeLengthEl,
+  membraneMaxEdgeLengthEl,
+  randomFieldSeedEl,
+  windEmitterJetVyEl,
+  windEmitterStrengthEl,
+  windEmitterRadiusEl,
+  windEmitterYFractionEl,
+  windEmitterSpinEl,
+  windEmitterCurlGainEl,
+  windEmitterDriftGainEl,
+  windEmitterChaosGainEl,
+  windEmitterWobbleAmpEl,
+  windEmitterWobbleFreqEl,
+].filter(Boolean);
+for (const el of sliderReadoutInputs) {
+  el.addEventListener('input', syncPaintControlValueLabels);
+  el.addEventListener('change', syncPaintControlValueLabels);
+}
 
 if (fieldPaintTargetEl) fieldPaintTargetEl.addEventListener('change', syncFieldPanelVisibility);
 if (softInfillModeEl) softInfillModeEl.addEventListener('change', compileNow);

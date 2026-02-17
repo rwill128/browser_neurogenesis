@@ -141,6 +141,40 @@ function readImportScale() {
   return Math.max(0.05, Math.min(2, raw));
 }
 
+function formatSliderValue(inputEl) {
+  const raw = Number(inputEl?.value);
+  const decimals = Number(inputEl?.dataset?.decimals);
+  if (!Number.isFinite(raw)) return String(inputEl?.value ?? '');
+  if (Number.isFinite(decimals) && decimals >= 0) return raw.toFixed(decimals);
+  return String(raw);
+}
+
+function refreshSliderReadoutById(inputId) {
+  if (!inputId) return;
+  const inputEl = document.getElementById(inputId);
+  const readoutEl = document.querySelector(`[data-readout-for="${inputId}"]`);
+  if (!inputEl || !readoutEl) return;
+  readoutEl.textContent = formatSliderValue(inputEl);
+}
+
+function refreshAllSliderReadouts() {
+  const readouts = document.querySelectorAll('[data-readout-for]');
+  for (const el of readouts) {
+    const inputId = el.getAttribute('data-readout-for');
+    refreshSliderReadoutById(inputId);
+  }
+}
+
+function bindSliderReadouts() {
+  const sliders = document.querySelectorAll('input[type="range"][id]');
+  for (const slider of sliders) {
+    const update = () => refreshSliderReadoutById(slider.id);
+    slider.addEventListener('input', update);
+    slider.addEventListener('change', update);
+  }
+  refreshAllSliderReadouts();
+}
+
 function createBuffer(device, bytes, usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC) {
   return device.createBuffer({ size: bytes, usage });
 }
@@ -5172,6 +5206,7 @@ async function start() {
   running = true;
   if (fpsHud) fpsHud.textContent = 'FPS: --';
 
+  refreshAllSliderReadouts();
   const selectedPreset = scenarioPresetEl?.value || 'baseline';
   if (selectedPreset.startsWith('mini:') && generatedMiniScenarios.size === 0) {
     await loadGeneratedMiniScenarios();
@@ -5207,6 +5242,8 @@ function stop() {
   log('stopped');
 }
 
+bindSliderReadouts();
+
 runBtn.addEventListener('click', () => start().catch((e) => log({ ok: false, error: String(e) })));
 stopBtn.addEventListener('click', stop);
 clearViscBtn.addEventListener('click', resetViscMap);
@@ -5222,6 +5259,7 @@ if (scenarioPresetEl) {
       return;
     }
     applyScenarioPreset(sim, preset);
+    refreshAllSliderReadouts();
   });
 }
 

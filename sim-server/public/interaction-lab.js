@@ -1,6 +1,10 @@
 const windFrame = document.getElementById('windFrame');
 const scenarioPresetEl = document.getElementById('scenarioPreset');
 const loadPresetBtn = document.getElementById('loadPresetBtn');
+const randomScenarioBtn = document.getElementById('randomScenarioBtn');
+const curriculumPrevBtn = document.getElementById('curriculumPrevBtn');
+const curriculumNextBtn = document.getElementById('curriculumNextBtn');
+const curriculumStatusEl = document.getElementById('curriculumStatus');
 const scenarioPresetHintEl = document.getElementById('scenarioPresetHint');
 const fixtureTypeEl = document.getElementById('fixtureType');
 const motionModeEl = document.getElementById('motionMode');
@@ -28,6 +32,9 @@ const EDGE_VEL_BLOCK = 1;
 let embedReady = false;
 let lastPayload = null;
 let scenarioPresets = [];
+let currentScenarioMeta = null;
+let curriculumOrder = [];
+let curriculumIndex = -1;
 
 const DEFAULT_SCENARIO_PRESETS = [
   {
@@ -95,6 +102,14 @@ const DEFAULT_SCENARIO_PRESETS = [
     velocityMode: 'pass',
     momentum: 0.6,
   },
+];
+
+const CURRICULUM_DEFAULT_IDS = [
+  'rigid-red-noop-block-pinned',
+  'rigid-red-eat-block-pinned',
+  'soft-green-noop-block-pinned',
+  'soft-green-eat-block-pinned',
+  'rigid-blue-eat-pass-circle',
 ];
 
 function clamp(v, lo, hi) {
@@ -178,7 +193,21 @@ function setInputValue(el, value) {
   if (Number.isFinite(n)) el.value = String(n);
 }
 
-function applyScenarioPreset(preset) {
+function randomChoice(arr) {
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function randomInRange(min, max, step = 0.05) {
+  const lo = Number(min);
+  const hi = Number(max);
+  const st = Math.max(1e-6, Number(step) || 0.05);
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return lo;
+  const n = lo + Math.random() * (hi - lo);
+  return Math.round(n / st) * st;
+}
+
+function applyScenarioPreset(preset, meta = null) {
   if (!preset || typeof preset !== 'object') return;
   setControlValue(fixtureTypeEl, preset.fixtureType || 'rigid-line');
   setControlValue(motionModeEl, preset.motionMode || 'pinned');
@@ -189,6 +218,12 @@ function applyScenarioPreset(preset) {
   setInputValue(circleSpeedEl, preset.circleSpeed ?? 0.8);
   setInputValue(momentumEl, preset.momentum ?? 1);
 
+  currentScenarioMeta = {
+    id: preset.id || null,
+    name: preset.name || preset.id || 'custom-scenario',
+    source: meta?.source || 'preset',
+  };
+
   if (scenarioPresetHintEl) {
     scenarioPresetHintEl.textContent = String(preset.description || '');
   }
@@ -197,6 +232,63 @@ function applyScenarioPreset(preset) {
 function getSelectedPreset() {
   const id = String(scenarioPresetEl?.value || '');
   return scenarioPresets.find((p) => String(p.id) === id) || null;
+}
+
+function resolveCurriculumOrder() {
+  const idSet = new Set(scenarioPresets.map((p) => String(p.id || '')));
+  curriculumOrder = CURRICULUM_DEFAULT_IDS.filter((id) => idSet.has(id));
+  if (curriculumOrder.length === 0) {
+    curriculumOrder = scenarioPresets.map((p) => String(p.id || '')).filter(Boolean);
+  }
+}
+
+function updateCurriculumStatus() {
+  if (!curriculumStatusEl) return;
+  if (curriculumOrder.length === 0 || curriculumIndex < 0) {
+    curriculumStatusEl.textContent = '';
+    return;
+  }
+  const id = curriculumOrder[curriculumIndex];
+  const preset = scenarioPresets.find((p) => String(p.id) === id);
+  const label = preset?.name || id;
+  curriculumStatusEl.textContent = `Curriculum ${curriculumIndex + 1}/${curriculumOrder.length}: ${label}`;
+}
+
+function loadCurriculumStep(nextIndex) {
+  if (curriculumOrder.length === 0) return false;
+  curriculumIndex = Math.max(0, Math.min(curriculumOrder.length - 1, Number(nextIndex) || 0));
+  const id = curriculumOrder[curriculumIndex];
+  const preset = scenarioPresets.find((p) => String(p.id) === id);
+  if (!preset) return false;
+  if (scenarioPresetEl) scenarioPresetEl.value = String(id);
+  applyScenarioPreset(preset, { source: 'curriculum' });
+  updateCurriculumStatus();
+  return true;
+}
+
+function generateRandomScenarioPreset() {
+  const fixtureType = randomChoice(['rigid-line', 'soft-line']) || 'rigid-line';
+  const motionMode = Math.random() < 0.7 ? 'pinned' : 'circle';
+  const dyeChannel = randomChoice(['r', 'g', 'b']) || 'r';
+  const dyeMode = Math.random() < 0.55 ? 'eat' : 'noop';
+  const velocityMode = Math.random() < 0.7 ? 'block' : 'pass';
+  const momentum = clamp(randomInRange(0.2, 1.0, 0.05), 0, 1);
+  const circleRadius = motionMode === 'circle' ? clamp(randomInRange(8, 22, 1), 0, 48) : 12;
+  const circleSpeed = motionMode === 'circle' ? clamp(randomInRange(0.35, 1.8, 0.05), 0, 6) : 0.8;
+
+  return {
+    id: `random-${timestampTag()}`,
+    name: 'Random generated scenario',
+    description: `Auto-generated: ${fixtureType}, ${motionMode}, ${dyeChannel.toUpperCase()} ${dyeMode.toUpperCase()}, velocity ${velocityMode.toUpperCase()}, momentum ${momentum.toFixed(2)}.`,
+    fixtureType,
+    motionMode,
+    circleRadius,
+    circleSpeed,
+    dyeChannel,
+    dyeMode,
+    velocityMode,
+    momentum,
+  };
 }
 
 function populateScenarioPresetDropdown() {
@@ -209,15 +301,18 @@ function populateScenarioPresetDropdown() {
     scenarioPresetEl.appendChild(opt);
   }
 
+  resolveCurriculumOrder();
   if (scenarioPresets.length > 0) {
     scenarioPresetEl.value = String(scenarioPresets[0].id);
-    applyScenarioPreset(scenarioPresets[0]);
+    applyScenarioPreset(scenarioPresets[0], { source: 'preset' });
+    curriculumIndex = curriculumOrder.findIndex((id) => id === String(scenarioPresets[0].id));
+    updateCurriculumStatus();
   }
 }
 
 async function loadScenarioPresetCatalog() {
   try {
-    const res = await fetch('/interaction-scenarios.json?v=20260217a', { cache: 'no-store' });
+    const res = await fetch('/interaction-scenarios.json?v=20260217b', { cache: 'no-store' });
     if (res.ok) {
       const json = await res.json();
       if (Array.isArray(json) && json.length > 0) {
@@ -384,10 +479,10 @@ function buildScenarioPayload() {
     },
   };
 
-  const activePreset = getSelectedPreset();
   const truthRow = {
-    scenarioPresetId: activePreset?.id || null,
-    scenarioPresetName: activePreset?.name || null,
+    scenarioPresetId: currentScenarioMeta?.id || null,
+    scenarioPresetName: currentScenarioMeta?.name || null,
+    scenarioSource: currentScenarioMeta?.source || 'manual',
     fixtureType,
     motionMode,
     channel,
@@ -407,7 +502,8 @@ function renderScenarioDebug(row, payload, extra = {}) {
     notes: {
       segmentLabelsInWindTunnel: 'R<body>:<edge> for rigid, S<softSpring> for soft',
       expectedSelectionRule: 'For each segment/channel: EAT=true removes dye, EAT=false is no-op',
-      screenshotWorkflow: 'Load scenario JSON -> Apply -> Download screenshot -> send screenshot for analysis',
+      screenshotWorkflow: 'Load/create scenario -> Apply -> Download screenshot -> send screenshot for analysis',
+      generationWorkflow: 'Use presets, curriculum buttons, or Random scenario to auto-generate cases',
     },
   }, null, 2);
 }
@@ -455,16 +551,47 @@ if (loadPresetBtn) {
   loadPresetBtn.addEventListener('click', () => {
     const preset = getSelectedPreset();
     if (!preset) return;
-    applyScenarioPreset(preset);
+    applyScenarioPreset(preset, { source: 'preset' });
+    curriculumIndex = curriculumOrder.findIndex((id) => id === String(preset.id));
+    updateCurriculumStatus();
     pushScenario();
     flashButton(loadPresetBtn, true, 'Loaded', 'Load failed');
+  });
+}
+
+if (randomScenarioBtn) {
+  randomScenarioBtn.addEventListener('click', () => {
+    const randomPreset = generateRandomScenarioPreset();
+    applyScenarioPreset(randomPreset, { source: 'random' });
+    curriculumIndex = -1;
+    updateCurriculumStatus();
+    pushScenario();
+    flashButton(randomScenarioBtn, true, 'Generated', 'Generate failed');
+  });
+}
+
+if (curriculumPrevBtn) {
+  curriculumPrevBtn.addEventListener('click', () => {
+    if (!loadCurriculumStep(curriculumIndex < 0 ? 0 : curriculumIndex - 1)) return;
+    pushScenario();
+    flashButton(curriculumPrevBtn, true, 'Loaded', 'Load failed');
+  });
+}
+
+if (curriculumNextBtn) {
+  curriculumNextBtn.addEventListener('click', () => {
+    if (!loadCurriculumStep(curriculumIndex < 0 ? 0 : curriculumIndex + 1)) return;
+    pushScenario();
+    flashButton(curriculumNextBtn, true, 'Loaded', 'Load failed');
   });
 }
 
 scenarioPresetEl?.addEventListener('change', () => {
   const preset = getSelectedPreset();
   if (!preset) return;
-  applyScenarioPreset(preset);
+  applyScenarioPreset(preset, { source: 'preset' });
+  curriculumIndex = curriculumOrder.findIndex((id) => id === String(preset.id));
+  updateCurriculumStatus();
   if (autoApplyEl?.checked) pushScenario();
 });
 
@@ -479,6 +606,13 @@ for (const el of [
   momentumEl,
 ]) {
   el?.addEventListener('change', () => {
+    if (!currentScenarioMeta || currentScenarioMeta.source !== 'manual') {
+      currentScenarioMeta = {
+        id: currentScenarioMeta?.id || null,
+        name: currentScenarioMeta?.name || 'manual-edit',
+        source: 'manual',
+      };
+    }
     if (autoApplyEl?.checked) pushScenario();
   });
 }
@@ -539,6 +673,13 @@ if (loadScenarioBtn && loadScenarioFile) {
       const raw = JSON.parse(text);
       const { payload, truthRow, source } = extractPayloadFromScenarioJson(raw);
       lastPayload = payload;
+      currentScenarioMeta = {
+        id: truthRow?.scenarioPresetId || null,
+        name: truthRow?.scenarioPresetName || f.name,
+        source: 'file',
+      };
+      curriculumIndex = -1;
+      updateCurriculumStatus();
       renderScenarioDebug(truthRow || { loadedFromFile: f.name }, payload, {
         loaded: { source, file: f.name },
       });

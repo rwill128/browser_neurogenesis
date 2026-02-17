@@ -21,6 +21,9 @@ const dyeModeLabelEl = document.getElementById('dyeModeLabel');
 const velocityModeEl = document.getElementById('velocityMode');
 const velocityContractHintEl = document.getElementById('velocityContractHint');
 const effectiveDyeModeStatusEl = document.getElementById('effectiveDyeModeStatus');
+const dyeModeHintEl = document.getElementById('dyeModeHint');
+const velocityModeHintEl = document.getElementById('velocityModeHint');
+const momentumHintEl = document.getElementById('momentumHint');
 const momentumEl = document.getElementById('momentum');
 const momentumValueEl = document.getElementById('momentumValue');
 const showSegmentIdsEl = document.getElementById('showSegmentIds');
@@ -166,6 +169,7 @@ function updateRangeValueLabels() {
     const v = normalizeNumericInput(momentumEl, 0, 1, 1, 2);
     momentumValueEl.textContent = v.toFixed(2);
   }
+  updateControlHints();
 }
 
 async function copyTextToClipboard(text) {
@@ -287,6 +291,7 @@ function updateDyeControlState() {
       : 'Current contract note: velocity=BLOCK is a hard boundary condition, so dye mode is locked to NO-OP.';
   }
   updateEffectiveDyeModeStatus();
+  updateControlHints();
 }
 
 function applyScenarioPreset(preset, meta = null) {
@@ -439,6 +444,30 @@ function updateEffectiveDyeModeStatus() {
     return;
   }
   effectiveDyeModeStatusEl.textContent = `Effective selected-channel dye behavior: ${effective === 'eat' ? 'EAT' : 'NO-OP'}`;
+}
+
+function updateControlHints() {
+  const velocityMode = String(velocityModeEl?.value || 'block').toLowerCase();
+  const requestedDyeMode = String(dyeModeEl?.value || 'noop').toLowerCase();
+  const effective = effectiveDyeMode(requestedDyeMode, velocityMode);
+  const momentum = clamp(momentumEl?.value, 0, 1);
+
+  if (dyeModeHintEl) {
+    dyeModeHintEl.textContent = effective === 'eat'
+      ? 'Dye mode: selected channel is removed when fluid crosses the segment.'
+      : 'Dye mode: selected channel passes through unchanged.';
+  }
+
+  if (velocityModeHintEl) {
+    velocityModeHintEl.textContent = velocityMode === 'block'
+      ? 'Velocity mode: BLOCK makes this segment a hard flow boundary.'
+      : 'Velocity mode: PASS allows fluid to cross this segment.';
+  }
+
+  if (momentumHintEl) {
+    const pct = Math.round(momentum * 100);
+    momentumHintEl.textContent = `Momentum coupling: ${pct}% transfer from fluid to fixture (0% decoupled, 100% fully coupled).`;
+  }
 }
 
 function velocityModeCode(mode) {
@@ -787,7 +816,10 @@ for (const el of [
   el?.addEventListener('change', () => {
     if (el === motionModeEl) updateMotionControlState();
     if (el === velocityModeEl) updateDyeControlState();
-    else if (el === dyeModeEl) updateEffectiveDyeModeStatus();
+    else if (el === dyeModeEl) {
+      updateEffectiveDyeModeStatus();
+      updateControlHints();
+    }
     if (el === circleRadiusEl || el === circleSpeedEl || el === momentumEl) updateRangeValueLabels();
     if (!currentScenarioMeta || currentScenarioMeta.source !== 'manual') {
       currentScenarioMeta = {

@@ -12,7 +12,6 @@ const autoApplyEl = document.getElementById('autoApply');
 const scenarioOut = document.getElementById('scenarioOut');
 
 const EDGE_DYE_PASS = 0;
-const EDGE_DYE_BLOCK = 1;
 const EDGE_DYE_EAT = 2;
 const EDGE_VEL_PASS = 0;
 const EDGE_VEL_BLOCK = 1;
@@ -27,10 +26,8 @@ function clamp(v, lo, hi) {
 }
 
 function dyeModeCode(mode) {
-  const m = String(mode || 'block').toLowerCase();
-  if (m === 'eat') return EDGE_DYE_EAT;
-  if (m === 'pass') return EDGE_DYE_PASS;
-  return EDGE_DYE_BLOCK;
+  const m = String(mode || 'noop').toLowerCase();
+  return m === 'eat' ? EDGE_DYE_EAT : EDGE_DYE_PASS;
 }
 
 function velocityModeCode(mode) {
@@ -114,7 +111,7 @@ function buildScenarioPayload() {
   const fixtureType = String(fixtureTypeEl?.value || 'rigid-line');
   const motionMode = String(motionModeEl?.value || 'pinned');
   const channel = String(dyeChannelEl?.value || 'r');
-  const dyeMode = String(dyeModeEl?.value || 'block');
+  const dyeMode = String(dyeModeEl?.value || 'noop');
   const velocityMode = String(velocityModeEl?.value || 'block');
   const momentum = clamp(momentumEl?.value, 0, 1);
 

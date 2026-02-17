@@ -183,42 +183,23 @@ function edgeVelocityModeToScalar(mode) {
 
 function edgeModeScalarPreview(v) {
   const n = Math.max(0, Math.min(1, Number(v) || 0));
-  if (n >= 0.67) return 255; // EAT
-  if (n >= 0.34) return 160; // PASS
-  return 0; // BLOCK
-}
-
-function winnerModeScalar(block, pass, eat) {
-  const b = Math.max(0, Math.min(1, Number(block) || 0));
-  const p = Math.max(0, Math.min(1, Number(pass) || 0));
-  const e = Math.max(0, Math.min(1, Number(eat) || 0));
-  if (e > p && e > b) return EDGE_DYE_EAT_SCALAR;
-  if (p > b && p > e) return EDGE_DYE_PASS_SCALAR;
-  return EDGE_DYE_BLOCK_SCALAR;
-}
-
-function winnerTakeAllDyeMode(block, pass, eat) {
-  const b = Math.max(0, Math.min(1, Number(block) || 0));
-  const p = Math.max(0, Math.min(1, Number(pass) || 0));
-  const e = Math.max(0, Math.min(1, Number(eat) || 0));
-  if (e > p && e > b) return 2; // EAT
-  if (p > b && p > e) return 0; // PASS
-  return 1; // BLOCK (tie fallback)
+  if (n >= 0.67) return 255; // EAT=true
+  return 160; // NO-OP (EAT=false)
 }
 
 function syncSoftDyeModeMapsFromWinnerFields() {
   for (let i = 0; i < W * H; i++) {
-    softEdgeDyeModeMapR[i] = winnerModeScalar(softEdgeDyeBlockMapR[i], softEdgeDyePassMapR[i], softEdgeDyeEatMapR[i]);
-    softEdgeDyeModeMapG[i] = winnerModeScalar(softEdgeDyeBlockMapG[i], softEdgeDyePassMapG[i], softEdgeDyeEatMapG[i]);
-    softEdgeDyeModeMapB[i] = winnerModeScalar(softEdgeDyeBlockMapB[i], softEdgeDyePassMapB[i], softEdgeDyeEatMapB[i]);
+    softEdgeDyeModeMapR[i] = (Number(softEdgeDyeEatMapR[i]) || 0) >= 0.5 ? EDGE_DYE_EAT_SCALAR : EDGE_DYE_PASS_SCALAR;
+    softEdgeDyeModeMapG[i] = (Number(softEdgeDyeEatMapG[i]) || 0) >= 0.5 ? EDGE_DYE_EAT_SCALAR : EDGE_DYE_PASS_SCALAR;
+    softEdgeDyeModeMapB[i] = (Number(softEdgeDyeEatMapB[i]) || 0) >= 0.5 ? EDGE_DYE_EAT_SCALAR : EDGE_DYE_PASS_SCALAR;
   }
 }
 
 function syncRigidDyeModeMapsFromWinnerFields() {
   for (let i = 0; i < W * H; i++) {
-    rigidEdgeDyeModeMapR[i] = winnerModeScalar(rigidEdgeDyeBlockMapR[i], rigidEdgeDyePassMapR[i], rigidEdgeDyeEatMapR[i]);
-    rigidEdgeDyeModeMapG[i] = winnerModeScalar(rigidEdgeDyeBlockMapG[i], rigidEdgeDyePassMapG[i], rigidEdgeDyeEatMapG[i]);
-    rigidEdgeDyeModeMapB[i] = winnerModeScalar(rigidEdgeDyeBlockMapB[i], rigidEdgeDyePassMapB[i], rigidEdgeDyeEatMapB[i]);
+    rigidEdgeDyeModeMapR[i] = (Number(rigidEdgeDyeEatMapR[i]) || 0) >= 0.5 ? EDGE_DYE_EAT_SCALAR : EDGE_DYE_PASS_SCALAR;
+    rigidEdgeDyeModeMapG[i] = (Number(rigidEdgeDyeEatMapG[i]) || 0) >= 0.5 ? EDGE_DYE_EAT_SCALAR : EDGE_DYE_PASS_SCALAR;
+    rigidEdgeDyeModeMapB[i] = (Number(rigidEdgeDyeEatMapB[i]) || 0) >= 0.5 ? EDGE_DYE_EAT_SCALAR : EDGE_DYE_PASS_SCALAR;
 
     // Back-compat absorb-only maps (legacy payloads/tests use these names).
     rigidEdgeConsumeMapR[i] = Math.max(0, Math.min(1, Number(rigidEdgeDyeEatMapR[i]) || 0));
@@ -231,13 +212,9 @@ function populateWinnerFieldsFromModeScalarMap(modeMap, blockMap, passMap, eatMa
   if (!modeMap || modeMap.length !== W * H) return;
   for (let i = 0; i < W * H; i++) {
     const s = Math.max(0, Math.min(1, Number(modeMap[i]) || 0));
-    if (s >= 0.67) {
-      blockMap[i] = 0; passMap[i] = 0; eatMap[i] = s;
-    } else if (s >= 0.34) {
-      blockMap[i] = 0; passMap[i] = s; eatMap[i] = 0;
-    } else {
-      blockMap[i] = Math.max(blockMap[i], 1 - s); passMap[i] = 0; eatMap[i] = 0;
-    }
+    blockMap[i] = 0;
+    passMap[i] = 0;
+    eatMap[i] = s >= 0.67 ? s : 0;
   }
 }
 
@@ -261,25 +238,18 @@ function sampleSegmentAverageMap(field, ax, ay, bx, by, fallback = 0) {
 
 function dyeModeNameFromCode(mode) {
   const m = Number(mode);
-  if (m === 2) return 'EAT';
-  if (m === 0) return 'PASS';
-  return 'BLOCK';
+  return m === 2 ? 'EAT' : 'NO-OP';
 }
 
 function velocityModeNameFromCode(mode) {
   return Number(mode) === 0 ? 'PASS' : 'BLOCK';
 }
 
-function computeChannelWinnerStats(ax, ay, bx, by, blockMap, passMap, eatMap) {
-  const blockAvg = sampleSegmentAverageMap(blockMap, ax, ay, bx, by, 0);
-  const passAvg = sampleSegmentAverageMap(passMap, ax, ay, bx, by, 0);
+function computeChannelEatStats(ax, ay, bx, by, eatMap, eatThreshold = 0.5) {
   const eatAvg = sampleSegmentAverageMap(eatMap, ax, ay, bx, by, 0);
-  const winner = winnerTakeAllDyeMode(blockAvg, passAvg, eatAvg);
   return {
-    blockAvg: +blockAvg.toFixed(4),
-    passAvg: +passAvg.toFixed(4),
     eatAvg: +eatAvg.toFixed(4),
-    winner: dyeModeNameFromCode(winner),
+    eats: eatAvg >= eatThreshold,
   };
 }
 
@@ -325,10 +295,10 @@ function updateSegmentStatsPreview(spec) {
           g: dyeModeNameFromCode(dye[1]),
           b: dyeModeNameFromCode(dye[2]),
         },
-        winnerStats: {
-          r: computeChannelWinnerStats(ax, ay, bx, by, rigidEdgeDyeBlockMapR, rigidEdgeDyePassMapR, rigidEdgeDyeEatMapR),
-          g: computeChannelWinnerStats(ax, ay, bx, by, rigidEdgeDyeBlockMapG, rigidEdgeDyePassMapG, rigidEdgeDyeEatMapG),
-          b: computeChannelWinnerStats(ax, ay, bx, by, rigidEdgeDyeBlockMapB, rigidEdgeDyePassMapB, rigidEdgeDyeEatMapB),
+        eatStats: {
+          r: computeChannelEatStats(ax, ay, bx, by, rigidEdgeDyeEatMapR),
+          g: computeChannelEatStats(ax, ay, bx, by, rigidEdgeDyeEatMapG),
+          b: computeChannelEatStats(ax, ay, bx, by, rigidEdgeDyeEatMapB),
         },
       });
     }
@@ -366,10 +336,10 @@ function updateSegmentStatsPreview(spec) {
           g: dyeModeNameFromCode(dye[1]),
           b: dyeModeNameFromCode(dye[2]),
         },
-        winnerStats: {
-          r: computeChannelWinnerStats(ax, ay, bx, by, softEdgeDyeBlockMapR, softEdgeDyePassMapR, softEdgeDyeEatMapR),
-          g: computeChannelWinnerStats(ax, ay, bx, by, softEdgeDyeBlockMapG, softEdgeDyePassMapG, softEdgeDyeEatMapG),
-          b: computeChannelWinnerStats(ax, ay, bx, by, softEdgeDyeBlockMapB, softEdgeDyePassMapB, softEdgeDyeEatMapB),
+        eatStats: {
+          r: computeChannelEatStats(ax, ay, bx, by, softEdgeDyeEatMapR),
+          g: computeChannelEatStats(ax, ay, bx, by, softEdgeDyeEatMapG),
+          b: computeChannelEatStats(ax, ay, bx, by, softEdgeDyeEatMapB),
         },
       });
       softGlobalIndex += 1;
@@ -964,6 +934,7 @@ function buildSpecFromCurrentFields(mesh, traitFields = null) {
     softSolverMode: softSolverModeEl?.value || 'membrane',
     membraneMinEdgeLength,
     membraneMaxEdgeLength,
+    dyeEatBooleanMode: true,
   });
 }
 
@@ -1128,7 +1099,7 @@ function drawFields() {
     softPermeabilityImg.data[i * 4 + 2] = spg;
     softPermeabilityImg.data[i * 4 + 3] = 255;
 
-    // Soft edge dye mode map (RGB channels show BLOCK/PASS/EAT quantized policy intensity).
+    // Soft edge dye mode map (RGB channels show NO-OP/EAT quantized policy intensity).
     softEdgeDyeModeImg.data[i * 4] = edgeModeScalarPreview(softDyeR);
     softEdgeDyeModeImg.data[i * 4 + 1] = edgeModeScalarPreview(softDyeG);
     softEdgeDyeModeImg.data[i * 4 + 2] = edgeModeScalarPreview(softDyeB);
@@ -1162,7 +1133,7 @@ function drawFields() {
     rigidEdgeVelocityModeImg.data[i * 4 + 2] = rvg;
     rigidEdgeVelocityModeImg.data[i * 4 + 3] = 255;
 
-    // Rigid edge dye mode map (RGB channels show BLOCK/PASS/EAT quantized policy intensity).
+    // Rigid edge dye mode map (RGB channels show NO-OP/EAT quantized policy intensity).
     rigidEdgeDyeModeImg.data[i * 4] = edgeModeScalarPreview(rigidDyeR);
     rigidEdgeDyeModeImg.data[i * 4 + 1] = edgeModeScalarPreview(rigidDyeG);
     rigidEdgeDyeModeImg.data[i * 4 + 2] = edgeModeScalarPreview(rigidDyeB);
@@ -1300,60 +1271,60 @@ function paintSoftPermeabilityMap(clientX, clientY, erase = false) {
   drawFields();
 }
 
-function resolveSoftDyeWinnerMap(channel, mode) {
+function resolveSoftDyeEatMap(channel) {
   const ch = String(channel || 'r').toLowerCase();
-  const m = String(mode || 'block').toLowerCase();
-  if (m === 'pass') {
-    if (ch === 'g') return softEdgeDyePassMapG;
-    if (ch === 'b') return softEdgeDyePassMapB;
-    return softEdgeDyePassMapR;
-  }
-  if (m === 'eat' || m === 'absorb') {
-    if (ch === 'g') return softEdgeDyeEatMapG;
-    if (ch === 'b') return softEdgeDyeEatMapB;
-    return softEdgeDyeEatMapR;
-  }
-  if (ch === 'g') return softEdgeDyeBlockMapG;
-  if (ch === 'b') return softEdgeDyeBlockMapB;
-  return softEdgeDyeBlockMapR;
+  if (ch === 'g') return softEdgeDyeEatMapG;
+  if (ch === 'b') return softEdgeDyeEatMapB;
+  return softEdgeDyeEatMapR;
 }
 
-function resolveRigidDyeWinnerMap(channel, mode) {
+function resolveRigidDyeEatMap(channel) {
   const ch = String(channel || 'r').toLowerCase();
-  const m = String(mode || 'block').toLowerCase();
-  if (m === 'pass') {
-    if (ch === 'g') return rigidEdgeDyePassMapG;
-    if (ch === 'b') return rigidEdgeDyePassMapB;
-    return rigidEdgeDyePassMapR;
+  if (ch === 'g') return rigidEdgeDyeEatMapG;
+  if (ch === 'b') return rigidEdgeDyeEatMapB;
+  return rigidEdgeDyeEatMapR;
+}
+
+function clearSoftDyeChannelMaps(channel, clientX, clientY) {
+  const ch = String(channel || 'r').toLowerCase();
+  const maps = ch === 'g'
+    ? [softEdgeDyeBlockMapG, softEdgeDyePassMapG, softEdgeDyeEatMapG]
+    : (ch === 'b'
+      ? [softEdgeDyeBlockMapB, softEdgeDyePassMapB, softEdgeDyeEatMapB]
+      : [softEdgeDyeBlockMapR, softEdgeDyePassMapR, softEdgeDyeEatMapR]);
+  for (const map of maps) {
+    paintScalarMap(map, softEdgeDyeModeCanvas, clientX, clientY, 0.0, 0.0, true);
   }
-  if (m === 'eat' || m === 'absorb') {
-    if (ch === 'g') return rigidEdgeDyeEatMapG;
-    if (ch === 'b') return rigidEdgeDyeEatMapB;
-    return rigidEdgeDyeEatMapR;
+}
+
+function clearRigidDyeChannelMaps(channel, clientX, clientY) {
+  const ch = String(channel || 'r').toLowerCase();
+  const maps = ch === 'g'
+    ? [rigidEdgeDyeBlockMapG, rigidEdgeDyePassMapG, rigidEdgeDyeEatMapG]
+    : (ch === 'b'
+      ? [rigidEdgeDyeBlockMapB, rigidEdgeDyePassMapB, rigidEdgeDyeEatMapB]
+      : [rigidEdgeDyeBlockMapR, rigidEdgeDyePassMapR, rigidEdgeDyeEatMapR]);
+  for (const map of maps) {
+    paintScalarMap(map, rigidEdgeDyeModeCanvas, clientX, clientY, 0.0, 0.0, true);
   }
-  if (ch === 'g') return rigidEdgeDyeBlockMapG;
-  if (ch === 'b') return rigidEdgeDyeBlockMapB;
-  return rigidEdgeDyeBlockMapR;
 }
 
 function paintSoftEdgeDyeModeMap(clientX, clientY, erase = false) {
   const channel = String(softEdgeDyeChannelEl?.value || 'r');
-  const mode = String(softEdgeDyeModeEl?.value || 'block');
+  const mode = String(softEdgeDyeModeEl?.value || 'noop');
   const paintValue = Number(softEdgeDyePaintEl?.value) || 1.0;
 
   if (channel === 'erase') {
-    for (const ch of ['r', 'g', 'b']) {
-      for (const m of ['block', 'pass', 'eat']) {
-        paintScalarMap(resolveSoftDyeWinnerMap(ch, m), softEdgeDyeModeCanvas, clientX, clientY, 0.0, 0.0, true);
-      }
-    }
+    for (const ch of ['r', 'g', 'b']) clearSoftDyeChannelMaps(ch, clientX, clientY);
     syncSoftDyeModeMapsFromWinnerFields();
     drawFields();
     return;
   }
 
-  const target = resolveSoftDyeWinnerMap(channel, mode);
-  paintScalarMap(target, softEdgeDyeModeCanvas, clientX, clientY, paintValue, 0.0, erase);
+  clearSoftDyeChannelMaps(channel, clientX, clientY);
+  if (!erase && mode === 'eat') {
+    paintScalarMap(resolveSoftDyeEatMap(channel), softEdgeDyeModeCanvas, clientX, clientY, paintValue, 0.0, false);
+  }
   syncSoftDyeModeMapsFromWinnerFields();
   drawFields();
 }
@@ -1412,22 +1383,20 @@ function paintRigidEdgeVelocityModeMap(clientX, clientY, erase = false) {
 
 function paintRigidEdgeDyeModeMap(clientX, clientY, erase = false) {
   const channel = String(rigidEdgeDyeChannelEl?.value || 'r');
-  const mode = String(rigidEdgeDyeModeEl?.value || 'block');
+  const mode = String(rigidEdgeDyeModeEl?.value || 'noop');
   const paintValue = Number(rigidEdgeDyePaintEl?.value) || 1.0;
 
   if (channel === 'erase') {
-    for (const ch of ['r', 'g', 'b']) {
-      for (const m of ['block', 'pass', 'eat']) {
-        paintScalarMap(resolveRigidDyeWinnerMap(ch, m), rigidEdgeDyeModeCanvas, clientX, clientY, 0.0, 0.0, true);
-      }
-    }
+    for (const ch of ['r', 'g', 'b']) clearRigidDyeChannelMaps(ch, clientX, clientY);
     syncRigidDyeModeMapsFromWinnerFields();
     drawFields();
     return;
   }
 
-  const target = resolveRigidDyeWinnerMap(channel, mode);
-  paintScalarMap(target, rigidEdgeDyeModeCanvas, clientX, clientY, paintValue, 0.0, erase);
+  clearRigidDyeChannelMaps(channel, clientX, clientY);
+  if (!erase && mode === 'eat') {
+    paintScalarMap(resolveRigidDyeEatMap(channel), rigidEdgeDyeModeCanvas, clientX, clientY, paintValue, 0.0, false);
+  }
   syncRigidDyeModeMapsFromWinnerFields();
   drawFields();
 }

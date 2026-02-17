@@ -49,12 +49,12 @@
             <option value="membraneEdge">Membrane edge-length field</option>
             <option value="membraneShape">Membrane stiffness field</option>
             <option value="softPermeability">Soft permeability field</option>
-            <option value="softEdgeDyeMode">Soft edge dye policy fields (BLOCK/PASS/EAT × R/G/B)</option>
+            <option value="softEdgeDyeMode">Soft edge dye EATS map (per-channel true/false)</option>
             <option value="softEdgeVelocityMode">Soft edge velocity mode field (BLOCK/PASS)</option>
             <option value="softEdgeMomentumMode">Soft edge momentum coupling field (0..1)</option>
             <option value="rigidPermeability">Rigid permeability field</option>
             <option value="rigidEdgeVelocityMode">Rigid edge velocity mode field (BLOCK/PASS)</option>
-            <option value="rigidEdgeDyeMode">Rigid edge dye policy fields (BLOCK/PASS/EAT × R/G/B)</option>
+            <option value="rigidEdgeDyeMode">Rigid edge dye EATS map (per-channel true/false)</option>
           </select>
         </label>
         <label>Trait paint mode
@@ -105,9 +105,8 @@
         </label>
         <label>Soft dye mode
           <select id="softEdgeDyeMode">
-            <option value="block" selected>BLOCK</option>
-            <option value="pass">PASS</option>
-            <option value="eat">EAT</option>
+            <option value="noop" selected>NO-OP (EATS=false)</option>
+            <option value="eat">EAT (EATS=true)</option>
           </select>
         </label>
         <label>Soft dye field paint (0..1) <input id="softEdgeDyePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
@@ -135,9 +134,8 @@
         </label>
         <label>Rigid dye mode
           <select id="rigidEdgeDyeMode">
-            <option value="block" selected>BLOCK</option>
-            <option value="pass">PASS</option>
-            <option value="eat">EAT</option>
+            <option value="noop" selected>NO-OP (EATS=false)</option>
+            <option value="eat">EAT (EATS=true)</option>
           </select>
         </label>
         <label>Rigid dye field paint (0..1) <input id="rigidEdgeDyePaintValue" type="number" value="1" min="0" max="1" step="0.05" /></label>
@@ -290,7 +288,7 @@
       <canvas id="softPermeabilityPaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="softEdgeDyeMode">
-      <div>Soft edge dye policy fields (BLOCK/PASS/EAT × R/G/B, winner-take-all per channel)</div>
+      <div>Soft edge dye EATS map (RGB channels, thresholded to EATS true/false per segment)</div>
       <canvas id="softEdgeDyeModePaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="softEdgeVelocityMode">
@@ -310,7 +308,7 @@
       <canvas id="rigidEdgeVelocityModePaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="rigidEdgeDyeMode">
-      <div>Rigid edge dye policy fields (BLOCK/PASS/EAT × R/G/B, winner-take-all per channel)</div>
+      <div>Rigid edge dye EATS map (RGB channels, thresholded to EATS true/false per segment)</div>
       <canvas id="rigidEdgeDyeModePaint" width="384" height="384"></canvas>
     </div>
     <div class="compiled-panel" id="compiledPanel">
@@ -319,7 +317,7 @@
     </div>
     <div class="wind-panel" id="windPanel">
       <div>Wind tunnel preview (GPU physics)</div>
-      <iframe id="windTunnelFrame" src="/gpu-lab.html?embed=1&v=20260216c" width="384" height="384" loading="lazy"></iframe>
+      <iframe id="windTunnelFrame" src="/gpu-lab.html?embed=1&v=20260216d" width="384" height="384" loading="lazy"></iframe>
     </div>
     <div class="segment-panel" id="segmentPanel">
       <div>Segment stats (ID aligns with wind tunnel labels)</div>
@@ -329,6 +327,6 @@
     </div>
   </div>
   <pre id="out">ready</pre>
-  <script type="module" src="/mesh-lab.js?v=20260216c"></script>
+  <script type="module" src="/mesh-lab.js?v=20260216d"></script>
 </body>
 </html>

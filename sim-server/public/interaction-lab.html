@@ -47,9 +47,8 @@
       </label>
       <label>Dye mode
         <select id="dyeMode">
-          <option value="block" selected>BLOCK</option>
-          <option value="pass">PASS</option>
-          <option value="eat">EAT</option>
+          <option value="noop" selected>NO-OP (EATS=false)</option>
+          <option value="eat">EAT (EATS=true)</option>
         </select>
       </label>
       <label>Velocity mode
@@ -71,7 +70,7 @@
   <div class="pane" style="margin-top:12px;">
     <div class="card">
       <div>Wind tunnel confrontation view</div>
-      <iframe id="windFrame" src="/gpu-lab.html?embed=1&v=20260216c" width="640" height="640" loading="lazy"></iframe>
+      <iframe id="windFrame" src="/gpu-lab.html?embed=1&v=20260216d" width="640" height="640" loading="lazy"></iframe>
     </div>
     <div class="card" style="width:520px;">
       <div>Scenario payload + current truth-table row</div>
@@ -79,6 +78,6 @@
     </div>
   </div>
 
-  <script type="module" src="/interaction-lab.js?v=20260216c"></script>
+  <script type="module" src="/interaction-lab.js?v=20260216d"></script>
 </body>
 </html>

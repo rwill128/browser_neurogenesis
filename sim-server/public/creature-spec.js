@@ -605,8 +605,14 @@ function winnerTakeAllDyeMode(blockValue, passValue, absorbValue) {
 
   if (absorb > pass && absorb > block) return EDGE_DYE_ABSORB;
   if (pass > block && pass > absorb) return EDGE_DYE_PASS;
-  // Deterministic tie fallback: BLOCK (safe default).
+  // Deterministic tie fallback: BLOCK (safe default for legacy winner maps).
   return EDGE_DYE_DEFLECT;
+}
+
+function eatBooleanDyeModeFromValue(v, threshold = 0.5) {
+  const value = clamp(Number(v) || 0, 0, 1);
+  const th = clamp(Number.isFinite(Number(threshold)) ? Number(threshold) : 0.5, 0, 1);
+  return value >= th ? EDGE_DYE_ABSORB : EDGE_DYE_PASS;
 }
 
 function buildRigidEdgeDyeModeFromPolicyFields(hull, fields, width, height, thresholds = {}) {
@@ -621,6 +627,7 @@ function buildRigidEdgeDyeModeFromPolicyFields(hull, fields, width, height, thre
   const eatB = normalizeOptionalScalarField(fields?.rigidEdgeDyeEatMapB);
 
   const hasWinnerMaps = !!(blockR || blockG || blockB || passR || passG || passB || eatR || eatG || eatB);
+  const hasEatBooleanMaps = (thresholds?.eatBooleanMode === true) && !!(eatR || eatG || eatB);
 
   const modeR = normalizeOptionalScalarField(fields?.rigidEdgeDyeModeMapR);
   const modeG = normalizeOptionalScalarField(fields?.rigidEdgeDyeModeMapG);
@@ -628,6 +635,7 @@ function buildRigidEdgeDyeModeFromPolicyFields(hull, fields, width, height, thre
 
   if (!hasWinnerMaps && !modeR && !modeG && !modeB) return null;
 
+  const eatTh = clamp(Number.isFinite(Number(thresholds?.rigidEdgeConsumeThreshold)) ? Number(thresholds.rigidEdgeConsumeThreshold) : 0.5, 0, 1);
   const sides = Math.max(0, hull?.length || 0);
   const out = [];
   for (let i = 0; i < sides; i++) {
@@ -638,7 +646,11 @@ function buildRigidEdgeDyeModeFromPolicyFields(hull, fields, width, height, thre
     const bx = Number(b?.x) || 0;
     const by = Number(b?.y) || 0;
 
-    const fromWinner = (blockField, passField, eatField, packedField) => {
+    const fromFields = (blockField, passField, eatField, packedField) => {
+      if (hasEatBooleanMaps && eatField) {
+        const eatV = sampleSegmentAverageField(eatField, width, height, ax, ay, bx, by, 0);
+        return eatBooleanDyeModeFromValue(eatV, eatTh);
+      }
       if (blockField || passField || eatField) {
         const blockV = blockField ? sampleSegmentAverageField(blockField, width, height, ax, ay, bx, by, 0) : 0;
         const passV = passField ? sampleSegmentAverageField(passField, width, height, ax, ay, bx, by, 0) : 0;
@@ -654,9 +666,9 @@ function buildRigidEdgeDyeModeFromPolicyFields(hull, fields, width, height, thre
     };
 
     out.push([
-      fromWinner(blockR, passR, eatR, modeR),
-      fromWinner(blockG, passG, eatG, modeG),
-      fromWinner(blockB, passB, eatB, modeB),
+      fromFields(blockR, passR, eatR, modeR),
+      fromFields(blockG, passG, eatG, modeG),
+      fromFields(blockB, passB, eatB, modeB),
     ]);
   }
   return out;
@@ -688,6 +700,7 @@ function applySoftEdgePoliciesFromFields(springs, nodes, fields, width, height, 
   const eatWinnerR = normalizeOptionalScalarField(fields?.softEdgeDyeEatMapR);
   const eatWinnerG = normalizeOptionalScalarField(fields?.softEdgeDyeEatMapG);
   const eatWinnerB = normalizeOptionalScalarField(fields?.softEdgeDyeEatMapB);
+  const hasEatBooleanWinnerMaps = (thresholds?.eatBooleanMode === true) && !!(eatWinnerR || eatWinnerG || eatWinnerB);
 
   const modeR = normalizeOptionalScalarField(fields?.softEdgeDyeModeMapR);
   const modeG = normalizeOptionalScalarField(fields?.softEdgeDyeModeMapG);
@@ -724,6 +737,10 @@ function applySoftEdgePoliciesFromFields(springs, nodes, fields, width, height, 
       const blockField = ci === 0 ? blockWinnerR : (ci === 1 ? blockWinnerG : blockWinnerB);
       const passWinnerField = ci === 0 ? passWinnerR : (ci === 1 ? passWinnerG : passWinnerB);
       const eatWinnerField = ci === 0 ? eatWinnerR : (ci === 1 ? eatWinnerG : eatWinnerB);
+      if (hasEatBooleanWinnerMaps && eatWinnerField) {
+        const eatV = sampleSegmentAverageField(eatWinnerField, width, height, ax, ay, bx, by, 0);
+        return eatBooleanDyeModeFromValue(eatV, eatTh);
+      }
       if (blockField || passWinnerField || eatWinnerField) {
         const blockV = blockField ? sampleSegmentAverageField(blockField, width, height, ax, ay, bx, by, 0) : 0;
         const passV = passWinnerField ? sampleSegmentAverageField(passWinnerField, width, height, ax, ay, bx, by, 0) : 0;
@@ -855,6 +872,7 @@ function buildRigidExportFromCompilerPieces(rigidPieces, nodes, options, width, 
       edgeDyeMode: buildRigidEdgeDyeModeFromPolicyFields(outerHull, options?.fields, width, height, {
         passThreshold: 0.34,
         absorbThreshold: 0.67,
+        eatBooleanMode: options?.dyeEatBooleanMode === true,
       }) || buildRigidEdgeConsumeDyeFromFields(
         outerHull,
         rigidConsumeFieldR,
@@ -951,6 +969,7 @@ function buildRigidExport(tris, nodes, options, width, height) {
         edgeDyeMode: buildRigidEdgeDyeModeFromPolicyFields(hull, options?.fields, width, height, {
           passThreshold: 0.34,
           absorbThreshold: 0.67,
+          eatBooleanMode: options?.dyeEatBooleanMode === true,
         }) || buildRigidEdgeConsumeDyeFromFields(
           hull,
           rigidConsumeFieldR,
@@ -1518,6 +1537,7 @@ function buildSoftMembraneExportFromField({ width, height, softField, edgeLength
         softPermeabilityThreshold,
         softEdgeConsumeThreshold: Number(options?.softEdgeConsumeThreshold),
         softEdgeVelocityThreshold: Number(options?.softEdgeVelocityThreshold),
+        eatBooleanMode: options?.dyeEatBooleanMode === true,
       },
     );
 
@@ -1877,6 +1897,7 @@ function buildSoftExport(tris, nodes, options, width, height, softCrossBeams = [
         softPermeabilityThreshold,
         softEdgeConsumeThreshold: Number(options?.softEdgeConsumeThreshold),
         softEdgeVelocityThreshold: Number(options?.softEdgeVelocityThreshold),
+        eatBooleanMode: options?.dyeEatBooleanMode === true,
       },
     );
 

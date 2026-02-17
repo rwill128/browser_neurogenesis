@@ -103,13 +103,13 @@ Used in force accumulation and feedback injection paths.
    - If an edge is stamped into `obstacleMask` (`velocity=BLOCK`), plume trajectories can be diverted before they reach the dye-mask contact path.
    - In practice this makes EAT less observable/reliable in BLOCK-heavy setups.
 
-2. **Single shared velocity field cannot express "red bounces, green/blue pass" as a true boundary condition**
-   - Today all RGB dye channels are advected by the same velocity field.
-   - That means you cannot get physically faithful per-channel wall dynamics (e.g., red reflected with side-shear while GB momentum passes through unchanged) from one shared `u,v` field alone.
+2. **Prototype channel-conditioned reflection is available in dye advection path**
+   - `dyeMode=BLOCK` (`DEFLECT`) for a selected channel uses channel-conditioned backtrace/deflection logic at boundaries.
+   - In Interaction Lab, this is exercised by setting `velocity=PASS` and `dyeMode=BLOCK` for the target channel.
 
-3. **What would be needed for true per-channel bounce/pass split**
-   - Channel-specific transport velocity (e.g., `u_r,v_r`, `u_g,v_g`, `u_b,v_b`) **or** an equivalent channel-conditioned flux/reflection operator at boundaries.
-   - Optional cross-coupling/mixing terms can be layered later, but the key requirement is channel-conditioned advection/flux.
+3. **Known limitation (shared momentum field)**
+   - Today all RGB channels still share one velocity field for transport momentum.
+   - So while dye flux can be channel-conditioned at the boundary (filter-like behavior), full per-channel momentum fidelity remains approximate versus a full multi-velocity model.
 
 ---
 

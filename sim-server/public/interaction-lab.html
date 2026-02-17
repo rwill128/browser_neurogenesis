@@ -65,8 +65,9 @@
       </label>
       <label>Dye mode
         <select id="dyeMode">
-          <option value="noop" selected>NO-OP (EATS=false)</option>
-          <option value="eat">EAT (EATS=true)</option>
+          <option value="pass" selected>PASS (channel transparent)</option>
+          <option value="eat">EAT (channel absorbed)</option>
+          <option value="block">BLOCK (channel reflected/deflected)</option>
         </select>
       </label>
       <label>Velocity mode
@@ -84,7 +85,7 @@
       <span class="hint">Goal: visually confront each truth-table row under a controlled micro setup while keeping full GPU solver path active.</span>
     </div>
     <div class="row">
-      <span class="hint">Current contract note: velocity=BLOCK can divert flow before dye-edge contact, so EAT may appear muted in BLOCK setups. True per-channel bounce/pass filtering needs channel-conditioned transport (not yet implemented).</span>
+      <span class="hint">Current contract note: velocity=BLOCK can divert flow before dye-edge contact, so EAT may appear muted in BLOCK setups. For channel-selective filtering, use velocity=PASS + dye mode BLOCK on the selected channel (prototype channel-conditioned dye reflection path).</span>
     </div>
   </div>
 
@@ -111,6 +112,6 @@
     </div>
   </div>
 
-  <script type="module" src="/interaction-lab.js?v=20260217d"></script>
+  <script type="module" src="/interaction-lab.js?v=20260217e"></script>
 </body>
 </html>

@@ -86,6 +86,26 @@ test('gpu-lab dye advection honors obstacle mask to prevent through-body leakage
   );
 });
 
+test('gpu-lab swept dye relocation subtracts absorbed channels before depositing displaced mass', () => {
+  assert.match(
+    source,
+    /function redistributeSweptEdgeDyeTransport\([\s\S]*const \[modeR, modeG, modeB\] = unpackDyeMaskModes\(packedMask\);/,
+    'expected swept dye relocation path to decode per-channel dye mode mask',
+  );
+
+  assert.match(
+    source,
+    /const rvAfterEat = modeR === EDGE_DYE_MODE\.ABSORB \? 0 : rv;[\s\S]*const gvAfterEat = modeG === EDGE_DYE_MODE\.ABSORB \? 0 : gv;[\s\S]*const bvAfterEat = modeB === EDGE_DYE_MODE\.ABSORB \? 0 : bv;/,
+    'expected swept transport to subtract absorbed channels before relocation',
+  );
+
+  assert.match(
+    source,
+    /r\[ti\] = \(Number\(r\[ti\]\) \|\| 0\) \+ rvAfterEat;[\s\S]*g\[ti\] = \(Number\(g\[ti\]\) \|\| 0\) \+ gvAfterEat;[\s\S]*b\[ti\] = \(Number\(b\[ti\]\) \|\| 0\) \+ bvAfterEat;/,
+    'expected swept transport deposits to use post-EAT channel values only',
+  );
+});
+
 test('gpu-lab attempts storage-buffer stage limits 10 then 9 before default device request', () => {
   assert.match(
     source,

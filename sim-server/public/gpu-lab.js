@@ -4,6 +4,7 @@ import { resolveRigidVsSoftNodeCollision, resolveRigidVsRigidPolygonCollision, g
 import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops, recoverSoftSpringRests } from '/soft-xpbd.js';
 import { computeVectorRms, computeRigidAlignedPoseResidual } from '/soft-deformation-metrics.js';
 import { computeSoftClusterKinematics, projectNodesTowardClusterRigidMotion } from '/soft-cluster-kinematics.js';
+import { stepRigidBodiesGpuOnly } from '/runtime-solvers/stepRigidGpuOnly.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -2510,6 +2511,7 @@ function redistributeSweptEdgeDyeTransport(sim, r, g, b) {
   const weight = sim?.sweptEdgePushWeightCpu;
   const touched = Array.isArray(sim?.sweptEdgeTouched) ? sim.sweptEdgeTouched : [];
   const obstacle = sim?.obstacleMaskCpu;
+  const dyeModeMask = sim?.dyeModeMaskCpu;
 
   if (
     !(mask instanceof Float32Array) ||
@@ -2523,11 +2525,12 @@ function redistributeSweptEdgeDyeTransport(sim, r, g, b) {
     n <= 0 ||
     touched.length === 0
   ) {
-    return { touchedCells: 0, movedMass: 0, deletedMass: 0 };
+    return { touchedCells: 0, movedMass: 0, deletedMass: 0, eatenMass: 0 };
   }
 
   let movedMass = 0;
   let deletedMass = 0;
+  let eatenMass = 0;
   let touchedCells = 0;
 
   for (const idx of touched) {
@@ -2539,6 +2542,17 @@ function redistributeSweptEdgeDyeTransport(sim, r, g, b) {
     if (dyeSum <= 1e-5) continue;
 
     touchedCells += 1;
+    const packedMask = (dyeModeMask instanceof Uint32Array && idx >= 0 && idx < dyeModeMask.length)
+      ? (dyeModeMask[idx] | 0)
+      : 0;
+    const [modeR, modeG, modeB] = unpackDyeMaskModes(packedMask);
+
+    const rvAfterEat = modeR === EDGE_DYE_MODE.ABSORB ? 0 : rv;
+    const gvAfterEat = modeG === EDGE_DYE_MODE.ABSORB ? 0 : gv;
+    const bvAfterEat = modeB === EDGE_DYE_MODE.ABSORB ? 0 : bv;
+    eatenMass += (rv - rvAfterEat) + (gv - gvAfterEat) + (bv - bvAfterEat);
+
+    const dyeRemaining = rvAfterEat + gvAfterEat + bvAfterEat;
     const w = Math.max(1e-6, Number(weight[idx]) || 0);
     const dirX = (Number(pushX[idx]) || 0) / w;
     const dirY = (Number(pushY[idx]) || 0) / w;
@@ -2549,24 +2563,24 @@ function redistributeSweptEdgeDyeTransport(sim, r, g, b) {
     const stepY = dirY > 0.1 ? 1 : (dirY < -0.1 ? -1 : 0);
 
     let deposited = false;
-    if (stepX !== 0 || stepY !== 0) {
+    if (dyeRemaining > 1e-5 && (stepX !== 0 || stepY !== 0)) {
       for (let k = 1; k <= 2; k++) {
         const tx = x + stepX * k;
         const ty = y + stepY * k;
         if (tx < 0 || tx >= n || ty < 0 || ty >= n) continue;
         const ti = ty * n + tx;
         if ((Number(obstacle[ti]) || 0) > 0.5) continue;
-        r[ti] = (Number(r[ti]) || 0) + rv;
-        g[ti] = (Number(g[ti]) || 0) + gv;
-        b[ti] = (Number(b[ti]) || 0) + bv;
-        movedMass += dyeSum;
+        r[ti] = (Number(r[ti]) || 0) + rvAfterEat;
+        g[ti] = (Number(g[ti]) || 0) + gvAfterEat;
+        b[ti] = (Number(b[ti]) || 0) + bvAfterEat;
+        movedMass += dyeRemaining;
         deposited = true;
         break;
       }
     }
 
-    if (!deposited) {
-      deletedMass += dyeSum;
+    if (!deposited && dyeRemaining > 1e-5) {
+      deletedMass += dyeRemaining;
     }
 
     r[idx] = 0;
@@ -2574,7 +2588,7 @@ function redistributeSweptEdgeDyeTransport(sim, r, g, b) {
     b[idx] = 0;
   }
 
-  return { touchedCells, movedMass, deletedMass };
+  return { touchedCells, movedMass, deletedMass, eatenMass };
 }
 
 function applySoftSpringsXPBDVelocity(s, dtPos, stiffnessScale, lambdaCache, { skipClusterSet = null } = {}) {
@@ -3538,13 +3552,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   // Optional interaction-lab scripted body motion (pinned / circular drag).
   applyInteractionLabBodyMotion(sim);
 
-  const rigidEdgeMomentumScale = (rb) => {
-    const arr = Array.isArray(rb?.edgeMomentumCoupling) ? rb.edgeMomentumCoupling : (Array.isArray(rb?.edgeMomentumTransfer) ? rb.edgeMomentumTransfer : null);
-    if (!arr || arr.length === 0) return 1;
-    let sum = 0; let c = 0;
-    for (const v of arr) { const n = Number(v); if (Number.isFinite(n)) { sum += clamp(n,0,1); c++; } }
-    return c > 0 ? (sum / c) : 1;
-  };
+  const solverPath = normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath);
   const softNodeMomentumScale = (() => {
     const sums = new Float32Array(s.nodes.length);
     const counts = new Uint16Array(s.nodes.length);
@@ -3562,92 +3570,128 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   let rigidCarryTransfer = 0;
   let softCarryTransfer = 0;
 
-  for (let bi = 0; bi < bodies.rigid.length; bi++) {
-    const b = bodies.rigid[bi];
-    const edgeMomentumScale = rigidEdgeMomentumScale(b);
-    const invMass = 1 / Math.max(0.05, b.mass);
-    const invInertia = 1 / Math.max(0.05, b.inertia || 1);
-    const sampleVerts = rigidVerticesWorld(b);
-    const sampleCount = Math.max(1, sampleVerts.length);
-    let forceX = 0;
-    let forceY = 0;
-    let torque = 0;
+  if (solverPath === 'gpu-only') {
+    rigidCarryTransfer = stepRigidBodiesGpuOnly({
+      sim,
+      bodies,
+      vxField,
+      vyField,
+      n,
+      dt,
+      dtNorm,
+      dragK,
+      swimGain,
+      localHoneyDrag,
+      viscosityMotionResponse,
+      obstacleMask,
+      bodyFeedbackPrevVx,
+      bodyFeedbackPrevVy,
+      selfFeedbackSuppression: SELF_FEEDBACK_SUPPRESSION,
+      rigidVerticesWorld,
+      sampleFluidForBodyCoupling,
+      applyBounceBoundary,
+    });
+  } else {
+    for (let bi = 0; bi < bodies.rigid.length; bi++) {
+      const b = bodies.rigid[bi];
+      const arr = Array.isArray(b?.edgeMomentumCoupling) ? b.edgeMomentumCoupling : (Array.isArray(b?.edgeMomentumTransfer) ? b.edgeMomentumTransfer : null);
+      const edgeMomentumScale = (() => {
+        if (!arr || arr.length === 0) return 1;
+        let sum = 0; let c = 0;
+        for (const v of arr) {
+          const value = Number(v);
+          if (Number.isFinite(value)) {
+            sum += clamp(value, 0, 1);
+            c += 1;
+          }
+        }
+        return c > 0 ? (sum / c) : 1;
+      })();
 
-    for (let si = 0; si < sampleCount; si++) {
-      const sx = sampleVerts[si].x;
-      const sy = sampleVerts[si].y;
-      const rx = sx - b.x;
-      const ry = sy - b.y;
-      const fx = sampleFluidForBodyCoupling(
-        vxField,
-        n,
-        sx,
-        sy,
-        rx,
-        ry,
-        obstacleMask,
-        bodyFeedbackPrevVx,
-        SELF_FEEDBACK_SUPPRESSION,
-      );
-      const fy = sampleFluidForBodyCoupling(
-        vyField,
-        n,
-        sx,
-        sy,
-        rx,
-        ry,
-        obstacleMask,
-        bodyFeedbackPrevVy,
-        SELF_FEEDBACK_SUPPRESSION,
-      );
-      const localVx = b.vx + (-(b.omega || 0) * ry);
-      const localVy = b.vy + ((b.omega || 0) * rx);
-      const relX = fx - localVx;
-      const relY = fy - localVy;
-      const honey = localHoneyDrag(sx, sy);
-      const fpx = relX * dragK * honey * edgeMomentumScale;
-      const fpy = relY * dragK * honey * edgeMomentumScale;
-      forceX += fpx;
-      forceY += fpy;
-      torque += rx * fpy - ry * fpx;
+      const invMass = 1 / Math.max(0.05, b.mass);
+      const invInertia = 1 / Math.max(0.05, b.inertia || 1);
+      const sampleVerts = rigidVerticesWorld(b);
+      const sampleCount = Math.max(1, sampleVerts.length);
+      let forceX = 0;
+      let forceY = 0;
+      let torque = 0;
+
+      for (let si = 0; si < sampleCount; si++) {
+        const sx = sampleVerts[si].x;
+        const sy = sampleVerts[si].y;
+        const rx = sx - b.x;
+        const ry = sy - b.y;
+        const fx = sampleFluidForBodyCoupling(
+          vxField,
+          n,
+          sx,
+          sy,
+          rx,
+          ry,
+          obstacleMask,
+          bodyFeedbackPrevVx,
+          SELF_FEEDBACK_SUPPRESSION,
+        );
+        const fy = sampleFluidForBodyCoupling(
+          vyField,
+          n,
+          sx,
+          sy,
+          rx,
+          ry,
+          obstacleMask,
+          bodyFeedbackPrevVy,
+          SELF_FEEDBACK_SUPPRESSION,
+        );
+        const localVx = b.vx + (-(b.omega || 0) * ry);
+        const localVy = b.vy + ((b.omega || 0) * rx);
+        const relX = fx - localVx;
+        const relY = fy - localVy;
+        const honey = localHoneyDrag(sx, sy);
+        const fpx = relX * dragK * honey * edgeMomentumScale;
+        const fpy = relY * dragK * honey * edgeMomentumScale;
+        forceX += fpx;
+        forceY += fpy;
+        torque += rx * fpy - ry * fpx;
+      }
+
+      forceX /= sampleCount;
+      forceY /= sampleCount;
+      torque /= sampleCount;
+
+      const ax = forceX * invMass;
+      const ay = forceY * invMass;
+      const alpha = torque * invInertia;
+
+      const swimPhase = sim.frame * 0.08 + bi * 2.1;
+      const swimX = swimGain * Math.cos(swimPhase) * 0.012 * invMass;
+      const swimY = swimGain * Math.sin(swimPhase * 1.6) * 0.009 * invMass;
+      const swimTorque = swimGain * Math.sin(swimPhase * 1.1) * 0.0025;
+
+      b.vx += ax * dt * 60 + swimX * dtNorm;
+      b.vy += ay * dt * 60 + swimY * dtNorm;
+      b.omega = (b.omega || 0) + alpha * dt * 60 + swimTorque * dtNorm;
+
+      const centerHoney = localHoneyDrag(b.x, b.y);
+      const rigidVisc = viscosityMotionResponse(centerHoney, 3.2);
+      b.vx *= rigidVisc.damp;
+      b.vy *= rigidVisc.damp;
+      b.omega *= Math.max(0.72, 0.99 - 0.01 * centerHoney);
+
+      const bMax = rigidVisc.vmax;
+      const bMag = Math.hypot(b.vx, b.vy);
+      if (bMag > bMax) {
+        b.vx = (b.vx / bMag) * bMax;
+        b.vy = (b.vy / bMag) * bMax;
+      }
+      b.omega = Math.max(-0.25, Math.min(0.25, b.omega));
+
+      rigidCarryTransfer += Math.hypot(ax, ay);
+      b.x = b.x + b.vx * dt * 22;
+      b.y = b.y + b.vy * dt * 28;
+      b.theta = (b.theta || 0) + b.omega * dt * 60;
+      applyBounceBoundary(b, n, 0.84);
     }
-
-    forceX /= sampleCount;
-    forceY /= sampleCount;
-    torque /= sampleCount;
-
-    const ax = forceX * invMass;
-    const ay = forceY * invMass;
-    const alpha = torque * invInertia;
-
-    const swimPhase = sim.frame * 0.08 + bi * 2.1;
-    const swimX = swimGain * Math.cos(swimPhase) * 0.012 * invMass;
-    const swimY = swimGain * Math.sin(swimPhase * 1.6) * 0.009 * invMass;
-    const swimTorque = swimGain * Math.sin(swimPhase * 1.1) * 0.0025;
-
-    b.vx += ax * dt * 60 + swimX * dtNorm;
-    b.vy += ay * dt * 60 + swimY * dtNorm;
-    b.omega = (b.omega || 0) + alpha * dt * 60 + swimTorque * dtNorm;
-
-    const centerHoney = localHoneyDrag(b.x, b.y);
-    const rigidVisc = viscosityMotionResponse(centerHoney, 3.2);
-    b.vx *= rigidVisc.damp;
-    b.vy *= rigidVisc.damp;
-    b.omega *= Math.max(0.72, 0.99 - 0.01 * centerHoney);
-
-    const bMax = rigidVisc.vmax;
-    const bMag = Math.hypot(b.vx, b.vy);
-    if (bMag > bMax) {
-      b.vx = (b.vx / bMag) * bMax;
-      b.vy = (b.vy / bMag) * bMax;
-    }
-    b.omega = Math.max(-0.25, Math.min(0.25, b.omega));
-
-    rigidCarryTransfer += Math.hypot(ax, ay);
-    b.x = b.x + b.vx * dt * 22;
-    b.y = b.y + b.vy * dt * 28;
-    b.theta = (b.theta || 0) + b.omega * dt * 60;
-    applyBounceBoundary(b, n, 0.84);
   }
 
   const softMembraneClusterSet = ensureSoftMembraneClusterSet(sim);
@@ -5272,7 +5316,7 @@ async function initSim() {
     couplingTelemetry: [],
     lastFluidObstacleStats: { rigidBlockedEdges: 0, softBlockedEdges: 0, blockedEdgeCount: 0, blockedCells: 0, sweptCells: 0 },
     lastDyeMaskStats: { rigidEdges: 0, softEdges: 0, nonPassCells: 0 },
-    lastSweptDyeTransportStats: { touchedCells: 0, movedMass: 0, deletedMass: 0 },
+    lastSweptDyeTransportStats: { touchedCells: 0, movedMass: 0, deletedMass: 0, eatenMass: 0 },
     overlayShowSegmentIds: true,
     overlayShowExtraVisuals: true,
     highlightSegmentId: null,
@@ -5511,6 +5555,7 @@ async function stepAndRender() {
         sweptDyeTouchedCellsNow: Number(sweptDyeTransportNow?.touchedCells) || 0,
         sweptDyeMovedMassNow: +((Number(sweptDyeTransportNow?.movedMass) || 0).toFixed(2)),
         sweptDyeDeletedMassNow: +((Number(sweptDyeTransportNow?.deletedMass) || 0).toFixed(2)),
+        sweptDyeEatenMassNow: +((Number(sweptDyeTransportNow?.eatenMass) || 0).toFixed(2)),
         softEdgePoliciesNow,
         paintValue: Number(paintValueEl?.value) || 0.85,
         brushSize: Number(brushSizeEl?.value) || 12,
@@ -5790,6 +5835,7 @@ window.__gpuLabApi = {
         touchedCells: Number(sim?.lastSweptDyeTransportStats?.touchedCells) || 0,
         movedMass: Number(sim?.lastSweptDyeTransportStats?.movedMass) || 0,
         deletedMass: Number(sim?.lastSweptDyeTransportStats?.deletedMass) || 0,
+        eatenMass: Number(sim?.lastSweptDyeTransportStats?.eatenMass) || 0,
       },
     };
   },

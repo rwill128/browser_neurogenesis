@@ -125,7 +125,7 @@
       <span class="hint">Goal: visually confront each truth-table row under a controlled micro setup while keeping full GPU solver path active.</span>
     </div>
     <div class="row">
-      <span id="velocityContractHint" class="hint">Current contract note: velocity=BLOCK acts as the real boundary condition. In Interaction Lab, dye EAT is automatically disabled when velocity=BLOCK (treated as NO-OP); EAT is active only when velocity=PASS.</span>
+      <span id="velocityContractHint" class="hint">Current contract note: velocity BLOCK/PASS and selected-channel dye EAT/NO-OP co-exist. With moving blockers, swept displacement transport subtracts eaten channels before relocating remaining dye mass.</span>
     </div>
   </div>
 
@@ -135,7 +135,7 @@
         <div>Wind tunnel confrontation view</div>
         <button id="downloadScreenshotBtn" class="copy-btn">Download screenshot</button>
       </div>
-      <iframe id="windFrame" src="/gpu-lab.html?embed=1&v=20260217g" width="640" height="640" loading="lazy"></iframe>
+      <iframe id="windFrame" src="/gpu-lab.html?embed=1&v=20260217h" width="640" height="640" loading="lazy"></iframe>
       <img id="captureThumb" class="thumb" alt="Latest interaction screenshot preview" />
     </div>
     <div class="card" style="width:520px;">
@@ -152,6 +152,6 @@
     </div>
   </div>
 
-  <script type="module" src="/interaction-lab.js?v=20260217n"></script>
+  <script type="module" src="/interaction-lab.js?v=20260217o"></script>
 </body>
 </html>

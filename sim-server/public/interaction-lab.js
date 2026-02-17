@@ -288,19 +288,12 @@ function updateMotionControlState() {
 }
 
 function updateDyeControlState() {
-  const velocityMode = String(velocityModeEl?.value || 'block').toLowerCase();
-  const allowEat = velocityMode === 'pass';
   if (dyeModeEl) {
-    if (!allowEat && String(dyeModeEl.value || 'noop').toLowerCase() === 'eat') {
-      dyeModeEl.value = 'noop';
-    }
-    dyeModeEl.disabled = !allowEat;
+    dyeModeEl.disabled = false;
   }
-  dyeModeLabelEl?.classList.toggle('control-disabled', !allowEat);
+  dyeModeLabelEl?.classList.remove('control-disabled');
   if (velocityContractHintEl) {
-    velocityContractHintEl.textContent = allowEat
-      ? 'Current contract note: velocity=PASS allows dye mode selection (NO-OP or EAT).'
-      : 'Current contract note: velocity=BLOCK is a hard boundary condition, so dye mode is locked to NO-OP.';
+    velocityContractHintEl.textContent = 'Current contract note: velocity BLOCK/PASS and selected-channel dye EAT/NO-OP now co-exist; with moving blockers, swept displacement transport subtracts eaten channels before relocation.';
   }
   updateEffectiveDyeModeStatus();
   updateControlHints();
@@ -454,10 +447,7 @@ function dyeModeCode(mode) {
   return EDGE_DYE_PASS;
 }
 
-function effectiveDyeMode(mode, velocityMode) {
-  // Contract: velocity BLOCK is the hard boundary condition; disable EAT in this branch.
-  const vel = String(velocityMode || 'block').toLowerCase();
-  if (vel !== 'pass') return 'noop';
+function effectiveDyeMode(mode, _velocityMode) {
   return String(mode || 'noop').toLowerCase() === 'eat' ? 'eat' : 'noop';
 }
 
@@ -466,11 +456,8 @@ function updateEffectiveDyeModeStatus() {
   const requested = String(dyeModeEl?.value || 'noop').toLowerCase();
   const velocityMode = String(velocityModeEl?.value || 'block').toLowerCase();
   const effective = effectiveDyeMode(requested, velocityMode);
-  if (requested === 'eat' && effective !== 'eat') {
-    effectiveDyeModeStatusEl.textContent = 'Effective selected-channel dye behavior: NO-OP (EAT disabled by velocity BLOCK)';
-    return;
-  }
-  effectiveDyeModeStatusEl.textContent = `Effective selected-channel dye behavior: ${effective === 'eat' ? 'EAT' : 'NO-OP'}`;
+  const velocityLabel = velocityMode === 'block' ? 'BLOCK' : 'PASS';
+  effectiveDyeModeStatusEl.textContent = `Effective selected-channel dye behavior: ${effective === 'eat' ? 'EAT' : 'NO-OP'} (velocity ${velocityLabel})`;
 }
 
 function updateControlHints() {
@@ -481,14 +468,14 @@ function updateControlHints() {
 
   if (dyeModeHintEl) {
     dyeModeHintEl.textContent = effective === 'eat'
-      ? 'Dye mode: selected channel is removed when fluid crosses the segment.'
+      ? 'Dye mode: selected channel is removed at segment contact (including swept relocation events).' 
       : 'Dye mode: selected channel passes through unchanged.';
   }
 
   if (velocityModeHintEl) {
     velocityModeHintEl.textContent = velocityMode === 'block'
-      ? 'Velocity mode: BLOCK makes this segment a hard flow boundary.'
-      : 'Velocity mode: PASS allows fluid to cross this segment.';
+      ? 'Velocity mode: BLOCK makes this segment a hard flow boundary while still allowing per-channel EAT/NO-OP dye policy.'
+      : 'Velocity mode: PASS allows fluid to cross this segment while applying selected-channel EAT/NO-OP dye policy.';
   }
 
   if (momentumHintEl) {
@@ -689,7 +676,7 @@ function renderScenarioDebug(row, payload, extra = {}) {
     notes: {
       segmentLabelsInWindTunnel: 'R<body>:<edge> for rigid, S<softSpring> for soft',
       expectedSelectionRule: 'For selected channel at each segment: NO-OP means no dye removal, EAT removes dye',
-      velocityDyeContract: 'velocity=BLOCK is treated as hard boundary condition, so requested EAT is auto-disabled (effective mode becomes NO-OP) unless velocity=PASS',
+      velocityDyeContract: 'velocity BLOCK/PASS and selected-channel EAT/NO-OP co-exist; swept moving-boundary displacement subtracts eaten channels before relocating remaining dye mass',
       screenshotWorkflow: 'Load/create scenario -> Apply -> Download screenshot -> send screenshot for analysis',
       generationWorkflow: 'Use presets, curriculum buttons, or Random scenario to auto-generate cases',
     },

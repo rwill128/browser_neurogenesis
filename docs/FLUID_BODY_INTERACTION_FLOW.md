@@ -107,10 +107,10 @@ Used in force accumulation and feedback injection paths.
    - Interaction Lab exposes dye as `EAT` or `NO-OP` per selected channel.
    - `BLOCK`/`DEFLECT` is not exposed in this lab mode.
 
-3. **Velocity-gated EAT behavior in Interaction Lab**
-   - `velocity=BLOCK` is treated as the hard boundary branch.
-   - In this branch, requested `EAT` is automatically disabled (effective dye mode becomes `NO-OP`).
-   - `EAT` is active only when `velocity=PASS`.
+3. **Updated Interaction Lab contract: BLOCK/PASS velocity with EAT/NO-OP dye can co-exist**
+   - `velocity=BLOCK` still controls the hard flow boundary branch.
+   - Selected-channel dye `EAT`/`NO-OP` now remains active independently of velocity mode.
+   - For moving BLOCK boundaries, swept relocation transport subtracts eaten channels first, then relocates remaining dye mass.
 
 ---
 

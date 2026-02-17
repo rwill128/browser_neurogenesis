@@ -15,7 +15,9 @@ const circleSpeedLabelEl = document.getElementById('circleSpeedLabel');
 const motionHintEl = document.getElementById('motionHint');
 const dyeChannelEl = document.getElementById('dyeChannel');
 const dyeModeEl = document.getElementById('dyeMode');
+const dyeModeLabelEl = document.getElementById('dyeModeLabel');
 const velocityModeEl = document.getElementById('velocityMode');
+const velocityContractHintEl = document.getElementById('velocityContractHint');
 const momentumEl = document.getElementById('momentum');
 const showSegmentIdsEl = document.getElementById('showSegmentIds');
 const showExtraVisualsEl = document.getElementById('showExtraVisuals');
@@ -227,6 +229,23 @@ function updateMotionControlState() {
   }
 }
 
+function updateDyeControlState() {
+  const velocityMode = String(velocityModeEl?.value || 'block').toLowerCase();
+  const allowEat = velocityMode === 'pass';
+  if (dyeModeEl) {
+    if (!allowEat && String(dyeModeEl.value || 'noop').toLowerCase() === 'eat') {
+      dyeModeEl.value = 'noop';
+    }
+    dyeModeEl.disabled = !allowEat;
+  }
+  dyeModeLabelEl?.classList.toggle('control-disabled', !allowEat);
+  if (velocityContractHintEl) {
+    velocityContractHintEl.textContent = allowEat
+      ? 'Current contract note: velocity=PASS allows dye mode selection (NO-OP or EAT).'
+      : 'Current contract note: velocity=BLOCK is a hard boundary condition, so dye mode is locked to NO-OP.';
+  }
+}
+
 function applyScenarioPreset(preset, meta = null) {
   if (!preset || typeof preset !== 'object') return;
   setControlValue(fixtureTypeEl, preset.fixtureType || 'rigid-line');
@@ -238,6 +257,7 @@ function applyScenarioPreset(preset, meta = null) {
   setInputValue(circleSpeedEl, preset.circleSpeed ?? 0.8);
   setInputValue(momentumEl, preset.momentum ?? 1);
   updateMotionControlState();
+  updateDyeControlState();
 
   currentScenarioMeta = {
     id: preset.id || null,
@@ -661,6 +681,7 @@ for (const el of [
 ]) {
   el?.addEventListener('change', () => {
     if (el === motionModeEl) updateMotionControlState();
+    if (el === velocityModeEl) updateDyeControlState();
     if (!currentScenarioMeta || currentScenarioMeta.source !== 'manual') {
       currentScenarioMeta = {
         id: currentScenarioMeta?.id || null,
@@ -768,6 +789,7 @@ if (downloadScreenshotBtn) {
 }
 
 updateMotionControlState();
+updateDyeControlState();
 
 loadScenarioPresetCatalog().finally(() => {
   pushScenario();

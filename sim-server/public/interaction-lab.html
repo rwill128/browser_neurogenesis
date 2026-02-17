@@ -66,7 +66,7 @@
           <option value="b">Blue</option>
         </select>
       </label>
-      <label>Dye mode
+      <label id="dyeModeLabel">Dye mode
         <select id="dyeMode">
           <option value="noop" selected>NO-OP (EATS=false)</option>
           <option value="eat">EAT (EATS=true)</option>
@@ -89,7 +89,7 @@
       <span class="hint">Goal: visually confront each truth-table row under a controlled micro setup while keeping full GPU solver path active.</span>
     </div>
     <div class="row">
-      <span class="hint">Current contract note: velocity=BLOCK acts as the real boundary condition. In Interaction Lab, dye EAT is automatically disabled when velocity=BLOCK (treated as NO-OP); EAT is active only when velocity=PASS.</span>
+      <span id="velocityContractHint" class="hint">Current contract note: velocity=BLOCK acts as the real boundary condition. In Interaction Lab, dye EAT is automatically disabled when velocity=BLOCK (treated as NO-OP); EAT is active only when velocity=PASS.</span>
     </div>
   </div>
 
@@ -116,6 +116,6 @@
     </div>
   </div>
 
-  <script type="module" src="/interaction-lab.js?v=20260217g"></script>
+  <script type="module" src="/interaction-lab.js?v=20260217h"></script>
 </body>
 </html>

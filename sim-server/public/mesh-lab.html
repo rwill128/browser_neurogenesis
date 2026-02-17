@@ -20,6 +20,7 @@
     .ctrl-group > summary::-webkit-details-marker { display:none; }
     .ctrl-body { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:0 10px 10px 10px; }
     .ctrl-note { opacity:0.82; font-size:12px; }
+    .ctrl-subhead { width:100%; font-size:12px; font-weight:700; color:#b9d7ff; text-transform:uppercase; letter-spacing:0.04em; margin-top:2px; }
     label { transition: opacity 120ms ease; }
     label.control-disabled { opacity:0.45; }
     canvas { border:1px solid #333; image-rendering: pixelated; }
@@ -100,6 +101,7 @@
     <details class="ctrl-group">
       <summary>Body edge trait paint controls</summary>
       <div class="ctrl-body">
+        <div class="ctrl-subhead">Soft edge policies</div>
         <label>Soft permeability paint (0..1) <input id="softPermeabilityPaintValue" type="range" value="0" min="0" max="1" step="0.05" /> <span id="softPermeabilityPaintValueLabel">0.00</span></label>
         <label>Soft dye channel
           <select id="softEdgeDyeChannel">
@@ -123,6 +125,9 @@
           </select>
         </label>
         <label>Soft momentum paint (0..1) <input id="softEdgeMomentumPaintValue" type="range" value="1" min="0" max="1" step="0.05" /> <span id="softEdgeMomentumPaintValueLabel">1.00</span></label>
+      </div>
+      <div class="ctrl-body">
+        <div class="ctrl-subhead">Rigid edge policies</div>
         <label>Rigid permeability paint (0..1) <input id="rigidPermeabilityPaintValue" type="range" value="1" min="0" max="1" step="0.05" /> <span id="rigidPermeabilityPaintValueLabel">1.00</span></label>
         <label>Rigid velocity mode
           <select id="rigidEdgeVelocityMode">
@@ -145,6 +150,9 @@
           </select>
         </label>
         <label>Rigid dye field paint (0..1) <input id="rigidEdgeDyePaintValue" type="range" value="1" min="0" max="1" step="0.05" /> <span id="rigidEdgeDyePaintValueLabel">1.00</span></label>
+      </div>
+      <div class="ctrl-body">
+        <span class="ctrl-note">Tip: pick the matching "Field to paint" target first, then use the controls above for that body type.</span>
       </div>
     </details>
 

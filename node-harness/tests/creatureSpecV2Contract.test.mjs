@@ -1479,3 +1479,93 @@ test('buildBodiesFromCreatureSpec keeps edge BLOCK/PASS and dye EAT semantics si
   const allFinite = Object.values(gpuOnlySummary).every((v) => Number.isFinite(v));
   assert.equal(allFinite, true, 'gpu-only edge-policy summary must stay finite');
 });
+
+test('buildBodiesFromCreatureSpec keeps per-element geometry/mass signatures aligned across baseline and gpu-only paths', () => {
+  const mesh = sampleMesh();
+  const w = 16;
+
+  const softPermeabilityMap = new Float32Array(w * w).fill(0);
+  const softEdgeDyeEatMapR = new Float32Array(w * w).fill(0);
+  const softEdgeVelocityModeMap = new Float32Array(w * w).fill(0);
+  const rigidPermeabilityMap = new Float32Array(w * w).fill(0);
+  const rigidEdgeConsumeMapR = new Float32Array(w * w).fill(0);
+
+  // Deterministic mixed policy paint: include both pass/block and dye eat toggles.
+  softPermeabilityMap[4 * w + 5] = 1;
+  softPermeabilityMap[4 * w + 6] = 1;
+  softEdgeDyeEatMapR[6 * w + 6] = 1;
+  softEdgeVelocityModeMap[4 * w + 7] = 1;
+  rigidPermeabilityMap[2 * w + 4] = 1;
+  rigidEdgeConsumeMapR[4 * w + 3] = 1;
+
+  const spec = createCreatureSpecFromMesh(mesh, {
+    softSolverMode: 'spring',
+    fields: {
+      softPermeabilityMap,
+      softEdgeDyeEatMapR,
+      softEdgeVelocityModeMap,
+      rigidPermeabilityMap,
+      rigidEdgeConsumeMapR,
+    },
+  });
+
+  const baselineBodies = buildBodiesFromCreatureSpec(spec, 128, {
+    ...CONTROLS,
+    runtimeSolverPath: 'baseline',
+  });
+  const gpuOnlyBodies = buildBodiesFromCreatureSpec(spec, 128, {
+    ...CONTROLS,
+    runtimeSolverPath: 'gpu-only',
+  });
+
+  const tol = 1e-9;
+
+  assert.equal(gpuOnlyBodies.rigid.length, baselineBodies.rigid.length, 'rigid body count must stay path-invariant');
+  for (let i = 0; i < baselineBodies.rigid.length; i++) {
+    const base = baselineBodies.rigid[i];
+    const gpu = gpuOnlyBodies.rigid[i];
+
+    assert.ok(Math.abs((gpu.x || 0) - (base.x || 0)) <= tol, `rigid[${i}].x drifted`);
+    assert.ok(Math.abs((gpu.y || 0) - (base.y || 0)) <= tol, `rigid[${i}].y drifted`);
+    assert.ok(Math.abs((gpu.r || 0) - (base.r || 0)) <= tol, `rigid[${i}].r drifted`);
+    assert.ok(Math.abs((gpu.mass || 0) - (base.mass || 0)) <= tol, `rigid[${i}].mass drifted`);
+
+    assert.deepEqual(gpu.edgeBodyMode, base.edgeBodyMode, `rigid[${i}] edge body policy changed`);
+    assert.deepEqual(gpu.edgeDyeMode, base.edgeDyeMode, `rigid[${i}] edge dye policy changed`);
+    assert.deepEqual(gpu.edgeVelocityMode, base.edgeVelocityMode, `rigid[${i}] edge velocity policy changed`);
+  }
+
+  assert.equal(gpuOnlyBodies.soft.nodes.length, baselineBodies.soft.nodes.length, 'soft node count must stay path-invariant');
+  for (let i = 0; i < baselineBodies.soft.nodes.length; i++) {
+    const base = baselineBodies.soft.nodes[i];
+    const gpu = gpuOnlyBodies.soft.nodes[i];
+    assert.ok(Math.abs((gpu.x || 0) - (base.x || 0)) <= tol, `soft.node[${i}].x drifted`);
+    assert.ok(Math.abs((gpu.y || 0) - (base.y || 0)) <= tol, `soft.node[${i}].y drifted`);
+    assert.ok(Math.abs((gpu.mass || 0) - (base.mass || 0)) <= tol, `soft.node[${i}].mass drifted`);
+    assert.ok(Math.abs((gpu.r || 0) - (base.r || 0)) <= tol, `soft.node[${i}].r drifted`);
+  }
+
+  assert.equal(gpuOnlyBodies.soft.springs.length, baselineBodies.soft.springs.length, 'soft spring count must stay path-invariant');
+  for (let i = 0; i < baselineBodies.soft.springs.length; i++) {
+    const base = baselineBodies.soft.springs[i];
+    const gpu = gpuOnlyBodies.soft.springs[i];
+
+    assert.equal(gpu[0], base[0], `soft.spring[${i}] node A changed`);
+    assert.equal(gpu[1], base[1], `soft.spring[${i}] node B changed`);
+    assert.ok(Math.abs((gpu[2] || 0) - (base[2] || 0)) <= tol, `soft.spring[${i}] rest length drifted`);
+    assert.equal(gpu[3], base[3], `soft.spring[${i}] body policy changed`);
+    assert.deepEqual(gpu[4], base[4], `soft.spring[${i}] dye policy changed`);
+    assert.equal(gpu[5], base[5], `soft.spring[${i}] velocity policy changed`);
+    assert.ok(Math.abs((gpu[6] || 0) - (base[6] || 0)) <= tol, `soft.spring[${i}] momentum coupling drifted`);
+  }
+
+  // Hybrid linkage shape should remain stable through import on both paths.
+  assert.deepEqual(gpuOnlyBodies.hybrid, baselineBodies.hybrid, 'hybrid joint mapping must remain identical across paths');
+
+  const allFinite = [
+    ...gpuOnlyBodies.rigid.flatMap((rb) => [rb.x, rb.y, rb.r, rb.mass]),
+    ...gpuOnlyBodies.soft.nodes.flatMap((node) => [node.x, node.y, node.mass, node.r]),
+    ...gpuOnlyBodies.soft.springs.flatMap((sp) => [sp?.[0], sp?.[1], sp?.[2], sp?.[6]]),
+  ].every((v) => Number.isFinite(Number(v)));
+  assert.equal(allFinite, true, 'gpu-only import/output geometry signature must stay finite');
+});

@@ -697,7 +697,7 @@ function renderScenarioDebug(row, payload, extra = {}) {
 }
 
 function postPayloadToEmbed(payload) {
-  if (!embedReady || !windFrame?.contentWindow || !payload) return;
+  if (!windFrame?.contentWindow || !payload) return;
   windFrame.contentWindow.postMessage(payload, window.location.origin);
 }
 
@@ -746,6 +746,10 @@ function ensureEmbedStatusPoll() {
   embedStatusPollTimer = setInterval(() => {
     const status = getEmbedStatus();
     if (!status) return;
+    if (!embedReady) {
+      embedReady = true;
+      if (lastPayload) postPayloadToEmbed(lastPayload);
+    }
     maybeResyncEmbedMotion(status);
   }, 450);
 }
@@ -903,7 +907,9 @@ windFrame?.addEventListener('load', () => {
   embedReady = false;
   embedStallFrames = 0;
   lastEmbedFrame = -1;
+  ensureEmbedStatusPoll();
   setTimeout(() => {
+    if (getEmbedStatus()) embedReady = true;
     if (lastPayload) postPayloadToEmbed(lastPayload);
   }, 250);
 });
@@ -1003,6 +1009,7 @@ updateRangeValueLabels();
 updateMotionControlState();
 updateDyeControlState();
 updateApplyModeState();
+ensureEmbedStatusPoll();
 
 window.addEventListener('beforeunload', () => {
   if (embedStatusPollTimer) {

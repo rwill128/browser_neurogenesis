@@ -39,6 +39,8 @@ const softClusterFluidTorqueCouplingEl = document.getElementById('softClusterFlu
 const softClusterAngularProjectionEl = document.getElementById('softClusterAngularProjection');
 const softClusterCollisionAngularProjectionEl = document.getElementById('softClusterCollisionAngularProjection');
 const enableArtificialSwimEl = document.getElementById('enableArtificialSwim');
+const seedRigidBodiesEl = document.getElementById('seedRigidBodies');
+const seedSpringSoftBodiesEl = document.getElementById('seedSpringSoftBodies');
 const spawnMembraneCellsEl = document.getElementById('spawnMembraneCells');
 const enableWarningDeformInterventionsEl = document.getElementById('enableWarningDeformInterventions');
 const enableSevereDeformInterventionsEl = document.getElementById('enableSevereDeformInterventions');
@@ -159,6 +161,8 @@ function readControls() {
     softClusterAngularProjection: Math.max(0, Math.min(1, Number(softClusterAngularProjectionEl?.value) || SOFT_CLUSTER_ANGULAR_PROJECTION)),
     softClusterCollisionAngularProjection: Math.max(0, Math.min(1, Number(softClusterCollisionAngularProjectionEl?.value) || SOFT_CLUSTER_COLLISION_ANGULAR_PROJECTION)),
     enableArtificialSwim: !!enableArtificialSwimEl?.checked,
+    seedRigidBodies: (seedRigidBodiesEl?.checked !== false),
+    seedSpringSoftBodies: (seedSpringSoftBodiesEl?.checked !== false),
     spawnMembraneCells: !!spawnMembraneCellsEl?.checked,
     enableWarningDeformInterventions: (enableWarningDeformInterventionsEl?.checked !== false),
     enableSevereDeformInterventions: (enableSevereDeformInterventionsEl?.checked !== false),
@@ -1042,8 +1046,10 @@ function initBodies(n, controls) {
   const bodyScale = bigMode ? 0.5 : 1.0;
   // Keep the same primitive catalog across 128/256/512/1024+ so
   // deformation differences are easier to attribute to fluid resolution.
-  const rigidCount = Math.max(1, Math.min(1000, Math.round(Number(controls?.rigidBodyCount) || 10)));
-  const softClusterCount = 10;
+  const rigidCount = (controls?.seedRigidBodies === false)
+    ? 0
+    : Math.max(1, Math.min(1000, Math.round(Number(controls?.rigidBodyCount) || 10)));
+  const softClusterCount = (controls?.seedSpringSoftBodies === false) ? 0 : 10;
 
   const rigidShapeCycle = [3, 4, 5, 6];
   const rigid = [];
@@ -5291,10 +5297,17 @@ async function stepAndRender() {
     return;
   }
   // Body archetype selection changes require body re-seeding.
-  if (uiControls.spawnMembraneCells !== s.controls.spawnMembraneCells) {
+  if (
+    uiControls.seedRigidBodies !== s.controls.seedRigidBodies ||
+    uiControls.seedSpringSoftBodies !== s.controls.seedSpringSoftBodies ||
+    uiControls.spawnMembraneCells !== s.controls.spawnMembraneCells
+  ) {
     running = false;
     sim = null;
-    log({ ok: true, msg: `reinitializing for membrane-cell mode ${uiControls.spawnMembraneCells ? 'ON' : 'OFF'}` });
+    log({
+      ok: true,
+      msg: `reinitializing for seed toggles rigid=${uiControls.seedRigidBodies ? 'ON' : 'OFF'} springSoft=${uiControls.seedSpringSoftBodies ? 'ON' : 'OFF'} membraneSoft=${uiControls.spawnMembraneCells ? 'ON' : 'OFF'}`,
+    });
     await start();
     return;
   }
@@ -5485,6 +5498,8 @@ async function stepAndRender() {
         softClusterFluidTorqueCoupling: s.controls.softClusterFluidTorqueCoupling,
         softClusterAngularProjection: s.controls.softClusterAngularProjection,
         softClusterCollisionAngularProjection: s.controls.softClusterCollisionAngularProjection,
+        seedRigidBodies: s.controls.seedRigidBodies !== false,
+        seedSpringSoftBodies: s.controls.seedSpringSoftBodies !== false,
         spawnMembraneCells: !!s.controls.spawnMembraneCells,
         warningInterventions: s.controls.enableWarningDeformInterventions !== false,
         severeInterventions: s.controls.enableSevereDeformInterventions !== false,

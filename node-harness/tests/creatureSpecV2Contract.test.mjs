@@ -1612,5 +1612,37 @@ test('gpu-only buildBodiesFromCreatureSpec returns detached structures while pre
     gpuOnlyBodies.rigid[0].edgeDyeMode[0][0] = baselineRigidDye === 2 ? 1 : 2;
     assert.equal(baselineBodies.rigid[0].edgeDyeMode[0][0], baselineRigidDye,
       'gpu-only rigid edge dye tuple mutation must not leak into baseline output');
+
+    if (baselineBodies.rigid[0].verticesLocal?.length > 0) {
+      assert.notEqual(gpuOnlyBodies.rigid[0].verticesLocal, baselineBodies.rigid[0].verticesLocal,
+        'gpu-only rigid vertices array must be detached from baseline');
+      const baselineVertexX = baselineBodies.rigid[0].verticesLocal[0].x;
+      gpuOnlyBodies.rigid[0].verticesLocal[0].x += 0.75;
+      assert.equal(baselineBodies.rigid[0].verticesLocal[0].x, baselineVertexX,
+        'gpu-only rigid vertex mutation must not leak into baseline output');
+    }
+
+    if (baselineBodies.rigid[0].edgePermeabilityRGB?.length > 0) {
+      assert.notEqual(gpuOnlyBodies.rigid[0].edgePermeabilityRGB, baselineBodies.rigid[0].edgePermeabilityRGB,
+        'gpu-only rigid edge permeability array must be detached from baseline');
+      const baselineRigidPermeability = baselineBodies.rigid[0].edgePermeabilityRGB[0][0];
+      gpuOnlyBodies.rigid[0].edgePermeabilityRGB[0][0] = baselineRigidPermeability + 0.1;
+      assert.equal(baselineBodies.rigid[0].edgePermeabilityRGB[0][0], baselineRigidPermeability,
+        'gpu-only rigid edge permeability mutation must not leak into baseline output');
+    }
+  }
+
+  if (baselineBodies.hybrid.length > 0 && Array.isArray(baselineBodies.hybrid[0].localAnchor)) {
+    const baselineAnchorX = baselineBodies.hybrid[0].localAnchor[0];
+    gpuOnlyBodies.hybrid[0].localAnchor[0] = baselineAnchorX + 0.25;
+    assert.equal(baselineBodies.hybrid[0].localAnchor[0], baselineAnchorX,
+      'gpu-only hybrid localAnchor mutation must not leak into baseline output');
+  }
+
+  if (baselineBodies.softMembraneClusters.length > 0 && baselineBodies.softMembraneClusters[0].nodeIndices?.length > 0) {
+    const baselineClusterNode = baselineBodies.softMembraneClusters[0].nodeIndices[0];
+    gpuOnlyBodies.softMembraneClusters[0].nodeIndices[0] = baselineClusterNode + 1;
+    assert.equal(baselineBodies.softMembraneClusters[0].nodeIndices[0], baselineClusterNode,
+      'gpu-only membrane cluster node index mutation must not leak into baseline output');
   }
 });

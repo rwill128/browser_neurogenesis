@@ -5388,19 +5388,52 @@ window.__gpuLabApi = {
   start: () => start(),
   stop: () => { stop(); return { ok: true }; },
   resetWindTunnelFromSpec: (spec, options = {}) => resetEmbedWindTunnelFromSpec(spec, options),
-  getStatus: () => ({
-    ok: true,
-    running: !!running,
-    frame: Number(sim?.frame) || 0,
-    grid: Number(sim?.controls?.n) || null,
-    rigidBodies: Number(sim?.bodies?.rigid?.length) || 0,
-    softNodes: Number(sim?.bodies?.soft?.nodes?.length) || 0,
-    interactionLab: sim?.interactionLab ? {
-      enabled: sim.interactionLab.enabled !== false,
-      targetType: sim.interactionLab.targetType,
-      motion: sim.interactionLab.mode,
-    } : null,
-  }),
+  getStatus: () => {
+    const il = sim?.interactionLab || null;
+    let fixturePose = null;
+    if (il?.targetType === 'soft') {
+      const ids = Array.isArray(il?.softNodeIndices) ? il.softNodeIndices : [];
+      const nodes = sim?.bodies?.soft?.nodes || [];
+      let sx = 0; let sy = 0; let c = 0;
+      for (const idx of ids) {
+        const n = nodes[idx | 0];
+        if (!n) continue;
+        sx += Number(n.x) || 0;
+        sy += Number(n.y) || 0;
+        c += 1;
+      }
+      if (c > 0) {
+        fixturePose = { x: sx / c, y: sy / c, vx: 0, vy: 0 };
+      }
+    } else {
+      const rb = sim?.bodies?.rigid?.[Number(il?.rigidIndex) | 0] || null;
+      if (rb) {
+        fixturePose = {
+          x: Number(rb.x) || 0,
+          y: Number(rb.y) || 0,
+          vx: Number(rb.vx) || 0,
+          vy: Number(rb.vy) || 0,
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      running: !!running,
+      frame: Number(sim?.frame) || 0,
+      grid: Number(sim?.controls?.n) || null,
+      rigidBodies: Number(sim?.bodies?.rigid?.length) || 0,
+      softNodes: Number(sim?.bodies?.soft?.nodes?.length) || 0,
+      interactionLab: il ? {
+        enabled: il.enabled !== false,
+        targetType: il.targetType,
+        motion: il.mode,
+        circleRadius: Number(il.circleRadius) || 0,
+        circleAngularSpeed: Number(il.circleAngularSpeed) || 0,
+        fixturePose,
+      } : null,
+    };
+  },
   captureCanvasDataUrl: (mimeType = 'image/png') => {
     try {
       if (!(canvas instanceof HTMLCanvasElement)) return null;

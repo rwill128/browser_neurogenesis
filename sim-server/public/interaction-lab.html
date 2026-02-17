@@ -11,6 +11,9 @@
     .card { border:1px solid #2f2f2f; border-radius:8px; background:#151515; padding:10px; }
     label { font-size:13px; color:#ddd; }
     label.control-disabled { opacity:0.55; }
+    .range-wrap { display:inline-flex; align-items:center; gap:8px; }
+    .range-wrap input[type="range"] { width:130px; }
+    .range-value { display:inline-block; min-width:44px; text-align:right; color:#b8e7ff; font-variant-numeric: tabular-nums; }
     input:disabled { opacity:0.5; cursor:not-allowed; }
     input, select, button { background:#222; color:#eee; border:1px solid #444; border-radius:6px; padding:4px 8px; }
     iframe { border:1px solid #333; background:#000; }
@@ -54,8 +57,18 @@
           <option value="circle">Dragged in circle</option>
         </select>
       </label>
-      <label id="circleRadiusLabel">Circle radius <input id="circleRadius" type="number" step="1" min="0" max="48" value="12" /></label>
-      <label id="circleSpeedLabel">Circle speed(rad/s) <input id="circleSpeed" type="number" step="0.05" min="0" max="6" value="0.8" /></label>
+      <label id="circleRadiusLabel">Circle radius
+        <span class="range-wrap">
+          <input id="circleRadius" type="range" step="1" min="0" max="48" value="12" />
+          <span id="circleRadiusValue" class="range-value">12</span>
+        </span>
+      </label>
+      <label id="circleSpeedLabel">Circle speed (rad/s)
+        <span class="range-wrap">
+          <input id="circleSpeed" type="range" step="0.05" min="0" max="6" value="0.8" />
+          <span id="circleSpeedValue" class="range-value">0.80</span>
+        </span>
+      </label>
       <span id="motionHint" class="hint"></span>
     </div>
 
@@ -80,12 +93,17 @@
         </select>
       </label>
       <span id="effectiveDyeModeStatus" class="status-chip">Effective selected-channel dye behavior: NO-OP</span>
-      <label>Momentum coupling <input id="momentum" type="number" min="0" max="1" step="0.05" value="1" /></label>
+      <label>Momentum coupling
+        <span class="range-wrap">
+          <input id="momentum" type="range" min="0" max="1" step="0.05" value="1" />
+          <span id="momentumValue" class="range-value">1.00</span>
+        </span>
+      </label>
       <label><input id="showSegmentIds" type="checkbox" checked /> Segment IDs</label>
       <label><input id="showExtraVisuals" type="checkbox" checked /> Extra visuals</label>
       <button id="applyBtn">Apply scenario</button>
       <label><input id="autoApply" type="checkbox" checked /> Auto-apply</label>
-      <span class="hint">Number fields auto-apply while typing (debounced) when auto-apply is on.</span>
+      <span class="hint">Slider drags auto-apply (debounced) when auto-apply is on.</span>
     </div>
 
     <div class="row">

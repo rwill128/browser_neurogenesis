@@ -12,6 +12,8 @@ const circleRadiusEl = document.getElementById('circleRadius');
 const circleSpeedEl = document.getElementById('circleSpeed');
 const circleRadiusLabelEl = document.getElementById('circleRadiusLabel');
 const circleSpeedLabelEl = document.getElementById('circleSpeedLabel');
+const circleRadiusValueEl = document.getElementById('circleRadiusValue');
+const circleSpeedValueEl = document.getElementById('circleSpeedValue');
 const motionHintEl = document.getElementById('motionHint');
 const dyeChannelEl = document.getElementById('dyeChannel');
 const dyeModeEl = document.getElementById('dyeMode');
@@ -20,6 +22,7 @@ const velocityModeEl = document.getElementById('velocityMode');
 const velocityContractHintEl = document.getElementById('velocityContractHint');
 const effectiveDyeModeStatusEl = document.getElementById('effectiveDyeModeStatus');
 const momentumEl = document.getElementById('momentum');
+const momentumValueEl = document.getElementById('momentumValue');
 const showSegmentIdsEl = document.getElementById('showSegmentIds');
 const showExtraVisualsEl = document.getElementById('showExtraVisuals');
 const applyBtn = document.getElementById('applyBtn');
@@ -144,6 +147,21 @@ function normalizeNumericInput(el, lo, hi, fallback, digits = null) {
   const next = typeof digits === 'number' ? clamped.toFixed(digits) : String(clamped);
   if (String(el.value) !== String(next)) el.value = next;
   return clamped;
+}
+
+function updateRangeValueLabels() {
+  if (circleRadiusValueEl) {
+    const v = normalizeNumericInput(circleRadiusEl, 0, 48, 12, 0);
+    circleRadiusValueEl.textContent = v.toFixed(0);
+  }
+  if (circleSpeedValueEl) {
+    const v = normalizeNumericInput(circleSpeedEl, 0, 6, 0.8, 2);
+    circleSpeedValueEl.textContent = v.toFixed(2);
+  }
+  if (momentumValueEl) {
+    const v = normalizeNumericInput(momentumEl, 0, 1, 1, 2);
+    momentumValueEl.textContent = v.toFixed(2);
+  }
 }
 
 async function copyTextToClipboard(text) {
@@ -277,6 +295,7 @@ function applyScenarioPreset(preset, meta = null) {
   setInputValue(circleRadiusEl, preset.circleRadius ?? 12);
   setInputValue(circleSpeedEl, preset.circleSpeed ?? 0.8);
   setInputValue(momentumEl, preset.momentum ?? 1);
+  updateRangeValueLabels();
   updateMotionControlState();
   updateDyeControlState();
 
@@ -716,9 +735,7 @@ for (const el of [
     if (el === motionModeEl) updateMotionControlState();
     if (el === velocityModeEl) updateDyeControlState();
     else if (el === dyeModeEl) updateEffectiveDyeModeStatus();
-    if (el === circleRadiusEl) normalizeNumericInput(circleRadiusEl, 0, 48, 12, 0);
-    if (el === circleSpeedEl) normalizeNumericInput(circleSpeedEl, 0, 6, 0.8, 2);
-    if (el === momentumEl) normalizeNumericInput(momentumEl, 0, 1, 1, 2);
+    if (el === circleRadiusEl || el === circleSpeedEl || el === momentumEl) updateRangeValueLabels();
     if (!currentScenarioMeta || currentScenarioMeta.source !== 'manual') {
       currentScenarioMeta = {
         id: currentScenarioMeta?.id || null,
@@ -732,6 +749,7 @@ for (const el of [
 
 for (const el of [circleRadiusEl, circleSpeedEl, momentumEl]) {
   el?.addEventListener('input', () => {
+    updateRangeValueLabels();
     if (!currentScenarioMeta || currentScenarioMeta.source !== 'manual') {
       currentScenarioMeta = {
         id: currentScenarioMeta?.id || null,
@@ -743,9 +761,9 @@ for (const el of [circleRadiusEl, circleSpeedEl, momentumEl]) {
   });
 }
 
-circleRadiusEl?.addEventListener('blur', () => normalizeNumericInput(circleRadiusEl, 0, 48, 12, 0));
-circleSpeedEl?.addEventListener('blur', () => normalizeNumericInput(circleSpeedEl, 0, 6, 0.8, 2));
-momentumEl?.addEventListener('blur', () => normalizeNumericInput(momentumEl, 0, 1, 1, 2));
+circleRadiusEl?.addEventListener('blur', updateRangeValueLabels);
+circleSpeedEl?.addEventListener('blur', updateRangeValueLabels);
+momentumEl?.addEventListener('blur', updateRangeValueLabels);
 
 windFrame?.addEventListener('load', () => {
   embedReady = false;
@@ -842,6 +860,7 @@ if (downloadScreenshotBtn) {
   });
 }
 
+updateRangeValueLabels();
 updateMotionControlState();
 updateDyeControlState();
 

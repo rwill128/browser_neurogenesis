@@ -5673,16 +5673,18 @@ window.__gpuLabApi = {
     if (il?.targetType === 'soft') {
       const ids = Array.isArray(il?.softNodeIndices) ? il.softNodeIndices : [];
       const nodes = sim?.bodies?.soft?.nodes || [];
-      let sx = 0; let sy = 0; let c = 0;
+      let sx = 0; let sy = 0; let svx = 0; let svy = 0; let c = 0;
       for (const idx of ids) {
         const n = nodes[idx | 0];
         if (!n) continue;
         sx += Number(n.x) || 0;
         sy += Number(n.y) || 0;
+        svx += Number(n.vx) || 0;
+        svy += Number(n.vy) || 0;
         c += 1;
       }
       if (c > 0) {
-        fixturePose = { x: sx / c, y: sy / c, vx: 0, vy: 0 };
+        fixturePose = { x: sx / c, y: sy / c, vx: svx / c, vy: svy / c };
       }
     } else {
       const rb = sim?.bodies?.rigid?.[Number(il?.rigidIndex) | 0] || null;

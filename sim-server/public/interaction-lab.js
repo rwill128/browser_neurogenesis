@@ -743,6 +743,14 @@ for (const el of [
         source: 'manual',
       };
     }
+
+    // Motion toggles are coarse behavioral mode switches; apply immediately
+    // so selecting "Dragged in circle" always takes effect even if auto-apply is off.
+    if (el === motionModeEl) {
+      pushScenario();
+      return;
+    }
+
     if (autoApplyEl?.checked) pushScenario();
   });
 }

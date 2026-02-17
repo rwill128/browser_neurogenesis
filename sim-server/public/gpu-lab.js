@@ -26,6 +26,8 @@ const brushSizeEl = document.getElementById('brushSize');
 const paintValueEl = document.getElementById('paintValue');
 const showViscEl = document.getElementById('showVisc');
 const showCollisionHullEl = document.getElementById('showCollisionHull');
+const showSegmentIdsEl = document.getElementById('showSegmentIds');
+const showExtraVisualsEl = document.getElementById('showExtraVisuals');
 const scenarioPresetEl = document.getElementById('scenarioPreset');
 const massLightEl = document.getElementById('massLight');
 const massHeavyEl = document.getElementById('massHeavy');
@@ -4425,6 +4427,9 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
   mergeBodiesIntoSim(sim.bodies, imported);
   configureInteractionLab(sim, options);
 
+  sim.overlayShowSegmentIds = options?.overlayShowSegmentIds !== false;
+  sim.overlayShowExtraVisuals = options?.overlayShowExtraVisuals !== false;
+
   sim.emitters = [buildWindTunnelEmitter(sim.controls.n, {
     strength: Number(options?.emitterStrength) || 3.8,
     radius: Number(options?.emitterRadius) || Math.max(7, sim.controls.n / 13),
@@ -4492,6 +4497,8 @@ function drawBodiesOverlay(sim) {
   const smooth = 0.35;
   const v = getCameraView(sim);
   const collisionDebug = !!showCollisionHullEl?.checked;
+  const showSegmentIds = sim?.overlayShowSegmentIds !== false;
+  const showExtraVisuals = sim?.overlayShowExtraVisuals !== false;
   let concaveCount = 0;
 
   const drawSegmentIdLabel = (id, pa, pb, color = 'rgba(255,255,255,0.92)') => {
@@ -4567,7 +4574,7 @@ function drawBodiesOverlay(sim) {
       ctx.lineTo(b2.x, b2.y);
       ctx.stroke();
       const rigidSegId = `R${i}:${ei}`;
-      drawSegmentIdLabel(rigidSegId, a, b2, 'rgba(255,245,200,0.96)');
+      if (showSegmentIds) drawSegmentIdLabel(rigidSegId, a, b2, 'rgba(255,245,200,0.96)');
       if (segmentHighlighted(rigidSegId)) {
         ctx.save();
         ctx.setLineDash([]);
@@ -4641,33 +4648,35 @@ function drawBodiesOverlay(sim) {
     }
   }
 
-  const softClusters = new Map();
-  for (const node of s.nodes) {
-    const cid = node.clusterId ?? 0;
-    if (!softClusters.has(cid)) softClusters.set(cid, []);
-    softClusters.get(cid).push(node);
-  }
-  for (const [cid, nodes] of softClusters.entries()) {
-    const severe = severeClusters.has(cid);
-    const warning = warningClusters.has(cid);
-    if (!nodes.length || (!nodes[0].digestEnabled && !severe && !warning)) continue;
-    let cx = 0, cy = 0;
-    for (const n0 of nodes) { cx += n0._rx; cy += n0._ry; }
-    cx /= nodes.length; cy /= nodes.length;
-    const ordered = [...nodes]
-      .map((p) => ({ x: p._rx, y: p._ry, a: Math.atan2(p._ry - cy, p._rx - cx) }))
-      .sort((a, b2) => a.a - b2.a);
-    ctx.fillStyle = severe
-      ? 'rgba(255, 60, 60, 0.24)'
-      : (warning ? 'rgba(255, 180, 70, 0.2)' : 'rgba(255, 80, 140, 0.2)');
-    ctx.beginPath();
-    for (let i = 0; i < ordered.length; i++) {
-      const p = worldToScreen(sim, ordered[i].x, ordered[i].y);
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
+  if (showExtraVisuals) {
+    const softClusters = new Map();
+    for (const node of s.nodes) {
+      const cid = node.clusterId ?? 0;
+      if (!softClusters.has(cid)) softClusters.set(cid, []);
+      softClusters.get(cid).push(node);
     }
-    ctx.closePath();
-    ctx.fill();
+    for (const [cid, nodes] of softClusters.entries()) {
+      const severe = severeClusters.has(cid);
+      const warning = warningClusters.has(cid);
+      if (!nodes.length || (!nodes[0].digestEnabled && !severe && !warning)) continue;
+      let cx = 0, cy = 0;
+      for (const n0 of nodes) { cx += n0._rx; cy += n0._ry; }
+      cx /= nodes.length; cy /= nodes.length;
+      const ordered = [...nodes]
+        .map((p) => ({ x: p._rx, y: p._ry, a: Math.atan2(p._ry - cy, p._rx - cx) }))
+        .sort((a, b2) => a.a - b2.a);
+      ctx.fillStyle = severe
+        ? 'rgba(255, 60, 60, 0.24)'
+        : (warning ? 'rgba(255, 180, 70, 0.2)' : 'rgba(255, 80, 140, 0.2)');
+      ctx.beginPath();
+      for (let i = 0; i < ordered.length; i++) {
+        const p = worldToScreen(sim, ordered[i].x, ordered[i].y);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
   }
   for (let sgi = 0; sgi < (s.springs || []).length; sgi++) {
     const spring = s.springs[sgi];
@@ -4716,7 +4725,7 @@ function drawBodiesOverlay(sim) {
     ctx.lineTo(pb.x, pb.y);
     ctx.stroke();
     const softSegId = `S${sgi}`;
-    drawSegmentIdLabel(softSegId, pa, pb, 'rgba(180,255,220,0.96)');
+    if (showSegmentIds) drawSegmentIdLabel(softSegId, pa, pb, 'rgba(180,255,220,0.96)');
     if (segmentHighlighted(softSegId)) {
       ctx.save();
       ctx.setLineDash([]);
@@ -4732,56 +4741,58 @@ function drawBodiesOverlay(sim) {
     ctx.setLineDash([]);
     ctx.lineWidth = lineWidthPrev;
   }
-  for (const node of s.nodes) {
-    const p = worldToScreen(sim, node._rx, node._ry);
-    const cid = node.clusterId ?? 0;
-    ctx.fillStyle = severeClusters.has(cid)
-      ? 'rgba(255, 70, 70, 0.98)'
-      : (warningClusters.has(cid) ? 'rgba(255, 190, 80, 0.95)' : '#00ffd0');
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, Math.max(1.6, 2.2 * Math.max(1, sim.camera.zoom * 0.6)), 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Visualize hybrid rigid-soft attachments.
-  for (const h of (sim.bodies.hybrid || [])) {
-    const rb = sim.bodies.rigid[h.rigidIndex];
-    const node = s.nodes[h.nodeIndex];
-    if (!rb || !node) continue;
-    const va = rigidVertexWorld(rb, h.vertexA);
-    const vb = rigidVertexWorld(rb, h.vertexB);
-    const pA = worldToScreen(sim, va.x, va.y);
-    const pB = worldToScreen(sim, vb.x, vb.y);
-    const pN = worldToScreen(sim, node._rx, node._ry);
-    ctx.strokeStyle = 'rgba(255,120,220,0.95)';
-    ctx.beginPath(); ctx.moveTo(pA.x, pA.y); ctx.lineTo(pN.x, pN.y); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(pB.x, pB.y); ctx.lineTo(pN.x, pN.y); ctx.stroke();
-  }
-
-  if (collisionDebug && Array.isArray(sim.lastRigidContacts)) {
-    ctx.fillStyle = 'rgba(255,90,90,0.95)';
-    for (const c of sim.lastRigidContacts.slice(0, 24)) {
-      if (!Array.isArray(c.contact) || c.contact.length < 2) continue;
-      const p = worldToScreen(sim, c.contact[0], c.contact[1]);
+  if (showExtraVisuals) {
+    for (const node of s.nodes) {
+      const p = worldToScreen(sim, node._rx, node._ry);
+      const cid = node.clusterId ?? 0;
+      ctx.fillStyle = severeClusters.has(cid)
+        ? 'rgba(255, 70, 70, 0.98)'
+        : (warningClusters.has(cid) ? 'rgba(255, 190, 80, 0.95)' : '#00ffd0');
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 2.6, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, Math.max(1.6, 2.2 * Math.max(1, sim.camera.zoom * 0.6)), 0, Math.PI * 2);
       ctx.fill();
     }
-  }
 
-  ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
-  ctx.fillStyle = 'rgba(255,255,255,0.9)';
-  const collisionDebugSuffix = collisionDebug
-    ? ` | solver hull debug ON (concave ${concaveCount}/${sim.bodies.rigid.length}, contacts ${(sim.lastRigidContacts || []).length})`
-    : '';
-  ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, ABSORB=amber, MIXED=violet | obstacle mask overlay=red | zoom ${sim.camera.zoom.toFixed(2)}x${collisionDebugSuffix}`, 10, canvas.height - 28);
-  ctx.fillStyle = 'rgba(0,255,208,0.95)';
-  const line2 = collisionDebug
-    ? 'Body edges: BLOCK solid vs PASS dashed | segment IDs: R<body>:<edge>, S<soft-spring> | soft momentum: thin→thick (0→1) | dashed green/cyan=solver hull, dashed amber=rigid-rigid convex proxies | soft deform warn=orange, severe=red'
-    : (ENABLE_HYBRID_BODY_LINKS
-      ? 'Body edges: BLOCK solid vs PASS dashed | segment IDs: R<body>:<edge>, S<soft-spring> | soft momentum: thin→thick (0→1) | hybrid links=magenta | soft deform warn=orange, severe=red'
-      : 'Body edges: BLOCK solid vs PASS dashed | segment IDs: R<body>:<edge>, S<soft-spring> | soft momentum: thin→thick (0→1) | hybrids disabled (rigid/soft separated) | soft deform warn=orange, severe=red');
-  ctx.fillText(line2, 10, canvas.height - 12);
+    // Visualize hybrid rigid-soft attachments.
+    for (const h of (sim.bodies.hybrid || [])) {
+      const rb = sim.bodies.rigid[h.rigidIndex];
+      const node = s.nodes[h.nodeIndex];
+      if (!rb || !node) continue;
+      const va = rigidVertexWorld(rb, h.vertexA);
+      const vb = rigidVertexWorld(rb, h.vertexB);
+      const pA = worldToScreen(sim, va.x, va.y);
+      const pB = worldToScreen(sim, vb.x, vb.y);
+      const pN = worldToScreen(sim, node._rx, node._ry);
+      ctx.strokeStyle = 'rgba(255,120,220,0.95)';
+      ctx.beginPath(); ctx.moveTo(pA.x, pA.y); ctx.lineTo(pN.x, pN.y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(pB.x, pB.y); ctx.lineTo(pN.x, pN.y); ctx.stroke();
+    }
+
+    if (collisionDebug && Array.isArray(sim.lastRigidContacts)) {
+      ctx.fillStyle = 'rgba(255,90,90,0.95)';
+      for (const c of sim.lastRigidContacts.slice(0, 24)) {
+        if (!Array.isArray(c.contact) || c.contact.length < 2) continue;
+        const p = worldToScreen(sim, c.contact[0], c.contact[1]);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    ctx.font = '12px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    const collisionDebugSuffix = collisionDebug
+      ? ` | solver hull debug ON (concave ${concaveCount}/${sim.bodies.rigid.length}, contacts ${(sim.lastRigidContacts || []).length})`
+      : '';
+    ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, ABSORB=amber, MIXED=violet | obstacle mask overlay=red | zoom ${sim.camera.zoom.toFixed(2)}x${collisionDebugSuffix}`, 10, canvas.height - 28);
+    ctx.fillStyle = 'rgba(0,255,208,0.95)';
+    const line2 = collisionDebug
+      ? 'Body edges: BLOCK solid vs PASS dashed | segment IDs: R<body>:<edge>, S<soft-spring> | soft momentum: thin→thick (0→1) | dashed green/cyan=solver hull, dashed amber=rigid-rigid convex proxies | soft deform warn=orange, severe=red'
+      : (ENABLE_HYBRID_BODY_LINKS
+        ? 'Body edges: BLOCK solid vs PASS dashed | segment IDs: R<body>:<edge>, S<soft-spring> | soft momentum: thin→thick (0→1) | hybrid links=magenta | soft deform warn=orange, severe=red'
+        : 'Body edges: BLOCK solid vs PASS dashed | segment IDs: R<body>:<edge>, S<soft-spring> | soft momentum: thin→thick (0→1) | hybrids disabled (rigid/soft separated) | soft deform warn=orange, severe=red');
+    ctx.fillText(line2, 10, canvas.height - 12);
+  }
   ctx.restore();
 }
 
@@ -4875,6 +4886,8 @@ async function initSim() {
     couplingTelemetry: [],
     lastFluidObstacleStats: { rigidBlockedEdges: 0, softBlockedEdges: 0, blockedEdgeCount: 0, blockedCells: 0 },
     lastDyeMaskStats: { rigidEdges: 0, softEdges: 0, nonPassCells: 0 },
+    overlayShowSegmentIds: true,
+    overlayShowExtraVisuals: true,
     highlightSegmentId: null,
     highlightUntilFrame: 0,
     frame: 0, t0: performance.now(),
@@ -4906,6 +4919,8 @@ async function stepAndRender() {
   }
 
   s.controls = { ...s.controls, ...uiControls, n: s.controls.n };
+  if (!EMBED_MODE && showSegmentIdsEl) s.overlayShowSegmentIds = !!showSegmentIdsEl.checked;
+  if (!EMBED_MODE && showExtraVisualsEl) s.overlayShowExtraVisuals = !!showExtraVisualsEl.checked;
   uploadUniforms(s.device, s.uniform, s.controls);
 
   // Per-frame body obstacle stamping from BLOCK velocity edges (rigid + soft).

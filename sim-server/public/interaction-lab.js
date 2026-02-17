@@ -14,6 +14,8 @@ const dyeChannelEl = document.getElementById('dyeChannel');
 const dyeModeEl = document.getElementById('dyeMode');
 const velocityModeEl = document.getElementById('velocityMode');
 const momentumEl = document.getElementById('momentum');
+const showSegmentIdsEl = document.getElementById('showSegmentIds');
+const showExtraVisualsEl = document.getElementById('showExtraVisuals');
 const applyBtn = document.getElementById('applyBtn');
 const autoApplyEl = document.getElementById('autoApply');
 const scenarioOut = document.getElementById('scenarioOut');
@@ -442,6 +444,8 @@ function buildScenarioPayload() {
   const velocityMode = String(velocityModeEl?.value || 'block');
   const dyeMode = effectiveDyeMode(requestedDyeMode, velocityMode);
   const momentum = clamp(momentumEl?.value, 0, 1);
+  const overlayShowSegmentIds = !!showSegmentIdsEl?.checked;
+  const overlayShowExtraVisuals = !!showExtraVisualsEl?.checked;
 
   const spec = fixtureType === 'soft-line'
     ? makeSoftLineSpec({ channel, dyeMode, velocityMode, momentum })
@@ -498,6 +502,8 @@ function buildScenarioPayload() {
       emitterWobbleAmp: 0,
       emitterWobbleFreq: 0,
       emitterLockPosition: true,
+      overlayShowSegmentIds,
+      overlayShowExtraVisuals,
       interactionLab,
     },
   };
@@ -514,6 +520,8 @@ function buildScenarioPayload() {
     effectiveDyeMode: dyeMode,
     velocityMode,
     momentum,
+    overlayShowSegmentIds,
+    overlayShowExtraVisuals,
   };
 
   return { payload, truthRow };
@@ -630,6 +638,8 @@ for (const el of [
   dyeModeEl,
   velocityModeEl,
   momentumEl,
+  showSegmentIdsEl,
+  showExtraVisualsEl,
 ]) {
   el?.addEventListener('change', () => {
     if (!currentScenarioMeta || currentScenarioMeta.source !== 'manual') {

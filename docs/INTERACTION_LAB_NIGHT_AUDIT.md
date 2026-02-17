@@ -55,3 +55,27 @@ For each cycle append:
   - Red plume is now clearly visible in the confrontation frame, making channel-filter behavior inspectable.
   - Deterministic validation rerun passed full suite: `154/154`.
 
+## 2026-02-17 03:25 (America/Buenos_Aires)
+
+- Scenario: `rigid-red-eat-block-pinned` (Curriculum 2/5: Rigid line · red EAT · velocity BLOCK · pinned)
+- Expected behavior (per current contract):
+  - Requested dye mode is EAT, but because `velocity=BLOCK`, effective dye mode must auto-resolve to NO-OP.
+  - Plume should reach/contact the rigid segment while boundary behavior is governed by BLOCK; no EAT-specific absorption should be applied.
+- Observed behavior:
+  - After loading preset and waiting for advection, red plume reached and contacted the segment (visible contact at labeled rigid edges `R0:1..R0:3`).
+  - Truth-table payload panel reports `requestedDyeMode: "eat"`, `dyeMode: "noop"`, `effectiveDyeMode: "noop"`, `velocityMode: "block"`, matching contract.
+  - Visual result is consistent with BLOCK-conditioned confrontation and no contradiction with EAT/PASS-only effectiveness rule.
+- Quick metrics:
+  - Fixture: `rigid-line`
+  - Motion: `pinned`
+  - Channel: `r`
+  - Momentum coupling: `1`
+  - Payload `createdAt`: `2026-02-17T06:25:24.002Z`
+- Screenshot path(s):
+  - `/Users/richardwilliams/.openclaw/media/browser/fd41faa5-9d4e-444e-bd07-d4742f6a7262.jpg`
+- Decision: **PASS (no issue)**
+- Fixes/code changes: none
+- Deterministic validation:
+  - Not rerun this cycle (no code change triggered).
+- Commit hash: `7d82ed7`
+

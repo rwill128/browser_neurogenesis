@@ -189,8 +189,10 @@ let lastCompiledFields = null;
 let compileRevision = 0;
 let windTunnelReady = false;
 let highlightedSegmentId = null;
+let lastCompileHint = '';
 
 const fieldPanels = Array.from(document.querySelectorAll('.field-panel'));
+const activeFieldHelpEl = document.getElementById('activeFieldHelp');
 
 function idx(x, y) { return y * W + x; }
 
@@ -412,7 +414,7 @@ function updateSegmentStatsPreview(spec) {
 
   renderSegmentStatsList(segments);
 
-  segmentStatsOut.textContent = JSON.stringify({
+  const payload = {
     segmentIdLegend: {
       rigid: 'R<rigidBodyIndex>:<edgeIndex>',
       soft: 'S<globalSoftSpringIndex>',
@@ -425,18 +427,23 @@ function updateSegmentStatsPreview(spec) {
       softSegments: segments.filter((s) => s.type === 'soft').length,
     },
     segments,
-  }, null, 2);
+  };
+  if (segments.length === 0 && lastCompileHint) payload.compileHint = lastCompileHint;
+  segmentStatsOut.textContent = JSON.stringify(payload, null, 2);
 }
 
 function isolateLargestContiguousTraitBody(rigidField, softField, threshold = 0.35) {
   const total = W * H;
   const th = Math.max(0, Math.min(1, Number(threshold) || 0.35));
   const occupied = new Uint8Array(total);
+  let maxOccupancy = 0;
 
   for (let i = 0; i < total; i++) {
     const rv = Number(rigidField?.[i]) || 0;
     const sv = Number(softField?.[i]) || 0;
-    if (Math.max(rv, sv) >= th) occupied[i] = 1;
+    const occ = Math.max(rv, sv);
+    if (occ > maxOccupancy) maxOccupancy = occ;
+    if (occ >= th) occupied[i] = 1;
   }
 
   const visited = new Uint8Array(total);
@@ -502,6 +509,7 @@ function isolateLargestContiguousTraitBody(rigidField, softField, threshold = 0.
       keptCells: 0,
       removedCells: 0,
       componentCount,
+      maxOccupancy,
     };
   }
 
@@ -553,6 +561,7 @@ function isolateLargestContiguousTraitBody(rigidField, softField, threshold = 0.
     keptCells: keptCount,
     removedCells: Math.max(0, occupiedCount - keptCount),
     componentCount,
+    maxOccupancy,
   };
 }
 
@@ -1066,7 +1075,7 @@ function renderSegmentStatsList(segments = []) {
   if (!segmentStatsList) return;
   segmentStatsList.innerHTML = '';
   if (!Array.isArray(segments) || segments.length === 0) {
-    segmentStatsList.textContent = 'No segments yet.';
+    segmentStatsList.textContent = lastCompileHint || 'No segments yet.';
     return;
   }
 
@@ -1663,8 +1672,27 @@ function setWidgetEnabled(el, enabled, disabledTitle = '') {
   }
 }
 
+function syncFieldHelpText(target) {
+  if (!activeFieldHelpEl) return;
+  const textByTarget = {
+    trait: 'Active field: Trait field. Paint rigid vs soft occupancy for compile/isolate passes.',
+    density: 'Active field: Resolution map. Darker paint compiles finer/smaller local primitives; brighter paint compiles coarser/larger ones.',
+    membraneEdge: 'Active field: Perimeter edge-length map. Dark paint drives shorter edges; bright paint drives longer edges.',
+    membraneShape: 'Active field: Membrane stiffness map. Dark paint makes softer perimeter response; bright paint makes stiffer response.',
+    softPermeability: 'Active field: Soft edge permeability. Darker zones block more flow; brighter zones allow more flow through soft edges.',
+    softEdgeDyeMode: 'Active field: Soft edge dye policy. Pick channel + mode, then paint where soft edges should EAT or NO-OP for dye.',
+    softEdgeVelocityMode: 'Active field: Soft edge velocity mode. Paint BLOCK vs PASS behavior for fluid velocity coupling at soft edges.',
+    softEdgeMomentumMode: 'Active field: Soft edge momentum coupling. 0 keeps velocity exchange low; 1 allows full momentum coupling.',
+    rigidPermeability: 'Active field: Rigid edge permeability. Darker zones block more flow; brighter zones allow more flow through rigid edges.',
+    rigidEdgeVelocityMode: 'Active field: Rigid edge velocity mode. Paint BLOCK vs PASS behavior for fluid velocity coupling at rigid edges.',
+    rigidEdgeDyeMode: 'Active field: Rigid edge dye policy. Pick channel + mode, then paint where rigid edges should EAT or NO-OP for dye.',
+  };
+  activeFieldHelpEl.textContent = textByTarget[target] || textByTarget.trait;
+}
+
 function syncFieldPanelVisibility() {
   const target = fieldPaintTargetEl?.value || 'trait';
+  syncFieldHelpText(target);
   for (const panel of fieldPanels) {
     if (!panel) continue;
     panel.hidden = panel.dataset.fieldPanel !== target;
@@ -1743,6 +1771,16 @@ function compileNow() {
     const threshold = Math.max(0, Math.min(1, Number(thresholdEl.value) || 0.35));
     const largestBody = isolateLargestContiguousTraitBody(rigid, soft, threshold);
 
+    lastCompileHint = '';
+    if ((largestBody?.keptCells || 0) <= 0) {
+      const maxOcc = Math.max(0, Math.min(1, Number(largestBody?.maxOccupancy) || 0));
+      if (maxOcc > 0.001) {
+        lastCompileHint = `No trait cells passed threshold ${threshold.toFixed(2)} (max paint ${maxOcc.toFixed(2)}). Lower Threshold or paint stronger in Trait field.`;
+      } else {
+        lastCompileHint = 'No trait paint to compile yet. Set Field to paint = Trait field and paint rigid/soft regions first.';
+      }
+    }
+
     const mesh = compileFieldToMesh({
       width: W,
       height: H,
@@ -1782,6 +1820,7 @@ function compileNow() {
   } catch (err) {
     const msg = `Compile failed: ${String(err?.message || err)}`;
     console.error('[mesh-lab] compileNow failed', err);
+    lastCompileHint = msg;
     out.textContent = msg;
     if (segmentStatsOut) segmentStatsOut.textContent = msg;
     if (segmentStatsList) segmentStatsList.textContent = msg;

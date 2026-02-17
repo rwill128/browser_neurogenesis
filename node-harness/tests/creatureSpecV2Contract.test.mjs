@@ -1400,3 +1400,82 @@ test('buildBodiesFromCreatureSpec preserves import/output parity across baseline
   const allFinite = Object.values(gpuOnlySummary).every((v) => Number.isFinite(v));
   assert.equal(allFinite, true, 'gpu-only import/output summary must stay finite');
 });
+
+test('buildBodiesFromCreatureSpec keeps edge BLOCK/PASS and dye EAT semantics similar across baseline and gpu-only paths', () => {
+  const mesh = sampleMesh();
+  const w = 16;
+
+  const softPermeabilityMap = new Float32Array(w * w).fill(0);
+  const softEdgeDyeEatMapR = new Float32Array(w * w).fill(0);
+  const softEdgeVelocityModeMap = new Float32Array(w * w).fill(0);
+  const rigidPermeabilityMap = new Float32Array(w * w).fill(0);
+  const rigidEdgeConsumeMapR = new Float32Array(w * w).fill(0);
+
+  // Soft triangle sample points include (5,4), (6,6), (7,4).
+  softPermeabilityMap[4 * w + 5] = 1;
+  softEdgeDyeEatMapR[6 * w + 6] = 1;
+  softEdgeVelocityModeMap[4 * w + 7] = 1;
+
+  // Rigid triangle sample points include (4,2), (5,4), (3,4).
+  rigidPermeabilityMap[2 * w + 4] = 1;
+  rigidEdgeConsumeMapR[4 * w + 3] = 1;
+
+  const spec = createCreatureSpecFromMesh(mesh, {
+    softSolverMode: 'spring',
+    fields: {
+      softPermeabilityMap,
+      softEdgeDyeEatMapR,
+      softEdgeVelocityModeMap,
+      rigidPermeabilityMap,
+      rigidEdgeConsumeMapR,
+    },
+  });
+
+  const summarize = (bodies) => {
+    const softVelocityPassCount = bodies.soft.springs.reduce((sum, sp) => sum + (Number(sp?.[5]) === 0 ? 1 : 0), 0);
+    const softRedEatCount = bodies.soft.springs.reduce((sum, sp) => sum + (Number(sp?.[4]?.[0]) === 2 ? 1 : 0), 0);
+
+    const rigidVelocityPassCount = bodies.rigid.reduce((sum, rb) => (
+      sum + (rb.edgeBodyMode || []).reduce((inner, mode) => inner + (Number(mode) === 0 ? 1 : 0), 0)
+    ), 0);
+    const rigidRedEatCount = bodies.rigid.reduce((sum, rb) => (
+      sum + (rb.edgeDyeMode || []).reduce((inner, rgb) => inner + (Number(rgb?.[0]) === 2 ? 1 : 0), 0)
+    ), 0);
+
+    const springRestSum = bodies.soft.springs.reduce((sum, sp) => sum + (Number(sp?.[2]) || 0), 0);
+    return {
+      softSpringCount: bodies.soft.springs.length,
+      rigidBodyCount: bodies.rigid.length,
+      softVelocityPassCount,
+      softRedEatCount,
+      rigidVelocityPassCount,
+      rigidRedEatCount,
+      springRestSum,
+    };
+  };
+
+  const baselineSummary = summarize(buildBodiesFromCreatureSpec(spec, 128, {
+    ...CONTROLS,
+    runtimeSolverPath: 'baseline',
+  }));
+  const gpuOnlySummary = summarize(buildBodiesFromCreatureSpec(spec, 128, {
+    ...CONTROLS,
+    runtimeSolverPath: 'gpu-only',
+  }));
+
+  // Preserve observable edge semantics and geometry shape while the GPU-only solver path is ported.
+  assert.equal(gpuOnlySummary.softSpringCount, baselineSummary.softSpringCount);
+  assert.equal(gpuOnlySummary.rigidBodyCount, baselineSummary.rigidBodyCount);
+  assert.equal(gpuOnlySummary.softVelocityPassCount, baselineSummary.softVelocityPassCount);
+  assert.equal(gpuOnlySummary.softRedEatCount, baselineSummary.softRedEatCount);
+  assert.equal(gpuOnlySummary.rigidVelocityPassCount, baselineSummary.rigidVelocityPassCount);
+  assert.equal(gpuOnlySummary.rigidRedEatCount, baselineSummary.rigidRedEatCount);
+
+  const restDelta = Math.abs(gpuOnlySummary.springRestSum - baselineSummary.springRestSum);
+  const restTolerance = 1e-9;
+  assert.ok(restDelta <= restTolerance,
+    `expected spring rest-length sum parity across paths (delta=${restDelta}, tol=${restTolerance})`);
+
+  const allFinite = Object.values(gpuOnlySummary).every((v) => Number.isFinite(v));
+  assert.equal(allFinite, true, 'gpu-only edge-policy summary must stay finite');
+});

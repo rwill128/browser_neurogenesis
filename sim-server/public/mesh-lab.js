@@ -29,7 +29,9 @@ const mctx = meshCanvas.getContext('2d');
 const modeEl = document.getElementById('paintMode');
 const fieldPaintTargetEl = document.getElementById('fieldPaintTarget');
 const brushEl = document.getElementById('brush');
+const brushValueEl = document.getElementById('brushValue');
 const thresholdEl = document.getElementById('threshold');
+const thresholdValueEl = document.getElementById('thresholdValue');
 const softDensityPaintEl = document.getElementById('softDensityPaint');
 const membraneEdgePaintEl = document.getElementById('membraneEdgePaintValue');
 const membraneShapePaintEl = document.getElementById('membraneShapePaintValue');
@@ -2046,6 +2048,20 @@ if (randomizeRigidDyeEatBBtn) randomizeRigidDyeEatBBtn.addEventListener('click',
 if (randomizeRigidEdgeVelocityModeBtn) {
   randomizeRigidEdgeVelocityModeBtn.addEventListener('click', () => randomizeWithTargets({ rigidEdgeVelocityMode: true }));
 }
+const syncPaintControlValueLabels = () => {
+  if (brushValueEl && brushEl) {
+    const brush = Math.max(1, Number(brushEl.value) || 50);
+    brushValueEl.textContent = `${Math.round(brush)} px`;
+  }
+  if (thresholdValueEl && thresholdEl) {
+    const threshold = Math.max(0, Math.min(1, Number(thresholdEl.value) || 0.35));
+    thresholdValueEl.textContent = threshold.toFixed(2);
+  }
+};
+
+if (brushEl) brushEl.addEventListener('input', syncPaintControlValueLabels);
+if (thresholdEl) thresholdEl.addEventListener('input', syncPaintControlValueLabels);
+
 if (fieldPaintTargetEl) fieldPaintTargetEl.addEventListener('change', syncFieldPanelVisibility);
 if (softInfillModeEl) softInfillModeEl.addEventListener('change', compileNow);
 if (softMinCellSizeEl) softMinCellSizeEl.addEventListener('change', compileNow);
@@ -2294,5 +2310,6 @@ if (copyOutBtn) {
 }
 
 syncFieldPanelVisibility();
+syncPaintControlValueLabels();
 drawFields();
 compileNow();

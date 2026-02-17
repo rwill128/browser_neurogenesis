@@ -43,20 +43,20 @@ test('gpu-lab applies soft momentum policy in fluid→soft force coupling path',
 test('gpu-lab samples coupling flow outside blocked edge cells to preserve body push', () => {
   assert.match(
     source,
-    /function sampleFluidForBodyCoupling\(field, n, x, y, dirX, dirY, obstacleMask = null\)/,
-    'expected boundary-aware fluid sampling helper for body coupling',
+    /function sampleFluidForBodyCoupling\([\s\S]*obstacleMask = null,[\s\S]*selfFeedbackSuppression = 0,[\s\S]*\)/,
+    'expected boundary-aware fluid sampling helper for body coupling (with self-feedback suppression support)',
   );
 
   assert.match(
     source,
-    /const fx = sampleFluidForBodyCoupling\(vxField, n, sx, sy, rx, ry, obstacleMask\);/,
-    'expected rigid coupling to use boundary-aware flow sampling',
+    /const fx = sampleFluidForBodyCoupling\([\s\S]*vxField,[\s\S]*sx,[\s\S]*sy,[\s\S]*obstacleMask,[\s\S]*bodyFeedbackPrevVx,[\s\S]*SELF_FEEDBACK_SUPPRESSION,[\s\S]*\);/,
+    'expected rigid coupling to use boundary-aware flow sampling with self-feedback suppression',
   );
 
   assert.match(
     source,
-    /const fx = sampleFluidForBodyCoupling\(vxField, n, node\.x, node\.y, rx, ry, obstacleMask\);/,
-    'expected soft coupling to use boundary-aware flow sampling',
+    /const fx = sampleFluidForBodyCoupling\([\s\S]*vxField,[\s\S]*node\.x,[\s\S]*node\.y,[\s\S]*obstacleMask,[\s\S]*bodyFeedbackPrevVx,[\s\S]*SELF_FEEDBACK_SUPPRESSION,[\s\S]*\);/,
+    'expected soft coupling to use boundary-aware flow sampling with self-feedback suppression',
   );
 });
 

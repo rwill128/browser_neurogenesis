@@ -103,7 +103,7 @@
       <label><input id="showExtraVisuals" type="checkbox" checked /> Extra visuals</label>
       <button id="applyBtn">Apply scenario</button>
       <label><input id="autoApply" type="checkbox" checked /> Auto-apply</label>
-      <span class="hint">Slider drags auto-apply (debounced) when auto-apply is on.</span>
+      <span id="applyModeHint" class="hint"></span>
     </div>
     <div class="row">
       <span id="dyeModeHint" class="hint"></span>
@@ -125,7 +125,7 @@
         <div>Wind tunnel confrontation view</div>
         <button id="downloadScreenshotBtn" class="copy-btn">Download screenshot</button>
       </div>
-      <iframe id="windFrame" src="/gpu-lab.html?embed=1&v=20260217d" width="640" height="640" loading="lazy"></iframe>
+      <iframe id="windFrame" src="/gpu-lab.html?embed=1&v=20260217e" width="640" height="640" loading="lazy"></iframe>
       <img id="captureThumb" class="thumb" alt="Latest interaction screenshot preview" />
     </div>
     <div class="card" style="width:520px;">

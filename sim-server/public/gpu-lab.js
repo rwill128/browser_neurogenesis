@@ -833,11 +833,33 @@ function sampleObstacleMaskNearest(mask, n, x, y) {
   return Number(mask[yi * n + xi]) || 0;
 }
 
-function sampleFluidForBodyCoupling(field, n, x, y, dirX, dirY, obstacleMask = null) {
+function sampleFluidForBodyCoupling(
+  field,
+  n,
+  x,
+  y,
+  dirX,
+  dirY,
+  obstacleMask = null,
+  selfFeedbackField = null,
+  selfFeedbackSuppression = 0,
+) {
+  const suppress = Math.max(0, Math.min(1, Number(selfFeedbackSuppression) || 0));
+  const sampleCouplingField = (sx, sy) => {
+    const base = sampleFieldBilinear(field, n, sx, sy);
+    if (!(selfFeedbackField instanceof Float32Array) || selfFeedbackField.length !== n * n || suppress <= 0) {
+      return base;
+    }
+    const own = sampleFieldBilinear(selfFeedbackField, n, sx, sy);
+    const v = base - own * suppress;
+    if (!Number.isFinite(v)) return 0;
+    return Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, v));
+  };
+
   const samples = [];
   const baseBlocked = sampleObstacleMaskNearest(obstacleMask, n, x, y) > 0.5;
   if (!baseBlocked) {
-    samples.push({ value: sampleFieldBilinear(field, n, x, y), off: 0 });
+    samples.push({ value: sampleCouplingField(x, y), off: 0 });
   }
 
   const len = Math.hypot(dirX, dirY);
@@ -855,7 +877,7 @@ function sampleFluidForBodyCoupling(field, n, x, y, dirX, dirY, obstacleMask = n
     const sx = x + nx * off;
     const sy = y + ny * off;
     if (sampleObstacleMaskNearest(obstacleMask, n, sx, sy) > 0.5) continue;
-    samples.push({ value: sampleFieldBilinear(field, n, sx, sy), off });
+    samples.push({ value: sampleCouplingField(sx, sy), off });
   }
 
   if (samples.length === 0) return 0;
@@ -872,6 +894,12 @@ function sampleFluidForBodyCoupling(field, n, x, y, dirX, dirY, obstacleMask = n
   const farMean = far.length > 0
     ? (far.reduce((sum, v) => sum + v, 0) / far.length)
     : median;
+
+  // If near-edge samples oppose farther ambient flow, bias toward far flow to
+  // avoid bodies re-grabbing their own injected wake and "swimming upstream".
+  if (far.length > 0 && median * farMean < 0) {
+    return median * 0.2 + farMean * 0.8;
+  }
 
   return median * 0.7 + farMean * 0.3;
 }
@@ -3455,6 +3483,21 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   const s = bodies.soft;
   const obstacleMask = sim?.obstacleMaskCpu;
 
+  const cells = n * n;
+  const SELF_FEEDBACK_SUPPRESSION = 0.82;
+  if (!(sim._bodyFeedbackPrevVx instanceof Float32Array) || sim._bodyFeedbackPrevVx.length !== cells) {
+    sim._bodyFeedbackPrevVx = new Float32Array(cells);
+    sim._bodyFeedbackPrevVy = new Float32Array(cells);
+    sim._bodyFeedbackCurrVx = new Float32Array(cells);
+    sim._bodyFeedbackCurrVy = new Float32Array(cells);
+  }
+  const bodyFeedbackPrevVx = sim._bodyFeedbackPrevVx;
+  const bodyFeedbackPrevVy = sim._bodyFeedbackPrevVy;
+  const bodyFeedbackCurrVx = sim._bodyFeedbackCurrVx;
+  const bodyFeedbackCurrVy = sim._bodyFeedbackCurrVy;
+  bodyFeedbackCurrVx.fill(0);
+  bodyFeedbackCurrVy.fill(0);
+
   // Optional interaction-lab scripted body motion (pinned / circular drag).
   applyInteractionLabBodyMotion(sim);
 
@@ -3498,8 +3541,28 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       const sy = sampleVerts[si].y;
       const rx = sx - b.x;
       const ry = sy - b.y;
-      const fx = sampleFluidForBodyCoupling(vxField, n, sx, sy, rx, ry, obstacleMask);
-      const fy = sampleFluidForBodyCoupling(vyField, n, sx, sy, rx, ry, obstacleMask);
+      const fx = sampleFluidForBodyCoupling(
+        vxField,
+        n,
+        sx,
+        sy,
+        rx,
+        ry,
+        obstacleMask,
+        bodyFeedbackPrevVx,
+        SELF_FEEDBACK_SUPPRESSION,
+      );
+      const fy = sampleFluidForBodyCoupling(
+        vyField,
+        n,
+        sx,
+        sy,
+        rx,
+        ry,
+        obstacleMask,
+        bodyFeedbackPrevVy,
+        SELF_FEEDBACK_SUPPRESSION,
+      );
       const localVx = b.vx + (-(b.omega || 0) * ry);
       const localVy = b.vy + ((b.omega || 0) * rx);
       const relX = fx - localVx;
@@ -3588,8 +3651,28 @@ function stepBodiesAndInject(sim, vxField, vyField) {
 
     const rx = node.x - clusterX;
     const ry = node.y - clusterY;
-    const fx = sampleFluidForBodyCoupling(vxField, n, node.x, node.y, rx, ry, obstacleMask);
-    const fy = sampleFluidForBodyCoupling(vyField, n, node.x, node.y, rx, ry, obstacleMask);
+    const fx = sampleFluidForBodyCoupling(
+      vxField,
+      n,
+      node.x,
+      node.y,
+      rx,
+      ry,
+      obstacleMask,
+      bodyFeedbackPrevVx,
+      SELF_FEEDBACK_SUPPRESSION,
+    );
+    const fy = sampleFluidForBodyCoupling(
+      vyField,
+      n,
+      node.x,
+      node.y,
+      rx,
+      ry,
+      obstacleMask,
+      bodyFeedbackPrevVy,
+      SELF_FEEDBACK_SUPPRESSION,
+    );
     const clusterLocalVx = clusterVx - clusterOmega * ry;
     const clusterLocalVy = clusterVy + clusterOmega * rx;
 
@@ -3971,6 +4054,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
         const nextVy = Number(vyField[idx]) + jy;
         vxField[idx] = Number.isFinite(nextVx) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, nextVx)) : 0;
         vyField[idx] = Number.isFinite(nextVy) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, nextVy)) : 0;
+        bodyFeedbackCurrVx[idx] += jx;
+        bodyFeedbackCurrVy[idx] += jy;
         injectedMomentum += Math.hypot(jx, jy);
       }
     }
@@ -4056,6 +4141,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     softClusterOmegaAbsAvg: softClusterCount > 0 ? (softClusterOmegaAbsSum / softClusterCount) : 0,
     softClusterAngularEnergy,
     injectedMomentum,
+    selfFeedbackSuppression: SELF_FEEDBACK_SUPPRESSION,
     softDeformWarningCount: deform.warningCount || 0,
     softDeformSevereCount: deform.severeCount || 0,
     softDeformSevereCollapseCount: deform.severeCollapseCount || 0,
@@ -4074,6 +4160,14 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   sim.couplingTelemetry = sim.couplingTelemetry || [];
   sim.couplingTelemetry.push(metrics);
   if (sim.couplingTelemetry.length > 120) sim.couplingTelemetry.shift();
+
+  // Ping-pong feedback fields: next frame samples this frame's injected momentum
+  // so we can suppress self-induced wake bias during flow->body coupling reads.
+  sim._bodyFeedbackPrevVx = bodyFeedbackCurrVx;
+  sim._bodyFeedbackPrevVy = bodyFeedbackCurrVy;
+  sim._bodyFeedbackCurrVx = bodyFeedbackPrevVx;
+  sim._bodyFeedbackCurrVy = bodyFeedbackPrevVy;
+
   return metrics;
 }
 

@@ -2074,7 +2074,41 @@ function stampSegmentObstacleMask(mask, n, ax, ay, bx, by, thickness = 1.8) {
   }
 }
 
-function stampSweptSegmentObstacleMask(mask, n, prevA, prevB, currA, currB, thickness = 1.8) {
+function stampSegmentSweepTransport(sweep, n, ax, ay, bx, by, thickness, dirX, dirY) {
+  if (!sweep || !Array.isArray(sweep.touched)) return;
+  const ex = bx - ax;
+  const ey = by - ay;
+  const segLenSq = ex * ex + ey * ey;
+  if (!Number.isFinite(segLenSq) || segLenSq < 1e-9) return;
+
+  const minX = Math.max(0, Math.floor(Math.min(ax, bx) - thickness - 1));
+  const maxX = Math.min(n - 1, Math.ceil(Math.max(ax, bx) + thickness + 1));
+  const minY = Math.max(0, Math.floor(Math.min(ay, by) - thickness - 1));
+  const maxY = Math.min(n - 1, Math.ceil(Math.max(ay, by) + thickness + 1));
+
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const px = x + 0.5;
+      const py = y + 0.5;
+      const apx = px - ax;
+      const apy = py - ay;
+      const t = Math.max(0, Math.min(1, (apx * ex + apy * ey) / Math.max(1e-9, segLenSq)));
+      const cx = ax + ex * t;
+      const cy = ay + ey * t;
+      const dx = px - cx;
+      const dy = py - cy;
+      if (dx * dx + dy * dy > thickness * thickness) continue;
+      const i = y * n + x;
+      if (sweep.mask[i] <= 0) sweep.touched.push(i);
+      sweep.mask[i] = 1;
+      sweep.pushX[i] += dirX;
+      sweep.pushY[i] += dirY;
+      sweep.weight[i] += 1;
+    }
+  }
+}
+
+function stampSweptSegmentObstacleMask(mask, n, prevA, prevB, currA, currB, thickness = 1.8, sweepTransport = null) {
   if (!prevA || !prevB || !currA || !currB) return;
   const ax0 = Number(prevA.x); const ay0 = Number(prevA.y);
   const bx0 = Number(prevB.x); const by0 = Number(prevB.y);
@@ -2089,6 +2123,8 @@ function stampSweptSegmentObstacleMask(mask, n, prevA, prevB, currA, currB, thic
   const stepSpan = Math.max(0.45, Number(thickness) * 0.65);
   const steps = Math.max(1, Math.ceil(maxMove / stepSpan));
 
+  let prevMidX = (ax0 + bx0) * 0.5;
+  let prevMidY = (ay0 + by0) * 0.5;
   for (let si = 0; si <= steps; si++) {
     const t = si / steps;
     const ax = ax0 + (ax1 - ax0) * t;
@@ -2096,6 +2132,27 @@ function stampSweptSegmentObstacleMask(mask, n, prevA, prevB, currA, currB, thic
     const bx = bx0 + (bx1 - bx0) * t;
     const by = by0 + (by1 - by0) * t;
     stampSegmentObstacleMask(mask, n, ax, ay, bx, by, thickness);
+
+    if (sweepTransport) {
+      const mx = (ax + bx) * 0.5;
+      const my = (ay + by) * 0.5;
+      const motionX = mx - prevMidX;
+      const motionY = my - prevMidY;
+      const ex = bx - ax;
+      const ey = by - ay;
+      const len = Math.hypot(ex, ey);
+      if (len > 1e-6) {
+        let nx = -ey / len;
+        let ny = ex / len;
+        if (motionX * nx + motionY * ny < 0) {
+          nx = -nx;
+          ny = -ny;
+        }
+        stampSegmentSweepTransport(sweepTransport, n, ax, ay, bx, by, thickness, nx, ny);
+      }
+      prevMidX = mx;
+      prevMidY = my;
+    }
   }
 }
 
@@ -2225,8 +2282,34 @@ function stampBodyObstacleMask(sim) {
   const n = Number(sim?.controls?.n) || 0;
   const mask = sim?.obstacleMaskCpu;
   if (!(mask instanceof Float32Array) || mask.length !== n * n || n <= 0) {
-    return { rigidBlockedEdges: 0, softBlockedEdges: 0, blockedEdgeCount: 0, blockedCells: 0 };
+    return { rigidBlockedEdges: 0, softBlockedEdges: 0, blockedEdgeCount: 0, blockedCells: 0, sweptCells: 0 };
   }
+
+  const cells = n * n;
+  if (!(sim.sweptEdgeMaskCpu instanceof Float32Array) || sim.sweptEdgeMaskCpu.length !== cells) {
+    sim.sweptEdgeMaskCpu = new Float32Array(cells);
+    sim.sweptEdgePushXCpu = new Float32Array(cells);
+    sim.sweptEdgePushYCpu = new Float32Array(cells);
+    sim.sweptEdgePushWeightCpu = new Float32Array(cells);
+    sim.sweptEdgeTouched = [];
+  }
+
+  const sweepTouched = Array.isArray(sim.sweptEdgeTouched) ? sim.sweptEdgeTouched : (sim.sweptEdgeTouched = []);
+  for (const idx of sweepTouched) {
+    sim.sweptEdgeMaskCpu[idx] = 0;
+    sim.sweptEdgePushXCpu[idx] = 0;
+    sim.sweptEdgePushYCpu[idx] = 0;
+    sim.sweptEdgePushWeightCpu[idx] = 0;
+  }
+  sweepTouched.length = 0;
+
+  const sweepTransport = {
+    mask: sim.sweptEdgeMaskCpu,
+    pushX: sim.sweptEdgePushXCpu,
+    pushY: sim.sweptEdgePushYCpu,
+    weight: sim.sweptEdgePushWeightCpu,
+    touched: sweepTouched,
+  };
 
   mask.fill(0);
   const rigidThickness = Math.max(1.4, 1.2 * (n / 256));
@@ -2266,7 +2349,7 @@ function stampBodyObstacleMask(sim) {
       if (prevVerts) {
         const pa = prevVerts[ei];
         const pb = prevVerts[(ei + 1) % sides];
-        stampSweptSegmentObstacleMask(mask, n, pa, pb, a, b, rigidThickness);
+        stampSweptSegmentObstacleMask(mask, n, pa, pb, a, b, rigidThickness, sweepTransport);
       }
 
       rigidBlockedEdges += 1;
@@ -2311,6 +2394,7 @@ function stampBodyObstacleMask(sim) {
     softBlockedEdges,
     blockedEdgeCount: rigidBlockedEdges + softBlockedEdges,
     blockedCells,
+    sweptCells: sweepTouched.length,
   };
 }
 
@@ -2332,6 +2416,81 @@ function enforceFluidEdgeBoundariesCpu(vxField, vyField, n) {
     vyField[left] *= 0.7;
     vyField[right] *= 0.7;
   }
+}
+
+function redistributeSweptEdgeDyeTransport(sim, r, g, b) {
+  const n = Number(sim?.controls?.n) || 0;
+  const mask = sim?.sweptEdgeMaskCpu;
+  const pushX = sim?.sweptEdgePushXCpu;
+  const pushY = sim?.sweptEdgePushYCpu;
+  const weight = sim?.sweptEdgePushWeightCpu;
+  const touched = Array.isArray(sim?.sweptEdgeTouched) ? sim.sweptEdgeTouched : [];
+  const obstacle = sim?.obstacleMaskCpu;
+
+  if (
+    !(mask instanceof Float32Array) ||
+    !(pushX instanceof Float32Array) ||
+    !(pushY instanceof Float32Array) ||
+    !(weight instanceof Float32Array) ||
+    !(obstacle instanceof Float32Array) ||
+    !(r instanceof Float32Array) ||
+    !(g instanceof Float32Array) ||
+    !(b instanceof Float32Array) ||
+    n <= 0 ||
+    touched.length === 0
+  ) {
+    return { touchedCells: 0, movedMass: 0, deletedMass: 0 };
+  }
+
+  let movedMass = 0;
+  let deletedMass = 0;
+  let touchedCells = 0;
+
+  for (const idx of touched) {
+    if (mask[idx] <= 0.5) continue;
+    const rv = Number(r[idx]) || 0;
+    const gv = Number(g[idx]) || 0;
+    const bv = Number(b[idx]) || 0;
+    const dyeSum = rv + gv + bv;
+    if (dyeSum <= 1e-5) continue;
+
+    touchedCells += 1;
+    const w = Math.max(1e-6, Number(weight[idx]) || 0);
+    const dirX = (Number(pushX[idx]) || 0) / w;
+    const dirY = (Number(pushY[idx]) || 0) / w;
+
+    const x = idx % n;
+    const y = Math.floor(idx / n);
+    const stepX = dirX > 0.1 ? 1 : (dirX < -0.1 ? -1 : 0);
+    const stepY = dirY > 0.1 ? 1 : (dirY < -0.1 ? -1 : 0);
+
+    let deposited = false;
+    if (stepX !== 0 || stepY !== 0) {
+      for (let k = 1; k <= 2; k++) {
+        const tx = x + stepX * k;
+        const ty = y + stepY * k;
+        if (tx < 0 || tx >= n || ty < 0 || ty >= n) continue;
+        const ti = ty * n + tx;
+        if ((Number(obstacle[ti]) || 0) > 0.5) continue;
+        r[ti] = (Number(r[ti]) || 0) + rv;
+        g[ti] = (Number(g[ti]) || 0) + gv;
+        b[ti] = (Number(b[ti]) || 0) + bv;
+        movedMass += dyeSum;
+        deposited = true;
+        break;
+      }
+    }
+
+    if (!deposited) {
+      deletedMass += dyeSum;
+    }
+
+    r[idx] = 0;
+    g[idx] = 0;
+    b[idx] = 0;
+  }
+
+  return { touchedCells, movedMass, deletedMass };
 }
 
 function applySoftSpringsXPBDVelocity(s, dtPos, stiffnessScale, lambdaCache, { skipClusterSet = null } = {}) {
@@ -4958,8 +5117,9 @@ async function initSim() {
     disableDefaultInject: false,
     camera: { x: controls.n * 0.5, y: controls.n * 0.5, zoom: controls.n >= 1024 ? 1.8 : 1.0 },
     couplingTelemetry: [],
-    lastFluidObstacleStats: { rigidBlockedEdges: 0, softBlockedEdges: 0, blockedEdgeCount: 0, blockedCells: 0 },
+    lastFluidObstacleStats: { rigidBlockedEdges: 0, softBlockedEdges: 0, blockedEdgeCount: 0, blockedCells: 0, sweptCells: 0 },
     lastDyeMaskStats: { rigidEdges: 0, softEdges: 0, nonPassCells: 0 },
+    lastSweptDyeTransportStats: { touchedCells: 0, movedMass: 0, deletedMass: 0 },
     overlayShowSegmentIds: true,
     overlayShowExtraVisuals: true,
     highlightSegmentId: null,
@@ -5091,6 +5251,8 @@ async function stepAndRender() {
     applyEmitters(s, r, g, b, vx, vy);
     const obstacleEdgesNow = Number(s?.lastFluidObstacleStats?.blockedEdgeCount) || 0;
     applyDigestiveCapture(s, r, g, b);
+    const sweptDyeTransportNow = redistributeSweptEdgeDyeTransport(s, r, g, b);
+    s.lastSweptDyeTransportStats = sweptDyeTransportNow;
     enforceFluidEdgeBoundariesCpu(vx, vy, s.controls.n);
 
     // Last-resort guardrail: prevent non-finite/unsafe velocity components from
@@ -5175,7 +5337,11 @@ async function stepAndRender() {
         membraneClusters: Array.isArray(s.bodies?.softMembraneClusters) ? s.bodies.softMembraneClusters.length : 0,
         fluidObstacleEdgesNow: obstacleEdgesNow,
         fluidObstacleCellsNow: Number(s?.lastFluidObstacleStats?.blockedCells) || 0,
+        fluidObstacleSweptCellsNow: Number(s?.lastFluidObstacleStats?.sweptCells) || 0,
         dyeMaskCellsNow: Number(s?.lastDyeMaskStats?.nonPassCells) || 0,
+        sweptDyeTouchedCellsNow: Number(sweptDyeTransportNow?.touchedCells) || 0,
+        sweptDyeMovedMassNow: +((Number(sweptDyeTransportNow?.movedMass) || 0).toFixed(2)),
+        sweptDyeDeletedMassNow: +((Number(sweptDyeTransportNow?.deletedMass) || 0).toFixed(2)),
         softEdgePoliciesNow,
         paintValue: Number(paintValueEl?.value) || 0.85,
         brushSize: Number(brushSizeEl?.value) || 12,
@@ -5432,6 +5598,15 @@ window.__gpuLabApi = {
         circleAngularSpeed: Number(il.circleAngularSpeed) || 0,
         fixturePose,
       } : null,
+      fluidObstacle: {
+        blockedCells: Number(sim?.lastFluidObstacleStats?.blockedCells) || 0,
+        sweptCells: Number(sim?.lastFluidObstacleStats?.sweptCells) || 0,
+      },
+      sweptDyeTransport: {
+        touchedCells: Number(sim?.lastSweptDyeTransportStats?.touchedCells) || 0,
+        movedMass: Number(sim?.lastSweptDyeTransportStats?.movedMass) || 0,
+        deletedMass: Number(sim?.lastSweptDyeTransportStats?.deletedMass) || 0,
+      },
     };
   },
   captureCanvasDataUrl: (mimeType = 'image/png') => {

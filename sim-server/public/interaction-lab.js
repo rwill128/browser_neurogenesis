@@ -127,6 +127,25 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, n));
 }
 
+let autoApplyDebounce = null;
+function queueAutoApply() {
+  if (!autoApplyEl?.checked) return;
+  if (autoApplyDebounce) clearTimeout(autoApplyDebounce);
+  autoApplyDebounce = setTimeout(() => {
+    autoApplyDebounce = null;
+    pushScenario();
+  }, 120);
+}
+
+function normalizeNumericInput(el, lo, hi, fallback, digits = null) {
+  if (!el) return fallback;
+  const raw = Number(el.value);
+  const clamped = clamp(Number.isFinite(raw) ? raw : fallback, lo, hi);
+  const next = typeof digits === 'number' ? clamped.toFixed(digits) : String(clamped);
+  if (String(el.value) !== String(next)) el.value = next;
+  return clamped;
+}
+
 async function copyTextToClipboard(text) {
   const payload = String(text || '');
   if (!payload) return false;
@@ -697,6 +716,9 @@ for (const el of [
     if (el === motionModeEl) updateMotionControlState();
     if (el === velocityModeEl) updateDyeControlState();
     else if (el === dyeModeEl) updateEffectiveDyeModeStatus();
+    if (el === circleRadiusEl) normalizeNumericInput(circleRadiusEl, 0, 48, 12, 0);
+    if (el === circleSpeedEl) normalizeNumericInput(circleSpeedEl, 0, 6, 0.8, 2);
+    if (el === momentumEl) normalizeNumericInput(momentumEl, 0, 1, 1, 2);
     if (!currentScenarioMeta || currentScenarioMeta.source !== 'manual') {
       currentScenarioMeta = {
         id: currentScenarioMeta?.id || null,
@@ -707,6 +729,23 @@ for (const el of [
     if (autoApplyEl?.checked) pushScenario();
   });
 }
+
+for (const el of [circleRadiusEl, circleSpeedEl, momentumEl]) {
+  el?.addEventListener('input', () => {
+    if (!currentScenarioMeta || currentScenarioMeta.source !== 'manual') {
+      currentScenarioMeta = {
+        id: currentScenarioMeta?.id || null,
+        name: currentScenarioMeta?.name || 'manual-edit',
+        source: 'manual',
+      };
+    }
+    queueAutoApply();
+  });
+}
+
+circleRadiusEl?.addEventListener('blur', () => normalizeNumericInput(circleRadiusEl, 0, 48, 12, 0));
+circleSpeedEl?.addEventListener('blur', () => normalizeNumericInput(circleSpeedEl, 0, 6, 0.8, 2));
+momentumEl?.addEventListener('blur', () => normalizeNumericInput(momentumEl, 0, 1, 1, 2));
 
 windFrame?.addEventListener('load', () => {
   embedReady = false;

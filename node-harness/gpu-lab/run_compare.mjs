@@ -2,6 +2,7 @@ import { createCpuBackend } from './cpu_ref.mjs';
 import { createGpuBackend as createGpuStubBackend } from './gpu_stub.mjs';
 import { createGpuBackend as createGpuWebGpuBackend } from './gpu_webgpu.mjs';
 import { snapshotMetrics } from './schema.mjs';
+import { buildParityEntry } from './parity.mjs';
 
 const cfg = {
   size: Number(process.env.GRID || 256),
@@ -57,4 +58,22 @@ function runGpuStub() {
 const cpu = runCpu();
 const gpuStub = runGpuStub();
 const gpuWebGpu = await runGpuWebGpu();
-console.log(JSON.stringify({ cfg, cpu, gpuStub, gpuWebGpu }, null, 2));
+
+const parity = {
+  gpuStub: buildParityEntry({
+    label: gpuStub.backend,
+    cpuMetrics: cpu.metrics,
+    candidateMetrics: gpuStub.metrics ?? null,
+    reason: 'gpu-stub backend does not emit fluid metrics yet'
+  }),
+  gpuWebGpu: buildParityEntry({
+    label: gpuWebGpu.backend,
+    cpuMetrics: cpu.metrics,
+    candidateMetrics: gpuWebGpu.available ? (gpuWebGpu.metrics ?? null) : null,
+    reason: gpuWebGpu.available
+      ? 'gpu-webgpu backend available but metrics readback not wired yet'
+      : (gpuWebGpu.reason || 'gpu-webgpu unavailable')
+  })
+};
+
+console.log(JSON.stringify({ cfg, cpu, gpuStub, gpuWebGpu, parity }, null, 2));

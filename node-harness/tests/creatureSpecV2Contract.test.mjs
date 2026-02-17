@@ -1337,3 +1337,66 @@ test('createCreatureSpecFromMesh preserves optional authoring field payload', ()
   assert.equal(spec.authoring.fields.rigidEdgeConsumeMapG[11], 0.5);
   assert.equal(spec.authoring.fields.rigidEdgeConsumeMapB[12], 0.25);
 });
+
+test('buildBodiesFromCreatureSpec preserves import/output parity across baseline and gpu-only runtime solver paths', () => {
+  const mesh = sampleMesh();
+  const w = 16;
+  const softPermeabilityMap = new Float32Array(w * w).fill(0);
+  const softEdgeDyeEatMapR = new Float32Array(w * w).fill(0);
+  const softEdgeVelocityModeMap = new Float32Array(w * w).fill(0);
+
+  // Paint one soft edge to PASS velocity and EAT red dye; rest stay defaults.
+  softPermeabilityMap[4 * w + 6] = 1;
+  softEdgeDyeEatMapR[4 * w + 6] = 1;
+  softEdgeVelocityModeMap[4 * w + 6] = 1;
+
+  const spec = createCreatureSpecFromMesh(mesh, {
+    fields: {
+      softPermeabilityMap,
+      softEdgeDyeEatMapR,
+      softEdgeVelocityModeMap,
+    },
+    softSolverMode: 'spring',
+  });
+
+  const summarize = (bodies) => {
+    const rigidMass = bodies.rigid.reduce((sum, rb) => sum + (Number(rb.mass) || 0), 0);
+    const softMass = bodies.soft.nodes.reduce((sum, node) => sum + (Number(node.mass) || 0), 0);
+    const springRestSum = bodies.soft.springs.reduce((sum, sp) => sum + (Number(sp?.[2]) || 0), 0);
+    const softEdgeVelocityPassCount = bodies.soft.springs.reduce((sum, sp) => sum + (Number(sp?.[5]) === 0 ? 1 : 0), 0);
+    const softEdgeRedEatCount = bodies.soft.springs.reduce((sum, sp) => sum + (Number(sp?.[4]?.[0]) === 2 ? 1 : 0), 0);
+    return {
+      rigidCount: bodies.rigid.length,
+      softNodeCount: bodies.soft.nodes.length,
+      softSpringCount: bodies.soft.springs.length,
+      hybridCount: bodies.hybrid.length,
+      membraneClusterCount: bodies.softMembraneClusters.length,
+      rigidMass,
+      softMass,
+      springRestSum,
+      softEdgeVelocityPassCount,
+      softEdgeRedEatCount,
+    };
+  };
+
+  const baselineBodies = buildBodiesFromCreatureSpec(spec, 128, {
+    ...CONTROLS,
+    runtimeSolverPath: 'baseline',
+  });
+  const gpuOnlyBodies = buildBodiesFromCreatureSpec(spec, 128, {
+    ...CONTROLS,
+    runtimeSolverPath: 'gpu-only',
+  });
+
+  const baselineSummary = summarize(baselineBodies);
+  const gpuOnlySummary = summarize(gpuOnlyBodies);
+
+  // Current import/output contract should remain path-invariant while GPU-only solver ports progress.
+  assert.deepEqual(gpuOnlySummary, baselineSummary);
+
+  // Sanity: ensure imported structure is non-empty and deterministic under both paths.
+  assert.ok(baselineSummary.softSpringCount > 0, 'expected at least one soft spring in imported structure');
+
+  const allFinite = Object.values(gpuOnlySummary).every((v) => Number.isFinite(v));
+  assert.equal(allFinite, true, 'gpu-only import/output summary must stay finite');
+});

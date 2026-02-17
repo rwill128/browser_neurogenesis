@@ -14,6 +14,8 @@
     iframe { border:1px solid #333; background:#000; }
     pre { background:#1b1b1b; padding:10px; border-radius:8px; max-height:640px; overflow:auto; }
     .hint { color:#aaa; font-size:12px; }
+    .panel-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; }
+    .copy-btn { font-size:12px; padding:3px 8px; }
   </style>
 </head>
 <body>
@@ -73,11 +75,14 @@
       <iframe id="windFrame" src="/gpu-lab.html?embed=1&v=20260216d" width="640" height="640" loading="lazy"></iframe>
     </div>
     <div class="card" style="width:520px;">
-      <div>Scenario payload + current truth-table row</div>
+      <div class="panel-head">
+        <div>Scenario payload + current truth-table row</div>
+        <button id="copyScenarioBtn" class="copy-btn">Copy JSON</button>
+      </div>
       <pre id="scenarioOut">ready</pre>
     </div>
   </div>
 
-  <script type="module" src="/interaction-lab.js?v=20260216d"></script>
+  <script type="module" src="/interaction-lab.js?v=20260216e"></script>
 </body>
 </html>

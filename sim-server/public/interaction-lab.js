@@ -10,6 +10,7 @@ const momentumEl = document.getElementById('momentum');
 const applyBtn = document.getElementById('applyBtn');
 const autoApplyEl = document.getElementById('autoApply');
 const scenarioOut = document.getElementById('scenarioOut');
+const copyScenarioBtn = document.getElementById('copyScenarioBtn');
 
 const EDGE_DYE_PASS = 0;
 const EDGE_DYE_EAT = 2;
@@ -23,6 +24,33 @@ function clamp(v, lo, hi) {
   const n = Number(v);
   if (!Number.isFinite(n)) return lo;
   return Math.max(lo, Math.min(hi, n));
+}
+
+async function copyTextToClipboard(text) {
+  const payload = String(text || '');
+  if (!payload) return false;
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(payload);
+      return true;
+    }
+  } catch {}
+
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = payload;
+    ta.setAttribute('readonly', 'readonly');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return !!ok;
+  } catch {
+    return false;
+  }
 }
 
 function dyeModeCode(mode) {
@@ -192,7 +220,7 @@ function renderScenarioDebug(row, payload) {
     payload,
     notes: {
       segmentLabelsInWindTunnel: 'R<body>:<edge> for rigid, S<softSpring> for soft',
-      expectedSelectionRule: 'For each segment/channel: avg(BLOCK,PASS,EAT) along segment -> highest wins',
+      expectedSelectionRule: 'For each segment/channel: EAT=true removes dye, EAT=false is no-op',
     },
   }, null, 2);
 }
@@ -247,5 +275,14 @@ window.addEventListener('message', (event) => {
     }, null, 2);
   }
 });
+
+if (copyScenarioBtn) {
+  copyScenarioBtn.addEventListener('click', async () => {
+    const ok = await copyTextToClipboard(scenarioOut?.textContent || '');
+    const prev = copyScenarioBtn.textContent;
+    copyScenarioBtn.textContent = ok ? 'Copied' : 'Copy failed';
+    setTimeout(() => { copyScenarioBtn.textContent = prev; }, 1100);
+  });
+}
 
 pushScenario();

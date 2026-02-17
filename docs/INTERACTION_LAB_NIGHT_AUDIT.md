@@ -79,3 +79,50 @@ For each cycle append:
   - Not rerun this cycle (no code change triggered).
 - Commit hash: `7d82ed7`
 
+
+## 2026-02-17 03:31 (America/Buenos_Aires)
+
+- Scenario: `random-20260217-033059` (Auto-generated: rigid-line, pinned, B NOOP, velocity PASS, momentum 0.60)
+- Expected behavior (per current contract):
+  - With `velocity=PASS`, edge velocity should behave as pass-through (dashed edge diagnostics).
+  - Requested dye mode is `NO-OP`, so no dye absorption should occur on the selected blue channel.
+  - Plume should advect to and contact/cross the segment region without EAT-style removal.
+- Observed behavior:
+  - After random scenario load and settle wait, blue plume reached/contacted the rigid segment region (`R0:1..R0:3`) with no amber absorb signature.
+  - Overlay diagnostics showed PASS edge styling (dashed), consistent with velocity pass-through.
+  - Truth-table payload reports `channel: "b"`, `requestedDyeMode: "noop"`, `effectiveDyeMode: "noop"`, `velocityMode: "pass"`, matching contract expectations.
+- Quick metrics:
+  - Fixture: `rigid-line`
+  - Motion: `pinned`
+  - Momentum coupling: `0.6000000000000001`
+  - Payload `createdAt`: `2026-02-17T06:30:59.202Z`
+- Screenshot path(s):
+  - `/Users/richardwilliams/.openclaw/media/browser/8001fb1c-c688-49ca-908c-c48f4902da01.jpg`
+- Decision: **PASS (no issue)**
+- Fixes/code changes: none
+- Deterministic validation:
+  - Not rerun this cycle (no code change triggered).
+
+## 2026-02-17 03:34 (America/Buenos_Aires)
+
+- Scenario: `rigid-red-eat-block-pinned` (manual repro from user report)
+- User report: "there's no emitter or dye at all" on last sent screenshot.
+- Expected behavior:
+  - Wind tunnel view should always show active dyed plume unless explicitly disabled.
+- Root cause found:
+  - In `buildWindTunnelEmitter(...)`, color channels were set with `clamp(Number(colorX), 0, 255)`.
+  - When `colorR/G/B` options are omitted, `Number(undefined)` becomes `NaN`, and clamp propagated `NaN`.
+  - This produced invalid emitter channel values and could result in effectively missing/black plume in some runs.
+- Fix applied:
+  - `sim-server/public/gpu-lab.js`
+    - `cr/cg/cb` now use finite-checked defaults:
+      - `colorR` fallback `135`
+      - `colorG` fallback `190`
+      - `colorB` fallback `255`
+- After-fix verification:
+  - Reopened Interaction Lab, allowed settle, confirmed non-zero dye totals and visible plume.
+  - Screenshot: `/Users/richardwilliams/.openclaw/media/browser/af224343-4ce2-4051-9c1b-ed213391b5ea.jpg`
+- Decision: **ISSUE FOUND -> FIXED**
+- Deterministic validation:
+  - `node-harness/test-gpu-track.mjs` passed `154/154`.
+

@@ -344,6 +344,15 @@ canvas.emitter-edit-mode {
 #populationCount { margin-top: 10px; font-size: 0.9em; color: #ccc; text-align: center; width: 100%; }
 #particleCount { margin-top: 10px; font-size: 0.9em; color: #ccc; text-align: center; width: 100%; }
 .viewport-instructions { font-size: 0.8em; color: #bbb; text-align: center; margin-top: 5px; }
+.control-help-text {
+    font-size: 0.78em;
+    color: #b7c8d8;
+    line-height: 1.35;
+    margin: 2px 0 8px 0;
+}
+.control-help-text strong {
+    color: #d9ecff;
+}
 #infoPanel h5 { margin-top: 0; margin-bottom: 8px; color: #00aeff; border-bottom: 1px solid #444; padding-bottom: 5px; }
 #infoPanel p { margin: 3px 0; line-height: 1.4; }
 #infoPanel strong { color: #bbb; }

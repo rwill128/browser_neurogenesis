@@ -283,19 +283,20 @@
             </div>
             <div class="control-group">
                 <h4>Fluid</h4>
+                <p class="control-help-text">Solver quick guide: <strong>Diffusion</strong> smooths and spreads dye/velocity, <strong>Viscosity</strong> damps fast currents, and <strong>Fade</strong> controls how quickly trails disappear.</p>
                 <label for="fluidGridSize" class="slider-label">Fluid Grid Resolution:</label>
                 <span id="fluidGridSizeValue" class="slider-value">128</span>
                 <input type="range" id="fluidGridSize" min="32" max="1028" value="128" step="16">
 
-                <label for="fluidDiffusion" class="slider-label">Diffusion:</label>
+                <label for="fluidDiffusion" class="slider-label" title="Higher diffusion spreads and smooths dye/velocity faster.">Diffusion:</label>
                 <span id="fluidDiffusionValue" class="slider-value">4.7e-4</span>
                 <input type="range" id="fluidDiffusion" min="0" max="0.001" value="0.00047" step="0.00001">
 
-                <label for="fluidViscosity" class="slider-label">Viscosity:</label>
+                <label for="fluidViscosity" class="slider-label" title="Higher viscosity damps turbulence and slows rapid flow changes.">Viscosity:</label>
                 <span id="fluidViscosityValue" class="slider-value">.0005</span>
                 <input type="range" id="fluidViscosity" min="0" max="0.0075" value="0.0005" step="0.00005">
 
-                <label for="fluidFade" class="slider-label">Fade Rate:</label>
+                <label for="fluidFade" class="slider-label" title="Higher fade clears dye trails faster; lower fade leaves longer history.">Fade Rate:</label>
                 <span id="fluidFadeValueSpan" class="slider-value">0.010</span>
                 <input type="range" id="fluidFade" min="0.0" max="1.0" value="0.01" step="0.001">
 
@@ -307,7 +308,7 @@
                 <label for="showFluidVelocityToggle" class="checkbox-label">Show Fluid Velocity:
                     <input type="checkbox" id="showFluidVelocityToggle">
                 </label>
-                <label for="useGpuFluidToggle" class="checkbox-label">Use GPU for Fluid Sim (Experimental):
+                <label for="useGpuFluidToggle" class="checkbox-label" title="Runs the fluid solver on WebGPU for speed; behavior should remain solver-equivalent but this path is still experimental.">Use GPU for Fluid Sim (Experimental):
                     <input type="checkbox" id="useGpuFluidToggle">
                 </label>
             </div>

@@ -369,8 +369,25 @@ function makeRgbPolicy(channel, mode) {
 
 function permeabilityFromDyeModeRgb(rgb) {
   // Rigid runtime treats dye PASS as DEFLECT unless permeability channel is enabled.
-  // For interaction-lab EAT/NO-OP semantics, map NO-OP channels to permeability=1.
+  // For interaction-lab channel semantics, map PASS channels to permeability=1.
   return [0, 1, 2].map((ci) => (Number(rgb?.[ci]) === EDGE_DYE_PASS ? 1 : 0));
+}
+
+function emitterTintForScenario(channel, dyeMode, velocityMode) {
+  const ch = String(channel || 'r').toLowerCase();
+  const idx = ch === 'g' ? 1 : (ch === 'b' ? 2 : 0);
+  const m = String(dyeMode || 'pass').toLowerCase();
+  const vel = String(velocityMode || 'block').toLowerCase();
+
+  // For channel-filter confrontation runs (BLOCK + velocity PASS),
+  // boost selected channel visibility so reflected plume is obvious.
+  if (m === 'block' && vel === 'pass') {
+    const rgb = [22, 22, 22];
+    rgb[idx] = 255;
+    return rgb;
+  }
+
+  return [135, 190, 255];
 }
 
 function makeRigidLineSpec({ channel, dyeMode, velocityMode, momentum }) {
@@ -484,6 +501,8 @@ function buildScenarioPayload() {
         thetaSpin: 0,
       };
 
+  const [emitterColorR, emitterColorG, emitterColorB] = emitterTintForScenario(channel, dyeMode, velocityMode);
+
   const payload = {
     type: 'gpuLabEmbedReset',
     spec,
@@ -501,6 +520,9 @@ function buildScenarioPayload() {
       emitterChaosGain: 0,
       emitterWobbleAmp: 0,
       emitterWobbleFreq: 0,
+      emitterColorR,
+      emitterColorG,
+      emitterColorB,
       emitterLockPosition: true,
       interactionLab,
     },
@@ -531,6 +553,7 @@ function renderScenarioDebug(row, payload, extra = {}) {
       expectedSelectionRule: 'For selected channel at each segment: PASS=transparent transport, EAT=absorb/remove, BLOCK=reflect/deflect channel flux',
       velocityDyeContract: 'velocity=BLOCK can divert flow before dye-edge contact, so EAT may appear muted in BLOCK-heavy setups',
       channelFilterMode: 'for channel-selective filtering use velocity=PASS + dyeMode=block on selected channel (prototype channel-conditioned dye reflection path)',
+      emitterVisualizationNote: 'BLOCK+PASS presets auto-tint emitter toward selected channel for clearer visual diagnosis',
       knownLimit: 'shared velocity field still constrains full per-channel momentum fidelity',
       screenshotWorkflow: 'Load/create scenario -> Apply -> Download screenshot -> send screenshot for analysis',
       generationWorkflow: 'Use presets, curriculum buttons, or Random scenario to auto-generate cases',

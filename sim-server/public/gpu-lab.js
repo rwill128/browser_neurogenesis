@@ -4367,6 +4367,9 @@ function buildWindTunnelEmitter(n, {
   wobbleFreq = 0.085,
   swirlJitter = 0.73,
   jetVy = 0.38,
+  colorR = 135,
+  colorG = 190,
+  colorB = 255,
   lockPosition = false,
 } = {}) {
   return {
@@ -4375,9 +4378,9 @@ function buildWindTunnelEmitter(n, {
     vx: 0,
     vy: Number.isFinite(Number(jetVy)) ? Number(jetVy) : 0.38,
     r: Math.max(3, Number(radius) || (n / 13)),
-    cr: 135,
-    cg: 190,
-    cb: 255,
+    cr: clamp(Number(colorR), 0, 255),
+    cg: clamp(Number(colorG), 0, 255),
+    cb: clamp(Number(colorB), 0, 255),
     strength: Math.max(0.1, Number(strength) || 3.8),
     spin: Number.isFinite(Number(spin)) ? Number(spin) : 1.25,
     curlGain: Number.isFinite(Number(curlGain)) ? Number(curlGain) : 1.65,
@@ -4435,6 +4438,9 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
     wobbleFreq: Number(options?.emitterWobbleFreq) || 0.11,
     swirlJitter: Number(options?.emitterSwirlJitter) || 1.17,
     jetVy: Number(options?.emitterJetVy) || 1.35,
+    colorR: Number(options?.emitterColorR),
+    colorG: Number(options?.emitterColorG),
+    colorB: Number(options?.emitterColorB),
     lockPosition: options?.emitterLockPosition !== false,
   })];
 

@@ -197,3 +197,17 @@ test('gpu-lab obstacle mask is edge-velocity BLOCK based for both rigid and soft
     'expected runtime to stop using post-pass body barrier path',
   );
 });
+
+test('gpu-lab routes rigid stepping through isolated gpu-only runtime solver module', () => {
+  assert.match(
+    source,
+    /import \{ stepRigidBodiesGpuOnly \} from '\/runtime-solvers\/stepRigidGpuOnly\.js';/,
+    'expected isolated gpu-only rigid stepping module import',
+  );
+
+  assert.match(
+    source,
+    /if \(solverPath === 'gpu-only'\) \{[\s\S]*stepRigidBodiesGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{/,
+    'expected explicit gpu-only rigid stepping dispatch with baseline fallback branch',
+  );
+});

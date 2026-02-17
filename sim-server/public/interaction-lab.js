@@ -46,6 +46,10 @@ let scenarioPresets = [];
 let currentScenarioMeta = null;
 let curriculumOrder = [];
 let curriculumIndex = -1;
+let embedStatusPollTimer = null;
+let embedStallFrames = 0;
+let lastEmbedFrame = -1;
+let lastEmbedResyncAt = 0;
 
 const DEFAULT_SCENARIO_PRESETS = [
   {
@@ -637,6 +641,55 @@ function postPayloadToEmbed(payload) {
   windFrame.contentWindow.postMessage(payload, window.location.origin);
 }
 
+function getEmbedStatus() {
+  try {
+    const api = windFrame?.contentWindow?.__gpuLabApi;
+    if (!api || typeof api.getStatus !== 'function') return null;
+    return api.getStatus() || null;
+  } catch {
+    return null;
+  }
+}
+
+function maybeResyncEmbedMotion(status) {
+  if (!lastPayload || !embedReady) return;
+  const desiredMode = String(motionModeEl?.value || 'pinned').toLowerCase();
+  const actualMode = String(status?.interactionLab?.motion || '').toLowerCase();
+  const now = performance.now();
+
+  const frameNow = Number(status?.frame) || 0;
+  if (frameNow <= lastEmbedFrame) embedStallFrames += 1;
+  else embedStallFrames = 0;
+  lastEmbedFrame = frameNow;
+
+  const fixtureVx = Number(status?.interactionLab?.fixturePose?.vx) || 0;
+  const fixtureVy = Number(status?.interactionLab?.fixturePose?.vy) || 0;
+  const fixtureSpeed = Math.hypot(fixtureVx, fixtureVy);
+  const requestedCircleSpeed = Math.max(0, Number(circleSpeedEl?.value) || 0);
+  const requestedCircleRadius = Math.max(0, Number(circleRadiusEl?.value) || 0);
+
+  const modeMismatch = desiredMode && actualMode && desiredMode !== actualMode;
+  const stalledCircle = desiredMode === 'circle'
+    && actualMode === 'circle'
+    && requestedCircleSpeed > 0.05
+    && requestedCircleRadius > 0.5
+    && fixtureSpeed < 0.02;
+
+  if ((modeMismatch || stalledCircle || embedStallFrames >= 3) && (now - lastEmbedResyncAt) > 800) {
+    lastEmbedResyncAt = now;
+    postPayloadToEmbed(lastPayload);
+  }
+}
+
+function ensureEmbedStatusPoll() {
+  if (embedStatusPollTimer) return;
+  embedStatusPollTimer = setInterval(() => {
+    const status = getEmbedStatus();
+    if (!status) return;
+    maybeResyncEmbedMotion(status);
+  }, 450);
+}
+
 function pushScenario() {
   const { payload, truthRow } = buildScenarioPayload();
   lastPayload = payload;
@@ -775,6 +828,8 @@ momentumEl?.addEventListener('blur', updateRangeValueLabels);
 
 windFrame?.addEventListener('load', () => {
   embedReady = false;
+  embedStallFrames = 0;
+  lastEmbedFrame = -1;
   setTimeout(() => {
     if (lastPayload) postPayloadToEmbed(lastPayload);
   }, 250);
@@ -785,6 +840,9 @@ window.addEventListener('message', (event) => {
   const data = event.data || {};
   if (data.type === 'gpuLabEmbedReady') {
     embedReady = true;
+    embedStallFrames = 0;
+    lastEmbedFrame = -1;
+    ensureEmbedStatusPoll();
     if (lastPayload) postPayloadToEmbed(lastPayload);
     else pushScenario();
     return;
@@ -871,6 +929,13 @@ if (downloadScreenshotBtn) {
 updateRangeValueLabels();
 updateMotionControlState();
 updateDyeControlState();
+
+window.addEventListener('beforeunload', () => {
+  if (embedStatusPollTimer) {
+    clearInterval(embedStatusPollTimer);
+    embedStatusPollTimer = null;
+  }
+});
 
 loadScenarioPresetCatalog().finally(() => {
   pushScenario();

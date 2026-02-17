@@ -10,6 +10,8 @@
     .pane { display:flex; gap:12px; align-items:flex-start; }
     .card { border:1px solid #2f2f2f; border-radius:8px; background:#151515; padding:10px; }
     label { font-size:13px; color:#ddd; }
+    label.control-disabled { opacity:0.55; }
+    input:disabled { opacity:0.5; cursor:not-allowed; }
     input, select, button { background:#222; color:#eee; border:1px solid #444; border-radius:6px; padding:4px 8px; }
     iframe { border:1px solid #333; background:#000; }
     pre { background:#1b1b1b; padding:10px; border-radius:8px; max-height:640px; overflow:auto; }
@@ -51,8 +53,9 @@
           <option value="circle">Dragged in circle</option>
         </select>
       </label>
-      <label>Circle radius <input id="circleRadius" type="number" step="1" min="0" max="48" value="12" /></label>
-      <label>Circle speed(rad/s) <input id="circleSpeed" type="number" step="0.05" min="0" max="6" value="0.8" /></label>
+      <label id="circleRadiusLabel">Circle radius <input id="circleRadius" type="number" step="1" min="0" max="48" value="12" /></label>
+      <label id="circleSpeedLabel">Circle speed(rad/s) <input id="circleSpeed" type="number" step="0.05" min="0" max="6" value="0.8" /></label>
+      <span id="motionHint" class="hint"></span>
     </div>
 
     <div class="row">

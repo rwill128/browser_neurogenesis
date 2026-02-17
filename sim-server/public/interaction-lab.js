@@ -10,6 +10,9 @@ const fixtureTypeEl = document.getElementById('fixtureType');
 const motionModeEl = document.getElementById('motionMode');
 const circleRadiusEl = document.getElementById('circleRadius');
 const circleSpeedEl = document.getElementById('circleSpeed');
+const circleRadiusLabelEl = document.getElementById('circleRadiusLabel');
+const circleSpeedLabelEl = document.getElementById('circleSpeedLabel');
+const motionHintEl = document.getElementById('motionHint');
 const dyeChannelEl = document.getElementById('dyeChannel');
 const dyeModeEl = document.getElementById('dyeMode');
 const velocityModeEl = document.getElementById('velocityMode');
@@ -210,6 +213,20 @@ function randomInRange(min, max, step = 0.05) {
   return Math.round(n / st) * st;
 }
 
+function updateMotionControlState() {
+  const mode = String(motionModeEl?.value || 'pinned');
+  const circleEnabled = mode === 'circle';
+  if (circleRadiusEl) circleRadiusEl.disabled = !circleEnabled;
+  if (circleSpeedEl) circleSpeedEl.disabled = !circleEnabled;
+  circleRadiusLabelEl?.classList.toggle('control-disabled', !circleEnabled);
+  circleSpeedLabelEl?.classList.toggle('control-disabled', !circleEnabled);
+  if (motionHintEl) {
+    motionHintEl.textContent = circleEnabled
+      ? 'Circle controls are active for dragged-in-circle motion.'
+      : 'Circle controls are ignored while motion is pinned.';
+  }
+}
+
 function applyScenarioPreset(preset, meta = null) {
   if (!preset || typeof preset !== 'object') return;
   setControlValue(fixtureTypeEl, preset.fixtureType || 'rigid-line');
@@ -220,6 +237,7 @@ function applyScenarioPreset(preset, meta = null) {
   setInputValue(circleRadiusEl, preset.circleRadius ?? 12);
   setInputValue(circleSpeedEl, preset.circleSpeed ?? 0.8);
   setInputValue(momentumEl, preset.momentum ?? 1);
+  updateMotionControlState();
 
   currentScenarioMeta = {
     id: preset.id || null,
@@ -642,6 +660,7 @@ for (const el of [
   showExtraVisualsEl,
 ]) {
   el?.addEventListener('change', () => {
+    if (el === motionModeEl) updateMotionControlState();
     if (!currentScenarioMeta || currentScenarioMeta.source !== 'manual') {
       currentScenarioMeta = {
         id: currentScenarioMeta?.id || null,
@@ -747,6 +766,8 @@ if (downloadScreenshotBtn) {
     }
   });
 }
+
+updateMotionControlState();
 
 loadScenarioPresetCatalog().finally(() => {
   pushScenario();

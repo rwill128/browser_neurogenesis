@@ -93,6 +93,8 @@ const importFile = document.getElementById('importFile');
 const out = document.getElementById('out');
 const segmentStatsOut = document.getElementById('segmentStatsOut');
 const segmentStatsList = document.getElementById('segmentStatsList');
+const copySegmentStatsBtn = document.getElementById('copySegmentStatsBtn');
+const copyOutBtn = document.getElementById('copyOutBtn');
 const windEmitterStrengthEl = document.getElementById('windEmitterStrength');
 const windEmitterJetVyEl = document.getElementById('windEmitterJetVy');
 const windEmitterRadiusEl = document.getElementById('windEmitterRadius');
@@ -165,6 +167,42 @@ let highlightedSegmentId = null;
 const fieldPanels = Array.from(document.querySelectorAll('.field-panel'));
 
 function idx(x, y) { return y * W + x; }
+
+async function copyTextToClipboard(text) {
+  const payload = String(text || '');
+  if (!payload) return false;
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(payload);
+      return true;
+    }
+  } catch {}
+
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = payload;
+    ta.setAttribute('readonly', 'readonly');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return !!ok;
+  } catch {
+    return false;
+  }
+}
+
+function flashCopyButtonState(btn, labelOk = 'Copied', labelErr = 'Copy failed') {
+  if (!btn) return;
+  const prev = btn.textContent;
+  return (ok) => {
+    btn.textContent = ok ? labelOk : labelErr;
+    setTimeout(() => { btn.textContent = prev; }, 1100);
+  };
+}
 
 const EDGE_DYE_BLOCK_SCALAR = 0.0;
 const EDGE_DYE_PASS_SCALAR = 0.5;
@@ -2236,6 +2274,22 @@ if (windTunnelFrame) {
       }
       return;
     }
+  });
+}
+
+if (copySegmentStatsBtn) {
+  const report = flashCopyButtonState(copySegmentStatsBtn);
+  copySegmentStatsBtn.addEventListener('click', async () => {
+    const ok = await copyTextToClipboard(segmentStatsOut?.textContent || '');
+    report(ok);
+  });
+}
+
+if (copyOutBtn) {
+  const report = flashCopyButtonState(copyOutBtn);
+  copyOutBtn.addEventListener('click', async () => {
+    const ok = await copyTextToClipboard(out?.textContent || '');
+    report(ok);
   });
 }
 

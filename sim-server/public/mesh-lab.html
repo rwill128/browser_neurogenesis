@@ -33,7 +33,10 @@
     .segment-id-btn { min-width:72px; font-family: ui-monospace, Menlo, monospace; }
     .segment-id-btn.active { border-color:#5de2ff; box-shadow:0 0 0 1px rgba(93,226,255,0.35) inset; }
     .segment-meta { font-size:12px; color:#cfcfcf; opacity:0.9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .panel-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; }
+    .copy-btn { font-size:12px; padding:3px 8px; }
     #segmentStatsOut { width:420px; max-height:384px; overflow:auto; white-space:pre; }
+    #outPanel { margin-top:10px; }
   </style>
 </head>
 <body>
@@ -320,13 +323,22 @@
       <iframe id="windTunnelFrame" src="/gpu-lab.html?embed=1&v=20260216d" width="384" height="384" loading="lazy"></iframe>
     </div>
     <div class="segment-panel" id="segmentPanel">
-      <div>Segment stats (ID aligns with wind tunnel labels)</div>
+      <div class="panel-head">
+        <div>Segment stats (ID aligns with wind tunnel labels)</div>
+        <button id="copySegmentStatsBtn" class="copy-btn">Copy JSON</button>
+      </div>
       <div class="ctrl-note">Click a segment ID to highlight it in the wind tunnel.</div>
       <div id="segmentStatsList">ready</div>
       <pre id="segmentStatsOut">ready</pre>
     </div>
   </div>
-  <pre id="out">ready</pre>
-  <script type="module" src="/mesh-lab.js?v=20260216d"></script>
+  <div id="outPanel">
+    <div class="panel-head">
+      <div>Compiled CreatureSpec JSON</div>
+      <button id="copyOutBtn" class="copy-btn">Copy JSON</button>
+    </div>
+    <pre id="out">ready</pre>
+  </div>
+  <script type="module" src="/mesh-lab.js?v=20260216e"></script>
 </body>
 </html>

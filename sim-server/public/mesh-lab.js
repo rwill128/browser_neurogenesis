@@ -14,6 +14,7 @@ const rigidEdgeVelocityModeCanvas = document.getElementById('rigidEdgeVelocityMo
 const rigidEdgeDyeModeCanvas = document.getElementById('rigidEdgeDyeModePaint');
 const meshCanvas = document.getElementById('mesh');
 const windTunnelFrame = document.getElementById('windTunnelFrame');
+const runtimeSolverPathEls = Array.from(document.querySelectorAll('input[name="runtimeSolverPath"]'));
 const pctx = paintCanvas.getContext('2d');
 const dctx = densityCanvas.getContext('2d');
 const ectx = membraneEdgeCanvas.getContext('2d');
@@ -1011,6 +1012,16 @@ function buildSpecFromCurrentFields(mesh, traitFields = null) {
   });
 }
 
+function normalizeRuntimeSolverPath(raw) {
+  const mode = String(raw || '').trim().toLowerCase();
+  return mode === 'gpu-only' ? 'gpu-only' : 'baseline';
+}
+
+function getRuntimeSolverPath() {
+  const picked = runtimeSolverPathEls.find((el) => el?.checked);
+  return normalizeRuntimeSolverPath(picked?.value);
+}
+
 function finiteOr(raw, fallback) {
   const v = Number(raw);
   return Number.isFinite(v) ? v : fallback;
@@ -1044,6 +1055,7 @@ function pushSpecToWindTunnel(spec) {
       grid: W,
       targetSpanFraction: 0.42,
       importScale: 1,
+      solverPath: getRuntimeSolverPath(),
       ...readWindTunnelEmitterOptions(),
     },
   };
@@ -2436,6 +2448,13 @@ if (copyOutBtn) {
   copyOutBtn.addEventListener('click', async () => {
     const ok = await copyTextToClipboard(out?.textContent || '');
     report(ok);
+  });
+}
+
+for (const solverEl of runtimeSolverPathEls) {
+  solverEl?.addEventListener('change', () => {
+    if (!solverEl.checked) return;
+    if (lastCompiledSpec) pushSpecToWindTunnel(lastCompiledSpec);
   });
 }
 

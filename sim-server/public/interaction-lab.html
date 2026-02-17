@@ -29,6 +29,16 @@
 <body>
   <h2>Interaction Lab (truth-table confrontation)</h2>
 
+  <div class="row" role="radiogroup" aria-label="Runtime solver path">
+    <strong>Runtime solver:</strong>
+    <label style="display:inline-flex;align-items:center;gap:6px;">
+      <input type="radio" name="runtimeSolverPath" value="baseline" checked /> Baseline solver
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:6px;">
+      <input type="radio" name="runtimeSolverPath" value="gpu-only" /> GPU-only solver (experimental)
+    </label>
+  </div>
+
   <div class="card">
     <div class="row">
       <label>Scenario preset

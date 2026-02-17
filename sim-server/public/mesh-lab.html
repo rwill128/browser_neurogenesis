@@ -53,6 +53,15 @@
 </head>
 <body>
   <h2>Field→Structure Compiler Lab</h2>
+  <div class="row" role="radiogroup" aria-label="Runtime solver path">
+    <strong>Runtime solver:</strong>
+    <label style="display:inline-flex;align-items:center;gap:6px;">
+      <input type="radio" name="runtimeSolverPath" value="baseline" checked /> Baseline solver
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:6px;">
+      <input type="radio" name="runtimeSolverPath" value="gpu-only" /> GPU-only solver (experimental)
+    </label>
+  </div>
   <div class="control-groups">
     <details class="ctrl-group" open>
       <summary>Painting & field authoring</summary>

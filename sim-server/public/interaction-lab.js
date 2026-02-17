@@ -1,4 +1,5 @@
 const windFrame = document.getElementById('windFrame');
+const runtimeSolverPathEls = Array.from(document.querySelectorAll('input[name="runtimeSolverPath"]'));
 const scenarioPresetEl = document.getElementById('scenarioPreset');
 const loadPresetBtn = document.getElementById('loadPresetBtn');
 const randomScenarioBtn = document.getElementById('randomScenarioBtn');
@@ -43,6 +44,16 @@ const EDGE_DYE_PASS = 0;
 const EDGE_DYE_EAT = 2;
 const EDGE_VEL_PASS = 0;
 const EDGE_VEL_BLOCK = 1;
+
+function normalizeRuntimeSolverPath(raw) {
+  const mode = String(raw || '').trim().toLowerCase();
+  return mode === 'gpu-only' ? 'gpu-only' : 'baseline';
+}
+
+function getRuntimeSolverPath() {
+  const picked = runtimeSolverPathEls.find((el) => el?.checked);
+  return normalizeRuntimeSolverPath(picked?.value);
+}
 
 let embedReady = false;
 let lastPayload = null;
@@ -645,6 +656,7 @@ function buildScenarioPayload() {
       emitterLockPosition: true,
       overlayShowSegmentIds,
       overlayShowExtraVisuals,
+      solverPath: getRuntimeSolverPath(),
       interactionLab,
     },
   };
@@ -663,6 +675,7 @@ function buildScenarioPayload() {
     momentum,
     overlayShowSegmentIds,
     overlayShowExtraVisuals,
+    runtimeSolverPath: getRuntimeSolverPath(),
   };
 
   return { payload, truthRow };
@@ -774,6 +787,12 @@ autoApplyEl?.addEventListener('change', () => {
   updateApplyModeState();
   if (autoApplyEl.checked) pushScenario();
 });
+for (const solverEl of runtimeSolverPathEls) {
+  solverEl?.addEventListener('change', () => {
+    if (!solverEl.checked) return;
+    if (autoApplyEl?.checked) pushScenario();
+  });
+}
 
 if (loadPresetBtn) {
   loadPresetBtn.addEventListener('click', () => {

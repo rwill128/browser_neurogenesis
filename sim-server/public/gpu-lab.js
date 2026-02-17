@@ -41,12 +41,14 @@ const enableArtificialSwimEl = document.getElementById('enableArtificialSwim');
 const spawnMembraneCellsEl = document.getElementById('spawnMembraneCells');
 const enableWarningDeformInterventionsEl = document.getElementById('enableWarningDeformInterventions');
 const enableSevereDeformInterventionsEl = document.getElementById('enableSevereDeformInterventions');
+const runtimeSolverPathEls = Array.from(document.querySelectorAll('input[name="runtimeSolverPath"]'));
 
 const GENERATED_MINI_SCENARIOS_URL = '/generated-mini-scenarios.json';
 let generatedMiniScenarios = new Map();
 
 const urlParams = new URLSearchParams(window.location.search || '');
 const EMBED_MODE = urlParams.get('embed') === '1' || urlParams.get('embedded') === '1';
+setRuntimeSolverPath(urlParams.get('solverPath'), { syncUrl: false });
 if (EMBED_MODE) {
   document.body.classList.add('embed-mode');
 }
@@ -107,6 +109,32 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+function normalizeRuntimeSolverPath(raw) {
+  const mode = String(raw || '').trim().toLowerCase();
+  return mode === 'gpu-only' ? 'gpu-only' : 'baseline';
+}
+
+function getRuntimeSolverPath() {
+  const picked = runtimeSolverPathEls.find((el) => el?.checked);
+  return normalizeRuntimeSolverPath(picked?.value);
+}
+
+function setRuntimeSolverPath(mode, { syncUrl = false } = {}) {
+  const normalized = normalizeRuntimeSolverPath(mode);
+  for (const el of runtimeSolverPathEls) {
+    if (!el) continue;
+    el.checked = (normalizeRuntimeSolverPath(el.value) === normalized);
+  }
+  if (syncUrl && window?.history?.replaceState) {
+    const params = new URLSearchParams(window.location.search || '');
+    params.set('solverPath', normalized);
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash || ''}`;
+    window.history.replaceState({}, '', nextUrl);
+  }
+  return normalized;
+}
+
 const EDGE_BODY_MODE = {
   PASS: 0,
   BLOCK: 1,
@@ -132,6 +160,7 @@ function readControls() {
     spawnMembraneCells: !!spawnMembraneCellsEl?.checked,
     enableWarningDeformInterventions: (enableWarningDeformInterventionsEl?.checked !== false),
     enableSevereDeformInterventions: (enableSevereDeformInterventionsEl?.checked !== false),
+    runtimeSolverPath: getRuntimeSolverPath(),
   };
 }
 
@@ -4753,11 +4782,13 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
 
   if (gridEl) gridEl.value = String(grid);
   if (showViscEl) showViscEl.checked = false;
+  const selectedSolverPath = setRuntimeSolverPath(options?.solverPath ?? getRuntimeSolverPath(), { syncUrl: true });
 
   running = false;
   sim = await initSim();
   // Wind-tunnel embed should use only the explicit configured emitter.
   sim.disableDefaultInject = true;
+  sim.controls.runtimeSolverPath = selectedSolverPath;
 
   sim.bodies = {
     rigid: [],
@@ -4811,6 +4842,7 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
   return {
     ok: true,
     mode: 'embed-wind-tunnel',
+    runtimeSolverPath: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath),
     grid: sim.controls.n,
     rigidBodies: sim.bodies.rigid.length,
     softNodes: sim.bodies.soft?.nodes?.length || 0,
@@ -5523,6 +5555,18 @@ function stop() {
 
 bindSliderReadouts();
 
+for (const solverEl of runtimeSolverPathEls) {
+  solverEl?.addEventListener('change', async () => {
+    if (!solverEl.checked) return;
+    const selected = setRuntimeSolverPath(solverEl.value, { syncUrl: true });
+    if (sim?.controls) sim.controls.runtimeSolverPath = selected;
+    if (!running || !sim) return;
+    running = false;
+    sim = null;
+    await start();
+  });
+}
+
 runBtn.addEventListener('click', () => start().catch((e) => log({ ok: false, error: String(e) })));
 stopBtn.addEventListener('click', stop);
 clearViscBtn.addEventListener('click', resetViscMap);
@@ -5703,6 +5747,7 @@ window.__gpuLabApi = {
       running: !!running,
       frame: Number(sim?.frame) || 0,
       grid: Number(sim?.controls?.n) || null,
+      runtimeSolverPath: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath),
       rigidBodies: Number(sim?.bodies?.rigid?.length) || 0,
       softNodes: Number(sim?.bodies?.soft?.nodes?.length) || 0,
       interactionLab: il ? {

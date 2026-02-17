@@ -32,6 +32,7 @@ const scenarioPresetEl = document.getElementById('scenarioPreset');
 const massLightEl = document.getElementById('massLight');
 const massHeavyEl = document.getElementById('massHeavy');
 const massSoftEl = document.getElementById('massSoft');
+const rigidBodyCountEl = document.getElementById('rigidBodyCount');
 const bodyDragEl = document.getElementById('bodyDrag');
 const bodyFeedbackEl = document.getElementById('bodyFeedback');
 const softClusterFluidTorqueCouplingEl = document.getElementById('softClusterFluidTorqueCoupling');
@@ -151,6 +152,7 @@ function readControls() {
     massLight: Math.max(0.05, Number(massLightEl.value) || 1.2),
     massHeavy: Math.max(0.05, Number(massHeavyEl.value) || 5.0),
     massSoft: Math.max(0.02, Number(massSoftEl.value) || 0.6),
+    rigidBodyCount: Math.max(1, Math.min(1000, Math.round(Number(rigidBodyCountEl?.value) || 10))),
     bodyDrag: Math.max(0, Number(bodyDragEl.value) || 0.55),
     bodyFeedback: Math.max(0, Number(bodyFeedbackEl.value) || 0.012),
     softClusterFluidTorqueCoupling: Math.max(0, Math.min(2, Number(softClusterFluidTorqueCouplingEl?.value) || SOFT_CLUSTER_FLOW_FORCE_SHARE)),
@@ -1040,7 +1042,7 @@ function initBodies(n, controls) {
   const bodyScale = bigMode ? 0.5 : 1.0;
   // Keep the same primitive catalog across 128/256/512/1024+ so
   // deformation differences are easier to attribute to fluid resolution.
-  const rigidCount = 10;
+  const rigidCount = Math.max(1, Math.min(1000, Math.round(Number(controls?.rigidBodyCount) || 10)));
   const softClusterCount = 10;
 
   const rigidShapeCycle = [3, 4, 5, 6];
@@ -5293,6 +5295,13 @@ async function stepAndRender() {
     running = false;
     sim = null;
     log({ ok: true, msg: `reinitializing for membrane-cell mode ${uiControls.spawnMembraneCells ? 'ON' : 'OFF'}` });
+    await start();
+    return;
+  }
+  if (uiControls.rigidBodyCount !== s.controls.rigidBodyCount) {
+    running = false;
+    sim = null;
+    log({ ok: true, msg: `reinitializing for rigid body count ${uiControls.rigidBodyCount}` });
     await start();
     return;
   }

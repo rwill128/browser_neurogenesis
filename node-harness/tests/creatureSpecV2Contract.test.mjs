@@ -1596,4 +1596,21 @@ test('gpu-only buildBodiesFromCreatureSpec returns detached structures while pre
   gpuOnlyBodies.soft.springs[0][5] = (baselineVelocityMode === 0 ? 1 : 0);
   assert.equal(baselineBodies.soft.springs[0][5], baselineVelocityMode,
     'gpu-only spring policy mutation must not leak into baseline output');
+
+  const baselineSpringDye = baselineBodies.soft.springs[0][4][0];
+  gpuOnlyBodies.soft.springs[0][4][0] = baselineSpringDye === 2 ? 1 : 2;
+  assert.equal(baselineBodies.soft.springs[0][4][0], baselineSpringDye,
+    'gpu-only spring dye tuple mutation must not leak into baseline output');
+
+  if (baselineBodies.rigid.length > 0) {
+    const baselineRigidEdgeMode = baselineBodies.rigid[0].edgeBodyMode[0];
+    gpuOnlyBodies.rigid[0].edgeBodyMode[0] = baselineRigidEdgeMode === 0 ? 1 : 0;
+    assert.equal(baselineBodies.rigid[0].edgeBodyMode[0], baselineRigidEdgeMode,
+      'gpu-only rigid edge body policy mutation must not leak into baseline output');
+
+    const baselineRigidDye = baselineBodies.rigid[0].edgeDyeMode[0][0];
+    gpuOnlyBodies.rigid[0].edgeDyeMode[0][0] = baselineRigidDye === 2 ? 1 : 2;
+    assert.equal(baselineBodies.rigid[0].edgeDyeMode[0][0], baselineRigidDye,
+      'gpu-only rigid edge dye tuple mutation must not leak into baseline output');
+  }
 });

@@ -312,7 +312,7 @@ function populateScenarioPresetDropdown() {
 
 async function loadScenarioPresetCatalog() {
   try {
-    const res = await fetch('/interaction-scenarios.json?v=20260217b', { cache: 'no-store' });
+    const res = await fetch('/interaction-scenarios.json?v=20260217c', { cache: 'no-store' });
     if (res.ok) {
       const json = await res.json();
       if (Array.isArray(json) && json.length > 0) {
@@ -348,6 +348,12 @@ function makeRgbPolicy(channel, mode) {
   return rgb;
 }
 
+function permeabilityFromDyeModeRgb(rgb) {
+  // Rigid runtime treats dye PASS as DEFLECT unless permeability channel is enabled.
+  // For interaction-lab EAT/NO-OP semantics, map NO-OP channels to permeability=1.
+  return [0, 1, 2].map((ci) => (Number(rgb?.[ci]) === EDGE_DYE_PASS ? 1 : 0));
+}
+
 function makeRigidLineSpec({ channel, dyeMode, velocityMode, momentum }) {
   const cx = 64;
   const cy = 64;
@@ -363,6 +369,7 @@ function makeRigidLineSpec({ channel, dyeMode, velocityMode, momentum }) {
 
   const vel = velocityModeCode(velocityMode);
   const dye = makeRgbPolicy(channel, dyeMode);
+  const permeabilityRgb = permeabilityFromDyeModeRgb(dye);
   const sides = hull.length;
 
   return {
@@ -376,6 +383,7 @@ function makeRigidLineSpec({ channel, dyeMode, velocityMode, momentum }) {
       mass: 8,
       edgeBodyMode: Array.from({ length: sides }, () => vel),
       edgeDyeMode: Array.from({ length: sides }, () => [...dye]),
+      edgePermeabilityRGB: Array.from({ length: sides }, () => [...permeabilityRgb]),
       edgeVelocityMode: Array.from({ length: sides }, () => vel),
       edgeMomentumCoupling: Array.from({ length: sides }, () => clamp(momentum, 0, 1)),
       insideCorrectionEnabled: 1,

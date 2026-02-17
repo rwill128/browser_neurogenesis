@@ -5235,10 +5235,103 @@ if (importSpecBtn && importSpecFile) {
   });
 }
 
+function captureCanvasMetrics() {
+  if (!(canvas instanceof HTMLCanvasElement) || !ctx) {
+    return {
+      ok: false,
+      error: 'canvas-not-ready',
+      frame: Number(sim?.frame) || 0,
+      totalRGB: 0,
+      nonZeroPixels: 0,
+      width: 0,
+      height: 0,
+    };
+  }
+  const w = Math.max(0, Number(canvas.width) || 0);
+  const h = Math.max(0, Number(canvas.height) || 0);
+  if (w <= 0 || h <= 0) {
+    return {
+      ok: false,
+      error: 'canvas-size-zero',
+      frame: Number(sim?.frame) || 0,
+      totalRGB: 0,
+      nonZeroPixels: 0,
+      width: w,
+      height: h,
+    };
+  }
+
+  try {
+    const image = ctx.getImageData(0, 0, w, h);
+    const data = image?.data || null;
+    if (!data || data.length === 0) {
+      return {
+        ok: false,
+        error: 'image-data-empty',
+        frame: Number(sim?.frame) || 0,
+        totalRGB: 0,
+        nonZeroPixels: 0,
+        width: w,
+        height: h,
+      };
+    }
+
+    let totalRGB = 0;
+    let nonZeroPixels = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const sum = (data[i] || 0) + (data[i + 1] || 0) + (data[i + 2] || 0);
+      totalRGB += sum;
+      if (sum > 0) nonZeroPixels += 1;
+    }
+
+    return {
+      ok: true,
+      frame: Number(sim?.frame) || 0,
+      totalRGB,
+      nonZeroPixels,
+      width: w,
+      height: h,
+      capturedAt: new Date().toISOString(),
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: String(err?.message || err),
+      frame: Number(sim?.frame) || 0,
+      totalRGB: 0,
+      nonZeroPixels: 0,
+      width: w,
+      height: h,
+    };
+  }
+}
+
 window.__gpuLabApi = {
   start: () => start(),
   stop: () => { stop(); return { ok: true }; },
   resetWindTunnelFromSpec: (spec, options = {}) => resetEmbedWindTunnelFromSpec(spec, options),
+  getStatus: () => ({
+    ok: true,
+    running: !!running,
+    frame: Number(sim?.frame) || 0,
+    grid: Number(sim?.controls?.n) || null,
+    rigidBodies: Number(sim?.bodies?.rigid?.length) || 0,
+    softNodes: Number(sim?.bodies?.soft?.nodes?.length) || 0,
+    interactionLab: sim?.interactionLab ? {
+      enabled: sim.interactionLab.enabled !== false,
+      targetType: sim.interactionLab.targetType,
+      motion: sim.interactionLab.mode,
+    } : null,
+  }),
+  captureCanvasDataUrl: (mimeType = 'image/png') => {
+    try {
+      if (!(canvas instanceof HTMLCanvasElement)) return null;
+      return canvas.toDataURL(String(mimeType || 'image/png'));
+    } catch {
+      return null;
+    }
+  },
+  captureCanvasMetrics: () => captureCanvasMetrics(),
 };
 
 if (EMBED_MODE) {

@@ -17,20 +17,37 @@ Creates:
   - `verdicts.json` (PENDING)
   - `analysis.md` template
 
-## Stage B — capture artifacts (scriptable step)
+## Stage B — capture artifacts (scripted, end-to-end)
 
-For each case dir, write:
+Run the capture runner to execute all truth-table cases plus random cases, then grab screenshots every N ticks:
 
-- `screenshot.png`
-- `metrics.json` (include at minimum `frame.totalRGB` and basic timing)
+```bash
+cd node-harness
+node interaction-pipeline/captureBatch.mjs \
+  --name truth-table-plus-random \
+  --randomCount 8 \
+  --tickEvery 100 \
+  --maxTick 1000
+```
 
-Then update `manifest.jsonl` entry fields:
+Output batch structure:
 
-- `screenshotPath`
-- `metricsPath`
-- `status` (e.g. `captured`)
+- `cases/<nn>-<id>/scenario.json` (source preset + run config)
+- `cases/<nn>-<id>/scenario-config.json` (actual Interaction Lab payload/truth row)
+- `cases/<nn>-<id>/screenshots/tick-XXXXXX.png`
+- `cases/<nn>-<id>/metrics.json`
+- `manifest.jsonl` (auto-updated statuses)
+- `capture-summary.json`
 
-> This keeps capture deterministic and analysis stateless.
+Notes:
+
+- Requires sim-server running (`http://127.0.0.1:8787` by default).
+- Uses `playwright-core` from `sim-server/node_modules`.
+  - Install once if missing:
+    - `cd sim-server && npm install --save-dev playwright-core`
+- For visible browser mode, add `--headed`.
+
+> This keeps capture deterministic and analysis stateless while producing screenshot-first artifacts.
 
 ## Stage C — analysis pass
 

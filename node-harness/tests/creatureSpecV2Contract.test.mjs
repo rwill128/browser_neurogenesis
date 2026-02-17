@@ -1569,3 +1569,31 @@ test('buildBodiesFromCreatureSpec keeps per-element geometry/mass signatures ali
   ].every((v) => Number.isFinite(Number(v)));
   assert.equal(allFinite, true, 'gpu-only import/output geometry signature must stay finite');
 });
+
+test('gpu-only buildBodiesFromCreatureSpec returns detached structures while preserving baseline parity', () => {
+  const spec = createCreatureSpecFromMesh(sampleMesh(), { softSolverMode: 'spring' });
+
+  const baselineBodies = buildBodiesFromCreatureSpec(spec, 128, {
+    ...CONTROLS,
+    runtimeSolverPath: 'baseline',
+  });
+  const gpuOnlyBodies = buildBodiesFromCreatureSpec(spec, 128, {
+    ...CONTROLS,
+    runtimeSolverPath: 'gpu-only',
+  });
+
+  assert.deepEqual(gpuOnlyBodies, baselineBodies, 'gpu-only import/output should stay parity-aligned with baseline');
+  assert.notEqual(gpuOnlyBodies, baselineBodies, 'gpu-only result root must be detached from baseline root');
+  assert.notEqual(gpuOnlyBodies.soft, baselineBodies.soft, 'gpu-only soft container must be detached');
+  assert.notEqual(gpuOnlyBodies.soft.nodes, baselineBodies.soft.nodes, 'gpu-only soft nodes array must be detached');
+  assert.notEqual(gpuOnlyBodies.rigid, baselineBodies.rigid, 'gpu-only rigid array must be detached');
+
+  const baselineX = baselineBodies.soft.nodes[0].x;
+  gpuOnlyBodies.soft.nodes[0].x += 11;
+  assert.equal(baselineBodies.soft.nodes[0].x, baselineX, 'mutating gpu-only output must not alter baseline output');
+
+  const baselineVelocityMode = baselineBodies.soft.springs[0][5];
+  gpuOnlyBodies.soft.springs[0][5] = (baselineVelocityMode === 0 ? 1 : 0);
+  assert.equal(baselineBodies.soft.springs[0][5], baselineVelocityMode,
+    'gpu-only spring policy mutation must not leak into baseline output');
+});

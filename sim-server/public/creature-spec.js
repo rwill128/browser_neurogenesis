@@ -1,3 +1,5 @@
+import { buildBodiesFromCreatureSpecGpuOnly } from './runtime-solvers/buildBodiesGpuOnly.js';
+
 export const CREATURE_SPEC_VERSION = 'creature-spec.v2';
 
 const EDGE_BODY_PASS = 0;
@@ -27,6 +29,10 @@ const MEMBRANE_DEFAULT_SIMPLIFY_EPS = 0.8;
  */
 function normalizeSoftSolverMode(mode) {
   return String(mode || '').toLowerCase() === 'membrane' ? 'membrane' : 'spring';
+}
+
+function normalizeRuntimeSolverPath(mode) {
+  return String(mode || '').toLowerCase() === 'gpu-only' ? 'gpu-only' : 'baseline';
 }
 
 /**
@@ -353,6 +359,19 @@ export function parseCreatureSpec(jsonText) {
  * @returns {object}
  */
 export function buildBodiesFromCreatureSpec(spec, n, controls) {
+  const runtimeSolverPath = normalizeRuntimeSolverPath(controls?.runtimeSolverPath);
+  if (runtimeSolverPath === 'gpu-only') {
+    return buildBodiesFromCreatureSpecGpuOnly({
+      spec,
+      n,
+      controls,
+      buildBaselineBodies: buildBodiesFromCreatureSpecBaseline,
+    });
+  }
+  return buildBodiesFromCreatureSpecBaseline(spec, n, controls);
+}
+
+function buildBodiesFromCreatureSpecBaseline(spec, n, controls) {
   const srcW = Math.max(1, Number(spec.space?.width) || n);
   const srcH = Math.max(1, Number(spec.space?.height) || n);
   const sx = n / srcW;

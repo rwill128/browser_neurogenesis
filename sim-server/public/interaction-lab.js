@@ -510,6 +510,8 @@ function renderScenarioDebug(row, payload, extra = {}) {
     notes: {
       segmentLabelsInWindTunnel: 'R<body>:<edge> for rigid, S<softSpring> for soft',
       expectedSelectionRule: 'For each segment/channel: EAT=true removes dye, EAT=false is no-op',
+      velocityDyeContract: 'velocity=BLOCK can divert flow before dye-edge contact, so EAT may appear muted in BLOCK-heavy setups',
+      futureFilterRequirement: 'true per-channel bounce/pass filtering requires channel-conditioned transport/flux (single shared velocity field is insufficient)',
       screenshotWorkflow: 'Load/create scenario -> Apply -> Download screenshot -> send screenshot for analysis',
       generationWorkflow: 'Use presets, curriculum buttons, or Random scenario to auto-generate cases',
     },

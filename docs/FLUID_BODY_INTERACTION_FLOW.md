@@ -97,6 +97,22 @@ Used in force accumulation and feedback injection paths.
 
 ---
 
+## Important current contract limits
+
+1. **Velocity BLOCK can suppress dye-contact opportunities for EAT**
+   - If an edge is stamped into `obstacleMask` (`velocity=BLOCK`), plume trajectories can be diverted before they reach the dye-mask contact path.
+   - In practice this makes EAT less observable/reliable in BLOCK-heavy setups.
+
+2. **Single shared velocity field cannot express "red bounces, green/blue pass" as a true boundary condition**
+   - Today all RGB dye channels are advected by the same velocity field.
+   - That means you cannot get physically faithful per-channel wall dynamics (e.g., red reflected with side-shear while GB momentum passes through unchanged) from one shared `u,v` field alone.
+
+3. **What would be needed for true per-channel bounce/pass split**
+   - Channel-specific transport velocity (e.g., `u_r,v_r`, `u_g,v_g`, `u_b,v_b`) **or** an equivalent channel-conditioned flux/reflection operator at boundaries.
+   - Optional cross-coupling/mixing terms can be layered later, but the key requirement is channel-conditioned advection/flux.
+
+---
+
 ## Why this shape exists
 
 - Keeps policy decisions edge-local and consistent across rigid + soft.

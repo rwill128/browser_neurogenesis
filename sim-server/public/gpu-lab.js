@@ -2360,6 +2360,11 @@ function stampBodyObstacleMask(sim) {
 
   let softBlockedEdges = 0;
   const soft = sim?.bodies?.soft;
+  const softNodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const prevSoftNodes = Array.isArray(sim?._prevObstacleSoftNodes) && sim._prevObstacleSoftNodes.length === softNodes.length
+    ? sim._prevObstacleSoftNodes
+    : null;
+
   for (const sp of (soft?.springs || [])) {
     const ai = Number(sp?.[0]);
     const bi = Number(sp?.[1]);
@@ -2370,8 +2375,8 @@ function stampBodyObstacleMask(sim) {
       : (Number(sp?.[3]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK);
     if (edgeVelocityMode === EDGE_BODY_MODE.PASS) continue;
 
-    const a = soft?.nodes?.[ai];
-    const b = soft?.nodes?.[bi];
+    const a = softNodes[ai];
+    const b = softNodes[bi];
     if (!a || !b) continue;
 
     const ax = Number(a.x);
@@ -2381,8 +2386,22 @@ function stampBodyObstacleMask(sim) {
     if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
 
     stampSegmentObstacleMask(mask, n, ax, ay, bx, by, softThickness);
+
+    if (prevSoftNodes) {
+      const pa = prevSoftNodes[ai];
+      const pb = prevSoftNodes[bi];
+      if (pa && pb) {
+        stampSweptSegmentObstacleMask(mask, n, pa, pb, a, b, softThickness, sweepTransport);
+      }
+    }
+
     softBlockedEdges += 1;
   }
+
+  sim._prevObstacleSoftNodes = softNodes.map((node) => ({
+    x: Number(node?.x) || 0,
+    y: Number(node?.y) || 0,
+  }));
 
   let blockedCells = 0;
   for (let i = 0; i < mask.length; i++) {

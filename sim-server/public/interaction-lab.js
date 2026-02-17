@@ -584,7 +584,9 @@ function buildScenarioPayload() {
         mode: motionMode,
         anchorX: 40,
         anchorY: 64,
-        circleCenterX: 64,
+        // Soft fixture motion is anchored on the first node; center this node at x=40
+        // so the segment midpoint still circles around x=64 (matching rigid fixtures).
+        circleCenterX: 40,
         circleCenterY: 64,
         circleRadius,
         circleAngularSpeed: circleSpeed,

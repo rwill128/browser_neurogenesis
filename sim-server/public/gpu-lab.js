@@ -8,6 +8,7 @@ import { stepRigidBodiesGpuOnly } from '/runtime-solvers/stepRigidGpuOnly.js';
 import { integrateSoftBodiesGpuOnly } from '/runtime-solvers/stepSoftIntegrateGpuOnly.js';
 import { resolveRigidRigidCollisionPassGpuOnly } from '/runtime-solvers/stepRigidCollisionGpuOnly.js';
 import { resolveRigidSoftCollisionPassGpuOnly } from '/runtime-solvers/stepRigidSoftCollisionGpuOnly.js';
+import { applySoftSpringsXPBDVelocityGpuOnly } from '/runtime-solvers/stepSoftSpringsXpbdGpuOnly.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -3886,9 +3887,22 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     }
   }
 
-  applySoftSpringsXPBDVelocity(s, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT, sim.softXPBDLambda, {
-    skipClusterSet: softMembraneClusterSet,
-  });
+  if (solverPath === 'gpu-only') {
+    applySoftSpringsXPBDVelocityGpuOnly({
+      soft: s,
+      dtPos,
+      stiffnessScale: SOFT_SPRING_STIFFNESS_DEFAULT,
+      lambdaCache: sim.softXPBDLambda,
+      softXpbdIters: SOFT_XPBD_ITERS,
+      softXpbdBaseCompliance: SOFT_XPBD_BASE_COMPLIANCE,
+      clamp,
+      skipClusterSet: softMembraneClusterSet,
+    });
+  } else {
+    applySoftSpringsXPBDVelocity(s, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT, sim.softXPBDLambda, {
+      skipClusterSet: softMembraneClusterSet,
+    });
+  }
 
   const softClusterLoops = buildSoftClusterBoundaryLoops(s.nodes, s.springs, {
     blockMode: EDGE_BODY_MODE.BLOCK,

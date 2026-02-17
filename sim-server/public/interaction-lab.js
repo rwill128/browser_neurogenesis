@@ -1,4 +1,7 @@
 const windFrame = document.getElementById('windFrame');
+const scenarioPresetEl = document.getElementById('scenarioPreset');
+const loadPresetBtn = document.getElementById('loadPresetBtn');
+const scenarioPresetHintEl = document.getElementById('scenarioPresetHint');
 const fixtureTypeEl = document.getElementById('fixtureType');
 const motionModeEl = document.getElementById('motionMode');
 const circleRadiusEl = document.getElementById('circleRadius');
@@ -24,6 +27,75 @@ const EDGE_VEL_BLOCK = 1;
 
 let embedReady = false;
 let lastPayload = null;
+let scenarioPresets = [];
+
+const DEFAULT_SCENARIO_PRESETS = [
+  {
+    id: 'rigid-red-eat-block-pinned',
+    name: 'Rigid line · red EAT · velocity BLOCK · pinned',
+    description: 'Baseline confrontation: rigid segment absorbs red dye while staying immobile.',
+    fixtureType: 'rigid-line',
+    motionMode: 'pinned',
+    circleRadius: 12,
+    circleSpeed: 0.8,
+    dyeChannel: 'r',
+    dyeMode: 'eat',
+    velocityMode: 'block',
+    momentum: 1,
+  },
+  {
+    id: 'rigid-red-noop-block-pinned',
+    name: 'Rigid line · red NO-OP · velocity BLOCK · pinned',
+    description: 'Control pair for the baseline: no dye removal, same geometry and flow coupling.',
+    fixtureType: 'rigid-line',
+    motionMode: 'pinned',
+    circleRadius: 12,
+    circleSpeed: 0.8,
+    dyeChannel: 'r',
+    dyeMode: 'noop',
+    velocityMode: 'block',
+    momentum: 1,
+  },
+  {
+    id: 'soft-green-eat-block-pinned',
+    name: 'Soft line · green EAT · velocity BLOCK · pinned',
+    description: 'Soft-segment version to verify per-spring channel absorption behavior.',
+    fixtureType: 'soft-line',
+    motionMode: 'pinned',
+    circleRadius: 12,
+    circleSpeed: 0.8,
+    dyeChannel: 'g',
+    dyeMode: 'eat',
+    velocityMode: 'block',
+    momentum: 1,
+  },
+  {
+    id: 'soft-green-noop-block-pinned',
+    name: 'Soft line · green NO-OP · velocity BLOCK · pinned',
+    description: 'Soft control pair: no-op dye channel with identical fixture setup.',
+    fixtureType: 'soft-line',
+    motionMode: 'pinned',
+    circleRadius: 12,
+    circleSpeed: 0.8,
+    dyeChannel: 'g',
+    dyeMode: 'noop',
+    velocityMode: 'block',
+    momentum: 1,
+  },
+  {
+    id: 'rigid-blue-eat-pass-circle',
+    name: 'Rigid line · blue EAT · velocity PASS · circle drag',
+    description: 'Dynamic trajectory case to inspect trailing removal under moving fixtures.',
+    fixtureType: 'rigid-line',
+    motionMode: 'circle',
+    circleRadius: 14,
+    circleSpeed: 1.2,
+    dyeChannel: 'b',
+    dyeMode: 'eat',
+    velocityMode: 'pass',
+    momentum: 0.6,
+  },
+];
 
 function clamp(v, lo, hi) {
   const n = Number(v);
@@ -90,6 +162,77 @@ function flashButton(btn, ok, okText = 'Done', failText = 'Failed') {
   const prev = btn.textContent;
   btn.textContent = ok ? okText : failText;
   setTimeout(() => { btn.textContent = prev; }, 1100);
+}
+
+function setControlValue(el, value) {
+  if (!el) return;
+  const v = String(value ?? '');
+  if (Array.from(el.options || []).some((o) => String(o.value) === v)) {
+    el.value = v;
+  }
+}
+
+function setInputValue(el, value) {
+  if (!el) return;
+  const n = Number(value);
+  if (Number.isFinite(n)) el.value = String(n);
+}
+
+function applyScenarioPreset(preset) {
+  if (!preset || typeof preset !== 'object') return;
+  setControlValue(fixtureTypeEl, preset.fixtureType || 'rigid-line');
+  setControlValue(motionModeEl, preset.motionMode || 'pinned');
+  setControlValue(dyeChannelEl, preset.dyeChannel || 'r');
+  setControlValue(dyeModeEl, preset.dyeMode || 'noop');
+  setControlValue(velocityModeEl, preset.velocityMode || 'block');
+  setInputValue(circleRadiusEl, preset.circleRadius ?? 12);
+  setInputValue(circleSpeedEl, preset.circleSpeed ?? 0.8);
+  setInputValue(momentumEl, preset.momentum ?? 1);
+
+  if (scenarioPresetHintEl) {
+    scenarioPresetHintEl.textContent = String(preset.description || '');
+  }
+}
+
+function getSelectedPreset() {
+  const id = String(scenarioPresetEl?.value || '');
+  return scenarioPresets.find((p) => String(p.id) === id) || null;
+}
+
+function populateScenarioPresetDropdown() {
+  if (!scenarioPresetEl) return;
+  scenarioPresetEl.innerHTML = '';
+  for (const p of scenarioPresets) {
+    const opt = document.createElement('option');
+    opt.value = String(p.id);
+    opt.textContent = String(p.name || p.id);
+    scenarioPresetEl.appendChild(opt);
+  }
+
+  if (scenarioPresets.length > 0) {
+    scenarioPresetEl.value = String(scenarioPresets[0].id);
+    applyScenarioPreset(scenarioPresets[0]);
+  }
+}
+
+async function loadScenarioPresetCatalog() {
+  try {
+    const res = await fetch('/interaction-scenarios.json?v=20260217a', { cache: 'no-store' });
+    if (res.ok) {
+      const json = await res.json();
+      if (Array.isArray(json) && json.length > 0) {
+        scenarioPresets = json;
+      } else {
+        scenarioPresets = [...DEFAULT_SCENARIO_PRESETS];
+      }
+    } else {
+      scenarioPresets = [...DEFAULT_SCENARIO_PRESETS];
+    }
+  } catch {
+    scenarioPresets = [...DEFAULT_SCENARIO_PRESETS];
+  }
+
+  populateScenarioPresetDropdown();
 }
 
 function dyeModeCode(mode) {
@@ -241,7 +384,10 @@ function buildScenarioPayload() {
     },
   };
 
+  const activePreset = getSelectedPreset();
   const truthRow = {
+    scenarioPresetId: activePreset?.id || null,
+    scenarioPresetName: activePreset?.name || null,
     fixtureType,
     motionMode,
     channel,
@@ -304,6 +450,23 @@ function captureWindFramePngDataUrl() {
 }
 
 applyBtn?.addEventListener('click', pushScenario);
+
+if (loadPresetBtn) {
+  loadPresetBtn.addEventListener('click', () => {
+    const preset = getSelectedPreset();
+    if (!preset) return;
+    applyScenarioPreset(preset);
+    pushScenario();
+    flashButton(loadPresetBtn, true, 'Loaded', 'Load failed');
+  });
+}
+
+scenarioPresetEl?.addEventListener('change', () => {
+  const preset = getSelectedPreset();
+  if (!preset) return;
+  applyScenarioPreset(preset);
+  if (autoApplyEl?.checked) pushScenario();
+});
 
 for (const el of [
   fixtureTypeEl,
@@ -408,4 +571,6 @@ if (downloadScreenshotBtn) {
   });
 }
 
-pushScenario();
+loadScenarioPresetCatalog().finally(() => {
+  pushScenario();
+});

@@ -1,0 +1,67 @@
+[
+  {
+    "id": "rigid-red-eat-block-pinned",
+    "name": "Rigid line · red EAT · velocity BLOCK · pinned",
+    "description": "Baseline confrontation: rigid segment absorbs red dye while staying immobile.",
+    "fixtureType": "rigid-line",
+    "motionMode": "pinned",
+    "circleRadius": 12,
+    "circleSpeed": 0.8,
+    "dyeChannel": "r",
+    "dyeMode": "eat",
+    "velocityMode": "block",
+    "momentum": 1
+  },
+  {
+    "id": "rigid-red-noop-block-pinned",
+    "name": "Rigid line · red NO-OP · velocity BLOCK · pinned",
+    "description": "Control pair for the baseline: no dye removal, same geometry and flow coupling.",
+    "fixtureType": "rigid-line",
+    "motionMode": "pinned",
+    "circleRadius": 12,
+    "circleSpeed": 0.8,
+    "dyeChannel": "r",
+    "dyeMode": "noop",
+    "velocityMode": "block",
+    "momentum": 1
+  },
+  {
+    "id": "soft-green-eat-block-pinned",
+    "name": "Soft line · green EAT · velocity BLOCK · pinned",
+    "description": "Soft-segment version to verify per-spring channel absorption behavior.",
+    "fixtureType": "soft-line",
+    "motionMode": "pinned",
+    "circleRadius": 12,
+    "circleSpeed": 0.8,
+    "dyeChannel": "g",
+    "dyeMode": "eat",
+    "velocityMode": "block",
+    "momentum": 1
+  },
+  {
+    "id": "soft-green-noop-block-pinned",
+    "name": "Soft line · green NO-OP · velocity BLOCK · pinned",
+    "description": "Soft control pair: no-op dye channel with identical fixture setup.",
+    "fixtureType": "soft-line",
+    "motionMode": "pinned",
+    "circleRadius": 12,
+    "circleSpeed": 0.8,
+    "dyeChannel": "g",
+    "dyeMode": "noop",
+    "velocityMode": "block",
+    "momentum": 1
+  },
+  {
+    "id": "rigid-blue-eat-pass-circle",
+    "name": "Rigid line · blue EAT · velocity PASS · circle drag",
+    "description": "Dynamic trajectory case to inspect trailing removal under moving fixtures.",
+    "fixtureType": "rigid-line",
+    "motionMode": "circle",
+    "circleRadius": 14,
+    "circleSpeed": 1.2,
+    "dyeChannel": "b",
+    "dyeMode": "eat",
+    "velocityMode": "pass",
+    "momentum": 0.6
+  }
+]

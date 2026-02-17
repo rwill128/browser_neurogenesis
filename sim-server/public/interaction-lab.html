@@ -25,6 +25,14 @@
 
   <div class="card">
     <div class="row">
+      <label>Scenario preset
+        <select id="scenarioPreset"></select>
+      </label>
+      <button id="loadPresetBtn">Load preset</button>
+      <span id="scenarioPresetHint" class="hint"></span>
+    </div>
+
+    <div class="row">
       <label>Body fixture
         <select id="fixtureType">
           <option value="rigid-line" selected>Rigid line segment (thin rectangle)</option>
@@ -94,6 +102,6 @@
     </div>
   </div>
 
-  <script type="module" src="/interaction-lab.js?v=20260217a"></script>
+  <script type="module" src="/interaction-lab.js?v=20260217b"></script>
 </body>
 </html>

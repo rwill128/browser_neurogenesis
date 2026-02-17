@@ -2040,6 +2040,31 @@ function stampSegmentObstacleMask(mask, n, ax, ay, bx, by, thickness = 1.8) {
   }
 }
 
+function stampSweptSegmentObstacleMask(mask, n, prevA, prevB, currA, currB, thickness = 1.8) {
+  if (!prevA || !prevB || !currA || !currB) return;
+  const ax0 = Number(prevA.x); const ay0 = Number(prevA.y);
+  const bx0 = Number(prevB.x); const by0 = Number(prevB.y);
+  const ax1 = Number(currA.x); const ay1 = Number(currA.y);
+  const bx1 = Number(currB.x); const by1 = Number(currB.y);
+
+  if (![ax0, ay0, bx0, by0, ax1, ay1, bx1, by1].every(Number.isFinite)) return;
+
+  const moveA = Math.hypot(ax1 - ax0, ay1 - ay0);
+  const moveB = Math.hypot(bx1 - bx0, by1 - by0);
+  const maxMove = Math.max(moveA, moveB);
+  const stepSpan = Math.max(0.45, Number(thickness) * 0.65);
+  const steps = Math.max(1, Math.ceil(maxMove / stepSpan));
+
+  for (let si = 0; si <= steps; si++) {
+    const t = si / steps;
+    const ax = ax0 + (ax1 - ax0) * t;
+    const ay = ay0 + (ay1 - ay0) * t;
+    const bx = bx0 + (bx1 - bx0) * t;
+    const by = by0 + (by1 - by0) * t;
+    stampSegmentObstacleMask(mask, n, ax, ay, bx, by, thickness);
+  }
+}
+
 function resolveRigidEdgeScalar(spec, edgeIndex, fallback) {
   if (!Array.isArray(spec)) return fallback;
   const edgeValue = spec[edgeIndex];
@@ -2177,6 +2202,10 @@ function stampBodyObstacleMask(sim) {
   for (const rb of sim?.bodies?.rigid || []) {
     const verts = rigidVerticesWorld(rb);
     const sides = verts.length;
+    const prevVerts = Array.isArray(rb?._prevObstacleVerts) && rb._prevObstacleVerts.length === sides
+      ? rb._prevObstacleVerts
+      : null;
+
     for (let ei = 0; ei < sides; ei++) {
       const edgeVelocityMode = Number(resolveRigidEdgeScalar(
         rb?.edgeVelocityMode,
@@ -2197,8 +2226,19 @@ function stampBodyObstacleMask(sim) {
       if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
 
       stampSegmentObstacleMask(mask, n, ax, ay, bx, by, rigidThickness);
+
+      // Swept stamping bridges previous->current rigid edge pose so fast-moving
+      // boundaries don't leave single-frame gaps for fluid transport.
+      if (prevVerts) {
+        const pa = prevVerts[ei];
+        const pb = prevVerts[(ei + 1) % sides];
+        stampSweptSegmentObstacleMask(mask, n, pa, pb, a, b, rigidThickness);
+      }
+
       rigidBlockedEdges += 1;
     }
+
+    rb._prevObstacleVerts = verts.map((p) => ({ x: Number(p?.x) || 0, y: Number(p?.y) || 0 }));
   }
 
   let softBlockedEdges = 0;

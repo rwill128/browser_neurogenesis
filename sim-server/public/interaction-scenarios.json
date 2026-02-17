@@ -21,21 +21,8 @@
     "circleRadius": 12,
     "circleSpeed": 0.8,
     "dyeChannel": "r",
-    "dyeMode": "pass",
+    "dyeMode": "noop",
     "velocityMode": "block",
-    "momentum": 1
-  },
-  {
-    "id": "rigid-red-block-pass-pinned",
-    "name": "Rigid line · red BLOCK · velocity PASS · pinned",
-    "description": "Channel-filter confrontation: red should reflect/deflect while green+blue pass-through transport remains open.",
-    "fixtureType": "rigid-line",
-    "motionMode": "pinned",
-    "circleRadius": 12,
-    "circleSpeed": 0.8,
-    "dyeChannel": "r",
-    "dyeMode": "block",
-    "velocityMode": "pass",
     "momentum": 1
   },
   {
@@ -60,7 +47,7 @@
     "circleRadius": 12,
     "circleSpeed": 0.8,
     "dyeChannel": "g",
-    "dyeMode": "pass",
+    "dyeMode": "noop",
     "velocityMode": "block",
     "momentum": 1
   },

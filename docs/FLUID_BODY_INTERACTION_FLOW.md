@@ -103,13 +103,14 @@ Used in force accumulation and feedback injection paths.
    - If an edge is stamped into `obstacleMask` (`velocity=BLOCK`), plume trajectories can be diverted before they reach the dye-mask contact path.
    - In practice this makes EAT less observable/reliable in BLOCK-heavy setups.
 
-2. **Prototype channel-conditioned reflection is available in dye advection path**
-   - `dyeMode=BLOCK` (`DEFLECT`) for a selected channel uses channel-conditioned backtrace/deflection logic at boundaries.
-   - In Interaction Lab, this is exercised by setting `velocity=PASS` and `dyeMode=BLOCK` for the target channel.
+2. **Interaction Lab contract (current mode): only EAT vs NO-OP authoring**
+   - Interaction Lab exposes dye as `EAT` or `NO-OP` per selected channel.
+   - `BLOCK`/`DEFLECT` is not exposed in this lab mode.
 
-3. **Known limitation (shared momentum field)**
-   - Today all RGB channels still share one velocity field for transport momentum.
-   - So while dye flux can be channel-conditioned at the boundary (filter-like behavior), full per-channel momentum fidelity remains approximate versus a full multi-velocity model.
+3. **Velocity-gated EAT behavior in Interaction Lab**
+   - `velocity=BLOCK` is treated as the hard boundary branch.
+   - In this branch, requested `EAT` is automatically disabled (effective dye mode becomes `NO-OP`).
+   - `EAT` is active only when `velocity=PASS`.
 
 ---
 

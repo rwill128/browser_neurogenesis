@@ -25,7 +25,6 @@ const downloadScreenshotBtn = document.getElementById('downloadScreenshotBtn');
 const captureThumb = document.getElementById('captureThumb');
 
 const EDGE_DYE_PASS = 0;
-const EDGE_DYE_BLOCK = 1;
 const EDGE_DYE_EAT = 2;
 const EDGE_VEL_PASS = 0;
 const EDGE_VEL_BLOCK = 1;
@@ -60,23 +59,11 @@ const DEFAULT_SCENARIO_PRESETS = [
     circleRadius: 12,
     circleSpeed: 0.8,
     dyeChannel: 'r',
-    dyeMode: 'pass',
+    dyeMode: 'noop',
     velocityMode: 'block',
     momentum: 1,
   },
-  {
-    id: 'rigid-red-block-pass-pinned',
-    name: 'Rigid line · red BLOCK · velocity PASS · pinned',
-    description: 'Channel-filter confrontation: red should reflect/deflect while green+blue pass-through transport remains open.',
-    fixtureType: 'rigid-line',
-    motionMode: 'pinned',
-    circleRadius: 12,
-    circleSpeed: 0.8,
-    dyeChannel: 'r',
-    dyeMode: 'block',
-    velocityMode: 'pass',
-    momentum: 1,
-  },
+  // channel-block preset removed per rollback to EAT/NO-OP interaction contract.
   {
     id: 'soft-green-eat-block-pinned',
     name: 'Soft line · green EAT · velocity BLOCK · pinned',
@@ -99,7 +86,7 @@ const DEFAULT_SCENARIO_PRESETS = [
     circleRadius: 12,
     circleSpeed: 0.8,
     dyeChannel: 'g',
-    dyeMode: 'pass',
+    dyeMode: 'noop',
     velocityMode: 'block',
     momentum: 1,
   },
@@ -121,7 +108,6 @@ const DEFAULT_SCENARIO_PRESETS = [
 const CURRICULUM_DEFAULT_IDS = [
   'rigid-red-noop-block-pinned',
   'rigid-red-eat-block-pinned',
-  'rigid-red-block-pass-pinned',
   'soft-green-noop-block-pinned',
   'soft-green-eat-block-pinned',
   'rigid-blue-eat-pass-circle',
@@ -227,7 +213,7 @@ function applyScenarioPreset(preset, meta = null) {
   setControlValue(fixtureTypeEl, preset.fixtureType || 'rigid-line');
   setControlValue(motionModeEl, preset.motionMode || 'pinned');
   setControlValue(dyeChannelEl, preset.dyeChannel || 'r');
-  setControlValue(dyeModeEl, preset.dyeMode || 'pass');
+  setControlValue(dyeModeEl, preset.dyeMode || 'noop');
   setControlValue(velocityModeEl, preset.velocityMode || 'block');
   setInputValue(circleRadiusEl, preset.circleRadius ?? 12);
   setInputValue(circleSpeedEl, preset.circleSpeed ?? 0.8);
@@ -285,7 +271,7 @@ function generateRandomScenarioPreset() {
   const fixtureType = randomChoice(['rigid-line', 'soft-line']) || 'rigid-line';
   const motionMode = Math.random() < 0.7 ? 'pinned' : 'circle';
   const dyeChannel = randomChoice(['r', 'g', 'b']) || 'r';
-  const dyeMode = randomChoice(['pass', 'eat', 'block']) || 'pass';
+  const dyeMode = randomChoice(['noop', 'eat']) || 'noop';
   const velocityMode = Math.random() < 0.7 ? 'block' : 'pass';
   const momentum = clamp(randomInRange(0.2, 1.0, 0.05), 0, 1);
   const circleRadius = motionMode === 'circle' ? clamp(randomInRange(8, 22, 1), 0, 48) : 12;
@@ -327,7 +313,7 @@ function populateScenarioPresetDropdown() {
 
 async function loadScenarioPresetCatalog() {
   try {
-    const res = await fetch('/interaction-scenarios.json?v=20260217d', { cache: 'no-store' });
+    const res = await fetch('/interaction-scenarios.json?v=20260217e', { cache: 'no-store' });
     if (res.ok) {
       const json = await res.json();
       if (Array.isArray(json) && json.length > 0) {
@@ -346,12 +332,17 @@ async function loadScenarioPresetCatalog() {
 }
 
 function dyeModeCode(mode) {
-  const m = String(mode || 'pass').toLowerCase();
+  const m = String(mode || 'noop').toLowerCase();
   if (m === 'eat') return EDGE_DYE_EAT;
-  if (m === 'block') return EDGE_DYE_BLOCK;
-  // Backward-compat alias from earlier UI wording.
-  if (m === 'noop') return EDGE_DYE_PASS;
+  // NO-OP and PASS aliases both map to pass-through.
   return EDGE_DYE_PASS;
+}
+
+function effectiveDyeMode(mode, velocityMode) {
+  // Contract: velocity BLOCK is the hard boundary condition; disable EAT in this branch.
+  const vel = String(velocityMode || 'block').toLowerCase();
+  if (vel !== 'pass') return 'noop';
+  return String(mode || 'noop').toLowerCase() === 'eat' ? 'eat' : 'noop';
 }
 
 function velocityModeCode(mode) {
@@ -373,20 +364,7 @@ function permeabilityFromDyeModeRgb(rgb) {
   return [0, 1, 2].map((ci) => (Number(rgb?.[ci]) === EDGE_DYE_PASS ? 1 : 0));
 }
 
-function emitterTintForScenario(channel, dyeMode, velocityMode) {
-  const ch = String(channel || 'r').toLowerCase();
-  const idx = ch === 'g' ? 1 : (ch === 'b' ? 2 : 0);
-  const m = String(dyeMode || 'pass').toLowerCase();
-  const vel = String(velocityMode || 'block').toLowerCase();
-
-  // For channel-filter confrontation runs (BLOCK + velocity PASS),
-  // boost selected channel visibility so reflected plume is obvious.
-  if (m === 'block' && vel === 'pass') {
-    const rgb = [22, 22, 22];
-    rgb[idx] = 255;
-    return rgb;
-  }
-
+function emitterTintForScenario() {
   return [135, 190, 255];
 }
 
@@ -460,8 +438,9 @@ function buildScenarioPayload() {
   const fixtureType = String(fixtureTypeEl?.value || 'rigid-line');
   const motionMode = String(motionModeEl?.value || 'pinned');
   const channel = String(dyeChannelEl?.value || 'r');
-  const dyeMode = String(dyeModeEl?.value || 'pass');
+  const requestedDyeMode = String(dyeModeEl?.value || 'noop');
   const velocityMode = String(velocityModeEl?.value || 'block');
+  const dyeMode = effectiveDyeMode(requestedDyeMode, velocityMode);
   const momentum = clamp(momentumEl?.value, 0, 1);
 
   const spec = fixtureType === 'soft-line'
@@ -501,8 +480,6 @@ function buildScenarioPayload() {
         thetaSpin: 0,
       };
 
-  const [emitterColorR, emitterColorG, emitterColorB] = emitterTintForScenario(channel, dyeMode, velocityMode);
-
   const payload = {
     type: 'gpuLabEmbedReset',
     spec,
@@ -520,9 +497,6 @@ function buildScenarioPayload() {
       emitterChaosGain: 0,
       emitterWobbleAmp: 0,
       emitterWobbleFreq: 0,
-      emitterColorR,
-      emitterColorG,
-      emitterColorB,
       emitterLockPosition: true,
       interactionLab,
     },
@@ -535,7 +509,9 @@ function buildScenarioPayload() {
     fixtureType,
     motionMode,
     channel,
+    requestedDyeMode,
     dyeMode,
+    effectiveDyeMode: dyeMode,
     velocityMode,
     momentum,
   };
@@ -550,11 +526,8 @@ function renderScenarioDebug(row, payload, extra = {}) {
     ...extra,
     notes: {
       segmentLabelsInWindTunnel: 'R<body>:<edge> for rigid, S<softSpring> for soft',
-      expectedSelectionRule: 'For selected channel at each segment: PASS=transparent transport, EAT=absorb/remove, BLOCK=reflect/deflect channel flux',
-      velocityDyeContract: 'velocity=BLOCK can divert flow before dye-edge contact, so EAT may appear muted in BLOCK-heavy setups',
-      channelFilterMode: 'for channel-selective filtering use velocity=PASS + dyeMode=block on selected channel (prototype channel-conditioned dye reflection path)',
-      emitterVisualizationNote: 'BLOCK+PASS presets auto-tint emitter toward selected channel for clearer visual diagnosis',
-      knownLimit: 'shared velocity field still constrains full per-channel momentum fidelity',
+      expectedSelectionRule: 'For selected channel at each segment: NO-OP means no dye removal, EAT removes dye',
+      velocityDyeContract: 'velocity=BLOCK is treated as hard boundary condition, so requested EAT is auto-disabled (effective mode becomes NO-OP) unless velocity=PASS',
       screenshotWorkflow: 'Load/create scenario -> Apply -> Download screenshot -> send screenshot for analysis',
       generationWorkflow: 'Use presets, curriculum buttons, or Random scenario to auto-generate cases',
     },

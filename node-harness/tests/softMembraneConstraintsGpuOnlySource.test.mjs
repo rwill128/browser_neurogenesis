@@ -10,7 +10,7 @@ const moduleSource = readFileSync(resolve(ROOT, 'sim-server/public/runtime-solve
 test('gpu-lab wires membrane boundary xpbd gpu-only pass with WGSL offload state bag', () => {
   assert.match(
     gpuLabSource,
-    /applySoftMembraneBoundaryXPBDVelocityGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*modeProfile: normalizeRuntimePipelineMode\(sim\?\.controls\?\.runtimePipelineMode, sim\?\.controls\?\.runtimeSolverPath\),[\s\S]*state: \(\(\) => \{[\s\S]*sim\.softMembraneBoundaryWgslState \|\|= \{\}[\s\S]*enableAuthoritativeMembraneBoundaryEdge !== false[\s\S]*enableAuthoritativeMembraneBoundaryEdge = true;[\s\S]*return st;[\s\S]*\}\)\(\),[\s\S]*\}\)/,
+    /applySoftMembraneBoundaryXPBDVelocityGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*modeProfile: normalizeRuntimePipelineMode\(sim\?\.controls\?\.runtimePipelineMode, sim\?\.controls\?\.runtimeSolverPath\),[\s\S]*state: \(\(\) => \{[\s\S]*sim\.softMembraneBoundaryWgslState \|\|= \{\}[\s\S]*enableAuthoritativeMembraneBoundaryEdge !== false[\s\S]*enableAuthoritativeMembraneBoundaryEdge = true;[\s\S]*enableAuthoritativeMembraneBend !== false[\s\S]*enableAuthoritativeMembraneBend = true;[\s\S]*return st;[\s\S]*\}\)\(\),[\s\S]*\}\)/,
     'expected gpu-lab membrane boundary gpu-only branch to wire isolated WGSL offload state bag with authoritative WGSL replay enabled by default (unless explicitly disabled)',
   );
 });
@@ -52,6 +52,24 @@ test('membrane constraints gpu-only module defines concrete WGSL membrane-bounda
     moduleSource,
     /canApplyAuthoritativeMembraneBoundaryEdgeProposal\([\s\S]*enableAuthoritativeMembraneBoundaryEdge !== true[\s\S]*applyMembraneBoundaryVelocityDeltasAuthoritative\([\s\S]*lastMembraneBoundaryEdgeAuthoritativeSource = authoritativeBoundaryFromWgsl\s*\?[\s\S]*'wgsl-membrane-boundary-edge-authoritative'\s*:[\s\S]*'cpu-membrane-boundary-edge-authoritative'/,
     'expected membrane boundary path to support signature-gated authoritative WGSL edge replay with explicit source-route ownership telemetry',
+  );
+
+  assert.match(
+    moduleSource,
+    /const softMembraneBendProposalWgsl = \/\* wgsl \*\/[\s\S]*let C = clamp\(d - rest, -cLimit, cLimit\);[\s\S]*deltaVxPrevOut\[i\] = \(-wP \* dl \* ux\) \* invDt;[\s\S]*lambdaNextOut\[i\] = lambdaNext;/,
+    'expected concrete WGSL kernel math for membrane bend XPBD velocity/lambda proposal deltas',
+  );
+
+  assert.match(
+    moduleSource,
+    /dispatchSoftMembraneBendProposal\([\s\S]*lastMembraneBendProposalSignature[\s\S]*lastMembraneBendProposalSource = finite\.allFinite\s*\?[\s\S]*'wgsl-membrane-bend-proposal'[\s\S]*'cpu-membrane-bend-authoritative-nonfinite'/,
+    'expected membrane bend proposal dispatch to preserve explicit source-route and hard non-finite fallback telemetry',
+  );
+
+  assert.match(
+    moduleSource,
+    /canApplyAuthoritativeMembraneBendProposal\([\s\S]*enableAuthoritativeMembraneBend !== true[\s\S]*lastMembraneBendProposalSource !== 'wgsl-membrane-bend-proposal'[\s\S]*lastMembraneBendAuthoritativeSource = authoritativeBendFromWgsl\s*\?[\s\S]*'wgsl-membrane-bend-authoritative'\s*:[\s\S]*'cpu-membrane-bend-authoritative'/,
+    'expected membrane bend path to support signature-gated authoritative WGSL replay with explicit source-route telemetry',
   );
 });
 

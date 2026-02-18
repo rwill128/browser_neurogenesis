@@ -372,6 +372,85 @@ test('soft membrane shape-memory can consume cached WGSL proposal as authoritati
   }
 });
 
+test('soft membrane bend can consume cached WGSL proposal as authoritative source', () => {
+  const dtPos = 0.11;
+  const loops = [{ clusterId: 1, indices: [0, 1, 2, 3] }];
+  const soft = {
+    nodes: [
+      { x: 8, y: 9, vx: 0.2, vy: -0.06, mass: 1.1, clusterId: 1, shapeMemoryWeight: 1 },
+      { x: 12.8, y: 8.5, vx: -0.1, vy: 0.12, mass: 0.9, clusterId: 1, shapeMemoryWeight: 0.7 },
+      { x: 13.4, y: 12.9, vx: 0.09, vy: -0.15, mass: 1.2, clusterId: 1, shapeMemoryWeight: 0.9 },
+      { x: 8.6, y: 13.4, vx: -0.07, vy: 0.11, mass: 1.0, clusterId: 1, shapeMemoryWeight: 1 },
+    ],
+  };
+
+  const sim = {
+    softMembraneLoopState: new Map(),
+    softMembraneClusterMap: new Map([[1, { clusterId: 1, shapeMemoryGain: 0.05 }]]),
+  };
+
+  const wgslState = {
+    enableAuthoritativeMembraneBoundaryEdge: true,
+    enableAuthoritativeMembraneBend: true,
+  };
+
+  const firstSoft = structuredClone(soft);
+  const touchedFirst = applySoftMembraneBoundaryXPBDVelocityGpuOnly({
+    sim,
+    soft: firstSoft,
+    loops,
+    dtPos,
+    membraneClusterSet: new Set([1]),
+    clamp,
+    membraneEdgeXpbdIters: MEMBRANE_EDGE_XPBD_ITERS,
+    membraneEdgeBaseCompliance: MEMBRANE_EDGE_BASE_COMPLIANCE,
+    membraneBendXpbdIters: MEMBRANE_BEND_XPBD_ITERS,
+    membraneBendBaseCompliance: MEMBRANE_BEND_BASE_COMPLIANCE,
+    wgslOffload: {
+      enabled: true,
+      device: {},
+      modeProfile: 'gpu-only-validated',
+      state: wgslState,
+    },
+  });
+
+  const preparedSig = wgslState.lastMembraneBendAuthoritativeSignature || '';
+
+  wgslState.lastMembraneBendProposalSource = 'wgsl-membrane-bend-proposal';
+  wgslState.lastMembraneBendProposalSignature = preparedSig;
+  wgslState.lastMembraneBendProposalFinite = { allFinite: true };
+  wgslState.lastMembraneBendProposalDeltaVxPrev = Float32Array.from([0.1, 0.2, 0.3, 0.4]);
+  wgslState.lastMembraneBendProposalDeltaVyPrev = Float32Array.from([-0.1, -0.2, -0.3, -0.4]);
+  wgslState.lastMembraneBendProposalDeltaVxNext = Float32Array.from([0.5, 0.6, 0.7, 0.8]);
+  wgslState.lastMembraneBendProposalDeltaVyNext = Float32Array.from([-0.5, -0.6, -0.7, -0.8]);
+  wgslState.lastMembraneBendProposalLambdaNext = Float32Array.from([1, 2, 3, 4]);
+
+  sim.softMembraneLoopState = new Map();
+  const secondSoft = structuredClone(soft);
+  const touchedSecond = applySoftMembraneBoundaryXPBDVelocityGpuOnly({
+    sim,
+    soft: secondSoft,
+    loops,
+    dtPos,
+    membraneClusterSet: new Set([1]),
+    clamp,
+    membraneEdgeXpbdIters: MEMBRANE_EDGE_XPBD_ITERS,
+    membraneEdgeBaseCompliance: MEMBRANE_EDGE_BASE_COMPLIANCE,
+    membraneBendXpbdIters: MEMBRANE_BEND_XPBD_ITERS,
+    membraneBendBaseCompliance: MEMBRANE_BEND_BASE_COMPLIANCE,
+    wgslOffload: {
+      enabled: true,
+      device: {},
+      modeProfile: 'gpu-only-validated',
+      state: wgslState,
+    },
+  });
+
+  assert.equal(touchedSecond, touchedFirst, 'bend touched count should stay stable for authoritative replay');
+  assert.equal(wgslState.lastMembraneBendAuthoritativeSource, 'wgsl-membrane-bend-authoritative');
+  assert.equal(wgslState.lastMembraneBendProposalSource, 'wgsl-membrane-bend-proposal');
+});
+
 test('soft membrane boundary+shape constraints parity: baseline and gpu-only match', () => {
   const dtPos = 0.11;
   const loops = [

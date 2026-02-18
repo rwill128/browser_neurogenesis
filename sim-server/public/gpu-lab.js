@@ -4223,6 +4223,9 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
             if (st.enableAuthoritativeMembraneBoundaryEdge !== false) {
               st.enableAuthoritativeMembraneBoundaryEdge = true;
             }
+            if (st.enableAuthoritativeMembraneBend !== false) {
+              st.enableAuthoritativeMembraneBend = true;
+            }
             return st;
           })(),
         },

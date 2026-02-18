@@ -1,6 +1,7 @@
 const WGSL_WORKGROUP_SIZE = 64;
 const SHAPE_LAYOUT_STRIDE_FLOATS = 11;
 const MEMBRANE_BOUNDARY_EDGE_LAYOUT_STRIDE_FLOATS = 11;
+const MEMBRANE_BEND_LAYOUT_STRIDE_FLOATS = 11;
 
 const softMembraneBoundaryEdgeProposalWgsl = /* wgsl */ `
 struct Params {
@@ -72,6 +73,81 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   deltaVyAOut[i] = (-wA * dl * ny) * invDt;
   deltaVxBOut[i] = (wB * dl * nx) * invDt;
   deltaVyBOut[i] = (wB * dl * ny) * invDt;
+  lambdaNextOut[i] = lambdaNext;
+}
+`;
+
+
+const softMembraneBendProposalWgsl = /* wgsl */ `
+struct Params {
+  count : f32,
+  dtPos : f32,
+  _pad0 : f32,
+  _pad1 : f32,
+};
+
+@group(0) @binding(0) var<storage, read> layout : array<f32>;
+@group(0) @binding(1) var<storage, read_write> deltaVxPrevOut : array<f32>;
+@group(0) @binding(2) var<storage, read_write> deltaVyPrevOut : array<f32>;
+@group(0) @binding(3) var<storage, read_write> deltaVxNextOut : array<f32>;
+@group(0) @binding(4) var<storage, read_write> deltaVyNextOut : array<f32>;
+@group(0) @binding(5) var<storage, read_write> lambdaNextOut : array<f32>;
+@group(0) @binding(6) var<uniform> params : Params;
+
+fn finiteOrZero(v : f32) -> f32 {
+  if (v == v && abs(v) < 1e20) {
+    return v;
+  }
+  return 0.0;
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
+  let i = gid.x;
+  if (f32(i) >= params.count) {
+    return;
+  }
+  let base = i * ${MEMBRANE_BEND_LAYOUT_STRIDE_FLOATS}u;
+  let px = finiteOrZero(layout[base + 0u]);
+  let py = finiteOrZero(layout[base + 1u]);
+  let nxp = finiteOrZero(layout[base + 2u]);
+  let nyp = finiteOrZero(layout[base + 3u]);
+  let rest = max(1e-4, finiteOrZero(layout[base + 4u]));
+  let wP = max(0.0, finiteOrZero(layout[base + 5u]));
+  let wN = max(0.0, finiteOrZero(layout[base + 6u]));
+  let lambdaPrev = finiteOrZero(layout[base + 7u]);
+  let bendAlpha = max(0.0, finiteOrZero(layout[base + 8u]));
+  let cLimit = max(0.0, finiteOrZero(layout[base + 9u]));
+  let lambdaLimit = max(1e-6, finiteOrZero(layout[base + 10u]));
+
+  let dx = nxp - px;
+  let dy = nyp - py;
+  let d = max(1e-6, sqrt(dx * dx + dy * dy));
+  let ux = dx / d;
+  let uy = dy / d;
+  let C = clamp(d - rest, -cLimit, cLimit);
+  let wSum = wP + wN;
+  if (wSum <= 1e-9) {
+    deltaVxPrevOut[i] = 0.0;
+    deltaVyPrevOut[i] = 0.0;
+    deltaVxNextOut[i] = 0.0;
+    deltaVyNextOut[i] = 0.0;
+    lambdaNextOut[i] = lambdaPrev;
+    return;
+  }
+
+  var dl = (-C - bendAlpha * lambdaPrev) / (wSum + bendAlpha);
+  if (!(dl == dl)) {
+    dl = 0.0;
+  }
+  let lambdaNext = clamp(lambdaPrev + dl, -lambdaLimit, lambdaLimit);
+  dl = lambdaNext - lambdaPrev;
+
+  let invDt = 1.0 / max(params.dtPos, 1e-8);
+  deltaVxPrevOut[i] = (-wP * dl * ux) * invDt;
+  deltaVyPrevOut[i] = (-wP * dl * uy) * invDt;
+  deltaVxNextOut[i] = (wN * dl * ux) * invDt;
+  deltaVyNextOut[i] = (wN * dl * uy) * invDt;
   lambdaNextOut[i] = lambdaNext;
 }
 `;
@@ -151,6 +227,26 @@ function computeShapeMemoryProposalSignature(layout, dtPos) {
     sum += Math.fround(layout[i + 5] || 0) * 0.11;
   }
   return `${layout.length}|${Math.fround(dtPos)}|${Math.fround(sum)}`;
+}
+
+
+function ensureSoftMembraneBendPipeline(offload) {
+  const state = offload?.state;
+  const device = offload?.device;
+  if (!state || !device) return null;
+  if (!state.membraneBendProposalPipelinePromise) {
+    state.membraneBendProposalPipelinePromise = device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: {
+        module: device.createShaderModule({ code: softMembraneBendProposalWgsl }),
+        entryPoint: 'main',
+      },
+    }).catch((err) => {
+      state.membraneBendProposalPipelinePromise = null;
+      throw err;
+    });
+  }
+  return state.membraneBendProposalPipelinePromise;
 }
 
 function ensureSoftMembraneShapeMemoryPipeline(offload) {
@@ -310,6 +406,124 @@ async function dispatchSoftMembraneBoundaryEdgeProposal(offload, layout, dtPos, 
   readDeltaVyABuffer.destroy();
   readDeltaVxBBuffer.destroy();
   readDeltaVyBBuffer.destroy();
+  readLambdaNextBuffer.destroy();
+  paramBuffer.destroy();
+  return finite.allFinite;
+}
+
+
+async function dispatchSoftMembraneBendProposal(offload, layout, dtPos, signature) {
+  const state = offload?.state;
+  const device = offload?.device;
+  if (!state || !device || !(layout instanceof Float32Array) || layout.length === 0) return false;
+  const count = Math.floor(layout.length / MEMBRANE_BEND_LAYOUT_STRIDE_FLOATS);
+  if (count <= 0) return false;
+
+  const pipeline = await ensureSoftMembraneBendPipeline(offload);
+  if (!pipeline) return false;
+
+  const layoutBuffer = device.createBuffer({ size: layout.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const outBytes = count * Float32Array.BYTES_PER_ELEMENT;
+  const deltaVxPrevBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const deltaVyPrevBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const deltaVxNextBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const deltaVyNextBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const lambdaNextBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const readDeltaVxPrevBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const readDeltaVyPrevBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const readDeltaVxNextBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const readDeltaVyNextBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const readLambdaNextBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const params = new Float32Array([count, dtPos, 0, 0]);
+  const paramBuffer = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
+  device.queue.writeBuffer(layoutBuffer, 0, layout);
+  device.queue.writeBuffer(paramBuffer, 0, params);
+
+  const bindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: layoutBuffer } },
+      { binding: 1, resource: { buffer: deltaVxPrevBuffer } },
+      { binding: 2, resource: { buffer: deltaVyPrevBuffer } },
+      { binding: 3, resource: { buffer: deltaVxNextBuffer } },
+      { binding: 4, resource: { buffer: deltaVyNextBuffer } },
+      { binding: 5, resource: { buffer: lambdaNextBuffer } },
+      { binding: 6, resource: { buffer: paramBuffer } },
+    ],
+  });
+
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(Math.max(1, Math.ceil(count / WGSL_WORKGROUP_SIZE)));
+  pass.end();
+  encoder.copyBufferToBuffer(deltaVxPrevBuffer, 0, readDeltaVxPrevBuffer, 0, outBytes);
+  encoder.copyBufferToBuffer(deltaVyPrevBuffer, 0, readDeltaVyPrevBuffer, 0, outBytes);
+  encoder.copyBufferToBuffer(deltaVxNextBuffer, 0, readDeltaVxNextBuffer, 0, outBytes);
+  encoder.copyBufferToBuffer(deltaVyNextBuffer, 0, readDeltaVyNextBuffer, 0, outBytes);
+  encoder.copyBufferToBuffer(lambdaNextBuffer, 0, readLambdaNextBuffer, 0, outBytes);
+  device.queue.submit([encoder.finish()]);
+
+  await Promise.all([
+    readDeltaVxPrevBuffer.mapAsync(GPUMapMode.READ),
+    readDeltaVyPrevBuffer.mapAsync(GPUMapMode.READ),
+    readDeltaVxNextBuffer.mapAsync(GPUMapMode.READ),
+    readDeltaVyNextBuffer.mapAsync(GPUMapMode.READ),
+    readLambdaNextBuffer.mapAsync(GPUMapMode.READ),
+  ]);
+
+  const deltaVxPrev = new Float32Array(readDeltaVxPrevBuffer.getMappedRange().slice(0));
+  const deltaVyPrev = new Float32Array(readDeltaVyPrevBuffer.getMappedRange().slice(0));
+  const deltaVxNext = new Float32Array(readDeltaVxNextBuffer.getMappedRange().slice(0));
+  const deltaVyNext = new Float32Array(readDeltaVyNextBuffer.getMappedRange().slice(0));
+  const lambdaNext = new Float32Array(readLambdaNextBuffer.getMappedRange().slice(0));
+  readDeltaVxPrevBuffer.unmap();
+  readDeltaVyPrevBuffer.unmap();
+  readDeltaVxNextBuffer.unmap();
+  readDeltaVyNextBuffer.unmap();
+  readLambdaNextBuffer.unmap();
+
+  const finite = {
+    allFinite: checkFiniteFloat32Array(deltaVxPrev).allFinite
+      && checkFiniteFloat32Array(deltaVyPrev).allFinite
+      && checkFiniteFloat32Array(deltaVxNext).allFinite
+      && checkFiniteFloat32Array(deltaVyNext).allFinite
+      && checkFiniteFloat32Array(lambdaNext).allFinite,
+  };
+
+  state.lastMembraneBendProposalSignature = String(signature || '');
+  state.lastMembraneBendProposalFinite = finite;
+  state.lastMembraneBendProposalSource = finite.allFinite
+    ? 'wgsl-membrane-bend-proposal'
+    : 'cpu-membrane-bend-authoritative-nonfinite';
+  state.lastMode = finite.allFinite ? 'wgsl-membrane-bend-proposal' : 'cpu-membrane-bend-authoritative';
+
+  if (finite.allFinite) {
+    state.lastMembraneBendProposalDeltaVxPrev = deltaVxPrev;
+    state.lastMembraneBendProposalDeltaVyPrev = deltaVyPrev;
+    state.lastMembraneBendProposalDeltaVxNext = deltaVxNext;
+    state.lastMembraneBendProposalDeltaVyNext = deltaVyNext;
+    state.lastMembraneBendProposalLambdaNext = lambdaNext;
+  } else {
+    state.lastMembraneBendProposalDeltaVxPrev = null;
+    state.lastMembraneBendProposalDeltaVyPrev = null;
+    state.lastMembraneBendProposalDeltaVxNext = null;
+    state.lastMembraneBendProposalDeltaVyNext = null;
+    state.lastMembraneBendProposalLambdaNext = null;
+  }
+
+  layoutBuffer.destroy();
+  deltaVxPrevBuffer.destroy();
+  deltaVyPrevBuffer.destroy();
+  deltaVxNextBuffer.destroy();
+  deltaVyNextBuffer.destroy();
+  lambdaNextBuffer.destroy();
+  readDeltaVxPrevBuffer.destroy();
+  readDeltaVyPrevBuffer.destroy();
+  readDeltaVxNextBuffer.destroy();
+  readDeltaVyNextBuffer.destroy();
   readLambdaNextBuffer.destroy();
   paramBuffer.destroy();
   return finite.allFinite;
@@ -538,6 +752,26 @@ function applyMembraneBoundaryVelocityDeltasAuthoritative({
   }
 }
 
+
+function canApplyAuthoritativeMembraneBendProposal({ wgslOffload, signature, expectedCount }) {
+  const state = wgslOffload?.state;
+  if (!state || state.enableAuthoritativeMembraneBend !== true) return false;
+  if (state.lastMembraneBendProposalSource !== 'wgsl-membrane-bend-proposal') return false;
+  if (String(state.lastMembraneBendProposalSignature || '') !== String(signature || '')) return false;
+  if (!(state.lastMembraneBendProposalDeltaVxPrev instanceof Float32Array)) return false;
+  if (!(state.lastMembraneBendProposalDeltaVyPrev instanceof Float32Array)) return false;
+  if (!(state.lastMembraneBendProposalDeltaVxNext instanceof Float32Array)) return false;
+  if (!(state.lastMembraneBendProposalDeltaVyNext instanceof Float32Array)) return false;
+  if (!(state.lastMembraneBendProposalLambdaNext instanceof Float32Array)) return false;
+  if (state.lastMembraneBendProposalDeltaVxPrev.length !== expectedCount) return false;
+  if (state.lastMembraneBendProposalDeltaVyPrev.length !== expectedCount) return false;
+  if (state.lastMembraneBendProposalDeltaVxNext.length !== expectedCount) return false;
+  if (state.lastMembraneBendProposalDeltaVyNext.length !== expectedCount) return false;
+  if (state.lastMembraneBendProposalLambdaNext.length !== expectedCount) return false;
+  if (state.lastMembraneBendProposalFinite?.allFinite !== true) return false;
+  return true;
+}
+
 export function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
   sim,
   soft,
@@ -572,6 +806,17 @@ export function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
   const edgeProposalCpuDeltaVyB = [];
   let edgeProposalSampleCount = 0;
   let edgeProposalSignatureAccumulator = 0;
+  const bendProposalLayout = [];
+  const bendProposalNodePrevIndices = [];
+  const bendProposalNodeNextIndices = [];
+  const bendProposalLoopClusterIds = [];
+  const bendProposalLoopEdgeIndices = [];
+  const bendProposalCpuDeltaVxPrev = [];
+  const bendProposalCpuDeltaVyPrev = [];
+  const bendProposalCpuDeltaVxNext = [];
+  const bendProposalCpuDeltaVyNext = [];
+  let bendProposalSampleCount = 0;
+  let bendProposalSignatureAccumulator = 0;
   let touched = 0;
 
   for (let iter = 0; iter < membraneEdgeXpbdIters; iter++) {
@@ -729,12 +974,83 @@ export function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
         dl = lambdaNext - lambdaPrev;
         st.bendLambda[i] = lambdaNext;
 
-        prev.vx += (-wP * dl * ux) / dtPos;
-        prev.vy += (-wP * dl * uy) / dtPos;
-        next.vx += (wN * dl * ux) / dtPos;
-        next.vy += (wN * dl * uy) / dtPos;
+        const cpuDeltaVxPrev = (-wP * dl * ux) / dtPos;
+        const cpuDeltaVyPrev = (-wP * dl * uy) / dtPos;
+        const cpuDeltaVxNext = (wN * dl * ux) / dtPos;
+        const cpuDeltaVyNext = (wN * dl * uy) / dtPos;
+
+        if (runWgslBoundaryProbe && iter === 0) {
+          const cLimit = Math.max(0.1, rest * 0.35);
+          bendProposalLayout.push(
+            px,
+            py,
+            nxp,
+            nyp,
+            rest,
+            wP,
+            wN,
+            lambdaPrev,
+            bendAlpha,
+            cLimit,
+            20,
+          );
+          bendProposalNodePrevIndices.push(ids[(i - 1 + ids.length) % ids.length] | 0);
+          bendProposalNodeNextIndices.push(ids[(i + 1) % ids.length] | 0);
+          bendProposalLoopClusterIds.push(cid | 0);
+          bendProposalLoopEdgeIndices.push(i | 0);
+          bendProposalCpuDeltaVxPrev.push(cpuDeltaVxPrev);
+          bendProposalCpuDeltaVyPrev.push(cpuDeltaVyPrev);
+          bendProposalCpuDeltaVxNext.push(cpuDeltaVxNext);
+          bendProposalCpuDeltaVyNext.push(cpuDeltaVyNext);
+          bendProposalSampleCount += 1;
+          bendProposalSignatureAccumulator += Math.fround(rest) * 0.43 + Math.fround(lambdaPrev) * 0.23 + Math.fround(wP + wN) * 0.09;
+        }
+
+        prev.vx += cpuDeltaVxPrev;
+        prev.vy += cpuDeltaVyPrev;
+        next.vx += cpuDeltaVxNext;
+        next.vy += cpuDeltaVyNext;
       }
     }
+  }
+
+
+  const bendLayout = bendProposalLayout.length > 0 ? Float32Array.from(bendProposalLayout) : null;
+  const bendSignature = bendLayout
+    ? `${bendProposalSampleCount}|${Math.fround(dtPos)}|${Math.fround(bendProposalSignatureAccumulator)}`
+    : '';
+
+  const authoritativeBendFromWgsl = canApplyAuthoritativeMembraneBendProposal({
+    wgslOffload,
+    signature: bendSignature,
+    expectedCount: bendProposalNodePrevIndices.length,
+  });
+
+  if (authoritativeBendFromWgsl) {
+    applyMembraneBoundaryVelocityDeltasAuthoritative({
+      sim,
+      soft,
+      nodeAIndices: bendProposalNodePrevIndices,
+      nodeBIndices: bendProposalNodeNextIndices,
+      loopClusterIds: bendProposalLoopClusterIds,
+      loopEdgeIndices: bendProposalLoopEdgeIndices,
+      cpuDeltaVxA: bendProposalCpuDeltaVxPrev,
+      cpuDeltaVyA: bendProposalCpuDeltaVyPrev,
+      cpuDeltaVxB: bendProposalCpuDeltaVxNext,
+      cpuDeltaVyB: bendProposalCpuDeltaVyNext,
+      wgslDeltaVxA: wgslOffload.state.lastMembraneBendProposalDeltaVxPrev,
+      wgslDeltaVyA: wgslOffload.state.lastMembraneBendProposalDeltaVyPrev,
+      wgslDeltaVxB: wgslOffload.state.lastMembraneBendProposalDeltaVxNext,
+      wgslDeltaVyB: wgslOffload.state.lastMembraneBendProposalDeltaVyNext,
+      wgslLambdaNext: wgslOffload.state.lastMembraneBendProposalLambdaNext,
+    });
+  }
+
+  if (wgslOffload?.state) {
+    wgslOffload.state.lastMembraneBendAuthoritativeSource = authoritativeBendFromWgsl
+      ? 'wgsl-membrane-bend-authoritative'
+      : 'cpu-membrane-bend-authoritative';
+    wgslOffload.state.lastMembraneBendAuthoritativeSignature = bendSignature;
   }
 
   if (runWgslBoundaryProbe) {
@@ -757,6 +1073,24 @@ export function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
           wgslOffload.state.lastMode = 'cpu-membrane-boundary-edge-authoritative';
         });
       wgslOffload.state.pendingWgslMembraneBoundaryEdgeProposalPromise = serializedDispatch;
+    }
+
+    wgslOffload.state.lastMembraneBendProposalSignaturePrepared = bendSignature;
+    wgslOffload.state.lastMembraneBendProposalLayoutBytes = bendLayout?.byteLength || 0;
+    if (!wgslOffload.state.lastMembraneBendProposalSource) {
+      wgslOffload.state.lastMembraneBendProposalSource = 'cpu-membrane-bend-authoritative';
+    }
+
+    if (bendLayout && bendLayout.length > 0) {
+      const serializedBendDispatch = (wgslOffload.state.pendingWgslMembraneBendProposalPromise || Promise.resolve())
+        .catch(() => {})
+        .then(() => dispatchSoftMembraneBendProposal(wgslOffload, bendLayout, dtPos, bendSignature))
+        .catch((err) => {
+          wgslOffload.state.lastMembraneBendProposalError = String(err?.message || err || 'unknown-error');
+          wgslOffload.state.lastMembraneBendProposalSource = 'cpu-membrane-bend-authoritative';
+          wgslOffload.state.lastMode = 'cpu-membrane-bend-authoritative';
+        });
+      wgslOffload.state.pendingWgslMembraneBendProposalPromise = serializedBendDispatch;
     }
   }
 

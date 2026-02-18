@@ -74,6 +74,7 @@
     body.embed-mode label,
     body.embed-mode #fpsHud,
     body.embed-mode #softIntegrateHud,
+    body.embed-mode #fallbackHud,
     body.embed-mode #deformationLegend,
     body.embed-mode .stabilizer-legend {
       display: none !important;
@@ -137,6 +138,7 @@
     </label>
     <span id="fpsHud" style="margin-left:10px;color:#9fe3ff;font-family:ui-monospace,Menlo,monospace">FPS: --</span>
     <span id="softIntegrateHud" style="margin-left:10px;color:#9faec7;font-family:ui-monospace,Menlo,monospace">Soft integrate: --</span>
+    <span id="fallbackHud" style="margin-left:10px;color:#7df0b6;font-family:ui-monospace,Menlo,monospace">Fallbacks: none</span>
   </div>
 
   <div class="row">
@@ -265,6 +267,6 @@
   </div>
 
   <pre id="out">idle</pre>
-  <script type="module" src="/gpu-lab.js?v=20260218b"></script>
+  <script type="module" src="/gpu-lab.js?v=20260218c"></script>
 </body>
 </html>

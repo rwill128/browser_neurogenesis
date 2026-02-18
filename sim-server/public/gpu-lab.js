@@ -35,6 +35,7 @@ const importSpecFile = document.getElementById('importSpecFile');
 const importScaleEl = document.getElementById('importScale');
 const fpsHud = document.getElementById('fpsHud');
 const softIntegrateHudEl = document.getElementById('softIntegrateHud');
+const fallbackHudEl = document.getElementById('fallbackHud');
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
 
@@ -364,6 +365,144 @@ function softIntegrateHudLabel(state) {
   if (mode === 'cpu-baseline') return { text: 'Soft integrate: CPU baseline', color: '#b8c7ff' };
   if (mode === 'cpu') return { text: 'Soft integrate: CPU (no WGSL)', color: '#ffd36b' };
   return { text: 'Soft integrate: --', color: '#9faec7' };
+}
+
+const GPU_FALLBACK_STAGE_LABELS = Object.freeze({
+  rigidStepWgslState: 'Rigid step',
+  softFluidCouplingWgslState: 'Soft fluid coupling',
+  softSpringXpbdWgslState: 'Soft spring XPBD',
+  softMembraneBoundaryWgslState: 'Membrane boundary XPBD',
+  softMembraneShapeMemoryWgslState: 'Membrane shape memory',
+  softAreaXpbdWgslState: 'Soft area XPBD',
+  softMembranePressureWgslState: 'Membrane pressure',
+  hybridConstraintsWgslState: 'Hybrid constraints',
+  softIntegrateWgslState: 'Soft integrate',
+  rigidPostIntegrateWgslState: 'Rigid post-integrate',
+  collisionBoundaryWgslState: 'Collision boundary',
+  postCollisionBoundaryWgslState: 'Post-collision recovery',
+  softRestRecoveryWgslState: 'Soft rest recovery',
+  bodyFluidInjectionWgslState: 'Body-fluid injection',
+});
+
+function collectGpuFallbackSignals(sim) {
+  const entries = [];
+  const seen = new Set();
+  const add = (stage, route, detailKey = '') => {
+    if (!stage || !route) return;
+    const key = `${stage}|${route}|${detailKey}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push({ stage, route: String(route), detailKey: String(detailKey || '') });
+  };
+
+  const addRuntimeFallback = (stage, runtime) => {
+    const mode = String(runtime?.mode || '').toLowerCase();
+    if (!mode.includes('cpu-fallback')) return;
+    const reason = String(runtime?.reason || '').trim();
+    add(stage, reason ? `mode=${mode}; reason=${reason}` : `mode=${mode}`, 'runtime-mode');
+  };
+
+  addRuntimeFallback('Soft integrate', sim?.softIntegrateRuntime);
+  addRuntimeFallback('Rigid post-integrate', sim?.rigidPostIntegrateRuntime);
+  addRuntimeFallback('Collision boundary', sim?.collisionBoundaryRuntime);
+
+  for (const [stateKey, stage] of Object.entries(GPU_FALLBACK_STAGE_LABELS)) {
+    const st = sim?.[stateKey];
+    if (!st || typeof st !== 'object') continue;
+    for (const [k, v] of Object.entries(st)) {
+      if (!k.startsWith('last') || typeof v !== 'string') continue;
+      const route = String(v);
+      const low = route.toLowerCase();
+      if (!(low.includes('fallback') || low.includes('nonfinite') || low.includes('error'))) continue;
+      add(stage, route, k);
+    }
+  }
+
+  return entries;
+}
+
+function updateFallbackHud(sim) {
+  if (!fallbackHudEl) return;
+
+  const solverPath = normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath);
+  if (solverPath !== 'gpu-only') {
+    fallbackHudEl.textContent = 'Fallbacks: n/a (baseline solver)';
+    fallbackHudEl.style.color = '#9fb8ff';
+    fallbackHudEl.title = 'CPU fallback tracking is shown while runtime solver is set to gpu-only.';
+    if (sim) {
+      sim.fallbackHudSummary = {
+        active: false,
+        currentCount: 0,
+        hasRecent: false,
+        lastFallbackFrame: null,
+        currentStages: [],
+        recentStages: [],
+      };
+    }
+    return;
+  }
+
+  sim.fallbackHudState ||= { byStage: new Map(), lastFallbackFrame: null };
+  const hudState = sim.fallbackHudState;
+  const frame = Number(sim?.frame) || 0;
+  const current = collectGpuFallbackSignals(sim);
+
+  for (const entry of current) {
+    hudState.byStage.set(entry.stage, {
+      ...entry,
+      lastFrame: frame,
+    });
+  }
+  if (current.length > 0) {
+    hudState.lastFallbackFrame = frame;
+  }
+
+  const sticky = Array.from(hudState.byStage.values())
+    .sort((a, b) => (Number(b.lastFrame) || 0) - (Number(a.lastFrame) || 0));
+
+  if (current.length > 0) {
+    const stages = current.map((e) => e.stage);
+    const uniqStages = Array.from(new Set(stages));
+    const stageLabel = uniqStages.slice(0, 3).join(', ');
+    const suffix = uniqStages.length > 3 ? ` +${uniqStages.length - 3} more` : '';
+    fallbackHudEl.textContent = `Fallback NOW (${current.length}): ${stageLabel}${suffix}`;
+    fallbackHudEl.style.color = '#ff8f8f';
+  } else if (sticky.length > 0) {
+    const recentStages = Array.from(new Set(sticky.slice(0, 3).map((e) => e.stage)));
+    const suffix = sticky.length > 3 ? ` +${sticky.length - 3} more` : '';
+    const frameLabel = Number.isFinite(Number(hudState.lastFallbackFrame)) ? `@f${hudState.lastFallbackFrame}` : '';
+    fallbackHudEl.textContent = `Last fallback ${frameLabel}: ${recentStages.join(', ')}${suffix}`;
+    fallbackHudEl.style.color = '#ffd36b';
+  } else {
+    fallbackHudEl.textContent = 'Fallbacks: none';
+    fallbackHudEl.style.color = '#7df0b6';
+  }
+
+  const detailLines = [];
+  if (current.length > 0) {
+    detailLines.push(`Current frame fallback routes (${current.length}):`);
+    for (const entry of current) {
+      detailLines.push(`- ${entry.stage}: ${entry.route}${entry.detailKey ? ` [${entry.detailKey}]` : ''}`);
+    }
+  }
+  if (sticky.length > 0) {
+    detailLines.push('Recent fallback routes:');
+    for (const entry of sticky.slice(0, 12)) {
+      detailLines.push(`- f${entry.lastFrame}: ${entry.stage}: ${entry.route}${entry.detailKey ? ` [${entry.detailKey}]` : ''}`);
+    }
+  }
+  fallbackHudEl.title = detailLines.length > 0
+    ? detailLines.join('\n')
+    : 'No CPU fallback routes detected in gpu-only solver path.';
+
+  sim.fallbackHudSummary = {
+    active: true,
+    currentCount: current.length,
+    hasRecent: sticky.length > 0,
+    lastFallbackFrame: hudState.lastFallbackFrame,
+    currentStages: Array.from(new Set(current.map((e) => e.stage))),
+    recentStages: Array.from(new Set(sticky.map((e) => e.stage))).slice(0, 12),
+  };
 }
 
 function createBuffer(device, bytes, usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC) {
@@ -6131,6 +6270,7 @@ async function stepAndRender() {
       softIntegrateHudEl.textContent = hud.text;
       softIntegrateHudEl.style.color = hud.color;
     }
+    updateFallbackHud(s);
     const couplingAverages = summarizeCouplingTelemetry(s.couplingTelemetry);
     const couplingSnapshot = { ...couplingAverages, ...Object.fromEntries(Object.entries(couplingInstant || {}).map(([k,v]) => [k+'Now', +((v || 0).toFixed(4))])) };
     const rigidContacts = Array.isArray(s.lastRigidContacts) ? s.lastRigidContacts : [];
@@ -6463,7 +6603,15 @@ window.__gpuLabApi = {
       frame: Number(sim?.frame) || 0,
       grid: Number(sim?.controls?.n) || null,
       runtimeSolverPath: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath),
-    runtimePipelineMode: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
+      runtimePipelineMode: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
+      fallbackHud: sim?.fallbackHudSummary || {
+        active: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath) === 'gpu-only',
+        currentCount: 0,
+        hasRecent: false,
+        lastFallbackFrame: null,
+        currentStages: [],
+        recentStages: [],
+      },
       rigidBodies: Number(sim?.bodies?.rigid?.length) || 0,
       softNodes: Number(sim?.bodies?.soft?.nodes?.length) || 0,
       interactionLab: il ? {

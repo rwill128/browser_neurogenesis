@@ -19,6 +19,7 @@ import {
 } from '/runtime-solvers/stepSoftMembraneConstraintsGpuOnly.js';
 import { applySoftFluidCouplingGpuOnly } from '/runtime-solvers/stepSoftFluidCouplingGpuOnly.js';
 import { applyPostCollisionRecoveryGpuOnly } from '/runtime-solvers/stepPostCollisionRecoveryGpuOnly.js';
+import { stabilizeRigidPostIntegrateGpuOnly } from '/runtime-solvers/stepRigidPostIntegrateGpuOnly.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -4093,14 +4094,22 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     }
   }
 
-  for (const rb of bodies.rigid) {
-    const vmag = Math.hypot(rb.vx, rb.vy);
-    const vcap = 4.0;
-    if (vmag > vcap) {
-      rb.vx = (rb.vx / vmag) * vcap;
-      rb.vy = (rb.vy / vmag) * vcap;
+  if (solverPath === 'gpu-only') {
+    stabilizeRigidPostIntegrateGpuOnly({
+      rigidBodies: bodies.rigid,
+      velocityCap: 4.0,
+      omegaCap: 0.22,
+    });
+  } else {
+    for (const rb of bodies.rigid) {
+      const vmag = Math.hypot(rb.vx, rb.vy);
+      const vcap = 4.0;
+      if (vmag > vcap) {
+        rb.vx = (rb.vx / vmag) * vcap;
+        rb.vy = (rb.vy / vmag) * vcap;
+      }
+      rb.omega = Math.max(-0.22, Math.min(0.22, rb.omega || 0));
     }
-    rb.omega = Math.max(-0.22, Math.min(0.22, rb.omega || 0));
   }
 
   const rigidContactDebug = [];

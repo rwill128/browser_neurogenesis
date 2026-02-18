@@ -99,6 +99,120 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const softNodeEdgeCollisionWgsl = /* wgsl */`
+struct Params {
+  nodeCount: u32,
+  pairCount: u32,
+  restitution: f32,
+  nodeEdgeSlop: f32,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read_write> posX: array<f32>;
+@group(0) @binding(2) var<storage, read_write> posY: array<f32>;
+@group(0) @binding(3) var<storage, read_write> velX: array<f32>;
+@group(0) @binding(4) var<storage, read_write> velY: array<f32>;
+@group(0) @binding(5) var<storage, read> radius: array<f32>;
+@group(0) @binding(6) var<storage, read> pairs: array<u32>;
+
+fn clampf(v: f32, lo: f32, hi: f32) -> f32 {
+  return min(max(v, lo), hi);
+}
+
+@compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x > 0u) { return; }
+
+  var k: u32 = 0u;
+  loop {
+    if (k >= params.pairCount) { break; }
+    let base = k * 3u;
+    let ni = pairs[base + 0u];
+    let ia = pairs[base + 1u];
+    let ib = pairs[base + 2u];
+    if (ni >= params.nodeCount || ia >= params.nodeCount || ib >= params.nodeCount) {
+      k = k + 1u;
+      continue;
+    }
+
+    var nodeX = posX[ni];
+    var nodeY = posY[ni];
+    var nodeVx = velX[ni];
+    var nodeVy = velY[ni];
+
+    var ax = posX[ia];
+    var ay = posY[ia];
+    var avx = velX[ia];
+    var avy = velY[ia];
+
+    var bx = posX[ib];
+    var by = posY[ib];
+    var bvx = velX[ib];
+    var bvy = velY[ib];
+
+    let abx = bx - ax;
+    let aby = by - ay;
+    let ab2 = abx * abx + aby * aby;
+    let t = select(clampf(((nodeX - ax) * abx + (nodeY - ay) * aby) / max(ab2, 1e-12), 0.0, 1.0), 0.0, ab2 <= 1e-12);
+    let cpx = ax + abx * t;
+    let cpy = ay + aby * t;
+
+    var nx = nodeX - cpx;
+    var ny = nodeY - cpy;
+    var dist = sqrt(nx * nx + ny * ny);
+    let minDist = max(0.4, radius[ni]);
+
+    if (dist < minDist) {
+      if (dist < 1e-6) {
+        let invLen = 1.0 / max(1e-6, sqrt((-aby) * (-aby) + abx * abx));
+        nx = -aby * invLen;
+        ny = abx * invLen;
+        dist = 1e-6;
+      } else {
+        nx = nx / dist;
+        ny = ny / dist;
+      }
+
+      let penetration = minDist - dist;
+      nodeX = nodeX + nx * penetration * 0.92;
+      nodeY = nodeY + ny * penetration * 0.92;
+      ax = ax - nx * penetration * 0.04;
+      ay = ay - ny * penetration * 0.04;
+      bx = bx - nx * penetration * 0.04;
+      by = by - ny * penetration * 0.04;
+
+      let edgeVx = (avx + bvx) * 0.5;
+      let edgeVy = (avy + bvy) * 0.5;
+      let rvx = nodeVx - edgeVx;
+      let rvy = nodeVy - edgeVy;
+      let vn = rvx * nx + rvy * ny;
+      if (vn < 0.0) {
+        let impulse = -(1.0 + params.restitution) * vn;
+        nodeVx = nodeVx + nx * impulse;
+        nodeVy = nodeVy + ny * impulse;
+      }
+    }
+
+    posX[ni] = nodeX;
+    posY[ni] = nodeY;
+    velX[ni] = nodeVx;
+    velY[ni] = nodeVy;
+
+    posX[ia] = ax;
+    posY[ia] = ay;
+    velX[ia] = avx;
+    velY[ia] = avy;
+
+    posX[ib] = bx;
+    posY[ib] = by;
+    velX[ib] = bvx;
+    velY[ib] = bvy;
+
+    k = k + 1u;
+  }
+}
+`;
+
 function canUseWgslOffload(offload) {
   if (!offload || offload.enabled !== true) return false;
   if (!offload.device || typeof offload.device.createComputePipelineAsync !== 'function') return false;
@@ -300,6 +414,169 @@ async function runNodeNodeCollisionWgsl(nodes, restitution, wgslOffload) {
   return { ok: true, reason: 'ok' };
 }
 
+async function ensureNodeEdgeWgslState(offload, count, pairCount) {
+  const state = offload.state || (offload.state = {});
+  const device = offload.device;
+
+  if (!state.softNodeEdgeCollisionPipeline) {
+    const module = device.createShaderModule({ code: softNodeEdgeCollisionWgsl });
+    state.softNodeEdgeCollisionPipeline = await device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: { module, entryPoint: 'main' },
+    });
+  }
+
+  const requiredNodeCapacity = Math.max(1, count);
+  if ((state.softNodeEdgeCollisionNodeCapacity || 0) < requiredNodeCapacity) {
+    const nodeCapacity = Math.max(requiredNodeCapacity, state.softNodeEdgeCollisionNodeCapacity ? state.softNodeEdgeCollisionNodeCapacity * 2 : 128);
+    const bytes = nodeCapacity * 4;
+    const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.COPY_SRC;
+    const readUsage = globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ;
+
+    state.softNodeEdgePosX?.destroy?.();
+    state.softNodeEdgePosY?.destroy?.();
+    state.softNodeEdgeVelX?.destroy?.();
+    state.softNodeEdgeVelY?.destroy?.();
+    state.softNodeEdgeRadius?.destroy?.();
+    state.softNodeEdgeReadPosX?.destroy?.();
+    state.softNodeEdgeReadPosY?.destroy?.();
+    state.softNodeEdgeReadVelX?.destroy?.();
+    state.softNodeEdgeReadVelY?.destroy?.();
+
+    state.softNodeEdgePosX = createBuffer(device, bytes, storageUsage);
+    state.softNodeEdgePosY = createBuffer(device, bytes, storageUsage);
+    state.softNodeEdgeVelX = createBuffer(device, bytes, storageUsage);
+    state.softNodeEdgeVelY = createBuffer(device, bytes, storageUsage);
+    state.softNodeEdgeRadius = createBuffer(device, bytes, globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST);
+    state.softNodeEdgeReadPosX = createBuffer(device, bytes, readUsage);
+    state.softNodeEdgeReadPosY = createBuffer(device, bytes, readUsage);
+    state.softNodeEdgeReadVelX = createBuffer(device, bytes, readUsage);
+    state.softNodeEdgeReadVelY = createBuffer(device, bytes, readUsage);
+    state.softNodeEdgeCollisionNodeCapacity = nodeCapacity;
+    state.softNodeEdgeCollisionBindGroup = null;
+  }
+
+  const requiredPairCapacity = Math.max(1, pairCount * 3);
+  if ((state.softNodeEdgeCollisionPairCapacity || 0) < requiredPairCapacity) {
+    const pairCapacity = Math.max(requiredPairCapacity, state.softNodeEdgeCollisionPairCapacity ? state.softNodeEdgeCollisionPairCapacity * 2 : 256);
+    state.softNodeEdgePairs?.destroy?.();
+    state.softNodeEdgePairs = createBuffer(
+      device,
+      pairCapacity * Uint32Array.BYTES_PER_ELEMENT,
+      globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST,
+    );
+    state.softNodeEdgeCollisionPairCapacity = pairCapacity;
+    state.softNodeEdgeCollisionBindGroup = null;
+  }
+
+  if (!state.softNodeEdgeCollisionParams) {
+    state.softNodeEdgeCollisionParams = createBuffer(
+      device,
+      16,
+      globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST,
+    );
+  }
+
+  if (!state.softNodeEdgeCollisionBindGroup) {
+    state.softNodeEdgeCollisionBindGroup = device.createBindGroup({
+      layout: state.softNodeEdgeCollisionPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.softNodeEdgeCollisionParams } },
+        { binding: 1, resource: { buffer: state.softNodeEdgePosX } },
+        { binding: 2, resource: { buffer: state.softNodeEdgePosY } },
+        { binding: 3, resource: { buffer: state.softNodeEdgeVelX } },
+        { binding: 4, resource: { buffer: state.softNodeEdgeVelY } },
+        { binding: 5, resource: { buffer: state.softNodeEdgeRadius } },
+        { binding: 6, resource: { buffer: state.softNodeEdgePairs } },
+      ],
+    });
+  }
+
+  return state;
+}
+
+async function runNodeEdgeCollisionWgsl(nodes, nodeEdgePacked, restitution, nodeEdgeSlop, wgslOffload) {
+  const count = nodes.length;
+  const pairCount = Math.floor((nodeEdgePacked?.length || 0) / 3);
+  if (count < 3 || pairCount <= 0) return { ok: true, reason: 'insufficient-node-edge-count' };
+
+  const state = await ensureNodeEdgeWgslState(wgslOffload, count, pairCount);
+  const device = wgslOffload.device;
+  const nodeBytes = count * 4;
+
+  const posX = new Float32Array(count);
+  const posY = new Float32Array(count);
+  const velX = new Float32Array(count);
+  const velY = new Float32Array(count);
+  const radius = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    const node = nodes[i] || {};
+    posX[i] = Number(node.x) || 0;
+    posY[i] = Number(node.y) || 0;
+    velX[i] = Number(node.vx) || 0;
+    velY[i] = Number(node.vy) || 0;
+    radius[i] = Number(node.r) || 1;
+  }
+
+  const params = new ArrayBuffer(16);
+  const view = new DataView(params);
+  view.setUint32(0, count, true);
+  view.setUint32(4, pairCount, true);
+  view.setFloat32(8, Number(restitution) || 0, true);
+  view.setFloat32(12, Number(nodeEdgeSlop) || 0, true);
+
+  device.queue.writeBuffer(state.softNodeEdgeCollisionParams, 0, params);
+  device.queue.writeBuffer(state.softNodeEdgePosX, 0, posX);
+  device.queue.writeBuffer(state.softNodeEdgePosY, 0, posY);
+  device.queue.writeBuffer(state.softNodeEdgeVelX, 0, velX);
+  device.queue.writeBuffer(state.softNodeEdgeVelY, 0, velY);
+  device.queue.writeBuffer(state.softNodeEdgeRadius, 0, radius);
+  device.queue.writeBuffer(state.softNodeEdgePairs, 0, nodeEdgePacked);
+
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(state.softNodeEdgeCollisionPipeline);
+  pass.setBindGroup(0, state.softNodeEdgeCollisionBindGroup);
+  pass.dispatchWorkgroups(1);
+  pass.end();
+
+  encoder.copyBufferToBuffer(state.softNodeEdgePosX, 0, state.softNodeEdgeReadPosX, 0, nodeBytes);
+  encoder.copyBufferToBuffer(state.softNodeEdgePosY, 0, state.softNodeEdgeReadPosY, 0, nodeBytes);
+  encoder.copyBufferToBuffer(state.softNodeEdgeVelX, 0, state.softNodeEdgeReadVelX, 0, nodeBytes);
+  encoder.copyBufferToBuffer(state.softNodeEdgeVelY, 0, state.softNodeEdgeReadVelY, 0, nodeBytes);
+  device.queue.submit([encoder.finish()]);
+
+  await Promise.all([
+    state.softNodeEdgeReadPosX.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes),
+    state.softNodeEdgeReadPosY.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes),
+    state.softNodeEdgeReadVelX.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes),
+    state.softNodeEdgeReadVelY.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes),
+  ]);
+
+  const outPosX = new Float32Array(state.softNodeEdgeReadPosX.getMappedRange(0, nodeBytes).slice(0));
+  const outPosY = new Float32Array(state.softNodeEdgeReadPosY.getMappedRange(0, nodeBytes).slice(0));
+  const outVelX = new Float32Array(state.softNodeEdgeReadVelX.getMappedRange(0, nodeBytes).slice(0));
+  const outVelY = new Float32Array(state.softNodeEdgeReadVelY.getMappedRange(0, nodeBytes).slice(0));
+
+  state.softNodeEdgeReadPosX.unmap();
+  state.softNodeEdgeReadPosY.unmap();
+  state.softNodeEdgeReadVelX.unmap();
+  state.softNodeEdgeReadVelY.unmap();
+
+  const finite = allFinite(outPosX) && allFinite(outPosY) && allFinite(outVelX) && allFinite(outVelY);
+  if (!finite) return { ok: false, reason: 'non-finite-node-edge-wgsl' };
+
+  for (let i = 0; i < count; i++) {
+    const node = nodes[i];
+    node.x = outPosX[i];
+    node.y = outPosY[i];
+    node.vx = outVelX[i];
+    node.vy = outVelY[i];
+  }
+
+  return { ok: true, reason: 'ok' };
+}
+
 export async function resolveSoftSoftCollisionPassGpuOnly({
   soft,
   resolveCircleCollision,
@@ -354,15 +631,50 @@ export async function resolveSoftSoftCollisionPassGpuOnly({
     edgeBodyModeBlock,
   });
   const nodeEdgePacked = nodeEdgeLayout.packed;
-  for (let k = 0; k < nodeEdgePacked.length; k += 3) {
-    const ni = nodeEdgePacked[k] | 0;
-    const i = nodeEdgePacked[k + 1] | 0;
-    const j = nodeEdgePacked[k + 2] | 0;
-    const node = nodes[ni];
-    const a = nodes[i];
-    const b = nodes[j];
-    if (!node || !a || !b) continue;
-    resolveSoftNodeVsSoftEdgeCollision(node, a, b, nodeEdgeSlop);
+  let nodeEdgeSource = 'cpu-soft-node-edge-authoritative';
+  const canRunNodeEdgeWgsl = canUseWgslOffload(wgslOffload) && nodeEdgeLayout.pairCount > 0;
+  if (canRunNodeEdgeWgsl) {
+    try {
+      const result = await runNodeEdgeCollisionWgsl(nodes, nodeEdgePacked, nodeEdgeSlop, nodeEdgeSlop, wgslOffload);
+      if (result.ok) {
+        nodeEdgeSource = 'wgsl-soft-node-edge-authoritative';
+      } else {
+        for (let k = 0; k < nodeEdgePacked.length; k += 3) {
+          const ni = nodeEdgePacked[k] | 0;
+          const i = nodeEdgePacked[k + 1] | 0;
+          const j = nodeEdgePacked[k + 2] | 0;
+          const node = nodes[ni];
+          const a = nodes[i];
+          const b = nodes[j];
+          if (!node || !a || !b) continue;
+          resolveSoftNodeVsSoftEdgeCollision(node, a, b, nodeEdgeSlop);
+        }
+        nodeEdgeSource = 'cpu-soft-node-edge-fallback-nonfinite';
+      }
+    } catch (_err) {
+      for (let k = 0; k < nodeEdgePacked.length; k += 3) {
+        const ni = nodeEdgePacked[k] | 0;
+        const i = nodeEdgePacked[k + 1] | 0;
+        const j = nodeEdgePacked[k + 2] | 0;
+        const node = nodes[ni];
+        const a = nodes[i];
+        const b = nodes[j];
+        if (!node || !a || !b) continue;
+        resolveSoftNodeVsSoftEdgeCollision(node, a, b, nodeEdgeSlop);
+      }
+      nodeEdgeSource = 'cpu-soft-node-edge-fallback-error';
+    }
+  } else {
+    for (let k = 0; k < nodeEdgePacked.length; k += 3) {
+      const ni = nodeEdgePacked[k] | 0;
+      const i = nodeEdgePacked[k + 1] | 0;
+      const j = nodeEdgePacked[k + 2] | 0;
+      const node = nodes[ni];
+      const a = nodes[i];
+      const b = nodes[j];
+      if (!node || !a || !b) continue;
+      resolveSoftNodeVsSoftEdgeCollision(node, a, b, nodeEdgeSlop);
+    }
   }
 
   if (wgslOffload?.state) {
@@ -374,13 +686,17 @@ export async function resolveSoftSoftCollisionPassGpuOnly({
     state.lastSoftNodeEdgeCandidatePairCount = nodeEdgeLayout.pairCount;
     state.lastSoftNodeEdgeCandidateLayoutSignature = nodeEdgeLayout.signature >>> 0;
     state.lastSoftNodeEdgeCandidatePacked = nodeEdgePacked;
-    state.lastSoftNodeEdgeCollisionSource = 'cpu-soft-node-edge-authoritative';
-    state.lastSoftNodeEdgeNextStage = nonStandardMode
-      ? 'wgsl-soft-node-edge-collision-pending'
-      : 'cpu-soft-node-edge-authoritative';
-    state.lastSourceRoute = nodeNodeSource;
-    state.lastMode = nodeNodeSource.startsWith('wgsl-')
-      ? 'wgsl-soft-node-node-authoritative'
-      : 'cpu-soft-node-node-authoritative';
+    state.lastSoftNodeEdgeCollisionSource = nodeEdgeSource;
+    state.lastSoftNodeEdgeNextStage = nodeEdgeSource.startsWith('wgsl-')
+      ? nodeEdgeSource
+      : (nonStandardMode ? 'wgsl-soft-node-edge-collision-pending' : 'cpu-soft-node-edge-authoritative');
+    state.lastSourceRoute = nodeEdgeSource.startsWith('wgsl-')
+      ? nodeEdgeSource
+      : nodeNodeSource;
+    state.lastMode = nodeEdgeSource.startsWith('wgsl-')
+      ? 'wgsl-soft-node-edge-authoritative'
+      : (nodeNodeSource.startsWith('wgsl-')
+        ? 'wgsl-soft-node-node-authoritative'
+        : 'cpu-soft-node-node-authoritative');
   }
 }

@@ -13,9 +13,12 @@ test('soft collision gpu-only source includes WGSL node-node authoritative path 
   assert.match(src, /cpu-soft-node-node-fallback-error/);
 });
 
-test('soft collision gpu-only source builds deterministic soft node-edge candidate layout for WGSL next stage bring-up', () => {
+test('soft collision gpu-only source builds deterministic soft node-edge candidate layout with WGSL authoritative path + fallback routes', () => {
+  assert.match(src, /const softNodeEdgeCollisionWgsl\s*=\s*\/\* wgsl \*\//);
   assert.match(src, /function buildSoftNodeEdgeCandidateLayout/);
   assert.match(src, /cpu-soft-node-edge-candidate-layout/);
-  assert.match(src, /wgsl-soft-node-edge-collision-pending/);
+  assert.match(src, /wgsl-soft-node-edge-authoritative/);
+  assert.match(src, /cpu-soft-node-edge-fallback-nonfinite/);
+  assert.match(src, /cpu-soft-node-edge-fallback-error/);
   assert.match(src, /lastSoftNodeEdgeCandidateLayoutSignature/);
 });

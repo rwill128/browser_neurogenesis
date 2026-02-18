@@ -110,6 +110,7 @@ function buildSoftMembraneInsideCorrectionWgslLayout({ soft, candidates, correct
   const loopPointOffsets = new Uint32Array(loopCount + 1);
 
   const flatPoints = [];
+  const loopNodeIds = [];
   for (let i = 0; i < nodeCount; i++) {
     const n = soft.nodes[i];
     nodeData[i * 4] = Number(n?.x) || 0;
@@ -136,6 +137,7 @@ function buildSoftMembraneInsideCorrectionWgslLayout({ soft, candidates, correct
     for (let pi = 0; pi < poly.length; pi++) {
       const p = poly[pi];
       flatPoints.push(Number(p?.x) || 0, Number(p?.y) || 0);
+      loopNodeIds.push(Number(c.ids?.[pi]) | 0);
     }
     pointOffset += poly.length;
   }
@@ -152,6 +154,7 @@ function buildSoftMembraneInsideCorrectionWgslLayout({ soft, candidates, correct
     loopClusterId,
     loopPointOffsets,
     flatPoints: Float32Array.from(flatPoints),
+    loopNodeIds: Int32Array.from(loopNodeIds),
   };
 }
 
@@ -177,6 +180,7 @@ function computeSoftMembraneInsideLayoutSignature(layout) {
   hashArray(layout.loopClusterId, false);
   hashArray(layout.loopPointOffsets, false);
   hashArray(layout.flatPoints, true);
+  hashArray(layout.loopNodeIds, false);
   return hash >>> 0;
 }
 
@@ -198,13 +202,15 @@ struct Params {
 @group(0) @binding(5) var<storage, read> loop_cluster_id: array<i32>;
 @group(0) @binding(6) var<storage, read> loop_point_offsets: array<u32>;
 @group(0) @binding(7) var<storage, read> flat_points: array<f32>;
-@group(0) @binding(8) var<storage, read_write> out_corr_x: array<f32>;
-@group(0) @binding(9) var<storage, read_write> out_corr_y: array<f32>;
-@group(0) @binding(10) var<storage, read_write> out_nx: array<f32>;
-@group(0) @binding(11) var<storage, read_write> out_ny: array<f32>;
-@group(0) @binding(12) var<storage, read_write> out_edge_a: array<i32>;
-@group(0) @binding(13) var<storage, read_write> out_edge_b: array<i32>;
-@group(0) @binding(14) var<storage, read_write> out_hit: array<u32>;
+@group(0) @binding(8) var<storage, read> loop_node_ids: array<i32>;
+@group(0) @binding(9) var<storage, read_write> out_corr_x: array<f32>;
+@group(0) @binding(10) var<storage, read_write> out_corr_y: array<f32>;
+@group(0) @binding(11) var<storage, read_write> out_nx: array<f32>;
+@group(0) @binding(12) var<storage, read_write> out_ny: array<f32>;
+@group(0) @binding(13) var<storage, read_write> out_edge_a: array<i32>;
+@group(0) @binding(14) var<storage, read_write> out_edge_b: array<i32>;
+@group(0) @binding(15) var<storage, read_write> out_loop_index: array<i32>;
+@group(0) @binding(16) var<storage, read_write> out_hit: array<u32>;
 
 fn point_xy(index: u32) -> vec2<f32> {
   let bi = index * 2u;
@@ -227,6 +233,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var best_n = vec2<f32>(0.0, 0.0);
   var best_ai: i32 = -1;
   var best_bi: i32 = -1;
+  var best_loop: i32 = -1;
   var hit: u32 = 0u;
 
   for (var li: u32 = 0u; li < params.loop_count; li = li + 1u) {
@@ -274,6 +281,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         best_d2 = d2;
         best_ai = i32(i - start);
         best_bi = i32(next - start);
+        best_loop = i32(li);
         hit = 1u;
       }
     }
@@ -285,6 +293,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   out_ny[ni] = best_n.y;
   out_edge_a[ni] = best_ai;
   out_edge_b[ni] = best_bi;
+  out_loop_index[ni] = best_loop;
   out_hit[ni] = hit;
 }
 `;
@@ -309,11 +318,13 @@ function canApplyAuthoritativeMembraneInsideProposal({ wgslOffload, signature, e
   if (!(state.lastMembraneInsideProposalCorrY instanceof Float32Array)) return false;
   if (!(state.lastMembraneInsideProposalNx instanceof Float32Array)) return false;
   if (!(state.lastMembraneInsideProposalNy instanceof Float32Array)) return false;
+  if (!(state.lastMembraneInsideProposalLoopIndex instanceof Int32Array)) return false;
   if (!(state.lastMembraneInsideProposalHit instanceof Uint32Array)) return false;
   if (state.lastMembraneInsideProposalCorrX.length !== expectedNodeCount) return false;
   if (state.lastMembraneInsideProposalCorrY.length !== expectedNodeCount) return false;
   if (state.lastMembraneInsideProposalNx.length !== expectedNodeCount) return false;
   if (state.lastMembraneInsideProposalNy.length !== expectedNodeCount) return false;
+  if (state.lastMembraneInsideProposalLoopIndex.length !== expectedNodeCount) return false;
   if (state.lastMembraneInsideProposalHit.length !== expectedNodeCount) return false;
   return true;
 }
@@ -331,6 +342,27 @@ function applyAuthoritativeMembraneInsideProposal({ soft, proposal, correctionIt
       if (!Number.isFinite(corrLen) || corrLen < EPS) continue;
       node.x += corrX * 0.95;
       node.y += corrY * 0.95;
+      const loopIndex = Number(proposal.loopIndex?.[ni]);
+      const edgeA = Number(proposal.edgeA?.[ni]);
+      const edgeB = Number(proposal.edgeB?.[ni]);
+      if (Number.isInteger(loopIndex) && loopIndex >= 0 && Number.isInteger(edgeA) && Number.isInteger(edgeB)) {
+        const start = Number(proposal.loopPointOffsets?.[loopIndex]) || 0;
+        const stop = Number(proposal.loopPointOffsets?.[loopIndex + 1]) || 0;
+        const len = stop - start;
+        if (len >= 3) {
+          const ai = Number(proposal.loopNodeIds?.[start + ((edgeA % len + len) % len)]);
+          const bi = Number(proposal.loopNodeIds?.[start + ((edgeB % len + len) % len)]);
+          const a = soft.nodes[ai | 0];
+          const b = soft.nodes[bi | 0];
+          if (a && b) {
+            a.x -= corrX * 0.02;
+            a.y -= corrY * 0.02;
+            b.x -= corrX * 0.02;
+            b.y -= corrY * 0.02;
+          }
+        }
+      }
+
       const nx = Number(proposal.nx[ni]) || 0;
       const ny = Number(proposal.ny[ni]) || 0;
       const vn = node.vx * nx + node.vy * ny;
@@ -383,6 +415,7 @@ function dispatchSoftMembraneInsideCorrectionProposal(wgslOffload, layout, signa
   const loopClusterIdBuffer = createStorageBuffer(layout.loopClusterId);
   const loopPointOffsetsBuffer = createStorageBuffer(layout.loopPointOffsets);
   const flatPointsBuffer = createStorageBuffer(layout.flatPoints);
+  const loopNodeIdsBuffer = createStorageBuffer(layout.loopNodeIds);
 
   const makeOut = () => device.createBuffer({
     size: Math.max(4, nodeCount * 4),
@@ -394,6 +427,7 @@ function dispatchSoftMembraneInsideCorrectionProposal(wgslOffload, layout, signa
   const outNy = makeOut();
   const outEdgeA = makeOut();
   const outEdgeB = makeOut();
+  const outLoopIndex = makeOut();
   const outHit = makeOut();
 
   const bindGroup = device.createBindGroup({
@@ -407,13 +441,15 @@ function dispatchSoftMembraneInsideCorrectionProposal(wgslOffload, layout, signa
       { binding: 5, resource: { buffer: loopClusterIdBuffer } },
       { binding: 6, resource: { buffer: loopPointOffsetsBuffer } },
       { binding: 7, resource: { buffer: flatPointsBuffer } },
-      { binding: 8, resource: { buffer: outCorrX } },
-      { binding: 9, resource: { buffer: outCorrY } },
-      { binding: 10, resource: { buffer: outNx } },
-      { binding: 11, resource: { buffer: outNy } },
-      { binding: 12, resource: { buffer: outEdgeA } },
-      { binding: 13, resource: { buffer: outEdgeB } },
-      { binding: 14, resource: { buffer: outHit } },
+      { binding: 8, resource: { buffer: loopNodeIdsBuffer } },
+      { binding: 9, resource: { buffer: outCorrX } },
+      { binding: 10, resource: { buffer: outCorrY } },
+      { binding: 11, resource: { buffer: outNx } },
+      { binding: 12, resource: { buffer: outNy } },
+      { binding: 13, resource: { buffer: outEdgeA } },
+      { binding: 14, resource: { buffer: outEdgeB } },
+      { binding: 15, resource: { buffer: outLoopIndex } },
+      { binding: 16, resource: { buffer: outHit } },
     ],
   });
 
@@ -432,14 +468,16 @@ function dispatchSoftMembraneInsideCorrectionProposal(wgslOffload, layout, signa
     readBackTypedArray(device, outNy, Float32Array, nodeCount),
     readBackTypedArray(device, outEdgeA, Int32Array, nodeCount),
     readBackTypedArray(device, outEdgeB, Int32Array, nodeCount),
+    readBackTypedArray(device, outLoopIndex, Int32Array, nodeCount),
     readBackTypedArray(device, outHit, Uint32Array, nodeCount),
-  ]).then(([corrX, corrY, nx, ny, edgeA, edgeB, hit]) => {
+  ]).then(([corrX, corrY, nx, ny, edgeA, edgeB, loopIndex, hit]) => {
     state.lastMembraneInsideProposalCorrX = corrX;
     state.lastMembraneInsideProposalCorrY = corrY;
     state.lastMembraneInsideProposalNx = nx;
     state.lastMembraneInsideProposalNy = ny;
     state.lastMembraneInsideProposalEdgeA = edgeA;
     state.lastMembraneInsideProposalEdgeB = edgeB;
+    state.lastMembraneInsideProposalLoopIndex = loopIndex;
     state.lastMembraneInsideProposalHit = hit;
     state.lastMembraneInsideProposalSource = 'wgsl-membrane-inside-correction-proposal';
     state.lastMembraneInsideProposalSignature = signature >>> 0;
@@ -487,6 +525,7 @@ export function applySoftMembraneInsideCorrectionPassGpuOnly({
           + stagedWgslLayout.loopClusterId.byteLength
           + stagedWgslLayout.loopPointOffsets.byteLength
           + stagedWgslLayout.flatPoints.byteLength
+          + stagedWgslLayout.loopNodeIds.byteLength
         )
       : 0;
     wgslOffload.state.lastPreparedMembraneInsideLayoutNodeCount = stagedWgslLayout?.nodeCount || 0;
@@ -509,6 +548,11 @@ export function applySoftMembraneInsideCorrectionPassGpuOnly({
       corrY: wgslOffload.state.lastMembraneInsideProposalCorrY,
       nx: wgslOffload.state.lastMembraneInsideProposalNx,
       ny: wgslOffload.state.lastMembraneInsideProposalNy,
+      edgeA: wgslOffload.state.lastMembraneInsideProposalEdgeA,
+      edgeB: wgslOffload.state.lastMembraneInsideProposalEdgeB,
+      loopIndex: wgslOffload.state.lastMembraneInsideProposalLoopIndex,
+      loopPointOffsets: stagedWgslLayout?.loopPointOffsets,
+      loopNodeIds: stagedWgslLayout?.loopNodeIds,
       hit: wgslOffload.state.lastMembraneInsideProposalHit,
     };
     const correctedByWgsl = applyAuthoritativeMembraneInsideProposal({ soft, proposal, correctionIters });
@@ -611,7 +655,8 @@ export function applySoftMembraneInsideCorrectionPassGpuOnly({
       + stagedWgslLayout.loopMeta.byteLength
       + stagedWgslLayout.loopClusterId.byteLength
       + stagedWgslLayout.loopPointOffsets.byteLength
-      + stagedWgslLayout.flatPoints.byteLength;
+      + stagedWgslLayout.flatPoints.byteLength
+      + stagedWgslLayout.loopNodeIds.byteLength;
     wgslOffload.state.lastMembraneInsideProposalSignaturePrepared = stagedWgslLayoutSignature >>> 0;
     const serializedDispatch = (wgslOffload.state.pendingWgslMembraneInsideProposalPromise || Promise.resolve())
       .catch(() => {})

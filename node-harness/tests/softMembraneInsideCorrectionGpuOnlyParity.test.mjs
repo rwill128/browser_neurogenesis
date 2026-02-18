@@ -170,3 +170,50 @@ test('soft membrane inside-correction parity: gpu-only module matches baseline c
   assert.equal(gpuCorrections, baselineCorrections);
   assert.deepEqual(gpuOnly.soft, baseline.soft);
 });
+
+test('soft membrane inside-correction authoritative WGSL replay also applies membrane edge back-reaction', () => {
+  const gpuOnly = makeState();
+  const initialA = { x: gpuOnly.soft.nodes[0].x, y: gpuOnly.soft.nodes[0].y };
+  const initialB = { x: gpuOnly.soft.nodes[1].x, y: gpuOnly.soft.nodes[1].y };
+
+  const wgslState = { enableAuthoritativeMembraneInsideCorrection: true };
+
+  applySoftMembraneInsideCorrectionPassGpuOnly({
+    sim: gpuOnly.sim,
+    soft: gpuOnly.soft,
+    loops: gpuOnly.loops,
+    correctionIters: 0,
+    correctionSlop: CORRECTION_SLOP,
+    wgslOffload: {
+      state: wgslState,
+      pipelineMode: 'gpu-only-fast',
+    },
+  });
+
+  wgslState.lastMembraneInsideProposalSignature = wgslState.lastPreparedMembraneInsideLayoutSignature;
+  wgslState.lastMembraneInsideProposalCorrX = new Float32Array([0, 0, 0, 0, 1.2, 0]);
+  wgslState.lastMembraneInsideProposalCorrY = new Float32Array([0, 0, 0, 0, 0.6, 0]);
+  wgslState.lastMembraneInsideProposalNx = new Float32Array([0, 0, 0, 0, 1, 0]);
+  wgslState.lastMembraneInsideProposalNy = new Float32Array([0, 0, 0, 0, 0, 0]);
+  wgslState.lastMembraneInsideProposalEdgeA = new Int32Array([-1, -1, -1, -1, 0, -1]);
+  wgslState.lastMembraneInsideProposalEdgeB = new Int32Array([-1, -1, -1, -1, 1, -1]);
+  wgslState.lastMembraneInsideProposalLoopIndex = new Int32Array([-1, -1, -1, -1, 0, -1]);
+  wgslState.lastMembraneInsideProposalHit = new Uint32Array([0, 0, 0, 0, 1, 0]);
+
+  const corrected = applySoftMembraneInsideCorrectionPassGpuOnly({
+    sim: gpuOnly.sim,
+    soft: gpuOnly.soft,
+    loops: gpuOnly.loops,
+    correctionIters: 1,
+    correctionSlop: CORRECTION_SLOP,
+    wgslOffload: {
+      state: wgslState,
+      pipelineMode: 'gpu-only-fast',
+    },
+  });
+
+  assert.equal(corrected, 1);
+  assert.ok(gpuOnly.soft.nodes[0].x < initialA.x, 'edge A should receive opposite correction nudge');
+  assert.ok(gpuOnly.soft.nodes[1].x < initialB.x, 'edge B should receive opposite correction nudge');
+  assert.match(wgslState.lastMembraneInsideAuthoritativeSource, /^wgsl-membrane-inside-authoritative/);
+});

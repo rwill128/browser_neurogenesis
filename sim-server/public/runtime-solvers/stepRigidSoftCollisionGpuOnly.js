@@ -332,7 +332,36 @@ function buildRigidSoftCollisionWgslLayout({ rigidBodies, soft, edgeBodyModeBloc
   };
 }
 
+export function buildActiveRigidSoftNodeNarrowphasePairs({ prep, activeMask }) {
+  const nodePairCount = Number(prep?.nodePairCount) || 0;
+  const rigidIndex = prep?.layout?.nodePairRigidIndex;
+  const nodeIndex = prep?.layout?.nodePairNodeIndex;
+  if (!(rigidIndex instanceof Uint32Array) || !(nodeIndex instanceof Uint32Array)) return null;
+  if (!(activeMask instanceof Uint32Array) || activeMask.length !== nodePairCount) return null;
 
+  const activeRigid = [];
+  const activeNode = [];
+  let signature = 0x811c9dc5;
+  for (let i = 0; i < nodePairCount; i++) {
+    if ((activeMask[i] >>> 0) !== 1) continue;
+    const rbi = rigidIndex[i] >>> 0;
+    const ni = nodeIndex[i] >>> 0;
+    activeRigid.push(rbi);
+    activeNode.push(ni);
+    signature = fnv1aMix(signature, rbi);
+    signature = fnv1aMix(signature, ni);
+  }
+
+  const compactRigidIndex = Uint32Array.from(activeRigid);
+  const compactNodeIndex = Uint32Array.from(activeNode);
+  return {
+    compactRigidIndex,
+    compactNodeIndex,
+    pairCount: compactRigidIndex.length,
+    byteLength: compactRigidIndex.byteLength + compactNodeIndex.byteLength,
+    signature: signature >>> 0,
+  };
+}
 
 const WGSL_WORKGROUP_SIZE = 64;
 
@@ -1004,6 +1033,14 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       wgslOffload.state.lastSourceRoute = 'wgsl-rigid-soft-node-broadphase-authoritative-filter';
       wgslOffload.state.lastMode = 'wgsl-broadphase-authoritative-filter';
       wgslOffload.state.lastNodeBroadphaseReadbackCount = wgslNodeBroadphaseMask.length;
+      const compactNodePairs = buildActiveRigidSoftNodeNarrowphasePairs({ prep: wgslPrep, activeMask: wgslNodeBroadphaseMask });
+      if (compactNodePairs) {
+        wgslOffload.state.lastPreparedNodeNarrowphasePairRigidIndex = compactNodePairs.compactRigidIndex;
+        wgslOffload.state.lastPreparedNodeNarrowphasePairNodeIndex = compactNodePairs.compactNodeIndex;
+        wgslOffload.state.lastPreparedNodeNarrowphasePairCount = compactNodePairs.pairCount;
+        wgslOffload.state.lastPreparedNodeNarrowphaseBytes = compactNodePairs.byteLength;
+        wgslOffload.state.lastPreparedNodeNarrowphaseSignature = compactNodePairs.signature;
+      }
     } else if (wgslNodeBroadphaseMask) {
       wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-node-broadphase-mask-fallback';
       wgslOffload.state.lastMode = 'cpu-authoritative-mask-fallback';

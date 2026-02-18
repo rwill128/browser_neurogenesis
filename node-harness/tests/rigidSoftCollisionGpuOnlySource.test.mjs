@@ -29,6 +29,14 @@ test('rigid-soft gpu-only module dispatches WGSL broadphase with active-mask rea
   );
 });
 
+test('rigid-soft gpu-only module compacts WGSL-filtered node pairs into deterministic narrowphase ownership buffers', () => {
+  assert.match(
+    source,
+    /export function buildActiveRigidSoftNodeNarrowphasePairs\([\s\S]*compactRigidIndex[\s\S]*compactNodeIndex[\s\S]*lastPreparedNodeNarrowphasePairCount[\s\S]*lastPreparedNodeNarrowphaseSignature/,
+    'expected rigid-soft gpu-only module to compact WGSL-active node broadphase pairs into deterministic typed-array ownership metadata for the next WGSL narrowphase stage',
+  );
+});
+
 test('rigid-soft gpu-only module includes WGSL edge broadphase proposal + authoritative filter source telemetry', () => {
   assert.match(
     source,

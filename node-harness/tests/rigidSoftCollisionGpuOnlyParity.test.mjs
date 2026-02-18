@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { resolveRigidVsSoftNodeCollision } from '../../sim-server/public/rigid-collision.js';
 import {
+  buildActiveRigidSoftNodeNarrowphasePairs,
   buildRigidSoftNarrowphaseGeometryLayout,
   resolveRigidSoftCollisionPassGpuOnly,
   resolveRigidVsSoftEdgeCollisionGpuOnly,
@@ -436,6 +437,94 @@ test('gpu-only rigid-soft broadphase serializes WGSL readback buffers so concurr
   assert.equal(stats.mapRejects, 0, 'expected rigid-soft broadphase readback queue to avoid outstanding map rejections');
 });
 
+
+test('gpu-only rigid-soft pass compacts WGSL-active node broadphase pairs into deterministic narrowphase ownership buffers', () => {
+  const prep = {
+    nodePairCount: 6,
+    layout: {
+      nodePairRigidIndex: new Uint32Array([0, 0, 0, 1, 1, 1]),
+      nodePairNodeIndex: new Uint32Array([0, 1, 2, 0, 1, 2]),
+    },
+  };
+  const activeMask = new Uint32Array([1, 0, 1, 0, 1, 1]);
+
+  const compactA = buildActiveRigidSoftNodeNarrowphasePairs({ prep, activeMask });
+  const compactB = buildActiveRigidSoftNodeNarrowphasePairs({ prep, activeMask: new Uint32Array(activeMask) });
+
+  assert.ok(compactA);
+  assert.equal(compactA.pairCount, 4);
+  assert.deepEqual(Array.from(compactA.compactRigidIndex), [0, 0, 1, 1]);
+  assert.deepEqual(Array.from(compactA.compactNodeIndex), [0, 2, 1, 2]);
+  assert.equal(compactA.byteLength, compactA.compactRigidIndex.byteLength + compactA.compactNodeIndex.byteLength);
+  assert.equal(compactA.signature, compactB.signature);
+
+  assert.equal(buildActiveRigidSoftNodeNarrowphasePairs({ prep, activeMask: new Uint32Array([1, 1]) }), null);
+});
+
+test('gpu-only rigid-soft pass stores compact node broadphase ownership metadata after WGSL filter readback', async () => {
+  globalThis.GPUBufferUsage ??= {
+    STORAGE: 1 << 0,
+    COPY_DST: 1 << 1,
+    UNIFORM: 1 << 2,
+    COPY_SRC: 1 << 3,
+    MAP_READ: 1 << 4,
+  };
+  globalThis.GPUMapMode ??= {
+    READ: 1,
+  };
+
+  const baselineState = makeState();
+  const mockPipeline = { getBindGroupLayout: () => ({}) };
+  const makeReadableBuffer = () => {
+    const data = new Uint32Array(1024);
+    data.fill(1);
+    return {
+      destroy() {},
+      async mapAsync() {},
+      getMappedRange(_offset = 0, size = data.byteLength) { return data.buffer.slice(0, size); },
+      unmap() {},
+    };
+  };
+
+  const mockDevice = {
+    createBuffer: () => makeReadableBuffer(),
+    createShaderModule: ({ code }) => ({ code }),
+    createComputePipelineAsync: () => Promise.resolve(mockPipeline),
+    createBindGroup: () => ({}),
+    createCommandEncoder: () => ({
+      beginComputePass: () => ({
+        setPipeline() {},
+        setBindGroup() {},
+        dispatchWorkgroups() {},
+        end() {},
+      }),
+      copyBufferToBuffer() {},
+      finish: () => ({}),
+    }),
+    queue: {
+      writeBuffer() {},
+      submit() {},
+    },
+  };
+
+  const wgslState = {
+    rigidSoftNodeBroadphasePipeline: mockPipeline,
+    rigidSoftEdgeBroadphasePipeline: mockPipeline,
+  };
+
+  await resolveRigidSoftCollisionPassGpuOnly({
+    rigidBodies: baselineState.rigid,
+    soft: baselineState.soft,
+    edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
+    wgslOffload: { enabled: true, state: wgslState, device: mockDevice },
+  });
+
+  assert.equal(wgslState.lastPreparedNodeNarrowphasePairCount, baselineState.rigid.length * baselineState.soft.nodes.length);
+  assert.equal(wgslState.lastPreparedNodeNarrowphasePairRigidIndex.length, wgslState.lastPreparedNodeNarrowphasePairCount);
+  assert.equal(wgslState.lastPreparedNodeNarrowphasePairNodeIndex.length, wgslState.lastPreparedNodeNarrowphasePairCount);
+  assert.ok(Number.isInteger(wgslState.lastPreparedNodeNarrowphaseSignature));
+  assert.ok(wgslState.lastPreparedNodeNarrowphaseBytes > 0);
+});
 
 test('gpu-only rigid-soft pass prepares deterministic finite rigid narrowphase geometry layout for WGSL follow-on kernels', () => {
   const rigidBodies = [

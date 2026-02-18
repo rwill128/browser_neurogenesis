@@ -113,7 +113,7 @@ test('body fluid injection gpu-only keeps cpu outputs stable while publishing wg
   assert.equal(prepared.result.injectedMomentum, plain.result.injectedMomentum, 'injected momentum should match in prep mode');
 
   const state = { ...(prepared?.offload?.state || {}) };
-  assert.equal(state.lastMode, 'cpu-prepared');
+  assert.equal(state.lastMode, 'cpu-gather-authoritative');
   assert.equal(state.lastPreparedRigidCount, bodies.rigid.length);
   assert.equal(state.lastPreparedSoftCount, soft.nodes.length);
   assert.equal(state.lastPreparedPointCount, bodies.rigid.length + soft.nodes.length);
@@ -132,4 +132,8 @@ test('body fluid injection gpu-only keeps cpu outputs stable while publishing wg
     state.preparedGatherLayout?.contribWeight?.length,
     'expected gather index/weight streams to stay aligned',
   );
+  assert.equal(state.lastCpuGatherDeltaVx instanceof Float32Array, true);
+  assert.equal(state.lastCpuGatherDeltaVy instanceof Float32Array, true);
+  assert.equal(state.lastCpuGatherDeltaVx?.length, n * n);
+  assert.equal(state.lastCpuGatherDeltaVy?.length, n * n);
 });

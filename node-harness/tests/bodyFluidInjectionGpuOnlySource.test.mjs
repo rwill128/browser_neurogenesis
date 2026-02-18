@@ -27,7 +27,19 @@ test('body-fluid injection gpu-only wires deterministic gather layout metadata i
 
   assert.match(
     source,
-    /wgslOffload\.state\.lastMode = wgslGatherRan \? 'wgsl-gather-proposal' : 'cpu-prepared';/,
-    'expected mode telemetry to report wgsl gather proposal dispatch versus cpu-prepared fallback',
+    /function computeBodyFluidInjectionCellDeltasFromGatherLayout\(\{ gatherLayout, couplingLimit, n \}\)[\s\S]*cellDeltaVx\[cell\] = clampComponent\(sumX, couplingLimit\);[\s\S]*cellDeltaVy\[cell\] = clampComponent\(sumY, couplingLimit\);/,
+    'expected deterministic CPU gather-delta helper that mirrors WGSL gather proposal ownership',
+  );
+
+  assert.match(
+    source,
+    /wgslOffload\.state\.lastCpuGatherDeltaVx = cpuGatherDelta\.cellDeltaVx;[\s\S]*wgslOffload\.state\.lastCpuGatherDeltaVy = cpuGatherDelta\.cellDeltaVy;/,
+    'expected offload telemetry to publish CPU gather delta arrays for upcoming WGSL parity/readback checks',
+  );
+
+  assert.match(
+    source,
+    /wgslOffload\.state\.lastMode = wgslGatherRan \? 'wgsl-gather-proposal' : 'cpu-gather-authoritative';/,
+    'expected mode telemetry to report wgsl gather proposal dispatch versus cpu gather authoritative fallback',
   );
 });

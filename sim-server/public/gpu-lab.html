@@ -37,6 +37,29 @@
       color: #9fe3ff;
       font-family: ui-monospace, Menlo, monospace;
     }
+    .stabilizer-legend {
+      margin: 0 0 10px;
+      max-width: 1180px;
+      padding: 10px;
+      border: 1px solid #333;
+      border-radius: 8px;
+      background: #171717;
+      color: #d8d8d8;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .stabilizer-legend p {
+      margin: 6px 0;
+      color: #cfcfcf;
+    }
+    .stabilizer-legend ul {
+      margin: 6px 0 0 16px;
+      padding: 0;
+    }
+    .stabilizer-legend code {
+      color: #9fe3ff;
+      font-family: ui-monospace, Menlo, monospace;
+    }
 
     body.embed-mode {
       padding: 0;
@@ -50,7 +73,8 @@
     body.embed-mode .pane-title,
     body.embed-mode label,
     body.embed-mode #fpsHud,
-    body.embed-mode #deformationLegend {
+    body.embed-mode #deformationLegend,
+    body.embed-mode .stabilizer-legend {
       display: none !important;
     }
     body.embed-mode .pane-row {
@@ -185,6 +209,21 @@
     </label>
   </div>
 
+  <details class="stabilizer-legend" open>
+    <summary><strong>Stabilization toggle reference (what each checkbox actually does)</strong></summary>
+    <p>These toggles apply to <code>baseline</code> and <code>gpu-only</code> solver paths unless noted otherwise.</p>
+    <ul>
+      <li><strong>Warning interventions (orange):</strong> enables warning-level deformation profile handling (mainly softer spring-rest recovery tuning when warning thresholds are crossed).</li>
+      <li><strong>Severe interventions (red):</strong> enables severe-collapse restabilization pass + severe recovery profile when severe deformation thresholds are crossed.</li>
+      <li><strong>Post-collision recovery:</strong> runs post-collision cluster rigid-motion projection, rigid/membrane inside-correction passes, and final boundary re-bounce cleanup.</li>
+      <li><strong>Soft cluster stabilizers:</strong> enables pre-collision cluster tug redistribution, relative drift damping, and ongoing cluster rigid-motion projection.</li>
+      <li><strong>Soft spring-rest recovery:</strong> gradually pulls spring rest lengths back toward baseline with adaptive recovery controls.</li>
+      <li><strong>Membrane boundary XPBD:</strong> applies membrane perimeter edge constraints + bend constraints (XPBD) each step.</li>
+      <li><strong>Membrane shape memory:</strong> projects membrane nodes toward a rotation-aligned reference shape using per-node shape-memory weights.</li>
+      <li><strong>Membrane pressure:</strong> applies membrane area/pressure preservation plus radial damping to resist collapse/over-expansion.</li>
+    </ul>
+  </details>
+
   <div class="row">
     <strong>Soft solver tuning:</strong>
     <label class="slider-control" title="Higher = stiffer springs (lower = softer/more stretchy).">spring stiffness <input id="softSpringStiffness" type="range" min="0.2" max="16" step="0.1" value="4.2" data-decimals="1" /><span class="slider-value" data-readout-for="softSpringStiffness">4.2</span></label>
@@ -211,6 +250,6 @@
   </div>
 
   <pre id="out">idle</pre>
-  <script type="module" src="/gpu-lab.js?v=20260217o"></script>
+  <script type="module" src="/gpu-lab.js?v=20260217p"></script>
 </body>
 </html>

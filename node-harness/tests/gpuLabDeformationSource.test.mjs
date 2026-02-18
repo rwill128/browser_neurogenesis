@@ -281,3 +281,17 @@ test('gpu-lab routes soft area XPBD stepping through isolated gpu-only runtime s
     'expected explicit gpu-only soft area XPBD dispatch with baseline fallback call',
   );
 });
+
+test('gpu-lab routes hybrid rigid-soft attachment constraints through isolated gpu-only runtime solver module', () => {
+  assert.match(
+    source,
+    /import \{ applyHybridAttachmentConstraintsGpuOnly \} from '\/runtime-solvers\/stepHybridConstraintsGpuOnly\.js';/,
+    'expected isolated gpu-only hybrid attachment module import',
+  );
+
+  assert.match(
+    source,
+    /if \(solverPath === 'gpu-only'\) \{[\s\S]*applyHybridAttachmentConstraintsGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*for \(let iter = 0; iter < 5; iter\+\+\) \{/,
+    'expected explicit gpu-only hybrid attachment dispatch with baseline fallback loops',
+  );
+});

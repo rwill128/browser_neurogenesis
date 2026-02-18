@@ -11,6 +11,7 @@ import { resolveRigidSoftCollisionPassGpuOnly } from '/runtime-solvers/stepRigid
 import { applySoftSpringsXPBDVelocityGpuOnly } from '/runtime-solvers/stepSoftSpringsXpbdGpuOnly.js';
 import { applySoftAreaXPBDVelocityGpuOnly } from '/runtime-solvers/stepSoftAreaXpbdGpuOnly.js';
 import { resolveSoftSoftCollisionPassGpuOnly } from '/runtime-solvers/stepSoftCollisionGpuOnly.js';
+import { applyHybridAttachmentConstraintsGpuOnly } from '/runtime-solvers/stepHybridConstraintsGpuOnly.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -3927,27 +3928,38 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   }
   const membranePressureClusters = applySoftMembraneCellPressure(sim, s, softClusterLoops, dtPos);
 
-  for (let iter = 0; iter < 5; iter++) {
-    // Hybrid rigid-soft attachment constraints (weld-like springs to rigid edge vertices).
-    for (const h of (bodies.hybrid || [])) {
-      const rb = bodies.rigid[h.rigidIndex];
-      const node = s.nodes[h.nodeIndex];
-      if (!rb || !node) continue;
-      const va = rigidVertexWorld(rb, h.vertexA);
-      const vb = rigidVertexWorld(rb, h.vertexB);
-      const pairs = [[va, h.restA], [vb, h.restB]];
-      for (const [anchor, rest] of pairs) {
-        const dx = node.x - anchor.x;
-        const dy = node.y - anchor.y;
-        const d = Math.max(1e-6, Math.hypot(dx, dy));
-        const err = (d - rest) * 0.74;
-        const nx = dx / d, ny = dy / d;
-        node.vx -= nx * err * 0.052 * dtNorm;
-        node.vy -= ny * err * 0.052 * dtNorm;
-        // Matched, softer reaction into rigid body to avoid hybrid jitter.
-        rb.vx += nx * err * 0.0075 * dtNorm;
-        rb.vy += ny * err * 0.0075 * dtNorm;
-        rb.omega = (rb.omega || 0) + (nx * ny) * err * 0.00075 * dtNorm;
+  if (solverPath === 'gpu-only') {
+    applyHybridAttachmentConstraintsGpuOnly({
+      rigidBodies: bodies.rigid,
+      soft: s,
+      hybrid: bodies.hybrid || [],
+      rigidVertexWorld,
+      dtNorm,
+      iterations: 5,
+    });
+  } else {
+    for (let iter = 0; iter < 5; iter++) {
+      // Hybrid rigid-soft attachment constraints (weld-like springs to rigid edge vertices).
+      for (const h of (bodies.hybrid || [])) {
+        const rb = bodies.rigid[h.rigidIndex];
+        const node = s.nodes[h.nodeIndex];
+        if (!rb || !node) continue;
+        const va = rigidVertexWorld(rb, h.vertexA);
+        const vb = rigidVertexWorld(rb, h.vertexB);
+        const pairs = [[va, h.restA], [vb, h.restB]];
+        for (const [anchor, rest] of pairs) {
+          const dx = node.x - anchor.x;
+          const dy = node.y - anchor.y;
+          const d = Math.max(1e-6, Math.hypot(dx, dy));
+          const err = (d - rest) * 0.74;
+          const nx = dx / d, ny = dy / d;
+          node.vx -= nx * err * 0.052 * dtNorm;
+          node.vy -= ny * err * 0.052 * dtNorm;
+          // Matched, softer reaction into rigid body to avoid hybrid jitter.
+          rb.vx += nx * err * 0.0075 * dtNorm;
+          rb.vy += ny * err * 0.0075 * dtNorm;
+          rb.omega = (rb.omega || 0) + (nx * ny) * err * 0.00075 * dtNorm;
+        }
       }
     }
   }

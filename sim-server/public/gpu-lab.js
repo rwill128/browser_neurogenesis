@@ -4143,8 +4143,6 @@ function stepBodiesAndInject(sim, vxField, vyField) {
         rigidBodies: bodies.rigid,
         soft: s,
         hybridAttachedByRigid,
-        resolveRigidVsSoftNodeCollision,
-        resolveRigidVsSoftEdgeCollision,
         edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
         nodeSlop: 0.18,
         edgeSlop: 0.16,

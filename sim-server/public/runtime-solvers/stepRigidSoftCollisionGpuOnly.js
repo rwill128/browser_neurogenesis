@@ -363,6 +363,57 @@ export function buildActiveRigidSoftNodeNarrowphasePairs({ prep, activeMask }) {
   };
 }
 
+export function buildActiveRigidSoftEdgeNarrowphasePairs({ prep, activeMask }) {
+  const edgePairCount = Number(prep?.edgePairCount) || 0;
+  const rigidIndex = prep?.layout?.edgePairRigidIndex;
+  const springIndex = prep?.layout?.edgePairSpringIndex;
+  const nodeAIndex = prep?.layout?.edgePairNodeAIndex;
+  const nodeBIndex = prep?.layout?.edgePairNodeBIndex;
+  if (!(rigidIndex instanceof Uint32Array)
+    || !(springIndex instanceof Uint32Array)
+    || !(nodeAIndex instanceof Uint32Array)
+    || !(nodeBIndex instanceof Uint32Array)) return null;
+  if (!(activeMask instanceof Uint32Array) || activeMask.length !== edgePairCount) return null;
+
+  const activeRigid = [];
+  const activeSpring = [];
+  const activeNodeA = [];
+  const activeNodeB = [];
+  let signature = 0x811c9dc5;
+  for (let i = 0; i < edgePairCount; i++) {
+    if ((activeMask[i] >>> 0) !== 1) continue;
+    const rbi = rigidIndex[i] >>> 0;
+    const si = springIndex[i] >>> 0;
+    const ai = nodeAIndex[i] >>> 0;
+    const bi = nodeBIndex[i] >>> 0;
+    activeRigid.push(rbi);
+    activeSpring.push(si);
+    activeNodeA.push(ai);
+    activeNodeB.push(bi);
+    signature = fnv1aMix(signature, rbi);
+    signature = fnv1aMix(signature, si);
+    signature = fnv1aMix(signature, ai);
+    signature = fnv1aMix(signature, bi);
+  }
+
+  const compactRigidIndex = Uint32Array.from(activeRigid);
+  const compactSpringIndex = Uint32Array.from(activeSpring);
+  const compactNodeAIndex = Uint32Array.from(activeNodeA);
+  const compactNodeBIndex = Uint32Array.from(activeNodeB);
+  return {
+    compactRigidIndex,
+    compactSpringIndex,
+    compactNodeAIndex,
+    compactNodeBIndex,
+    pairCount: compactRigidIndex.length,
+    byteLength: compactRigidIndex.byteLength
+      + compactSpringIndex.byteLength
+      + compactNodeAIndex.byteLength
+      + compactNodeBIndex.byteLength,
+    signature: signature >>> 0,
+  };
+}
+
 const WGSL_WORKGROUP_SIZE = 64;
 
 const rigidSoftNodeBroadphaseWgsl = /* wgsl */`
@@ -1059,6 +1110,16 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     if (wgslEdgeBroadphaseMask && wgslEdgeBroadphaseMask.length === (wgslPrep.edgePairCount >>> 0)) {
       wgslOffload.state.lastEdgeBroadphaseAuthoritativeSource = 'wgsl-rigid-soft-edge-broadphase-authoritative-filter';
       wgslOffload.state.lastEdgeBroadphaseReadbackCount = wgslEdgeBroadphaseMask.length;
+      const compactEdgePairs = buildActiveRigidSoftEdgeNarrowphasePairs({ prep: wgslPrep, activeMask: wgslEdgeBroadphaseMask });
+      if (compactEdgePairs) {
+        wgslOffload.state.lastPreparedEdgeNarrowphasePairRigidIndex = compactEdgePairs.compactRigidIndex;
+        wgslOffload.state.lastPreparedEdgeNarrowphasePairSpringIndex = compactEdgePairs.compactSpringIndex;
+        wgslOffload.state.lastPreparedEdgeNarrowphasePairNodeAIndex = compactEdgePairs.compactNodeAIndex;
+        wgslOffload.state.lastPreparedEdgeNarrowphasePairNodeBIndex = compactEdgePairs.compactNodeBIndex;
+        wgslOffload.state.lastPreparedEdgeNarrowphasePairCount = compactEdgePairs.pairCount;
+        wgslOffload.state.lastPreparedEdgeNarrowphaseBytes = compactEdgePairs.byteLength;
+        wgslOffload.state.lastPreparedEdgeNarrowphaseSignature = compactEdgePairs.signature;
+      }
     } else if (wgslEdgeBroadphaseMask) {
       wgslOffload.state.lastEdgeBroadphaseAuthoritativeSource = 'cpu-rigid-soft-edge-broadphase-mask-fallback';
       wgslOffload.state.lastError = 'rigid-soft-edge-broadphase-mask-size-mismatch';

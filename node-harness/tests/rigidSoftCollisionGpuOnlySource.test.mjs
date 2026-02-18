@@ -44,3 +44,11 @@ test('rigid-soft gpu-only module includes WGSL edge broadphase proposal + author
     'expected rigid-soft gpu-only module to run concrete WGSL edge broadphase math and expose authoritative source telemetry for edge filtering',
   );
 });
+
+test('rigid-soft gpu-only module compacts WGSL-filtered edge pairs into deterministic narrowphase ownership buffers', () => {
+  assert.match(
+    source,
+    /export function buildActiveRigidSoftEdgeNarrowphasePairs\([\s\S]*compactRigidIndex[\s\S]*compactSpringIndex[\s\S]*compactNodeAIndex[\s\S]*compactNodeBIndex[\s\S]*lastPreparedEdgeNarrowphasePairCount[\s\S]*lastPreparedEdgeNarrowphaseSignature/,
+    'expected rigid-soft gpu-only module to compact WGSL-active edge broadphase pairs into deterministic typed-array ownership metadata for the next WGSL edge narrowphase stage',
+  );
+});

@@ -231,7 +231,30 @@ function computeSoftRestRecoveryProposalSignature({ layout, springs, restBaselin
   return hash >>> 0;
 }
 
-function computeRestProposalParity({ proposalBySpring, cpuBySpring, activeSpringIndices }) {
+function buildCpuRestProposalBySpring({ springs, restBaseline, layout, options }) {
+  const proposalBySpring = new Float32Array(restBaseline.length || 0);
+  for (let i = 0; i < proposalBySpring.length; i++) proposalBySpring[i] = Number(restBaseline[i]) || 0;
+
+  const active = layout?.activeSpringIndices instanceof Uint32Array ? layout.activeSpringIndices : new Uint32Array(0);
+  const recoverRate = Math.max(0, Math.min(1, Number(options?.recoverRate) || 0));
+  const hardMinFactor = Math.max(0.05, Number(options?.hardMinFactor) || 0.7);
+  const hardMaxFactor = Math.max(hardMinFactor + 1e-6, Number(options?.hardMaxFactor) || 1.45);
+
+  for (let i = 0; i < active.length; i++) {
+    const si = active[i] >>> 0;
+    const base = Math.max(Math.abs(Number(restBaseline?.[si]) || 0), 1e-6);
+    const springRest = Number(springs?.[si]?.[2]);
+    const cur = Number.isFinite(springRest) ? springRest : base;
+    const next = cur + (base - cur) * recoverRate;
+    const minRest = base * hardMinFactor;
+    const maxRest = Math.max(minRest + 1e-6, base * hardMaxFactor);
+    if (si < proposalBySpring.length) proposalBySpring[si] = Math.max(minRest, Math.min(maxRest, next));
+  }
+
+  return proposalBySpring;
+}
+
+function computeRestProposalParity({ proposalBySpring, cpuProposalBySpring, activeSpringIndices }) {
   const active = activeSpringIndices instanceof Uint32Array ? activeSpringIndices : new Uint32Array(0);
   let maxAbs = 0;
   let absSum = 0;
@@ -239,7 +262,7 @@ function computeRestProposalParity({ proposalBySpring, cpuBySpring, activeSpring
   for (let i = 0; i < active.length; i++) {
     const si = active[i] >>> 0;
     const proposal = Number(proposalBySpring?.[si]);
-    const cpu = Number(cpuBySpring?.[si]);
+    const cpu = Number(cpuProposalBySpring?.[si]);
     if (!Number.isFinite(proposal) || !Number.isFinite(cpu)) continue;
     const err = Math.abs(proposal - cpu);
     if (err > maxAbs) maxAbs = err;
@@ -435,9 +458,15 @@ async function dispatchSoftRestRecoveryWgslProposal({ springs, restBaseline, lay
     if (si < proposalBySpring.length) proposalBySpring[si] = proposalByActiveSpring[i];
   }
 
+  const cpuProposalBySpring = buildCpuRestProposalBySpring({
+    springs,
+    restBaseline,
+    layout,
+    options,
+  });
   const parity = computeRestProposalParity({
     proposalBySpring,
-    cpuBySpring: restBaseline,
+    cpuProposalBySpring,
     activeSpringIndices: layout.activeSpringIndices,
   });
 
@@ -445,9 +474,10 @@ async function dispatchSoftRestRecoveryWgslProposal({ springs, restBaseline, lay
   state.lastProposalSpringCount = springCount;
   state.lastProposalByActiveSpring = proposalByActiveSpring;
   state.lastProposalBySpring = proposalBySpring;
+  state.lastCpuProposalBySpring = cpuProposalBySpring;
   state.lastProposalParity = {
     ...parity,
-    source: 'wgsl-rest-recovery-proposal',
+    source: 'wgsl-rest-recovery-proposal-vs-cpu',
   };
   state.lastProposalSource = 'wgsl-rest-recovery-proposal';
   state.lastProposalSignature = proposalSignature >>> 0;

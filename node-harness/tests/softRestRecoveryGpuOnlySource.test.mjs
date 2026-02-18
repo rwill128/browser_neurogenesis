@@ -45,7 +45,7 @@ test('soft rest-recovery gpu-only module dispatches concrete WGSL rest-length pr
 
   assert.match(
     moduleSource,
-    /dispatchSoftRestRecoveryWgslProposal\([\s\S]*computeRestProposalParity\([\s\S]*lastProposalParity = \{[\s\S]*source: 'wgsl-rest-recovery-proposal'/,
+    /dispatchSoftRestRecoveryWgslProposal\([\s\S]*buildCpuRestProposalBySpring\([\s\S]*computeRestProposalParity\([\s\S]*lastCpuProposalBySpring = cpuProposalBySpring;[\s\S]*source: 'wgsl-rest-recovery-proposal-vs-cpu'/,
     'expected WGSL rest proposal branch to persist deterministic CPU-vs-WGSL parity telemetry and source route',
   );
 });

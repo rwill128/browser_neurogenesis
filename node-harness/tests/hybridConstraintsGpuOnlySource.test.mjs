@@ -35,7 +35,19 @@ test('hybrid constraints gpu-only path dispatches real WGSL attachment probe + v
 
   assert.match(
     source,
-    /const serializedDispatch = \(wgslOffload\.state\.pendingWgslProbePromise \|\| Promise\.resolve\(\)\)[\s\S]*dispatchHybridAttachmentErrorProbe\(wgslOffload, prep, soft\);[\s\S]*dispatchHybridAttachmentVelocityDeltaProposal\(wgslOffload, prep, soft,[\s\S]*pendingWgslProbePromise = serializedDispatch;[\s\S]*lastMode = 'wgsl-velocity-proposal';/,
-    'expected gpu-only hybrid WGSL dispatch chain to serialize probe+proposal readbacks and publish source-route ownership for authoritative bring-up',
+    /const hybridAttachmentVelocityNodeReductionWgsl = \/\* wgsl \*\/[\s\S]*nodeDeltaVxOut\[ni\] = sumDx;[\s\S]*nodeContributionOut\[ni\] = count;[\s\S]*dispatchHybridAttachmentVelocityNodeReduction\([\s\S]*pass\.dispatchWorkgroups\([\s\S]*copyBufferToBuffer\(state\.velocityNodeDeltaVxOut[\s\S]*copyBufferToBuffer\(state\.velocityNodeDeltaVyOut[\s\S]*copyBufferToBuffer\(state\.velocityNodeContributionOut[\s\S]*mapAsync\(globalThis\.GPUMapMode\.READ/,
+    'expected gpu-only hybrid module to run a concrete WGSL node-reduction stage that aggregates per-attachment velocity proposals into per-node telemetry',
+  );
+
+  assert.match(
+    source,
+    /state\.lastVelocityNodeReductionSource = 'wgsl-node-reduction-proposal';/,
+    'expected node-reduction stage to publish deterministic source-route ownership telemetry',
+  );
+
+  assert.match(
+    source,
+    /const serializedDispatch = \(wgslOffload\.state\.pendingWgslProbePromise \|\| Promise\.resolve\(\)\)[\s\S]*dispatchHybridAttachmentErrorProbe\(wgslOffload, prep, soft\);[\s\S]*dispatchHybridAttachmentVelocityDeltaProposal\(wgslOffload, prep, soft,[\s\S]*dispatchHybridAttachmentVelocityNodeReduction\(wgslOffload, prep\);[\s\S]*pendingWgslProbePromise = serializedDispatch;[\s\S]*lastMode = 'wgsl-velocity-proposal';/,
+    'expected gpu-only hybrid WGSL dispatch chain to serialize probe+proposal+node-reduction readbacks and publish source-route ownership for authoritative bring-up',
   );
 });

@@ -116,7 +116,48 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   deltaVxOut[ai] = deltaVx;
   deltaVyOut[ai] = deltaVy;
 }
+`
+;
+
+
+const hybridAttachmentVelocityNodeReductionWgsl = /* wgsl */`
+struct NodeReductionParams {
+  nodeCount: u32,
+  attachmentCount: u32,
+  _pad0: u32,
+  _pad1: u32,
+};
+
+@group(0) @binding(0) var<uniform> params: NodeReductionParams;
+@group(0) @binding(1) var<storage, read> nodeIndex: array<u32>;
+@group(0) @binding(2) var<storage, read> deltaVxIn: array<f32>;
+@group(0) @binding(3) var<storage, read> deltaVyIn: array<f32>;
+@group(0) @binding(4) var<storage, read_write> nodeDeltaVxOut: array<f32>;
+@group(0) @binding(5) var<storage, read_write> nodeDeltaVyOut: array<f32>;
+@group(0) @binding(6) var<storage, read_write> nodeContributionOut: array<u32>;
+
+@compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let ni = gid.x;
+  if (ni >= params.nodeCount) { return; }
+
+  var sumDx = 0.0;
+  var sumDy = 0.0;
+  var count = 0u;
+  for (var ai = 0u; ai < params.attachmentCount; ai = ai + 1u) {
+    if (nodeIndex[ai] == ni) {
+      sumDx = sumDx + deltaVxIn[ai];
+      sumDy = sumDy + deltaVyIn[ai];
+      count = count + 1u;
+    }
+  }
+
+  nodeDeltaVxOut[ni] = sumDx;
+  nodeDeltaVyOut[ni] = sumDy;
+  nodeContributionOut[ni] = count;
+}
 `;
+
 function clampFinite(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -401,6 +442,115 @@ function ensureHybridAttachmentVelocityProposalBuffers(offload, nodeCount, attac
   return state;
 }
 
+
+function ensureHybridAttachmentVelocityNodeReductionBuffers(offload, nodeCount) {
+  const state = offload.state;
+  const device = offload.device;
+  const requiredNodeCapacity = Math.max(1, nodeCount);
+  if ((state.velocityNodeReductionCapacity || 0) < requiredNodeCapacity) {
+    const capacity = Math.max(requiredNodeCapacity, state.velocityNodeReductionCapacity ? state.velocityNodeReductionCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.velocityNodeDeltaVxOut?.destroy?.();
+    state.velocityNodeDeltaVyOut?.destroy?.();
+    state.velocityNodeContributionOut?.destroy?.();
+    state.velocityNodeDeltaVxReadback?.destroy?.();
+    state.velocityNodeDeltaVyReadback?.destroy?.();
+    state.velocityNodeContributionReadback?.destroy?.();
+
+    state.velocityNodeDeltaVxOut = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.velocityNodeDeltaVyOut = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.velocityNodeContributionOut = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.velocityNodeDeltaVxReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.velocityNodeDeltaVyReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.velocityNodeContributionReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.velocityNodeReductionCapacity = capacity;
+    state.velocityNodeReductionBindGroup = null;
+  }
+
+  if (!state.velocityNodeReductionParams) {
+    state.velocityNodeReductionParams = device.createBuffer({
+      size: 16,
+      usage: globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST,
+    });
+    state.velocityNodeReductionBindGroup = null;
+  }
+}
+
+async function dispatchHybridAttachmentVelocityNodeReduction(offload, prep) {
+  const state = offload.state;
+  const device = offload.device;
+  const nodeCount = prep.plan.softNodeCount >>> 0;
+  const attachmentCount = prep.plan.attachmentCount >>> 0;
+  if (nodeCount === 0 || attachmentCount === 0) return;
+
+  ensureHybridAttachmentVelocityNodeReductionBuffers(offload, nodeCount);
+
+  if (!state.velocityNodeReductionPipeline) {
+    state.velocityNodeReductionShaderModule = device.createShaderModule({ code: hybridAttachmentVelocityNodeReductionWgsl });
+    state.velocityNodeReductionPipeline = await device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: {
+        module: state.velocityNodeReductionShaderModule,
+        entryPoint: 'main',
+      },
+    });
+    state.velocityNodeReductionBindGroup = null;
+  }
+
+  if (!state.velocityNodeReductionBindGroup) {
+    state.velocityNodeReductionBindGroup = device.createBindGroup({
+      layout: state.velocityNodeReductionPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.velocityNodeReductionParams } },
+        { binding: 1, resource: { buffer: state.velocityNodeIndex } },
+        { binding: 2, resource: { buffer: state.velocityDeltaVxOut } },
+        { binding: 3, resource: { buffer: state.velocityDeltaVyOut } },
+        { binding: 4, resource: { buffer: state.velocityNodeDeltaVxOut } },
+        { binding: 5, resource: { buffer: state.velocityNodeDeltaVyOut } },
+        { binding: 6, resource: { buffer: state.velocityNodeContributionOut } },
+      ],
+    });
+  }
+
+  const params = new Uint32Array(4);
+  params[0] = nodeCount;
+  params[1] = attachmentCount;
+  device.queue.writeBuffer(state.velocityNodeReductionParams, 0, params.buffer, params.byteOffset, params.byteLength);
+
+  const nodeBytes = nodeCount * 4;
+  const encoder = device.createCommandEncoder({ label: 'hybrid-attachment-node-reduction-encoder' });
+  const pass = encoder.beginComputePass({ label: 'hybrid-attachment-node-reduction-pass' });
+  pass.setPipeline(state.velocityNodeReductionPipeline);
+  pass.setBindGroup(0, state.velocityNodeReductionBindGroup);
+  pass.dispatchWorkgroups(Math.max(1, Math.ceil(nodeCount / WGSL_WORKGROUP_SIZE)));
+  pass.end();
+  encoder.copyBufferToBuffer(state.velocityNodeDeltaVxOut, 0, state.velocityNodeDeltaVxReadback, 0, nodeBytes);
+  encoder.copyBufferToBuffer(state.velocityNodeDeltaVyOut, 0, state.velocityNodeDeltaVyReadback, 0, nodeBytes);
+  encoder.copyBufferToBuffer(state.velocityNodeContributionOut, 0, state.velocityNodeContributionReadback, 0, nodeBytes);
+  device.queue.submit([encoder.finish()]);
+
+  await state.velocityNodeDeltaVxReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
+  const mappedDx = state.velocityNodeDeltaVxReadback.getMappedRange(0, nodeBytes);
+  const nodeDeltaVx = new Float32Array(mappedDx.slice(0));
+  state.velocityNodeDeltaVxReadback.unmap();
+
+  await state.velocityNodeDeltaVyReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
+  const mappedDy = state.velocityNodeDeltaVyReadback.getMappedRange(0, nodeBytes);
+  const nodeDeltaVy = new Float32Array(mappedDy.slice(0));
+  state.velocityNodeDeltaVyReadback.unmap();
+
+  await state.velocityNodeContributionReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
+  const mappedCount = state.velocityNodeContributionReadback.getMappedRange(0, nodeBytes);
+  const nodeContributionCount = new Uint32Array(mappedCount.slice(0));
+  state.velocityNodeContributionReadback.unmap();
+
+  state.lastVelocityNodeReductionDeltaVx = nodeDeltaVx;
+  state.lastVelocityNodeReductionDeltaVy = nodeDeltaVy;
+  state.lastVelocityNodeReductionContributionCount = nodeContributionCount;
+  state.lastVelocityNodeReductionDispatchCount = Math.max(1, Math.ceil(nodeCount / WGSL_WORKGROUP_SIZE));
+  state.lastVelocityNodeReductionSource = 'wgsl-node-reduction-proposal';
+}
+
 async function dispatchHybridAttachmentVelocityDeltaProposal(offload, prep, soft, paramsConfig) {
   const state = offload.state;
   const device = offload.device;
@@ -618,6 +768,7 @@ export function applyHybridAttachmentConstraintsGpuOnly({
             nodeImpulseScale,
             dtNorm: safeDtNorm,
           });
+          await dispatchHybridAttachmentVelocityNodeReduction(wgslOffload, prep);
         });
       wgslOffload.state.pendingWgslProbePromise = serializedDispatch;
       serializedDispatch

@@ -5,6 +5,7 @@ import {
   computeSoftClusterKinematics,
   projectNodesTowardClusterRigidMotion,
 } from '../../sim-server/public/soft-cluster-kinematics.js';
+import { applySoftMembraneInsideCorrectionPassGpuOnly } from '../../sim-server/public/runtime-solvers/stepSoftMembraneInsideCorrectionGpuOnly.js';
 
 function makeState() {
   return {
@@ -192,4 +193,91 @@ test('post-collision recovery parity: gpu-only module uses isolated cluster kine
   assert.equal(gpu.rigidInsideCorrections, baselineRigidInsideCorrections);
   assert.equal(gpu.membraneInsideCorrections, baselineMembraneInsideCorrections);
   assert.deepEqual(gpuState, baselineState);
+});
+
+
+function makeDefaultMembraneState() {
+  return {
+    sim: {
+      frame: 7,
+      softMembraneClusterMap: new Map([[1, { insideCorrectionEnabled: 1 }]]),
+    },
+    bodies: {
+      rigid: [{ x: 9.8, y: 10.1, vx: 0.25, vy: -0.15, omega: 0.02 }],
+    },
+    soft: {
+      nodes: [
+        { x: 8.5, y: 8.5, vx: 0.03, vy: -0.01, r: 0.45, clusterId: 1 },
+        { x: 12.5, y: 8.5, vx: -0.02, vy: 0.02, r: 0.45, clusterId: 1 },
+        { x: 12.5, y: 12.5, vx: 0.01, vy: 0.01, r: 0.45, clusterId: 1 },
+        { x: 8.5, y: 12.5, vx: -0.01, vy: -0.02, r: 0.45, clusterId: 1 },
+        { x: 10.7, y: 10.6, vx: -0.6, vy: 0.1, r: 0.55, clusterId: 2 },
+      ],
+    },
+    dtNorm: 1.1,
+    n: 32,
+    softClusterLoops: [{ clusterId: 1, indices: [0, 1, 2, 3] }],
+    hybridAttachedByRigid: new Map(),
+    softMembraneClusterSet: new Set([1]),
+    softClusterCollisionLinearProjection: 0.2,
+    softClusterCollisionAngularProjection: 0.1,
+  };
+}
+
+test('post-collision recovery parity: default gpu-only membrane inside-correction path matches baseline sequencing', () => {
+  const baselineState = makeDefaultMembraneState();
+  const gpuState = makeDefaultMembraneState();
+
+  const rigidInside = (bodies) => {
+    for (const rb of (bodies.rigid || [])) {
+      rb.vx += 0.015;
+      rb.vy -= 0.01;
+    }
+    return 1;
+  };
+  const bounce = (body, _n, factor) => {
+    body.vx *= factor;
+    body.vy *= factor;
+  };
+
+  const baseKinematics = computeSoftClusterKinematics(baselineState.soft.nodes);
+  projectNodesTowardClusterRigidMotion(baselineState.soft.nodes, baseKinematics, {
+    linearGain: baselineState.softClusterCollisionLinearProjection * baselineState.dtNorm,
+    angularGain: baselineState.softClusterCollisionAngularProjection * baselineState.dtNorm,
+    membraneClusterSet: baselineState.softMembraneClusterSet,
+    membraneGainScale: 0.72,
+  });
+  const baselineRigidInsideCorrections = rigidInside(
+    baselineState.bodies,
+    baselineState.soft,
+    baselineState.hybridAttachedByRigid,
+  );
+  const baselineMembraneInsideCorrections = applySoftMembraneInsideCorrectionPassGpuOnly({
+    sim: baselineState.sim,
+    soft: baselineState.soft,
+    loops: baselineState.softClusterLoops,
+  });
+  for (const rb of baselineState.bodies.rigid) bounce(rb, baselineState.n, 0.84);
+  for (const sn of baselineState.soft.nodes) bounce(sn, baselineState.n, 0.78);
+
+  const gpu = applyPostCollisionRecoveryGpuOnly({
+    sim: gpuState.sim,
+    bodies: gpuState.bodies,
+    soft: gpuState.soft,
+    dtNorm: gpuState.dtNorm,
+    softMembraneClusterSet: gpuState.softMembraneClusterSet,
+    softClusterCollisionLinearProjection: gpuState.softClusterCollisionLinearProjection,
+    softClusterCollisionAngularProjection: gpuState.softClusterCollisionAngularProjection,
+    membraneGainScale: 0.72,
+    applyRigidInsideCorrectionPass: rigidInside,
+    applyBounceBoundary: bounce,
+    n: gpuState.n,
+    softClusterLoops: gpuState.softClusterLoops,
+    hybridAttachedByRigid: gpuState.hybridAttachedByRigid,
+  });
+
+  assert.equal(gpu.rigidInsideCorrections, baselineRigidInsideCorrections);
+  assert.equal(gpu.membraneInsideCorrections, baselineMembraneInsideCorrections);
+  assert.deepEqual(gpuState, baselineState);
+  assert.ok(gpu.membraneInsideCorrections > 0, 'expected default gpu-only membrane inside-correction to run');
 });

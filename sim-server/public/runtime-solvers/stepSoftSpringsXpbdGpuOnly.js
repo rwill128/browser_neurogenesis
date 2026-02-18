@@ -445,6 +445,7 @@ async function dispatchSoftSpringWgslVelocityDeltaProposal({
   deltaLambdaByColor,
   deltaLambdaByColorBuffer = null,
   includeEndpointTelemetry = true,
+  includeContributionCountTelemetry = true,
 }) {
   if (!canUseWgslOffload(offload)) return null;
   const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
@@ -573,7 +574,9 @@ async function dispatchSoftSpringWgslVelocityDeltaProposal({
   const nodeBytes = nodes.length * 4;
   encoder.copyBufferToBuffer(state.velocityNodeDeltaVXOut, 0, state.velocityNodeDeltaVXReadback, 0, nodeBytes);
   encoder.copyBufferToBuffer(state.velocityNodeDeltaVYOut, 0, state.velocityNodeDeltaVYReadback, 0, nodeBytes);
-  encoder.copyBufferToBuffer(state.velocityNodeContributionCountOut, 0, state.velocityNodeContributionCountReadback, 0, nodeBytes);
+  if (includeContributionCountTelemetry) {
+    encoder.copyBufferToBuffer(state.velocityNodeContributionCountOut, 0, state.velocityNodeContributionCountReadback, 0, nodeBytes);
+  }
   device.queue.submit([encoder.finish()]);
 
   let endpointDeltaVX = null;
@@ -600,10 +603,13 @@ async function dispatchSoftSpringWgslVelocityDeltaProposal({
   const nodeDeltaVy = new Float32Array(mappedNodeVY.slice(0));
   state.velocityNodeDeltaVYReadback.unmap();
 
-  await state.velocityNodeContributionCountReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
-  const mappedNodeCounts = state.velocityNodeContributionCountReadback.getMappedRange(0, nodeBytes);
-  const nodeContributionCount = new Uint32Array(mappedNodeCounts.slice(0));
-  state.velocityNodeContributionCountReadback.unmap();
+  let nodeContributionCount = null;
+  if (includeContributionCountTelemetry) {
+    await state.velocityNodeContributionCountReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
+    const mappedNodeCounts = state.velocityNodeContributionCountReadback.getMappedRange(0, nodeBytes);
+    nodeContributionCount = new Uint32Array(mappedNodeCounts.slice(0));
+    state.velocityNodeContributionCountReadback.unmap();
+  }
 
   return {
     dispatchCount: endpointDispatchCount,
@@ -1395,11 +1401,17 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
       )
       && wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor instanceof Float32Array
       && wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor instanceof Float32Array
-      && wgslOffload.state.lastVelocityDeltaProposalNodeContributionCount instanceof Uint32Array
       && wgslOffload.state.lastProposalLambdaNextBySpring instanceof Float32Array
       && wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor.length === soft.nodes.length
       && wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor.length === soft.nodes.length
-      && wgslOffload.state.lastVelocityDeltaProposalNodeContributionCount.length === soft.nodes.length
+      && (
+        fastMode
+          ? true
+          : (
+            wgslOffload.state.lastVelocityDeltaProposalNodeContributionCount instanceof Uint32Array
+            && wgslOffload.state.lastVelocityDeltaProposalNodeContributionCount.length === soft.nodes.length
+          )
+      )
       && wgslOffload.state.lastProposalLambdaNextBySpring.length === soft.springs.length;
 
     if (cachedProposalReady) {
@@ -1460,6 +1472,7 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
                 deltaLambdaByColor: wgslOffload.state.lastProposalDeltaLambdaByColor,
                 deltaLambdaByColorBuffer: wgslOffload.state.lastProposalDeltaLambdaBuffer,
                 includeEndpointTelemetry: !fastMode,
+                includeContributionCountTelemetry: !fastMode,
               });
               let proposalReduction = null;
               if (!fastMode) {

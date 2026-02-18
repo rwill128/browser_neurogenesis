@@ -133,6 +133,25 @@ test('soft spring gpu-only fast mode skips endpoint readback + cpu parity while 
 });
 
 
+test('soft spring gpu-only fast mode also skips node contribution-count readback while validated mode keeps parity ownership checks', () => {
+  assert.match(
+    source,
+    /includeContributionCountTelemetry: !fastMode/,
+    'expected fast mode dispatch wiring to disable contribution-count readback/map work',
+  );
+  assert.match(
+    source,
+    /if \(includeContributionCountTelemetry\) \{[\s\S]*copyBufferToBuffer\(state\.velocityNodeContributionCountOut, 0, state\.velocityNodeContributionCountReadback, 0, nodeBytes\)[\s\S]*mapAsync\(globalThis\.GPUMapMode\.READ, 0, nodeBytes\)[\s\S]*nodeContributionCount = new Uint32Array/,
+    'expected contribution-count buffer copy/map work to stay explicitly gated behind contribution telemetry opt-in',
+  );
+  assert.match(
+    source,
+    /fastMode[\s\S]*\? true[\s\S]*lastVelocityDeltaProposalNodeContributionCount instanceof Uint32Array[\s\S]*lastVelocityDeltaProposalNodeContributionCount\.length === soft\.nodes\.length/,
+    'expected authoritative replay gating to require contribution-count ownership telemetry only outside fast mode',
+  );
+});
+
+
 test('soft spring gpu-only fast mode authoritative replay skips residual cpu XPBD iterations after finite-checked WGSL node reduction', () => {
   assert.match(
     source,

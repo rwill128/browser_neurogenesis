@@ -35,7 +35,7 @@ test('soft spring gpu-only WGSL layout publishes color-batched endpoint ownershi
 test('soft spring gpu-only path dispatches real WGSL probe + lambda proposal stages when offload device is available', () => {
   assert.match(
     source,
-    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*Promise\.all\(\[[\s\S]*dispatchSoftSpringWgslProbe\(\{ soft, offload: wgslOffload, layout \}\)[\s\S]*dispatchSoftSpringWgslLambdaProposal\([\s\S]*lastMode = proposalRan \? 'wgsl-proposal' : 'wgsl-probe'/,
+    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*Promise\.all\(\[[\s\S]*dispatchSoftSpringWgslProbe\(\{ soft, offload: wgslOffload, layout \}\)[\s\S]*dispatchSoftSpringWgslLambdaProposal\([\s\S]*lastMode = proposalRan \? 'wgsl-velocity-proposal' : 'wgsl-probe'/,
     'expected gpu-only soft spring branch to execute WGSL probe + lambda proposal dispatches (with cpu fallback semantics preserved)',
   );
 });
@@ -57,10 +57,10 @@ test('soft spring gpu-only WGSL lambda proposal stage reads back per-spring delt
 });
 
 
-test('soft spring gpu-only WGSL proposal branch stores deterministic per-node velocity delta proposal for next reduction offload stage', () => {
+test('soft spring gpu-only WGSL proposal branch dispatches velocity-delta proposal stage and publishes endpoint+node telemetry', () => {
   assert.match(
     source,
-    /proposalRan\) \{[\s\S]*reduceSoftSpringVelocityDeltasDeterministic\([\s\S]*lastVelocityDeltaProposalNodeVxByColor[\s\S]*lastVelocityDeltaProposalNodeVyByColor/,
-    'expected WGSL proposal branch to publish deterministic per-node velocity delta proposal buffers for upcoming authoritative reduction dispatch',
+    /proposalRan\) \{[\s\S]*dispatchSoftSpringWgslVelocityDeltaProposal\([\s\S]*lastVelocityDeltaProposalEndpointVxByColor[\s\S]*lastVelocityDeltaProposalEndpointVyByColor[\s\S]*lastVelocityDeltaProposalNodeVxByColor[\s\S]*lastVelocityDeltaProposalNodeVyByColor/,
+    'expected WGSL proposal branch to dispatch deterministic velocity-delta WGSL stage and publish endpoint/node buffers',
   );
 });

@@ -323,3 +323,17 @@ test('gpu-lab routes soft membrane cell-pressure stepping through isolated gpu-o
     'expected explicit gpu-only membrane pressure dispatch with baseline fallback call',
   );
 });
+
+test('gpu-lab routes post-collision soft-cluster projection and inside-correction recovery through isolated gpu-only runtime solver module', () => {
+  assert.match(
+    source,
+    /import \{ applyPostCollisionRecoveryGpuOnly \} from '\/runtime-solvers\/stepPostCollisionRecoveryGpuOnly\.js';/,
+    'expected isolated gpu-only post-collision recovery module import',
+  );
+
+  assert.match(
+    source,
+    /if \(solverPath === 'gpu-only'\) \{[\s\S]*applyPostCollisionRecoveryGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*computeSoftClusterKinematics\(s\.nodes\);[\s\S]*applyRigidInsideCorrectionPass\(bodies, s, hybridAttachedByRigid\);/,
+    'expected explicit gpu-only post-collision recovery dispatch with baseline fallback branch',
+  );
+});

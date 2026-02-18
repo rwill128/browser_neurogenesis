@@ -14,6 +14,7 @@ import { resolveSoftSoftCollisionPassGpuOnly } from '/runtime-solvers/stepSoftCo
 import { applyHybridAttachmentConstraintsGpuOnly } from '/runtime-solvers/stepHybridConstraintsGpuOnly.js';
 import { applySoftMembraneCellPressureGpuOnly } from '/runtime-solvers/stepSoftMembranePressureGpuOnly.js';
 import { applySoftFluidCouplingGpuOnly } from '/runtime-solvers/stepSoftFluidCouplingGpuOnly.js';
+import { applyPostCollisionRecoveryGpuOnly } from '/runtime-solvers/stepPostCollisionRecoveryGpuOnly.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -4168,18 +4169,43 @@ function stepBodiesAndInject(sim, vxField, vyField) {
 
   // After collision impulses, redistribute linear/angular momentum across each
   // soft cluster using explicit COM/inertia-derived rigid projection.
-  const postCollisionClusterKinematics = computeSoftClusterKinematics(s.nodes);
-  projectNodesTowardClusterRigidMotion(s.nodes, postCollisionClusterKinematics, {
-    linearGain: SOFT_CLUSTER_COLLISION_LINEAR_PROJECTION * dtNorm,
-    angularGain: softClusterCollisionAngularProjection * dtNorm,
-    membraneClusterSet: softMembraneClusterSet,
-    membraneGainScale: 0.72,
-  });
+  let rigidInsideCorrections = 0;
+  let membraneInsideCorrections = 0;
+  if (solverPath === 'gpu-only') {
+    const postCollisionRecovery = applyPostCollisionRecoveryGpuOnly({
+      sim,
+      bodies,
+      soft: s,
+      dtNorm,
+      softMembraneClusterSet,
+      softClusterCollisionLinearProjection: SOFT_CLUSTER_COLLISION_LINEAR_PROJECTION,
+      softClusterCollisionAngularProjection,
+      membraneGainScale: 0.72,
+      computeSoftClusterKinematics,
+      projectNodesTowardClusterRigidMotion,
+      applyRigidInsideCorrectionPass,
+      applyMembraneInsideCorrectionPass,
+      applyBounceBoundary,
+      n,
+      softClusterLoops,
+      hybridAttachedByRigid,
+    });
+    rigidInsideCorrections = postCollisionRecovery.rigidInsideCorrections;
+    membraneInsideCorrections = postCollisionRecovery.membraneInsideCorrections;
+  } else {
+    const postCollisionClusterKinematics = computeSoftClusterKinematics(s.nodes);
+    projectNodesTowardClusterRigidMotion(s.nodes, postCollisionClusterKinematics, {
+      linearGain: SOFT_CLUSTER_COLLISION_LINEAR_PROJECTION * dtNorm,
+      angularGain: softClusterCollisionAngularProjection * dtNorm,
+      membraneClusterSet: softMembraneClusterSet,
+      membraneGainScale: 0.72,
+    });
 
-  const rigidInsideCorrections = applyRigidInsideCorrectionPass(bodies, s, hybridAttachedByRigid);
-  const membraneInsideCorrections = applyMembraneInsideCorrectionPass(sim, s, softClusterLoops);
-  for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
-  for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
+    rigidInsideCorrections = applyRigidInsideCorrectionPass(bodies, s, hybridAttachedByRigid);
+    membraneInsideCorrections = applyMembraneInsideCorrectionPass(sim, s, softClusterLoops);
+    for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
+    for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
+  }
 
   sim.lastRigidContacts = rigidContactDebug.length > 64 ? rigidContactDebug.slice(0, 64) : rigidContactDebug;
 

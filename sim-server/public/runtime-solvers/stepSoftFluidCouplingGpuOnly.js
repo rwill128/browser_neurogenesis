@@ -346,12 +346,8 @@ struct Params {
 @group(0) @binding(8) var<storage, read> momentum: array<f32>;
 @group(0) @binding(9) var<storage, read> isMembraneCluster: array<u32>;
 @group(0) @binding(10) var<storage, read> honey: array<f32>;
-@group(0) @binding(11) var<storage, read_write> outForceX: array<f32>;
-@group(0) @binding(12) var<storage, read_write> outForceY: array<f32>;
-@group(0) @binding(13) var<storage, read_write> outCarryX: array<f32>;
-@group(0) @binding(14) var<storage, read_write> outCarryY: array<f32>;
-@group(0) @binding(15) var<storage, read_write> outLocalCarryX: array<f32>;
-@group(0) @binding(16) var<storage, read_write> outLocalCarryY: array<f32>;
+@group(0) @binding(11) var<storage, read_write> outForceCarryPacked: array<vec4<f32>>;
+@group(0) @binding(12) var<storage, read_write> outLocalCarryPacked: array<vec2<f32>>;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -368,13 +364,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   let fx = sampleDeltaVx[i] * dragHoney * m;
   let fy = sampleDeltaVy[i] * dragHoney * m;
-  outForceX[i] = fx;
-  outForceY[i] = fy;
-  outCarryX[i] = fx * invM;
-  outCarryY[i] = fy * invM;
+  let carryX = fx * invM;
+  let carryY = fy * invM;
+  outForceCarryPacked[i] = vec4<f32>(fx, fy, carryX, carryY);
 
-  outLocalCarryX[i] = (sampleVx[i] - nodeVx[i]) * dragHoney * invM * params.localFlowShare;
-  outLocalCarryY[i] = (sampleVy[i] - nodeVy[i]) * dragHoney * invM * params.localFlowShare;
+  let localCarryX = (sampleVx[i] - nodeVx[i]) * dragHoney * invM * params.localFlowShare;
+  let localCarryY = (sampleVy[i] - nodeVy[i]) * dragHoney * invM * params.localFlowShare;
+  outLocalCarryPacked[i] = vec2<f32>(localCarryX, localCarryY);
 }
 `;
 
@@ -459,14 +455,14 @@ function ensureSoftFluidCarryProposalResources(state, device, nodeCount) {
     size: Math.max(4, byteSize),
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
-  const createOutputStorage = (label) => device.createBuffer({
+  const createOutputStorage = (label, byteSize) => device.createBuffer({
     label,
-    size: Math.max(4, bytes),
+    size: Math.max(4, byteSize),
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
   });
-  const createReadback = (label) => device.createBuffer({
+  const createReadback = (label, byteSize) => device.createBuffer({
     label,
-    size: Math.max(4, bytes),
+    size: Math.max(4, byteSize),
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   });
 
@@ -482,6 +478,9 @@ function ensureSoftFluidCarryProposalResources(state, device, nodeCount) {
       entryPoint: 'main',
     },
   });
+
+  const packedForceCarryBytes = capacity * 4 * Float32Array.BYTES_PER_ELEMENT;
+  const packedLocalCarryBytes = capacity * 2 * Float32Array.BYTES_PER_ELEMENT;
 
   const resources = {
     capacity,
@@ -500,18 +499,10 @@ function ensureSoftFluidCarryProposalResources(state, device, nodeCount) {
     momentumBuffer: createStorage('soft-fluid-carry-momentum', bytes),
     membraneBuffer: createStorage('soft-fluid-carry-membrane', u32Bytes),
     honeyBuffer: createStorage('soft-fluid-carry-honey', bytes),
-    outForceXBuffer: createOutputStorage('soft-fluid-carry-out-force-x'),
-    outForceYBuffer: createOutputStorage('soft-fluid-carry-out-force-y'),
-    outCarryXBuffer: createOutputStorage('soft-fluid-carry-out-carry-x'),
-    outCarryYBuffer: createOutputStorage('soft-fluid-carry-out-carry-y'),
-    outLocalCarryXBuffer: createOutputStorage('soft-fluid-carry-out-local-carry-x'),
-    outLocalCarryYBuffer: createOutputStorage('soft-fluid-carry-out-local-carry-y'),
-    readForceXBuffer: createReadback('soft-fluid-carry-read-force-x'),
-    readForceYBuffer: createReadback('soft-fluid-carry-read-force-y'),
-    readCarryXBuffer: createReadback('soft-fluid-carry-read-carry-x'),
-    readCarryYBuffer: createReadback('soft-fluid-carry-read-carry-y'),
-    readLocalCarryXBuffer: createReadback('soft-fluid-carry-read-local-carry-x'),
-    readLocalCarryYBuffer: createReadback('soft-fluid-carry-read-local-carry-y'),
+    outForceCarryPackedBuffer: createOutputStorage('soft-fluid-carry-out-force-carry-packed', packedForceCarryBytes),
+    outLocalCarryPackedBuffer: createOutputStorage('soft-fluid-carry-out-local-carry-packed', packedLocalCarryBytes),
+    readForceCarryPackedBuffer: createReadback('soft-fluid-carry-read-force-carry-packed', packedForceCarryBytes),
+    readLocalCarryPackedBuffer: createReadback('soft-fluid-carry-read-local-carry-packed', packedLocalCarryBytes),
     pipeline,
     bindGroup: null,
   };
@@ -531,12 +522,8 @@ function ensureSoftFluidCarryProposalResources(state, device, nodeCount) {
       { binding: 8, resource: { buffer: resources.momentumBuffer } },
       { binding: 9, resource: { buffer: resources.membraneBuffer } },
       { binding: 10, resource: { buffer: resources.honeyBuffer } },
-      { binding: 11, resource: { buffer: resources.outForceXBuffer } },
-      { binding: 12, resource: { buffer: resources.outForceYBuffer } },
-      { binding: 13, resource: { buffer: resources.outCarryXBuffer } },
-      { binding: 14, resource: { buffer: resources.outCarryYBuffer } },
-      { binding: 15, resource: { buffer: resources.outLocalCarryXBuffer } },
-      { binding: 16, resource: { buffer: resources.outLocalCarryYBuffer } },
+      { binding: 11, resource: { buffer: resources.outForceCarryPackedBuffer } },
+      { binding: 12, resource: { buffer: resources.outLocalCarryPackedBuffer } },
     ],
   });
 
@@ -582,33 +569,46 @@ function dispatchSoftFluidCarryProposalWgsl({ wgslOffload, nodeCount, dragK, nod
   pass.dispatchWorkgroups(Math.max(1, Math.ceil(nodeCount / 64)));
   pass.end();
 
-  encoder.copyBufferToBuffer(resources.outForceXBuffer, 0, resources.readForceXBuffer, 0, nodeCount * 4);
-  encoder.copyBufferToBuffer(resources.outForceYBuffer, 0, resources.readForceYBuffer, 0, nodeCount * 4);
-  encoder.copyBufferToBuffer(resources.outCarryXBuffer, 0, resources.readCarryXBuffer, 0, nodeCount * 4);
-  encoder.copyBufferToBuffer(resources.outCarryYBuffer, 0, resources.readCarryYBuffer, 0, nodeCount * 4);
-  encoder.copyBufferToBuffer(resources.outLocalCarryXBuffer, 0, resources.readLocalCarryXBuffer, 0, nodeCount * 4);
-  encoder.copyBufferToBuffer(resources.outLocalCarryYBuffer, 0, resources.readLocalCarryYBuffer, 0, nodeCount * 4);
+  const packedForceCarryBytes = nodeCount * 4 * Float32Array.BYTES_PER_ELEMENT;
+  const packedLocalCarryBytes = nodeCount * 2 * Float32Array.BYTES_PER_ELEMENT;
+  encoder.copyBufferToBuffer(resources.outForceCarryPackedBuffer, 0, resources.readForceCarryPackedBuffer, 0, packedForceCarryBytes);
+  encoder.copyBufferToBuffer(resources.outLocalCarryPackedBuffer, 0, resources.readLocalCarryPackedBuffer, 0, packedLocalCarryBytes);
 
   device.queue.submit([encoder.finish()]);
 
   const readback = async () => {
-    const mapRead = async (buffer) => {
-      await buffer.mapAsync(GPUMapMode.READ);
-      try {
-        return new Float32Array(buffer.getMappedRange().slice(0));
-      } finally {
-        buffer.unmap();
-      }
-    };
-
-    const [forceX, forceY, carryX, carryY, localCarryX, localCarryY] = await Promise.all([
-      mapRead(resources.readForceXBuffer),
-      mapRead(resources.readForceYBuffer),
-      mapRead(resources.readCarryXBuffer),
-      mapRead(resources.readCarryYBuffer),
-      mapRead(resources.readLocalCarryXBuffer),
-      mapRead(resources.readLocalCarryYBuffer),
+    await Promise.all([
+      resources.readForceCarryPackedBuffer.mapAsync(GPUMapMode.READ, 0, packedForceCarryBytes),
+      resources.readLocalCarryPackedBuffer.mapAsync(GPUMapMode.READ, 0, packedLocalCarryBytes),
     ]);
+
+    let forceCarryPacked = null;
+    let localCarryPacked = null;
+    try {
+      forceCarryPacked = new Float32Array(resources.readForceCarryPackedBuffer.getMappedRange(0, packedForceCarryBytes).slice(0));
+      localCarryPacked = new Float32Array(resources.readLocalCarryPackedBuffer.getMappedRange(0, packedLocalCarryBytes).slice(0));
+    } finally {
+      resources.readForceCarryPackedBuffer.unmap();
+      resources.readLocalCarryPackedBuffer.unmap();
+    }
+
+    const forceX = new Float32Array(nodeCount);
+    const forceY = new Float32Array(nodeCount);
+    const carryX = new Float32Array(nodeCount);
+    const carryY = new Float32Array(nodeCount);
+    const localCarryX = new Float32Array(nodeCount);
+    const localCarryY = new Float32Array(nodeCount);
+
+    for (let i = 0; i < nodeCount; i++) {
+      const base4 = i * 4;
+      const base2 = i * 2;
+      forceX[i] = Number(forceCarryPacked[base4]) || 0;
+      forceY[i] = Number(forceCarryPacked[base4 + 1]) || 0;
+      carryX[i] = Number(forceCarryPacked[base4 + 2]) || 0;
+      carryY[i] = Number(forceCarryPacked[base4 + 3]) || 0;
+      localCarryX[i] = Number(localCarryPacked[base2]) || 0;
+      localCarryY[i] = Number(localCarryPacked[base2 + 1]) || 0;
+    }
 
     state.lastCarryProposalForceX = forceX;
     state.lastCarryProposalForceY = forceY;

@@ -33,8 +33,14 @@ test('soft fluid-coupling gpu-only publishes deterministic WGSL prep layout for 
 
   assert.match(
     source,
-    /const SOFT_FLUID_CARRY_PROPOSAL_WGSL = \/\* wgsl \*\/[\s\S]*@compute @workgroup_size\(64\)[\s\S]*outCarryX\[i\] = fx \* invM;[\s\S]*outLocalCarryY\[i\] = \(sampleVy\[i\] - nodeVy\[i\]\) \* dragHoney \* invM \* params\.localFlowShare;/,
+    /const SOFT_FLUID_CARRY_PROPOSAL_WGSL = \/\* wgsl \*\/[\s\S]*@compute @workgroup_size\(64\)[\s\S]*outForceCarryPacked\[i\] = vec4<f32>\(fx, fy, carryX, carryY\);[\s\S]*outLocalCarryPacked\[i\] = vec2<f32>\(localCarryX, localCarryY\);/,
     'expected concrete WGSL carry proposal shader to compute force/carry/local-carry outputs from deterministic prepared buffers',
+  );
+
+  assert.match(
+    source,
+    /encoder\.copyBufferToBuffer\(resources\.outForceCarryPackedBuffer, 0, resources\.readForceCarryPackedBuffer, 0, packedForceCarryBytes\);[\s\S]*encoder\.copyBufferToBuffer\(resources\.outLocalCarryPackedBuffer, 0, resources\.readLocalCarryPackedBuffer, 0, packedLocalCarryBytes\);[\s\S]*const forceX = new Float32Array\(nodeCount\);[\s\S]*const localCarryY = new Float32Array\(nodeCount\);/,
+    'expected carry proposal readback path to use packed GPU buffers then unpack once on CPU, reducing per-stage map/copy fan-out',
   );
 
   assert.match(

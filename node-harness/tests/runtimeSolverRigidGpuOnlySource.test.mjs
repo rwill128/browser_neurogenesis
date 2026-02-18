@@ -39,4 +39,17 @@ test('rigid gpu-only module defines concrete WGSL rigid step proposal kernel wit
     /pendingWgslRigidStepProposalPromise[\s\S]*dispatchRigidStepProposal\([\s\S]*lastRigidStepProposalSource = 'cpu-rigid-step-authoritative'[\s\S]*lastMode = 'cpu-rigid-step-authoritative'/,
     'expected serialized rigid WGSL dispatch with hard CPU fallback source-route when dispatch fails',
   );
+
+
+  assert.match(
+    moduleSource,
+    /const authoritativeEnabled = wgslOffload\?\.state\?\.enableAuthoritativeRigidStep === true;[\s\S]*const wgslApplied = await serializedDispatch;[\s\S]*proposalReady = authoritativeEnabled[\s\S]*lastRigidStepProposalSignature[\s\S]*lastRigidStepAuthoritativeSource = getGpuOnlyPipelineModeProfile\(wgslOffload\) === 'gpu-only-fast'[\s\S]*'wgsl-rigid-step-authoritative-fast'[\s\S]*'wgsl-rigid-step-authoritative'/,
+    'expected rigid gpu-only path to support signature-gated authoritative WGSL apply with explicit mode/source-route visibility',
+  );
+
+  assert.match(
+    moduleSource,
+    /lastRigidStepAuthoritativeSource = 'cpu-rigid-step-authoritative-fallback';[\s\S]*lastSourceRoute = 'cpu-rigid-step-authoritative';[\s\S]*lastMode = getGpuOnlyPipelineModeProfile\(wgslOffload\) === 'gpu-only-fast'[\s\S]*'cpu-rigid-step-authoritative-fast'[\s\S]*'cpu-rigid-step-authoritative'/,
+    'expected rigid gpu-only authoritative WGSL apply to retain hard CPU fallback route for unavailable/non-finite/mismatched proposals',
+  );
 });

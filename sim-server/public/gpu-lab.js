@@ -3953,7 +3953,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   let softCarryTransfer = 0;
 
   if (solverPath === 'gpu-only') {
-    rigidCarryTransfer = stepRigidBodiesGpuOnly({
+    rigidCarryTransfer = await stepRigidBodiesGpuOnly({
       sim,
       bodies,
       vxField,

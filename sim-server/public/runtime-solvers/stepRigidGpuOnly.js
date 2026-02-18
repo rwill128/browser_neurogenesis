@@ -248,7 +248,7 @@ function rigidEdgeMomentumScale(rb) {
  * Isolated from baseline in gpu-lab.js so integration/coupling responsibility can
  * migrate incrementally while baseline remains the reference/default path.
  */
-export function stepRigidBodiesGpuOnly({
+export async function stepRigidBodiesGpuOnly({
   sim,
   bodies,
   vxField,
@@ -404,8 +404,65 @@ export function stepRigidBodiesGpuOnly({
         wgslOffload.state.lastRigidStepProposalError = String(err?.message || err || 'unknown-error');
         wgslOffload.state.lastRigidStepProposalSource = 'cpu-rigid-step-authoritative';
         wgslOffload.state.lastMode = 'cpu-rigid-step-authoritative';
+        return false;
       });
     wgslOffload.state.pendingWgslRigidStepProposalPromise = serializedDispatch;
+
+    const authoritativeEnabled = wgslOffload?.state?.enableAuthoritativeRigidStep === true;
+    const wgslApplied = await serializedDispatch;
+    const proposalReady = authoritativeEnabled
+      && wgslApplied === true
+      && String(wgslOffload?.state?.lastRigidStepProposalSignature || '') === signature
+      && wgslOffload?.state?.lastRigidStepProposalVx instanceof Float32Array
+      && wgslOffload?.state?.lastRigidStepProposalVy instanceof Float32Array
+      && wgslOffload?.state?.lastRigidStepProposalOmega instanceof Float32Array
+      && wgslOffload?.state?.lastRigidStepProposalX instanceof Float32Array
+      && wgslOffload?.state?.lastRigidStepProposalY instanceof Float32Array
+      && wgslOffload?.state?.lastRigidStepProposalTheta instanceof Float32Array
+      && wgslOffload?.state?.lastRigidStepProposalCarry instanceof Float32Array
+      && wgslOffload.state.lastRigidStepProposalVx.length === bodies.rigid.length
+      && wgslOffload.state.lastRigidStepProposalVy.length === bodies.rigid.length
+      && wgslOffload.state.lastRigidStepProposalOmega.length === bodies.rigid.length
+      && wgslOffload.state.lastRigidStepProposalX.length === bodies.rigid.length
+      && wgslOffload.state.lastRigidStepProposalY.length === bodies.rigid.length
+      && wgslOffload.state.lastRigidStepProposalTheta.length === bodies.rigid.length
+      && wgslOffload.state.lastRigidStepProposalCarry.length === bodies.rigid.length;
+
+    if (proposalReady) {
+      const vx = wgslOffload.state.lastRigidStepProposalVx;
+      const vy = wgslOffload.state.lastRigidStepProposalVy;
+      const omega = wgslOffload.state.lastRigidStepProposalOmega;
+      const x = wgslOffload.state.lastRigidStepProposalX;
+      const y = wgslOffload.state.lastRigidStepProposalY;
+      const theta = wgslOffload.state.lastRigidStepProposalTheta;
+      const carry = wgslOffload.state.lastRigidStepProposalCarry;
+      let carrySum = 0;
+      for (let i = 0; i < bodies.rigid.length; i++) {
+        const b = bodies.rigid[i];
+        if (!b) continue;
+        b.vx = vx[i] || 0;
+        b.vy = vy[i] || 0;
+        b.omega = omega[i] || 0;
+        b.x = x[i] || 0;
+        b.y = y[i] || 0;
+        b.theta = theta[i] || 0;
+        carrySum += carry[i] || 0;
+      }
+      rigidCarryTransfer = carrySum;
+      wgslOffload.state.lastRigidStepAuthoritativeSource = getGpuOnlyPipelineModeProfile(wgslOffload) === 'gpu-only-fast'
+        ? 'wgsl-rigid-step-authoritative-fast'
+        : 'wgsl-rigid-step-authoritative';
+      wgslOffload.state.lastSourceRoute = wgslOffload.state.lastRigidStepAuthoritativeSource;
+      wgslOffload.state.lastMode = wgslOffload.state.lastRigidStepAuthoritativeSource;
+      wgslOffload.state.lastRigidStepAuthoritativeSignature = signature;
+    } else if (authoritativeEnabled) {
+      wgslOffload.state.lastRigidStepAuthoritativeSource = 'cpu-rigid-step-authoritative-fallback';
+      wgslOffload.state.lastSourceRoute = 'cpu-rigid-step-authoritative';
+      wgslOffload.state.lastMode = getGpuOnlyPipelineModeProfile(wgslOffload) === 'gpu-only-fast'
+        ? 'cpu-rigid-step-authoritative-fast'
+        : 'cpu-rigid-step-authoritative';
+      wgslOffload.state.lastRigidStepAuthoritativeSignature = signature;
+    }
   }
 
   return rigidCarryTransfer;

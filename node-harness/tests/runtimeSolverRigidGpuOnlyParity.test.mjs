@@ -172,12 +172,12 @@ function makeArgs() {
   };
 }
 
-test('gpu-only rigid solver path matches baseline rigid integration/coupling step outcomes', () => {
+test('gpu-only rigid solver path matches baseline rigid integration/coupling step outcomes', async () => {
   const baselineArgs = makeArgs();
   const gpuArgs = makeArgs();
 
   const baselineCarry = baselineRigidStep(baselineArgs);
-  const gpuCarry = stepRigidBodiesGpuOnly(gpuArgs);
+  const gpuCarry = await stepRigidBodiesGpuOnly(gpuArgs);
 
   assert.equal(gpuArgs.bodies.rigid.length, baselineArgs.bodies.rigid.length);
   for (let i = 0; i < baselineArgs.bodies.rigid.length; i++) {

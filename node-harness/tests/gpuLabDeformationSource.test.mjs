@@ -366,6 +366,20 @@ test('gpu-lab routes post-collision soft-cluster projection and inside-correctio
   );
 });
 
+test('gpu-lab routes soft deformation severe-collapse intervention sequencing through isolated gpu-only runtime solver module', () => {
+  assert.match(
+    source,
+    /import \{ applySoftDeformationInterventionsGpuOnly \} from '\/runtime-solvers\/stepSoftDeformationGpuOnly\.js';/,
+    'expected isolated gpu-only soft deformation intervention module import',
+  );
+
+  assert.match(
+    source,
+    /let deform;[\s\S]*if \(solverPath === 'gpu-only'\) \{[\s\S]*applySoftDeformationInterventionsGpuOnly\(\{[\s\S]*buildSoftDeformationState,[\s\S]*stabilizeSeverelyDeformedSoftClusters,[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*deform = buildSoftDeformationState\(sim, s, softClusterLoops\);[\s\S]*stabilizeSeverelyDeformedSoftClusters\(sim, s, softClusterLoops, deform\);/,
+    'expected explicit gpu-only soft deformation intervention dispatch with baseline fallback logic',
+  );
+});
+
 test('gpu-lab gates post-collision recovery pass with shared toggle across baseline and gpu-only paths', () => {
   assert.match(
     source,

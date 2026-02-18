@@ -24,6 +24,7 @@ import { applyCollisionBoundaryPassGpuOnly } from '/runtime-solvers/stepCollisio
 import { runCollisionIterationsGpuOnly } from '/runtime-solvers/stepCollisionIterationsGpuOnly.js';
 import { applySoftRestRecoveryGpuOnly } from '/runtime-solvers/stepSoftRestRecoveryGpuOnly.js';
 import { applyBodyFluidInjectionGpuOnly } from '/runtime-solvers/stepBodyFluidInjectionGpuOnly.js';
+import { applySoftDeformationInterventionsGpuOnly } from '/runtime-solvers/stepSoftDeformationGpuOnly.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -4425,10 +4426,22 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   const warningInterventionsOn = sim.controls?.enableWarningDeformInterventions !== false;
   const severeInterventionsOn = sim.controls?.enableSevereDeformInterventions !== false;
 
-  let deform = buildSoftDeformationState(sim, s, softClusterLoops);
-  if (severeInterventionsOn && deform.severeCollapseCount > 0) {
-    stabilizeSeverelyDeformedSoftClusters(sim, s, softClusterLoops, deform);
+  let deform;
+  if (solverPath === 'gpu-only') {
+    deform = applySoftDeformationInterventionsGpuOnly({
+      sim,
+      soft: s,
+      softClusterLoops,
+      severeInterventionsOn,
+      buildSoftDeformationState,
+      stabilizeSeverelyDeformedSoftClusters,
+    });
+  } else {
     deform = buildSoftDeformationState(sim, s, softClusterLoops);
+    if (severeInterventionsOn && deform.severeCollapseCount > 0) {
+      stabilizeSeverelyDeformedSoftClusters(sim, s, softClusterLoops, deform);
+      deform = buildSoftDeformationState(sim, s, softClusterLoops);
+    }
   }
 
   if (softSpringRestRecoveryOn && sim.softSpringRestBaseline && sim.softSpringRestBaseline.length === s.springs.length) {

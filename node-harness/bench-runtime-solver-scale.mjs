@@ -535,15 +535,22 @@ function stageDeltaSummary(baseline, gpuOnly) {
   return delta;
 }
 
+function parseEnvNumber(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 const scales = parseNumberList(process.env.SCALES, [25, 50, 100, 200, 400]);
 const rigidSweep = parseNumberList(process.env.RIGID_SWEEP, scales);
 const softSweep = parseNumberList(process.env.SOFT_SWEEP, [24, 48, 96, 192, 384]);
 const contactSweep = parseFloatList(process.env.CONTACT_SWEEP, [0.15, 0.35, 0.55, 0.75, 0.92]);
 const sweeps = parseSweepList(process.env.SWEEPS);
-const fixedSteps = Math.max(4, Number(process.env.FIXED_STEPS || 64) || 64);
-const warmupSteps = Math.max(0, Number(process.env.WARMUP_STEPS || 8) || 8);
-const baseRigidCount = Math.max(1, Number(process.env.BASE_RIGID_COUNT || 100) || 100);
-const baseSoftCount = Math.max(0, Number(process.env.BASE_SOFT_COUNT || 64) || 64);
+const fixedSteps = Math.max(4, parseEnvNumber('FIXED_STEPS', 64));
+const warmupSteps = Math.max(0, parseEnvNumber('WARMUP_STEPS', 8));
+const baseRigidCount = Math.max(1, parseEnvNumber('BASE_RIGID_COUNT', 100));
+const baseSoftCount = Math.max(0, parseEnvNumber('BASE_SOFT_COUNT', 64));
 
 const experiments = buildExperiments({
   scales,

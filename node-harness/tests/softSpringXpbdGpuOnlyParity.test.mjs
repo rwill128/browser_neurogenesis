@@ -97,7 +97,64 @@ function createSoftSpringMockWgslDevice() {
               const nodeCount = paramsU32[0] || 0;
               const springCount = paramsU32[1] || 0;
 
-              if (buffers.has(10)) {
+              if (buffers.has(12)) {
+                const endpointCount = paramsU32[2] || 0;
+                const dtPos = Math.max(1e-8, paramsF32[3] || 0);
+                const nodePredX = readF32(buffers.get(1), nodeCount);
+                const nodePredY = readF32(buffers.get(2), nodeCount);
+                const springA = readU32(buffers.get(3), springCount);
+                const springB = readU32(buffers.get(4), springCount);
+                const invMassA = readF32(buffers.get(5), springCount);
+                const invMassB = readF32(buffers.get(6), springCount);
+                const endpointNodes = readU32(buffers.get(7), endpointCount);
+                const endpointSprings = readU32(buffers.get(8), endpointCount);
+                const endpointSigns = new Int32Array(ensure(buffers.get(9), endpointCount * 4).slice(0, endpointCount * 4));
+                const deltaLambda = readF32(buffers.get(10), springCount);
+
+                const outVX = new Float32Array(endpointCount);
+                const outVY = new Float32Array(endpointCount);
+                for (let ei = 0; ei < endpointCount; ei++) {
+                  const ni = endpointNodes[ei];
+                  const si = endpointSprings[ei];
+                  if (ni >= nodeCount || si >= springCount || dtPos <= 1e-8) continue;
+                  const ia = springA[si];
+                  const ib = springB[si];
+                  if (ia >= nodeCount || ib >= nodeCount) continue;
+
+                  const dx = nodePredX[ib] - nodePredX[ia];
+                  const dy = nodePredY[ib] - nodePredY[ia];
+                  const d = Math.max(1e-6, Math.hypot(dx, dy));
+                  const nx = dx / d;
+                  const ny = dy / d;
+                  const sign = endpointSigns[ei] < 0 ? -1 : 1;
+                  const w = sign < 0 ? invMassA[si] : invMassB[si];
+                  const scale = (sign * w * deltaLambda[si]) / dtPos;
+                  outVX[ei] = nx * scale;
+                  outVY[ei] = ny * scale;
+                }
+                writeF32(buffers.get(11), outVX);
+                writeF32(buffers.get(12), outVY);
+              } else if (buffers.has(5) && !buffers.has(6)) {
+                const endpointCount = paramsU32[1] || 0;
+                const endpointNodes = readU32(buffers.get(1), endpointCount);
+                const endpointVX = readF32(buffers.get(2), endpointCount);
+                const endpointVY = readF32(buffers.get(3), endpointCount);
+                const outVX = new Float32Array(nodeCount);
+                const outVY = new Float32Array(nodeCount);
+                for (let ni = 0; ni < nodeCount; ni++) {
+                  let sumX = 0;
+                  let sumY = 0;
+                  for (let ei = 0; ei < endpointCount; ei++) {
+                    if (endpointNodes[ei] !== ni) continue;
+                    sumX += endpointVX[ei] || 0;
+                    sumY += endpointVY[ei] || 0;
+                  }
+                  outVX[ni] = sumX;
+                  outVY[ni] = sumY;
+                }
+                writeF32(buffers.get(4), outVX);
+                writeF32(buffers.get(5), outVY);
+              } else if (buffers.has(10)) {
                 const nodeX = readF32(buffers.get(1), nodeCount);
                 const nodeY = readF32(buffers.get(2), nodeCount);
                 const springA = readU32(buffers.get(3), springCount);
@@ -523,6 +580,8 @@ test('soft spring XPBD WGSL proposal stage runs on gpu-only path while CPU remai
   assert.equal(wgslState.lastVelocityDeltaProposalEndpointVyByColor instanceof Float32Array, true);
   assert.equal(wgslState.lastVelocityDeltaProposalNodeVxByColor instanceof Float32Array, true);
   assert.equal(wgslState.lastVelocityDeltaProposalNodeVyByColor instanceof Float32Array, true);
+  assert.equal(Number.isInteger(wgslState.lastVelocityDeltaReductionDispatch), true);
+  assert.equal(wgslState.lastVelocityDeltaReductionDispatch > 0, true);
 
   const invOrder = wgslState.preparedPlan.springColorOrderedIndices;
   const remappedDelta = new Float32Array(invOrder.length);

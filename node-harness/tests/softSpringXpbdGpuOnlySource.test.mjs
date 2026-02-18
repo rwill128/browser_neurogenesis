@@ -64,3 +64,12 @@ test('soft spring gpu-only WGSL proposal branch dispatches velocity-delta propos
     'expected WGSL proposal branch to dispatch deterministic velocity-delta WGSL stage and publish endpoint/node buffers',
   );
 });
+
+
+test('soft spring gpu-only WGSL velocity proposal stage runs WGSL node-reduction dispatch before readback', () => {
+  assert.match(
+    source,
+    /const softSpringVelocityNodeReductionWgsl = \/\* wgsl \*\/[\s\S]*velocityReductionPipeline[\s\S]*nodeReductionPass\.setPipeline\(state\.velocityReductionPipeline\)[\s\S]*nodeReductionPass\.dispatchWorkgroups\([\s\S]*copyBufferToBuffer\(state\.velocityNodeDeltaVXOut, 0, state\.velocityNodeDeltaVXReadback, 0, nodeBytes\)[\s\S]*lastVelocityDeltaReductionDispatch/,
+    'expected velocity proposal path to include a concrete WGSL node-reduction stage (not CPU-only reduction loop)',
+  );
+});

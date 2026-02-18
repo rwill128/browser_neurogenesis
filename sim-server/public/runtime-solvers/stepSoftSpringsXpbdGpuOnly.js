@@ -161,6 +161,40 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const softSpringVelocityNodeReductionWgsl = /* wgsl */`
+struct Params {
+  nodeCount: u32,
+  endpointCount: u32,
+  _pad0: u32,
+  _pad1: u32,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> endpointNodeIndices: array<u32>;
+@group(0) @binding(2) var<storage, read> endpointDeltaVX: array<f32>;
+@group(0) @binding(3) var<storage, read> endpointDeltaVY: array<f32>;
+@group(0) @binding(4) var<storage, read_write> nodeDeltaVXOut: array<f32>;
+@group(0) @binding(5) var<storage, read_write> nodeDeltaVYOut: array<f32>;
+
+@compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let ni = gid.x;
+  if (ni >= params.nodeCount) { return; }
+
+  var sumX = 0.0;
+  var sumY = 0.0;
+  for (var ei = 0u; ei < params.endpointCount; ei = ei + 1u) {
+    if (endpointNodeIndices[ei] == ni) {
+      sumX = sumX + endpointDeltaVX[ei];
+      sumY = sumY + endpointDeltaVY[ei];
+    }
+  }
+
+  nodeDeltaVXOut[ni] = sumX;
+  nodeDeltaVYOut[ni] = sumY;
+}
+`;
+
 function canUseWgslOffload(offload) {
   if (!offload || offload.enabled !== true) return false;
   if (!offload.device || typeof offload.device.createComputePipelineAsync !== 'function') return false;
@@ -298,10 +332,31 @@ function ensureVelocityDeltaProposalBuffers(offload, nodeCount, springCount, end
     const bytes = capacity * 4;
     state.velocityNodePredX?.destroy?.();
     state.velocityNodePredY?.destroy?.();
+    state.velocityNodeDeltaVXOut?.destroy?.();
+    state.velocityNodeDeltaVYOut?.destroy?.();
+    state.velocityNodeDeltaVXReadback?.destroy?.();
+    state.velocityNodeDeltaVYReadback?.destroy?.();
     state.velocityNodePredX = device.createBuffer({ size: bytes, usage: storageUsage });
     state.velocityNodePredY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.velocityNodeDeltaVXOut = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC,
+    });
+    state.velocityNodeDeltaVYOut = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC,
+    });
+    state.velocityNodeDeltaVXReadback = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
+    });
+    state.velocityNodeDeltaVYReadback = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
+    });
     state.velocityNodeCapacity = capacity;
     state.velocityBindGroup = null;
+    state.velocityReductionBindGroup = null;
   }
 
   const requiredSpringCapacity = Math.max(1, springCount);
@@ -359,6 +414,10 @@ function ensureVelocityDeltaProposalBuffers(offload, nodeCount, springCount, end
   if (!state.velocityParams) {
     state.velocityParams = device.createBuffer({ size: 16, usage: uniformUsage });
     state.velocityBindGroup = null;
+  }
+  if (!state.velocityReductionParams) {
+    state.velocityReductionParams = device.createBuffer({ size: 16, usage: uniformUsage });
+    state.velocityReductionBindGroup = null;
   }
 
   return state;
@@ -433,40 +492,81 @@ async function dispatchSoftSpringWgslVelocityDeltaProposal({ soft, offload, layo
   device.queue.writeBuffer(state.velocityEndpointSigns, 0, layout.endpointSignsI32ByColor);
   device.queue.writeBuffer(state.velocityDeltaLambdaByColor, 0, deltaLambdaByColor);
 
-  const bytes = endpointCount * 4;
-  const dispatchCount = Math.ceil(endpointCount / WGSL_WORKGROUP_SIZE);
+  if (!state.velocityReductionPipeline) {
+    const module = device.createShaderModule({ code: softSpringVelocityNodeReductionWgsl });
+    state.velocityReductionPipeline = await device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: { module, entryPoint: 'main' },
+    });
+    state.velocityReductionBindGroup = null;
+  }
+
+  if (!state.velocityReductionBindGroup) {
+    state.velocityReductionBindGroup = device.createBindGroup({
+      layout: state.velocityReductionPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.velocityReductionParams } },
+        { binding: 1, resource: { buffer: state.velocityEndpointNodeIndices } },
+        { binding: 2, resource: { buffer: state.velocityEndpointDeltaVXOut } },
+        { binding: 3, resource: { buffer: state.velocityEndpointDeltaVYOut } },
+        { binding: 4, resource: { buffer: state.velocityNodeDeltaVXOut } },
+        { binding: 5, resource: { buffer: state.velocityNodeDeltaVYOut } },
+      ],
+    });
+  }
+
+  const endpointBytes = endpointCount * 4;
+  const endpointDispatchCount = Math.ceil(endpointCount / WGSL_WORKGROUP_SIZE);
+  const nodeDispatchCount = Math.ceil(nodes.length / WGSL_WORKGROUP_SIZE);
+  const reductionParams = new Uint32Array(4);
+  reductionParams[0] = nodes.length >>> 0;
+  reductionParams[1] = endpointCount >>> 0;
+  device.queue.writeBuffer(state.velocityReductionParams, 0, reductionParams);
+
   const encoder = device.createCommandEncoder();
-  const pass = encoder.beginComputePass();
-  pass.setPipeline(state.velocityPipeline);
-  pass.setBindGroup(0, state.velocityBindGroup);
-  pass.dispatchWorkgroups(dispatchCount);
-  pass.end();
-  encoder.copyBufferToBuffer(state.velocityEndpointDeltaVXOut, 0, state.velocityEndpointDeltaVXReadback, 0, bytes);
-  encoder.copyBufferToBuffer(state.velocityEndpointDeltaVYOut, 0, state.velocityEndpointDeltaVYReadback, 0, bytes);
+  const endpointPass = encoder.beginComputePass();
+  endpointPass.setPipeline(state.velocityPipeline);
+  endpointPass.setBindGroup(0, state.velocityBindGroup);
+  endpointPass.dispatchWorkgroups(endpointDispatchCount);
+  endpointPass.end();
+
+  const nodeReductionPass = encoder.beginComputePass();
+  nodeReductionPass.setPipeline(state.velocityReductionPipeline);
+  nodeReductionPass.setBindGroup(0, state.velocityReductionBindGroup);
+  nodeReductionPass.dispatchWorkgroups(nodeDispatchCount);
+  nodeReductionPass.end();
+
+  encoder.copyBufferToBuffer(state.velocityEndpointDeltaVXOut, 0, state.velocityEndpointDeltaVXReadback, 0, endpointBytes);
+  encoder.copyBufferToBuffer(state.velocityEndpointDeltaVYOut, 0, state.velocityEndpointDeltaVYReadback, 0, endpointBytes);
+
+  const nodeBytes = nodes.length * 4;
+  encoder.copyBufferToBuffer(state.velocityNodeDeltaVXOut, 0, state.velocityNodeDeltaVXReadback, 0, nodeBytes);
+  encoder.copyBufferToBuffer(state.velocityNodeDeltaVYOut, 0, state.velocityNodeDeltaVYReadback, 0, nodeBytes);
   device.queue.submit([encoder.finish()]);
 
-  await state.velocityEndpointDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
-  const mappedVX = state.velocityEndpointDeltaVXReadback.getMappedRange(0, bytes);
+  await state.velocityEndpointDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, endpointBytes);
+  const mappedVX = state.velocityEndpointDeltaVXReadback.getMappedRange(0, endpointBytes);
   const endpointDeltaVX = new Float32Array(mappedVX.slice(0));
   state.velocityEndpointDeltaVXReadback.unmap();
 
-  await state.velocityEndpointDeltaVYReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
-  const mappedVY = state.velocityEndpointDeltaVYReadback.getMappedRange(0, bytes);
+  await state.velocityEndpointDeltaVYReadback.mapAsync(globalThis.GPUMapMode.READ, 0, endpointBytes);
+  const mappedVY = state.velocityEndpointDeltaVYReadback.getMappedRange(0, endpointBytes);
   const endpointDeltaVY = new Float32Array(mappedVY.slice(0));
   state.velocityEndpointDeltaVYReadback.unmap();
 
-  const nodeDeltaVx = new Float32Array(nodes.length);
-  const nodeDeltaVy = new Float32Array(nodes.length);
-  const endpointNodeIndices = layout.endpointNodeIndicesByColor;
-  for (let ei = 0; ei < endpointCount; ei++) {
-    const ni = endpointNodeIndices[ei];
-    if (!Number.isInteger(ni) || ni < 0 || ni >= nodeDeltaVx.length) continue;
-    nodeDeltaVx[ni] += endpointDeltaVX[ei];
-    nodeDeltaVy[ni] += endpointDeltaVY[ei];
-  }
+  await state.velocityNodeDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
+  const mappedNodeVX = state.velocityNodeDeltaVXReadback.getMappedRange(0, nodeBytes);
+  const nodeDeltaVx = new Float32Array(mappedNodeVX.slice(0));
+  state.velocityNodeDeltaVXReadback.unmap();
+
+  await state.velocityNodeDeltaVYReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
+  const mappedNodeVY = state.velocityNodeDeltaVYReadback.getMappedRange(0, nodeBytes);
+  const nodeDeltaVy = new Float32Array(mappedNodeVY.slice(0));
+  state.velocityNodeDeltaVYReadback.unmap();
 
   return {
-    dispatchCount,
+    dispatchCount: endpointDispatchCount,
+    reductionDispatchCount: nodeDispatchCount,
     endpointDeltaVX,
     endpointDeltaVY,
     nodeDeltaVx,
@@ -1061,6 +1161,7 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
             });
             if (velocityProposal) {
               wgslOffload.state.lastVelocityDeltaProposalDispatch = velocityProposal.dispatchCount;
+              wgslOffload.state.lastVelocityDeltaReductionDispatch = velocityProposal.reductionDispatchCount;
               wgslOffload.state.lastVelocityDeltaProposalEndpointVxByColor = velocityProposal.endpointDeltaVX;
               wgslOffload.state.lastVelocityDeltaProposalEndpointVyByColor = velocityProposal.endpointDeltaVY;
               wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor = velocityProposal.nodeDeltaVx;

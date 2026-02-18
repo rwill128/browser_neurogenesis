@@ -25,7 +25,13 @@ test('soft rest-recovery gpu-only module includes concrete WGSL strain probe sta
   assert.match(
     moduleSource,
     /buildSoftRestRecoveryWgslPlan\([\s\S]*buildSoftRestRecoveryWgslLayout\([\s\S]*computeSoftRestRecoveryProposalSignature\([\s\S]*lastPreparedProposalSignature[\s\S]*pendingWgslRestRecoveryProbePromise[\s\S]*dispatchSoftRestRecoveryWgslProbe\([\s\S]*dispatchSoftRestRecoveryWgslProposal\([\s\S]*lastMode = proposalRan[\s\S]*'wgsl-rest-recovery-proposal'/,
-    'expected deterministic plan/layout prep, proposal signature routing, and serialized WGSL probe+proposal source-route reporting before CPU-authoritative rest recovery',
+    'expected deterministic plan/layout prep, proposal signature routing, and serialized WGSL probe+proposal source-route reporting',
+  );
+
+  assert.match(
+    moduleSource,
+    /canApplyAuthoritativeRestRecoveryProposal\([\s\S]*enableAuthoritativeRestRecovery[\s\S]*applyAuthoritativeRestRecoveryProposal\([\s\S]*lastAuthoritativeSource = useAuthoritativeProposal[\s\S]*'wgsl-rest-recovery-authoritative'/,
+    'expected cached WGSL proposal to gate authoritative rest-length ownership in gpu-only path when parity + signature checks pass',
   );
 });
 

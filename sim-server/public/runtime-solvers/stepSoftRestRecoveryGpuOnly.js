@@ -253,6 +253,28 @@ function computeRestProposalParity({ proposalBySpring, cpuBySpring, activeSpring
   };
 }
 
+function canApplyAuthoritativeRestRecoveryProposal({ wgslOffload, proposalSignature, springCount }) {
+  const state = wgslOffload?.state;
+  if (!state || state.enableAuthoritativeRestRecovery !== true) return false;
+  if (state.lastProposalSource !== 'wgsl-rest-recovery-proposal') return false;
+  if ((state.lastProposalSignature >>> 0) !== (proposalSignature >>> 0)) return false;
+  if (!(state.lastProposalBySpring instanceof Float32Array)) return false;
+  if (state.lastProposalBySpring.length !== springCount) return false;
+  const parity = state.lastProposalParity;
+  if (!parity || !Number.isFinite(parity.maxAbs) || parity.maxAbs > 1e-5) return false;
+  return true;
+}
+
+function applyAuthoritativeRestRecoveryProposal({ springs, proposalBySpring }) {
+  for (let si = 0; si < springs.length; si++) {
+    const spring = springs[si];
+    if (!Array.isArray(spring) || spring.length < 3) continue;
+    const nextRest = Number(proposalBySpring[si]);
+    if (!Number.isFinite(nextRest)) continue;
+    spring[2] = nextRest;
+  }
+}
+
 async function dispatchSoftRestRecoveryWgslProbe({ softNodes, layout, offload }) {
   if (!canUseWgslOffload(offload)) return false;
   const nodes = Array.isArray(softNodes) ? softNodes : [];
@@ -489,6 +511,7 @@ export function applySoftRestRecoveryGpuOnly({
     deform,
   });
 
+  let proposalSignature = 0;
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     const plan = buildSoftRestRecoveryWgslPlan({ springs, softNodes });
     const layout = buildSoftRestRecoveryWgslLayout({ plan, restBaseline });
@@ -497,7 +520,7 @@ export function applySoftRestRecoveryGpuOnly({
     wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
     wgslOffload.state.lastPreparedActiveSpringCount = plan.activeSpringCount;
 
-    const proposalSignature = computeSoftRestRecoveryProposalSignature({
+    proposalSignature = computeSoftRestRecoveryProposalSignature({
       layout,
       springs,
       restBaseline,
@@ -537,11 +560,30 @@ export function applySoftRestRecoveryGpuOnly({
     }
   }
 
-  recoverSoftSpringRests(springs, restBaseline, options);
+  const useAuthoritativeProposal = canApplyAuthoritativeRestRecoveryProposal({
+    wgslOffload,
+    proposalSignature,
+    springCount: springs.length,
+  });
+
+  if (useAuthoritativeProposal) {
+    applyAuthoritativeRestRecoveryProposal({
+      springs,
+      proposalBySpring: wgslOffload.state.lastProposalBySpring,
+    });
+  } else {
+    recoverSoftSpringRests(springs, restBaseline, options);
+  }
 
   if (wgslOffload?.state) {
-    wgslOffload.state.lastAuthoritativeSource = 'cpu-rest-recovery-authoritative';
-    if (!wgslOffload.state.lastMode) wgslOffload.state.lastMode = 'cpu-rest-recovery-authoritative';
+    wgslOffload.state.lastAuthoritativeSource = useAuthoritativeProposal
+      ? 'wgsl-rest-recovery-authoritative'
+      : 'cpu-rest-recovery-authoritative';
+    if (!wgslOffload.state.lastMode) {
+      wgslOffload.state.lastMode = useAuthoritativeProposal
+        ? 'wgsl-rest-recovery-authoritative'
+        : 'cpu-rest-recovery-authoritative';
+    }
     if (!wgslOffload.state.lastProbeSource) wgslOffload.state.lastProbeSource = 'cpu-rest-recovery-authoritative';
     if (!wgslOffload.state.lastProposalSource) wgslOffload.state.lastProposalSource = 'cpu-rest-recovery-authoritative';
   }

@@ -123,3 +123,53 @@ test('soft rest-recovery gpu-only defaults proposal source-route telemetry to cp
     'expected deterministic proposal signature prep even when wgsl device is unavailable',
   );
 });
+
+test('soft rest-recovery gpu-only can promote cached WGSL proposal to authoritative rest update when parity is clean', () => {
+  const springs = [
+    [0, 1, 1.4],
+    [1, 2, 0.9],
+  ];
+  const restBaseline = [1.1, 0.8];
+  const wgslOffload = {
+    enabled: true,
+    state: {
+      enableAuthoritativeRestRecovery: true,
+      lastProposalSource: 'wgsl-rest-recovery-proposal',
+      lastProposalBySpring: new Float32Array([1.23, 0.77]),
+      lastProposalParity: { maxAbs: 0, comparedCount: 2 },
+    },
+  };
+
+  let cpuCalls = 0;
+  applySoftRestRecoveryGpuOnly({
+    springs,
+    softNodes: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }],
+    restBaseline,
+    severeInterventionsOn: false,
+    warningInterventionsOn: false,
+    deform: { severeCollapseCount: 0, warningCount: 0 },
+    recoverSoftSpringRests: () => { cpuCalls += 1; },
+    wgslOffload,
+  });
+
+  wgslOffload.state.lastProposalSignature = wgslOffload.state.lastPreparedProposalSignature;
+  applySoftRestRecoveryGpuOnly({
+    springs,
+    softNodes: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 2, y: 0 }],
+    restBaseline,
+    severeInterventionsOn: false,
+    warningInterventionsOn: false,
+    deform: { severeCollapseCount: 0, warningCount: 0 },
+    recoverSoftSpringRests: () => { cpuCalls += 1; },
+    wgslOffload,
+  });
+
+  assert.equal(cpuCalls, 1, 'expected cpu recover callback to be skipped once cached WGSL proposal becomes authoritative');
+  assert.ok(Math.abs(springs[0][2] - 1.23) <= 1e-6);
+  assert.ok(Math.abs(springs[1][2] - 0.77) <= 1e-6);
+  assert.equal(
+    wgslOffload.state.lastAuthoritativeSource,
+    'wgsl-rest-recovery-authoritative',
+    'expected explicit source-route ownership when authoritative rest recovery uses WGSL proposal cache',
+  );
+});

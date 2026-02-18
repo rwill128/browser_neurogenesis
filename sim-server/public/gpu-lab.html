@@ -60,6 +60,48 @@
       color: #9fe3ff;
       font-family: ui-monospace, Menlo, monospace;
     }
+    .fallback-panel {
+      margin: 0 0 10px;
+      max-width: 1180px;
+      padding: 8px 10px;
+      border: 1px solid #333;
+      border-radius: 8px;
+      background: #171717;
+    }
+    .fallback-panel .fallback-controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    .fallback-panel button {
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: 1px solid #444;
+      background: #222;
+      color: #eee;
+      cursor: pointer;
+    }
+    .fallback-copy-status {
+      color: #9faec7;
+      font-size: 12px;
+      font-family: ui-monospace, Menlo, monospace;
+    }
+    .fallback-details {
+      margin: 0;
+      background: #111;
+      border: 1px solid #2f2f2f;
+      border-radius: 6px;
+      padding: 8px;
+      color: #ffd7d7;
+      max-height: 180px;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-family: ui-monospace, Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.35;
+    }
 
     body.embed-mode {
       padding: 0;
@@ -75,6 +117,7 @@
     body.embed-mode #fpsHud,
     body.embed-mode #softIntegrateHud,
     body.embed-mode #fallbackHud,
+    body.embed-mode #fallbackPanel,
     body.embed-mode #deformationLegend,
     body.embed-mode .stabilizer-legend {
       display: none !important;
@@ -139,6 +182,16 @@
     <span id="fpsHud" style="margin-left:10px;color:#9fe3ff;font-family:ui-monospace,Menlo,monospace">FPS: --</span>
     <span id="softIntegrateHud" style="margin-left:10px;color:#9faec7;font-family:ui-monospace,Menlo,monospace">Soft integrate: --</span>
     <span id="fallbackHud" style="margin-left:10px;color:#7df0b6;font-family:ui-monospace,Menlo,monospace">Fallbacks: none</span>
+  </div>
+
+  <div id="fallbackPanel" class="fallback-panel" aria-live="polite">
+    <div class="fallback-controls">
+      <strong>Fallback routes (persistent):</strong>
+      <button id="copyFallbacksBtn" type="button">Copy fallbacks</button>
+      <button id="clearFallbacksBtn" type="button">Clear fallback history</button>
+      <span id="copyFallbacksStatus" class="fallback-copy-status">ready</span>
+    </div>
+    <pre id="fallbackHudDetails" class="fallback-details">No fallback routes recorded yet.</pre>
   </div>
 
   <div class="row">
@@ -267,6 +320,6 @@
   </div>
 
   <pre id="out">idle</pre>
-  <script type="module" src="/gpu-lab.js?v=20260218c"></script>
+  <script type="module" src="/gpu-lab.js?v=20260218d"></script>
 </body>
 </html>

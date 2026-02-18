@@ -36,6 +36,10 @@ const importScaleEl = document.getElementById('importScale');
 const fpsHud = document.getElementById('fpsHud');
 const softIntegrateHudEl = document.getElementById('softIntegrateHud');
 const fallbackHudEl = document.getElementById('fallbackHud');
+const fallbackHudDetailsEl = document.getElementById('fallbackHudDetails');
+const copyFallbacksBtn = document.getElementById('copyFallbacksBtn');
+const clearFallbacksBtn = document.getElementById('clearFallbacksBtn');
+const copyFallbacksStatusEl = document.getElementById('copyFallbacksStatus');
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
 
@@ -384,6 +388,12 @@ const GPU_FALLBACK_STAGE_LABELS = Object.freeze({
   bodyFluidInjectionWgslState: 'Body-fluid injection',
 });
 
+function setFallbackCopyStatus(text, color = '#9faec7') {
+  if (!copyFallbacksStatusEl) return;
+  copyFallbacksStatusEl.textContent = String(text || '');
+  copyFallbacksStatusEl.style.color = color;
+}
+
 function collectGpuFallbackSignals(sim) {
   const entries = [];
   const seen = new Set();
@@ -421,6 +431,47 @@ function collectGpuFallbackSignals(sim) {
   return entries;
 }
 
+async function copyFallbackReportToClipboard() {
+  const text = String(sim?.fallbackHudState?.reportText || fallbackHudDetailsEl?.textContent || '').trim();
+  if (!text) {
+    setFallbackCopyStatus('nothing to copy', '#ffd36b');
+    return;
+  }
+
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', 'readonly');
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.top = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (!ok) throw new Error('copy command rejected');
+    }
+    setFallbackCopyStatus('copied', '#6bff9a');
+  } catch (err) {
+    setFallbackCopyStatus(`copy failed: ${String(err?.message || err)}`, '#ff8f8f');
+  }
+}
+
+function clearFallbackHistory() {
+  if (!sim) {
+    if (fallbackHudDetailsEl) fallbackHudDetailsEl.textContent = 'No fallback routes recorded yet.';
+    setFallbackCopyStatus('cleared', '#9fe3ff');
+    return;
+  }
+  sim.fallbackHudState = { byRoute: new Map(), lastFallbackFrame: null, reportText: '' };
+  updateFallbackHud(sim);
+  setFallbackCopyStatus('cleared', '#9fe3ff');
+}
+
 function updateFallbackHud(sim) {
   if (!fallbackHudEl) return;
 
@@ -428,8 +479,12 @@ function updateFallbackHud(sim) {
   if (solverPath !== 'gpu-only') {
     fallbackHudEl.textContent = 'Fallbacks: n/a (baseline solver)';
     fallbackHudEl.style.color = '#9fb8ff';
-    fallbackHudEl.title = 'CPU fallback tracking is shown while runtime solver is set to gpu-only.';
+    const baselineText = 'Fallback tracker is active only while runtime solver is set to gpu-only.';
+    fallbackHudEl.title = baselineText;
+    if (fallbackHudDetailsEl) fallbackHudDetailsEl.textContent = baselineText;
     if (sim) {
+      sim.fallbackHudState ||= { byRoute: new Map(), lastFallbackFrame: null, reportText: '' };
+      sim.fallbackHudState.reportText = baselineText;
       sim.fallbackHudSummary = {
         active: false,
         currentCount: 0,
@@ -437,63 +492,87 @@ function updateFallbackHud(sim) {
         lastFallbackFrame: null,
         currentStages: [],
         recentStages: [],
+        currentEntries: [],
+        recentEntries: [],
+        reportText: baselineText,
       };
     }
     return;
   }
 
-  sim.fallbackHudState ||= { byStage: new Map(), lastFallbackFrame: null };
+  sim.fallbackHudState ||= { byRoute: new Map(), lastFallbackFrame: null, reportText: '' };
   const hudState = sim.fallbackHudState;
+  if (!(hudState.byRoute instanceof Map)) {
+    hudState.byRoute = new Map();
+  }
+
   const frame = Number(sim?.frame) || 0;
   const current = collectGpuFallbackSignals(sim);
 
   for (const entry of current) {
-    hudState.byStage.set(entry.stage, {
-      ...entry,
-      lastFrame: frame,
-    });
+    const key = `${entry.stage}|${entry.route}|${entry.detailKey}`;
+    const prev = hudState.byRoute.get(key);
+    if (prev) {
+      prev.lastFrame = frame;
+      prev.hits = (Number(prev.hits) || 0) + 1;
+      hudState.byRoute.set(key, prev);
+    } else {
+      hudState.byRoute.set(key, {
+        ...entry,
+        firstFrame: frame,
+        lastFrame: frame,
+        hits: 1,
+      });
+    }
   }
   if (current.length > 0) {
     hudState.lastFallbackFrame = frame;
   }
 
-  const sticky = Array.from(hudState.byStage.values())
+  const sticky = Array.from(hudState.byRoute.values())
     .sort((a, b) => (Number(b.lastFrame) || 0) - (Number(a.lastFrame) || 0));
 
   if (current.length > 0) {
-    const stages = current.map((e) => e.stage);
-    const uniqStages = Array.from(new Set(stages));
-    const stageLabel = uniqStages.slice(0, 3).join(', ');
-    const suffix = uniqStages.length > 3 ? ` +${uniqStages.length - 3} more` : '';
-    fallbackHudEl.textContent = `Fallback NOW (${current.length}): ${stageLabel}${suffix}`;
+    const stages = Array.from(new Set(current.map((e) => e.stage)));
+    fallbackHudEl.textContent = `Fallback NOW (${current.length}): ${stages.join(', ')}`;
     fallbackHudEl.style.color = '#ff8f8f';
   } else if (sticky.length > 0) {
-    const recentStages = Array.from(new Set(sticky.slice(0, 3).map((e) => e.stage)));
-    const suffix = sticky.length > 3 ? ` +${sticky.length - 3} more` : '';
+    const recentStages = Array.from(new Set(sticky.map((e) => e.stage)));
     const frameLabel = Number.isFinite(Number(hudState.lastFallbackFrame)) ? `@f${hudState.lastFallbackFrame}` : '';
-    fallbackHudEl.textContent = `Last fallback ${frameLabel}: ${recentStages.join(', ')}${suffix}`;
+    fallbackHudEl.textContent = `Last fallback ${frameLabel}: ${recentStages.join(', ')}`;
     fallbackHudEl.style.color = '#ffd36b';
   } else {
     fallbackHudEl.textContent = 'Fallbacks: none';
     fallbackHudEl.style.color = '#7df0b6';
   }
 
-  const detailLines = [];
-  if (current.length > 0) {
-    detailLines.push(`Current frame fallback routes (${current.length}):`);
+  const mode = normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath);
+  const lines = [
+    `Fallback tracker | frame=${frame} | solver=${solverPath} | mode=${mode}`,
+    '',
+    `Current frame fallback routes (${current.length}):`,
+  ];
+  if (current.length === 0) {
+    lines.push('- none');
+  } else {
     for (const entry of current) {
-      detailLines.push(`- ${entry.stage}: ${entry.route}${entry.detailKey ? ` [${entry.detailKey}]` : ''}`);
+      lines.push(`- ${entry.stage}: ${entry.route}${entry.detailKey ? ` [${entry.detailKey}]` : ''}`);
     }
   }
-  if (sticky.length > 0) {
-    detailLines.push('Recent fallback routes:');
-    for (const entry of sticky.slice(0, 12)) {
-      detailLines.push(`- f${entry.lastFrame}: ${entry.stage}: ${entry.route}${entry.detailKey ? ` [${entry.detailKey}]` : ''}`);
+  lines.push('');
+  lines.push(`Persistent fallback history (unique routes=${sticky.length}):`);
+  if (sticky.length === 0) {
+    lines.push('- none');
+  } else {
+    for (const entry of sticky) {
+      lines.push(`- f${entry.lastFrame} (${entry.hits}x): ${entry.stage}: ${entry.route}${entry.detailKey ? ` [${entry.detailKey}]` : ''}`);
     }
   }
-  fallbackHudEl.title = detailLines.length > 0
-    ? detailLines.join('\n')
-    : 'No CPU fallback routes detected in gpu-only solver path.';
+  const reportText = lines.join('\n');
+  hudState.reportText = reportText;
+
+  if (fallbackHudDetailsEl) fallbackHudDetailsEl.textContent = reportText;
+  fallbackHudEl.title = reportText;
 
   sim.fallbackHudSummary = {
     active: true,
@@ -501,7 +580,10 @@ function updateFallbackHud(sim) {
     hasRecent: sticky.length > 0,
     lastFallbackFrame: hudState.lastFallbackFrame,
     currentStages: Array.from(new Set(current.map((e) => e.stage))),
-    recentStages: Array.from(new Set(sticky.map((e) => e.stage))).slice(0, 12),
+    recentStages: Array.from(new Set(sticky.map((e) => e.stage))),
+    currentEntries: current.map((e) => `${e.stage}: ${e.route}${e.detailKey ? ` [${e.detailKey}]` : ''}`),
+    recentEntries: sticky.map((e) => `f${e.lastFrame} (${e.hits}x): ${e.stage}: ${e.route}${e.detailKey ? ` [${e.detailKey}]` : ''}`),
+    reportText,
   };
 }
 
@@ -6393,6 +6475,16 @@ function stop() {
 
 bindSliderReadouts();
 
+copyFallbacksBtn?.addEventListener('click', () => {
+  copyFallbackReportToClipboard();
+});
+
+clearFallbacksBtn?.addEventListener('click', () => {
+  clearFallbackHistory();
+});
+
+setFallbackCopyStatus('ready', '#9faec7');
+
 for (const solverEl of runtimeSolverPathEls) {
   solverEl?.addEventListener('change', async () => {
     if (!solverEl.checked) return;
@@ -6611,6 +6703,9 @@ window.__gpuLabApi = {
         lastFallbackFrame: null,
         currentStages: [],
         recentStages: [],
+        currentEntries: [],
+        recentEntries: [],
+        reportText: '',
       },
       rigidBodies: Number(sim?.bodies?.rigid?.length) || 0,
       softNodes: Number(sim?.bodies?.soft?.nodes?.length) || 0,

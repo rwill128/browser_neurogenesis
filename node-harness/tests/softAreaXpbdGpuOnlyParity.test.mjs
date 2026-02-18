@@ -105,6 +105,7 @@ test('soft area XPBD parity: baseline stepping and gpu-only module produce match
     softAreaRest: new Map([[7, 44.2], [11, 29.4]]),
     softAreaLambda: new Map([[7, 0.07], [11, -0.04]]),
   };
+  const wgslOffload = { enabled: true, state: {} };
 
   applySoftAreaXPBDVelocityBaseline(baselineSim, baselineSoft, loops, dtPos, stiffnessScale);
   applySoftAreaXPBDVelocityGpuOnly({
@@ -115,6 +116,7 @@ test('soft area XPBD parity: baseline stepping and gpu-only module produce match
     stiffnessScale,
     softAreaXpbdIters: SOFT_AREA_XPBD_ITERS,
     softAreaBaseCompliance: SOFT_AREA_BASE_COMPLIANCE,
+    wgslOffload,
   });
 
   assert.deepEqual(
@@ -124,6 +126,12 @@ test('soft area XPBD parity: baseline stepping and gpu-only module produce match
   );
 
   assert.equal(gpuOnlySoft.nodes.length, baselineSoft.nodes.length);
+
+  assert.equal(wgslOffload.state.lastMode, 'cpu-prepared', 'expected gpu-only area pass to publish WGSL-prepared layout mode');
+  assert.equal(wgslOffload.state.lastPreparedClusterCount, 3, 'expected prepared cluster count to include all loops');
+  assert.equal(wgslOffload.state.lastPreparedEndpointCount, 9, 'expected prepared endpoint count to match flattened loop endpoints');
+  assert.ok((wgslOffload.state.lastPreparedLayoutBytes || 0) > 0, 'expected prepared WGSL layout byte footprint to be tracked');
+
   for (let i = 0; i < baselineSoft.nodes.length; i++) {
     const b = baselineSoft.nodes[i];
     const g = gpuOnlySoft.nodes[i];

@@ -4191,6 +4191,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       stiffnessScale: softSpringStiffness,
       softAreaXpbdIters: SOFT_AREA_XPBD_ITERS,
       softAreaBaseCompliance,
+      wgslOffload: {
+        enabled: true,
+        device: sim?.device,
+        state: (sim.softAreaXpbdWgslState ||= {}),
+      },
     });
   } else {
     applySoftAreaXPBDVelocity(sim, s, softClusterLoops, dtPos, softSpringStiffness, {

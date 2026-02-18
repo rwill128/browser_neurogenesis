@@ -106,6 +106,19 @@
     </label>
   </div>
 
+  <div class="row" role="radiogroup" aria-label="Runtime pipeline mode">
+    <strong>Pipeline mode:</strong>
+    <label style="display:inline-flex;align-items:center;gap:6px;">
+      <input type="radio" name="runtimePipelineMode" value="standard" checked /> standard (baseline reference)
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:6px;">
+      <input type="radio" name="runtimePipelineMode" value="gpu-only-validated" /> gpu-only validated (parity-heavy)
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:6px;">
+      <input type="radio" name="runtimePipelineMode" value="gpu-only-fast" /> gpu-only fast (reduced readback/parity)
+    </label>
+  </div>
+
   <div class="row">
     <button id="runBtn">Start GPU fluid sim</button>
     <button id="stopBtn">Stop</button>

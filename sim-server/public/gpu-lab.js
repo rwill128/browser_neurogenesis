@@ -80,6 +80,7 @@ const enableMembraneBoundaryXpbdEl = document.getElementById('enableMembraneBoun
 const enableMembraneShapeMemoryEl = document.getElementById('enableMembraneShapeMemory');
 const enableMembranePressureEl = document.getElementById('enableMembranePressure');
 const runtimeSolverPathEls = Array.from(document.querySelectorAll('input[name="runtimeSolverPath"]'));
+const runtimePipelineModeEls = Array.from(document.querySelectorAll('input[name="runtimePipelineMode"]'));
 
 const GENERATED_MINI_SCENARIOS_URL = '/generated-mini-scenarios.json';
 let generatedMiniScenarios = new Map();
@@ -87,6 +88,7 @@ let generatedMiniScenarios = new Map();
 const urlParams = new URLSearchParams(window.location.search || '');
 const EMBED_MODE = urlParams.get('embed') === '1' || urlParams.get('embedded') === '1';
 setRuntimeSolverPath(urlParams.get('solverPath'), { syncUrl: false });
+setRuntimePipelineMode(urlParams.get('pipelineMode'), { syncUrl: false });
 if (EMBED_MODE) {
   document.body.classList.add('embed-mode');
 }
@@ -201,9 +203,43 @@ function normalizeRuntimeSolverPath(raw) {
   return mode === 'gpu-only' ? 'gpu-only' : 'baseline';
 }
 
+function normalizeRuntimePipelineMode(raw, solverPath = null) {
+  const normalizedSolverPath = normalizeRuntimeSolverPath(solverPath ?? getRuntimeSolverPath());
+  if (normalizedSolverPath !== 'gpu-only') return 'standard';
+  const mode = String(raw || '').trim().toLowerCase();
+  if (mode === 'gpu-only-fast') return 'gpu-only-fast';
+  if (mode === 'gpu-only-validated') return 'gpu-only-validated';
+  return 'gpu-only-validated';
+}
+
 function getRuntimeSolverPath() {
   const picked = runtimeSolverPathEls.find((el) => el?.checked);
   return normalizeRuntimeSolverPath(picked?.value);
+}
+
+function getRuntimePipelineMode(solverPath = null) {
+  const normalizedSolverPath = normalizeRuntimeSolverPath(solverPath ?? getRuntimeSolverPath());
+  if (normalizedSolverPath !== 'gpu-only') return 'standard';
+  const picked = runtimePipelineModeEls.find((el) => el?.checked);
+  return normalizeRuntimePipelineMode(picked?.value, normalizedSolverPath);
+}
+
+function setRuntimePipelineMode(mode, { syncUrl = false, solverPath = null } = {}) {
+  const normalizedSolverPath = normalizeRuntimeSolverPath(solverPath ?? getRuntimeSolverPath());
+  const normalized = normalizeRuntimePipelineMode(mode, normalizedSolverPath);
+  for (const el of runtimePipelineModeEls) {
+    if (!el) continue;
+    el.checked = (normalizeRuntimePipelineMode(el.value, normalizedSolverPath) === normalized);
+    el.disabled = normalizedSolverPath !== 'gpu-only' && normalizeRuntimePipelineMode(el.value, 'gpu-only') !== 'standard';
+  }
+  if (syncUrl && window?.history?.replaceState) {
+    const params = new URLSearchParams(window.location.search || '');
+    params.set('pipelineMode', normalized);
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash || ''}`;
+    window.history.replaceState({}, '', nextUrl);
+  }
+  return normalized;
 }
 
 function setRuntimeSolverPath(mode, { syncUrl = false } = {}) {
@@ -212,9 +248,14 @@ function setRuntimeSolverPath(mode, { syncUrl = false } = {}) {
     if (!el) continue;
     el.checked = (normalizeRuntimeSolverPath(el.value) === normalized);
   }
+  const activePipelineMode = setRuntimePipelineMode(
+    normalized === 'gpu-only' ? getRuntimePipelineMode('gpu-only') : 'standard',
+    { syncUrl, solverPath: normalized },
+  );
   if (syncUrl && window?.history?.replaceState) {
     const params = new URLSearchParams(window.location.search || '');
     params.set('solverPath', normalized);
+    params.set('pipelineMode', activePipelineMode);
     const query = params.toString();
     const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash || ''}`;
     window.history.replaceState({}, '', nextUrl);
@@ -264,6 +305,7 @@ function readControls() {
     enableMembraneShapeMemory: (enableMembraneShapeMemoryEl?.checked !== false),
     enableMembranePressure: (enableMembranePressureEl?.checked !== false),
     runtimeSolverPath: getRuntimeSolverPath(),
+    runtimePipelineMode: getRuntimePipelineMode(),
   };
 }
 
@@ -5344,12 +5386,17 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
   if (gridEl) gridEl.value = String(grid);
   if (showViscEl) showViscEl.checked = false;
   const selectedSolverPath = setRuntimeSolverPath(options?.solverPath ?? getRuntimeSolverPath(), { syncUrl: true });
+  const selectedPipelineMode = setRuntimePipelineMode(options?.pipelineMode ?? getRuntimePipelineMode(selectedSolverPath), {
+    syncUrl: true,
+    solverPath: selectedSolverPath,
+  });
 
   running = false;
   sim = await initSim();
   // Wind-tunnel embed should use only the explicit configured emitter.
   sim.disableDefaultInject = true;
   sim.controls.runtimeSolverPath = selectedSolverPath;
+  sim.controls.runtimePipelineMode = selectedPipelineMode;
 
   sim.bodies = {
     rigid: [],
@@ -5404,6 +5451,7 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
     ok: true,
     mode: 'embed-wind-tunnel',
     runtimeSolverPath: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath),
+    runtimePipelineMode: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
     grid: sim.controls.n,
     rigidBodies: sim.bodies.rigid.length,
     softNodes: sim.bodies.soft?.nodes?.length || 0,
@@ -6159,8 +6207,25 @@ for (const solverEl of runtimeSolverPathEls) {
   solverEl?.addEventListener('change', async () => {
     if (!solverEl.checked) return;
     const selected = setRuntimeSolverPath(solverEl.value, { syncUrl: true });
-    if (sim?.controls) sim.controls.runtimeSolverPath = selected;
+    if (sim?.controls) {
+      sim.controls.runtimeSolverPath = selected;
+      sim.controls.runtimePipelineMode = getRuntimePipelineMode(selected);
+    }
     if (!running || !sim) return;
+    running = false;
+    sim = null;
+    await start();
+  });
+}
+
+
+for (const pipelineEl of runtimePipelineModeEls) {
+  pipelineEl?.addEventListener('change', async () => {
+    if (!pipelineEl.checked) return;
+    const selectedPath = getRuntimeSolverPath();
+    const selectedMode = setRuntimePipelineMode(pipelineEl.value, { syncUrl: true, solverPath: selectedPath });
+    if (sim?.controls) sim.controls.runtimePipelineMode = selectedMode;
+    if (!running || !sim || selectedPath !== 'gpu-only') return;
     running = false;
     sim = null;
     await start();
@@ -6348,6 +6413,7 @@ window.__gpuLabApi = {
       frame: Number(sim?.frame) || 0,
       grid: Number(sim?.controls?.n) || null,
       runtimeSolverPath: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath),
+    runtimePipelineMode: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
       rigidBodies: Number(sim?.bodies?.rigid?.length) || 0,
       softNodes: Number(sim?.bodies?.soft?.nodes?.length) || 0,
       interactionLab: il ? {

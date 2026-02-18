@@ -437,7 +437,14 @@ function ensureVelocityDeltaProposalBuffers(offload, nodeCount, springCount, end
   return state;
 }
 
-async function dispatchSoftSpringWgslVelocityDeltaProposal({ soft, offload, layout, dtPos, deltaLambdaByColor }) {
+async function dispatchSoftSpringWgslVelocityDeltaProposal({
+  soft,
+  offload,
+  layout,
+  dtPos,
+  deltaLambdaByColor,
+  includeEndpointTelemetry = true,
+}) {
   if (!canUseWgslOffload(offload)) return null;
   const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
   const springCount = Number(layout?.springNodeAByColor?.length) || 0;
@@ -551,8 +558,10 @@ async function dispatchSoftSpringWgslVelocityDeltaProposal({ soft, offload, layo
   nodeReductionPass.dispatchWorkgroups(nodeDispatchCount);
   nodeReductionPass.end();
 
-  encoder.copyBufferToBuffer(state.velocityEndpointDeltaVXOut, 0, state.velocityEndpointDeltaVXReadback, 0, endpointBytes);
-  encoder.copyBufferToBuffer(state.velocityEndpointDeltaVYOut, 0, state.velocityEndpointDeltaVYReadback, 0, endpointBytes);
+  if (includeEndpointTelemetry) {
+    encoder.copyBufferToBuffer(state.velocityEndpointDeltaVXOut, 0, state.velocityEndpointDeltaVXReadback, 0, endpointBytes);
+    encoder.copyBufferToBuffer(state.velocityEndpointDeltaVYOut, 0, state.velocityEndpointDeltaVYReadback, 0, endpointBytes);
+  }
 
   const nodeBytes = nodes.length * 4;
   encoder.copyBufferToBuffer(state.velocityNodeDeltaVXOut, 0, state.velocityNodeDeltaVXReadback, 0, nodeBytes);
@@ -560,15 +569,19 @@ async function dispatchSoftSpringWgslVelocityDeltaProposal({ soft, offload, layo
   encoder.copyBufferToBuffer(state.velocityNodeContributionCountOut, 0, state.velocityNodeContributionCountReadback, 0, nodeBytes);
   device.queue.submit([encoder.finish()]);
 
-  await state.velocityEndpointDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, endpointBytes);
-  const mappedVX = state.velocityEndpointDeltaVXReadback.getMappedRange(0, endpointBytes);
-  const endpointDeltaVX = new Float32Array(mappedVX.slice(0));
-  state.velocityEndpointDeltaVXReadback.unmap();
+  let endpointDeltaVX = null;
+  let endpointDeltaVY = null;
+  if (includeEndpointTelemetry) {
+    await state.velocityEndpointDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, endpointBytes);
+    const mappedVX = state.velocityEndpointDeltaVXReadback.getMappedRange(0, endpointBytes);
+    endpointDeltaVX = new Float32Array(mappedVX.slice(0));
+    state.velocityEndpointDeltaVXReadback.unmap();
 
-  await state.velocityEndpointDeltaVYReadback.mapAsync(globalThis.GPUMapMode.READ, 0, endpointBytes);
-  const mappedVY = state.velocityEndpointDeltaVYReadback.getMappedRange(0, endpointBytes);
-  const endpointDeltaVY = new Float32Array(mappedVY.slice(0));
-  state.velocityEndpointDeltaVYReadback.unmap();
+    await state.velocityEndpointDeltaVYReadback.mapAsync(globalThis.GPUMapMode.READ, 0, endpointBytes);
+    const mappedVY = state.velocityEndpointDeltaVYReadback.getMappedRange(0, endpointBytes);
+    endpointDeltaVY = new Float32Array(mappedVY.slice(0));
+    state.velocityEndpointDeltaVYReadback.unmap();
+  }
 
   await state.velocityNodeDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
   const mappedNodeVX = state.velocityNodeDeltaVXReadback.getMappedRange(0, nodeBytes);
@@ -1230,6 +1243,23 @@ function computeSoftSpringVelocityProposalSignature({ soft, layout, lambdaCache,
   return `spr-v1-${hash.toString(16)}-${nodeCount}-${springCount}`;
 }
 
+function isGpuOnlyFastMode(wgslOffload) {
+  return String(wgslOffload?.modeProfile || '').trim().toLowerCase() === 'gpu-only-fast';
+}
+
+function checkFiniteFloat32Array(values) {
+  if (!(values instanceof Float32Array)) return { allFinite: false, nonFiniteCount: 0, comparedCount: 0 };
+  let nonFiniteCount = 0;
+  for (let i = 0; i < values.length; i++) {
+    if (!Number.isFinite(values[i])) nonFiniteCount += 1;
+  }
+  return {
+    allFinite: nonFiniteCount === 0,
+    nonFiniteCount,
+    comparedCount: values.length,
+  };
+}
+
 function applySoftSpringWgslAuthoritativeProposal({
   soft,
   lambdaCache,
@@ -1301,15 +1331,25 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
     // Concrete WGSL soft-spring stage: consume prior deterministic WGSL velocity
     // reduction as authoritative node/lambda update when the current frame input
     // signature matches and parity remains within tolerance.
+    const fastMode = isGpuOnlyFastMode(wgslOffload);
     const cachedProposalReady = wgslOffload.state.enableAuthoritativeVelocityDelta === true
       && wgslOffload.state.lastVelocityDeltaProposalSignature === proposalSignature
-      && wgslOffload.state.lastVelocityDeltaProposalSource === 'wgsl-node-reduction'
-      && wgslOffload.state.lastVelocityDeltaParity?.maxAbs <= 1e-5
       && (
-        wgslOffload.state.lastContributionCountParity?.mismatchCount === 0
-        || wgslOffload.state.lastVelocityDeltaParity?.maxAbs <= 1e-9
+        wgslOffload.state.lastVelocityDeltaProposalSource === 'wgsl-node-reduction'
+        || wgslOffload.state.lastVelocityDeltaProposalSource === 'wgsl-node-reduction-fast'
       )
-      && wgslOffload.state.lastContributionCountParity?.comparedCount === soft.nodes.length
+      && (
+        fastMode
+          ? wgslOffload.state.lastVelocityDeltaFinite?.allFinite === true
+          : (
+            wgslOffload.state.lastVelocityDeltaParity?.maxAbs <= 1e-5
+            && (
+              wgslOffload.state.lastContributionCountParity?.mismatchCount === 0
+              || wgslOffload.state.lastVelocityDeltaParity?.maxAbs <= 1e-9
+            )
+            && wgslOffload.state.lastContributionCountParity?.comparedCount === soft.nodes.length
+          )
+      )
       && wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor instanceof Float32Array
       && wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor instanceof Float32Array
       && wgslOffload.state.lastVelocityDeltaProposalNodeContributionCount instanceof Uint32Array
@@ -1362,16 +1402,24 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
                 layout,
                 dtPos,
                 deltaLambdaByColor: wgslOffload.state.lastProposalDeltaLambdaByColor,
+                includeEndpointTelemetry: !fastMode,
               });
-              const proposalReduction = reduceSoftSpringVelocityDeltasDeterministic({
-                soft,
-                dtPos,
-                layout,
-                deltaLambdaByColor: wgslOffload.state.lastProposalDeltaLambdaByColor,
-              });
-              wgslOffload.state.lastVelocityDeltaExpectedNodeVxByColor = proposalReduction.deltaVxByNode;
-              wgslOffload.state.lastVelocityDeltaExpectedNodeVyByColor = proposalReduction.deltaVyByNode;
-              wgslOffload.state.lastVelocityDeltaExpectedNodeContributionCount = proposalReduction.contributionCountByNode;
+              let proposalReduction = null;
+              if (!fastMode) {
+                proposalReduction = reduceSoftSpringVelocityDeltasDeterministic({
+                  soft,
+                  dtPos,
+                  layout,
+                  deltaLambdaByColor: wgslOffload.state.lastProposalDeltaLambdaByColor,
+                });
+                wgslOffload.state.lastVelocityDeltaExpectedNodeVxByColor = proposalReduction.deltaVxByNode;
+                wgslOffload.state.lastVelocityDeltaExpectedNodeVyByColor = proposalReduction.deltaVyByNode;
+                wgslOffload.state.lastVelocityDeltaExpectedNodeContributionCount = proposalReduction.contributionCountByNode;
+              } else {
+                wgslOffload.state.lastVelocityDeltaExpectedNodeVxByColor = null;
+                wgslOffload.state.lastVelocityDeltaExpectedNodeVyByColor = null;
+                wgslOffload.state.lastVelocityDeltaExpectedNodeContributionCount = null;
+              }
 
               if (velocityProposal) {
                 wgslOffload.state.lastVelocityDeltaProposalDispatch = velocityProposal.dispatchCount;
@@ -1381,36 +1429,63 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
                 wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor = velocityProposal.nodeDeltaVx;
                 wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor = velocityProposal.nodeDeltaVy;
                 wgslOffload.state.lastVelocityDeltaProposalNodeContributionCount = velocityProposal.nodeContributionCount;
-                wgslOffload.state.lastVelocityDeltaProposalSource = 'wgsl-node-reduction';
-              } else {
+                wgslOffload.state.lastVelocityDeltaProposalSource = fastMode ? 'wgsl-node-reduction-fast' : 'wgsl-node-reduction';
+              } else if (proposalReduction) {
                 wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor = proposalReduction.deltaVxByNode;
                 wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor = proposalReduction.deltaVyByNode;
                 wgslOffload.state.lastVelocityDeltaProposalNodeContributionCount = proposalReduction.contributionCountByNode;
                 wgslOffload.state.lastVelocityDeltaProposalSource = 'cpu-deterministic-reduction';
               }
 
-              const vxParity = computeVelocityDeltaParityStats(
-                wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor,
-                proposalReduction.deltaVxByNode,
-              );
-              const vyParity = computeVelocityDeltaParityStats(
-                wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor,
-                proposalReduction.deltaVyByNode,
-              );
-              const contributionCountParity = computeContributionCountParityStats(
-                wgslOffload.state.lastVelocityDeltaProposalNodeContributionCount,
-                proposalReduction.contributionCountByNode,
-              );
-              wgslOffload.state.lastContributionCountParity = contributionCountParity;
-              wgslOffload.state.lastVelocityDeltaParity = {
-                vx: vxParity,
-                vy: vyParity,
-                contributionCount: contributionCountParity,
-                comparedNodeCount: Math.min(vxParity.comparedCount, vyParity.comparedCount, contributionCountParity.comparedCount),
-                maxAbs: Math.max(vxParity.absMax, vyParity.absMax),
-                meanAbs: (vxParity.absMean + vyParity.absMean) * 0.5,
-                source: wgslOffload.state.lastVelocityDeltaProposalSource,
+              const finiteVx = checkFiniteFloat32Array(wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor);
+              const finiteVy = checkFiniteFloat32Array(wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor);
+              wgslOffload.state.lastVelocityDeltaFinite = {
+                allFinite: finiteVx.allFinite && finiteVy.allFinite,
+                nonFiniteCount: (finiteVx.nonFiniteCount || 0) + (finiteVy.nonFiniteCount || 0),
+                comparedCount: Math.min(finiteVx.comparedCount || 0, finiteVy.comparedCount || 0),
               };
+
+              if (fastMode) {
+                wgslOffload.state.lastContributionCountParity = {
+                  mismatchCount: 0,
+                  comparedCount: soft.nodes.length,
+                  source: 'skipped-fast-mode',
+                };
+                wgslOffload.state.lastVelocityDeltaParity = {
+                  vx: null,
+                  vy: null,
+                  contributionCount: wgslOffload.state.lastContributionCountParity,
+                  comparedNodeCount: soft.nodes.length,
+                  maxAbs: 0,
+                  meanAbs: 0,
+                  source: wgslOffload.state.lastVelocityDeltaProposalSource,
+                  mode: 'gpu-only-fast',
+                  validation: 'skipped-cpu-parity',
+                };
+              } else if (proposalReduction) {
+                const vxParity = computeVelocityDeltaParityStats(
+                  wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor,
+                  proposalReduction.deltaVxByNode,
+                );
+                const vyParity = computeVelocityDeltaParityStats(
+                  wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor,
+                  proposalReduction.deltaVyByNode,
+                );
+                const contributionCountParity = computeContributionCountParityStats(
+                  wgslOffload.state.lastVelocityDeltaProposalNodeContributionCount,
+                  proposalReduction.contributionCountByNode,
+                );
+                wgslOffload.state.lastContributionCountParity = contributionCountParity;
+                wgslOffload.state.lastVelocityDeltaParity = {
+                  vx: vxParity,
+                  vy: vyParity,
+                  contributionCount: contributionCountParity,
+                  comparedNodeCount: Math.min(vxParity.comparedCount, vyParity.comparedCount, contributionCountParity.comparedCount),
+                  maxAbs: Math.max(vxParity.absMax, vyParity.absMax),
+                  meanAbs: (vxParity.absMean + vyParity.absMean) * 0.5,
+                  source: wgslOffload.state.lastVelocityDeltaProposalSource,
+                };
+              }
               wgslOffload.state.lastVelocityDeltaProposalSignature = proposalSignature;
             }
             if (probeRan || proposalRan) {

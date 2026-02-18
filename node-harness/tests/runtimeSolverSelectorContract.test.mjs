@@ -43,4 +43,16 @@ test('gpu lab consumes and reports runtime solver path for embed resets/status',
 
   assert.match(gpuLabJs, /setRuntimeSolverPath\(options\?\.solverPath\s*\?\?\s*getRuntimeSolverPath\(\)/, 'gpu-lab embed reset must apply requested runtime solver path');
   assert.match(gpuLabJs, /runtimeSolverPath:\s*normalizeRuntimeSolverPath\(sim\?\.controls\?\.runtimeSolverPath\)/, 'gpu-lab API status must report active runtime solver path');
+  assert.match(gpuLabJs, /setRuntimePipelineMode\(options\?\.pipelineMode\s*\?\?\s*getRuntimePipelineMode\(selectedSolverPath\)/, 'gpu-lab embed reset must apply requested runtime pipeline mode');
+  assert.match(gpuLabJs, /runtimePipelineMode:\s*normalizeRuntimePipelineMode\(sim\?\.controls\?\.runtimePipelineMode, sim\?\.controls\?\.runtimeSolverPath\)/, 'gpu-lab API status must report active runtime pipeline mode');
+});
+
+test('gpu lab html exposes 3 runtime pipeline modes with explicit labels', async () => {
+  const gpuLabHtml = await read('sim-server/public/gpu-lab.html');
+  assert.match(gpuLabHtml, /name="runtimePipelineMode"[^>]*value="standard"/i, 'gpu-lab missing standard runtime pipeline mode radio');
+  assert.match(gpuLabHtml, /name="runtimePipelineMode"[^>]*value="gpu-only-validated"/i, 'gpu-lab missing gpu-only validated mode radio');
+  assert.match(gpuLabHtml, /name="runtimePipelineMode"[^>]*value="gpu-only-fast"/i, 'gpu-lab missing gpu-only fast mode radio');
+  assert.match(gpuLabHtml, /standard \(baseline reference\)/i, 'gpu-lab missing standard mode label');
+  assert.match(gpuLabHtml, /gpu-only validated \(parity-heavy\)/i, 'gpu-lab missing validated mode label');
+  assert.match(gpuLabHtml, /gpu-only fast \(reduced readback\/parity\)/i, 'gpu-lab missing fast mode label');
 });

@@ -94,7 +94,15 @@ test('soft spring gpu-only WGSL velocity proposal stage runs WGSL node-reduction
 test('soft spring gpu-only WGSL velocity proposal branch records source route + deterministic parity metrics against CPU ownership reduction', () => {
   assert.match(
     source,
-    /reduceSoftSpringVelocityDeltasDeterministic\([\s\S]*lastVelocityDeltaExpectedNodeVxByColor[\s\S]*lastVelocityDeltaExpectedNodeVyByColor[\s\S]*lastVelocityDeltaExpectedNodeContributionCount[\s\S]*lastVelocityDeltaProposalNodeContributionCount[\s\S]*lastVelocityDeltaProposalSource = 'wgsl-node-reduction'[\s\S]*lastVelocityDeltaProposalSource = 'cpu-deterministic-reduction'[\s\S]*computeVelocityDeltaParityStats[\s\S]*computeContributionCountParityStats[\s\S]*lastContributionCountParity[\s\S]*lastVelocityDeltaParity = \{[\s\S]*source: wgslOffload\.state\.lastVelocityDeltaProposalSource/,
+    /reduceSoftSpringVelocityDeltasDeterministic\([\s\S]*lastVelocityDeltaExpectedNodeVxByColor[\s\S]*lastVelocityDeltaExpectedNodeVyByColor[\s\S]*lastVelocityDeltaExpectedNodeContributionCount[\s\S]*lastVelocityDeltaProposalNodeContributionCount[\s\S]*lastVelocityDeltaProposalSource = fastMode \? 'wgsl-node-reduction-fast' : 'wgsl-node-reduction'[\s\S]*lastVelocityDeltaProposalSource = 'cpu-deterministic-reduction'[\s\S]*computeVelocityDeltaParityStats[\s\S]*computeContributionCountParityStats[\s\S]*lastContributionCountParity[\s\S]*lastVelocityDeltaParity = \{[\s\S]*source: wgslOffload\.state\.lastVelocityDeltaProposalSource/,
     'expected WGSL velocity proposal branch to persist source-route ownership and CPU parity metrics (including node contribution counts) required before switching to authoritative WGSL node deltas',
+  );
+});
+
+test('soft spring gpu-only fast mode skips endpoint readback + cpu parity while keeping finite safety guards and route visibility', () => {
+  assert.match(
+    source,
+    /isGpuOnlyFastMode\(wgslOffload\)[\s\S]*includeEndpointTelemetry: !fastMode[\s\S]*lastVelocityDeltaProposalSource = fastMode \? 'wgsl-node-reduction-fast' : 'wgsl-node-reduction'[\s\S]*lastVelocityDeltaFinite[\s\S]*if \(fastMode\) \{[\s\S]*validation: 'skipped-cpu-parity'/,
+    'expected fast mode branch to reduce readback/parity overhead while retaining finite checks and explicit source-route telemetry',
   );
 });

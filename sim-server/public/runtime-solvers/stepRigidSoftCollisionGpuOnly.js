@@ -2216,6 +2216,110 @@ function applyRigidSoftAuthoritativeProposal({ rigidBodies, soft, impulseSeed, p
   }
 }
 
+function applyCpuRigidSoftResponseFallback({
+  rigidBodies,
+  soft,
+  compactNodePairs,
+  compactEdgePairs,
+  wgslNodeBroadphaseMask,
+  wgslEdgeBroadphaseMask,
+  resolveRigidVsSoftNodeCollision,
+  resolveRigidVsSoftEdgeCollision,
+  edgeBodyModeBlock,
+  nodeSlop,
+  edgeSlop,
+  wgslOffload,
+}) {
+  const compactNodeRigidIndex = compactNodePairs?.compactRigidIndex;
+  const compactNodeNodeIndex = compactNodePairs?.compactNodeIndex;
+  if (compactNodeRigidIndex instanceof Uint32Array && compactNodeNodeIndex instanceof Uint32Array) {
+    if (wgslOffload?.state) {
+      wgslOffload.state.lastNodeCollisionResponseSource = 'cpu-rigid-soft-compact-node-hard-fallback-response';
+      wgslOffload.state.lastNodeCollisionResponsePairCount = compactNodePairs.pairCount | 0;
+      if (canUseWgslOffload(wgslOffload)) {
+        wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-response-hard-fallback';
+        wgslOffload.state.lastMode = 'cpu-rigid-soft-response-hard-fallback';
+      }
+    }
+    for (let pi = 0; pi < compactNodePairs.pairCount; pi++) {
+      const rbi = compactNodeRigidIndex[pi] | 0;
+      const ni = compactNodeNodeIndex[pi] | 0;
+      const rb = rigidBodies[rbi];
+      const sn = soft.nodes[ni];
+      if (!rb || !sn) continue;
+      resolveRigidVsSoftNodeCollision(rb, sn, null, nodeSlop);
+    }
+  } else {
+    if (wgslOffload?.state) {
+      wgslOffload.state.lastNodeCollisionResponseSource = 'cpu-rigid-soft-full-scan-hard-fallback-response';
+      if (canUseWgslOffload(wgslOffload)) {
+        wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-response-hard-fallback';
+        wgslOffload.state.lastMode = 'cpu-rigid-soft-response-hard-fallback';
+      }
+    }
+    let nodePairCursor = 0;
+    for (let rbi = 0; rbi < rigidBodies.length; rbi++) {
+      const rb = rigidBodies[rbi];
+      for (let ni = 0; ni < soft.nodes.length; ni++) {
+        const broadphaseActive = wgslNodeBroadphaseMask
+          ? (wgslNodeBroadphaseMask[nodePairCursor] === 1)
+          : true;
+        nodePairCursor++;
+        if (!broadphaseActive) continue;
+        const sn = soft.nodes[ni];
+        resolveRigidVsSoftNodeCollision(rb, sn, null, nodeSlop);
+      }
+    }
+  }
+
+  const compactEdgeRigidIndex = compactEdgePairs?.compactRigidIndex;
+  const compactEdgeNodeAIndex = compactEdgePairs?.compactNodeAIndex;
+  const compactEdgeNodeBIndex = compactEdgePairs?.compactNodeBIndex;
+  if (
+    compactEdgeRigidIndex instanceof Uint32Array
+    && compactEdgeNodeAIndex instanceof Uint32Array
+    && compactEdgeNodeBIndex instanceof Uint32Array
+  ) {
+    if (wgslOffload?.state) {
+      wgslOffload.state.lastEdgeCollisionResponseSource = 'cpu-rigid-soft-compact-edge-hard-fallback-response';
+      wgslOffload.state.lastEdgeCollisionResponsePairCount = compactEdgePairs.pairCount | 0;
+    }
+    for (let pi = 0; pi < compactEdgePairs.pairCount; pi++) {
+      const rbi = compactEdgeRigidIndex[pi] | 0;
+      const ni = compactEdgeNodeAIndex[pi] | 0;
+      const nj = compactEdgeNodeBIndex[pi] | 0;
+      const rb = rigidBodies[rbi];
+      const a = soft.nodes[ni];
+      const b = soft.nodes[nj];
+      if (!rb || !a || !b) continue;
+      resolveRigidVsSoftEdgeCollision(rb, a, b, edgeSlop);
+    }
+  } else {
+    if (wgslOffload?.state) {
+      wgslOffload.state.lastEdgeCollisionResponseSource = 'cpu-rigid-soft-full-scan-edge-hard-fallback-response';
+    }
+    let edgePairCursor = 0;
+    for (let rbi = 0; rbi < rigidBodies.length; rbi++) {
+      const rb = rigidBodies[rbi];
+      for (let si = 0; si < soft.springs.length; si++) {
+        const spring = soft.springs[si];
+        if (!Array.isArray(spring) || spring.length < 4) continue;
+        const i = Number(spring[0]) | 0;
+        const j = Number(spring[1]) | 0;
+        const edgeBodyMode = spring[3];
+        if (edgeBodyMode !== edgeBodyModeBlock) continue;
+        if (i < 0 || j < 0 || i >= soft.nodes.length || j >= soft.nodes.length) continue;
+        const broadphaseActive = wgslEdgeBroadphaseMask
+          ? (wgslEdgeBroadphaseMask[edgePairCursor] === 1)
+          : true;
+        edgePairCursor++;
+        if (!broadphaseActive) continue;
+        resolveRigidVsSoftEdgeCollision(rb, soft.nodes[i], soft.nodes[j], edgeSlop);
+      }
+    }
+  }
+}
+
 export async function resolveRigidSoftCollisionPassGpuOnly({
   rigidBodies,
   soft,
@@ -2508,92 +2612,26 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
 
   if (usedWgslAuthoritativeResponse) return;
 
-  const compactNodeRigidIndex = compactNodePairs?.compactRigidIndex;
-  const compactNodeNodeIndex = compactNodePairs?.compactNodeIndex;
-  if (compactNodeRigidIndex instanceof Uint32Array && compactNodeNodeIndex instanceof Uint32Array) {
-    if (wgslOffload?.state) {
-      wgslOffload.state.lastNodeCollisionResponseSource = 'cpu-rigid-soft-compact-node-fallback-response';
-      wgslOffload.state.lastNodeCollisionResponsePairCount = compactNodePairs.pairCount | 0;
-      if (canUseWgslOffload(wgslOffload)) {
-        wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-response-fallback';
-        wgslOffload.state.lastMode = 'cpu-rigid-soft-response-fallback';
-      }
+  if (wgslOffload?.state && canUseWgslOffload(wgslOffload)) {
+    if (!wgslOffload.state.lastRigidSoftResponseAuthoritativeSource) {
+      wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-hard-fallback-prep';
     }
-    for (let pi = 0; pi < compactNodePairs.pairCount; pi++) {
-      const rbi = compactNodeRigidIndex[pi] | 0;
-      const ni = compactNodeNodeIndex[pi] | 0;
-      const rb = rigidBodies[rbi];
-      const sn = soft.nodes[ni];
-      if (!rb || !sn) continue;
-      resolveRigidVsSoftNodeCollision(rb, sn, null, nodeSlop);
-    }
-  } else {
-    if (wgslOffload?.state) {
-      wgslOffload.state.lastNodeCollisionResponseSource = 'cpu-rigid-soft-full-scan-fallback-response';
-      if (canUseWgslOffload(wgslOffload)) {
-        wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-response-fallback';
-        wgslOffload.state.lastMode = 'cpu-rigid-soft-response-fallback';
-      }
-    }
-    let nodePairCursor = 0;
-    for (let rbi = 0; rbi < rigidBodies.length; rbi++) {
-      const rb = rigidBodies[rbi];
-      for (let ni = 0; ni < soft.nodes.length; ni++) {
-        const broadphaseActive = wgslNodeBroadphaseMask
-          ? (wgslNodeBroadphaseMask[nodePairCursor] === 1)
-          : true;
-        nodePairCursor++;
-        if (!broadphaseActive) continue;
-        const sn = soft.nodes[ni];
-        resolveRigidVsSoftNodeCollision(rb, sn, null, nodeSlop);
-      }
-    }
+    wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-response-hard-fallback';
+    wgslOffload.state.lastMode = 'cpu-rigid-soft-response-hard-fallback';
   }
 
-  const compactEdgeRigidIndex = compactEdgePairs?.compactRigidIndex;
-  const compactEdgeNodeAIndex = compactEdgePairs?.compactNodeAIndex;
-  const compactEdgeNodeBIndex = compactEdgePairs?.compactNodeBIndex;
-  if (
-    compactEdgeRigidIndex instanceof Uint32Array
-    && compactEdgeNodeAIndex instanceof Uint32Array
-    && compactEdgeNodeBIndex instanceof Uint32Array
-  ) {
-    if (wgslOffload?.state) {
-      wgslOffload.state.lastEdgeCollisionResponseSource = 'cpu-rigid-soft-compact-edge-fallback-response';
-      wgslOffload.state.lastEdgeCollisionResponsePairCount = compactEdgePairs.pairCount | 0;
-    }
-    for (let pi = 0; pi < compactEdgePairs.pairCount; pi++) {
-      const rbi = compactEdgeRigidIndex[pi] | 0;
-      const ni = compactEdgeNodeAIndex[pi] | 0;
-      const nj = compactEdgeNodeBIndex[pi] | 0;
-      const rb = rigidBodies[rbi];
-      const a = soft.nodes[ni];
-      const b = soft.nodes[nj];
-      if (!rb || !a || !b) continue;
-      resolveRigidVsSoftEdgeCollision(rb, a, b, edgeSlop);
-    }
-  } else {
-    if (wgslOffload?.state) {
-      wgslOffload.state.lastEdgeCollisionResponseSource = 'cpu-rigid-soft-full-scan-edge-fallback-response';
-    }
-    let edgePairCursor = 0;
-    for (let rbi = 0; rbi < rigidBodies.length; rbi++) {
-      const rb = rigidBodies[rbi];
-      for (let si = 0; si < soft.springs.length; si++) {
-        const spring = soft.springs[si];
-        if (!Array.isArray(spring) || spring.length < 4) continue;
-        const i = Number(spring[0]) | 0;
-        const j = Number(spring[1]) | 0;
-        const edgeBodyMode = spring[3];
-        if (edgeBodyMode !== edgeBodyModeBlock) continue;
-        if (i < 0 || j < 0 || i >= soft.nodes.length || j >= soft.nodes.length) continue;
-        const broadphaseActive = wgslEdgeBroadphaseMask
-          ? (wgslEdgeBroadphaseMask[edgePairCursor] === 1)
-          : true;
-        edgePairCursor++;
-        if (!broadphaseActive) continue;
-        resolveRigidVsSoftEdgeCollision(rb, soft.nodes[i], soft.nodes[j], edgeSlop);
-      }
-    }
-  }
+  applyCpuRigidSoftResponseFallback({
+    rigidBodies,
+    soft,
+    compactNodePairs,
+    compactEdgePairs,
+    wgslNodeBroadphaseMask,
+    wgslEdgeBroadphaseMask,
+    resolveRigidVsSoftNodeCollision,
+    resolveRigidVsSoftEdgeCollision,
+    edgeBodyModeBlock,
+    nodeSlop,
+    edgeSlop,
+    wgslOffload,
+  });
 }

@@ -4576,6 +4576,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       computeSoftClusterKinematics,
       softClusterFluidInjectBlend: SOFT_CLUSTER_FLUID_INJECT_BLEND,
       fluidCouplingComponentLimit: sim?.controls?.fluidCouplingComponentLimit,
+      wgslOffload: {
+        enabled: true,
+        device: sim?.device,
+        state: (sim.bodyFluidInjectionWgslState ||= {}),
+      },
     });
     injectedMomentum = fluidInjectionResult.injectedMomentum || 0;
     softClusterForInjection = fluidInjectionResult.softClusterForInjection || computeSoftClusterKinematics(s.nodes);

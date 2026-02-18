@@ -266,6 +266,12 @@ test('gpu-lab routes body-fluid momentum injection through isolated gpu-only run
     /let injectedMomentum = 0;[\s\S]*if \(solverPath === 'gpu-only'\) \{[\s\S]*applyBodyFluidInjectionGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*const injectPoint = \(px, py, pvx, pvy/,
     'expected explicit gpu-only body-fluid injection dispatch with baseline fallback branch',
   );
+
+  assert.match(
+    source,
+    /applyBodyFluidInjectionGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*state: \(sim\.bodyFluidInjectionWgslState \|\|= \{\}\),[\s\S]*\}\);/,
+    'expected gpu-only body-fluid injection dispatch to wire optional WGSL prep context',
+  );
 });
 
 test('gpu-lab routes soft integration stepping through isolated gpu-only runtime solver module', () => {

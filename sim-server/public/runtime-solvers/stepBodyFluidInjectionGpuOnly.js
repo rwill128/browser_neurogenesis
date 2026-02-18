@@ -7,6 +7,123 @@ function clampComponent(v, limit) {
   return clamp(v, -limit, limit);
 }
 
+function buildBodyFluidInjectionWgslPrep({
+  sim,
+  bodies,
+  soft,
+  n,
+  vxField,
+  vyField,
+  swimGain,
+  rigidEdgeMomentumScale,
+  softNodeMomentumScale,
+  sampleFieldBilinear,
+  computeSoftClusterKinematics,
+  softClusterFluidInjectBlend,
+}) {
+  const rigidCount = Array.isArray(bodies?.rigid) ? bodies.rigid.length : 0;
+  const softNodeCount = Array.isArray(soft?.nodes) ? soft.nodes.length : 0;
+  const pointCount = rigidCount + softNodeCount;
+
+  const pointX = new Float32Array(pointCount);
+  const pointY = new Float32Array(pointCount);
+  const pointVx = new Float32Array(pointCount);
+  const pointVy = new Float32Array(pointCount);
+  const localFluidX = new Float32Array(pointCount);
+  const localFluidY = new Float32Array(pointCount);
+  const pointMass = new Float32Array(pointCount);
+  const pointRadius = new Float32Array(pointCount);
+  const swimInjectX = new Float32Array(pointCount);
+  const swimInjectY = new Float32Array(pointCount);
+  const pointMomentumScale = new Float32Array(pointCount);
+
+  let pointIndex = 0;
+
+  for (let bi = 0; bi < rigidCount; bi++) {
+    const b = bodies.rigid[bi];
+    const fx = sampleFieldBilinear(vxField, n, b.x, b.y);
+    const fy = sampleFieldBilinear(vyField, n, b.x, b.y);
+    const swimPhase = sim.frame * 0.08 + bi * 2.1;
+
+    pointX[pointIndex] = Number(b.x) || 0;
+    pointY[pointIndex] = Number(b.y) || 0;
+    pointVx[pointIndex] = Number(b.vx) || 0;
+    pointVy[pointIndex] = Number(b.vy) || 0;
+    localFluidX[pointIndex] = Number(fx) || 0;
+    localFluidY[pointIndex] = Number(fy) || 0;
+    pointMass[pointIndex] = Number(b.mass) || 0;
+    pointRadius[pointIndex] = (Number(b.r) || 0) * 0.8;
+    swimInjectX[pointIndex] = swimGain * Math.cos(swimPhase) * 0.015;
+    swimInjectY[pointIndex] = swimGain * Math.sin(swimPhase) * 0.012;
+    pointMomentumScale[pointIndex] = rigidEdgeMomentumScale(b);
+    pointIndex += 1;
+  }
+
+  const softClusterForInjection = computeSoftClusterKinematics(soft.nodes);
+  for (let i = 0; i < softNodeCount; i++) {
+    const node = soft.nodes[i];
+    const fx = sampleFieldBilinear(vxField, n, node.x, node.y);
+    const fy = sampleFieldBilinear(vyField, n, node.x, node.y);
+    const cid = node.clusterId ?? 0;
+    const c = softClusterForInjection.get(cid);
+    const cx = Number.isFinite(Number(c?.x)) ? Number(c.x) : node.x;
+    const cy = Number.isFinite(Number(c?.y)) ? Number(c.y) : node.y;
+    const cvx = Number.isFinite(Number(c?.vx)) ? Number(c.vx) : node.vx;
+    const cvy = Number.isFinite(Number(c?.vy)) ? Number(c.vy) : node.vy;
+    const omega = Number.isFinite(Number(c?.omega)) ? Number(c.omega) : 0;
+    const rx = node.x - cx;
+    const ry = node.y - cy;
+    const rigidLikeVx = cvx - omega * ry;
+    const rigidLikeVy = cvy + omega * rx;
+    const blend = Number.isFinite(Number(softClusterFluidInjectBlend))
+      ? clamp(Number(softClusterFluidInjectBlend), 0, 1)
+      : 0.55;
+    const injectVx = node.vx * (1 - blend) + rigidLikeVx * blend;
+    const injectVy = node.vy * (1 - blend) + rigidLikeVy * blend;
+    const swimPhase = sim.frame * 0.12 + i * 1.57;
+
+    pointX[pointIndex] = Number(node.x) || 0;
+    pointY[pointIndex] = Number(node.y) || 0;
+    pointVx[pointIndex] = Number(injectVx) || 0;
+    pointVy[pointIndex] = Number(injectVy) || 0;
+    localFluidX[pointIndex] = Number(fx) || 0;
+    localFluidY[pointIndex] = Number(fy) || 0;
+    pointMass[pointIndex] = Number(node.mass) || 0;
+    pointRadius[pointIndex] = 2.2;
+    swimInjectX[pointIndex] = swimGain * Math.cos(swimPhase) * 0.01;
+    swimInjectY[pointIndex] = swimGain * Math.sin(swimPhase) * 0.01;
+    pointMomentumScale[pointIndex] = softNodeMomentumScale(i);
+    pointIndex += 1;
+  }
+
+  const layout = {
+    pointX,
+    pointY,
+    pointVx,
+    pointVy,
+    localFluidX,
+    localFluidY,
+    pointMass,
+    pointRadius,
+    swimInjectX,
+    swimInjectY,
+    pointMomentumScale,
+  };
+
+  layout.byteLength = Object.values(layout).reduce((sum, arr) => sum + (arr?.byteLength || 0), 0);
+
+  return {
+    plan: {
+      rigidCount,
+      softNodeCount,
+      pointCount,
+      frame: Number(sim?.frame) || 0,
+    },
+    layout,
+    softClusterForInjection,
+  };
+}
+
 export function applyBodyFluidInjectionGpuOnly({
   sim,
   bodies,
@@ -24,6 +141,7 @@ export function applyBodyFluidInjectionGpuOnly({
   computeSoftClusterKinematics,
   softClusterFluidInjectBlend,
   fluidCouplingComponentLimit,
+  wgslOffload,
 }) {
   const couplingLimitRaw = Number(fluidCouplingComponentLimit);
   const couplingLimit = Number.isFinite(couplingLimitRaw)
@@ -81,61 +199,48 @@ export function applyBodyFluidInjectionGpuOnly({
     }
   };
 
-  for (let bi = 0; bi < bodies.rigid.length; bi++) {
-    const b = bodies.rigid[bi];
-    const fx = sampleFieldBilinear(vxField, n, b.x, b.y);
-    const fy = sampleFieldBilinear(vyField, n, b.x, b.y);
-    const swimPhase = sim.frame * 0.08 + bi * 2.1;
-    injectPoint(
-      b.x,
-      b.y,
-      b.vx,
-      b.vy,
-      fx,
-      fy,
-      b.mass,
-      b.r * 0.8,
-      swimGain * Math.cos(swimPhase) * 0.015,
-      swimGain * Math.sin(swimPhase) * 0.012,
-      rigidEdgeMomentumScale(b),
-    );
+  const { plan, layout, softClusterForInjection } = buildBodyFluidInjectionWgslPrep({
+    sim,
+    bodies,
+    soft,
+    n,
+    vxField,
+    vyField,
+    swimGain,
+    rigidEdgeMomentumScale,
+    softNodeMomentumScale,
+    sampleFieldBilinear,
+    computeSoftClusterKinematics,
+    softClusterFluidInjectBlend,
+  });
+
+  if (wgslOffload?.enabled === true && wgslOffload?.state) {
+    wgslOffload.state.preparedPlan = plan;
+    wgslOffload.state.preparedLayout = layout;
+    wgslOffload.state.lastPreparedRigidCount = plan.rigidCount;
+    wgslOffload.state.lastPreparedSoftCount = plan.softNodeCount;
+    wgslOffload.state.lastPreparedPointCount = plan.pointCount;
+    wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
+    // Blocker for immediate WGSL dispatch: this stage writes overlapping splat
+    // circles into shared float fields, which needs two-pass gather/reduction to
+    // avoid atomics-on-float races. Keep cpu application deterministic for now.
+    wgslOffload.state.lastMode = 'cpu-prepared';
   }
 
-  const softClusterForInjection = computeSoftClusterKinematics(soft.nodes);
-  for (let i = 0; i < soft.nodes.length; i++) {
-    const node = soft.nodes[i];
-    const fx = sampleFieldBilinear(vxField, n, node.x, node.y);
-    const fy = sampleFieldBilinear(vyField, n, node.x, node.y);
-    const cid = node.clusterId ?? 0;
-    const c = softClusterForInjection.get(cid);
-    const cx = Number.isFinite(Number(c?.x)) ? Number(c.x) : node.x;
-    const cy = Number.isFinite(Number(c?.y)) ? Number(c.y) : node.y;
-    const cvx = Number.isFinite(Number(c?.vx)) ? Number(c.vx) : node.vx;
-    const cvy = Number.isFinite(Number(c?.vy)) ? Number(c.vy) : node.vy;
-    const omega = Number.isFinite(Number(c?.omega)) ? Number(c.omega) : 0;
-    const rx = node.x - cx;
-    const ry = node.y - cy;
-    const rigidLikeVx = cvx - omega * ry;
-    const rigidLikeVy = cvy + omega * rx;
-    const blend = Number.isFinite(Number(softClusterFluidInjectBlend))
-      ? clamp(Number(softClusterFluidInjectBlend), 0, 1)
-      : 0.55;
-    const injectVx = node.vx * (1 - blend) + rigidLikeVx * blend;
-    const injectVy = node.vy * (1 - blend) + rigidLikeVy * blend;
-    const swimPhase = sim.frame * 0.12 + i * 1.57;
-
+  const count = plan.pointCount;
+  for (let i = 0; i < count; i++) {
     injectPoint(
-      node.x,
-      node.y,
-      injectVx,
-      injectVy,
-      fx,
-      fy,
-      node.mass,
-      2.2,
-      swimGain * Math.cos(swimPhase) * 0.01,
-      swimGain * Math.sin(swimPhase) * 0.01,
-      softNodeMomentumScale(i),
+      layout.pointX[i],
+      layout.pointY[i],
+      layout.pointVx[i],
+      layout.pointVy[i],
+      layout.localFluidX[i],
+      layout.localFluidY[i],
+      layout.pointMass[i],
+      layout.pointRadius[i],
+      layout.swimInjectX[i],
+      layout.swimInjectY[i],
+      layout.pointMomentumScale[i],
     );
   }
 

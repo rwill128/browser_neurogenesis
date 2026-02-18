@@ -57,6 +57,43 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const rigidInsideNodePolyCandidateWgsl = /* wgsl */`
+@group(0) @binding(0) var<storage, read> poly_rigid_index: array<u32>;
+@group(0) @binding(1) var<storage, read> poly_min_x: array<f32>;
+@group(0) @binding(2) var<storage, read> poly_min_y: array<f32>;
+@group(0) @binding(3) var<storage, read> poly_max_x: array<f32>;
+@group(0) @binding(4) var<storage, read> poly_max_y: array<f32>;
+@group(0) @binding(5) var<storage, read> node_x: array<f32>;
+@group(0) @binding(6) var<storage, read> node_y: array<f32>;
+@group(0) @binding(7) var<storage, read> node_r: array<f32>;
+@group(0) @binding(8) var<storage, read_write> node_candidate_count_out: array<u32>;
+
+@compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let node_index = gid.x;
+  let node_count = arrayLength(&node_candidate_count_out);
+  if (node_index >= node_count) { return; }
+
+  let nx = node_x[node_index];
+  let ny = node_y[node_index];
+  let nr = max(node_r[node_index], 0.25);
+  var candidate_count = 0u;
+  let poly_count = arrayLength(&poly_rigid_index);
+
+  for (var pi = 0u; pi < poly_count; pi = pi + 1u) {
+    let min_x = poly_min_x[pi] - nr;
+    let min_y = poly_min_y[pi] - nr;
+    let max_x = poly_max_x[pi] + nr;
+    let max_y = poly_max_y[pi] + nr;
+    if (nx >= min_x && nx <= max_x && ny >= min_y && ny <= max_y) {
+      candidate_count = candidate_count + 1u;
+    }
+  }
+
+  node_candidate_count_out[node_index] = candidate_count;
+}
+`;
+
 function hashU32ArrayFnv1a(arr) {
   let hash = 0x811c9dc5;
   const len = Number(arr?.length) || 0;
@@ -313,6 +350,71 @@ function ensureRigidInsidePolyBoundsProbeState({ offload, prep }) {
   return state;
 }
 
+function ensureRigidInsideNodeCandidateState({ offload, prep }) {
+  const state = offload.state;
+  const device = offload.device;
+  const polyCount = Math.max(1, Number(prep?.polyCount) || 0);
+  const nodeCount = Math.max(1, Number(prep?.nodeCount) || 0);
+
+  if (!state.insideNodeCandidatePipeline) {
+    const module = device.createShaderModule({ code: rigidInsideNodePolyCandidateWgsl });
+    state.insideNodeCandidatePipeline = device.createComputePipeline({
+      layout: 'auto',
+      compute: { module, entryPoint: 'main' },
+    });
+  }
+
+  const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
+  const readbackUsage = globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ;
+
+  if ((state.insideNodeCandidatePolyCapacity || 0) < polyCount) {
+    const bytes = polyCount * 4;
+    state.insideNodeCandidatePolyRigidIndex?.destroy?.();
+    state.insideNodeCandidatePolyRigidIndex = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insideNodeCandidatePolyCapacity = polyCount;
+    state.insideNodeCandidateBindGroup = null;
+  }
+
+  if ((state.insideNodeCandidateNodeCapacity || 0) < nodeCount) {
+    const bytes = nodeCount * 4;
+    state.insideNodeCandidateNodeX?.destroy?.();
+    state.insideNodeCandidateNodeY?.destroy?.();
+    state.insideNodeCandidateNodeR?.destroy?.();
+    state.insideNodeCandidateCountOut?.destroy?.();
+    state.insideNodeCandidateCountReadback?.destroy?.();
+    state.insideNodeCandidateNodeX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insideNodeCandidateNodeY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insideNodeCandidateNodeR = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insideNodeCandidateCountOut = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC,
+    });
+    state.insideNodeCandidateCountReadback = device.createBuffer({ size: bytes, usage: readbackUsage });
+    state.insideNodeCandidateNodeCapacity = nodeCount;
+    state.insideNodeCandidateBindGroup = null;
+  }
+
+  if (!state.insideNodeCandidateBindGroup) {
+    state.insideNodeCandidateBindGroup = device.createBindGroup({
+      layout: state.insideNodeCandidatePipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.insideNodeCandidatePolyRigidIndex } },
+        { binding: 1, resource: { buffer: state.insidePolyBoundsMinX } },
+        { binding: 2, resource: { buffer: state.insidePolyBoundsMinY } },
+        { binding: 3, resource: { buffer: state.insidePolyBoundsMaxX } },
+        { binding: 4, resource: { buffer: state.insidePolyBoundsMaxY } },
+        { binding: 5, resource: { buffer: state.insideNodeCandidateNodeX } },
+        { binding: 6, resource: { buffer: state.insideNodeCandidateNodeY } },
+        { binding: 7, resource: { buffer: state.insideNodeCandidateNodeR } },
+        { binding: 8, resource: { buffer: state.insideNodeCandidateCountOut } },
+      ],
+    });
+  }
+
+  return state;
+}
+
+
 function dispatchRigidInsidePolyBoundsProbe({ offload, prep, proposalSignature }) {
   if (!canUseWgslOffload(offload)) return false;
   if ((Number(prep?.polyCount) || 0) <= 0) return false;
@@ -337,6 +439,65 @@ function dispatchRigidInsidePolyBoundsProbe({ offload, prep, proposalSignature }
   state.lastInsidePolyBoundsProbeDispatchCount = dispatchCount;
   state.lastInsidePolyBoundsProbePolyCount = prep.polyCount;
   state.lastInsidePolyBoundsProbeSignature = proposalSignature >>> 0;
+  return true;
+}
+
+
+
+function dispatchRigidInsideNodeCandidateProposal({ offload, prep, proposalSignature }) {
+  if (!canUseWgslOffload(offload)) return false;
+  if ((Number(prep?.polyCount) || 0) <= 0) return false;
+  if ((Number(prep?.nodeCount) || 0) <= 0) return false;
+
+  const state = ensureRigidInsideNodeCandidateState({ offload, prep });
+  const device = offload.device;
+  const nodeCount = prep.nodeCount;
+
+  device.queue.writeBuffer(state.insideNodeCandidatePolyRigidIndex, 0, prep.layout.polyRigidIndex);
+  device.queue.writeBuffer(state.insideNodeCandidateNodeX, 0, prep.layout.nodeX);
+  device.queue.writeBuffer(state.insideNodeCandidateNodeY, 0, prep.layout.nodeY);
+  device.queue.writeBuffer(state.insideNodeCandidateNodeR, 0, prep.layout.nodeR);
+
+  const dispatchCount = Math.max(1, Math.ceil(nodeCount / WGSL_WORKGROUP_SIZE));
+  const nodeBytes = nodeCount * 4;
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(state.insideNodeCandidatePipeline);
+  pass.setBindGroup(0, state.insideNodeCandidateBindGroup);
+  pass.dispatchWorkgroups(dispatchCount);
+  pass.end();
+  encoder.copyBufferToBuffer(
+    state.insideNodeCandidateCountOut,
+    0,
+    state.insideNodeCandidateCountReadback,
+    0,
+    nodeBytes,
+  );
+  device.queue.submit([encoder.finish()]);
+
+  const readbackPromise = state.insideNodeCandidateCountReadback
+    .mapAsync(globalThis.GPUMapMode.READ)
+    .then(() => {
+      const mapped = state.insideNodeCandidateCountReadback.getMappedRange(0, nodeBytes);
+      const nodeCandidateCount = new Uint32Array(mapped.slice(0));
+      state.insideNodeCandidateCountReadback.unmap();
+      state.lastInsideNodeCandidateCountByNode = nodeCandidateCount;
+      state.lastInsideNodeCandidateCountSource = 'wgsl-rigid-inside-node-candidate-proposal';
+      state.lastInsideNodeCandidateProposalSignature = proposalSignature >>> 0;
+      state.lastInsideNodeCandidateDispatchCount = dispatchCount;
+      state.lastInsideNodeCandidateComparedNodeCount = nodeCount;
+      state.lastInsideNodeCandidateTotal = nodeCandidateCount.reduce((sum, value) => sum + (Number(value) || 0), 0);
+      state.lastInsideNodeCandidateMax = nodeCandidateCount.reduce((max, value) => Math.max(max, Number(value) || 0), 0);
+      state.lastInsideNodeCandidateError = null;
+    })
+    .catch((err) => {
+      state.lastInsideNodeCandidateError = String(err?.message || err || 'unknown-error');
+    });
+
+  state.pendingInsideNodeCandidatePromise = readbackPromise;
+  state.lastInsideNodeCandidateSourceRoute = 'wgsl-rigid-inside-node-candidate-proposal';
+  state.lastInsideNodeCandidateDispatchCount = dispatchCount;
+  state.lastInsideNodeCandidateProposalSignature = proposalSignature >>> 0;
   return true;
 }
 
@@ -491,6 +652,15 @@ export function applyRigidInsideCorrectionPassGpuOnly({
       if (probeRan) {
         wgslOffload.state.lastSourceRoute = 'wgsl-rigid-inside-poly-bounds-probe';
         wgslOffload.state.lastMode = 'cpu-rigid-inside-authoritative-wgsl-probe';
+        const candidateRan = dispatchRigidInsideNodeCandidateProposal({
+          offload: wgslOffload,
+          prep,
+          proposalSignature,
+        });
+        if (candidateRan) {
+          wgslOffload.state.lastSourceRoute = 'wgsl-rigid-inside-node-candidate-proposal';
+          wgslOffload.state.lastMode = 'cpu-rigid-inside-authoritative-wgsl-candidate-proposal';
+        }
       }
     } catch (err) {
       wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');

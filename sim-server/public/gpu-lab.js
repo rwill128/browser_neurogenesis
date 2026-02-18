@@ -4214,6 +4214,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         clamp,
         membraneCellBasePressureGain: MEMBRANE_CELL_BASE_PRESSURE_GAIN,
         membraneCellBaseRadialDamping: MEMBRANE_CELL_BASE_RADIAL_DAMPING,
+        wgslOffload: {
+          enabled: true,
+          device: sim?.device,
+          state: (sim.softMembranePressureWgslState ||= {}),
+        },
       })
       : applySoftMembraneCellPressure(sim, s, softClusterLoops, dtPos))
     : 0;

@@ -1,25 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applySoftMembraneCellPressureGpuOnly } from '../../sim-server/public/runtime-solvers/stepSoftMembranePressureGpuOnly.js';
 
-const MEMBRANE_CELL_BASE_PRESSURE_GAIN = 0.08;
-const MEMBRANE_CELL_BASE_RADIAL_DAMPING = 0.06;
+import { applySoftMembraneCellPressureGpuOnly } from '../../sim-server/public/runtime-solvers/stepSoftMembranePressureGpuOnly.js';
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
 function signedAreaCurrent(nodes, indices) {
-  let s = 0;
+  if (!Array.isArray(indices) || indices.length < 3) return 0;
+  let sum = 0;
   for (let i = 0; i < indices.length; i++) {
     const a = nodes[indices[i]];
     const b = nodes[indices[(i + 1) % indices.length]];
-    s += a.x * b.y - b.x * a.y;
+    if (!a || !b) continue;
+    sum += a.x * b.y - a.y * b.x;
   }
-  return 0.5 * s;
+  return 0.5 * sum;
 }
 
-function applySoftMembraneCellPressureBaseline(sim, soft, loops, dtPos) {
+function applySoftMembraneCellPressureBaseline({
+  sim,
+  soft,
+  loops,
+  dtPos,
+  membraneCellBasePressureGain = 0.08,
+  membraneCellBaseRadialDamping = 0.06,
+}) {
   const membranes = sim?.bodies?.softMembraneClusters;
   if (!Array.isArray(membranes) || membranes.length === 0) return 0;
   if (!(sim.softMembraneAreaBaseline instanceof Map)) sim.softMembraneAreaBaseline = new Map();
@@ -47,8 +54,8 @@ function applySoftMembraneCellPressureBaseline(sim, soft, loops, dtPos) {
     const err = clamp((areaBase - areaNow) / areaBase, -0.65, 0.65);
     if (Math.abs(err) < 1e-4) continue;
 
-    const pressureGain = Math.max(0.005, Number(membrane?.pressureGain) || MEMBRANE_CELL_BASE_PRESSURE_GAIN);
-    const radialDamping = clamp(Number(membrane?.radialDamping) || MEMBRANE_CELL_BASE_RADIAL_DAMPING, 0, 0.2);
+    const pressureGain = Math.max(0.005, Number(membrane?.pressureGain) || membraneCellBasePressureGain);
+    const radialDamping = clamp(Number(membrane?.radialDamping) || membraneCellBaseRadialDamping, 0, 0.2);
     const gain = pressureGain * (1 + Math.min(1.4, Math.abs(err) * 2.2));
 
     let cx = 0;
@@ -101,66 +108,67 @@ function applySoftMembraneCellPressureBaseline(sim, soft, loops, dtPos) {
   return touched;
 }
 
-test('soft membrane cell-pressure parity: baseline and gpu-only module produce matching velocity updates', () => {
-  const dtPos = 0.12;
-  const seedSoft = {
-    nodes: [
-      { x: 8, y: 8, vx: 0.2, vy: -0.1, mass: 1.0, clusterId: 2 },
-      { x: 14, y: 8.5, vx: -0.1, vy: 0.22, mass: 0.8, clusterId: 2 },
-      { x: 15, y: 13.5, vx: 0.05, vy: -0.2, mass: 1.3, clusterId: 2 },
-      { x: 9, y: 14, vx: -0.18, vy: 0.07, mass: 1.1, clusterId: 2 },
-      { x: 20, y: 20, vx: 0.1, vy: 0.05, mass: 1.2, clusterId: 5 },
-      { x: 24, y: 20, vx: -0.08, vy: -0.04, mass: 1.0, clusterId: 5 },
-      { x: 22, y: 24, vx: 0.03, vy: -0.09, mass: 0.9, clusterId: 5 },
-    ],
-  };
+test('soft membrane pressure gpu-only path matches baseline while publishing WGSL prep metadata', () => {
   const loops = [
-    { clusterId: 2, indices: [0, 1, 2, 3] },
-    { clusterId: 5, indices: [4, 5, 6] },
-    { clusterId: 77, indices: [0, 1] },
+    { clusterId: 0, indices: [0, 1, 2, 3] },
+    { clusterId: 1, indices: [4, 5, 6] },
+  ];
+
+  const seedNodes = [
+    { x: 0.0, y: 0.0, vx: 0.02, vy: -0.01, mass: 1.1 },
+    { x: 1.2, y: 0.0, vx: -0.01, vy: 0.04, mass: 1.0 },
+    { x: 1.2, y: 1.0, vx: -0.03, vy: -0.02, mass: 0.95 },
+    { x: 0.0, y: 1.0, vx: 0.01, vy: 0.03, mass: 1.05 },
+    { x: 2.0, y: 0.1, vx: -0.04, vy: 0.01, mass: 1.2 },
+    { x: 3.1, y: 0.4, vx: 0.02, vy: -0.03, mass: 1.15 },
+    { x: 2.6, y: 1.2, vx: 0.01, vy: 0.05, mass: 1.0 },
+  ];
+
+  const seedMembranes = [
+    { clusterId: 0, restArea: 1.42, pressureGain: 0.09, radialDamping: 0.04 },
+    { clusterId: 1, restArea: 0.58, pressureGain: 0.07, radialDamping: 0.03 },
   ];
 
   const baselineSim = {
-    bodies: {
-      softMembraneClusters: [
-        { clusterId: 2, restArea: 42.5, pressureGain: 0.09, radialDamping: 0.04 },
-        { clusterId: 5, restArea: 11.2, pressureGain: 0.07, radialDamping: 0.05 },
-      ],
-    },
-    softMembraneAreaBaseline: new Map([[2, 42.5], [5, 11.2]]),
+    bodies: { softMembraneClusters: structuredClone(seedMembranes) },
+    softMembraneAreaBaseline: new Map([[0, 1.42], [1, 0.58]]),
   };
-  const gpuOnlySim = structuredClone(baselineSim);
-  gpuOnlySim.softMembraneAreaBaseline = new Map([[2, 42.5], [5, 11.2]]);
+  const gpuSim = {
+    bodies: { softMembraneClusters: structuredClone(seedMembranes) },
+    softMembraneAreaBaseline: new Map([[0, 1.42], [1, 0.58]]),
+  };
+  const baselineSoft = { nodes: structuredClone(seedNodes) };
+  const gpuSoft = { nodes: structuredClone(seedNodes) };
+  const wgslState = {};
 
-  const baselineSoft = structuredClone(seedSoft);
-  const gpuOnlySoft = structuredClone(seedSoft);
-
-  const baselineTouched = applySoftMembraneCellPressureBaseline(baselineSim, baselineSoft, loops, dtPos);
-  const gpuOnlyTouched = applySoftMembraneCellPressureGpuOnly({
-    sim: gpuOnlySim,
-    soft: gpuOnlySoft,
+  const baselineTouched = applySoftMembraneCellPressureBaseline({
+    sim: baselineSim,
+    soft: baselineSoft,
     loops,
-    dtPos,
-    signedAreaCurrent,
-    clamp,
-    membraneCellBasePressureGain: MEMBRANE_CELL_BASE_PRESSURE_GAIN,
-    membraneCellBaseRadialDamping: MEMBRANE_CELL_BASE_RADIAL_DAMPING,
+    dtPos: 0.83,
   });
 
-  assert.equal(gpuOnlyTouched, baselineTouched, 'touched membrane cluster count should match baseline');
-  assert.deepEqual(
-    Array.from(gpuOnlySim.softMembraneAreaBaseline.entries()),
-    Array.from(baselineSim.softMembraneAreaBaseline.entries()),
-    'membrane area baselines should stay aligned',
-  );
+  const gpuTouched = applySoftMembraneCellPressureGpuOnly({
+    sim: gpuSim,
+    soft: gpuSoft,
+    loops,
+    dtPos: 0.83,
+    signedAreaCurrent,
+    clamp,
+    wgslOffload: {
+      enabled: true,
+      state: wgslState,
+    },
+  });
 
-  assert.equal(gpuOnlySoft.nodes.length, baselineSoft.nodes.length);
-  for (let i = 0; i < baselineSoft.nodes.length; i++) {
-    const b = baselineSoft.nodes[i];
-    const g = gpuOnlySoft.nodes[i];
-    assert.ok(Math.abs(g.vx - b.vx) < 1e-12, `node ${i} vx mismatch: ${g.vx} vs ${b.vx}`);
-    assert.ok(Math.abs(g.vy - b.vy) < 1e-12, `node ${i} vy mismatch: ${g.vy} vs ${b.vy}`);
-    assert.ok(Math.abs(g.x - b.x) < 1e-12, `node ${i} x mismatch: ${g.x} vs ${b.x}`);
-    assert.ok(Math.abs(g.y - b.y) < 1e-12, `node ${i} y mismatch: ${g.y} vs ${b.y}`);
-  }
+  assert.equal(gpuTouched, baselineTouched);
+  assert.deepEqual(gpuSoft, baselineSoft, 'gpu-only membrane pressure should preserve baseline node velocity semantics');
+  assert.deepEqual([...gpuSim.softMembraneAreaBaseline.entries()], [...baselineSim.softMembraneAreaBaseline.entries()]);
+
+  assert.equal(wgslState.lastMode, 'cpu-prepared');
+  assert.equal(wgslState.lastPreparedMembraneCount, seedMembranes.length);
+  assert.equal(wgslState.preparedLayout?.membraneOffsets instanceof Uint32Array, true);
+  assert.equal(wgslState.preparedLayout?.loopIndices instanceof Uint32Array, true);
+  assert.equal(wgslState.preparedLayout?.nodeX instanceof Float32Array, true);
+  assert.ok((wgslState.lastPreparedLayoutBytes || 0) > 0);
 });

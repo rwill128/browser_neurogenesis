@@ -951,7 +951,7 @@ function applyAuthoritativeRigidInsideProposal({
 }
 
 
-export function applyRigidInsideCorrectionPassGpuOnly({
+export async function applyRigidInsideCorrectionPassGpuOnly({
   rigidBodies,
   soft,
   correctionIters = 2,
@@ -1076,6 +1076,14 @@ export function applyRigidInsideCorrectionPassGpuOnly({
       wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
       wgslOffload.state.lastMode = 'cpu-rigid-inside-authoritative';
       wgslOffload.state.lastSourceRoute = 'cpu-rigid-inside-prepared-layout';
+    }
+  }
+
+  if (wgslOffload?.state?.pendingInsideCorrectionProposalPromise) {
+    try {
+      await wgslOffload.state.pendingInsideCorrectionProposalPromise;
+    } catch {
+      // hard fallback remains CPU-authoritative when proposal readback fails
     }
   }
 

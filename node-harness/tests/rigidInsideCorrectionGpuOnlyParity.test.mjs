@@ -28,14 +28,14 @@ function buildFixture() {
   };
 }
 
-test('rigid-inside correction parity: wgsl-prep-enabled path preserves CPU authoritative behavior and emits deterministic prep telemetry', () => {
+test('rigid-inside correction parity: wgsl-prep-enabled path preserves CPU authoritative behavior and emits deterministic prep telemetry', async () => {
   const base = buildFixture();
   const withPrep = buildFixture();
 
-  const baselineCorrected = applyRigidInsideCorrectionPassGpuOnly({ ...base, wgslOffload: null });
+  const baselineCorrected = await applyRigidInsideCorrectionPassGpuOnly({ ...base, wgslOffload: null });
 
   const offload = { enabled: true, state: {} };
-  const prepCorrected = applyRigidInsideCorrectionPassGpuOnly({ ...withPrep, wgslOffload: offload });
+  const prepCorrected = await applyRigidInsideCorrectionPassGpuOnly({ ...withPrep, wgslOffload: offload });
 
   assert.equal(prepCorrected, baselineCorrected);
   assert.deepEqual(withPrep.soft.nodes, base.soft.nodes);
@@ -60,12 +60,12 @@ test('rigid-inside correction parity: wgsl-prep-enabled path preserves CPU autho
 });
 
 
-test('rigid-inside correction applies cached WGSL authoritative proposal when proposal is finite', () => {
+test('rigid-inside correction applies cached WGSL authoritative proposal when proposal is finite', async () => {
   const prepFixture = buildFixture();
   const offload = { enabled: true, modeProfile: 'gpu-only-validated', state: {} };
 
   // First pass prepares deterministic proposal signature/layout metadata.
-  applyRigidInsideCorrectionPassGpuOnly({ ...prepFixture, wgslOffload: offload });
+  await applyRigidInsideCorrectionPassGpuOnly({ ...prepFixture, wgslOffload: offload });
 
   const fixture = buildFixture();
   const signature = offload.state.lastPreparedInsideProposalSignature >>> 0;
@@ -77,7 +77,7 @@ test('rigid-inside correction applies cached WGSL authoritative proposal when pr
   offload.state.lastInsideCorrectionProposalError = null;
 
   const beforeX = fixture.soft.nodes[0].x;
-  const corrected = applyRigidInsideCorrectionPassGpuOnly({ ...fixture, wgslOffload: offload });
+  const corrected = await applyRigidInsideCorrectionPassGpuOnly({ ...fixture, wgslOffload: offload });
 
   assert.ok(corrected > 0);
   assert.ok(fixture.soft.nodes[0].x > beforeX);
@@ -85,12 +85,12 @@ test('rigid-inside correction applies cached WGSL authoritative proposal when pr
   assert.equal(offload.state.lastSourceRoute, 'wgsl-rigid-inside-authoritative');
 });
 
-test('rigid-inside correction fast mode can consume same-frame WGSL correction proposal from prepared WGSL proposals', () => {
+test('rigid-inside correction fast mode can consume same-frame WGSL correction proposal from prepared WGSL proposals', async () => {
   const fixture = buildFixture();
   const baseline = buildFixture();
   const prepFixture = buildFixture();
 
-  const baselineCorrected = applyRigidInsideCorrectionPassGpuOnly({ ...baseline, wgslOffload: null });
+  const baselineCorrected = await applyRigidInsideCorrectionPassGpuOnly({ ...baseline, wgslOffload: null });
 
   const offload = {
     enabled: true,
@@ -99,7 +99,7 @@ test('rigid-inside correction fast mode can consume same-frame WGSL correction p
     },
   };
 
-  applyRigidInsideCorrectionPassGpuOnly({ ...prepFixture, wgslOffload: offload });
+  await applyRigidInsideCorrectionPassGpuOnly({ ...prepFixture, wgslOffload: offload });
   const signature = offload.state.lastPreparedInsideProposalSignature >>> 0;
   offload.state.lastInsideCorrectionProposalSource = 'wgsl-rigid-inside-correction-proposal';
   offload.state.lastInsideCorrectionProposalSignature = signature;
@@ -108,7 +108,7 @@ test('rigid-inside correction fast mode can consume same-frame WGSL correction p
   offload.state.lastInsideCorrectionProposalRigidIndex = new Uint32Array([0, 0]);
   offload.state.lastInsideCorrectionProposalError = null;
 
-  const corrected = applyRigidInsideCorrectionPassGpuOnly({ ...fixture, wgslOffload: offload });
+  const corrected = await applyRigidInsideCorrectionPassGpuOnly({ ...fixture, wgslOffload: offload });
 
   assert.ok(corrected > 0);
   assert.equal(corrected, baselineCorrected);

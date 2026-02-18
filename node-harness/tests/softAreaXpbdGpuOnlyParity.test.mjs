@@ -151,6 +151,37 @@ function createSoftAreaMockWgslDevice() {
               const paramsBuf = ensure(buffers.get(0), 16);
               const paramsU32 = new Uint32Array(paramsBuf);
               const paramsF32 = new Float32Array(paramsBuf);
+
+              if (buffers.has(6) && buffers.has(5) && buffers.has(4) && buffers.has(3) && buffers.has(2) && !buffers.has(11)) {
+                const nodeCount = paramsU32[0] || 0;
+                const endpointCount = paramsU32[1] || 0;
+                const endpointNodeIndices = readU32(buffers.get(1), endpointCount);
+                const endpointDeltaVX = readF32(buffers.get(2), endpointCount);
+                const endpointDeltaVY = readF32(buffers.get(3), endpointCount);
+                const nodeDeltaVX = new Float32Array(nodeCount);
+                const nodeDeltaVY = new Float32Array(nodeCount);
+                const nodeContribution = new Uint32Array(nodeCount);
+                for (let ni = 0; ni < nodeCount; ni++) {
+                  let sumX = 0;
+                  let sumY = 0;
+                  let count = 0;
+                  for (let ei = 0; ei < endpointCount; ei++) {
+                    if ((endpointNodeIndices[ei] >>> 0) !== ni) continue;
+                    sumX += endpointDeltaVX[ei] || 0;
+                    sumY += endpointDeltaVY[ei] || 0;
+                    count += 1;
+                  }
+                  nodeDeltaVX[ni] = sumX;
+                  nodeDeltaVY[ni] = sumY;
+                  nodeContribution[ni] = count;
+                }
+                writeF32(buffers.get(4), nodeDeltaVX);
+                writeF32(buffers.get(5), nodeDeltaVY);
+                const contributionBuffer = ensure(buffers.get(6), nodeContribution.byteLength);
+                new Uint8Array(contributionBuffer).set(new Uint8Array(nodeContribution.buffer));
+                continue;
+              }
+
               const nodeCount = paramsU32[0] || 0;
               const clusterCount = paramsU32[1] || 0;
               const dtPos = paramsF32[2] || 0;
@@ -425,6 +456,7 @@ test('soft area XPBD WGSL proposal stage runs on gpu-only path while CPU remains
   assert.equal(wgslState.lastAreaVelocityProposalNodeDeltaVx.length, gpuOnlySoft.nodes.length);
   assert.equal(wgslState.lastAreaVelocityProposalNodeDeltaVy.length, gpuOnlySoft.nodes.length);
   assert.equal(wgslState.lastAreaVelocityProposalNodeContributionCount.length, gpuOnlySoft.nodes.length);
+  assert.ok((wgslState.lastAreaVelocityProposalNodeReductionDispatch || 0) > 0, 'expected WGSL node-reduction dispatch telemetry to be published');
 
   const reducedSumVx = wgslState.lastAreaVelocityProposalNodeDeltaVx.reduce((sum, v) => sum + v, 0);
   const reducedSumVy = wgslState.lastAreaVelocityProposalNodeDeltaVy.reduce((sum, v) => sum + v, 0);

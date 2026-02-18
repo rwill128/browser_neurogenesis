@@ -205,6 +205,46 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+
+const softAreaVelocityNodeReductionWgsl = /* wgsl */`
+struct Params {
+  nodeCount: u32,
+  endpointCount: u32,
+  _pad0: u32,
+  _pad1: u32,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> endpointNodeIndices: array<u32>;
+@group(0) @binding(2) var<storage, read> endpointDeltaVX: array<f32>;
+@group(0) @binding(3) var<storage, read> endpointDeltaVY: array<f32>;
+@group(0) @binding(4) var<storage, read_write> nodeDeltaVXOut: array<f32>;
+@group(0) @binding(5) var<storage, read_write> nodeDeltaVYOut: array<f32>;
+@group(0) @binding(6) var<storage, read_write> nodeContributionCountOut: array<u32>;
+
+@compute @workgroup_size(
+${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let ni = gid.x;
+  if (ni >= params.nodeCount) { return; }
+
+  var sumX = 0.0;
+  var sumY = 0.0;
+  var count = 0u;
+  for (var ei = 0u; ei < params.endpointCount; ei = ei + 1u) {
+    if (endpointNodeIndices[ei] == ni) {
+      sumX = sumX + endpointDeltaVX[ei];
+      sumY = sumY + endpointDeltaVY[ei];
+      count = count + 1u;
+    }
+  }
+
+  nodeDeltaVXOut[ni] = sumX;
+  nodeDeltaVYOut[ni] = sumY;
+  nodeContributionCountOut[ni] = count;
+}
+`;
+
 function canUseWgslOffload(offload) {
   if (!offload || offload.enabled !== true) return false;
   if (!offload.device || typeof offload.device.createComputePipelineAsync !== 'function') return false;
@@ -403,6 +443,138 @@ function ensureSoftAreaVelocityDeltaProposalBuffers(offload, nodeCount, endpoint
   return state;
 }
 
+
+
+function ensureSoftAreaVelocityNodeReductionBuffers(offload, nodeCount, endpointCount) {
+  const state = offload.state || (offload.state = {});
+  const device = offload.device;
+  const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
+  const uniformUsage = globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST;
+
+  const requiredNodeCapacity = Math.max(1, nodeCount);
+  if ((state.areaVelocityNodeReductionNodeCapacity || 0) < requiredNodeCapacity) {
+    const capacity = Math.max(requiredNodeCapacity, state.areaVelocityNodeReductionNodeCapacity ? state.areaVelocityNodeReductionNodeCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.areaVelocityNodeReductionDeltaVXOut?.destroy?.();
+    state.areaVelocityNodeReductionDeltaVYOut?.destroy?.();
+    state.areaVelocityNodeReductionContributionOut?.destroy?.();
+    state.areaVelocityNodeReductionDeltaVXReadback?.destroy?.();
+    state.areaVelocityNodeReductionDeltaVYReadback?.destroy?.();
+    state.areaVelocityNodeReductionContributionReadback?.destroy?.();
+    state.areaVelocityNodeReductionDeltaVXOut = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.areaVelocityNodeReductionDeltaVYOut = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.areaVelocityNodeReductionContributionOut = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.areaVelocityNodeReductionDeltaVXReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.areaVelocityNodeReductionDeltaVYReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.areaVelocityNodeReductionContributionReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.areaVelocityNodeReductionNodeCapacity = capacity;
+    state.areaVelocityNodeReductionBindGroup = null;
+  }
+
+  const requiredEndpointCapacity = Math.max(1, endpointCount);
+  if ((state.areaVelocityNodeReductionEndpointCapacity || 0) < requiredEndpointCapacity) {
+    const capacity = Math.max(requiredEndpointCapacity, state.areaVelocityNodeReductionEndpointCapacity ? state.areaVelocityNodeReductionEndpointCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.areaVelocityNodeReductionEndpointNodeIndices?.destroy?.();
+    state.areaVelocityNodeReductionEndpointNodeIndices = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaVelocityNodeReductionEndpointCapacity = capacity;
+    state.areaVelocityNodeReductionBindGroup = null;
+  }
+
+  if (!state.areaVelocityNodeReductionParams) {
+    state.areaVelocityNodeReductionParams = device.createBuffer({ size: 16, usage: uniformUsage });
+    state.areaVelocityNodeReductionBindGroup = null;
+  }
+
+  return state;
+}
+
+async function dispatchSoftAreaWgslVelocityNodeReduction({ soft, offload, plan }) {
+  if (!canUseWgslOffload(offload)) return false;
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const endpointCount = Number(plan?.endpointCount) || 0;
+  if (nodes.length <= 0 || endpointCount <= 0) return false;
+
+  const state = ensureSoftAreaVelocityNodeReductionBuffers(offload, nodes.length, endpointCount);
+  const device = offload.device;
+
+  if (!state.areaVelocityNodeReductionPipeline) {
+    const module = device.createShaderModule({ code: softAreaVelocityNodeReductionWgsl });
+    state.areaVelocityNodeReductionPipeline = await device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: { module, entryPoint: 'main' },
+    });
+    state.areaVelocityNodeReductionBindGroup = null;
+  }
+
+  if (!state.areaVelocityNodeReductionBindGroup) {
+    state.areaVelocityNodeReductionBindGroup = device.createBindGroup({
+      layout: state.areaVelocityNodeReductionPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.areaVelocityNodeReductionParams } },
+        { binding: 1, resource: { buffer: state.areaVelocityNodeReductionEndpointNodeIndices } },
+        { binding: 2, resource: { buffer: state.areaVelocityDeltaVXOut } },
+        { binding: 3, resource: { buffer: state.areaVelocityDeltaVYOut } },
+        { binding: 4, resource: { buffer: state.areaVelocityNodeReductionDeltaVXOut } },
+        { binding: 5, resource: { buffer: state.areaVelocityNodeReductionDeltaVYOut } },
+        { binding: 6, resource: { buffer: state.areaVelocityNodeReductionContributionOut } },
+      ],
+    });
+  }
+
+  const paramsBytes = new ArrayBuffer(16);
+  const paramsU32 = new Uint32Array(paramsBytes);
+  paramsU32[0] = nodes.length >>> 0;
+  paramsU32[1] = endpointCount >>> 0;
+
+  device.queue.writeBuffer(state.areaVelocityNodeReductionParams, 0, paramsBytes);
+  device.queue.writeBuffer(state.areaVelocityNodeReductionEndpointNodeIndices, 0, plan.clusterNodeIndices);
+
+  const nodeBytes = nodes.length * 4;
+  const dispatchCount = Math.ceil(nodes.length / WGSL_WORKGROUP_SIZE);
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(state.areaVelocityNodeReductionPipeline);
+  pass.setBindGroup(0, state.areaVelocityNodeReductionBindGroup);
+  pass.dispatchWorkgroups(dispatchCount);
+  pass.end();
+
+  encoder.copyBufferToBuffer(state.areaVelocityNodeReductionDeltaVXOut, 0, state.areaVelocityNodeReductionDeltaVXReadback, 0, nodeBytes);
+  encoder.copyBufferToBuffer(state.areaVelocityNodeReductionDeltaVYOut, 0, state.areaVelocityNodeReductionDeltaVYReadback, 0, nodeBytes);
+  encoder.copyBufferToBuffer(state.areaVelocityNodeReductionContributionOut, 0, state.areaVelocityNodeReductionContributionReadback, 0, nodeBytes);
+  device.queue.submit([encoder.finish()]);
+
+  await state.areaVelocityNodeReductionDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
+  const mappedVx = state.areaVelocityNodeReductionDeltaVXReadback.getMappedRange(0, nodeBytes);
+  const deltaVxByNode = new Float32Array(mappedVx.slice(0));
+  state.areaVelocityNodeReductionDeltaVXReadback.unmap();
+
+  await state.areaVelocityNodeReductionDeltaVYReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
+  const mappedVy = state.areaVelocityNodeReductionDeltaVYReadback.getMappedRange(0, nodeBytes);
+  const deltaVyByNode = new Float32Array(mappedVy.slice(0));
+  state.areaVelocityNodeReductionDeltaVYReadback.unmap();
+
+  await state.areaVelocityNodeReductionContributionReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
+  const mappedContribution = state.areaVelocityNodeReductionContributionReadback.getMappedRange(0, nodeBytes);
+  const contributionCountByNode = new Uint32Array(mappedContribution.slice(0));
+  state.areaVelocityNodeReductionContributionReadback.unmap();
+
+  let maxAbsDelta = 0;
+  let sumAbsDelta = 0;
+  for (let ni = 0; ni < nodes.length; ni++) {
+    const abs = Math.hypot(deltaVxByNode[ni], deltaVyByNode[ni]);
+    if (abs > maxAbsDelta) maxAbsDelta = abs;
+    sumAbsDelta += abs;
+  }
+
+  state.lastAreaVelocityProposalNodeReductionDispatch = dispatchCount;
+  state.lastAreaVelocityProposalNodeDeltaVx = deltaVxByNode;
+  state.lastAreaVelocityProposalNodeDeltaVy = deltaVyByNode;
+  state.lastAreaVelocityProposalNodeContributionCount = contributionCountByNode;
+  state.lastAreaVelocityProposalNodeReductionAbsDeltaMean = nodes.length > 0 ? sumAbsDelta / nodes.length : 0;
+  state.lastAreaVelocityProposalNodeReductionAbsDeltaMax = maxAbsDelta;
+  return true;
+}
 async function dispatchSoftAreaWgslVelocityDeltaProposal({ soft, offload, plan, dtPos, deltaByCluster }) {
   if (!canUseWgslOffload(offload)) return false;
   const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
@@ -892,11 +1064,18 @@ export function applySoftAreaXPBDVelocityGpuOnly({
             deltaByCluster: wgslOffload.state.lastAreaProposalDeltaLambdaByCluster,
           });
           if (velocityProposalRan) {
-            reduceSoftAreaVelocityProposalToNodeDeltas({
+            const nodeReductionRan = await dispatchSoftAreaWgslVelocityNodeReduction({
               soft,
               offload: wgslOffload,
               plan,
             });
+            if (!nodeReductionRan) {
+              reduceSoftAreaVelocityProposalToNodeDeltas({
+                soft,
+                offload: wgslOffload,
+                plan,
+              });
+            }
           }
         }
 

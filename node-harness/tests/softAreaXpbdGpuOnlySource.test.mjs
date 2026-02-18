@@ -78,13 +78,19 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
 
   assert.match(
     areaSource,
-    /function reduceSoftAreaVelocityProposalToNodeDeltas\([\s\S]*lastAreaVelocityProposalNodeDeltaVx[\s\S]*lastAreaVelocityProposalNodeDeltaVy[\s\S]*lastAreaVelocityProposalNodeContributionCount/,
-    'expected gpu-only area module to publish deterministic endpoint->node reduced velocity deltas as reduction-kernel parity baseline',
+    /const softAreaVelocityNodeReductionWgsl = \/\* wgsl \*\/[\s\S]*nodeContributionCountOut: array<u32>[\s\S]*for \(var ei = 0u; ei < params\.endpointCount; ei = ei \+ 1u\)[\s\S]*nodeDeltaVXOut\[ni\] = sumX;[\s\S]*nodeContributionCountOut\[ni\] = count;/,
+    'expected gpu-only area module to define deterministic WGSL node-reduction shader for endpoint->node aggregation ownership',
   );
 
   assert.match(
     areaSource,
-    /velocityProposalRan = await dispatchSoftAreaWgslVelocityDeltaProposal\([\s\S]*if \(velocityProposalRan\) \{[\s\S]*reduceSoftAreaVelocityProposalToNodeDeltas\(/,
-    'expected gpu-only area branch to run CPU deterministic reduction immediately after WGSL endpoint proposal for next WGSL node-reduction stage bring-up',
+    /dispatchSoftAreaWgslVelocityNodeReduction\([\s\S]*state\.lastAreaVelocityProposalNodeDeltaVx[\s\S]*state\.lastAreaVelocityProposalNodeDeltaVy[\s\S]*state\.lastAreaVelocityProposalNodeContributionCount/,
+    'expected WGSL node-reduction stage to publish deterministic per-node deltas and contribution counts',
+  );
+
+  assert.match(
+    areaSource,
+    /velocityProposalRan = await dispatchSoftAreaWgslVelocityDeltaProposal\([\s\S]*const nodeReductionRan = await dispatchSoftAreaWgslVelocityNodeReduction\([\s\S]*if \(!nodeReductionRan\) \{[\s\S]*reduceSoftAreaVelocityProposalToNodeDeltas\(/,
+    'expected gpu-only area branch to run WGSL node-reduction after endpoint proposal and keep CPU deterministic fallback on WGSL reduction failure',
   );
 });

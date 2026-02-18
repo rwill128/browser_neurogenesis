@@ -5415,7 +5415,7 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
   mergeBodiesIntoSim(sim.bodies, imported);
   configureInteractionLab(sim, options);
 
-  sim.overlayShowSegmentIds = options?.overlayShowSegmentIds !== false;
+  sim.overlayShowSegmentIds = options?.overlayShowSegmentIds === true;
   sim.overlayShowExtraVisuals = options?.overlayShowExtraVisuals !== false;
 
   sim.emitters = [buildWindTunnelEmitter(sim.controls.n, {
@@ -5877,7 +5877,7 @@ async function initSim() {
     lastFluidObstacleStats: { rigidBlockedEdges: 0, softBlockedEdges: 0, blockedEdgeCount: 0, blockedCells: 0, sweptCells: 0 },
     lastDyeMaskStats: { rigidEdges: 0, softEdges: 0, nonPassCells: 0 },
     lastSweptDyeTransportStats: { touchedCells: 0, movedMass: 0, deletedMass: 0, eatenMass: 0 },
-    overlayShowSegmentIds: true,
+    overlayShowSegmentIds: false,
     overlayShowExtraVisuals: true,
     highlightSegmentId: null,
     highlightUntilFrame: 0,

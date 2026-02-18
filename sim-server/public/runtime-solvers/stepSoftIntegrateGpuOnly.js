@@ -49,6 +49,81 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+function hashF32Fnv1a(arr) {
+  const buf = new ArrayBuffer(4);
+  const f = new Float32Array(buf);
+  const u = new Uint32Array(buf);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < arr.length; i++) {
+    f[0] = Number(arr[i]) || 0;
+    hash ^= u[0] >>> 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function computeSoftIntegrateProposalSignature({ x, y, vx, vy, dt, softIntegrationScale, hybridNodeVCap, n }) {
+  let hash = 0x811c9dc5;
+  hash ^= (x.length >>> 0);
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32Fnv1a(x);
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32Fnv1a(y);
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32Fnv1a(vx);
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32Fnv1a(vy);
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  const scalars = new Float32Array([Number(dt) || 0, Number(softIntegrationScale) || 0, Number(hybridNodeVCap) || 0, Number(n) || 0]);
+  hash ^= hashF32Fnv1a(scalars);
+  return hash >>> 0;
+}
+
+function buildCpuReferenceIntegration({ x, y, vx, vy, dt, softIntegrationScale, hybridNodeVCap, n, applyBounceBoundary, nodes }) {
+  const outX = new Float32Array(x);
+  const outY = new Float32Array(y);
+  const outVx = new Float32Array(vx);
+  const outVy = new Float32Array(vy);
+
+  for (let i = 0; i < outX.length; i++) {
+    let vxv = outVx[i];
+    let vyv = outVy[i];
+    const speed = Math.hypot(vxv, vyv);
+    if (speed > hybridNodeVCap) {
+      const inv = hybridNodeVCap / Math.max(speed, 1e-9);
+      vxv *= inv;
+      vyv *= inv;
+    }
+
+    const tmpNode = {
+      x: outX[i] + vxv * dt * softIntegrationScale,
+      y: outY[i] + vyv * dt * softIntegrationScale,
+      vx: vxv,
+      vy: vyv,
+      r: Number(nodes?.[i]?.r) || 0,
+    };
+
+    applyBounceBoundary(tmpNode, n, 0.78);
+    outX[i] = Number(tmpNode.x) || 0;
+    outY[i] = Number(tmpNode.y) || 0;
+    outVx[i] = Number(tmpNode.vx) || 0;
+    outVy[i] = Number(tmpNode.vy) || 0;
+  }
+
+  return { outX, outY, outVx, outVy };
+}
+
+function computeSoftIntegrateParity(expected, actual, epsilon = 1e-5) {
+  let mismatchCount = 0;
+  let maxAbsErr = 0;
+  for (let i = 0; i < expected.length; i++) {
+    const err = Math.abs((actual[i] || 0) - (expected[i] || 0));
+    if (err > epsilon) mismatchCount += 1;
+    if (err > maxAbsErr) maxAbsErr = err;
+  }
+  return { mismatchCount, maxAbsErr };
+}
+
 function integrateSoftBodiesCpu({ soft, n, dt, softIntegrationScale, hybridNodeVCap, applyBounceBoundary }) {
   for (const node of (soft?.nodes || [])) {
     const vmag = Math.hypot(node.vx, node.vy);
@@ -199,6 +274,20 @@ async function integrateSoftBodiesWgsl({ soft, n, dt, softIntegrationScale, hybr
   const outVx = new Float32Array(state.readVx.getMappedRange(0, bytes).slice(0));
   const outVy = new Float32Array(state.readVy.getMappedRange(0, bytes).slice(0));
 
+  const proposalSignature = computeSoftIntegrateProposalSignature({ x, y, vx, vy, dt, softIntegrationScale, hybridNodeVCap, n });
+  const cpuRef = buildCpuReferenceIntegration({
+    x,
+    y,
+    vx,
+    vy,
+    dt,
+    softIntegrationScale,
+    hybridNodeVCap,
+    n,
+    applyBounceBoundary,
+    nodes,
+  });
+
   state.readX.unmap();
   state.readY.unmap();
   state.readVx.unmap();
@@ -212,6 +301,23 @@ async function integrateSoftBodiesWgsl({ soft, n, dt, softIntegrationScale, hybr
     node.vy = outVy[i];
     applyBounceBoundary(node, n, 0.78);
   }
+
+  const parityX = computeSoftIntegrateParity(cpuRef.outX, outX);
+  const parityY = computeSoftIntegrateParity(cpuRef.outY, outY);
+  const parityVx = computeSoftIntegrateParity(cpuRef.outVx, outVx);
+  const parityVy = computeSoftIntegrateParity(cpuRef.outVy, outVy);
+  state.lastProposalSignature = proposalSignature >>> 0;
+  state.lastSourceRoute = 'wgsl-integrate-proposal';
+  state.lastParity = {
+    source: 'wgsl-integrate-proposal-vs-cpu',
+    proposalSignature: proposalSignature >>> 0,
+    mismatchCount: parityX.mismatchCount + parityY.mismatchCount + parityVx.mismatchCount + parityVy.mismatchCount,
+    maxAbsErr: Math.max(parityX.maxAbsErr, parityY.maxAbsErr, parityVx.maxAbsErr, parityVy.maxAbsErr),
+    x: parityX,
+    y: parityY,
+    vx: parityVx,
+    vy: parityVy,
+  };
 }
 
 export async function integrateSoftBodiesGpuOnly({
@@ -241,6 +347,7 @@ export async function integrateSoftBodiesGpuOnly({
     if (wgslOffload?.state) {
       wgslOffload.state.lastError = null;
       wgslOffload.state.lastMode = 'wgsl';
+      wgslOffload.state.lastSourceRoute = 'wgsl-integrate-authoritative';
     }
     return { mode: 'wgsl', reason: 'ok' };
   } catch (err) {
@@ -249,6 +356,7 @@ export async function integrateSoftBodiesGpuOnly({
     if (wgslOffload?.state) {
       wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
       wgslOffload.state.lastMode = 'cpu-fallback';
+      wgslOffload.state.lastSourceRoute = 'cpu-fallback-authoritative';
     }
     return { mode: 'cpu-fallback', reason: String(err?.message || err || 'unknown-error') };
   }

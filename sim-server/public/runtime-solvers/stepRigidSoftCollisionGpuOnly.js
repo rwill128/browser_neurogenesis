@@ -2216,6 +2216,14 @@ function applyRigidSoftAuthoritativeProposal({ rigidBodies, soft, impulseSeed, p
   }
 }
 
+function resolveRigidSoftNodeCollisionCpuFallback(rb, sn, nodeSlop) {
+  return resolveRigidVsSoftNodeCollisionGpuOnly(rb, sn, null, nodeSlop);
+}
+
+function resolveRigidSoftEdgeCollisionCpuFallback(rb, a, b, edgeSlop) {
+  return resolveRigidVsSoftEdgeCollisionGpuOnly(rb, a, b, edgeSlop);
+}
+
 function applyCpuRigidSoftResponseFallback({
   rigidBodies,
   soft,
@@ -2223,13 +2231,20 @@ function applyCpuRigidSoftResponseFallback({
   compactEdgePairs,
   wgslNodeBroadphaseMask,
   wgslEdgeBroadphaseMask,
-  resolveRigidVsSoftNodeCollision,
-  resolveRigidVsSoftEdgeCollision,
   edgeBodyModeBlock,
   nodeSlop,
   edgeSlop,
   wgslOffload,
+  cpuNodeSolver,
+  cpuEdgeSolver,
 }) {
+  const solveNodeCollision = typeof cpuNodeSolver === 'function'
+    ? (rb, sn) => cpuNodeSolver(rb, sn, null, nodeSlop)
+    : (rb, sn) => resolveRigidSoftNodeCollisionCpuFallback(rb, sn, nodeSlop);
+  const solveEdgeCollision = typeof cpuEdgeSolver === 'function'
+    ? (rb, a, b) => cpuEdgeSolver(rb, a, b, edgeSlop)
+    : (rb, a, b) => resolveRigidSoftEdgeCollisionCpuFallback(rb, a, b, edgeSlop);
+
   const compactNodeRigidIndex = compactNodePairs?.compactRigidIndex;
   const compactNodeNodeIndex = compactNodePairs?.compactNodeIndex;
   if (compactNodeRigidIndex instanceof Uint32Array && compactNodeNodeIndex instanceof Uint32Array) {
@@ -2247,7 +2262,7 @@ function applyCpuRigidSoftResponseFallback({
       const rb = rigidBodies[rbi];
       const sn = soft.nodes[ni];
       if (!rb || !sn) continue;
-      resolveRigidVsSoftNodeCollision(rb, sn, null, nodeSlop);
+      solveNodeCollision(rb, sn);
     }
   } else {
     if (wgslOffload?.state) {
@@ -2267,7 +2282,7 @@ function applyCpuRigidSoftResponseFallback({
         nodePairCursor++;
         if (!broadphaseActive) continue;
         const sn = soft.nodes[ni];
-        resolveRigidVsSoftNodeCollision(rb, sn, null, nodeSlop);
+        solveNodeCollision(rb, sn);
       }
     }
   }
@@ -2292,7 +2307,7 @@ function applyCpuRigidSoftResponseFallback({
       const a = soft.nodes[ni];
       const b = soft.nodes[nj];
       if (!rb || !a || !b) continue;
-      resolveRigidVsSoftEdgeCollision(rb, a, b, edgeSlop);
+      solveEdgeCollision(rb, a, b);
     }
   } else {
     if (wgslOffload?.state) {
@@ -2314,7 +2329,7 @@ function applyCpuRigidSoftResponseFallback({
           : true;
         edgePairCursor++;
         if (!broadphaseActive) continue;
-        resolveRigidVsSoftEdgeCollision(rb, soft.nodes[i], soft.nodes[j], edgeSlop);
+        solveEdgeCollision(rb, soft.nodes[i], soft.nodes[j]);
       }
     }
   }
@@ -2323,8 +2338,8 @@ function applyCpuRigidSoftResponseFallback({
 export async function resolveRigidSoftCollisionPassGpuOnly({
   rigidBodies,
   soft,
-  resolveRigidVsSoftNodeCollision = resolveRigidVsSoftNodeCollisionGpuOnly,
-  resolveRigidVsSoftEdgeCollision = resolveRigidVsSoftEdgeCollisionGpuOnly,
+  resolveRigidVsSoftNodeCollision,
+  resolveRigidVsSoftEdgeCollision,
   edgeBodyModeBlock,
   nodeSlop = 0.18,
   edgeSlop = 0.16,
@@ -2599,6 +2614,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         wgslOffload.state.lastEdgeCollisionResponsePairCount = impulseSeed.edgePairCount;
         wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'wgsl-rigid-soft-response-authoritative';
         wgslOffload.state.lastRigidSoftResponseOwnership = 'wgsl-authoritative';
+        wgslOffload.state.lastRigidSoftResponseRoute = 'wgsl-authoritative';
         wgslOffload.state.lastRigidSoftResponseFallbackReason = null;
         wgslOffload.state.lastSourceRoute = 'wgsl-rigid-soft-response-authoritative';
         wgslOffload.state.lastMode = 'wgsl-rigid-soft-response-authoritative';
@@ -2606,12 +2622,14 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       } else {
         wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-nonfinite';
         wgslOffload.state.lastRigidSoftResponseOwnership = 'cpu-fallback';
+        wgslOffload.state.lastRigidSoftResponseRoute = 'cpu-fallback';
         wgslOffload.state.lastRigidSoftResponseFallbackReason = 'nonfinite-or-signature-mismatch';
       }
     } catch (err) {
       wgslOffload.state.lastError = String(err?.message || err || 'rigid-soft-response-wgsl-error');
       wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-error';
       wgslOffload.state.lastRigidSoftResponseOwnership = 'cpu-fallback';
+      wgslOffload.state.lastRigidSoftResponseRoute = 'cpu-fallback';
       wgslOffload.state.lastRigidSoftResponseFallbackReason = 'wgsl-dispatch-error';
     }
   }
@@ -2626,6 +2644,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       wgslOffload.state.lastRigidSoftResponseFallbackReason = 'hard-fallback';
     }
     wgslOffload.state.lastRigidSoftResponseOwnership = 'cpu-fallback';
+    wgslOffload.state.lastRigidSoftResponseRoute = 'cpu-fallback';
     wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-response-hard-fallback';
     wgslOffload.state.lastMode = 'cpu-rigid-soft-response-hard-fallback';
   }
@@ -2637,11 +2656,11 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     compactEdgePairs,
     wgslNodeBroadphaseMask,
     wgslEdgeBroadphaseMask,
-    resolveRigidVsSoftNodeCollision,
-    resolveRigidVsSoftEdgeCollision,
     edgeBodyModeBlock,
     nodeSlop,
     edgeSlop,
     wgslOffload,
+    cpuNodeSolver: resolveRigidVsSoftNodeCollision,
+    cpuEdgeSolver: resolveRigidVsSoftEdgeCollision,
   });
 }

@@ -28,3 +28,11 @@ test('rigid-soft gpu-only module dispatches WGSL broadphase with active-mask rea
     'expected rigid-soft gpu-only module to read back concrete WGSL broadphase masks and apply them as authoritative node-collision filtering when valid',
   );
 });
+
+test('rigid-soft gpu-only module includes WGSL edge broadphase proposal + authoritative filter source telemetry', () => {
+  assert.match(
+    source,
+    /const rigidSoftEdgeBroadphaseWgsl = \/\* wgsl \*\/[\s\S]*edgePairNodeAIndex[\s\S]*edgePairNodeBIndex[\s\S]*dispatchRigidSoftEdgeBroadphaseWgsl[\s\S]*lastEdgeBroadphaseAuthoritativeSource = 'wgsl-rigid-soft-edge-broadphase-authoritative-filter';/,
+    'expected rigid-soft gpu-only module to run concrete WGSL edge broadphase math and expose authoritative source telemetry for edge filtering',
+  );
+});

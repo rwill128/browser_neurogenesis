@@ -273,6 +273,8 @@ test('gpu-only rigid-soft pass publishes deterministic WGSL candidate layout sou
   assert.equal(wgslState.preparedLayout.nodePairNodeIndex.length, baselineCalls.nodes.length);
   assert.equal(wgslState.preparedLayout.edgePairRigidIndex.length, baselineCalls.edges.length);
   assert.equal(wgslState.preparedLayout.edgePairSpringIndex.length, baselineCalls.edges.length);
+  assert.equal(wgslState.preparedLayout.edgePairNodeAIndex.length, baselineCalls.edges.length);
+  assert.equal(wgslState.preparedLayout.edgePairNodeBIndex.length, baselineCalls.edges.length);
 });
 
 test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when device is available while preserving CPU collision visitation parity', async () => {
@@ -329,6 +331,7 @@ test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when dev
 
   const wgslState = {
     rigidSoftNodeBroadphasePipeline: mockPipeline,
+    rigidSoftEdgeBroadphasePipeline: mockPipeline,
   };
 
   await resolveRigidSoftCollisionPassGpuOnly({
@@ -347,8 +350,11 @@ test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when dev
 
   assert.deepEqual(gpuCalls, baselineCalls);
   assert.equal(wgslState.lastNodeBroadphaseDispatched, true);
+  assert.equal(wgslState.lastEdgeBroadphaseDispatched, true);
   assert.equal(wgslState.lastSourceRoute, 'wgsl-rigid-soft-node-broadphase-authoritative-filter');
   assert.equal(wgslState.lastMode, 'wgsl-broadphase-authoritative-filter');
+  assert.equal(wgslState.lastEdgeBroadphaseAuthoritativeSource, 'wgsl-rigid-soft-edge-broadphase-authoritative-filter');
   assert.ok(dispatches[0] >= 1);
-  assert.ok(writes.length >= 8);
+  assert.ok(dispatches[1] >= 1);
+  assert.ok(writes.length >= 16);
 });

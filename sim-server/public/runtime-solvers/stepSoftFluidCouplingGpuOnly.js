@@ -302,6 +302,29 @@ function hasAuthoritativeWgslClusterLoadProposal(wgslOffload, proposalSignature,
     && state.lastClusterLoadProposalCount.length === clusterCount;
 }
 
+function buildCarryProposalFiniteSummary({ forceX, forceY, carryX, carryY, localCarryX, localCarryY }) {
+  const forceXFinite = checkFiniteFloat32Array(forceX);
+  const forceYFinite = checkFiniteFloat32Array(forceY);
+  const carryXFinite = checkFiniteFloat32Array(carryX);
+  const carryYFinite = checkFiniteFloat32Array(carryY);
+  const localCarryXFinite = checkFiniteFloat32Array(localCarryX);
+  const localCarryYFinite = checkFiniteFloat32Array(localCarryY);
+  return {
+    allFinite: forceXFinite.allFinite
+      && forceYFinite.allFinite
+      && carryXFinite.allFinite
+      && carryYFinite.allFinite
+      && localCarryXFinite.allFinite
+      && localCarryYFinite.allFinite,
+    forceX: forceXFinite,
+    forceY: forceYFinite,
+    carryX: carryXFinite,
+    carryY: carryYFinite,
+    localCarryX: localCarryXFinite,
+    localCarryY: localCarryYFinite,
+  };
+}
+
 const SOFT_FLUID_CARRY_PROPOSAL_WGSL = /* wgsl */`
 struct Params {
   nodeCount: u32,
@@ -593,6 +616,14 @@ function dispatchSoftFluidCarryProposalWgsl({ wgslOffload, nodeCount, dragK, nod
     state.lastCarryProposalCarryY = carryY;
     state.lastCarryProposalLocalCarryX = localCarryX;
     state.lastCarryProposalLocalCarryY = localCarryY;
+    state.lastCarryProposalFinite = buildCarryProposalFiniteSummary({
+      forceX,
+      forceY,
+      carryX,
+      carryY,
+      localCarryX,
+      localCarryY,
+    });
     state.lastCarryProposalSignature = Number(proposalSignature) >>> 0;
     state.lastCarryProposalSource = 'wgsl-carry-proposal';
     state.lastMode = 'wgsl-carry-proposal';
@@ -888,7 +919,12 @@ export function applySoftFluidCouplingGpuOnly({
       localCarryY: wgslOffload.state.lastCarryProposalLocalCarryY,
     }
     : null;
-  let carrySource = authoritativeCarryProposal ? 'wgsl-carry-authoritative' : 'cpu-carry-authoritative';
+  const authoritativeCarryFinite = authoritativeCarryProposal
+    ? buildCarryProposalFiniteSummary(authoritativeCarryProposal)
+    : { allFinite: false };
+  const canUseAuthoritativeCarryProposal = authoritativeCarryProposal && (fastMode ? authoritativeCarryFinite.allFinite === true : true);
+  const useFastAuthoritativeCarryShortcut = fastMode && canUseAuthoritativeCarryProposal;
+  let carrySource = canUseAuthoritativeCarryProposal ? 'wgsl-carry-authoritative' : 'cpu-carry-authoritative';
   const ensureClusterLoad = (cid) => {
     if (!clusterFluidLoadMap.has(cid)) {
       clusterFluidLoadMap.set(cid, { forceX: 0, forceY: 0, torque: 0, count: 0 });
@@ -897,12 +933,12 @@ export function applySoftFluidCouplingGpuOnly({
   };
 
   let softCarryTransfer = 0;
-  const cpuProposalForceX = new Float32Array(nodes.length);
-  const cpuProposalForceY = new Float32Array(nodes.length);
-  const cpuProposalCarryX = new Float32Array(nodes.length);
-  const cpuProposalCarryY = new Float32Array(nodes.length);
-  const cpuProposalLocalCarryX = new Float32Array(nodes.length);
-  const cpuProposalLocalCarryY = new Float32Array(nodes.length);
+  const cpuProposalForceX = useFastAuthoritativeCarryShortcut ? null : new Float32Array(nodes.length);
+  const cpuProposalForceY = useFastAuthoritativeCarryShortcut ? null : new Float32Array(nodes.length);
+  const cpuProposalCarryX = useFastAuthoritativeCarryShortcut ? null : new Float32Array(nodes.length);
+  const cpuProposalCarryY = useFastAuthoritativeCarryShortcut ? null : new Float32Array(nodes.length);
+  const cpuProposalLocalCarryX = useFastAuthoritativeCarryShortcut ? null : new Float32Array(nodes.length);
+  const cpuProposalLocalCarryY = useFastAuthoritativeCarryShortcut ? null : new Float32Array(nodes.length);
 
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
@@ -930,52 +966,61 @@ export function applySoftFluidCouplingGpuOnly({
 
     const rx = node.x - clusterX;
     const ry = node.y - clusterY;
-    const fx = sampleFluidForBodyCoupling(
-      vxField,
-      n,
-      node.x,
-      node.y,
-      rx,
-      ry,
-      obstacleMask,
-      bodyFeedbackPrevVx,
-      selfFeedbackSuppression,
-    );
-    const fy = sampleFluidForBodyCoupling(
-      vyField,
-      n,
-      node.x,
-      node.y,
-      rx,
-      ry,
-      obstacleMask,
-      bodyFeedbackPrevVy,
-      selfFeedbackSuppression,
-    );
-    const clusterLocalVx = clusterVx - clusterOmega * ry;
-    const clusterLocalVy = clusterVy + clusterOmega * rx;
+    let cpuForceX = 0;
+    let cpuForceY = 0;
+    let cpuCarryX = 0;
+    let cpuCarryY = 0;
+    let cpuLocalCarryX = 0;
+    let cpuLocalCarryY = 0;
 
-    const cpuForceX = (fx - clusterLocalVx) * dragK * honey * flowCoupling * mass;
-    const cpuForceY = (fy - clusterLocalVy) * dragK * honey * flowCoupling * mass;
-    const cpuCarryX = cpuForceX * invMass;
-    const cpuCarryY = cpuForceY * invMass;
+    if (!useFastAuthoritativeCarryShortcut) {
+      const fx = sampleFluidForBodyCoupling(
+        vxField,
+        n,
+        node.x,
+        node.y,
+        rx,
+        ry,
+        obstacleMask,
+        bodyFeedbackPrevVx,
+        selfFeedbackSuppression,
+      );
+      const fy = sampleFluidForBodyCoupling(
+        vyField,
+        n,
+        node.x,
+        node.y,
+        rx,
+        ry,
+        obstacleMask,
+        bodyFeedbackPrevVy,
+        selfFeedbackSuppression,
+      );
+      const clusterLocalVx = clusterVx - clusterOmega * ry;
+      const clusterLocalVy = clusterVy + clusterOmega * rx;
 
-    const cpuLocalCarryX = (fx - node.vx) * dragK * honey * invMass * flowCoupling * SOFT_NODE_LOCAL_FLOW_SHARE;
-    const cpuLocalCarryY = (fy - node.vy) * dragK * honey * invMass * flowCoupling * SOFT_NODE_LOCAL_FLOW_SHARE;
+      cpuForceX = (fx - clusterLocalVx) * dragK * honey * flowCoupling * mass;
+      cpuForceY = (fy - clusterLocalVy) * dragK * honey * flowCoupling * mass;
+      cpuCarryX = cpuForceX * invMass;
+      cpuCarryY = cpuForceY * invMass;
 
-    cpuProposalForceX[i] = cpuForceX;
-    cpuProposalForceY[i] = cpuForceY;
-    cpuProposalCarryX[i] = cpuCarryX;
-    cpuProposalCarryY[i] = cpuCarryY;
-    cpuProposalLocalCarryX[i] = cpuLocalCarryX;
-    cpuProposalLocalCarryY[i] = cpuLocalCarryY;
+      cpuLocalCarryX = (fx - node.vx) * dragK * honey * invMass * flowCoupling * SOFT_NODE_LOCAL_FLOW_SHARE;
+      cpuLocalCarryY = (fy - node.vy) * dragK * honey * invMass * flowCoupling * SOFT_NODE_LOCAL_FLOW_SHARE;
 
-    const forceX = authoritativeCarryProposal ? authoritativeCarryProposal.forceX[i] : cpuForceX;
-    const forceY = authoritativeCarryProposal ? authoritativeCarryProposal.forceY[i] : cpuForceY;
-    const carryX = authoritativeCarryProposal ? authoritativeCarryProposal.carryX[i] : cpuCarryX;
-    const carryY = authoritativeCarryProposal ? authoritativeCarryProposal.carryY[i] : cpuCarryY;
-    const localCarryX = authoritativeCarryProposal ? authoritativeCarryProposal.localCarryX[i] : cpuLocalCarryX;
-    const localCarryY = authoritativeCarryProposal ? authoritativeCarryProposal.localCarryY[i] : cpuLocalCarryY;
+      cpuProposalForceX[i] = cpuForceX;
+      cpuProposalForceY[i] = cpuForceY;
+      cpuProposalCarryX[i] = cpuCarryX;
+      cpuProposalCarryY[i] = cpuCarryY;
+      cpuProposalLocalCarryX[i] = cpuLocalCarryX;
+      cpuProposalLocalCarryY[i] = cpuLocalCarryY;
+    }
+
+    const forceX = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.forceX[i] : cpuForceX;
+    const forceY = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.forceY[i] : cpuForceY;
+    const carryX = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.carryX[i] : cpuCarryX;
+    const carryY = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.carryY[i] : cpuCarryY;
+    const localCarryX = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.localCarryX[i] : cpuLocalCarryX;
+    const localCarryY = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.localCarryY[i] : cpuLocalCarryY;
 
     node.vx += localCarryX * dt * 60 + swimX * dtNorm;
     node.vy += localCarryY * dt * 60 + swimY * dtNorm;
@@ -1011,11 +1056,13 @@ export function applySoftFluidCouplingGpuOnly({
   }
 
   if (wgslOffload?.state && clusterLoadProposalSignature !== 0) {
+    const clusterLoadForceX = useFastAuthoritativeCarryShortcut ? authoritativeCarryProposal?.forceX : cpuProposalForceX;
+    const clusterLoadForceY = useFastAuthoritativeCarryShortcut ? authoritativeCarryProposal?.forceY : cpuProposalForceY;
     const wgslClusterLoadDispatched = dispatchSoftFluidClusterLoadReductionWgsl({
       wgslOffload,
       proposalSignature: clusterLoadProposalSignature,
-      forceX: cpuProposalForceX,
-      forceY: cpuProposalForceY,
+      forceX: clusterLoadForceX,
+      forceY: clusterLoadForceY,
     });
     wgslOffload.state.lastClusterLoadProposalDispatched = wgslClusterLoadDispatched;
   }
@@ -1156,6 +1203,8 @@ export function applySoftFluidCouplingGpuOnly({
 
   if (wgslOffload?.state) {
     wgslOffload.state.lastPipelineModeProfile = modeProfile;
+    wgslOffload.state.lastCarryProposalFinite = authoritativeCarryFinite;
+    wgslOffload.state.lastCarryFastShortcutUsed = useFastAuthoritativeCarryShortcut;
     if (!fastMode) {
       wgslOffload.state.lastCpuCarryProposalForceX = cpuProposalForceX;
       wgslOffload.state.lastCpuCarryProposalForceY = cpuProposalForceY;

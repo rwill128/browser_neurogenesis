@@ -45,8 +45,8 @@ test('soft fluid-coupling gpu-only publishes deterministic WGSL prep layout for 
 
   assert.match(
     source,
-    /dispatchSoftFluidClusterLoadReductionWgsl\([\s\S]*proposalSignature: clusterLoadProposalSignature,[\s\S]*forceX: cpuProposalForceX,[\s\S]*forceY: cpuProposalForceY,[\s\S]*lastClusterLoadProposalDispatched = wgslClusterLoadDispatched;/,
-    'expected gpu-only soft-fluid branch to dispatch concrete WGSL cluster-load reduction proposals using deterministic force arrays',
+    /const clusterLoadForceX = useFastAuthoritativeCarryShortcut \? authoritativeCarryProposal\?\.forceX : cpuProposalForceX;[\s\S]*const clusterLoadForceY = useFastAuthoritativeCarryShortcut \? authoritativeCarryProposal\?\.forceY : cpuProposalForceY;[\s\S]*dispatchSoftFluidClusterLoadReductionWgsl\([\s\S]*proposalSignature: clusterLoadProposalSignature,[\s\S]*forceX: clusterLoadForceX,[\s\S]*forceY: clusterLoadForceY,[\s\S]*lastClusterLoadProposalDispatched = wgslClusterLoadDispatched;/,
+    'expected gpu-only soft-fluid branch to dispatch concrete WGSL cluster-load reduction proposals using fast-authoritative carry force routing when available',
   );
 
   assert.match(
@@ -63,8 +63,8 @@ test('soft fluid-coupling gpu-only publishes deterministic WGSL prep layout for 
 
   assert.match(
     source,
-    /hasAuthoritativeWgslCarryProposal\([\s\S]*carrySource = authoritativeCarryProposal \? 'wgsl-carry-authoritative' : 'cpu-carry-authoritative';[\s\S]*lastAuthoritativeCarrySource = carrySource;[\s\S]*lastAuthoritativeClusterLoadSource = clusterLoadSource;/,
-    'expected gpu-only soft-fluid branch to keep authoritative carry/cluster source-route ownership tied to WGSL proposal gates',
+    /hasAuthoritativeWgslCarryProposal\([\s\S]*const canUseAuthoritativeCarryProposal = authoritativeCarryProposal && \(fastMode \? authoritativeCarryFinite\.allFinite === true : true\);[\s\S]*carrySource = canUseAuthoritativeCarryProposal \? 'wgsl-carry-authoritative' : 'cpu-carry-authoritative';[\s\S]*lastAuthoritativeCarrySource = carrySource;[\s\S]*lastAuthoritativeClusterLoadSource = clusterLoadSource;/,
+    'expected gpu-only soft-fluid branch to keep authoritative carry/cluster source-route ownership tied to WGSL proposal gates and fast-mode finite safety checks',
   );
 
   assert.match(
@@ -83,8 +83,8 @@ test('soft fluid-coupling gpu-only fast mode skips cluster parity shadow work wh
 
   assert.match(
     source,
-    /const modeProfile = getGpuOnlyPipelineModeProfile\(wgslOffload\);[\s\S]*const fastMode = isGpuOnlyFastMode\(wgslOffload\);[\s\S]*if \(!fastMode && hasClusterProposal\) \{[\s\S]*clusterLoadMismatchCount \+= 1;/,
-    'expected fast mode to skip cpu cluster parity mismatch loops while validated mode retains parity-heavy checks',
+    /const modeProfile = getGpuOnlyPipelineModeProfile\(wgslOffload\);[\s\S]*const fastMode = isGpuOnlyFastMode\(wgslOffload\);[\s\S]*const useFastAuthoritativeCarryShortcut = fastMode && canUseAuthoritativeCarryProposal;[\s\S]*if \(!useFastAuthoritativeCarryShortcut\) \{[\s\S]*sampleFluidForBodyCoupling\([\s\S]*if \(!fastMode && hasClusterProposal\) \{[\s\S]*clusterLoadMismatchCount \+= 1;/,
+    'expected fast mode to bypass per-node CPU fluid sampling when finite authoritative WGSL carry exists while validated mode retains parity-heavy checks',
   );
 
   assert.match(

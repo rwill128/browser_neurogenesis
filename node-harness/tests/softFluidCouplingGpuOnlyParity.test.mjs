@@ -486,3 +486,87 @@ test('soft fluid coupling can promote cached WGSL cluster-load reduction proposa
   assert.match(wgslState.lastSourceRoute, /\+wgsl-cluster-load-authoritative$/);
   assert.equal(wgslState.lastMode, 'wgsl-carry-or-cluster-authoritative');
 });
+
+test('soft fluid coupling fast mode can skip per-node CPU carry recompute when finite authoritative WGSL carry proposal is cached', () => {
+  const n = 10;
+  const cells = n * n;
+  const vxField = new Float32Array(cells);
+  const vyField = new Float32Array(cells);
+  for (let i = 0; i < cells; i++) {
+    vxField[i] = Math.sin(i * 0.09) * 0.19;
+    vyField[i] = Math.cos(i * 0.06) * 0.17;
+  }
+
+  const soft = {
+    nodes: [
+      { x: 2.4, y: 3.1, vx: 0.08, vy: -0.06, mass: 1.0, clusterId: 0 },
+      { x: 3.9, y: 4.0, vx: -0.04, vy: 0.11, mass: 1.1, clusterId: 0 },
+      { x: 6.5, y: 7.2, vx: 0.07, vy: 0.03, mass: 0.96, clusterId: 1 },
+    ],
+  };
+
+  const constants = {
+    SOFT_NODE_FLOW_COUPLING: 0.051,
+    SOFT_NODE_LOCAL_FLOW_SHARE: 0.71,
+    SOFT_CLUSTER_TUG_COUPLING: 0.094,
+    SOFT_CLUSTER_RELATIVE_DRAG: 0.064,
+    softClusterFluidTorqueCoupling: 0.081,
+    SOFT_CLUSTER_LINEAR_PROJECTION: 0.23,
+    softClusterAngularProjection: 0.1,
+  };
+
+  const wgslState = {};
+  const commonArgs = {
+    sim: { frame: 18, controls: { massSoft: 1.0 } },
+    n,
+    dt: 0.016,
+    dtNorm: 1,
+    vxField,
+    vyField,
+    dragK: 0.34,
+    swimGain: 0.56,
+    localHoneyDrag: () => 0.28,
+    viscosityMotionResponse,
+    obstacleMask: null,
+    bodyFeedbackPrevVx: new Float32Array(cells),
+    bodyFeedbackPrevVy: new Float32Array(cells),
+    selfFeedbackSuppression: 0.8,
+    softMembraneClusterSet: new Set([1]),
+    softNodeMomentumScale: (idx) => (idx % 2 === 0 ? 0.92 : 1.0),
+    constants,
+    computeSoftCentroid,
+    computeSoftClusterKinematics,
+    projectNodesTowardClusterRigidMotion,
+    sampleFluidForBodyCoupling,
+  };
+
+  applySoftFluidCouplingGpuOnly({
+    ...commonArgs,
+    soft: structuredClone(soft),
+    wgslOffload: { enabled: true, state: wgslState },
+  });
+
+  wgslState.lastCarryProposalSignature = wgslState.lastPreparedProposalSignature;
+  wgslState.lastCarryProposalForceX = new Float32Array(wgslState.lastCpuCarryProposalForceX);
+  wgslState.lastCarryProposalForceY = new Float32Array(wgslState.lastCpuCarryProposalForceY);
+  wgslState.lastCarryProposalCarryX = new Float32Array(wgslState.lastCpuCarryProposalCarryX);
+  wgslState.lastCarryProposalCarryY = new Float32Array(wgslState.lastCpuCarryProposalCarryY);
+  wgslState.lastCarryProposalLocalCarryX = new Float32Array(wgslState.lastCpuCarryProposalLocalCarryX);
+  wgslState.lastCarryProposalLocalCarryY = new Float32Array(wgslState.lastCpuCarryProposalLocalCarryY);
+  wgslState.lastClusterLoadProposalSignature = wgslState.lastPreparedClusterLoadProposalSignature;
+  wgslState.lastClusterLoadProposalForceX = new Float32Array(wgslState.lastCpuClusterLoadForceX);
+  wgslState.lastClusterLoadProposalForceY = new Float32Array(wgslState.lastCpuClusterLoadForceY);
+  wgslState.lastClusterLoadProposalTorque = new Float32Array(wgslState.lastCpuClusterLoadTorque);
+  wgslState.lastClusterLoadProposalCount = new Uint32Array(wgslState.lastCpuClusterLoadCount);
+
+  applySoftFluidCouplingGpuOnly({
+    ...commonArgs,
+    soft: structuredClone(soft),
+    wgslOffload: { enabled: true, state: wgslState, authoritativeClusterLoad: true, modeProfile: 'gpu-only-fast' },
+  });
+
+  assert.equal(wgslState.lastCarryFastShortcutUsed, true);
+  assert.equal(wgslState.lastCarryProposalFinite.allFinite, true);
+  assert.equal(wgslState.lastAuthoritativeCarrySource, 'wgsl-carry-authoritative');
+  assert.equal(wgslState.lastMode, 'wgsl-carry-or-cluster-authoritative-fast');
+});

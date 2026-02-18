@@ -4,6 +4,7 @@ import {
   applySoftSpringsXPBDVelocityGpuOnly,
   buildSoftSpringXpbdWgslPlan,
   buildSoftSpringXpbdWgslLayout,
+  reduceSoftSpringVelocityDeltasDeterministic,
 } from '../../sim-server/public/runtime-solvers/stepSoftSpringsXpbdGpuOnly.js';
 
 const SOFT_XPBD_ITERS = 10;
@@ -537,4 +538,38 @@ test('soft spring XPBD WGSL proposal stage runs on gpu-only path while CPU remai
     'expected lambda-next telemetry remapped back to original spring ownership order',
   );
   assert.equal(wgslState.lastProbeSpringCount, 2);
+});
+
+
+test('reduceSoftSpringVelocityDeltasDeterministic deterministic endpoint ownership reduction matches spring correction math', () => {
+  const dtPos = 0.2;
+  const soft = {
+    nodes: [
+      { x: 0, y: 0, vx: 0.1, vy: 0.0, mass: 2 },
+      { x: 1, y: 0, vx: -0.05, vy: 0.0, mass: 4 },
+    ],
+    springs: [[0, 1, 1]],
+  };
+  const plan = buildSoftSpringXpbdWgslPlan({ soft });
+  const layout = buildSoftSpringXpbdWgslLayout({ soft, plan });
+  const deltaLambdaByColor = new Float32Array([0.3]);
+
+  const reduced = reduceSoftSpringVelocityDeltasDeterministic({
+    soft,
+    dtPos,
+    layout,
+    deltaLambdaByColor,
+  });
+
+  assert.equal(reduced.deltaVxByNode.length, 2);
+  assert.equal(reduced.deltaVyByNode.length, 2);
+  const wA = 1 / 2;
+  const wB = 1 / 4;
+  const nx = 1;
+  const expectedA = (-wA * deltaLambdaByColor[0] * nx) / dtPos;
+  const expectedB = (wB * deltaLambdaByColor[0] * nx) / dtPos;
+  assert.ok(Math.abs(reduced.deltaVxByNode[0] - expectedA) < 1e-6);
+  assert.ok(Math.abs(reduced.deltaVxByNode[1] - expectedB) < 1e-6);
+  assert.ok(Math.abs(reduced.deltaVyByNode[0]) < 1e-6);
+  assert.ok(Math.abs(reduced.deltaVyByNode[1]) < 1e-6);
 });

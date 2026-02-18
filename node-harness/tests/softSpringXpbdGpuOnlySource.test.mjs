@@ -55,3 +55,12 @@ test('soft spring gpu-only WGSL lambda proposal stage reads back per-spring delt
     'expected WGSL lambda proposal stage to read back deterministic per-spring lambda telemetry in both color and original spring order',
   );
 });
+
+
+test('soft spring gpu-only WGSL proposal branch stores deterministic per-node velocity delta proposal for next reduction offload stage', () => {
+  assert.match(
+    source,
+    /proposalRan\) \{[\s\S]*reduceSoftSpringVelocityDeltasDeterministic\([\s\S]*lastVelocityDeltaProposalNodeVxByColor[\s\S]*lastVelocityDeltaProposalNodeVyByColor/,
+    'expected WGSL proposal branch to publish deterministic per-node velocity delta proposal buffers for upcoming authoritative reduction dispatch',
+  );
+});

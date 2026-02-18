@@ -671,6 +671,86 @@ export function buildSoftSpringXpbdWgslLayout({
   };
 }
 
+
+export function reduceSoftSpringVelocityDeltasDeterministic({
+  soft,
+  dtPos,
+  layout,
+  deltaLambdaByColor,
+} = {}) {
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const safeDtPos = Math.max(1e-8, Number(dtPos) || 0);
+  const endpointNodeIndices = layout?.endpointNodeIndicesByColor instanceof Uint32Array
+    ? layout.endpointNodeIndicesByColor
+    : new Uint32Array(0);
+  const endpointSpringIndices = layout?.endpointSpringIndicesByColor instanceof Uint32Array
+    ? layout.endpointSpringIndicesByColor
+    : new Uint32Array(0);
+  const endpointSigns = layout?.endpointSignsI32ByColor instanceof Int32Array
+    ? layout.endpointSignsI32ByColor
+    : new Int32Array(0);
+  const springNodeA = layout?.springNodeAByColor instanceof Uint32Array
+    ? layout.springNodeAByColor
+    : new Uint32Array(0);
+  const springNodeB = layout?.springNodeBByColor instanceof Uint32Array
+    ? layout.springNodeBByColor
+    : new Uint32Array(0);
+  const springInvMassA = layout?.springInvMassAByColor instanceof Float32Array
+    ? layout.springInvMassAByColor
+    : new Float32Array(0);
+  const springInvMassB = layout?.springInvMassBByColor instanceof Float32Array
+    ? layout.springInvMassBByColor
+    : new Float32Array(0);
+  const dlByColor = deltaLambdaByColor instanceof Float32Array
+    ? deltaLambdaByColor
+    : new Float32Array(0);
+
+  const nodePredX = new Float32Array(nodes.length);
+  const nodePredY = new Float32Array(nodes.length);
+  for (let ni = 0; ni < nodes.length; ni++) {
+    const node = nodes[ni] || {};
+    nodePredX[ni] = (Number(node.x) || 0) + (Number(node.vx) || 0) * safeDtPos;
+    nodePredY[ni] = (Number(node.y) || 0) + (Number(node.vy) || 0) * safeDtPos;
+  }
+
+  const springNx = new Float32Array(springNodeA.length);
+  const springNy = new Float32Array(springNodeA.length);
+  for (let si = 0; si < springNodeA.length; si++) {
+    const ia = springNodeA[si];
+    const ib = springNodeB[si];
+    if (ia >= nodePredX.length || ib >= nodePredX.length) continue;
+    const dx = nodePredX[ib] - nodePredX[ia];
+    const dy = nodePredY[ib] - nodePredY[ia];
+    const d = Math.max(1e-6, Math.hypot(dx, dy));
+    springNx[si] = dx / d;
+    springNy[si] = dy / d;
+  }
+
+  const deltaVxByNode = new Float32Array(nodes.length);
+  const deltaVyByNode = new Float32Array(nodes.length);
+
+  const endpointCount = Math.min(endpointNodeIndices.length, endpointSpringIndices.length, endpointSigns.length);
+  for (let ei = 0; ei < endpointCount; ei++) {
+    const ni = endpointNodeIndices[ei];
+    const si = endpointSpringIndices[ei];
+    if (ni >= deltaVxByNode.length || si >= dlByColor.length) continue;
+
+    const sign = endpointSigns[ei] < 0 ? -1 : 1;
+    const w = sign < 0 ? springInvMassA[si] : springInvMassB[si];
+    const dl = dlByColor[si];
+    if (!Number.isFinite(dl) || !Number.isFinite(w)) continue;
+
+    const scale = (sign * w * dl) / safeDtPos;
+    deltaVxByNode[ni] += springNx[si] * scale;
+    deltaVyByNode[ni] += springNy[si] * scale;
+  }
+
+  return {
+    deltaVxByNode,
+    deltaVyByNode,
+  };
+}
+
 export function applySoftSpringsXPBDVelocityGpuOnly({
   soft,
   dtPos,
@@ -723,6 +803,16 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
         }),
       ])
         .then(([probeRan, proposalRan]) => {
+          if (proposalRan) {
+            const proposalReduction = reduceSoftSpringVelocityDeltasDeterministic({
+              soft,
+              dtPos,
+              layout,
+              deltaLambdaByColor: wgslOffload.state.lastProposalDeltaLambdaByColor,
+            });
+            wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor = proposalReduction.deltaVxByNode;
+            wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor = proposalReduction.deltaVyByNode;
+          }
           if (probeRan || proposalRan) {
             wgslOffload.state.lastError = null;
             wgslOffload.state.lastMode = proposalRan ? 'wgsl-proposal' : 'wgsl-probe';

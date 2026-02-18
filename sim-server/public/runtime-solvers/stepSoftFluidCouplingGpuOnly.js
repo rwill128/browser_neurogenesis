@@ -59,17 +59,31 @@ function buildSoftFluidCouplingWgslLayout({ nodes, softNodeMomentumScale, softMe
   const clusterIds = new Int32Array(clusterCount);
   const clusterNodeOffsets = new Uint32Array(clusterCount + 1);
   const clusterNodeCount = new Uint32Array(clusterCount);
+  const nodeClusterSlot = new Uint32Array(nodeCount);
+  const clusterNodeIndices = new Uint32Array(nodeCount);
 
+  const clusterSlotById = new Map();
   let offset = 0;
   for (let i = 0; i < clusterCount; i++) {
     const cid = sortedClusterIds[i];
     const count = Number(clusterCounts.get(cid)) || 0;
+    clusterSlotById.set(cid, i);
     clusterIds[i] = cid;
     clusterNodeOffsets[i] = offset;
     clusterNodeCount[i] = count;
     offset += count;
   }
   clusterNodeOffsets[clusterCount] = offset;
+
+  const clusterCursor = new Uint32Array(clusterCount);
+  for (let i = 0; i < clusterCount; i++) clusterCursor[i] = clusterNodeOffsets[i];
+  for (let i = 0; i < nodeCount; i++) {
+    const cid = nodeClusterId[i];
+    const slot = clusterSlotById.get(cid) ?? 0;
+    nodeClusterSlot[i] = slot >>> 0;
+    const outIndex = clusterCursor[slot]++;
+    clusterNodeIndices[outIndex] = i >>> 0;
+  }
 
   const layout = {
     nodeX,
@@ -79,10 +93,12 @@ function buildSoftFluidCouplingWgslLayout({ nodes, softNodeMomentumScale, softMe
     nodeMass,
     nodeMomentum,
     nodeClusterId,
+    nodeClusterSlot,
     nodeIsMembraneCluster,
     clusterIds,
     clusterNodeOffsets,
     clusterNodeCount,
+    clusterNodeIndices,
   };
 
   const signatureSeed = [nodeCount, clusterCount, offset];
@@ -94,6 +110,8 @@ function buildSoftFluidCouplingWgslLayout({ nodes, softNodeMomentumScale, softMe
   signature ^= hashU32ArrayFnv1a(nodeClusterId);
   signature = Math.imul(signature, 0x01000193) >>> 0;
   signature ^= hashU32ArrayFnv1a(clusterNodeOffsets);
+  signature = Math.imul(signature, 0x01000193) >>> 0;
+  signature ^= hashU32ArrayFnv1a(clusterNodeIndices);
   signature >>>= 0;
 
   const byteLength = Object.values(layout).reduce((sum, arr) => sum + (arr?.byteLength || 0), 0);
@@ -267,16 +285,17 @@ export function applySoftFluidCouplingGpuOnly({
     wgslOffload.state.lastPreparedClusterCount = prep.clusterCount;
     wgslOffload.state.lastPreparedLayoutBytes = prep.byteLength;
     wgslOffload.state.lastPreparedLayoutSignature = prep.signature;
+    wgslOffload.state.lastPreparedOwnershipCount = prep.layout.clusterNodeIndices.length;
     wgslOffload.state.lastPreparedSampleLayoutBytes = samplePrep.byteLength;
     wgslOffload.state.lastPreparedSampleLayoutSignature = samplePrep.signature;
     wgslOffload.state.lastPreparedSampleNodeCount = samplePrep.nodeCount;
-    wgslOffload.state.lastSourceRoute = 'cpu-sampled-layout';
+    wgslOffload.state.lastSourceRoute = 'cpu-sampled-layout+cluster-ownership';
     wgslOffload.state.lastMode = 'cpu-prepared';
     wgslOffload.state.lastError = null;
-    // Blocker for immediate WGSL stage in this pass: this module still consumes
-    // CPU-side sampled fluid fields/callbacks. This run lands deterministic
-    // sampled-fluid packing so the next WGSL kernel can consume fixed arrays
-    // (sample + cluster-local velocity deltas) without callback ownership.
+    // Blocker for immediate WGSL stage in this pass: fluid sampling still depends
+    // on CPU callbacks/fields. This run adds deterministic per-cluster ownership
+    // indices (nodeClusterSlot + clusterNodeIndices), so the next WGSL stage can
+    // reduce cluster means/drag directly from fixed buffers once sampling moves.
   }
 
   const softCentroid = computeSoftCentroid(nodes);

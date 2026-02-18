@@ -381,12 +381,15 @@ test('soft fluid coupling wgsl prep telemetry: gpu-only publishes deterministic 
   });
 
   assert.equal(wgslState.lastMode, 'cpu-prepared');
-  assert.equal(wgslState.lastSourceRoute, 'cpu-sampled-layout');
+  assert.equal(wgslState.lastSourceRoute, 'cpu-sampled-layout+cluster-ownership');
   assert.ok(wgslState.lastPreparedLayoutBytes > 0, 'expected deterministic structural layout bytes');
+  assert.equal(wgslState.lastPreparedOwnershipCount, soft.nodes.length, 'expected ownership index count to match node count');
   assert.ok(wgslState.lastPreparedSampleLayoutBytes > 0, 'expected deterministic sampled-fluid layout bytes');
   assert.ok(Number.isInteger(wgslState.lastPreparedLayoutSignature));
   assert.ok(Number.isInteger(wgslState.lastPreparedSampleLayoutSignature));
   assert.equal(wgslState.lastPreparedSampleNodeCount, soft.nodes.length);
+  assert.equal(wgslState.preparedLayout.nodeClusterSlot.length, soft.nodes.length);
+  assert.equal(wgslState.preparedLayout.clusterNodeIndices.length, soft.nodes.length);
   assert.equal(wgslState.preparedSampleLayout.fluidSampleVx.length, soft.nodes.length);
   assert.equal(wgslState.preparedSampleLayout.sampleDeltaVy.length, soft.nodes.length);
 });

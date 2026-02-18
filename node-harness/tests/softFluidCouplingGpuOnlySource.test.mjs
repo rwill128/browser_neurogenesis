@@ -9,7 +9,7 @@ const source = readFileSync(resolve(ROOT, 'sim-server/public/runtime-solvers/ste
 test('soft fluid-coupling gpu-only publishes deterministic WGSL prep layout for next-stage offload', () => {
   assert.match(
     source,
-    /function buildSoftFluidCouplingWgslLayout\(\{ nodes, softNodeMomentumScale, softMembraneClusterSet \}\) \{[\s\S]*clusterNodeOffsets = new Uint32Array\(clusterCount \+ 1\);[\s\S]*clusterNodeCount = new Uint32Array\(clusterCount\);/,
+    /function buildSoftFluidCouplingWgslLayout\(\{ nodes, softNodeMomentumScale, softMembraneClusterSet \}\) \{[\s\S]*clusterNodeOffsets = new Uint32Array\(clusterCount \+ 1\);[\s\S]*clusterNodeCount = new Uint32Array\(clusterCount\);[\s\S]*nodeClusterSlot = new Uint32Array\(nodeCount\);[\s\S]*clusterNodeIndices = new Uint32Array\(nodeCount\);/,
     'expected deterministic node/cluster packed layout builder for upcoming WGSL stage',
   );
 
@@ -21,13 +21,13 @@ test('soft fluid-coupling gpu-only publishes deterministic WGSL prep layout for 
 
   assert.match(
     source,
-    /if \(wgslOffload\?\.enabled === true && wgslOffload\?\.state\) \{[\s\S]*preparedLayout = prep\.layout;[\s\S]*preparedSampleLayout = samplePrep\.layout;[\s\S]*lastPreparedLayoutBytes = prep\.byteLength;[\s\S]*lastPreparedSampleLayoutBytes = samplePrep\.byteLength;[\s\S]*lastPreparedSampleLayoutSignature = samplePrep\.signature;/,
+    /if \(wgslOffload\?\.enabled === true && wgslOffload\?\.state\) \{[\s\S]*preparedLayout = prep\.layout;[\s\S]*preparedSampleLayout = samplePrep\.layout;[\s\S]*lastPreparedLayoutBytes = prep\.byteLength;[\s\S]*lastPreparedOwnershipCount = prep\.layout\.clusterNodeIndices\.length;[\s\S]*lastPreparedSampleLayoutBytes = samplePrep\.byteLength;[\s\S]*lastPreparedSampleLayoutSignature = samplePrep\.signature;/,
     'expected gpu-only path to publish both structural and sampled-fluid WGSL prep telemetry into offload state',
   );
 
   assert.match(
     source,
-    /lastSourceRoute = 'cpu-sampled-layout';[\s\S]*lastMode = 'cpu-prepared';[\s\S]*next WGSL kernel can consume fixed arrays/,
+    /lastSourceRoute = 'cpu-sampled-layout\+cluster-ownership';[\s\S]*lastMode = 'cpu-prepared';[\s\S]*next WGSL stage can[\s\S]*reduce cluster means\/drag directly from fixed buffers/,
     'expected explicit sampled-layout source-route marker and blocker note for imminent WGSL kernel handoff',
   );
 });

@@ -45,6 +45,7 @@ function canUseWgslOffload(offload) {
   if (!offload || offload.enabled !== true) return false;
   if (!offload.device || typeof offload.device.createComputePipelineAsync !== 'function') return false;
   if (typeof globalThis.GPUBufferUsage === 'undefined') return false;
+  if (typeof globalThis.GPUMapMode === 'undefined') return false;
   return true;
 }
 
@@ -74,10 +75,18 @@ function ensureProbeBuffers(offload, nodeCount, springCount) {
     state.probeSpringNodeB?.destroy?.();
     state.probeSpringRest?.destroy?.();
     state.probeStretchOut?.destroy?.();
+    state.probeStretchReadback?.destroy?.();
     state.probeSpringNodeA = device.createBuffer({ size: bytes, usage: storageUsage });
     state.probeSpringNodeB = device.createBuffer({ size: bytes, usage: storageUsage });
     state.probeSpringRest = device.createBuffer({ size: bytes, usage: storageUsage });
-    state.probeStretchOut = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeStretchOut = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC,
+    });
+    state.probeStretchReadback = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
+    });
     state.probeSpringCapacity = capacity;
     state.probeBindGroup = null;
   }
@@ -141,17 +150,37 @@ async function dispatchSoftSpringWgslProbe({ soft, offload, layout }) {
   device.queue.writeBuffer(state.probeSpringNodeB, 0, layout.springNodeBByColor);
   device.queue.writeBuffer(state.probeSpringRest, 0, layout.springRestByColor);
 
+  const dispatchCount = Math.ceil(springCount / WGSL_WORKGROUP_SIZE);
+  const bytes = springCount * 4;
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   pass.setPipeline(state.probePipeline);
   pass.setBindGroup(0, state.probeBindGroup);
-  pass.dispatchWorkgroups(Math.ceil(springCount / WGSL_WORKGROUP_SIZE));
+  pass.dispatchWorkgroups(dispatchCount);
   pass.end();
+  encoder.copyBufferToBuffer(state.probeStretchOut, 0, state.probeStretchReadback, 0, bytes);
   device.queue.submit([encoder.finish()]);
+
+  await state.probeStretchReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
+  const mapped = state.probeStretchReadback.getMappedRange(0, bytes);
+  const stretchByColor = new Float32Array(mapped.slice(0));
+  state.probeStretchReadback.unmap();
+
+  let absMax = 0;
+  let absSum = 0;
+  for (let i = 0; i < stretchByColor.length; i++) {
+    const abs = Math.abs(stretchByColor[i]);
+    if (abs > absMax) absMax = abs;
+    absSum += abs;
+  }
 
   state.lastProbeNodeCount = nodes.length;
   state.lastProbeSpringCount = springCount;
-  state.lastProbeDispatch = Math.ceil(springCount / WGSL_WORKGROUP_SIZE);
+  state.lastProbeDispatch = dispatchCount;
+  state.lastProbeAbsMean = stretchByColor.length > 0 ? absSum / stretchByColor.length : 0;
+  state.lastProbeAbsMax = absMax;
+  state.lastProbeStretchByColor = stretchByColor;
+  state.lastProbeColorBucketCount = Math.max(0, (layout?.springColorOffsets?.length || 1) - 1);
   return true;
 }
 

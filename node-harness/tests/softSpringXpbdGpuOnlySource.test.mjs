@@ -30,3 +30,11 @@ test('soft spring gpu-only path dispatches a real WGSL probe stage when offload 
     'expected gpu-only soft spring branch to execute WGSL compute dispatch (with cpu fallback semantics preserved)',
   );
 });
+
+test('soft spring gpu-only WGSL probe copies stretch output into readback buffer for deterministic parity telemetry', () => {
+  assert.match(
+    source,
+    /copyBufferToBuffer\(state\.probeStretchOut, 0, state\.probeStretchReadback, 0, bytes\)[\s\S]*mapAsync\(globalThis\.GPUMapMode\.READ, 0, bytes\)[\s\S]*lastProbeAbsMean[\s\S]*lastProbeAbsMax[\s\S]*lastProbeStretchByColor/,
+    'expected WGSL probe stage to read back stretch metrics for deterministic CPU-vs-WGSL parity harness checks',
+  );
+});

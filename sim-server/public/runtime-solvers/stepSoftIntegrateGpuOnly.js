@@ -92,6 +92,15 @@ async function ensureWgslState(offload, count) {
     const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.COPY_SRC;
     const readbackUsage = globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ;
 
+    state.x?.destroy?.();
+    state.y?.destroy?.();
+    state.vx?.destroy?.();
+    state.vy?.destroy?.();
+    state.readX?.destroy?.();
+    state.readY?.destroy?.();
+    state.readVx?.destroy?.();
+    state.readVy?.destroy?.();
+
     state.x = createBuffer(device, bytes, storageUsage);
     state.y = createBuffer(device, bytes, storageUsage);
     state.vx = createBuffer(device, bytes, storageUsage);
@@ -103,6 +112,7 @@ async function ensureWgslState(offload, count) {
     state.readVy = createBuffer(device, bytes, readbackUsage);
 
     state.capacity = capacity;
+    state.bindGroup = null;
   }
 
   if (!state.params) {
@@ -151,13 +161,14 @@ async function integrateSoftBodiesWgsl({ soft, n, dt, softIntegrationScale, hybr
     vy[i] = Number(node.vy) || 0;
   }
 
-  const params = new Float32Array(8);
-  params[0] = count;
-  params[4] = dt;
-  params[5] = softIntegrationScale;
-  params[6] = hybridNodeVCap;
+  const paramsBuffer = new ArrayBuffer(32);
+  const paramsView = new DataView(paramsBuffer);
+  paramsView.setUint32(0, count, true);
+  paramsView.setFloat32(16, dt, true);
+  paramsView.setFloat32(20, softIntegrationScale, true);
+  paramsView.setFloat32(24, hybridNodeVCap, true);
 
-  device.queue.writeBuffer(state.params, 0, params);
+  device.queue.writeBuffer(state.params, 0, paramsBuffer);
   device.queue.writeBuffer(state.x, 0, x);
   device.queue.writeBuffer(state.y, 0, y);
   device.queue.writeBuffer(state.vx, 0, vx);
@@ -214,7 +225,7 @@ export async function integrateSoftBodiesGpuOnly({
 }) {
   if (!canUseWgslOffload(wgslOffload)) {
     integrateSoftBodiesCpu({ soft, n, dt, softIntegrationScale, hybridNodeVCap, applyBounceBoundary });
-    return;
+    return { mode: 'cpu', reason: 'wgsl-unavailable' };
   }
 
   try {
@@ -227,8 +238,18 @@ export async function integrateSoftBodiesGpuOnly({
       applyBounceBoundary,
       offload: wgslOffload,
     });
-  } catch (_err) {
+    if (wgslOffload?.state) {
+      wgslOffload.state.lastError = null;
+      wgslOffload.state.lastMode = 'wgsl';
+    }
+    return { mode: 'wgsl', reason: 'ok' };
+  } catch (err) {
     // Keep runtime behavior stable if the optional WGSL path fails in-session.
     integrateSoftBodiesCpu({ soft, n, dt, softIntegrationScale, hybridNodeVCap, applyBounceBoundary });
+    if (wgslOffload?.state) {
+      wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
+      wgslOffload.state.lastMode = 'cpu-fallback';
+    }
+    return { mode: 'cpu-fallback', reason: String(err?.message || err || 'unknown-error') };
   }
 }

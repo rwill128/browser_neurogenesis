@@ -925,6 +925,38 @@ export function applySoftFluidCouplingGpuOnly({
   const canUseAuthoritativeCarryProposal = authoritativeCarryProposal && (fastMode ? authoritativeCarryFinite.allFinite === true : true);
   const useFastAuthoritativeCarryShortcut = fastMode && canUseAuthoritativeCarryProposal;
   let carrySource = canUseAuthoritativeCarryProposal ? 'wgsl-carry-authoritative' : 'cpu-carry-authoritative';
+
+  const clusterIds = wgslOffload?.state?.preparedLayout?.clusterIds;
+  const proposalForceX = wgslOffload?.state?.lastClusterLoadProposalForceX;
+  const proposalForceY = wgslOffload?.state?.lastClusterLoadProposalForceY;
+  const proposalTorque = wgslOffload?.state?.lastClusterLoadProposalTorque;
+  const proposalCount = wgslOffload?.state?.lastClusterLoadProposalCount;
+  const hasClusterProposal = clusterIds instanceof Int32Array
+    && proposalForceX instanceof Float32Array
+    && proposalForceY instanceof Float32Array
+    && proposalTorque instanceof Float32Array
+    && proposalCount instanceof Uint32Array
+    && wgslOffload?.state?.lastClusterLoadProposalSignature === clusterLoadProposalSignature
+    && proposalForceX.length === clusterIds.length
+    && proposalForceY.length === clusterIds.length
+    && proposalTorque.length === clusterIds.length
+    && proposalCount.length === clusterIds.length;
+  const proposalForceXFinite = checkFiniteFloat32Array(proposalForceX);
+  const proposalForceYFinite = checkFiniteFloat32Array(proposalForceY);
+  const proposalTorqueFinite = checkFiniteFloat32Array(proposalTorque);
+  const proposalCountFinite = checkFiniteUint32Array(proposalCount);
+  const clusterLoadFinite = hasClusterProposal
+    && proposalForceXFinite.allFinite
+    && proposalForceYFinite.allFinite
+    && proposalTorqueFinite.allFinite
+    && proposalCountFinite.allFinite;
+
+  const canUseAuthoritativeClusterLoadPreloop = fastMode
+    && wgslOffload?.authoritativeClusterLoad === true
+    && clusterLoadFinite
+    && clusterIds instanceof Int32Array
+    && hasAuthoritativeWgslClusterLoadProposal(wgslOffload, clusterLoadProposalSignature, clusterIds.length);
+
   const ensureClusterLoad = (cid) => {
     if (!clusterFluidLoadMap.has(cid)) {
       clusterFluidLoadMap.set(cid, { forceX: 0, forceY: 0, torque: 0, count: 0 });
@@ -1025,11 +1057,13 @@ export function applySoftFluidCouplingGpuOnly({
     node.vx += localCarryX * dt * 60 + swimX * dtNorm;
     node.vy += localCarryY * dt * 60 + swimY * dtNorm;
 
-    const load = ensureClusterLoad(cid);
-    load.forceX += forceX;
-    load.forceY += forceY;
-    load.torque += rx * forceY - ry * forceX;
-    load.count += 1;
+    if (!canUseAuthoritativeClusterLoadPreloop) {
+      const load = ensureClusterLoad(cid);
+      load.forceX += forceX;
+      load.forceY += forceY;
+      load.torque += rx * forceY - ry * forceX;
+      load.count += 1;
+    }
 
     const st = clusterCarryMap.get(cid) || { sumX: 0, sumY: 0, count: 0, maxX: 0, maxY: 0, maxMag: 0 };
     st.sumX += carryX;
@@ -1067,31 +1101,9 @@ export function applySoftFluidCouplingGpuOnly({
     wgslOffload.state.lastClusterLoadProposalDispatched = wgslClusterLoadDispatched;
   }
 
-  const clusterIds = wgslOffload?.state?.preparedLayout?.clusterIds;
-  const proposalForceX = wgslOffload?.state?.lastClusterLoadProposalForceX;
-  const proposalForceY = wgslOffload?.state?.lastClusterLoadProposalForceY;
-  const proposalTorque = wgslOffload?.state?.lastClusterLoadProposalTorque;
-  const proposalCount = wgslOffload?.state?.lastClusterLoadProposalCount;
-  const hasClusterProposal = clusterIds instanceof Int32Array
-    && proposalForceX instanceof Float32Array
-    && proposalForceY instanceof Float32Array
-    && proposalTorque instanceof Float32Array
-    && proposalCount instanceof Uint32Array
-    && wgslOffload?.state?.lastClusterLoadProposalSignature === clusterLoadProposalSignature
-    && proposalForceX.length === clusterIds.length
-    && proposalForceY.length === clusterIds.length
-    && proposalTorque.length === clusterIds.length
-    && proposalCount.length === clusterIds.length;
-
-  const proposalForceXFinite = checkFiniteFloat32Array(proposalForceX);
-  const proposalForceYFinite = checkFiniteFloat32Array(proposalForceY);
-  const proposalTorqueFinite = checkFiniteFloat32Array(proposalTorque);
-  const proposalCountFinite = checkFiniteUint32Array(proposalCount);
-  const clusterLoadFinite = hasClusterProposal
-    && proposalForceXFinite.allFinite
-    && proposalForceYFinite.allFinite
-    && proposalTorqueFinite.allFinite
-    && proposalCountFinite.allFinite;
+  // Cluster-load proposal + finite checks were computed before the node loop so
+  // fast-mode can skip CPU cluster-load accumulation when authoritative WGSL
+  // cluster reduction is already available for this signature.
 
   let clusterLoadMismatchCount = 0;
   if (!fastMode && hasClusterProposal) {
@@ -1205,6 +1217,7 @@ export function applySoftFluidCouplingGpuOnly({
     wgslOffload.state.lastPipelineModeProfile = modeProfile;
     wgslOffload.state.lastCarryProposalFinite = authoritativeCarryFinite;
     wgslOffload.state.lastCarryFastShortcutUsed = useFastAuthoritativeCarryShortcut;
+    wgslOffload.state.lastClusterLoadCpuAccumulationSkipped = canUseAuthoritativeClusterLoadPreloop;
     if (!fastMode) {
       wgslOffload.state.lastCpuCarryProposalForceX = cpuProposalForceX;
       wgslOffload.state.lastCpuCarryProposalForceY = cpuProposalForceY;

@@ -381,7 +381,7 @@ test('gpu-lab routes post-collision soft-cluster projection and inside-correctio
 
   assert.match(
     source,
-    /if \(solverPath === 'gpu-only'\) \{[\s\S]*applyPostCollisionRecoveryGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*computeSoftClusterKinematics\(s\.nodes\);[\s\S]*applyRigidInsideCorrectionPass\(bodies, s, hybridAttachedByRigid\);/,
+    /if \(solverPath === 'gpu-only'\) \{[\s\S]*await applyPostCollisionRecoveryGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*computeSoftClusterKinematics\(s\.nodes\);[\s\S]*applyRigidInsideCorrectionPass\(bodies, s, hybridAttachedByRigid\);/,
     'expected explicit gpu-only post-collision recovery dispatch with baseline fallback branch',
   );
 });

@@ -5,7 +5,7 @@ import {
 } from './stepSoftClusterKinematicsGpuOnly.js';
 import { applySoftMembraneInsideCorrectionPassGpuOnly } from './stepSoftMembraneInsideCorrectionGpuOnly.js';
 
-export function applyPostCollisionRecoveryGpuOnly(args = {}) {
+export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
   const {
     bodies,
     soft,
@@ -40,13 +40,13 @@ export function applyPostCollisionRecoveryGpuOnly(args = {}) {
       ? projectNodesTowardClusterRigidMotion
       : projectNodesTowardClusterRigidMotionGpuOnly;
 
-  const postCollisionClusterKinematics = computeKinematics(soft.nodes);
-  projectTowardRigidMotion(soft.nodes, postCollisionClusterKinematics, {
+  const postCollisionClusterKinematics = await Promise.resolve(computeKinematics(soft.nodes));
+  await Promise.resolve(projectTowardRigidMotion(soft.nodes, postCollisionClusterKinematics, {
     linearGain,
     angularGain,
     membraneClusterSet: softMembraneClusterSet,
     membraneGainScale: Number(membraneGainScale) || 0.72,
-  });
+  }));
 
   const rigidInsideCorrections =
     typeof applyRigidInsideCorrectionPass === 'function'

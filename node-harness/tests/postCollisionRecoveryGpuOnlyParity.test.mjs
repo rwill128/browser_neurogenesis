@@ -113,7 +113,7 @@ function runBaselineInline(state, callbacks) {
   return { rigidInsideCorrections, membraneInsideCorrections };
 }
 
-test('post-collision recovery parity: gpu-only module matches baseline projection + inside-correction sequencing', () => {
+test('post-collision recovery parity: gpu-only module matches baseline projection + inside-correction sequencing', async () => {
   const baselineState = makeState();
   const gpuState = makeState();
 
@@ -123,7 +123,7 @@ test('post-collision recovery parity: gpu-only module matches baseline projectio
   const gpuCallbacks = makeCallbacks(gpuLog);
 
   const baseline = runBaselineInline(baselineState, baselineCallbacks);
-  const gpu = applyPostCollisionRecoveryGpuOnly({
+  const gpu = await applyPostCollisionRecoveryGpuOnly({
     sim: gpuState.sim,
     bodies: gpuState.bodies,
     soft: gpuState.soft,
@@ -148,7 +148,52 @@ test('post-collision recovery parity: gpu-only module matches baseline projectio
   assert.deepEqual(gpuLog, baselineLog, 'gpu-only orchestration sequence should match baseline sequencing');
 });
 
-test('post-collision recovery parity: gpu-only module uses isolated cluster kinematics/projection defaults matching baseline math', () => {
+test('post-collision recovery parity: gpu-only module awaits async projection callback before inside-correction passes', async () => {
+  const state = makeState();
+  const order = [];
+
+  const gpu = await applyPostCollisionRecoveryGpuOnly({
+    sim: state.sim,
+    bodies: state.bodies,
+    soft: state.soft,
+    dtNorm: state.dtNorm,
+    softMembraneClusterSet: state.softMembraneClusterSet,
+    softClusterCollisionLinearProjection: state.softClusterCollisionLinearProjection,
+    softClusterCollisionAngularProjection: state.softClusterCollisionAngularProjection,
+    membraneGainScale: 0.72,
+    computeSoftClusterKinematics(nodes) {
+      order.push('kinematics');
+      return computeSoftClusterKinematics(nodes);
+    },
+    async projectNodesTowardClusterRigidMotion(nodes, clusterMap, opts) {
+      order.push('project:start');
+      await Promise.resolve();
+      projectNodesTowardClusterRigidMotion(nodes, clusterMap, opts);
+      order.push('project:end');
+    },
+    applyRigidInsideCorrectionPass() {
+      order.push('rigidInside');
+      return 0;
+    },
+    applyMembraneInsideCorrectionPass() {
+      order.push('membraneInside');
+      return 0;
+    },
+    applyBounceBoundary() {
+      order.push('bounce');
+    },
+    n: state.n,
+    softClusterLoops: state.softClusterLoops,
+    hybridAttachedByRigid: state.hybridAttachedByRigid,
+  });
+
+  assert.equal(gpu.rigidInsideCorrections, 0);
+  assert.equal(gpu.membraneInsideCorrections, 0);
+  assert.deepEqual(order.slice(0, 4), ['kinematics', 'project:start', 'project:end', 'rigidInside']);
+  assert.ok(order.indexOf('bounce') > order.indexOf('membraneInside'), 'bounce pass should run after inside-correction passes');
+});
+
+test('post-collision recovery parity: gpu-only module uses isolated cluster kinematics/projection defaults matching baseline math', async () => {
   const baselineState = makeState();
   const gpuState = makeState();
 
@@ -173,7 +218,7 @@ test('post-collision recovery parity: gpu-only module uses isolated cluster kine
   for (const rb of baselineState.bodies.rigid) baselineCallbacks.applyBounceBoundary(rb, baselineState.n, 0.84);
   for (const sn of baselineState.soft.nodes) baselineCallbacks.applyBounceBoundary(sn, baselineState.n, 0.78);
 
-  const gpu = applyPostCollisionRecoveryGpuOnly({
+  const gpu = await applyPostCollisionRecoveryGpuOnly({
     sim: gpuState.sim,
     bodies: gpuState.bodies,
     soft: gpuState.soft,
@@ -224,7 +269,7 @@ function makeDefaultMembraneState() {
   };
 }
 
-test('post-collision recovery parity: default gpu-only membrane inside-correction path matches baseline sequencing', () => {
+test('post-collision recovery parity: default gpu-only membrane inside-correction path matches baseline sequencing', async () => {
   const baselineState = makeDefaultMembraneState();
   const gpuState = makeDefaultMembraneState();
 
@@ -260,7 +305,7 @@ test('post-collision recovery parity: default gpu-only membrane inside-correctio
   for (const rb of baselineState.bodies.rigid) bounce(rb, baselineState.n, 0.84);
   for (const sn of baselineState.soft.nodes) bounce(sn, baselineState.n, 0.78);
 
-  const gpu = applyPostCollisionRecoveryGpuOnly({
+  const gpu = await applyPostCollisionRecoveryGpuOnly({
     sim: gpuState.sim,
     bodies: gpuState.bodies,
     soft: gpuState.soft,

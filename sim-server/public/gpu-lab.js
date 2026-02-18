@@ -4419,7 +4419,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   const postCollisionRecoveryOn = sim.controls?.enablePostCollisionRecovery !== false;
   if (postCollisionRecoveryOn) {
     if (solverPath === 'gpu-only') {
-      const postCollisionRecovery = applyPostCollisionRecoveryGpuOnly({
+      const postCollisionRecovery = await applyPostCollisionRecoveryGpuOnly({
         sim,
         bodies,
         soft: s,

@@ -211,6 +211,7 @@ test('soft membrane pressure gpu-only route uses WGSL proposal as authoritative 
   const signature = wgslState.lastPreparedProposalSignature;
   const contributionCount = wgslState.preparedPlan.indexCount;
   wgslState.lastVelocityProposalSignature = signature;
+  wgslState.lastVelocityProposalFinite = { allFinite: true };
   wgslState.lastVelocityProposalDeltaVx = new Float32Array(contributionCount).fill(0.02);
   wgslState.lastVelocityProposalDeltaVy = new Float32Array(contributionCount).fill(-0.01);
 

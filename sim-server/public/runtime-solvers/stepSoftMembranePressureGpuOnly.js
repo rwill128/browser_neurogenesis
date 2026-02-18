@@ -121,6 +121,37 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+
+function getGpuOnlyPipelineModeProfile(offload) {
+  const modeProfile = String(offload?.modeProfile || '').trim().toLowerCase();
+  if (modeProfile === 'gpu-only-fast') return 'gpu-only-fast';
+  if (modeProfile === 'gpu-only-validated') return 'gpu-only-validated';
+  return 'standard';
+}
+
+function isGpuOnlyFastMode(offload) {
+  return getGpuOnlyPipelineModeProfile(offload) === 'gpu-only-fast';
+}
+
+function checkFiniteFloat32Array(values) {
+  if (!(values instanceof Float32Array)) {
+    return { allFinite: false, firstInvalidIndex: -1, invalidCount: 0 };
+  }
+  let firstInvalidIndex = -1;
+  let invalidCount = 0;
+  for (let i = 0; i < values.length; i++) {
+    if (!Number.isFinite(values[i])) {
+      if (firstInvalidIndex === -1) firstInvalidIndex = i;
+      invalidCount += 1;
+    }
+  }
+  return {
+    allFinite: invalidCount === 0,
+    firstInvalidIndex,
+    invalidCount,
+  };
+}
+
 function canUseWgslOffload(offload) {
   return Boolean(
     offload
@@ -490,7 +521,7 @@ async function dispatchSoftMembranePressureAreaProbe(offload, prep) {
   return true;
 }
 
-async function dispatchSoftMembranePressureVelocityDeltaProposal(offload, prep, dtPos, proposalSignature) {
+async function dispatchSoftMembranePressureVelocityDeltaProposal(offload, prep, dtPos, proposalSignature, options = {}) {
   const device = offload.device;
   const state = await ensureSoftMembranePressureProbeState(offload, prep);
   const contributionCount = prep.plan.indexCount;
@@ -526,19 +557,57 @@ async function dispatchSoftMembranePressureVelocityDeltaProposal(offload, prep, 
   const deltaVy = new Float32Array(deltaVyMapped.slice(0));
   state.velocityProposalDeltaVyReadback.unmap();
 
-  const cpuExpected = buildCpuMembranePressureVelocityDeltaProposal(prep, dtPos);
+  const fastMode = options.fastMode === true;
+  const finiteVx = checkFiniteFloat32Array(deltaVx);
+  const finiteVy = checkFiniteFloat32Array(deltaVy);
+  const finite = {
+    allFinite: finiteVx.allFinite && finiteVy.allFinite,
+    vx: finiteVx,
+    vy: finiteVy,
+  };
+
   state.lastVelocityProposalDispatchCount = Math.max(1, Math.ceil(contributionCount / WGSL_WORKGROUP_SIZE));
   state.lastVelocityProposalContributionCount = contributionCount;
+  state.lastVelocityProposalFinite = finite;
+
+  if (!finite.allFinite) {
+    state.lastVelocityProposalDeltaVx = null;
+    state.lastVelocityProposalDeltaVy = null;
+    state.lastVelocityProposalExpectedDeltaVx = null;
+    state.lastVelocityProposalExpectedDeltaVy = null;
+    state.lastVelocityProposalParity = {
+      source: fastMode ? 'cpu-membrane-fallback-fast-nonfinite' : 'cpu-membrane-fallback-nonfinite',
+      validation: 'non-finite-wgsl-proposal',
+      finite,
+    };
+    state.lastVelocityProposalSource = fastMode ? 'cpu-membrane-fallback-fast-nonfinite' : 'cpu-membrane-fallback-nonfinite';
+    state.lastVelocityProposalSignature = '';
+    return false;
+  }
+
   state.lastVelocityProposalDeltaVx = deltaVx;
   state.lastVelocityProposalDeltaVy = deltaVy;
-  state.lastVelocityProposalExpectedDeltaVx = cpuExpected.deltaVx;
-  state.lastVelocityProposalExpectedDeltaVy = cpuExpected.deltaVy;
-  state.lastVelocityProposalParity = {
-    vx: computeProposalParityStats(cpuExpected.deltaVx, deltaVx),
-    vy: computeProposalParityStats(cpuExpected.deltaVy, deltaVy),
-    source: 'wgsl-pressure-velocity-proposal',
-  };
-  state.lastVelocityProposalSource = 'wgsl-pressure-velocity-proposal';
+  if (fastMode) {
+    state.lastVelocityProposalExpectedDeltaVx = null;
+    state.lastVelocityProposalExpectedDeltaVy = null;
+    state.lastVelocityProposalParity = {
+      source: 'wgsl-pressure-velocity-proposal-fast',
+      validation: 'skipped-cpu-parity',
+      finite,
+    };
+    state.lastVelocityProposalSource = 'wgsl-pressure-velocity-proposal-fast';
+  } else {
+    const cpuExpected = buildCpuMembranePressureVelocityDeltaProposal(prep, dtPos);
+    state.lastVelocityProposalExpectedDeltaVx = cpuExpected.deltaVx;
+    state.lastVelocityProposalExpectedDeltaVy = cpuExpected.deltaVy;
+    state.lastVelocityProposalParity = {
+      vx: computeProposalParityStats(cpuExpected.deltaVx, deltaVx),
+      vy: computeProposalParityStats(cpuExpected.deltaVy, deltaVy),
+      source: 'wgsl-pressure-velocity-proposal',
+      finite,
+    };
+    state.lastVelocityProposalSource = 'wgsl-pressure-velocity-proposal';
+  }
   state.lastVelocityProposalSignature = String(proposalSignature || '');
   return true;
 }
@@ -566,6 +635,9 @@ export function applySoftMembraneCellPressureGpuOnly({
   let authoritativeProposal = null;
   let authoritativeMembraneIndexByCluster = null;
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
+    const pipelineMode = getGpuOnlyPipelineModeProfile(wgslOffload);
+    const fastMode = isGpuOnlyFastMode(wgslOffload);
+    wgslOffload.state.lastPipelineModeProfile = pipelineMode;
     const prep = buildSoftMembranePressureWgslPrep({
       membranes,
       loopByCluster,
@@ -585,6 +657,7 @@ export function applySoftMembraneCellPressureGpuOnly({
 
     const canUseAuthoritativeWgsl = prep.plan.indexCount > 0
       && wgslOffload.state.lastVelocityProposalSignature === proposalSignature
+      && wgslOffload.state.lastVelocityProposalFinite?.allFinite === true
       && wgslOffload.state.lastVelocityProposalDeltaVx instanceof Float32Array
       && wgslOffload.state.lastVelocityProposalDeltaVy instanceof Float32Array
       && wgslOffload.state.lastVelocityProposalDeltaVx.length === prep.plan.indexCount
@@ -600,8 +673,8 @@ export function applySoftMembraneCellPressureGpuOnly({
       for (let i = 0; i < prep.layout.clusterId.length; i++) {
         authoritativeMembraneIndexByCluster.set(Number(prep.layout.clusterId[i]), i);
       }
-      wgslOffload.state.lastMode = 'wgsl-pressure-authoritative';
-      wgslOffload.state.lastVelocityProposalSource = 'wgsl-pressure-authoritative';
+      wgslOffload.state.lastMode = fastMode ? 'wgsl-pressure-authoritative-fast' : 'wgsl-pressure-authoritative';
+      wgslOffload.state.lastVelocityProposalSource = fastMode ? 'wgsl-pressure-authoritative-fast' : 'wgsl-pressure-authoritative';
       wgslOffload.state.lastAuthoritativeProposalSignature = proposalSignature;
       wgslOffload.state.lastAuthoritativeProposalFrame = Number(sim?.frame) || 0;
     }
@@ -612,7 +685,7 @@ export function applySoftMembraneCellPressureGpuOnly({
         .then(async () => {
           const probeRan = await dispatchSoftMembranePressureAreaProbe(wgslOffload, prep);
           const proposalRan = probeRan
-            ? await dispatchSoftMembranePressureVelocityDeltaProposal(wgslOffload, prep, dtPos, proposalSignature)
+            ? await dispatchSoftMembranePressureVelocityDeltaProposal(wgslOffload, prep, dtPos, proposalSignature, { fastMode })
             : false;
           return { probeRan, proposalRan };
         })

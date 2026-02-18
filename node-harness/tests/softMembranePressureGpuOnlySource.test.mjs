@@ -38,7 +38,7 @@ test('soft membrane pressure gpu-only path dispatches WGSL area-probe + velocity
 
   assert.match(
     source,
-    /const serializedDispatch = \(wgslOffload\.state\.pendingWgslAreaProbePromise \|\| Promise\.resolve\(\)\)[\s\S]*dispatchSoftMembranePressureAreaProbe\(wgslOffload, prep\)[\s\S]*dispatchSoftMembranePressureVelocityDeltaProposal\(wgslOffload, prep, dtPos, proposalSignature\)[\s\S]*lastMode = proposalRan[\s\S]*'wgsl-velocity-proposal'[\s\S]*'wgsl-area-probe'[\s\S]*pendingWgslAreaProbePromise = serializedDispatch;/,
+    /const serializedDispatch = \(wgslOffload\.state\.pendingWgslAreaProbePromise \|\| Promise\.resolve\(\)\)[\s\S]*dispatchSoftMembranePressureAreaProbe\(wgslOffload, prep\)[\s\S]*dispatchSoftMembranePressureVelocityDeltaProposal\(wgslOffload, prep, dtPos, proposalSignature, \{ fastMode \}\)[\s\S]*lastMode = proposalRan[\s\S]*'wgsl-velocity-proposal'[\s\S]*'wgsl-area-probe'[\s\S]*pendingWgslAreaProbePromise = serializedDispatch;/,
     'expected membrane pressure WGSL dispatch chain to serialize probe+proposal readbacks and publish staged mode ownership',
   );
 });
@@ -46,20 +46,40 @@ test('soft membrane pressure gpu-only path dispatches WGSL area-probe + velocity
 test('soft membrane pressure gpu-only module can route deterministic signature-matched WGSL proposal readback as authoritative deltas', () => {
   assert.match(
     source,
-    /const proposalSignature = computeMembraneProposalSignature\(prep, dtPos\);[\s\S]*const canUseAuthoritativeWgsl = prep\.plan\.indexCount > 0[\s\S]*lastVelocityProposalSignature === proposalSignature[\s\S]*lastVelocityProposalDeltaVx instanceof Float32Array[\s\S]*lastVelocityProposalDeltaVy instanceof Float32Array[\s\S]*lastVelocityProposalSource = 'wgsl-pressure-authoritative';/,
-    'expected membrane pressure gpu-only path to guard authoritative WGSL proposal replay behind deterministic signature + typed-array ownership checks',
+    /const proposalSignature = computeMembraneProposalSignature\(prep, dtPos\);[\s\S]*const canUseAuthoritativeWgsl = prep\.plan\.indexCount > 0[\s\S]*lastVelocityProposalSignature === proposalSignature[\s\S]*lastVelocityProposalFinite\?\.allFinite === true[\s\S]*lastVelocityProposalDeltaVx instanceof Float32Array[\s\S]*lastVelocityProposalDeltaVy instanceof Float32Array[\s\S]*lastVelocityProposalSource = fastMode \? 'wgsl-pressure-authoritative-fast' : 'wgsl-pressure-authoritative';/,
+    'expected membrane pressure gpu-only path to guard authoritative WGSL proposal replay behind deterministic signature + finite safety checks + typed-array ownership checks',
   );
 
   assert.match(
     source,
-    /dispatchSoftMembranePressureVelocityDeltaProposal\(wgslOffload, prep, dtPos, proposalSignature\)/,
-    'expected membrane pressure path to thread deterministic signature into WGSL proposal dispatch',
+    /dispatchSoftMembranePressureVelocityDeltaProposal\(wgslOffload, prep, dtPos, proposalSignature, \{ fastMode \}\)/,
+    'expected membrane pressure path to thread deterministic signature and fast-mode routing into WGSL proposal dispatch',
   );
 
   assert.match(
     source,
     /lastVelocityProposalSignature = String\(proposalSignature \|\| ''\);/,
     'expected membrane pressure WGSL proposal dispatch to persist deterministic signature metadata for next-frame authoritative source routing',
+  );
+});
+
+test('soft membrane pressure gpu-only fast mode skips CPU parity shadow while preserving finite checks + fallback source routing', () => {
+  assert.match(
+    source,
+    /function getGpuOnlyPipelineModeProfile\(offload\) \{[\s\S]*modeProfile === 'gpu-only-fast'[\s\S]*modeProfile === 'gpu-only-validated'[\s\S]*return 'standard';[\s\S]*\}/,
+    'expected membrane pressure gpu-only path to normalize standard vs validated vs fast pipeline mode profiles',
+  );
+
+  assert.match(
+    source,
+    /const fastMode = options\.fastMode === true;[\s\S]*if \(!finite\.allFinite\) \{[\s\S]*lastVelocityProposalSource = fastMode \? 'cpu-membrane-fallback-fast-nonfinite' : 'cpu-membrane-fallback-nonfinite';[\s\S]*return false;[\s\S]*\}/,
+    'expected membrane pressure velocity proposal readback to keep hard non-finite guardrails with explicit fast-mode fallback source telemetry',
+  );
+
+  assert.match(
+    source,
+    /if \(fastMode\) \{[\s\S]*lastVelocityProposalExpectedDeltaVx = null;[\s\S]*lastVelocityProposalExpectedDeltaVy = null;[\s\S]*validation: 'skipped-cpu-parity'[\s\S]*lastVelocityProposalSource = 'wgsl-pressure-velocity-proposal-fast';[\s\S]*\} else \{[\s\S]*buildCpuMembranePressureVelocityDeltaProposal\(/,
+    'expected fast mode to remove CPU shadow/parity recompute while standard/validated modes keep parity reference coverage',
   );
 });
 

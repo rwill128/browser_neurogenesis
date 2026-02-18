@@ -1099,11 +1099,30 @@ function initBodies(n, controls) {
 
   const rigidShapeCycle = [3, 4, 5, 6];
   const rigid = [];
+
+  // High rigid counts (especially on 1024/2048 grids) need structured placement
+  // and adaptive sizing so seeds don't begin in dense clumps.
+  const spawnMinX = n * 0.08;
+  const spawnMaxX = n * 0.92;
+  const spawnMinY = n * 0.12;
+  const spawnMaxY = n * 0.88;
+  const spawnW = Math.max(1, spawnMaxX - spawnMinX);
+  const spawnH = Math.max(1, spawnMaxY - spawnMinY);
+  const spawnAspect = spawnW / spawnH;
+  const cols = Math.max(1, Math.ceil(Math.sqrt(rigidCount * spawnAspect)));
+  const rows = Math.max(1, Math.ceil(rigidCount / cols));
+  const cellW = spawnW / cols;
+  const cellH = spawnH / rows;
+  const jitterFrac = rigidCount > 64 ? 0.22 : 0.35;
+  const crowdScale = rigidCount <= 24
+    ? 1
+    : Math.max(0.35, Math.min(1, Math.sqrt(24 / Math.max(1, rigidCount))));
+
   for (let i = 0; i < rigidCount; i++) {
-    const t = rigidCount <= 1 ? 0.5 : i / (rigidCount - 1);
     const mass = (i % 2 === 0) ? controls.massLight : controls.massHeavy;
     const sides = rigidShapeCycle[i % rigidShapeCycle.length];
-    const r = ((i % 2 === 0) ? 5 : 6) * scale * bodyScale * (sides >= 5 ? 0.95 : 1.0);
+    const baseR = ((i % 2 === 0) ? 5 : 6) * scale * bodyScale * (sides >= 5 ? 0.95 : 1.0);
+    const r = Math.max(0.9 * scale * bodyScale, baseR * crowdScale);
     const edgeDyeMode = Array.from({ length: sides }, (_, ei) => {
       const phase = (ei + i) % 3;
       if (phase === 0) return [EDGE_DYE_MODE.DEFLECT, EDGE_DYE_MODE.PASS, EDGE_DYE_MODE.ABSORB];
@@ -1114,9 +1133,17 @@ function initBodies(n, controls) {
     const edgePermeabilityRGB = Array.from({ length: sides }, () => [0, 0, 0]);
     const digestRGB = (i % 3 === 0) ? [1, 0.2, 0.2] : ((i % 3 === 1) ? [0.2, 1, 0.2] : [0.2, 0.2, 1]);
     const consumeDyeRGB = (i % 2) === 0 ? [1, 1, 1] : [0, 0, 0];
+
+    const row = Math.floor(i / cols);
+    const col = i % cols;
+    const jitterX = (Math.random() - 0.5) * cellW * jitterFrac;
+    const jitterY = (Math.random() - 0.5) * cellH * jitterFrac;
+    const baseX = spawnMinX + (col + 0.5) * cellW;
+    const baseY = spawnMinY + (row + 0.5) * cellH;
+
     rigid.push({
-      x: n * (0.15 + 0.7 * ((t + Math.random() * 0.1) % 1)),
-      y: n * (0.2 + 0.6 * Math.random()),
+      x: clamp(baseX + jitterX, spawnMinX + r, spawnMaxX - r),
+      y: clamp(baseY + jitterY, spawnMinY + r, spawnMaxY - r),
       vx: 0,
       vy: 0,
       r,

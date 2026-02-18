@@ -39,6 +39,24 @@ test('soft fluid-coupling gpu-only publishes deterministic WGSL prep layout for 
 
   assert.match(
     source,
+    /const SOFT_FLUID_CLUSTER_LOAD_REDUCTION_WGSL = \/\* wgsl \*\/[\s\S]*clusterNodeOffsets: array<u32>;[\s\S]*outClusterTorque\[ci\] = sumTorque;[\s\S]*outClusterCount\[ci\] = count;/,
+    'expected gpu-only soft-fluid module to define a concrete WGSL cluster-load reduction stage over deterministic ownership offsets',
+  );
+
+  assert.match(
+    source,
+    /dispatchSoftFluidClusterLoadReductionWgsl\([\s\S]*proposalSignature: clusterLoadProposalSignature,[\s\S]*forceX: cpuProposalForceX,[\s\S]*forceY: cpuProposalForceY,[\s\S]*lastClusterLoadProposalDispatched = wgslClusterLoadDispatched;/,
+    'expected gpu-only soft-fluid branch to dispatch concrete WGSL cluster-load reduction proposals using deterministic force arrays',
+  );
+
+  assert.match(
+    source,
+    /lastClusterLoadParity = \{[\s\S]*source: 'wgsl-cluster-load-proposal-vs-cpu',[\s\S]*mismatchCount: clusterLoadMismatchCount,[\s\S]*signature: clusterLoadProposalSignature >>> 0,[\s\S]*\};/,
+    'expected gpu-only soft-fluid branch to publish deterministic WGSL-vs-CPU cluster-load parity telemetry before authoritative cutover',
+  );
+
+  assert.match(
+    source,
     /hasAuthoritativeWgslCarryProposal\([\s\S]*carrySource = authoritativeCarryProposal \? 'wgsl-carry-authoritative' : 'cpu-carry-authoritative';[\s\S]*lastCpuCarryProposalForceX = cpuProposalForceX;[\s\S]*lastAuthoritativeCarrySource = carrySource;[\s\S]*lastMode = carrySource === 'wgsl-carry-authoritative'/,
     'expected gpu-only soft-fluid branch to publish deterministic CPU carry proposal arrays and route authoritative ownership to matching WGSL proposals',
   );

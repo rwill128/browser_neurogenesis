@@ -146,6 +146,8 @@ function buildSoftFluidCouplingCpuSampleLayout({
   const clusterLocalVy = new Float32Array(nodeCount);
   const sampleDeltaVx = new Float32Array(nodeCount);
   const sampleDeltaVy = new Float32Array(nodeCount);
+  const clusterCenterX = new Float32Array(nodeCount);
+  const clusterCenterY = new Float32Array(nodeCount);
   const localHoney = new Float32Array(nodeCount);
 
   const centroid = computeSoftCentroid(nodes);
@@ -194,6 +196,8 @@ function buildSoftFluidCouplingCpuSampleLayout({
     clusterLocalVy[i] = localVy;
     sampleDeltaVx[i] = fx - localVx;
     sampleDeltaVy[i] = fy - localVy;
+    clusterCenterX[i] = clusterX;
+    clusterCenterY[i] = clusterY;
     localHoney[i] = Number(localHoneyDrag?.(Number(node.x) || 0, Number(node.y) || 0)) || 0;
   }
 
@@ -204,6 +208,8 @@ function buildSoftFluidCouplingCpuSampleLayout({
     clusterLocalVy,
     sampleDeltaVx,
     sampleDeltaVy,
+    clusterCenterX,
+    clusterCenterY,
     localHoney,
   };
   const signatureSeed = [nodeCount, Number(sim?.frame) || 0, Number(n) || 0];
@@ -294,6 +300,59 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   outLocalCarryX[i] = (sampleVx[i] - nodeVx[i]) * dragHoney * invM * params.localFlowShare;
   outLocalCarryY[i] = (sampleVy[i] - nodeVy[i]) * dragHoney * invM * params.localFlowShare;
+}
+`;
+
+const SOFT_FLUID_CLUSTER_LOAD_REDUCTION_WGSL = /* wgsl */`
+struct Params {
+  clusterCount: u32,
+  _pad0: vec3<u32>,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> clusterNodeOffsets: array<u32>;
+@group(0) @binding(2) var<storage, read> clusterNodeIndices: array<u32>;
+@group(0) @binding(3) var<storage, read> nodeX: array<f32>;
+@group(0) @binding(4) var<storage, read> nodeY: array<f32>;
+@group(0) @binding(5) var<storage, read> clusterCenterX: array<f32>;
+@group(0) @binding(6) var<storage, read> clusterCenterY: array<f32>;
+@group(0) @binding(7) var<storage, read> forceX: array<f32>;
+@group(0) @binding(8) var<storage, read> forceY: array<f32>;
+@group(0) @binding(9) var<storage, read_write> outClusterForceX: array<f32>;
+@group(0) @binding(10) var<storage, read_write> outClusterForceY: array<f32>;
+@group(0) @binding(11) var<storage, read_write> outClusterTorque: array<f32>;
+@group(0) @binding(12) var<storage, read_write> outClusterCount: array<u32>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let ci = gid.x;
+  if (ci >= params.clusterCount) {
+    return;
+  }
+
+  let begin = clusterNodeOffsets[ci];
+  let end = clusterNodeOffsets[ci + 1u];
+  var sumFx = 0.0;
+  var sumFy = 0.0;
+  var sumTorque = 0.0;
+  var count = 0u;
+
+  for (var idx = begin; idx < end; idx = idx + 1u) {
+    let ni = clusterNodeIndices[idx];
+    let fx = forceX[ni];
+    let fy = forceY[ni];
+    let rx = nodeX[ni] - clusterCenterX[ni];
+    let ry = nodeY[ni] - clusterCenterY[ni];
+    sumFx = sumFx + fx;
+    sumFy = sumFy + fy;
+    sumTorque = sumTorque + (rx * fy - ry * fx);
+    count = count + 1u;
+  }
+
+  outClusterForceX[ci] = sumFx;
+  outClusterForceY[ci] = sumFy;
+  outClusterTorque[ci] = sumTorque;
+  outClusterCount[ci] = count;
 }
 `;
 
@@ -499,6 +558,170 @@ function dispatchSoftFluidCarryProposalWgsl({ wgslOffload, nodeCount, dragK, nod
   return true;
 }
 
+function ensureSoftFluidClusterLoadReductionResources(state, device, nodeCount, clusterCount) {
+  if (!state || !device || !Number.isFinite(nodeCount) || !Number.isFinite(clusterCount) || nodeCount <= 0 || clusterCount <= 0) return null;
+  if (typeof GPUBufferUsage === 'undefined' || typeof GPUMapMode === 'undefined') return null;
+
+  const nodeCapacity = Math.max(1, Number(nodeCount) | 0);
+  const clusterCapacity = Math.max(1, Number(clusterCount) | 0);
+  const nodeBytes = nodeCapacity * Float32Array.BYTES_PER_ELEMENT;
+  const nodeU32Bytes = nodeCapacity * Uint32Array.BYTES_PER_ELEMENT;
+  const clusterBytes = clusterCapacity * Float32Array.BYTES_PER_ELEMENT;
+  const clusterU32Bytes = clusterCapacity * Uint32Array.BYTES_PER_ELEMENT;
+  const offsetBytes = (clusterCapacity + 1) * Uint32Array.BYTES_PER_ELEMENT;
+  const recreate = !state.clusterLoadReductionResources
+    || (Number(state.clusterLoadReductionResources.nodeCapacity) || 0) < nodeCapacity
+    || (Number(state.clusterLoadReductionResources.clusterCapacity) || 0) < clusterCapacity;
+
+  if (!recreate) return state.clusterLoadReductionResources;
+
+  const createStorage = (label, byteSize) => device.createBuffer({
+    label,
+    size: Math.max(4, byteSize),
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+  const createOutStorage = (label, byteSize) => device.createBuffer({
+    label,
+    size: Math.max(4, byteSize),
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+  });
+  const createReadback = (label, byteSize) => device.createBuffer({
+    label,
+    size: Math.max(4, byteSize),
+    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+  });
+
+  const module = device.createShaderModule({
+    label: 'soft-fluid-cluster-load-reduction-wgsl',
+    code: SOFT_FLUID_CLUSTER_LOAD_REDUCTION_WGSL,
+  });
+  const pipeline = device.createComputePipeline({
+    label: 'soft-fluid-cluster-load-reduction-pipeline',
+    layout: 'auto',
+    compute: { module, entryPoint: 'main' },
+  });
+
+  const resources = {
+    nodeCapacity,
+    clusterCapacity,
+    paramsBuffer: device.createBuffer({
+      label: 'soft-fluid-cluster-load-reduction-params',
+      size: 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    }),
+    clusterNodeOffsetsBuffer: createStorage('soft-fluid-cluster-node-offsets', offsetBytes),
+    clusterNodeIndicesBuffer: createStorage('soft-fluid-cluster-node-indices', nodeU32Bytes),
+    nodeXBuffer: createStorage('soft-fluid-cluster-node-x', nodeBytes),
+    nodeYBuffer: createStorage('soft-fluid-cluster-node-y', nodeBytes),
+    clusterCenterXBuffer: createStorage('soft-fluid-cluster-center-x', nodeBytes),
+    clusterCenterYBuffer: createStorage('soft-fluid-cluster-center-y', nodeBytes),
+    forceXBuffer: createStorage('soft-fluid-cluster-force-x', nodeBytes),
+    forceYBuffer: createStorage('soft-fluid-cluster-force-y', nodeBytes),
+    outClusterForceXBuffer: createOutStorage('soft-fluid-cluster-out-force-x', clusterBytes),
+    outClusterForceYBuffer: createOutStorage('soft-fluid-cluster-out-force-y', clusterBytes),
+    outClusterTorqueBuffer: createOutStorage('soft-fluid-cluster-out-torque', clusterBytes),
+    outClusterCountBuffer: createOutStorage('soft-fluid-cluster-out-count', clusterU32Bytes),
+    readClusterForceXBuffer: createReadback('soft-fluid-cluster-read-force-x', clusterBytes),
+    readClusterForceYBuffer: createReadback('soft-fluid-cluster-read-force-y', clusterBytes),
+    readClusterTorqueBuffer: createReadback('soft-fluid-cluster-read-torque', clusterBytes),
+    readClusterCountBuffer: createReadback('soft-fluid-cluster-read-count', clusterU32Bytes),
+    pipeline,
+    bindGroup: null,
+  };
+
+  resources.bindGroup = device.createBindGroup({
+    label: 'soft-fluid-cluster-load-reduction-bind-group',
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: resources.paramsBuffer } },
+      { binding: 1, resource: { buffer: resources.clusterNodeOffsetsBuffer } },
+      { binding: 2, resource: { buffer: resources.clusterNodeIndicesBuffer } },
+      { binding: 3, resource: { buffer: resources.nodeXBuffer } },
+      { binding: 4, resource: { buffer: resources.nodeYBuffer } },
+      { binding: 5, resource: { buffer: resources.clusterCenterXBuffer } },
+      { binding: 6, resource: { buffer: resources.clusterCenterYBuffer } },
+      { binding: 7, resource: { buffer: resources.forceXBuffer } },
+      { binding: 8, resource: { buffer: resources.forceYBuffer } },
+      { binding: 9, resource: { buffer: resources.outClusterForceXBuffer } },
+      { binding: 10, resource: { buffer: resources.outClusterForceYBuffer } },
+      { binding: 11, resource: { buffer: resources.outClusterTorqueBuffer } },
+      { binding: 12, resource: { buffer: resources.outClusterCountBuffer } },
+    ],
+  });
+
+  state.clusterLoadReductionResources = resources;
+  return resources;
+}
+
+function dispatchSoftFluidClusterLoadReductionWgsl({ wgslOffload, proposalSignature, forceX, forceY }) {
+  const state = wgslOffload?.state;
+  const device = wgslOffload?.device;
+  const prep = state?.preparedLayout;
+  const sample = state?.preparedSampleLayout;
+  const nodeCount = Number(prep?.nodeX?.length) || 0;
+  const clusterCount = Number(prep?.clusterIds?.length) || 0;
+  if (!state || !device || !prep || !sample || !(forceX instanceof Float32Array) || !(forceY instanceof Float32Array)) return false;
+  if (forceX.length !== nodeCount || forceY.length !== nodeCount || nodeCount <= 0 || clusterCount <= 0) return false;
+  if (state.pendingClusterLoadProposalPromise) return false;
+
+  const resources = ensureSoftFluidClusterLoadReductionResources(state, device, nodeCount, clusterCount);
+  if (!resources) return false;
+
+  const params = new Uint32Array(4);
+  params[0] = clusterCount >>> 0;
+  device.queue.writeBuffer(resources.paramsBuffer, 0, params);
+  writeUintArrayToBuffer(device, resources.clusterNodeOffsetsBuffer, prep.clusterNodeOffsets);
+  writeUintArrayToBuffer(device, resources.clusterNodeIndicesBuffer, prep.clusterNodeIndices);
+  writeFloatArrayToBuffer(device, resources.nodeXBuffer, prep.nodeX);
+  writeFloatArrayToBuffer(device, resources.nodeYBuffer, prep.nodeY);
+  writeFloatArrayToBuffer(device, resources.clusterCenterXBuffer, sample.clusterCenterX);
+  writeFloatArrayToBuffer(device, resources.clusterCenterYBuffer, sample.clusterCenterY);
+  writeFloatArrayToBuffer(device, resources.forceXBuffer, forceX);
+  writeFloatArrayToBuffer(device, resources.forceYBuffer, forceY);
+
+  const encoder = device.createCommandEncoder({ label: 'soft-fluid-cluster-load-reduction-encoder' });
+  const pass = encoder.beginComputePass({ label: 'soft-fluid-cluster-load-reduction-pass' });
+  pass.setPipeline(resources.pipeline);
+  pass.setBindGroup(0, resources.bindGroup);
+  pass.dispatchWorkgroups(Math.max(1, Math.ceil(clusterCount / 64)));
+  pass.end();
+
+  encoder.copyBufferToBuffer(resources.outClusterForceXBuffer, 0, resources.readClusterForceXBuffer, 0, clusterCount * 4);
+  encoder.copyBufferToBuffer(resources.outClusterForceYBuffer, 0, resources.readClusterForceYBuffer, 0, clusterCount * 4);
+  encoder.copyBufferToBuffer(resources.outClusterTorqueBuffer, 0, resources.readClusterTorqueBuffer, 0, clusterCount * 4);
+  encoder.copyBufferToBuffer(resources.outClusterCountBuffer, 0, resources.readClusterCountBuffer, 0, clusterCount * 4);
+  device.queue.submit([encoder.finish()]);
+
+  state.pendingClusterLoadProposalPromise = Promise.all([
+    resources.readClusterForceXBuffer.mapAsync(GPUMapMode.READ),
+    resources.readClusterForceYBuffer.mapAsync(GPUMapMode.READ),
+    resources.readClusterTorqueBuffer.mapAsync(GPUMapMode.READ),
+    resources.readClusterCountBuffer.mapAsync(GPUMapMode.READ),
+  ]).then(() => {
+    try {
+      state.lastClusterLoadProposalForceX = new Float32Array(resources.readClusterForceXBuffer.getMappedRange().slice(0));
+      state.lastClusterLoadProposalForceY = new Float32Array(resources.readClusterForceYBuffer.getMappedRange().slice(0));
+      state.lastClusterLoadProposalTorque = new Float32Array(resources.readClusterTorqueBuffer.getMappedRange().slice(0));
+      state.lastClusterLoadProposalCount = new Uint32Array(resources.readClusterCountBuffer.getMappedRange().slice(0));
+      state.lastClusterLoadProposalSignature = Number(proposalSignature) >>> 0;
+      state.lastClusterLoadProposalSource = 'wgsl-cluster-load-proposal';
+      state.lastSourceRoute = 'wgsl-cluster-load-proposal';
+      state.lastMode = 'wgsl-cluster-load-proposal';
+    } finally {
+      resources.readClusterForceXBuffer.unmap();
+      resources.readClusterForceYBuffer.unmap();
+      resources.readClusterTorqueBuffer.unmap();
+      resources.readClusterCountBuffer.unmap();
+    }
+  }).catch((err) => {
+    state.lastClusterLoadProposalError = String(err?.message || err);
+  }).finally(() => {
+    state.pendingClusterLoadProposalPromise = null;
+  });
+
+  return true;
+}
+
 export function applySoftFluidCouplingGpuOnly({
   sim,
   soft,
@@ -536,6 +759,7 @@ export function applySoftFluidCouplingGpuOnly({
 
   const nodes = soft?.nodes || [];
   let carryProposalSignature = 0;
+  let clusterLoadProposalSignature = 0;
 
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     const prep = buildSoftFluidCouplingWgslLayout({
@@ -566,10 +790,12 @@ export function applySoftFluidCouplingGpuOnly({
     wgslOffload.state.lastPreparedLayoutSignature = prep.signature;
     wgslOffload.state.lastPreparedOwnershipCount = prep.layout.clusterNodeIndices.length;
     carryProposalSignature = (Math.imul(prep.signature ^ samplePrep.signature, 0x01000193) ^ ((nodes.length || 0) >>> 0)) >>> 0;
+    clusterLoadProposalSignature = (Math.imul(carryProposalSignature ^ prep.signature, 0x01000193) ^ (prep.clusterCount >>> 0)) >>> 0;
     wgslOffload.state.lastPreparedSampleLayoutBytes = samplePrep.byteLength;
     wgslOffload.state.lastPreparedSampleLayoutSignature = samplePrep.signature;
     wgslOffload.state.lastPreparedSampleNodeCount = samplePrep.nodeCount;
     wgslOffload.state.lastPreparedProposalSignature = carryProposalSignature;
+    wgslOffload.state.lastPreparedClusterLoadProposalSignature = clusterLoadProposalSignature;
     wgslOffload.state.lastSourceRoute = 'cpu-sampled-layout+cluster-ownership';
     wgslOffload.state.lastMode = 'cpu-prepared';
     wgslOffload.state.lastError = null;
@@ -729,6 +955,16 @@ export function applySoftFluidCouplingGpuOnly({
     softCarryTransfer += Math.hypot(carryX, carryY);
   }
 
+  if (wgslOffload?.state && clusterLoadProposalSignature !== 0) {
+    const wgslClusterLoadDispatched = dispatchSoftFluidClusterLoadReductionWgsl({
+      wgslOffload,
+      proposalSignature: clusterLoadProposalSignature,
+      forceX: cpuProposalForceX,
+      forceY: cpuProposalForceY,
+    });
+    wgslOffload.state.lastClusterLoadProposalDispatched = wgslClusterLoadDispatched;
+  }
+
   const clusterAccelMap = new Map();
   for (const [cid, load] of clusterFluidLoadMap.entries()) {
     const clusterKin = softClusterKinematics.get(cid);
@@ -804,6 +1040,35 @@ export function applySoftFluidCouplingGpuOnly({
     wgslOffload.state.lastCpuCarryProposalCarryY = cpuProposalCarryY;
     wgslOffload.state.lastCpuCarryProposalLocalCarryX = cpuProposalLocalCarryX;
     wgslOffload.state.lastCpuCarryProposalLocalCarryY = cpuProposalLocalCarryY;
+    const clusterIds = wgslOffload.state.preparedLayout?.clusterIds;
+    const proposalForceX = wgslOffload.state.lastClusterLoadProposalForceX;
+    const proposalForceY = wgslOffload.state.lastClusterLoadProposalForceY;
+    const proposalTorque = wgslOffload.state.lastClusterLoadProposalTorque;
+    let clusterLoadMismatchCount = 0;
+    if (clusterIds instanceof Int32Array
+      && proposalForceX instanceof Float32Array
+      && proposalForceY instanceof Float32Array
+      && proposalTorque instanceof Float32Array
+      && wgslOffload.state.lastClusterLoadProposalSignature === clusterLoadProposalSignature
+      && proposalForceX.length === clusterIds.length
+      && proposalForceY.length === clusterIds.length
+      && proposalTorque.length === clusterIds.length) {
+      for (let i = 0; i < clusterIds.length; i++) {
+        const cid = clusterIds[i];
+        const cpuLoad = clusterFluidLoadMap.get(cid) || { forceX: 0, forceY: 0, torque: 0 };
+        if (Math.abs((proposalForceX[i] || 0) - (cpuLoad.forceX || 0)) > 1e-5
+          || Math.abs((proposalForceY[i] || 0) - (cpuLoad.forceY || 0)) > 1e-5
+          || Math.abs((proposalTorque[i] || 0) - (cpuLoad.torque || 0)) > 1e-5) {
+          clusterLoadMismatchCount += 1;
+        }
+      }
+    }
+    wgslOffload.state.lastClusterLoadParity = {
+      source: 'wgsl-cluster-load-proposal-vs-cpu',
+      mismatchCount: clusterLoadMismatchCount,
+      clusterCount: Number(clusterIds?.length) || 0,
+      signature: clusterLoadProposalSignature >>> 0,
+    };
     wgslOffload.state.lastAuthoritativeCarrySource = carrySource;
     wgslOffload.state.lastAuthoritativeCarrySignature = carryProposalSignature;
     wgslOffload.state.lastSourceRoute = carrySource;

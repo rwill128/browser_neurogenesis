@@ -3,6 +3,7 @@ import {
   computeSoftClusterKinematicsGpuOnly,
   projectNodesTowardClusterRigidMotionGpuOnly,
 } from './stepSoftClusterKinematicsGpuOnly.js';
+import { applySoftMembraneInsideCorrectionPassGpuOnly } from './stepSoftMembraneInsideCorrectionGpuOnly.js';
 
 export function applyPostCollisionRecoveryGpuOnly(args = {}) {
   const {
@@ -59,7 +60,11 @@ export function applyPostCollisionRecoveryGpuOnly(args = {}) {
   const membraneInsideCorrections =
     typeof applyMembraneInsideCorrectionPass === 'function'
       ? applyMembraneInsideCorrectionPass(args.sim, soft, softClusterLoops)
-      : 0;
+      : applySoftMembraneInsideCorrectionPassGpuOnly({
+        sim: args.sim,
+        soft,
+        loops: softClusterLoops,
+      });
 
   if (typeof applyBounceBoundary === 'function') {
     for (const rb of (bodies.rigid || [])) applyBounceBoundary(rb, n, 0.84);

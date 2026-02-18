@@ -380,16 +380,21 @@ test('soft fluid coupling wgsl prep telemetry: gpu-only publishes deterministic 
     wgslOffload: { enabled: true, state: wgslState },
   });
 
-  assert.equal(wgslState.lastMode, 'cpu-prepared');
-  assert.equal(wgslState.lastSourceRoute, 'cpu-sampled-layout+cluster-ownership');
+  assert.equal(wgslState.lastMode, 'cpu-carry-authoritative');
+  assert.equal(wgslState.lastSourceRoute, 'cpu-carry-authoritative');
   assert.ok(wgslState.lastPreparedLayoutBytes > 0, 'expected deterministic structural layout bytes');
   assert.equal(wgslState.lastPreparedOwnershipCount, soft.nodes.length, 'expected ownership index count to match node count');
   assert.ok(wgslState.lastPreparedSampleLayoutBytes > 0, 'expected deterministic sampled-fluid layout bytes');
   assert.ok(Number.isInteger(wgslState.lastPreparedLayoutSignature));
   assert.ok(Number.isInteger(wgslState.lastPreparedSampleLayoutSignature));
+  assert.ok(Number.isInteger(wgslState.lastPreparedProposalSignature));
   assert.equal(wgslState.lastPreparedSampleNodeCount, soft.nodes.length);
+  assert.equal(wgslState.lastAuthoritativeCarrySource, 'cpu-carry-authoritative');
+  assert.equal(wgslState.lastAuthoritativeCarrySignature, wgslState.lastPreparedProposalSignature);
   assert.equal(wgslState.preparedLayout.nodeClusterSlot.length, soft.nodes.length);
   assert.equal(wgslState.preparedLayout.clusterNodeIndices.length, soft.nodes.length);
   assert.equal(wgslState.preparedSampleLayout.fluidSampleVx.length, soft.nodes.length);
   assert.equal(wgslState.preparedSampleLayout.sampleDeltaVy.length, soft.nodes.length);
+  assert.equal(wgslState.lastCpuCarryProposalForceX.length, soft.nodes.length);
+  assert.equal(wgslState.lastCpuCarryProposalLocalCarryY.length, soft.nodes.length);
 });

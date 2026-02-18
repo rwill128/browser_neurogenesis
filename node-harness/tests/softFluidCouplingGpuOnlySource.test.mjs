@@ -27,7 +27,13 @@ test('soft fluid-coupling gpu-only publishes deterministic WGSL prep layout for 
 
   assert.match(
     source,
-    /lastSourceRoute = 'cpu-sampled-layout\+cluster-ownership';[\s\S]*lastMode = 'cpu-prepared';[\s\S]*next WGSL stage can[\s\S]*reduce cluster means\/drag directly from fixed buffers/,
-    'expected explicit sampled-layout source-route marker and blocker note for imminent WGSL kernel handoff',
+    /lastPreparedProposalSignature = carryProposalSignature;[\s\S]*lastSourceRoute = 'cpu-sampled-layout\+cluster-ownership';[\s\S]*lastMode = 'cpu-prepared';[\s\S]*synchronous,[\s\S]*real WGSL readback[\s\S]*authoritative-routing[\s\S]*signature\/length checks pass/,
+    'expected deterministic proposal-signature telemetry + explicit async WGSL blocker note for authoritative routing handoff',
+  );
+
+  assert.match(
+    source,
+    /hasAuthoritativeWgslCarryProposal\([\s\S]*carrySource = authoritativeCarryProposal \? 'wgsl-carry-authoritative' : 'cpu-carry-authoritative';[\s\S]*lastCpuCarryProposalForceX = cpuProposalForceX;[\s\S]*lastAuthoritativeCarrySource = carrySource;[\s\S]*lastMode = carrySource === 'wgsl-carry-authoritative'/,
+    'expected gpu-only soft-fluid branch to publish deterministic CPU carry proposal arrays and route authoritative ownership to matching WGSL proposals',
   );
 });

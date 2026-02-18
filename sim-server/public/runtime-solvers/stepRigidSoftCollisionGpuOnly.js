@@ -266,7 +266,7 @@ function fnv1aMix(seed, value) {
   return h >>> 0;
 }
 
-function buildRigidSoftCollisionWgslLayout({ rigidBodies, soft, hybridAttachedByRigid, edgeBodyModeBlock }) {
+function buildRigidSoftCollisionWgslLayout({ rigidBodies, soft, edgeBodyModeBlock }) {
   const rigid = Array.isArray(rigidBodies) ? rigidBodies : [];
   const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
   const springs = Array.isArray(soft?.springs) ? soft.springs : [];
@@ -281,10 +281,7 @@ function buildRigidSoftCollisionWgslLayout({ rigidBodies, soft, hybridAttachedBy
   let signature = 0x811c9dc5;
 
   for (let rbi = 0; rbi < rigid.length; rbi++) {
-    const attachedNodeSet = hybridAttachedByRigid?.get?.(rbi) || null;
-
     for (let ni = 0; ni < nodes.length; ni++) {
-      if (attachedNodeSet && attachedNodeSet.has(ni)) continue;
       nodePairRigidIndex.push(rbi);
       nodePairNodeIndex.push(ni);
       signature = fnv1aMix(signature, rbi);
@@ -299,7 +296,6 @@ function buildRigidSoftCollisionWgslLayout({ rigidBodies, soft, hybridAttachedBy
       const edgeBodyMode = spring[3];
       if (edgeBodyMode !== edgeBodyModeBlock) continue;
       if (i < 0 || j < 0 || i >= nodes.length || j >= nodes.length) continue;
-      if (attachedNodeSet && (attachedNodeSet.has(i) || attachedNodeSet.has(j))) continue;
       edgePairRigidIndex.push(rbi);
       edgePairSpringIndex.push(si);
       edgePairNodeAIndex.push(i);
@@ -595,6 +591,104 @@ function ensureRigidSoftEdgeBroadphaseBuffers(offload, nodeCount, rigidCount, pa
   return state;
 }
 
+
+function floatToSignatureWord(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return (Math.round(n * 1024) >>> 0);
+}
+
+export function buildRigidSoftNarrowphaseGeometryLayout(rigidBodies) {
+  const rigid = Array.isArray(rigidBodies) ? rigidBodies : [];
+  const edgeStart = new Uint32Array(rigid.length + 1);
+  const centroidX = new Float32Array(rigid.length);
+  const centroidY = new Float32Array(rigid.length);
+  const edgeAx = [];
+  const edgeAy = [];
+  const edgeBx = [];
+  const edgeBy = [];
+  const edgeNx = [];
+  const edgeNy = [];
+
+  let edgeCursor = 0;
+  let signature = 0x811c9dc5;
+
+  for (let rbi = 0; rbi < rigid.length; rbi++) {
+    const verts = sanitizeFinitePolygonVerts(rigidVerticesWorld(rigid[rbi]));
+    const safeVerts = verts.length >= 3 ? verts : sanitizeFinitePolygonVerts(rigidVerticesWorld({
+      ...rigid[rbi],
+      verticesLocal: null,
+      sides: Math.max(5, Math.trunc(finiteOr(rigid[rbi]?.sides, 6)) || 6),
+    }));
+
+    edgeStart[rbi] = edgeCursor;
+    if (safeVerts.length < 3) {
+      centroidX[rbi] = finiteOr(rigid[rbi]?.x, 0);
+      centroidY[rbi] = finiteOr(rigid[rbi]?.y, 0);
+      signature = fnv1aMix(signature, rbi);
+      continue;
+    }
+
+    const c = polygonCentroid(safeVerts);
+    centroidX[rbi] = c.x;
+    centroidY[rbi] = c.y;
+    signature = fnv1aMix(signature, rbi);
+    signature = fnv1aMix(signature, floatToSignatureWord(c.x));
+    signature = fnv1aMix(signature, floatToSignatureWord(c.y));
+
+    for (let vi = 0; vi < safeVerts.length; vi++) {
+      const a = safeVerts[vi];
+      const b = safeVerts[(vi + 1) % safeVerts.length];
+      const out = edgeOutwardNormal(a.x, a.y, b.x, b.y, c.x, c.y);
+      edgeAx.push(a.x);
+      edgeAy.push(a.y);
+      edgeBx.push(b.x);
+      edgeBy.push(b.y);
+      edgeNx.push(out.nx);
+      edgeNy.push(out.ny);
+      edgeCursor += 1;
+
+      signature = fnv1aMix(signature, floatToSignatureWord(a.x));
+      signature = fnv1aMix(signature, floatToSignatureWord(a.y));
+      signature = fnv1aMix(signature, floatToSignatureWord(b.x));
+      signature = fnv1aMix(signature, floatToSignatureWord(b.y));
+      signature = fnv1aMix(signature, floatToSignatureWord(out.nx));
+      signature = fnv1aMix(signature, floatToSignatureWord(out.ny));
+    }
+  }
+  edgeStart[rigid.length] = edgeCursor;
+
+  const layout = {
+    edgeStart,
+    centroidX,
+    centroidY,
+    edgeAx: Float32Array.from(edgeAx),
+    edgeAy: Float32Array.from(edgeAy),
+    edgeBx: Float32Array.from(edgeBx),
+    edgeBy: Float32Array.from(edgeBy),
+    edgeNx: Float32Array.from(edgeNx),
+    edgeNy: Float32Array.from(edgeNy),
+  };
+
+  const byteLength = layout.edgeStart.byteLength
+    + layout.centroidX.byteLength
+    + layout.centroidY.byteLength
+    + layout.edgeAx.byteLength
+    + layout.edgeAy.byteLength
+    + layout.edgeBx.byteLength
+    + layout.edgeBy.byteLength
+    + layout.edgeNx.byteLength
+    + layout.edgeNy.byteLength;
+
+  return {
+    layout,
+    rigidCount: rigid.length,
+    edgeCount: edgeCursor,
+    byteLength,
+    signature: signature >>> 0,
+  };
+}
+
 function computeRigidBodyAabbs(rigidBodies) {
   const rigid = Array.isArray(rigidBodies) ? rigidBodies : [];
   const minX = new Float32Array(rigid.length);
@@ -863,7 +957,6 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
 export async function resolveRigidSoftCollisionPassGpuOnly({
   rigidBodies,
   soft,
-  hybridAttachedByRigid,
   resolveRigidVsSoftNodeCollision = resolveRigidVsSoftNodeCollisionGpuOnly,
   resolveRigidVsSoftEdgeCollision = resolveRigidVsSoftEdgeCollisionGpuOnly,
   edgeBodyModeBlock,
@@ -881,14 +974,19 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     wgslPrep = buildRigidSoftCollisionWgslLayout({
       rigidBodies,
       soft,
-      hybridAttachedByRigid,
       edgeBodyModeBlock,
     });
+    const wgslNarrowphaseGeometry = buildRigidSoftNarrowphaseGeometryLayout(rigidBodies);
     wgslOffload.state.preparedLayout = wgslPrep.layout;
     wgslOffload.state.lastPreparedNodePairCount = wgslPrep.nodePairCount;
     wgslOffload.state.lastPreparedEdgePairCount = wgslPrep.edgePairCount;
     wgslOffload.state.lastPreparedLayoutBytes = wgslPrep.byteLength;
     wgslOffload.state.lastPreparedLayoutSignature = wgslPrep.signature;
+    wgslOffload.state.lastPreparedNarrowphaseGeometry = wgslNarrowphaseGeometry.layout;
+    wgslOffload.state.lastPreparedNarrowphaseRigidCount = wgslNarrowphaseGeometry.rigidCount;
+    wgslOffload.state.lastPreparedNarrowphaseEdgeCount = wgslNarrowphaseGeometry.edgeCount;
+    wgslOffload.state.lastPreparedNarrowphaseBytes = wgslNarrowphaseGeometry.byteLength;
+    wgslOffload.state.lastPreparedNarrowphaseSignature = wgslNarrowphaseGeometry.signature;
     wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-candidate-layout';
     wgslOffload.state.lastMode = 'cpu-prepared';
     wgslOffload.state.lastError = null;
@@ -935,10 +1033,8 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
   let edgePairCursor = 0;
   for (let rbi = 0; rbi < rigidBodies.length; rbi++) {
     const rb = rigidBodies[rbi];
-    const attachedNodeSet = hybridAttachedByRigid?.get?.(rbi) || null;
 
     for (let ni = 0; ni < soft.nodes.length; ni++) {
-      if (attachedNodeSet && attachedNodeSet.has(ni)) continue;
       const broadphaseActive = wgslNodeBroadphaseMask
         ? (wgslNodeBroadphaseMask[nodePairCursor] === 1)
         : true;
@@ -956,7 +1052,6 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       const edgeBodyMode = spring[3];
       if (edgeBodyMode !== edgeBodyModeBlock) continue;
       if (i < 0 || j < 0 || i >= soft.nodes.length || j >= soft.nodes.length) continue;
-      if (attachedNodeSet && (attachedNodeSet.has(i) || attachedNodeSet.has(j))) continue;
       const broadphaseActive = wgslEdgeBroadphaseMask
         ? (wgslEdgeBroadphaseMask[edgePairCursor] === 1)
         : true;

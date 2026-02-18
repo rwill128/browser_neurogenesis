@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { resolveRigidVsSoftNodeCollision } from '../../sim-server/public/rigid-collision.js';
 import {
+  buildRigidSoftNarrowphaseGeometryLayout,
   resolveRigidSoftCollisionPassGpuOnly,
   resolveRigidVsSoftEdgeCollisionGpuOnly,
 } from '../../sim-server/public/runtime-solvers/stepRigidSoftCollisionGpuOnly.js';
@@ -31,27 +32,20 @@ function makeState() {
         [2, 3, 1.1, EDGE_BODY_MODE.BLOCK],
       ],
     },
-    hybridAttachedByRigid: new Map([
-      [0, new Set([1])],
-      [1, new Set([2])],
-    ]),
   };
 }
 
 function runBaseline(state, calls) {
   for (let rbi = 0; rbi < state.rigid.length; rbi++) {
     const rb = state.rigid[rbi];
-    const attachedNodeSet = state.hybridAttachedByRigid.get(rbi) || null;
 
     for (let ni = 0; ni < state.soft.nodes.length; ni++) {
-      if (attachedNodeSet && attachedNodeSet.has(ni)) continue;
       const sn = state.soft.nodes[ni];
       calls.nodes.push(`${rb.id}->${sn.id}`);
     }
 
     for (const [i, j, _rest, edgeBodyMode] of state.soft.springs) {
       if (edgeBodyMode !== EDGE_BODY_MODE.BLOCK) continue;
-      if (attachedNodeSet && (attachedNodeSet.has(i) || attachedNodeSet.has(j))) continue;
       calls.edges.push(`${rb.id}->${state.soft.nodes[i].id}-${state.soft.nodes[j].id}`);
     }
   }
@@ -68,7 +62,6 @@ test('gpu-only rigid-soft collision pass matches baseline contact visitation and
   await resolveRigidSoftCollisionPassGpuOnly({
     rigidBodies: gpuState.rigid,
     soft: gpuState.soft,
-    hybridAttachedByRigid: gpuState.hybridAttachedByRigid,
     resolveRigidVsSoftNodeCollision: (rb, sn) => {
       gpuCalls.nodes.push(`${rb.id}->${sn.id}`);
     },
@@ -159,7 +152,6 @@ function makeRuntimeState() {
         [2, 0, 1.0, EDGE_BODY_MODE.BLOCK],
       ],
     },
-    hybridAttachedByRigid: new Map(),
   };
 }
 
@@ -181,7 +173,6 @@ test('gpu-only rigid-soft pass default runtime collision solver matches baseline
   await resolveRigidSoftCollisionPassGpuOnly({
     rigidBodies: baseline.rigidBodies,
     soft: baseline.soft,
-    hybridAttachedByRigid: baseline.hybridAttachedByRigid,
     resolveRigidVsSoftNodeCollision,
     resolveRigidVsSoftEdgeCollision: baselineEdgeCollision,
     edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
@@ -192,7 +183,6 @@ test('gpu-only rigid-soft pass default runtime collision solver matches baseline
   await resolveRigidSoftCollisionPassGpuOnly({
     rigidBodies: gpuOnly.rigidBodies,
     soft: gpuOnly.soft,
-    hybridAttachedByRigid: gpuOnly.hybridAttachedByRigid,
     edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
     nodeSlop: 0.18,
     edgeSlop: 0.16,
@@ -251,7 +241,6 @@ test('gpu-only rigid-soft pass publishes deterministic WGSL candidate layout sou
   await resolveRigidSoftCollisionPassGpuOnly({
     rigidBodies: gpuState.rigid,
     soft: gpuState.soft,
-    hybridAttachedByRigid: gpuState.hybridAttachedByRigid,
     resolveRigidVsSoftNodeCollision: (rb, sn) => {
       gpuCalls.nodes.push(`${rb.id}->${sn.id}`);
     },
@@ -275,6 +264,10 @@ test('gpu-only rigid-soft pass publishes deterministic WGSL candidate layout sou
   assert.equal(wgslState.preparedLayout.edgePairSpringIndex.length, baselineCalls.edges.length);
   assert.equal(wgslState.preparedLayout.edgePairNodeAIndex.length, baselineCalls.edges.length);
   assert.equal(wgslState.preparedLayout.edgePairNodeBIndex.length, baselineCalls.edges.length);
+  assert.equal(wgslState.lastPreparedNarrowphaseRigidCount, baselineState.rigid.length);
+  assert.ok(wgslState.lastPreparedNarrowphaseEdgeCount >= 0);
+  assert.ok(Number.isInteger(wgslState.lastPreparedNarrowphaseSignature));
+  assert.ok(wgslState.lastPreparedNarrowphaseBytes > 0);
 });
 
 test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when device is available while preserving CPU collision visitation parity', async () => {
@@ -337,7 +330,6 @@ test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when dev
   await resolveRigidSoftCollisionPassGpuOnly({
     rigidBodies: gpuState.rigid,
     soft: gpuState.soft,
-    hybridAttachedByRigid: gpuState.hybridAttachedByRigid,
     resolveRigidVsSoftNodeCollision: (rb, sn) => {
       gpuCalls.nodes.push(`${rb.id}->${sn.id}`);
     },
@@ -428,14 +420,12 @@ test('gpu-only rigid-soft broadphase serializes WGSL readback buffers so concurr
     resolveRigidSoftCollisionPassGpuOnly({
       rigidBodies: stateA.rigid,
       soft: stateA.soft,
-      hybridAttachedByRigid: stateA.hybridAttachedByRigid,
       edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
       wgslOffload: offload,
     }),
     resolveRigidSoftCollisionPassGpuOnly({
       rigidBodies: stateB.rigid,
       soft: stateB.soft,
-      hybridAttachedByRigid: stateB.hybridAttachedByRigid,
       edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
       wgslOffload: offload,
     }),
@@ -444,4 +434,68 @@ test('gpu-only rigid-soft broadphase serializes WGSL readback buffers so concurr
   assert.equal(wgslState.lastNodeBroadphaseReadbackSourceRoute, 'wgsl-rigid-soft-node-broadphase-readback');
   assert.equal(wgslState.lastEdgeBroadphaseReadbackSourceRoute, 'wgsl-rigid-soft-edge-broadphase-readback');
   assert.equal(stats.mapRejects, 0, 'expected rigid-soft broadphase readback queue to avoid outstanding map rejections');
+});
+
+
+test('gpu-only rigid-soft pass prepares deterministic finite rigid narrowphase geometry layout for WGSL follow-on kernels', () => {
+  const rigidBodies = [
+    {
+      x: 4,
+      y: 3,
+      theta: 0.2,
+      r: 1.1,
+      sides: 5,
+      verticesLocal: [
+        { x: -1.0, y: -0.5 },
+        { x: 0.8, y: -0.7 },
+        { x: 1.1, y: 0.6 },
+        { x: 0.0, y: 1.2 },
+        { x: -1.2, y: 0.4 },
+      ],
+    },
+    {
+      x: -2,
+      y: 1,
+      theta: 0,
+      r: 0.9,
+      sides: 6,
+      verticesLocal: [
+        { x: Number.NaN, y: 0 },
+        { x: Number.POSITIVE_INFINITY, y: 1 },
+      ],
+    },
+  ];
+
+  const preparedA = buildRigidSoftNarrowphaseGeometryLayout(rigidBodies);
+  const preparedB = buildRigidSoftNarrowphaseGeometryLayout(structuredClone(rigidBodies));
+
+  assert.equal(preparedA.rigidCount, rigidBodies.length);
+  assert.ok(preparedA.edgeCount >= 11, 'expected finite fallback polygon edges for invalid rigid vertices');
+  assert.equal(preparedA.layout.edgeStart.length, rigidBodies.length + 1);
+  assert.equal(preparedA.layout.edgeStart[preparedA.layout.edgeStart.length - 1], preparedA.edgeCount);
+  assert.equal(preparedA.layout.edgeAx.length, preparedA.edgeCount);
+  assert.equal(preparedA.layout.edgeAy.length, preparedA.edgeCount);
+  assert.equal(preparedA.layout.edgeBx.length, preparedA.edgeCount);
+  assert.equal(preparedA.layout.edgeBy.length, preparedA.edgeCount);
+  assert.equal(preparedA.layout.edgeNx.length, preparedA.edgeCount);
+  assert.equal(preparedA.layout.edgeNy.length, preparedA.edgeCount);
+
+  const arrays = [
+    preparedA.layout.centroidX,
+    preparedA.layout.centroidY,
+    preparedA.layout.edgeAx,
+    preparedA.layout.edgeAy,
+    preparedA.layout.edgeBx,
+    preparedA.layout.edgeBy,
+    preparedA.layout.edgeNx,
+    preparedA.layout.edgeNy,
+  ];
+  for (const arr of arrays) {
+    for (let i = 0; i < arr.length; i++) {
+      assert.ok(Number.isFinite(arr[i]), `expected finite value at index ${i}`);
+    }
+  }
+
+  assert.equal(preparedA.signature, preparedB.signature);
+  assert.equal(preparedA.byteLength, preparedB.byteLength);
 });

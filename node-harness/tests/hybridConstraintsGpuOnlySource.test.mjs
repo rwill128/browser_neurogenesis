@@ -50,4 +50,22 @@ test('hybrid constraints gpu-only path dispatches real WGSL attachment probe + v
     /const serializedDispatch = \(wgslOffload\.state\.pendingWgslProbePromise \|\| Promise\.resolve\(\)\)[\s\S]*dispatchHybridAttachmentErrorProbe\(wgslOffload, prep, soft\);[\s\S]*dispatchHybridAttachmentVelocityDeltaProposal\(wgslOffload, prep, soft,[\s\S]*dispatchHybridAttachmentVelocityNodeReduction\(wgslOffload, prep\);[\s\S]*pendingWgslProbePromise = serializedDispatch;[\s\S]*lastMode = 'wgsl-velocity-proposal';/,
     'expected gpu-only hybrid WGSL dispatch chain to serialize probe+proposal+node-reduction readbacks and publish source-route ownership for authoritative bring-up',
   );
+
+  assert.match(
+    source,
+    /const proposalSignature = computeHybridVelocityProposalSignature\([\s\S]*lastPreparedVelocityProposalSignature = proposalSignature;[\s\S]*authoritativeHybridConstraints === true[\s\S]*lastVelocityProposalSignature === proposalSignature[\s\S]*applyHybridAuthoritativeCachedProposal\([\s\S]*lastMode = 'wgsl-velocity-authoritative';/,
+    'expected hybrid gpu-only path to support signature-gated authoritative WGSL velocity replay while keeping cpu path default',
+  );
+
+  assert.match(
+    source,
+    /function publishHybridVelocityNodeReductionParity\([\s\S]*lastVelocityNodeReductionParity = \{[\s\S]*mismatchedContributionCount,[\s\S]*\};/,
+    'expected node-reduction stage parity helper to record deterministic cpu-vs-wgsl node mismatch telemetry',
+  );
+
+  assert.match(
+    source,
+    /buildHybridVelocityNodeReference\([\s\S]*lastVelocityNodeReductionCpuReference = nodeReference;[\s\S]*publishHybridVelocityNodeReductionParity\(/,
+    'expected wgsl node-reduction dispatch to publish deterministic cpu reference + parity ownership',
+  );
 });

@@ -152,3 +152,83 @@ test('gpu-only hybrid attachment pass keeps CPU parity while publishing WGSL pre
   assert.equal(wgslState.preparedPlan?.softNodeCount, seedSoft.nodes.length);
   assert.ok((wgslState.lastPreparedLayoutBytes || 0) > 0);
 });
+
+test('gpu-only hybrid attachment can route signature-matched WGSL node-reduction proposal as authoritative node velocity replay', () => {
+  const rigidSeed = [{
+    x: 0,
+    y: 0,
+    a: 0,
+    vx: 0,
+    vy: 0,
+    omega: 0,
+    verticesLocal: [
+      { x: -0.2, y: 0 },
+      { x: 0.2, y: 0 },
+    ],
+  }];
+  const softSeed = {
+    nodes: [
+      { x: 0.1, y: 0.2, vx: 0.5, vy: -0.4 },
+      { x: -0.2, y: 0.3, vx: -0.1, vy: 0.2 },
+    ],
+  };
+  const hybrid = [
+    { rigidIndex: 0, nodeIndex: 0, vertexA: 0, vertexB: 1, restA: 0.2, restB: 0.3 },
+    { rigidIndex: 0, nodeIndex: 1, vertexA: 0, vertexB: 1, restA: 0.4, restB: 0.6 },
+  ];
+
+  const wgslState = {
+    lastVelocityProposalSignature: null,
+    lastVelocityNodeReductionDeltaVx: new Float32Array([0.03, -0.02]),
+    lastVelocityNodeReductionDeltaVy: new Float32Array([-0.01, 0.04]),
+    lastVelocityNodeReductionContributionCount: new Uint32Array([1, 1]),
+    lastVelocityNodeReductionParity: {
+      maxAbsError: 0,
+      mismatchedContributionCount: 0,
+    },
+  };
+
+  const probeRigid = structuredClone(rigidSeed);
+  const probeSoft = structuredClone(softSeed);
+  applyHybridAttachmentConstraintsGpuOnly({
+    rigidBodies: probeRigid,
+    soft: probeSoft,
+    hybrid,
+    rigidVertexWorld,
+    dtNorm: 0.5,
+    iterations: 5,
+    wgslOffload: {
+      enabled: true,
+      state: wgslState,
+      authoritativeHybridConstraints: true,
+    },
+  });
+
+  assert.equal(wgslState.lastMode, 'cpu-prepared');
+  const signature = wgslState.lastPreparedVelocityProposalSignature;
+  assert.equal(typeof signature, 'string');
+
+  const rigidBodies = structuredClone(rigidSeed);
+  const soft = structuredClone(softSeed);
+  wgslState.lastVelocityProposalSignature = signature;
+
+  applyHybridAttachmentConstraintsGpuOnly({
+    rigidBodies,
+    soft,
+    hybrid,
+    rigidVertexWorld,
+    dtNorm: 0.5,
+    iterations: 5,
+    wgslOffload: {
+      enabled: true,
+      state: wgslState,
+      authoritativeHybridConstraints: true,
+    },
+  });
+
+  assert.equal(wgslState.lastMode, 'wgsl-velocity-authoritative');
+  assert.ok(Math.abs(soft.nodes[0].vx - 0.53) < 1e-6);
+  assert.ok(Math.abs(soft.nodes[0].vy + 0.41) < 1e-6);
+  assert.ok(Math.abs(soft.nodes[1].vx + 0.12) < 1e-6);
+  assert.ok(Math.abs(soft.nodes[1].vy - 0.24) < 1e-6);
+});

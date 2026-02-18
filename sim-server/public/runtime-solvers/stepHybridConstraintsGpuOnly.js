@@ -370,6 +370,104 @@ function computeHybridVelocityDeltaParity(cpuDelta, wgslDelta) {
   };
 }
 
+
+function buildHybridVelocityNodeReference({ prep, cpuDelta }) {
+  const nodeCount = prep?.plan?.softNodeCount >>> 0;
+  const attachmentCount = prep?.plan?.attachmentCount >>> 0;
+  const nodeDeltaVx = new Float32Array(nodeCount);
+  const nodeDeltaVy = new Float32Array(nodeCount);
+  const nodeContributionCount = new Uint32Array(nodeCount);
+  for (let ai = 0; ai < attachmentCount; ai++) {
+    const ni = prep.layout.nodeIndex[ai] >>> 0;
+    if (ni >= nodeCount) continue;
+    nodeDeltaVx[ni] += clampFinite(cpuDelta?.cellDeltaVx?.[ai]);
+    nodeDeltaVy[ni] += clampFinite(cpuDelta?.cellDeltaVy?.[ai]);
+    nodeContributionCount[ni] += 1;
+  }
+  return { nodeDeltaVx, nodeDeltaVy, nodeContributionCount };
+}
+
+function publishHybridVelocityNodeReductionParity({ state, reference }) {
+  const wgslDx = state.lastVelocityNodeReductionDeltaVx;
+  const wgslDy = state.lastVelocityNodeReductionDeltaVy;
+  const wgslCount = state.lastVelocityNodeReductionContributionCount;
+  const count = Math.min(
+    reference?.nodeDeltaVx?.length || 0,
+    wgslDx?.length || 0,
+    wgslDy?.length || 0,
+    wgslCount?.length || 0,
+  );
+  let maxAbsError = 0;
+  let sumAbsError = 0;
+  let mismatchedContributionCount = 0;
+  for (let i = 0; i < count; i++) {
+    const errX = Math.abs(clampFinite(reference.nodeDeltaVx[i]) - clampFinite(wgslDx[i]));
+    const errY = Math.abs(clampFinite(reference.nodeDeltaVy[i]) - clampFinite(wgslDy[i]));
+    const err = Math.max(errX, errY);
+    if (err > maxAbsError) maxAbsError = err;
+    sumAbsError += err;
+    if ((reference.nodeContributionCount[i] >>> 0) !== (wgslCount[i] >>> 0)) {
+      mismatchedContributionCount += 1;
+    }
+  }
+  state.lastVelocityNodeReductionParity = {
+    source: 'wgsl-node-reduction-proposal',
+    comparedNodeCount: count,
+    maxAbsError,
+    avgAbsError: count > 0 ? sumAbsError / count : 0,
+    mismatchedContributionCount,
+  };
+}
+
+function computeHybridVelocityProposalSignature({ prep, soft, dtNorm, nodeErrorGain, nodeImpulseScale }) {
+  const attachmentCount = prep?.plan?.attachmentCount >>> 0;
+  const nodeCount = prep?.plan?.softNodeCount >>> 0;
+  const seed = [
+    attachmentCount,
+    nodeCount,
+    clampFinite(dtNorm),
+    clampFinite(nodeErrorGain),
+    clampFinite(nodeImpulseScale),
+  ];
+  for (let i = 0; i < attachmentCount; i++) {
+    const ni = prep.layout.nodeIndex[i] >>> 0;
+    const node = soft?.nodes?.[ni];
+    seed.push(
+      ni,
+      clampFinite(node?.x),
+      clampFinite(node?.y),
+      clampFinite(prep.layout.anchorAX[i]),
+      clampFinite(prep.layout.anchorAY[i]),
+      clampFinite(prep.layout.anchorBX[i]),
+      clampFinite(prep.layout.anchorBY[i]),
+      clampFinite(prep.layout.restA[i]),
+      clampFinite(prep.layout.restB[i]),
+    );
+  }
+  return JSON.stringify(seed);
+}
+
+function applyHybridAuthoritativeCachedProposal({ soft, state }) {
+  const nodeDvx = state?.lastVelocityNodeReductionDeltaVx;
+  const nodeDvy = state?.lastVelocityNodeReductionDeltaVy;
+  const nodeContribution = state?.lastVelocityNodeReductionContributionCount;
+  const parity = state?.lastVelocityNodeReductionParity;
+  const nodeCount = soft?.nodes?.length || 0;
+  if (!nodeCount || nodeDvx?.length !== nodeCount || nodeDvy?.length !== nodeCount || nodeContribution?.length !== nodeCount) {
+    return false;
+  }
+  if (!parity || (parity.mismatchedContributionCount || 0) !== 0 || !Number.isFinite(parity.maxAbsError) || parity.maxAbsError > 1e-5) {
+    return false;
+  }
+  for (let i = 0; i < nodeCount; i++) {
+    const node = soft.nodes[i];
+    if (!node) continue;
+    node.vx += clampFinite(nodeDvx[i]);
+    node.vy += clampFinite(nodeDvy[i]);
+  }
+  return true;
+}
+
 function ensureHybridAttachmentVelocityProposalBuffers(offload, nodeCount, attachmentCount) {
   const state = offload.state;
   const device = offload.device;
@@ -758,6 +856,25 @@ export function applyHybridAttachmentConstraintsGpuOnly({
     wgslOffload.state.lastMode = 'cpu-prepared';
     wgslOffload.state.lastError = null;
 
+    const proposalSignature = computeHybridVelocityProposalSignature({
+      prep,
+      soft,
+      dtNorm: safeDtNorm,
+      nodeErrorGain,
+      nodeImpulseScale,
+    });
+    wgslOffload.state.lastPreparedVelocityProposalSignature = proposalSignature;
+
+    if (
+      wgslOffload?.authoritativeHybridConstraints === true
+      && wgslOffload.state.lastVelocityProposalSignature === proposalSignature
+      && applyHybridAuthoritativeCachedProposal({ soft, state: wgslOffload.state })
+    ) {
+      wgslOffload.state.lastMode = 'wgsl-velocity-authoritative';
+      wgslOffload.state.lastAuthoritativeVelocityProposalSignature = proposalSignature;
+      return;
+    }
+
     if (canUseWgslOffload(wgslOffload)) {
       const serializedDispatch = (wgslOffload.state.pendingWgslProbePromise || Promise.resolve())
         .catch(() => {})
@@ -769,6 +886,14 @@ export function applyHybridAttachmentConstraintsGpuOnly({
             dtNorm: safeDtNorm,
           });
           await dispatchHybridAttachmentVelocityNodeReduction(wgslOffload, prep);
+
+          const nodeReference = buildHybridVelocityNodeReference({
+            prep,
+            cpuDelta: wgslOffload.state.lastVelocityDeltaCpuReference,
+          });
+          wgslOffload.state.lastVelocityNodeReductionCpuReference = nodeReference;
+          publishHybridVelocityNodeReductionParity({ state: wgslOffload.state, reference: nodeReference });
+          wgslOffload.state.lastVelocityProposalSignature = proposalSignature;
         });
       wgslOffload.state.pendingWgslProbePromise = serializedDispatch;
       serializedDispatch

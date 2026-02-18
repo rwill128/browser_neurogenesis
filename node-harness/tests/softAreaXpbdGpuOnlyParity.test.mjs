@@ -557,3 +557,80 @@ test('soft area XPBD can consume signature-matched WGSL proposal as authoritativ
     assert.ok(Math.abs(secondSoft.nodes[i].vy - (softSeed.nodes[i].vy + dvy[i])) < 1e-12);
   }
 });
+
+test('soft area XPBD fast mode auto-promotes signature-matched WGSL proposal to authoritative replay', async () => {
+  globalThis.GPUBufferUsage = {
+    STORAGE: 1 << 0,
+    COPY_DST: 1 << 1,
+    COPY_SRC: 1 << 2,
+    MAP_READ: 1 << 3,
+    UNIFORM: 1 << 4,
+  };
+  globalThis.GPUMapMode = { READ: 1 };
+
+  const dtPos = 0.16;
+  const stiffnessScale = 3.4;
+  const softSeed = {
+    nodes: [
+      { x: 14, y: 18, vx: 0.3, vy: -0.2, mass: 1.0, clusterId: 7 },
+      { x: 22, y: 17, vx: -0.2, vy: 0.1, mass: 0.9, clusterId: 7 },
+      { x: 26, y: 24, vx: 0.4, vy: 0.3, mass: 1.2, clusterId: 7 },
+      { x: 19, y: 29, vx: -0.3, vy: -0.1, mass: 1.4, clusterId: 7 },
+    ],
+  };
+  const loops = [{ clusterId: 7, indices: [0, 1, 2, 3] }];
+  const device = createSoftAreaMockWgslDevice();
+  const wgslState = {};
+
+  applySoftAreaXPBDVelocityGpuOnly({
+    sim: {
+      frame: 1,
+      softAreaRest: new Map([[7, 44.2]]),
+      softAreaLambda: new Map([[7, 0.07]]),
+    },
+    soft: structuredClone(softSeed),
+    loops,
+    dtPos,
+    stiffnessScale,
+    softAreaXpbdIters: SOFT_AREA_XPBD_ITERS,
+    softAreaBaseCompliance: SOFT_AREA_BASE_COMPLIANCE,
+    wgslOffload: {
+      enabled: true,
+      modeProfile: 'gpu-only-fast',
+      device,
+      state: wgslState,
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(wgslState.lastMode, 'wgsl-velocity-proposal');
+  assert.equal(typeof wgslState.lastAreaVelocityProposalSignature, 'string');
+
+  const secondSoft = structuredClone(softSeed);
+  const secondSim = {
+    frame: 2,
+    softAreaRest: new Map([[7, 44.2]]),
+    softAreaLambda: new Map([[7, 0.07]]),
+  };
+
+  applySoftAreaXPBDVelocityGpuOnly({
+    sim: secondSim,
+    soft: secondSoft,
+    loops,
+    dtPos,
+    stiffnessScale,
+    softAreaXpbdIters: SOFT_AREA_XPBD_ITERS,
+    softAreaBaseCompliance: SOFT_AREA_BASE_COMPLIANCE,
+    wgslOffload: {
+      enabled: true,
+      modeProfile: 'gpu-only-fast',
+      device,
+      state: wgslState,
+    },
+  });
+
+  assert.equal(wgslState.lastMode, 'wgsl-area-authoritative-fast');
+  assert.equal(wgslState.lastAuthoritativeProposalSignature, wgslState.lastAreaVelocityProposalSignature);
+  assert.equal(wgslState.lastAreaVelocityProposalFinite?.allFinite, true);
+  assert.equal(secondSim.softAreaLambda.get(7), wgslState.lastAreaProposalLambdaNextByCluster[0]);
+});

@@ -117,4 +117,10 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
     /checkFiniteFloat32Array\(wgslOffload\.state\.lastAreaVelocityProposalNodeDeltaVx\)[\s\S]*lastAreaVelocityProposalFinite[\s\S]*allFinite !== true[\s\S]*lastMode = 'cpu-fallback'/,
     'expected gpu-only area fast path to keep non-finite guardrails and explicit fallback mode',
   );
+
+  assert.match(
+    areaSource,
+    /const fastModeAuthoritative = isGpuOnlyFastMode\(wgslOffload\);[\s\S]*const canUseAuthoritativeReplay = wgslOffload\?\.authoritativeAreaXpbd === true \|\| fastModeAuthoritative;[\s\S]*lastMode = fastModeAuthoritative[\s\S]*'wgsl-area-authoritative-fast'[\s\S]*'wgsl-area-authoritative'/,
+    'expected soft area authoritative replay to auto-enable in gpu-only-fast mode while preserving explicit validated-mode route naming',
+  );
 });

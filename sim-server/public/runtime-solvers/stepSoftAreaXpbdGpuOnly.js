@@ -1174,8 +1174,20 @@ function applySoftAreaAuthoritativeCachedProposal({ sim, soft, loops, state }) {
   if (!(state?.lastAreaVelocityProposalNodeDeltaVy instanceof Float32Array)) return false;
 
   const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  if (state.lastAreaProposalLambdaNextByCluster.length !== loops.length) return false;
   if (state.lastAreaVelocityProposalNodeDeltaVx.length !== nodes.length) return false;
   if (state.lastAreaVelocityProposalNodeDeltaVy.length !== nodes.length) return false;
+
+  const finiteX = checkFiniteFloat32Array(state.lastAreaVelocityProposalNodeDeltaVx);
+  const finiteY = checkFiniteFloat32Array(state.lastAreaVelocityProposalNodeDeltaVy);
+  if (finiteX.allFinite !== true || finiteY.allFinite !== true) {
+    state.lastAreaVelocityProposalFinite = {
+      allFinite: false,
+      nonFiniteCount: (finiteX.nonFiniteCount || 0) + (finiteY.nonFiniteCount || 0),
+      comparedCount: (finiteX.comparedCount || 0) + (finiteY.comparedCount || 0),
+    };
+    return false;
+  }
 
   for (let ci = 0; ci < loops.length; ci++) {
     sim?.softAreaLambda?.set?.(loops[ci]?.clusterId, Number(state.lastAreaProposalLambdaNextByCluster[ci]) || 0);
@@ -1185,6 +1197,12 @@ function applySoftAreaAuthoritativeCachedProposal({ sim, soft, loops, state }) {
     nodes[ni].vx += Number(state.lastAreaVelocityProposalNodeDeltaVx[ni]) || 0;
     nodes[ni].vy += Number(state.lastAreaVelocityProposalNodeDeltaVy[ni]) || 0;
   }
+
+  state.lastAreaVelocityProposalFinite = {
+    allFinite: true,
+    nonFiniteCount: 0,
+    comparedCount: nodes.length * 2,
+  };
   return true;
 }
 
@@ -1223,9 +1241,12 @@ export function applySoftAreaXPBDVelocityGpuOnly({
     });
     wgslOffload.state.lastPreparedProposalSignature = proposalSignature;
 
+    const fastModeAuthoritative = isGpuOnlyFastMode(wgslOffload);
+    const canUseAuthoritativeReplay = wgslOffload?.authoritativeAreaXpbd === true || fastModeAuthoritative;
+    const signatureMatched = wgslOffload.state.lastAreaVelocityProposalSignature === proposalSignature;
     if (
-      wgslOffload?.authoritativeAreaXpbd === true
-      && wgslOffload.state.lastAreaVelocityProposalSignature === proposalSignature
+      canUseAuthoritativeReplay
+      && signatureMatched
       && applySoftAreaAuthoritativeCachedProposal({
         sim,
         soft,
@@ -1233,10 +1254,16 @@ export function applySoftAreaXPBDVelocityGpuOnly({
         state: wgslOffload.state,
       })
     ) {
-      wgslOffload.state.lastMode = 'wgsl-area-authoritative';
+      wgslOffload.state.lastMode = fastModeAuthoritative
+        ? 'wgsl-area-authoritative-fast'
+        : 'wgsl-area-authoritative';
       wgslOffload.state.lastAuthoritativeProposalSignature = proposalSignature;
       wgslOffload.state.lastAuthoritativeProposalFrame = Number(sim?.frame) || 0;
       return;
+    }
+    if (canUseAuthoritativeReplay && signatureMatched && wgslOffload.state.lastAreaVelocityProposalFinite?.allFinite === false) {
+      wgslOffload.state.lastMode = 'cpu-fallback';
+      wgslOffload.state.lastError = 'non-finite-area-authoritative-replay';
     }
 
     // Concrete WGSL area stages: per-cluster area probe + lambda proposal.

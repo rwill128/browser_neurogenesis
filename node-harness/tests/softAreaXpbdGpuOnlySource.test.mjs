@@ -42,13 +42,13 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
 
   assert.match(
     areaSource,
-    /copyBufferToBuffer\(state\.areaLambdaDeltaOut, 0, state\.areaLambdaDeltaReadback, 0, bytes\)[\s\S]*copyBufferToBuffer\(state\.areaLambdaNextOut, 0, state\.areaLambdaNextReadback, 0, bytes\)[\s\S]*lastAreaProposalDeltaLambdaByCluster[\s\S]*lastAreaProposalLambdaNextByCluster[\s\S]*lastAreaProposalAbsDeltaMean[\s\S]*lastAreaProposalAbsDeltaMax/,
-    'expected WGSL area lambda proposal stage to read back deterministic per-cluster lambda telemetry for upcoming reduction offload',
+    /copyBufferToBuffer\(state\.areaLambdaDeltaOut, 0, state\.areaLambdaDeltaReadback, 0, bytes\)[\s\S]*const nextByCluster = new Float32Array\(clusterCount\)[\s\S]*const lambdaPrev = Number\(plan\.clusterLambda\?\.\[ci\]\) \|\| 0;[\s\S]*nextByCluster\[ci\] = Math\.max\(-20, Math\.min\(20, lambdaPrev \+ dl\)\);[\s\S]*lastAreaProposalDeltaLambdaByCluster[\s\S]*lastAreaProposalLambdaNextByCluster[\s\S]*lastAreaProposalAbsDeltaMean[\s\S]*lastAreaProposalAbsDeltaMax/,
+    'expected WGSL area lambda proposal stage to read back per-cluster delta telemetry and reconstruct deterministic lambda-next values on CPU for offload replay',
   );
 
   assert.match(
     areaSource,
-    /dispatchSoftAreaWgslVelocityDeltaProposal\([\s\S]*deltaByCluster: wgslOffload\.state\.lastAreaProposalDeltaLambdaByCluster[\s\S]*lastMode = velocityProposalRan[\s\S]*'wgsl-velocity-proposal'/,
+    /dispatchSoftAreaWgslVelocityDeltaProposal\([\s\S]*deltaByCluster: state\.lastAreaProposalDeltaLambdaByCluster[\s\S]*lastMode = velocityProposalRan[\s\S]*'wgsl-velocity-proposal'/,
     'expected gpu-only area pass to run WGSL endpoint velocity-delta proposal stage after lambda proposal for reduction-ready telemetry',
   );
 
@@ -72,7 +72,7 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
 
   assert.match(
     areaSource,
-    /copyBufferToBuffer\(state\.areaVelocityDeltaVXOut, 0, state\.areaVelocityDeltaVXReadback, 0, bytes\)[\s\S]*copyBufferToBuffer\(state\.areaVelocityDeltaVYOut, 0, state\.areaVelocityDeltaVYReadback, 0, bytes\)[\s\S]*lastAreaVelocityProposalDeltaVxByEndpoint[\s\S]*lastAreaVelocityProposalDeltaVyByEndpoint[\s\S]*lastAreaVelocityProposalAbsDeltaMean[\s\S]*lastAreaVelocityProposalAbsDeltaMax/,
+    /copyBufferToBuffer\(state\.areaVelocityDeltaVOut, 0, state\.areaVelocityDeltaVReadback, 0, packedBytes\)[\s\S]*const deltaVxByEndpoint = new Float32Array\(endpointCount\)[\s\S]*const deltaVyByEndpoint = new Float32Array\(endpointCount\)[\s\S]*lastAreaVelocityProposalDeltaVxByEndpoint[\s\S]*lastAreaVelocityProposalDeltaVyByEndpoint[\s\S]*lastAreaVelocityProposalAbsDeltaMean[\s\S]*lastAreaVelocityProposalAbsDeltaMax/,
     'expected WGSL area velocity proposal stage to read back deterministic per-endpoint node delta telemetry for upcoming reduction offload',
   );
 
@@ -114,7 +114,7 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
 
   assert.match(
     areaSource,
-    /checkFiniteFloat32Array\(wgslOffload\.state\.lastAreaVelocityProposalNodeDeltaVx\)[\s\S]*lastAreaVelocityProposalFinite[\s\S]*allFinite !== true[\s\S]*lastMode = 'cpu-fallback'/,
+    /checkFiniteFloat32Array\(state\.lastAreaVelocityProposalNodeDeltaVx\)[\s\S]*lastAreaVelocityProposalFinite[\s\S]*allFinite !== true[\s\S]*lastMode = 'cpu-fallback'/,
     'expected gpu-only area fast path to keep non-finite guardrails and explicit fallback mode',
   );
 

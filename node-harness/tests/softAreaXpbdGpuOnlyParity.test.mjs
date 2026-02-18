@@ -152,12 +152,21 @@ function createSoftAreaMockWgslDevice() {
               const paramsU32 = new Uint32Array(paramsBuf);
               const paramsF32 = new Float32Array(paramsBuf);
 
-              if (buffers.has(6) && buffers.has(5) && buffers.has(4) && buffers.has(3) && buffers.has(2) && !buffers.has(11)) {
+              const isNodeReduction = buffers.has(5)
+                && buffers.has(4)
+                && buffers.has(3)
+                && buffers.has(2)
+                && buffers.has(1)
+                && !buffers.has(6)
+                && !buffers.has(7)
+                && !buffers.has(8)
+                && !buffers.has(9)
+                && !buffers.has(10);
+              if (isNodeReduction) {
                 const nodeCount = paramsU32[0] || 0;
                 const endpointCount = paramsU32[1] || 0;
                 const endpointNodeIndices = readU32(buffers.get(1), endpointCount);
-                const endpointDeltaVX = readF32(buffers.get(2), endpointCount);
-                const endpointDeltaVY = readF32(buffers.get(3), endpointCount);
+                const packedDelta = readF32(buffers.get(2), endpointCount * 2);
                 const nodeDeltaVX = new Float32Array(nodeCount);
                 const nodeDeltaVY = new Float32Array(nodeCount);
                 const nodeContribution = new Uint32Array(nodeCount);
@@ -167,24 +176,24 @@ function createSoftAreaMockWgslDevice() {
                   let count = 0;
                   for (let ei = 0; ei < endpointCount; ei++) {
                     if ((endpointNodeIndices[ei] >>> 0) !== ni) continue;
-                    sumX += endpointDeltaVX[ei] || 0;
-                    sumY += endpointDeltaVY[ei] || 0;
+                    const base = ei * 2;
+                    sumX += packedDelta[base] || 0;
+                    sumY += packedDelta[base + 1] || 0;
                     count += 1;
                   }
                   nodeDeltaVX[ni] = sumX;
                   nodeDeltaVY[ni] = sumY;
                   nodeContribution[ni] = count;
                 }
-                writeF32(buffers.get(4), nodeDeltaVX);
-                writeF32(buffers.get(5), nodeDeltaVY);
-                const contributionBuffer = ensure(buffers.get(6), nodeContribution.byteLength);
+                writeF32(buffers.get(3), nodeDeltaVX);
+                writeF32(buffers.get(4), nodeDeltaVY);
+                const contributionBuffer = ensure(buffers.get(5), nodeContribution.byteLength);
                 new Uint8Array(contributionBuffer).set(new Uint8Array(nodeContribution.buffer));
                 continue;
               }
 
               const nodeCount = paramsU32[0] || 0;
               const clusterCount = paramsU32[1] || 0;
-              const dtPos = paramsF32[2] || 0;
 
               const nodeX = readF32(buffers.get(1), nodeCount);
               const nodeY = readF32(buffers.get(2), nodeCount);
@@ -194,13 +203,17 @@ function createSoftAreaMockWgslDevice() {
               const endpointCount = offsets[clusterCount] || 0;
               const nodeIdx = readU32(buffers.get(6), endpointCount);
               const endpointCountParam = paramsU32[2] || 0;
+              const isVelocityDelta = endpointCountParam === endpointCount
+                && buffers.has(10)
+                && buffers.has(9)
+                && buffers.has(8);
+              const dtPos = isVelocityDelta ? (paramsF32[3] || 0) : (paramsF32[2] || 0);
 
-              if (endpointCountParam > 0 && buffers.has(11) && buffers.has(10) && buffers.has(9) && buffers.has(8)) {
+              if (isVelocityDelta) {
                 const invMass = readF32(buffers.get(7), endpointCount);
                 const endpointCluster = readU32(buffers.get(8), endpointCount);
                 const deltaLambda = readF32(buffers.get(9), clusterCount);
-                const outVX = new Float32Array(endpointCount);
-                const outVY = new Float32Array(endpointCount);
+                const outPacked = new Float32Array(endpointCount * 2);
                 const invDt = dtPos > 1e-8 ? (1 / dtPos) : 0;
 
                 for (let ei = 0; ei < endpointCount; ei++) {
@@ -220,25 +233,24 @@ function createSoftAreaMockWgslDevice() {
                   const ny = nodeY[ni2] + nodeVY[ni2] * dtPos;
                   const gx = 0.5 * (ny - py);
                   const gy = 0.5 * (px - nx);
-                  outVX[ei] = invMass[ei] * gx * dl * invDt;
-                  outVY[ei] = invMass[ei] * gy * dl * invDt;
+                  const base = ei * 2;
+                  outPacked[base] = invMass[ei] * gx * dl * invDt;
+                  outPacked[base + 1] = invMass[ei] * gy * dl * invDt;
                 }
 
-                writeF32(buffers.get(10), outVX);
-                writeF32(buffers.get(11), outVY);
-              } else if (buffers.has(11)) {
+                writeF32(buffers.get(10), outPacked);
+              } else if (buffers.has(10) && buffers.has(9) && buffers.has(8)) {
                 const invMass = readF32(buffers.get(7), endpointCount);
                 const restArea = readF32(buffers.get(8), clusterCount);
                 const lambdaPrev = readF32(buffers.get(9), clusterCount);
                 const alpha = paramsF32[3] || 0;
                 const deltaOut = new Float32Array(clusterCount);
-                const nextOut = new Float32Array(clusterCount);
 
                 for (let ci = 0; ci < clusterCount; ci++) {
                   const start = offsets[ci];
                   const end = offsets[ci + 1];
                   if (end <= start + 1) {
-                    nextOut[ci] = lambdaPrev[ci];
+                    deltaOut[ci] = 0;
                     continue;
                   }
                   let twiceArea = 0;
@@ -265,7 +277,7 @@ function createSoftAreaMockWgslDevice() {
                   }
 
                   if (sumWGrad2 <= 1e-10) {
-                    nextOut[ci] = lambdaPrev[ci];
+                    deltaOut[ci] = 0;
                     continue;
                   }
 
@@ -276,11 +288,9 @@ function createSoftAreaMockWgslDevice() {
                   dl = Math.max(-2.0, Math.min(2.0, dl));
                   const next = Math.max(-20, Math.min(20, prev + dl));
                   deltaOut[ci] = next - prev;
-                  nextOut[ci] = next;
                 }
 
                 writeF32(buffers.get(10), deltaOut);
-                writeF32(buffers.get(11), nextOut);
               } else {
                 const out = new Float32Array(clusterCount);
                 for (let ci = 0; ci < clusterCount; ci++) {

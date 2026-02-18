@@ -3,7 +3,7 @@ import {
   buildSoftClusterKinematicsWgslPrep,
   computeSoftClusterKinematicsGpuOnly,
   computeSoftClusterKinematicsFromMassMomentsGpuOnly,
-  projectNodesTowardClusterRigidMotionGpuOnly,
+  projectNodesTowardClusterRigidMotionWithWgslGpuOnly,
 } from './stepSoftClusterKinematicsGpuOnly.js';
 import { applySoftMembraneInsideCorrectionPassGpuOnly } from './stepSoftMembraneInsideCorrectionGpuOnly.js';
 
@@ -433,7 +433,7 @@ export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
   const projectTowardRigidMotion =
     typeof projectNodesTowardClusterRigidMotion === 'function'
       ? projectNodesTowardClusterRigidMotion
-      : projectNodesTowardClusterRigidMotionGpuOnly;
+      : projectNodesTowardClusterRigidMotionWithWgslGpuOnly;
 
   const preparedSoftClusterKinematics = buildSoftClusterKinematicsWgslPrep(soft.nodes);
 
@@ -522,6 +522,7 @@ export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
     angularGain,
     membraneClusterSet: softMembraneClusterSet,
     membraneGainScale: Number(membraneGainScale) || 0.72,
+    wgslOffload,
   }));
 
   const rigidInsideCorrections =

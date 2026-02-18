@@ -433,3 +433,323 @@ export function projectNodesTowardClusterRigidMotionGpuOnly(nodes, clusterKinema
     meanDelta: projectedNodes > 0 ? (sumDelta / projectedNodes) : 0,
   };
 }
+
+const WGSL_WORKGROUP_SIZE = 64;
+const SOFT_CLUSTER_PROJECTION_LAYOUT_STRIDE_FLOATS = 13;
+
+const softClusterProjectionProposalWgsl = /* wgsl */ `
+struct Params {
+  count : f32,
+  _pad0 : f32,
+  _pad1 : f32,
+  _pad2 : f32,
+};
+
+@group(0) @binding(0) var<storage, read> layout : array<f32>;
+@group(0) @binding(1) var<storage, read_write> deltaVxOut : array<f32>;
+@group(0) @binding(2) var<storage, read_write> deltaVyOut : array<f32>;
+@group(0) @binding(3) var<uniform> params : Params;
+
+fn finiteOrZero(v : f32) -> f32 {
+  if (v == v && abs(v) < 1e20) {
+    return v;
+  }
+  return 0.0;
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
+  let i = gid.x;
+  if (f32(i) >= params.count) {
+    return;
+  }
+
+  let base = i * ${SOFT_CLUSTER_PROJECTION_LAYOUT_STRIDE_FLOATS}u;
+  let x = finiteOrZero(layout[base + 1u]);
+  let y = finiteOrZero(layout[base + 2u]);
+  let vx = finiteOrZero(layout[base + 3u]);
+  let vy = finiteOrZero(layout[base + 4u]);
+  let cx = finiteOrZero(layout[base + 5u]);
+  let cy = finiteOrZero(layout[base + 6u]);
+  let cvx = finiteOrZero(layout[base + 7u]);
+  let cvy = finiteOrZero(layout[base + 8u]);
+  let omega = finiteOrZero(layout[base + 9u]);
+  let lg = clamp(max(0.0, finiteOrZero(layout[base + 10u])), 0.0, 1.0);
+  let ag = clamp(max(0.0, finiteOrZero(layout[base + 11u])), 0.0, 1.0);
+  let membraneScale = clamp(max(0.0, finiteOrZero(layout[base + 12u])), 0.0, 1.0);
+
+  lg = clamp(lg * membraneScale, 0.0, 1.0);
+  ag = clamp(ag * membraneScale, 0.0, 1.0);
+
+  let rx = x - cx;
+  let ry = y - cy;
+  let targetRelVx = -omega * ry;
+  let targetRelVy = omega * rx;
+
+  let curRelVx = vx - cvx;
+  let curRelVy = vy - cvy;
+
+  deltaVxOut[i] = (cvx - vx) * lg + (targetRelVx - curRelVx) * ag;
+  deltaVyOut[i] = (cvy - vy) * lg + (targetRelVy - curRelVy) * ag;
+}
+`;
+
+function checkFiniteFloat32Array(values) {
+  if (!(values instanceof Float32Array)) return false;
+  for (let i = 0; i < values.length; i++) {
+    if (!Number.isFinite(values[i])) return false;
+  }
+  return true;
+}
+
+function computeSoftClusterProjectionSignature(layout, linearGain, angularGain, membraneGainScale) {
+  if (!(layout instanceof Float32Array) || layout.length === 0) {
+    return `0|${Math.fround(linearGain)}|${Math.fround(angularGain)}|${Math.fround(membraneGainScale)}|0`;
+  }
+  let sum = 0;
+  for (let i = 0; i < layout.length; i += SOFT_CLUSTER_PROJECTION_LAYOUT_STRIDE_FLOATS) {
+    sum += Math.fround(layout[i + 1] || 0) * 0.13;
+    sum += Math.fround(layout[i + 2] || 0) * 0.11;
+    sum += Math.fround(layout[i + 9] || 0) * 0.17;
+    sum += Math.fround(layout[i + 12] || 0) * 0.19;
+  }
+  return `${Math.floor(layout.length / SOFT_CLUSTER_PROJECTION_LAYOUT_STRIDE_FLOATS)}|${Math.fround(linearGain)}|${Math.fround(angularGain)}|${Math.fround(membraneGainScale)}|${Math.fround(sum)}`;
+}
+
+function ensureSoftClusterProjectionProposalPipeline(offload) {
+  const state = offload?.state;
+  const device = offload?.device;
+  if (!state || !device) return null;
+  if (!state.softClusterProjectionProposalPipelinePromise) {
+    state.softClusterProjectionProposalPipelinePromise = device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: {
+        module: device.createShaderModule({ code: softClusterProjectionProposalWgsl }),
+        entryPoint: 'main',
+      },
+    }).catch((err) => {
+      state.softClusterProjectionProposalPipelinePromise = null;
+      throw err;
+    });
+  }
+  return state.softClusterProjectionProposalPipelinePromise;
+}
+
+function getGpuOnlyPipelineModeProfile(offload) {
+  const modeProfile = String(offload?.modeProfile || '').trim().toLowerCase();
+  if (modeProfile === 'gpu-only-fast') return 'gpu-only-fast';
+  if (modeProfile === 'gpu-only-validated') return 'gpu-only-validated';
+  return 'standard';
+}
+
+async function dispatchSoftClusterProjectionProposal(offload, layout, signature) {
+  const state = offload?.state;
+  const device = offload?.device;
+  if (!state || !device || !(layout instanceof Float32Array) || layout.length === 0) return false;
+  const count = Math.floor(layout.length / SOFT_CLUSTER_PROJECTION_LAYOUT_STRIDE_FLOATS);
+  if (count <= 0) return false;
+
+  const pipeline = await ensureSoftClusterProjectionProposalPipeline(offload);
+  if (!pipeline) return false;
+
+  const layoutBuffer = device.createBuffer({ size: layout.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const outBytes = count * Float32Array.BYTES_PER_ELEMENT;
+  const deltaVxBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const deltaVyBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const readDeltaVxBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const readDeltaVyBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const params = new Float32Array([count, 0, 0, 0]);
+  const paramBuffer = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
+  device.queue.writeBuffer(layoutBuffer, 0, layout);
+  device.queue.writeBuffer(paramBuffer, 0, params);
+
+  const bindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: layoutBuffer } },
+      { binding: 1, resource: { buffer: deltaVxBuffer } },
+      { binding: 2, resource: { buffer: deltaVyBuffer } },
+      { binding: 3, resource: { buffer: paramBuffer } },
+    ],
+  });
+
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(Math.max(1, Math.ceil(count / WGSL_WORKGROUP_SIZE)));
+  pass.end();
+  encoder.copyBufferToBuffer(deltaVxBuffer, 0, readDeltaVxBuffer, 0, outBytes);
+  encoder.copyBufferToBuffer(deltaVyBuffer, 0, readDeltaVyBuffer, 0, outBytes);
+  device.queue.submit([encoder.finish()]);
+
+  await Promise.all([readDeltaVxBuffer.mapAsync(GPUMapMode.READ), readDeltaVyBuffer.mapAsync(GPUMapMode.READ)]);
+  const deltaVx = new Float32Array(readDeltaVxBuffer.getMappedRange().slice(0));
+  const deltaVy = new Float32Array(readDeltaVyBuffer.getMappedRange().slice(0));
+  readDeltaVxBuffer.unmap();
+  readDeltaVyBuffer.unmap();
+
+  const allFinite = checkFiniteFloat32Array(deltaVx) && checkFiniteFloat32Array(deltaVy);
+  state.lastSoftClusterProjectionProposalSignature = String(signature || '');
+  state.lastSoftClusterProjectionProposalSource = allFinite
+    ? 'wgsl-soft-cluster-rigid-motion-projection-proposal'
+    : 'cpu-soft-cluster-rigid-motion-projection-authoritative-nonfinite';
+  state.lastSoftClusterProjectionProposalFinite = { allFinite };
+  if (allFinite) {
+    state.lastSoftClusterProjectionProposalDeltaVx = deltaVx;
+    state.lastSoftClusterProjectionProposalDeltaVy = deltaVy;
+  } else {
+    state.lastSoftClusterProjectionProposalDeltaVx = null;
+    state.lastSoftClusterProjectionProposalDeltaVy = null;
+  }
+
+  layoutBuffer.destroy();
+  deltaVxBuffer.destroy();
+  deltaVyBuffer.destroy();
+  readDeltaVxBuffer.destroy();
+  readDeltaVyBuffer.destroy();
+  paramBuffer.destroy();
+  return allFinite;
+}
+
+export async function projectNodesTowardClusterRigidMotionWithWgslGpuOnly(nodes, clusterKinematics, {
+  linearGain = 0.08,
+  angularGain = 0.18,
+  membraneClusterSet = null,
+  membraneGainScale = 0.72,
+  wgslOffload = null,
+} = {}) {
+  if (!Array.isArray(nodes) || !(clusterKinematics instanceof Map) || clusterKinematics.size === 0) {
+    return { projectedNodes: 0, meanDelta: 0 };
+  }
+
+  const runWgslProposal = wgslOffload?.enabled === true
+    && wgslOffload?.state
+    && wgslOffload?.device
+    && getGpuOnlyPipelineModeProfile(wgslOffload) !== 'standard';
+
+  const layoutEntries = [];
+  const nodeRefs = [];
+  const cpuDeltaVx = [];
+  const cpuDeltaVy = [];
+
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (!node) continue;
+    const cid = Number.isFinite(Number(node.clusterId)) ? Number(node.clusterId) : 0;
+    const st = clusterKinematics.get(cid);
+    if (!st) continue;
+
+    const x = Number(node.x);
+    const y = Number(node.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+    const membraneScale = (membraneClusterSet instanceof Set && membraneClusterSet.has(cid))
+      ? Number(membraneGainScale) || 0.72
+      : 1;
+
+    const lg = clamp(Number(linearGain) * membraneScale, 0, 1);
+    const ag = clamp(Number(angularGain) * membraneScale, 0, 1);
+    if (lg <= 0 && ag <= 0) continue;
+
+    const vx = finiteOr(node.vx, 0);
+    const vy = finiteOr(node.vy, 0);
+    const rx = x - st.x;
+    const ry = y - st.y;
+    const targetRelVx = -st.omega * ry;
+    const targetRelVy = st.omega * rx;
+    const curRelVx = vx - st.vx;
+    const curRelVy = vy - st.vy;
+    const dvx = (st.vx - vx) * lg + (targetRelVx - curRelVx) * ag;
+    const dvy = (st.vy - vy) * lg + (targetRelVy - curRelVy) * ag;
+
+    nodeRefs.push(node);
+    cpuDeltaVx.push(dvx);
+    cpuDeltaVy.push(dvy);
+
+    if (runWgslProposal) {
+      layoutEntries.push(
+        i,
+        x,
+        y,
+        vx,
+        vy,
+        Number(st.x) || 0,
+        Number(st.y) || 0,
+        Number(st.vx) || 0,
+        Number(st.vy) || 0,
+        Number(st.omega) || 0,
+        Number(linearGain) || 0,
+        Number(angularGain) || 0,
+        membraneScale,
+      );
+    }
+  }
+
+  let useWgslAuthoritative = false;
+  let wgslDeltaVx = null;
+  let wgslDeltaVy = null;
+  let signature = '';
+
+  if (runWgslProposal && layoutEntries.length > 0) {
+    const layout = Float32Array.from(layoutEntries);
+    signature = computeSoftClusterProjectionSignature(layout, linearGain, angularGain, membraneGainScale);
+    wgslOffload.state.lastSoftClusterProjectionProposalLayoutBytes = layout.byteLength;
+    wgslOffload.state.lastSoftClusterProjectionProposalSignaturePrepared = signature;
+    if (!wgslOffload.state.lastSoftClusterProjectionProposalSource) {
+      wgslOffload.state.lastSoftClusterProjectionProposalSource = 'cpu-soft-cluster-rigid-motion-projection-authoritative';
+    }
+
+    const serializedDispatch = (wgslOffload.state.pendingSoftClusterProjectionProposalPromise || Promise.resolve())
+      .catch(() => {})
+      .then(() => dispatchSoftClusterProjectionProposal(wgslOffload, layout, signature))
+      .catch((err) => {
+        wgslOffload.state.lastSoftClusterProjectionProposalError = String(err?.message || err || 'unknown-error');
+        wgslOffload.state.lastSoftClusterProjectionProposalSource = 'cpu-soft-cluster-rigid-motion-projection-authoritative';
+        return false;
+      });
+    wgslOffload.state.pendingSoftClusterProjectionProposalPromise = serializedDispatch;
+
+    const proposalReady = await serializedDispatch;
+    useWgslAuthoritative = wgslOffload?.state?.enableAuthoritativeSoftClusterProjection === true
+      && proposalReady === true
+      && String(wgslOffload?.state?.lastSoftClusterProjectionProposalSignature || '') === signature
+      && wgslOffload?.state?.lastSoftClusterProjectionProposalDeltaVx instanceof Float32Array
+      && wgslOffload?.state?.lastSoftClusterProjectionProposalDeltaVy instanceof Float32Array
+      && wgslOffload.state.lastSoftClusterProjectionProposalDeltaVx.length === nodeRefs.length
+      && wgslOffload.state.lastSoftClusterProjectionProposalDeltaVy.length === nodeRefs.length
+      && wgslOffload.state.lastSoftClusterProjectionProposalFinite?.allFinite === true;
+
+    if (useWgslAuthoritative) {
+      wgslDeltaVx = wgslOffload.state.lastSoftClusterProjectionProposalDeltaVx;
+      wgslDeltaVy = wgslOffload.state.lastSoftClusterProjectionProposalDeltaVy;
+    }
+  }
+
+  let projectedNodes = 0;
+  let sumDelta = 0;
+  for (let i = 0; i < nodeRefs.length; i++) {
+    const node = nodeRefs[i];
+    const dvx = useWgslAuthoritative ? Number(wgslDeltaVx?.[i]) : Number(cpuDeltaVx[i]);
+    const dvy = useWgslAuthoritative ? Number(wgslDeltaVy?.[i]) : Number(cpuDeltaVy[i]);
+    const safeDvx = Number.isFinite(dvx) ? dvx : 0;
+    const safeDvy = Number.isFinite(dvy) ? dvy : 0;
+    node.vx = finiteOr(node.vx, 0) + safeDvx;
+    node.vy = finiteOr(node.vy, 0) + safeDvy;
+    projectedNodes += 1;
+    sumDelta += Math.hypot(safeDvx, safeDvy);
+  }
+
+  if (wgslOffload?.state) {
+    wgslOffload.state.lastSoftClusterProjectionAuthoritativeSource = useWgslAuthoritative
+      ? 'wgsl-soft-cluster-rigid-motion-projection-authoritative'
+      : 'cpu-soft-cluster-rigid-motion-projection-authoritative';
+    wgslOffload.state.lastSoftClusterProjectionAuthoritativeSignature = signature;
+  }
+
+  return {
+    projectedNodes,
+    meanDelta: projectedNodes > 0 ? (sumDelta / projectedNodes) : 0,
+  };
+}

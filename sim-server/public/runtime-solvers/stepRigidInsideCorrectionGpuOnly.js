@@ -9,6 +9,53 @@
 import { getRigidCollisionPolysWorld, pointInPolygonInclusive } from '../rigid-collision.js';
 
 const EPS = 1e-8;
+const WGSL_WORKGROUP_SIZE = 64;
+
+const rigidInsidePolyBoundsProbeWgsl = /* wgsl */`
+@group(0) @binding(0) var<storage, read> poly_point_offsets: array<u32>;
+@group(0) @binding(1) var<storage, read> poly_point_x: array<f32>;
+@group(0) @binding(2) var<storage, read> poly_point_y: array<f32>;
+@group(0) @binding(3) var<storage, read_write> poly_min_x: array<f32>;
+@group(0) @binding(4) var<storage, read_write> poly_min_y: array<f32>;
+@group(0) @binding(5) var<storage, read_write> poly_max_x: array<f32>;
+@group(0) @binding(6) var<storage, read_write> poly_max_y: array<f32>;
+
+@compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let poly_index = gid.x;
+  let poly_count = arrayLength(&poly_min_x);
+  if (poly_index >= poly_count) { return; }
+
+  let start = poly_point_offsets[poly_index];
+  let stop = poly_point_offsets[poly_index + 1u];
+  if (stop <= start) {
+    poly_min_x[poly_index] = 0.0;
+    poly_min_y[poly_index] = 0.0;
+    poly_max_x[poly_index] = 0.0;
+    poly_max_y[poly_index] = 0.0;
+    return;
+  }
+
+  var min_x = poly_point_x[start];
+  var min_y = poly_point_y[start];
+  var max_x = min_x;
+  var max_y = min_y;
+
+  for (var i = start + 1u; i < stop; i = i + 1u) {
+    let px = poly_point_x[i];
+    let py = poly_point_y[i];
+    min_x = min(min_x, px);
+    min_y = min(min_y, py);
+    max_x = max(max_x, px);
+    max_y = max(max_y, py);
+  }
+
+  poly_min_x[poly_index] = min_x;
+  poly_min_y[poly_index] = min_y;
+  poly_max_x[poly_index] = max_x;
+  poly_max_y[poly_index] = max_y;
+}
+`;
 
 function hashU32ArrayFnv1a(arr) {
   let hash = 0x811c9dc5;
@@ -188,6 +235,111 @@ function closestPointOnSegment(px, py, ax, ay, bx, by) {
   return { x: ax + abx * t, y: ay + aby * t, t, abx, aby, ab2 };
 }
 
+function canUseWgslOffload(offload) {
+  return Boolean(
+    offload
+    && offload.enabled === true
+    && offload.device
+    && typeof offload.device.createBuffer === 'function'
+    && typeof offload.device.createCommandEncoder === 'function'
+    && offload.state
+    && globalThis.GPUBufferUsage,
+  );
+}
+
+function ensureRigidInsidePolyBoundsProbeState({ offload, prep }) {
+  const state = offload.state;
+  const device = offload.device;
+  const polyCount = Math.max(1, Number(prep?.polyCount) || 0);
+  const polyPointCount = Math.max(1, Number(prep?.layout?.polyPointX?.length) || 0);
+
+  if (!state.insidePolyBoundsProbePipeline) {
+    const module = device.createShaderModule({ code: rigidInsidePolyBoundsProbeWgsl });
+    state.insidePolyBoundsProbePipeline = device.createComputePipeline({
+      layout: 'auto',
+      compute: { module, entryPoint: 'main' },
+    });
+  }
+
+  const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
+
+  if ((state.insidePolyBoundsProbePolyCapacity || 0) < polyCount) {
+    const bytes = polyCount * 4;
+    state.insidePolyBoundsMinX?.destroy?.();
+    state.insidePolyBoundsMinY?.destroy?.();
+    state.insidePolyBoundsMaxX?.destroy?.();
+    state.insidePolyBoundsMaxY?.destroy?.();
+    state.insidePolyBoundsMinX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insidePolyBoundsMinY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insidePolyBoundsMaxX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insidePolyBoundsMaxY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insidePolyBoundsProbePolyCapacity = polyCount;
+    state.insidePolyBoundsProbeBindGroup = null;
+  }
+
+  if ((state.insidePolyBoundsProbePointCapacity || 0) < polyPointCount) {
+    const bytes = polyPointCount * 4;
+    state.insidePolyBoundsPointX?.destroy?.();
+    state.insidePolyBoundsPointY?.destroy?.();
+    state.insidePolyBoundsPointX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insidePolyBoundsPointY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insidePolyBoundsProbePointCapacity = polyPointCount;
+    state.insidePolyBoundsProbeBindGroup = null;
+  }
+
+  if ((state.insidePolyBoundsProbeOffsetCapacity || 0) < (polyCount + 1)) {
+    const bytes = (polyCount + 1) * 4;
+    state.insidePolyBoundsPointOffsets?.destroy?.();
+    state.insidePolyBoundsPointOffsets = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insidePolyBoundsProbeOffsetCapacity = polyCount + 1;
+    state.insidePolyBoundsProbeBindGroup = null;
+  }
+
+  if (!state.insidePolyBoundsProbeBindGroup) {
+    state.insidePolyBoundsProbeBindGroup = device.createBindGroup({
+      layout: state.insidePolyBoundsProbePipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.insidePolyBoundsPointOffsets } },
+        { binding: 1, resource: { buffer: state.insidePolyBoundsPointX } },
+        { binding: 2, resource: { buffer: state.insidePolyBoundsPointY } },
+        { binding: 3, resource: { buffer: state.insidePolyBoundsMinX } },
+        { binding: 4, resource: { buffer: state.insidePolyBoundsMinY } },
+        { binding: 5, resource: { buffer: state.insidePolyBoundsMaxX } },
+        { binding: 6, resource: { buffer: state.insidePolyBoundsMaxY } },
+      ],
+    });
+  }
+
+  return state;
+}
+
+function dispatchRigidInsidePolyBoundsProbe({ offload, prep, proposalSignature }) {
+  if (!canUseWgslOffload(offload)) return false;
+  if ((Number(prep?.polyCount) || 0) <= 0) return false;
+
+  const state = ensureRigidInsidePolyBoundsProbeState({ offload, prep });
+  const device = offload.device;
+
+  device.queue.writeBuffer(state.insidePolyBoundsPointOffsets, 0, prep.layout.polyPointOffsets);
+  device.queue.writeBuffer(state.insidePolyBoundsPointX, 0, prep.layout.polyPointX);
+  device.queue.writeBuffer(state.insidePolyBoundsPointY, 0, prep.layout.polyPointY);
+
+  const dispatchCount = Math.max(1, Math.ceil(prep.polyCount / WGSL_WORKGROUP_SIZE));
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(state.insidePolyBoundsProbePipeline);
+  pass.setBindGroup(0, state.insidePolyBoundsProbeBindGroup);
+  pass.dispatchWorkgroups(dispatchCount);
+  pass.end();
+  device.queue.submit([encoder.finish()]);
+
+  state.lastInsidePolyBoundsProbeSource = 'wgsl-rigid-inside-poly-bounds-probe';
+  state.lastInsidePolyBoundsProbeDispatchCount = dispatchCount;
+  state.lastInsidePolyBoundsProbePolyCount = prep.polyCount;
+  state.lastInsidePolyBoundsProbeSignature = proposalSignature >>> 0;
+  return true;
+}
+
 function resolveRigidInsideProjection(rb, node, poly, correctionSlop = 0.04) {
   if (!rb || !node || !Array.isArray(poly) || poly.length < 3) return false;
   if (!pointInPolygonInclusive(node.x, node.y, poly)) return false;
@@ -329,6 +481,22 @@ export function applyRigidInsideCorrectionPassGpuOnly({
     wgslOffload.state.lastSourceRoute = 'cpu-rigid-inside-prepared-layout';
     wgslOffload.state.lastMode = 'cpu-rigid-inside-authoritative';
     wgslOffload.state.lastError = null;
+
+    try {
+      const probeRan = dispatchRigidInsidePolyBoundsProbe({
+        offload: wgslOffload,
+        prep,
+        proposalSignature,
+      });
+      if (probeRan) {
+        wgslOffload.state.lastSourceRoute = 'wgsl-rigid-inside-poly-bounds-probe';
+        wgslOffload.state.lastMode = 'cpu-rigid-inside-authoritative-wgsl-probe';
+      }
+    } catch (err) {
+      wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
+      wgslOffload.state.lastMode = 'cpu-rigid-inside-authoritative';
+      wgslOffload.state.lastSourceRoute = 'cpu-rigid-inside-prepared-layout';
+    }
   }
 
   for (let iter = 0; iter < correctionIters; iter++) {

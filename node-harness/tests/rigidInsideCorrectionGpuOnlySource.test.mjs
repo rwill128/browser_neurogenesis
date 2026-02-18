@@ -21,6 +21,12 @@ test('rigid-inside gpu-only path publishes deterministic WGSL prep layout + sour
 
   assert.match(
     source,
+    /const rigidInsidePolyBoundsProbeWgsl = \/\* wgsl \*\/[\s\S]*@compute @workgroup_size\(\$\{WGSL_WORKGROUP_SIZE\}\)[\s\S]*dispatchRigidInsidePolyBoundsProbe\([\s\S]*lastInsidePolyBoundsProbeSource = 'wgsl-rigid-inside-poly-bounds-probe';[\s\S]*lastSourceRoute = 'wgsl-rigid-inside-poly-bounds-probe';/,
+    'expected gpu-only inside-correction path to run a concrete WGSL polygon-bounds probe stage and publish probe source-route telemetry for upcoming point-in-polygon offload',
+  );
+
+  assert.match(
+    source,
     /wgslOffload\.state\.lastInsideCpuReference = \{[\s\S]*source: 'cpu-rigid-inside-authoritative-reference',[\s\S]*\};[\s\S]*wgslOffload\.state\.lastInsideParity = \{[\s\S]*source: 'cpu-rigid-inside-authoritative-reference',[\s\S]*proposalSignature: proposalSignature >>> 0,[\s\S]*preparedLayoutSignature: preparedLayoutSignature >>> 0/,
     'expected deterministic CPU reference/parity payload to be emitted for next WGSL inside-correction stage parity bring-up',
   );

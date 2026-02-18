@@ -47,6 +47,12 @@ test('membrane constraints gpu-only module defines concrete WGSL membrane-bounda
     /pendingWgslMembraneBoundaryEdgeProposalPromise[\s\S]*dispatchSoftMembraneBoundaryEdgeProposal\([\s\S]*lastMembraneBoundaryEdgeProposalSource = 'cpu-membrane-boundary-edge-authoritative'[\s\S]*lastMode = 'cpu-membrane-boundary-edge-authoritative'/,
     'expected serialized membrane boundary WGSL proposal dispatch with hard CPU fallback source-route when dispatch fails',
   );
+
+  assert.match(
+    moduleSource,
+    /canApplyAuthoritativeMembraneBoundaryEdgeProposal\([\s\S]*enableAuthoritativeMembraneBoundaryEdge !== true[\s\S]*applyMembraneBoundaryVelocityDeltasAuthoritative\([\s\S]*lastMembraneBoundaryEdgeAuthoritativeSource = authoritativeBoundaryFromWgsl\s*\?[\s\S]*'wgsl-membrane-boundary-edge-authoritative'\s*:[\s\S]*'cpu-membrane-boundary-edge-authoritative'/,
+    'expected membrane boundary path to support signature-gated authoritative WGSL edge replay with explicit source-route ownership telemetry',
+  );
 });
 
 test('membrane constraints gpu-only module defines concrete WGSL shape-memory proposal kernel with source-route telemetry', () => {

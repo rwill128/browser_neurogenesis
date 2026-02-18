@@ -4226,6 +4226,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       rigidVertexWorld,
       dtNorm,
       iterations: 5,
+      wgslOffload: {
+        enabled: true,
+        device: sim?.device,
+        state: (sim.hybridConstraintsWgslState ||= {}),
+      },
     });
   } else {
     for (let iter = 0; iter < 5; iter++) {

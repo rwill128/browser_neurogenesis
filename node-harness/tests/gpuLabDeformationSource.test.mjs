@@ -362,6 +362,12 @@ test('gpu-lab routes hybrid rigid-soft attachment constraints through isolated g
     /if \(solverPath === 'gpu-only'\) \{[\s\S]*applyHybridAttachmentConstraintsGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*for \(let iter = 0; iter < 5; iter\+\+\) \{/,
     'expected explicit gpu-only hybrid attachment dispatch with baseline fallback loops',
   );
+
+  assert.match(
+    source,
+    /applyHybridAttachmentConstraintsGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*state: \(sim\.hybridConstraintsWgslState \|\|= \{\}\),[\s\S]*\}\);/,
+    'expected gpu-only hybrid attachment dispatch to wire optional WGSL prep context',
+  );
 });
 
 test('gpu-lab routes soft membrane cell-pressure stepping through isolated gpu-only runtime solver module', () => {

@@ -89,3 +89,66 @@ test('gpu-only hybrid attachment pass matches baseline weld-like rigid-soft cons
   assert.deepEqual(gpuSoft, baselineSoft, 'gpu-only hybrid attachment pass should mutate soft nodes identically to baseline loops');
   assert.deepEqual(gpuRigid, baselineRigid, 'gpu-only hybrid attachment pass should mutate rigid bodies identically to baseline loops');
 });
+
+test('gpu-only hybrid attachment pass keeps CPU parity while publishing WGSL prep metadata', () => {
+  const seedRigid = [{
+    x: -0.6,
+    y: 2.2,
+    a: -0.21,
+    vx: 0.04,
+    vy: 0.09,
+    omega: -0.02,
+    verticesLocal: [
+      { x: -0.45, y: -0.2 },
+      { x: 0.5, y: -0.18 },
+      { x: 0.02, y: 0.62 },
+    ],
+  }];
+  const seedSoft = {
+    nodes: [
+      { x: -0.3, y: 2.0, vx: -0.03, vy: 0.05 },
+      { x: -0.8, y: 2.4, vx: 0.07, vy: -0.04 },
+    ],
+  };
+  const hybrid = [
+    { rigidIndex: 0, nodeIndex: 0, vertexA: 0, vertexB: 1, restA: 0.62, restB: 0.74 },
+    { rigidIndex: 0, nodeIndex: 1, vertexA: 1, vertexB: 2, restA: 0.71, restB: 0.81 },
+  ];
+
+  const baselineRigid = structuredClone(seedRigid);
+  const baselineSoft = structuredClone(seedSoft);
+  const gpuRigid = structuredClone(seedRigid);
+  const gpuSoft = structuredClone(seedSoft);
+  const wgslState = {};
+
+  applyHybridAttachmentConstraintsBaseline({
+    rigidBodies: baselineRigid,
+    soft: baselineSoft,
+    hybrid,
+    dtNorm: 0.77,
+    iterations: 5,
+  });
+
+  applyHybridAttachmentConstraintsGpuOnly({
+    rigidBodies: gpuRigid,
+    soft: gpuSoft,
+    hybrid,
+    rigidVertexWorld,
+    dtNorm: 0.77,
+    iterations: 5,
+    wgslOffload: {
+      enabled: true,
+      state: wgslState,
+    },
+  });
+
+  assert.deepEqual(gpuSoft, baselineSoft, 'wgsl prep mode should preserve cpu-authoritative soft outputs');
+  assert.deepEqual(gpuRigid, baselineRigid, 'wgsl prep mode should preserve cpu-authoritative rigid outputs');
+  assert.equal(wgslState.lastMode, 'cpu-prepared');
+  assert.equal(wgslState.lastPreparedAttachmentCount, hybrid.length);
+  assert.equal(wgslState.lastPreparedValidAttachmentCount, hybrid.length);
+  assert.equal(wgslState.preparedLayout?.nodeIndex?.length, hybrid.length);
+  assert.equal(wgslState.preparedLayout?.anchorAX?.length, hybrid.length);
+  assert.equal(wgslState.preparedPlan?.softNodeCount, seedSoft.nodes.length);
+  assert.ok((wgslState.lastPreparedLayoutBytes || 0) > 0);
+});

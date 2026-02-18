@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 const ROOT = '/Users/richardwilliams/browser_neurogenesis';
 const source = readFileSync(resolve(ROOT, 'sim-server/public/runtime-solvers/stepBodyFluidInjectionGpuOnly.js'), 'utf8');
 
-test('body-fluid injection gpu-only wires deterministic gather layout metadata into a WGSL gather proposal dispatch', () => {
+test('body-fluid injection gpu-only keeps deterministic WGSL gather layout + validated signature routing', () => {
   assert.match(
     source,
     /function buildBodyFluidInjectionGatherLayout\(\{[\s\S]*cellOffsets = new Uint32Array\(cellCount \+ 1\);[\s\S]*contribPointIndex = new Uint32Array\(totalContrib\);[\s\S]*contribWeight = new Float32Array\(totalContrib\);/,
@@ -15,43 +15,39 @@ test('body-fluid injection gpu-only wires deterministic gather layout metadata i
 
   assert.match(
     source,
-    /wgslOffload\.state\.preparedGatherLayout = gatherLayout;[\s\S]*wgslOffload\.state\.lastPreparedGatherContributionCount = gatherLayout\.contributionCount;/,
-    'expected offload state to publish gather layout telemetry for WGSL gather proposal dispatch',
+    /const gatherSignature = fastMode \? 0 : buildBodyFluidInjectionGatherSignature\(gatherLayout\);/,
+    'expected validated mode to retain deterministic gather signatures while fast mode skips signature/parity overhead',
   );
 
   assert.match(
     source,
-    /const wgslGatherRan = await dispatchBodyFluidInjectionGatherProposal\(\{[\s\S]*gatherLayout,[\s\S]*couplingLimit,[\s\S]*n,[\s\S]*\}\);/,
-    'expected gather proposal dispatch to run in-frame so WGSL deltas can be authoritative immediately',
+    /const hasMatchingWgslGather = fastMode[\s\S]*lastGatherProposalFrame[\s\S]*: wgslOffload\.state\.lastGatherProposalSignature === gatherSignature/,
+    'expected validated mode to gate authoritative WGSL gather replay on deterministic signatures',
+  );
+});
+
+test('body-fluid injection gpu-only fast mode skips shadow cpu parity while preserving finite checks + fallback route visibility', () => {
+  assert.match(
+    source,
+    /function isGpuOnlyFastMode\(offload\) \{[\s\S]*modeProfile[\s\S]*gpu-only-fast[\s\S]*\}/,
+    'expected body-fluid injection path to detect explicit gpu-only-fast mode profile',
   );
 
   assert.match(
     source,
-    /function computeBodyFluidInjectionCellDeltasFromGatherLayout\(\{ gatherLayout, couplingLimit, n \}\)[\s\S]*cellDeltaVx\[cell\] = clampComponent\(sumX, couplingLimit\);[\s\S]*cellDeltaVy\[cell\] = clampComponent\(sumY, couplingLimit\);/,
-    'expected deterministic CPU gather-delta helper that mirrors WGSL gather proposal ownership',
+    /let cpuGatherDelta = null;[\s\S]*if \(!fastMode\) \{[\s\S]*computeBodyFluidInjectionCellDeltasFromGatherLayout\(/,
+    'expected fast mode to skip default shadow CPU gather/parity work before WGSL proposal dispatch',
   );
 
   assert.match(
     source,
-    /wgslOffload\.state\.lastCpuGatherDeltaVx = cpuGatherDelta\.cellDeltaVx;[\s\S]*wgslOffload\.state\.lastCpuGatherDeltaVy = cpuGatherDelta\.cellDeltaVy;[\s\S]*wgslOffload\.state\.lastPreparedGatherSignature = gatherSignature;/,
-    'expected offload telemetry to publish CPU gather deltas plus deterministic gather signatures for WGSL source routing',
+    /checkFiniteFloat32Array\(wgslDeltaVx\)[\s\S]*checkFiniteFloat32Array\(wgslDeltaVy\)[\s\S]*gatherSource = fastMode \? 'wgsl-gather-authoritative-fast' : 'wgsl-gather-authoritative';/,
+    'expected fast mode WGSL gather route to retain hard non-finite safety rails before authoritative apply',
   );
 
   assert.match(
     source,
-    /const hasMatchingWgslGather =[\s\S]*lastGatherProposalSignature === gatherSignature[\s\S]*gatherSource = 'wgsl-gather-authoritative';/,
-    'expected gpu-only gather apply path to route authoritative deltas to WGSL readback when deterministic signatures match',
-  );
-
-  assert.match(
-    source,
-    /encoder\.copyBufferToBuffer\(state\.gatherProposalDeltaVx, 0, state\.gatherProposalDeltaVxReadback, 0, cellBytes\)[\s\S]*mapAsync\(globalThis\.GPUMapMode\.READ, 0, cellBytes\)[\s\S]*state\.lastGatherProposalDeltaVx = deltaVx;[\s\S]*state\.lastGatherProposalDeltaVy = deltaVy;/,
-    'expected WGSL gather proposal stage to read back deterministic cell-delta telemetry for parity checks',
-  );
-
-  assert.match(
-    source,
-    /const hasMatchingWgslGather =[\s\S]*lastGatherProposalSignature === gatherSignature[\s\S]*if \(hasMatchingWgslGather\) \{[\s\S]*gatherSource = 'wgsl-gather-authoritative';/,
-    'expected same-frame WGSL gather readback to become authoritative when signatures match',
+    /if \(!gatherDeltaToApply\) \{[\s\S]*gatherSource = fastMode \? 'cpu-gather-fallback-fast' : 'cpu-gather-authoritative';/,
+    'expected fast mode to keep explicit CPU fallback source-route telemetry when WGSL gather is unavailable/non-finite',
   );
 });

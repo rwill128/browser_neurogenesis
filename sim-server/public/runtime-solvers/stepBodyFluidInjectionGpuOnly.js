@@ -70,6 +70,18 @@ function canUseWgslOffload(offload) {
   );
 }
 
+function isGpuOnlyFastMode(offload) {
+  return String(offload?.modeProfile || '').trim().toLowerCase() === 'gpu-only-fast';
+}
+
+function checkFiniteFloat32Array(arr) {
+  const len = Number(arr?.length) || 0;
+  for (let i = 0; i < len; i++) {
+    if (!Number.isFinite(Number(arr[i]))) return { allFinite: false, firstBadIndex: i };
+  }
+  return { allFinite: true, firstBadIndex: -1 };
+}
+
 function hashU32ArrayFnv1a(arr) {
   let hash = 0x811c9dc5;
   const len = Number(arr?.length) || 0;
@@ -594,12 +606,16 @@ export async function applyBodyFluidInjectionGpuOnly({
     fluidCouplingComponentLimit: couplingLimit,
   });
 
-  const cpuGatherDelta = computeBodyFluidInjectionCellDeltasFromGatherLayout({
-    gatherLayout,
-    couplingLimit,
-    n,
-  });
-  const gatherSignature = buildBodyFluidInjectionGatherSignature(gatherLayout);
+  const fastMode = isGpuOnlyFastMode(wgslOffload);
+  let cpuGatherDelta = null;
+  if (!fastMode) {
+    cpuGatherDelta = computeBodyFluidInjectionCellDeltasFromGatherLayout({
+      gatherLayout,
+      couplingLimit,
+      n,
+    });
+  }
+  const gatherSignature = fastMode ? 0 : buildBodyFluidInjectionGatherSignature(gatherLayout);
 
   let gatherDeltaToApply = cpuGatherDelta;
   let gatherSource = 'cpu-gather-authoritative';
@@ -614,10 +630,10 @@ export async function applyBodyFluidInjectionGpuOnly({
     wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
     wgslOffload.state.lastPreparedGatherBytes = gatherLayout.byteLength;
     wgslOffload.state.lastPreparedGatherContributionCount = gatherLayout.contributionCount;
-    wgslOffload.state.lastCpuGatherDeltaVx = cpuGatherDelta.cellDeltaVx;
-    wgslOffload.state.lastCpuGatherDeltaVy = cpuGatherDelta.cellDeltaVy;
+    wgslOffload.state.lastCpuGatherDeltaVx = cpuGatherDelta?.cellDeltaVx || null;
+    wgslOffload.state.lastCpuGatherDeltaVy = cpuGatherDelta?.cellDeltaVy || null;
     wgslOffload.state.lastPreparedGatherSignature = gatherSignature;
-    wgslOffload.state.lastMode = 'cpu-prepared';
+    wgslOffload.state.lastMode = fastMode ? 'cpu-prepared-fast' : 'cpu-prepared';
 
     if (canUseWgslOffload(wgslOffload)) {
       const runId = (wgslOffload.state.lastWgslRunId || 0) + 1;
@@ -631,7 +647,9 @@ export async function applyBodyFluidInjectionGpuOnly({
           n,
         });
         wgslOffload.state.lastError = null;
-        wgslOffload.state.lastMode = wgslGatherRan ? 'wgsl-gather-proposal' : 'cpu-gather-authoritative';
+        wgslOffload.state.lastMode = wgslGatherRan
+          ? (fastMode ? 'wgsl-gather-proposal-fast' : 'wgsl-gather-proposal')
+          : 'cpu-gather-authoritative';
       } catch (err) {
         wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
         wgslOffload.state.lastMode = 'cpu-gather-authoritative';
@@ -640,30 +658,65 @@ export async function applyBodyFluidInjectionGpuOnly({
       }
     }
 
-    const hasMatchingWgslGather =
-      wgslOffload.state.lastGatherProposalSignature === gatherSignature
-      && Number(wgslOffload.state.lastGatherProposalCellCount) === (n * n)
-      && wgslOffload.state.lastGatherProposalDeltaVx instanceof Float32Array
-      && wgslOffload.state.lastGatherProposalDeltaVy instanceof Float32Array;
+    const hasMatchingWgslGather = fastMode
+      ? Number(wgslOffload.state.lastGatherProposalCellCount) === (n * n)
+        && Number(wgslOffload.state.lastGatherProposalFrame) === (Number(sim?.frame) || 0)
+        && wgslOffload.state.lastGatherProposalDeltaVx instanceof Float32Array
+        && wgslOffload.state.lastGatherProposalDeltaVy instanceof Float32Array
+      : wgslOffload.state.lastGatherProposalSignature === gatherSignature
+        && Number(wgslOffload.state.lastGatherProposalCellCount) === (n * n)
+        && wgslOffload.state.lastGatherProposalDeltaVx instanceof Float32Array
+        && wgslOffload.state.lastGatherProposalDeltaVy instanceof Float32Array;
 
     if (hasMatchingWgslGather) {
-      gatherDeltaToApply = {
-        cellDeltaVx: wgslOffload.state.lastGatherProposalDeltaVx,
-        cellDeltaVy: wgslOffload.state.lastGatherProposalDeltaVy,
+      const wgslDeltaVx = wgslOffload.state.lastGatherProposalDeltaVx;
+      const wgslDeltaVy = wgslOffload.state.lastGatherProposalDeltaVy;
+      const finiteVx = checkFiniteFloat32Array(wgslDeltaVx);
+      const finiteVy = checkFiniteFloat32Array(wgslDeltaVy);
+      const finite = {
+        allFinite: finiteVx.allFinite && finiteVy.allFinite,
+        firstBadIndex: finiteVx.allFinite ? finiteVy.firstBadIndex : finiteVx.firstBadIndex,
       };
-      gatherSource = 'wgsl-gather-authoritative';
-      wgslOffload.state.lastMode = 'wgsl-gather-authoritative';
-      wgslOffload.state.lastError = null;
-      wgslOffload.state.lastAuthoritativeGatherSource = gatherSource;
-      wgslOffload.state.lastAuthoritativeGatherSignature = gatherSignature;
-      wgslOffload.state.lastAuthoritativeGatherFrame = Number(sim?.frame) || 0;
+      wgslOffload.state.lastGatherProposalFinite = finite;
+
+      if (finite.allFinite) {
+        gatherDeltaToApply = {
+          cellDeltaVx: wgslDeltaVx,
+          cellDeltaVy: wgslDeltaVy,
+        };
+        gatherSource = fastMode ? 'wgsl-gather-authoritative-fast' : 'wgsl-gather-authoritative';
+        wgslOffload.state.lastMode = gatherSource;
+        wgslOffload.state.lastError = null;
+        wgslOffload.state.lastGatherValidation = {
+          source: gatherSource,
+          validation: fastMode ? 'skipped-cpu-parity' : 'cpu-parity-ready',
+          finite,
+        };
+      }
     }
+  }
+
+  if (!gatherDeltaToApply) {
+    cpuGatherDelta = cpuGatherDelta || computeBodyFluidInjectionCellDeltasFromGatherLayout({
+      gatherLayout,
+      couplingLimit,
+      n,
+    });
+    gatherDeltaToApply = cpuGatherDelta;
+    gatherSource = fastMode ? 'cpu-gather-fallback-fast' : 'cpu-gather-authoritative';
   }
 
   if (wgslOffload?.state) {
     wgslOffload.state.lastAuthoritativeGatherSource = gatherSource;
     wgslOffload.state.lastAuthoritativeGatherSignature = gatherSignature;
     wgslOffload.state.lastAuthoritativeGatherFrame = Number(sim?.frame) || 0;
+    if (fastMode && gatherSource.startsWith('cpu-gather')) {
+      wgslOffload.state.lastGatherValidation = {
+        source: gatherSource,
+        validation: 'wgsl-unavailable-or-non-finite',
+        finite: wgslOffload.state.lastGatherProposalFinite || { allFinite: false, firstBadIndex: -1 },
+      };
+    }
   }
 
   injectedMomentum = applyBodyFluidInjectionCellDeltas({

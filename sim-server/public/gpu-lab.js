@@ -4178,6 +4178,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       wgslOffload: {
         enabled: true,
         device: sim?.device,
+        modeProfile: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
         state: (sim.softSpringXpbdWgslState ||= {}),
       },
     });
@@ -4241,6 +4242,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       wgslOffload: {
         enabled: true,
         device: sim?.device,
+        modeProfile: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
         state: (sim.softAreaXpbdWgslState ||= {}),
       },
     });
@@ -4281,6 +4283,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       wgslOffload: {
         enabled: true,
         device: sim?.device,
+        modeProfile: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
         state: (sim.hybridConstraintsWgslState ||= {}),
       },
     });

@@ -99,4 +99,16 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
     /state\.lastAreaVelocityProposalNodeParityMaxError = maxNodeDeltaError;[\s\S]*state\.lastAreaVelocityProposalNodeParityMeanError = actualVx\.length > 0 \? \(sumNodeDeltaError \/ actualVx\.length\) : 0;[\s\S]*state\.lastAreaVelocityProposalNodeContributionParityMaxError = maxContributionError;/,
     'expected WGSL area node-reduction parity helper to publish deterministic per-node delta/count error telemetry against CPU reference',
   );
+
+  assert.match(
+    areaSource,
+    /isGpuOnlyFastMode\(wgslOffload\)[\s\S]*dispatchSoftAreaWgslVelocityDeltaProposal\([\s\S]*includeEndpointTelemetry: !fastMode[\s\S]*lastAreaVelocityProposalSource = fastMode[\s\S]*'wgsl-node-reduction-fast'[\s\S]*'wgsl-node-reduction'[\s\S]*if \(fastMode\) \{[\s\S]*validation: 'skipped-cpu-parity'/,
+    'expected gpu-only area fast mode branch to skip endpoint telemetry/parity while retaining source-route visibility',
+  );
+
+  assert.match(
+    areaSource,
+    /checkFiniteFloat32Array\(wgslOffload\.state\.lastAreaVelocityProposalNodeDeltaVx\)[\s\S]*lastAreaVelocityProposalFinite[\s\S]*allFinite !== true[\s\S]*lastMode = 'cpu-fallback'/,
+    'expected gpu-only area fast path to keep non-finite guardrails and explicit fallback mode',
+  );
 });

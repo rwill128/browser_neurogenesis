@@ -253,6 +253,23 @@ function canUseWgslOffload(offload) {
   return true;
 }
 
+function isGpuOnlyFastMode(wgslOffload) {
+  return String(wgslOffload?.modeProfile || '').trim().toLowerCase() === 'gpu-only-fast';
+}
+
+function checkFiniteFloat32Array(values) {
+  if (!(values instanceof Float32Array)) return { allFinite: false, nonFiniteCount: 0, comparedCount: 0 };
+  let nonFiniteCount = 0;
+  for (let i = 0; i < values.length; i++) {
+    if (!Number.isFinite(values[i])) nonFiniteCount += 1;
+  }
+  return {
+    allFinite: nonFiniteCount === 0,
+    nonFiniteCount,
+    comparedCount: values.length,
+  };
+}
+
 function ensureSoftAreaProbeBuffers(offload, nodeCount, endpointCount, clusterCount) {
   const state = offload.state || (offload.state = {});
   const device = offload.device;
@@ -575,7 +592,14 @@ async function dispatchSoftAreaWgslVelocityNodeReduction({ soft, offload, plan }
   state.lastAreaVelocityProposalNodeReductionAbsDeltaMax = maxAbsDelta;
   return true;
 }
-async function dispatchSoftAreaWgslVelocityDeltaProposal({ soft, offload, plan, dtPos, deltaByCluster }) {
+async function dispatchSoftAreaWgslVelocityDeltaProposal({
+  soft,
+  offload,
+  plan,
+  dtPos,
+  deltaByCluster,
+  includeEndpointTelemetry = true,
+}) {
   if (!canUseWgslOffload(offload)) return false;
   const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
   const clusterCount = Number(plan?.clusterCount) || 0;
@@ -654,9 +678,23 @@ async function dispatchSoftAreaWgslVelocityDeltaProposal({ soft, offload, plan, 
   pass.setBindGroup(0, state.areaVelocityBindGroup);
   pass.dispatchWorkgroups(dispatchCount);
   pass.end();
-  encoder.copyBufferToBuffer(state.areaVelocityDeltaVXOut, 0, state.areaVelocityDeltaVXReadback, 0, bytes);
-  encoder.copyBufferToBuffer(state.areaVelocityDeltaVYOut, 0, state.areaVelocityDeltaVYReadback, 0, bytes);
+  if (includeEndpointTelemetry) {
+    encoder.copyBufferToBuffer(state.areaVelocityDeltaVXOut, 0, state.areaVelocityDeltaVXReadback, 0, bytes);
+    encoder.copyBufferToBuffer(state.areaVelocityDeltaVYOut, 0, state.areaVelocityDeltaVYReadback, 0, bytes);
+  }
   device.queue.submit([encoder.finish()]);
+
+  state.lastAreaVelocityProposalEndpointCount = endpointCount;
+  state.lastAreaVelocityProposalDispatch = dispatchCount;
+  state.lastAreaVelocityProposalTelemetryMode = includeEndpointTelemetry ? 'full-readback' : 'reduced-readback';
+
+  if (!includeEndpointTelemetry) {
+    state.lastAreaVelocityProposalDeltaVxByEndpoint = null;
+    state.lastAreaVelocityProposalDeltaVyByEndpoint = null;
+    state.lastAreaVelocityProposalAbsDeltaMean = null;
+    state.lastAreaVelocityProposalAbsDeltaMax = null;
+    return true;
+  }
 
   await state.areaVelocityDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
   const mappedVX = state.areaVelocityDeltaVXReadback.getMappedRange(0, bytes);
@@ -676,8 +714,6 @@ async function dispatchSoftAreaWgslVelocityDeltaProposal({ soft, offload, plan, 
     sumAbsDelta += abs;
   }
 
-  state.lastAreaVelocityProposalEndpointCount = endpointCount;
-  state.lastAreaVelocityProposalDispatch = dispatchCount;
   state.lastAreaVelocityProposalDeltaVxByEndpoint = deltaVxByEndpoint;
   state.lastAreaVelocityProposalDeltaVyByEndpoint = deltaVyByEndpoint;
   state.lastAreaVelocityProposalAbsDeltaMean = endpointCount > 0 ? sumAbsDelta / endpointCount : 0;
@@ -1200,6 +1236,7 @@ export function applySoftAreaXPBDVelocityGpuOnly({
     // consume a deterministic signature-matched WGSL proposal on the next frame.
     if (canUseWgslOffload(wgslOffload)) {
       void (async () => {
+        const fastMode = isGpuOnlyFastMode(wgslOffload);
         const [probeRan, proposalRan] = await Promise.all([
           dispatchSoftAreaWgslProbe({ sim, soft, offload: wgslOffload, plan, dtPos }),
           dispatchSoftAreaWgslLambdaProposal({ soft, offload: wgslOffload, plan, dtPos, alpha }),
@@ -1213,6 +1250,7 @@ export function applySoftAreaXPBDVelocityGpuOnly({
             plan,
             dtPos,
             deltaByCluster: wgslOffload.state.lastAreaProposalDeltaLambdaByCluster,
+            includeEndpointTelemetry: !fastMode,
           });
           if (velocityProposalRan) {
             const nodeReductionRan = await dispatchSoftAreaWgslVelocityNodeReduction({
@@ -1220,24 +1258,77 @@ export function applySoftAreaXPBDVelocityGpuOnly({
               offload: wgslOffload,
               plan,
             });
+
+            wgslOffload.state.lastAreaVelocityProposalSource = fastMode
+              ? 'wgsl-node-reduction-fast'
+              : 'wgsl-node-reduction';
+
             if (!nodeReductionRan) {
-              reduceSoftAreaVelocityProposalToNodeDeltas({
-                soft,
-                offload: wgslOffload,
-                plan,
-              });
+              if (fastMode) {
+                const fallbackTelemetry = await dispatchSoftAreaWgslVelocityDeltaProposal({
+                  soft,
+                  offload: wgslOffload,
+                  plan,
+                  dtPos,
+                  deltaByCluster: wgslOffload.state.lastAreaProposalDeltaLambdaByCluster,
+                  includeEndpointTelemetry: true,
+                });
+                if (fallbackTelemetry) {
+                  reduceSoftAreaVelocityProposalToNodeDeltas({
+                    soft,
+                    offload: wgslOffload,
+                    plan,
+                  });
+                  wgslOffload.state.lastAreaVelocityProposalSource = 'cpu-deterministic-reduction-fallback';
+                }
+              } else {
+                reduceSoftAreaVelocityProposalToNodeDeltas({
+                  soft,
+                  offload: wgslOffload,
+                  plan,
+                });
+                wgslOffload.state.lastAreaVelocityProposalSource = 'cpu-deterministic-reduction';
+              }
             }
 
-            const nodeReference = buildSoftAreaVelocityNodeReference({
-              soft,
-              plan,
-              dtPos,
-              deltaByCluster: wgslOffload.state.lastAreaProposalDeltaLambdaByCluster,
-            });
-            publishSoftAreaVelocityNodeParity({
-              offload: wgslOffload,
-              reference: nodeReference,
-            });
+            const deltaFinite = checkFiniteFloat32Array(wgslOffload.state.lastAreaVelocityProposalNodeDeltaVx);
+            const deltaFiniteY = checkFiniteFloat32Array(wgslOffload.state.lastAreaVelocityProposalNodeDeltaVy);
+            wgslOffload.state.lastAreaVelocityProposalFinite = {
+              allFinite: deltaFinite.allFinite === true && deltaFiniteY.allFinite === true,
+              nonFiniteCount: (deltaFinite.nonFiniteCount || 0) + (deltaFiniteY.nonFiniteCount || 0),
+              comparedCount: (deltaFinite.comparedCount || 0) + (deltaFiniteY.comparedCount || 0),
+            };
+
+            if (fastMode) {
+              wgslOffload.state.lastAreaVelocityProposalParity = {
+                source: wgslOffload.state.lastAreaVelocityProposalSource,
+                validation: 'skipped-cpu-parity',
+                finite: wgslOffload.state.lastAreaVelocityProposalFinite,
+              };
+            } else {
+              const nodeReference = buildSoftAreaVelocityNodeReference({
+                soft,
+                plan,
+                dtPos,
+                deltaByCluster: wgslOffload.state.lastAreaProposalDeltaLambdaByCluster,
+              });
+              publishSoftAreaVelocityNodeParity({
+                offload: wgslOffload,
+                reference: nodeReference,
+              });
+              wgslOffload.state.lastAreaVelocityProposalParity = {
+                source: wgslOffload.state.lastAreaVelocityProposalSource,
+                validation: 'cpu-parity',
+                maxNodeDeltaError: wgslOffload.state.lastAreaVelocityProposalNodeParityMaxError,
+                maxContributionError: wgslOffload.state.lastAreaVelocityProposalNodeContributionParityMaxError,
+              };
+            }
+
+            if (wgslOffload.state.lastAreaVelocityProposalFinite?.allFinite !== true) {
+              wgslOffload.state.lastMode = 'cpu-fallback';
+              wgslOffload.state.lastError = 'non-finite-area-velocity-proposal';
+              return;
+            }
           }
         }
 

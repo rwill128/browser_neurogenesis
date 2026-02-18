@@ -10,16 +10,16 @@ const moduleSource = readFileSync(resolve(ROOT, 'sim-server/public/runtime-solve
 test('gpu-lab wires membrane boundary xpbd gpu-only pass with WGSL offload state bag', () => {
   assert.match(
     gpuLabSource,
-    /applySoftMembraneBoundaryXPBDVelocityGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*modeProfile: normalizeRuntimePipelineMode\(sim\?\.controls\?\.runtimePipelineMode, sim\?\.controls\?\.runtimeSolverPath\),[\s\S]*state: \(sim\.softMembraneBoundaryWgslState \|\|= \{\}\),[\s\S]*\}\)/,
-    'expected gpu-lab membrane boundary gpu-only branch to wire isolated WGSL offload state bag while baseline path stays untouched',
+    /applySoftMembraneBoundaryXPBDVelocityGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*modeProfile: normalizeRuntimePipelineMode\(sim\?\.controls\?\.runtimePipelineMode, sim\?\.controls\?\.runtimeSolverPath\),[\s\S]*state: \(\(\) => \{[\s\S]*sim\.softMembraneBoundaryWgslState \|\|= \{\}[\s\S]*enableAuthoritativeMembraneBoundaryEdge !== false[\s\S]*enableAuthoritativeMembraneBoundaryEdge = true;[\s\S]*return st;[\s\S]*\}\)\(\),[\s\S]*\}\)/,
+    'expected gpu-lab membrane boundary gpu-only branch to wire isolated WGSL offload state bag with authoritative WGSL replay enabled by default (unless explicitly disabled)',
   );
 });
 
 test('gpu-lab wires membrane shape-memory gpu-only pass with WGSL offload state bag', () => {
   assert.match(
     gpuLabSource,
-    /applySoftMembraneShapeMemoryVelocityGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*state: \(sim\.softMembraneShapeMemoryWgslState \|\|= \{\}\),[\s\S]*\}\)/,
-    'expected gpu-lab membrane shape-memory gpu-only branch to wire isolated WGSL offload context while baseline path stays untouched',
+    /applySoftMembraneShapeMemoryVelocityGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*state: \(\(\) => \{[\s\S]*sim\.softMembraneShapeMemoryWgslState \|\|= \{\}[\s\S]*enableAuthoritativeShapeMemory !== false[\s\S]*enableAuthoritativeShapeMemory = true;[\s\S]*return st;[\s\S]*\}\)\(\),[\s\S]*\}\)/,
+    'expected gpu-lab membrane shape-memory gpu-only branch to wire isolated WGSL offload context with authoritative WGSL replay enabled by default (unless explicitly disabled)',
   );
 });
 

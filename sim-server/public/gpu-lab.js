@@ -4218,7 +4218,13 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           enabled: true,
           device: sim?.device,
           modeProfile: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
-          state: (sim.softMembraneBoundaryWgslState ||= {}),
+          state: (() => {
+            const st = (sim.softMembraneBoundaryWgslState ||= {});
+            if (st.enableAuthoritativeMembraneBoundaryEdge !== false) {
+              st.enableAuthoritativeMembraneBoundaryEdge = true;
+            }
+            return st;
+          })(),
         },
       })
       : applySoftMembraneBoundaryXPBDVelocity(sim, s, softClusterLoops, dtPos, {
@@ -4243,7 +4249,13 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         wgslOffload: {
           enabled: true,
           device: sim?.device,
-          state: (sim.softMembraneShapeMemoryWgslState ||= {}),
+          state: (() => {
+            const st = (sim.softMembraneShapeMemoryWgslState ||= {});
+            if (st.enableAuthoritativeShapeMemory !== false) {
+              st.enableAuthoritativeShapeMemory = true;
+            }
+            return st;
+          })(),
         },
       })
       : applySoftMembraneShapeMemoryVelocity(sim, s, softClusterLoops, dtPos))

@@ -218,6 +218,36 @@ function createSoftAreaMockWgslDevice() {
 
                 writeF32(buffers.get(10), deltaOut);
                 writeF32(buffers.get(11), nextOut);
+              } else if (buffers.has(10) && buffers.has(9)) {
+                const invMass = readF32(buffers.get(7), endpointCount);
+                const deltaLambda = readF32(buffers.get(8), clusterCount);
+                const outVX = new Float32Array(endpointCount);
+                const outVY = new Float32Array(endpointCount);
+                const invDt = dtPos > 1e-8 ? (1 / dtPos) : 0;
+
+                for (let ci = 0; ci < clusterCount; ci++) {
+                  const start = offsets[ci];
+                  const end = offsets[ci + 1];
+                  if (end <= start + 1 || invDt === 0) continue;
+                  const dl = deltaLambda[ci] || 0;
+                  if (!dl) continue;
+                  for (let ei = start; ei < end; ei++) {
+                    const pi = nodeIdx[ei > start ? (ei - 1) : (end - 1)];
+                    const ni2 = nodeIdx[(ei + 1) < end ? (ei + 1) : start];
+                    if (pi >= nodeCount || ni2 >= nodeCount) continue;
+                    const px = nodeX[pi] + nodeVX[pi] * dtPos;
+                    const py = nodeY[pi] + nodeVY[pi] * dtPos;
+                    const nx = nodeX[ni2] + nodeVX[ni2] * dtPos;
+                    const ny = nodeY[ni2] + nodeVY[ni2] * dtPos;
+                    const gx = 0.5 * (ny - py);
+                    const gy = 0.5 * (px - nx);
+                    outVX[ei] = invMass[ei] * gx * dl * invDt;
+                    outVY[ei] = invMass[ei] * gy * dl * invDt;
+                  }
+                }
+
+                writeF32(buffers.get(9), outVX);
+                writeF32(buffers.get(10), outVY);
               } else {
                 const out = new Float32Array(clusterCount);
                 for (let ci = 0; ci < clusterCount; ci++) {
@@ -372,7 +402,7 @@ test('soft area XPBD WGSL proposal stage runs on gpu-only path while CPU remains
 
   assert.deepEqual(Array.from(gpuOnlySim.softAreaLambda.entries()), Array.from(baselineSim.softAreaLambda.entries()));
   assert.deepEqual(gpuOnlySoft.nodes, baselineSoft.nodes);
-  assert.equal(wgslState.lastMode, 'wgsl-proposal');
+  assert.equal(wgslState.lastMode, 'wgsl-velocity-proposal');
   assert.equal(wgslState.lastError, null);
   assert.equal(wgslState.lastAreaProbeClusterCount, 1);
   assert.equal(wgslState.lastAreaProposalClusterCount, 1);
@@ -380,4 +410,9 @@ test('soft area XPBD WGSL proposal stage runs on gpu-only path while CPU remains
   assert.equal(wgslState.lastAreaProposalLambdaNextByCluster instanceof Float32Array, true);
   assert.equal(wgslState.lastAreaProposalDeltaLambdaByCluster.length, 1);
   assert.equal(wgslState.lastAreaProposalLambdaNextByCluster.length, 1);
+  assert.equal(wgslState.lastAreaVelocityProposalEndpointCount, 4);
+  assert.equal(wgslState.lastAreaVelocityProposalDeltaVxByEndpoint instanceof Float32Array, true);
+  assert.equal(wgslState.lastAreaVelocityProposalDeltaVyByEndpoint instanceof Float32Array, true);
+  assert.equal(wgslState.lastAreaVelocityProposalDeltaVxByEndpoint.length, 4);
+  assert.equal(wgslState.lastAreaVelocityProposalDeltaVyByEndpoint.length, 4);
 });

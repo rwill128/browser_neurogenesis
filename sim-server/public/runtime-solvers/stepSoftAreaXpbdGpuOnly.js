@@ -132,6 +132,93 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+
+const softAreaVelocityDeltaProposalWgsl = /* wgsl */`
+struct Params {
+  nodeCount: u32,
+  clusterCount: u32,
+  endpointCount: u32,
+  dtPos: f32,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> nodeX: array<f32>;
+@group(0) @binding(2) var<storage, read> nodeY: array<f32>;
+@group(0) @binding(3) var<storage, read> nodeVX: array<f32>;
+@group(0) @binding(4) var<storage, read> nodeVY: array<f32>;
+@group(0) @binding(5) var<storage, read> clusterOffsets: array<u32>;
+@group(0) @binding(6) var<storage, read> clusterNodeIndices: array<u32>;
+@group(0) @binding(7) var<storage, read> clusterNodeInvMass: array<f32>;
+@group(0) @binding(8) var<storage, read> clusterDeltaLambda: array<f32>;
+@group(0) @binding(9) var<storage, read_write> endpointDeltaVXOut: array<f32>;
+@group(0) @binding(10) var<storage, read_write> endpointDeltaVYOut: array<f32>;
+
+fn findClusterIndex(ei: u32) -> u32 {
+  var ci = 0u;
+  loop {
+    if (ci + 1u >= params.clusterCount + 1u) { break; }
+    let start = clusterOffsets[ci];
+    let end = clusterOffsets[ci + 1u];
+    if (ei >= start && ei < end) {
+      return ci;
+    }
+    ci = ci + 1u;
+    if (ci >= params.clusterCount) { break; }
+  }
+  return params.clusterCount;
+}
+
+@compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let ei = gid.x;
+  if (ei >= params.endpointCount) { return; }
+
+  let ci = findClusterIndex(ei);
+  if (ci >= params.clusterCount) {
+    endpointDeltaVXOut[ei] = 0.0;
+    endpointDeltaVYOut[ei] = 0.0;
+    return;
+  }
+
+  let start = clusterOffsets[ci];
+  let end = clusterOffsets[ci + 1u];
+  if (end <= start + 1u || params.dtPos <= 1e-8) {
+    endpointDeltaVXOut[ei] = 0.0;
+    endpointDeltaVYOut[ei] = 0.0;
+    return;
+  }
+
+  let ni = clusterNodeIndices[ei];
+  if (ni >= params.nodeCount) {
+    endpointDeltaVXOut[ei] = 0.0;
+    endpointDeltaVYOut[ei] = 0.0;
+    return;
+  }
+
+  let prevEi = select(end - 1u, ei - 1u, ei > start);
+  let nextEi = select(start, ei + 1u, (ei + 1u) < end);
+  let pi = clusterNodeIndices[prevEi];
+  let ni2 = clusterNodeIndices[nextEi];
+  if (pi >= params.nodeCount || ni2 >= params.nodeCount) {
+    endpointDeltaVXOut[ei] = 0.0;
+    endpointDeltaVYOut[ei] = 0.0;
+    return;
+  }
+
+  let px = nodeX[pi] + nodeVX[pi] * params.dtPos;
+  let py = nodeY[pi] + nodeVY[pi] * params.dtPos;
+  let nx = nodeX[ni2] + nodeVX[ni2] * params.dtPos;
+  let ny = nodeY[ni2] + nodeVY[ni2] * params.dtPos;
+  let gx = 0.5 * (ny - py);
+  let gy = 0.5 * (px - nx);
+
+  let dl = clusterDeltaLambda[ci];
+  let w = clusterNodeInvMass[ei];
+  endpointDeltaVXOut[ei] = (w * gx * dl) / params.dtPos;
+  endpointDeltaVYOut[ei] = (w * gy * dl) / params.dtPos;
+}
+`;
+
 function canUseWgslOffload(offload) {
   if (!offload || offload.enabled !== true) return false;
   if (!offload.device || typeof offload.device.createComputePipelineAsync !== 'function') return false;
@@ -263,6 +350,177 @@ function ensureSoftAreaLambdaProposalBuffers(offload, nodeCount, endpointCount, 
   }
 
   return state;
+}
+
+
+function ensureSoftAreaVelocityDeltaProposalBuffers(offload, nodeCount, endpointCount, clusterCount) {
+  const state = offload.state || (offload.state = {});
+  const device = offload.device;
+  const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
+  const uniformUsage = globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST;
+
+  const requiredNodeCapacity = Math.max(1, nodeCount);
+  if ((state.areaVelocityNodeCapacity || 0) < requiredNodeCapacity) {
+    const capacity = Math.max(requiredNodeCapacity, state.areaVelocityNodeCapacity ? state.areaVelocityNodeCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.areaVelocityNodeX?.destroy?.();
+    state.areaVelocityNodeY?.destroy?.();
+    state.areaVelocityNodeVX?.destroy?.();
+    state.areaVelocityNodeVY?.destroy?.();
+    state.areaVelocityNodeX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaVelocityNodeY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaVelocityNodeVX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaVelocityNodeVY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaVelocityNodeCapacity = capacity;
+    state.areaVelocityBindGroup = null;
+  }
+
+  const requiredEndpointCapacity = Math.max(1, endpointCount);
+  if ((state.areaVelocityEndpointCapacity || 0) < requiredEndpointCapacity) {
+    const capacity = Math.max(requiredEndpointCapacity, state.areaVelocityEndpointCapacity ? state.areaVelocityEndpointCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.areaVelocityClusterNodeIndices?.destroy?.();
+    state.areaVelocityClusterNodeInvMass?.destroy?.();
+    state.areaVelocityDeltaVXOut?.destroy?.();
+    state.areaVelocityDeltaVYOut?.destroy?.();
+    state.areaVelocityDeltaVXReadback?.destroy?.();
+    state.areaVelocityDeltaVYReadback?.destroy?.();
+    state.areaVelocityClusterNodeIndices = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaVelocityClusterNodeInvMass = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaVelocityDeltaVXOut = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.areaVelocityDeltaVYOut = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.areaVelocityDeltaVXReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.areaVelocityDeltaVYReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.areaVelocityEndpointCapacity = capacity;
+    state.areaVelocityBindGroup = null;
+  }
+
+  const requiredClusterCapacity = Math.max(1, clusterCount);
+  if ((state.areaVelocityClusterCapacity || 0) < requiredClusterCapacity) {
+    const capacity = Math.max(requiredClusterCapacity, state.areaVelocityClusterCapacity ? state.areaVelocityClusterCapacity * 2 : 64);
+    const bytes = capacity * 4;
+    state.areaVelocityClusterOffsets?.destroy?.();
+    state.areaVelocityClusterDeltaLambda?.destroy?.();
+    state.areaVelocityClusterOffsets = device.createBuffer({ size: (capacity + 1) * 4, usage: storageUsage });
+    state.areaVelocityClusterDeltaLambda = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaVelocityClusterCapacity = capacity;
+    state.areaVelocityBindGroup = null;
+  }
+
+  if (!state.areaVelocityParams) {
+    state.areaVelocityParams = device.createBuffer({ size: 16, usage: uniformUsage });
+    state.areaVelocityBindGroup = null;
+  }
+
+  return state;
+}
+
+async function dispatchSoftAreaWgslVelocityDeltaProposal({ soft, offload, plan, dtPos, deltaByCluster }) {
+  if (!canUseWgslOffload(offload)) return false;
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const clusterCount = Number(plan?.clusterCount) || 0;
+  const endpointCount = Number(plan?.endpointCount) || 0;
+  if (nodes.length <= 0 || clusterCount <= 0 || endpointCount <= 0) return false;
+  if (!(deltaByCluster instanceof Float32Array) || deltaByCluster.length < clusterCount) return false;
+
+  const state = ensureSoftAreaVelocityDeltaProposalBuffers(offload, nodes.length, endpointCount, clusterCount);
+  const device = offload.device;
+
+  if (!state.areaVelocityPipeline) {
+    const module = device.createShaderModule({ code: softAreaVelocityDeltaProposalWgsl });
+    state.areaVelocityPipeline = await device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: { module, entryPoint: 'main' },
+    });
+    state.areaVelocityBindGroup = null;
+  }
+
+  if (!state.areaVelocityBindGroup) {
+    state.areaVelocityBindGroup = device.createBindGroup({
+      layout: state.areaVelocityPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.areaVelocityParams } },
+        { binding: 1, resource: { buffer: state.areaVelocityNodeX } },
+        { binding: 2, resource: { buffer: state.areaVelocityNodeY } },
+        { binding: 3, resource: { buffer: state.areaVelocityNodeVX } },
+        { binding: 4, resource: { buffer: state.areaVelocityNodeVY } },
+        { binding: 5, resource: { buffer: state.areaVelocityClusterOffsets } },
+        { binding: 6, resource: { buffer: state.areaVelocityClusterNodeIndices } },
+        { binding: 7, resource: { buffer: state.areaVelocityClusterNodeInvMass } },
+        { binding: 8, resource: { buffer: state.areaVelocityClusterDeltaLambda } },
+        { binding: 9, resource: { buffer: state.areaVelocityDeltaVXOut } },
+        { binding: 10, resource: { buffer: state.areaVelocityDeltaVYOut } },
+      ],
+    });
+  }
+
+  const nodeX = new Float32Array(nodes.length);
+  const nodeY = new Float32Array(nodes.length);
+  const nodeVX = new Float32Array(nodes.length);
+  const nodeVY = new Float32Array(nodes.length);
+  for (let ni = 0; ni < nodes.length; ni++) {
+    const node = nodes[ni] || {};
+    nodeX[ni] = Number(node.x) || 0;
+    nodeY[ni] = Number(node.y) || 0;
+    nodeVX[ni] = Number(node.vx) || 0;
+    nodeVY[ni] = Number(node.vy) || 0;
+  }
+
+  const paramsBytes = new ArrayBuffer(16);
+  const paramsU32 = new Uint32Array(paramsBytes);
+  const paramsF32 = new Float32Array(paramsBytes);
+  paramsU32[0] = nodes.length >>> 0;
+  paramsU32[1] = clusterCount >>> 0;
+  paramsU32[2] = endpointCount >>> 0;
+  paramsF32[3] = Number.isFinite(dtPos) ? dtPos : 0;
+
+  device.queue.writeBuffer(state.areaVelocityParams, 0, paramsBytes);
+  device.queue.writeBuffer(state.areaVelocityNodeX, 0, nodeX);
+  device.queue.writeBuffer(state.areaVelocityNodeY, 0, nodeY);
+  device.queue.writeBuffer(state.areaVelocityNodeVX, 0, nodeVX);
+  device.queue.writeBuffer(state.areaVelocityNodeVY, 0, nodeVY);
+  device.queue.writeBuffer(state.areaVelocityClusterOffsets, 0, plan.clusterOffsets);
+  device.queue.writeBuffer(state.areaVelocityClusterNodeIndices, 0, plan.clusterNodeIndices);
+  device.queue.writeBuffer(state.areaVelocityClusterNodeInvMass, 0, plan.clusterNodeInvMass);
+  device.queue.writeBuffer(state.areaVelocityClusterDeltaLambda, 0, deltaByCluster);
+
+  const dispatchCount = Math.ceil(endpointCount / WGSL_WORKGROUP_SIZE);
+  const bytes = endpointCount * 4;
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(state.areaVelocityPipeline);
+  pass.setBindGroup(0, state.areaVelocityBindGroup);
+  pass.dispatchWorkgroups(dispatchCount);
+  pass.end();
+  encoder.copyBufferToBuffer(state.areaVelocityDeltaVXOut, 0, state.areaVelocityDeltaVXReadback, 0, bytes);
+  encoder.copyBufferToBuffer(state.areaVelocityDeltaVYOut, 0, state.areaVelocityDeltaVYReadback, 0, bytes);
+  device.queue.submit([encoder.finish()]);
+
+  await state.areaVelocityDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
+  const mappedVX = state.areaVelocityDeltaVXReadback.getMappedRange(0, bytes);
+  const deltaVxByEndpoint = new Float32Array(mappedVX.slice(0));
+  state.areaVelocityDeltaVXReadback.unmap();
+
+  await state.areaVelocityDeltaVYReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
+  const mappedVY = state.areaVelocityDeltaVYReadback.getMappedRange(0, bytes);
+  const deltaVyByEndpoint = new Float32Array(mappedVY.slice(0));
+  state.areaVelocityDeltaVYReadback.unmap();
+
+  let maxAbsDelta = 0;
+  let sumAbsDelta = 0;
+  for (let ei = 0; ei < endpointCount; ei++) {
+    const abs = Math.hypot(deltaVxByEndpoint[ei], deltaVyByEndpoint[ei]);
+    if (abs > maxAbsDelta) maxAbsDelta = abs;
+    sumAbsDelta += abs;
+  }
+
+  state.lastAreaVelocityProposalEndpointCount = endpointCount;
+  state.lastAreaVelocityProposalDispatch = dispatchCount;
+  state.lastAreaVelocityProposalDeltaVxByEndpoint = deltaVxByEndpoint;
+  state.lastAreaVelocityProposalDeltaVyByEndpoint = deltaVyByEndpoint;
+  state.lastAreaVelocityProposalAbsDeltaMean = endpointCount > 0 ? sumAbsDelta / endpointCount : 0;
+  state.lastAreaVelocityProposalAbsDeltaMax = maxAbsDelta;
+  return true;
 }
 
 async function dispatchSoftAreaWgslLambdaProposal({ soft, offload, plan, dtPos, alpha }) {
@@ -581,20 +839,33 @@ export function applySoftAreaXPBDVelocityGpuOnly({
     // CPU remains authoritative for velocity updates until reduction kernels
     // land; these kernels validate deterministic area/lambda parity telemetry.
     if (canUseWgslOffload(wgslOffload)) {
-      void Promise.all([
-        dispatchSoftAreaWgslProbe({ sim, soft, offload: wgslOffload, plan, dtPos }),
-        dispatchSoftAreaWgslLambdaProposal({ soft, offload: wgslOffload, plan, dtPos, alpha }),
-      ])
-        .then(([probeRan, proposalRan]) => {
-          if (probeRan || proposalRan) {
-            wgslOffload.state.lastError = null;
-            wgslOffload.state.lastMode = proposalRan ? 'wgsl-proposal' : 'wgsl-probe';
-          }
-        })
-        .catch((err) => {
-          wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
-          wgslOffload.state.lastMode = 'cpu-fallback';
-        });
+      void (async () => {
+        const [probeRan, proposalRan] = await Promise.all([
+          dispatchSoftAreaWgslProbe({ sim, soft, offload: wgslOffload, plan, dtPos }),
+          dispatchSoftAreaWgslLambdaProposal({ soft, offload: wgslOffload, plan, dtPos, alpha }),
+        ]);
+
+        let velocityProposalRan = false;
+        if (proposalRan) {
+          velocityProposalRan = await dispatchSoftAreaWgslVelocityDeltaProposal({
+            soft,
+            offload: wgslOffload,
+            plan,
+            dtPos,
+            deltaByCluster: wgslOffload.state.lastAreaProposalDeltaLambdaByCluster,
+          });
+        }
+
+        if (probeRan || proposalRan || velocityProposalRan) {
+          wgslOffload.state.lastError = null;
+          wgslOffload.state.lastMode = velocityProposalRan
+            ? 'wgsl-velocity-proposal'
+            : (proposalRan ? 'wgsl-proposal' : 'wgsl-probe');
+        }
+      })().catch((err) => {
+        wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
+        wgslOffload.state.lastMode = 'cpu-fallback';
+      });
     }
   }
 

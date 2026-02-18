@@ -36,7 +36,7 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
 
   assert.match(
     areaSource,
-    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*Promise\.all\(\[[\s\S]*dispatchSoftAreaWgslProbe\(\{ sim, soft, offload: wgslOffload, plan, dtPos \}\)[\s\S]*dispatchSoftAreaWgslLambdaProposal\(\{ soft, offload: wgslOffload, plan, dtPos, alpha \}\)[\s\S]*lastMode = proposalRan \? 'wgsl-proposal' : 'wgsl-probe'/,
+    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*Promise\.all\(\[[\s\S]*dispatchSoftAreaWgslProbe\(\{ sim, soft, offload: wgslOffload, plan, dtPos \}\)[\s\S]*dispatchSoftAreaWgslLambdaProposal\(\{ soft, offload: wgslOffload, plan, dtPos, alpha \}\)[\s\S]*lastMode = velocityProposalRan[\s\S]*'wgsl-velocity-proposal'[\s\S]*'wgsl-proposal'[\s\S]*'wgsl-probe'/,
     'expected gpu-only soft area pass to dispatch WGSL probe + lambda proposal stages while retaining CPU-authoritative fallback',
   );
 
@@ -44,5 +44,17 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
     areaSource,
     /copyBufferToBuffer\(state\.areaLambdaDeltaOut, 0, state\.areaLambdaDeltaReadback, 0, bytes\)[\s\S]*copyBufferToBuffer\(state\.areaLambdaNextOut, 0, state\.areaLambdaNextReadback, 0, bytes\)[\s\S]*lastAreaProposalDeltaLambdaByCluster[\s\S]*lastAreaProposalLambdaNextByCluster[\s\S]*lastAreaProposalAbsDeltaMean[\s\S]*lastAreaProposalAbsDeltaMax/,
     'expected WGSL area lambda proposal stage to read back deterministic per-cluster lambda telemetry for upcoming reduction offload',
+  );
+
+  assert.match(
+    areaSource,
+    /dispatchSoftAreaWgslVelocityDeltaProposal\([\s\S]*deltaByCluster: wgslOffload\.state\.lastAreaProposalDeltaLambdaByCluster[\s\S]*lastMode = velocityProposalRan[\s\S]*'wgsl-velocity-proposal'/,
+    'expected gpu-only area pass to run WGSL endpoint velocity-delta proposal stage after lambda proposal for reduction-ready telemetry',
+  );
+
+  assert.match(
+    areaSource,
+    /copyBufferToBuffer\(state\.areaVelocityDeltaVXOut, 0, state\.areaVelocityDeltaVXReadback, 0, bytes\)[\s\S]*copyBufferToBuffer\(state\.areaVelocityDeltaVYOut, 0, state\.areaVelocityDeltaVYReadback, 0, bytes\)[\s\S]*lastAreaVelocityProposalDeltaVxByEndpoint[\s\S]*lastAreaVelocityProposalDeltaVyByEndpoint[\s\S]*lastAreaVelocityProposalAbsDeltaMean[\s\S]*lastAreaVelocityProposalAbsDeltaMax/,
+    'expected WGSL area velocity proposal stage to read back deterministic per-endpoint node delta telemetry for upcoming reduction offload',
   );
 });

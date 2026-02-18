@@ -76,12 +76,12 @@
             <option value="membraneEdge">Membrane edge-length field</option>
             <option value="membraneShape">Membrane stiffness field</option>
             <option value="softPermeability">Soft permeability field</option>
-            <option value="softEdgeDyeMode">Soft edge dye EATS map (per-channel true/false)</option>
+            <option value="softEdgeDyeMode">Soft edge dye REMOVE map (per-channel true/false)</option>
             <option value="softEdgeVelocityMode">Soft edge velocity mode field (BLOCK/PASS)</option>
             <option value="softEdgeMomentumMode">Soft edge momentum coupling field (0..1)</option>
             <option value="rigidPermeability">Rigid permeability field</option>
             <option value="rigidEdgeVelocityMode">Rigid edge velocity mode field (BLOCK/PASS)</option>
-            <option value="rigidEdgeDyeMode">Rigid edge dye EATS map (per-channel true/false)</option>
+            <option value="rigidEdgeDyeMode">Rigid edge dye REMOVE map (per-channel true/false)</option>
           </select>
         </label>
         <label>Trait paint mode
@@ -137,8 +137,8 @@
         </label>
         <label>Soft dye mode
           <select id="softEdgeDyeMode">
-            <option value="noop" selected>NO-OP (EATS=false)</option>
-            <option value="eat">EAT (EATS=true)</option>
+            <option value="noop" selected>NO-OP (REMOVE=false)</option>
+            <option value="eat">REMOVE (REMOVE=true)</option>
           </select>
         </label>
         <label>Soft dye field paint (0..1) <input id="softEdgeDyePaintValue" type="range" value="1" min="0" max="1" step="0.05" /> <span id="softEdgeDyePaintValueLabel">1.00</span></label>
@@ -169,8 +169,8 @@
         </label>
         <label>Rigid dye mode
           <select id="rigidEdgeDyeMode">
-            <option value="noop" selected>NO-OP (EATS=false)</option>
-            <option value="eat">EAT (EATS=true)</option>
+            <option value="noop" selected>NO-OP (REMOVE=false)</option>
+            <option value="eat">REMOVE (REMOVE=true)</option>
           </select>
         </label>
         <label>Rigid dye field paint (0..1) <input id="rigidEdgeDyePaintValue" type="range" value="1" min="0" max="1" step="0.05" /> <span id="rigidEdgeDyePaintValueLabel">1.00</span></label>
@@ -253,26 +253,26 @@
         <button id="randomizeSoftEdgeDyeModeBtn">Randomize all soft dye fields (9)</button>
         <button id="randomizeSoftDyeBlockRBtn">Soft R BLOCK</button>
         <button id="randomizeSoftDyePassRBtn">Soft R PASS</button>
-        <button id="randomizeSoftDyeEatRBtn">Soft R EAT</button>
+        <button id="randomizeSoftDyeEatRBtn">Soft R REMOVE</button>
         <button id="randomizeSoftDyeBlockGBtn">Soft G BLOCK</button>
         <button id="randomizeSoftDyePassGBtn">Soft G PASS</button>
-        <button id="randomizeSoftDyeEatGBtn">Soft G EAT</button>
+        <button id="randomizeSoftDyeEatGBtn">Soft G REMOVE</button>
         <button id="randomizeSoftDyeBlockBBtn">Soft B BLOCK</button>
         <button id="randomizeSoftDyePassBBtn">Soft B PASS</button>
-        <button id="randomizeSoftDyeEatBBtn">Soft B EAT</button>
+        <button id="randomizeSoftDyeEatBBtn">Soft B REMOVE</button>
         <button id="randomizeSoftEdgeVelocityModeBtn">Randomize soft velocity mode only</button>
         <button id="randomizeSoftEdgeMomentumModeBtn">Randomize soft momentum only</button>
         <button id="randomizeRigidPermeabilityBtn">Randomize rigid permeability only</button>
         <button id="randomizeRigidEdgeDyeModeBtn">Randomize all rigid dye fields (9)</button>
         <button id="randomizeRigidDyeBlockRBtn">Rigid R BLOCK</button>
         <button id="randomizeRigidDyePassRBtn">Rigid R PASS</button>
-        <button id="randomizeRigidDyeEatRBtn">Rigid R EAT</button>
+        <button id="randomizeRigidDyeEatRBtn">Rigid R REMOVE</button>
         <button id="randomizeRigidDyeBlockGBtn">Rigid G BLOCK</button>
         <button id="randomizeRigidDyePassGBtn">Rigid G PASS</button>
-        <button id="randomizeRigidDyeEatGBtn">Rigid G EAT</button>
+        <button id="randomizeRigidDyeEatGBtn">Rigid G REMOVE</button>
         <button id="randomizeRigidDyeBlockBBtn">Rigid B BLOCK</button>
         <button id="randomizeRigidDyePassBBtn">Rigid B PASS</button>
-        <button id="randomizeRigidDyeEatBBtn">Rigid B EAT</button>
+        <button id="randomizeRigidDyeEatBBtn">Rigid B REMOVE</button>
         <button id="randomizeRigidEdgeVelocityModeBtn">Randomize rigid velocity mode only</button>
       </div>
     </details>
@@ -332,7 +332,7 @@
       <canvas id="softPermeabilityPaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="softEdgeDyeMode">
-      <div>Soft edge dye EATS map (RGB channels, thresholded to EATS true/false per segment)</div>
+      <div>Soft edge dye REMOVE map (RGB channels, thresholded to REMOVE true/false per segment)</div>
       <canvas id="softEdgeDyeModePaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="softEdgeVelocityMode">
@@ -352,7 +352,7 @@
       <canvas id="rigidEdgeVelocityModePaint" width="384" height="384"></canvas>
     </div>
     <div class="field-panel" data-field-panel="rigidEdgeDyeMode">
-      <div>Rigid edge dye EATS map (RGB channels, thresholded to EATS true/false per segment)</div>
+      <div>Rigid edge dye REMOVE map (RGB channels, thresholded to REMOVE true/false per segment)</div>
       <canvas id="rigidEdgeDyeModePaint" width="384" height="384"></canvas>
     </div>
     <div class="compiled-panel" id="compiledPanel">
@@ -380,6 +380,6 @@
     </div>
     <pre id="out">ready</pre>
   </div>
-  <script type="module" src="/mesh-lab.js?v=20260218b"></script>
+  <script type="module" src="/mesh-lab.js?v=20260218c"></script>
 </body>
 </html>

@@ -69,8 +69,8 @@ let lastEmbedResyncAt = 0;
 const DEFAULT_SCENARIO_PRESETS = [
   {
     id: 'rigid-red-eat-block-pinned',
-    name: 'Rigid line · red EAT · velocity BLOCK · pinned',
-    description: 'Baseline confrontation: rigid segment absorbs red dye while staying immobile.',
+    name: 'Rigid line · red REMOVE · velocity BLOCK · pinned',
+    description: 'Baseline confrontation: rigid segment removes red dye while staying immobile.',
     fixtureType: 'rigid-line',
     motionMode: 'pinned',
     circleRadius: 12,
@@ -93,11 +93,11 @@ const DEFAULT_SCENARIO_PRESETS = [
     velocityMode: 'block',
     momentum: 1,
   },
-  // channel-block preset removed per rollback to EAT/NO-OP interaction contract.
+  // channel-block preset removed per rollback to REMOVE/NO-OP interaction contract.
   {
     id: 'soft-green-eat-block-pinned',
-    name: 'Soft line · green EAT · velocity BLOCK · pinned',
-    description: 'Soft-segment version to verify per-spring channel absorption behavior.',
+    name: 'Soft line · green REMOVE · velocity BLOCK · pinned',
+    description: 'Soft-segment version to verify per-spring channel removal behavior.',
     fixtureType: 'soft-line',
     motionMode: 'pinned',
     circleRadius: 12,
@@ -122,7 +122,7 @@ const DEFAULT_SCENARIO_PRESETS = [
   },
   {
     id: 'rigid-blue-eat-pass-circle',
-    name: 'Rigid line · blue EAT · velocity PASS · circle drag',
+    name: 'Rigid line · blue REMOVE · velocity PASS · circle drag',
     description: 'Dynamic trajectory case to inspect trailing removal under moving fixtures.',
     fixtureType: 'rigid-line',
     motionMode: 'circle',
@@ -293,7 +293,7 @@ function updateDyeControlState() {
   }
   dyeModeLabelEl?.classList.remove('control-disabled');
   if (velocityContractHintEl) {
-    velocityContractHintEl.textContent = 'Current contract note: velocity BLOCK/PASS and selected-channel dye EAT/NO-OP now co-exist; with moving blockers, swept displacement transport subtracts eaten channels before relocation.';
+    velocityContractHintEl.textContent = 'Current contract note: velocity BLOCK/PASS and selected-channel dye REMOVE/NO-OP now co-exist; with moving blockers, swept displacement transport subtracts removed channels before relocation.';
   }
   updateEffectiveDyeModeStatus();
   updateControlHints();
@@ -389,7 +389,7 @@ function generateRandomScenarioPreset() {
   return {
     id: `random-${timestampTag()}`,
     name: 'Random generated scenario',
-    description: `Auto-generated: ${fixtureType}, ${motionMode}, ${dyeChannel.toUpperCase()} ${dyeMode.toUpperCase()}, velocity ${velocityMode.toUpperCase()}, momentum ${momentum.toFixed(2)}.`,
+    description: `Auto-generated: ${fixtureType}, ${motionMode}, ${dyeChannel.toUpperCase()} ${dyeMode === 'eat' ? 'REMOVE' : 'NO-OP'}, velocity ${velocityMode.toUpperCase()}, momentum ${momentum.toFixed(2)}.`,
     fixtureType,
     motionMode,
     circleRadius,
@@ -422,7 +422,7 @@ function populateScenarioPresetDropdown() {
 
 async function loadScenarioPresetCatalog() {
   try {
-    const res = await fetch('/interaction-scenarios.json?v=20260217e', { cache: 'no-store' });
+    const res = await fetch('/interaction-scenarios.json?v=20260218a', { cache: 'no-store' });
     if (res.ok) {
       const json = await res.json();
       if (Array.isArray(json) && json.length > 0) {
@@ -457,7 +457,7 @@ function updateEffectiveDyeModeStatus() {
   const velocityMode = String(velocityModeEl?.value || 'block').toLowerCase();
   const effective = effectiveDyeMode(requested, velocityMode);
   const velocityLabel = velocityMode === 'block' ? 'BLOCK' : 'PASS';
-  effectiveDyeModeStatusEl.textContent = `Effective selected-channel dye behavior: ${effective === 'eat' ? 'EAT' : 'NO-OP'} (velocity ${velocityLabel})`;
+  effectiveDyeModeStatusEl.textContent = `Effective selected-channel dye behavior: ${effective === 'eat' ? 'REMOVE' : 'NO-OP'} (velocity ${velocityLabel})`;
 }
 
 function updateControlHints() {
@@ -474,8 +474,8 @@ function updateControlHints() {
 
   if (velocityModeHintEl) {
     velocityModeHintEl.textContent = velocityMode === 'block'
-      ? 'Velocity mode: BLOCK makes this segment a hard flow boundary while still allowing per-channel EAT/NO-OP dye policy.'
-      : 'Velocity mode: PASS allows fluid to cross this segment while applying selected-channel EAT/NO-OP dye policy.';
+      ? 'Velocity mode: BLOCK makes this segment a hard flow boundary while still allowing per-channel REMOVE/NO-OP dye policy.'
+      : 'Velocity mode: PASS allows fluid to cross this segment while applying selected-channel REMOVE/NO-OP dye policy.';
   }
 
   if (momentumHintEl) {
@@ -675,8 +675,8 @@ function renderScenarioDebug(row, payload, extra = {}) {
     ...extra,
     notes: {
       segmentLabelsInWindTunnel: 'R<body>:<edge> for rigid, S<softSpring> for soft',
-      expectedSelectionRule: 'For selected channel at each segment: NO-OP means no dye removal, EAT removes dye',
-      velocityDyeContract: 'velocity BLOCK/PASS and selected-channel EAT/NO-OP co-exist; swept moving-boundary displacement subtracts eaten channels before relocating remaining dye mass',
+      expectedSelectionRule: 'For selected channel at each segment: NO-OP means no dye removal, REMOVE removes dye',
+      velocityDyeContract: 'velocity BLOCK/PASS and selected-channel REMOVE/NO-OP co-exist; swept moving-boundary displacement subtracts removed channels before relocating remaining dye mass',
       screenshotWorkflow: 'Load/create scenario -> Apply -> Download screenshot -> send screenshot for analysis',
       generationWorkflow: 'Use presets, curriculum buttons, or Random scenario to auto-generate cases',
     },

@@ -250,8 +250,8 @@ function edgeVelocityModeToScalar(mode) {
 
 function edgeModeScalarPreview(v) {
   const n = Math.max(0, Math.min(1, Number(v) || 0));
-  if (n >= 0.67) return 255; // EAT=true
-  return 160; // NO-OP (EAT=false)
+  if (n >= 0.67) return 255; // REMOVE=true
+  return 160; // NO-OP (REMOVE=false)
 }
 
 function syncSoftDyeModeMapsFromWinnerFields() {
@@ -305,7 +305,7 @@ function sampleSegmentAverageMap(field, ax, ay, bx, by, fallback = 0) {
 
 function dyeModeNameFromCode(mode) {
   const m = Number(mode);
-  return m === 2 ? 'EAT' : 'NO-OP';
+  return m === 2 ? 'REMOVE' : 'NO-OP';
 }
 
 function velocityModeNameFromCode(mode) {
@@ -321,7 +321,7 @@ function normalizeVelocityModeCode(mode, fallback = 1) {
 
 function normalizeDyeModeCode(mode, fallback = 1) {
   const m = Number(mode);
-  if (m === 2) return 2; // EAT
+  if (m === 2) return 2; // REMOVE
   if (m === 1) return 1; // NO-OP
   return Number(fallback) === 2 ? 2 : 1;
 }
@@ -1186,16 +1186,16 @@ function renderSegmentStatsList(segments = []) {
       const sel = document.createElement('select');
       sel.className = 'segment-edit-select';
       sel.title = `${channelName} dye mode for this segment`;
-      sel.innerHTML = '<option value="1">NO-OP</option><option value="2">EAT</option>';
+      sel.innerHTML = '<option value="1">NO-OP</option><option value="2">REMOVE</option>';
       return sel;
     };
 
     const dyeR = makeDyeSelect('Red');
     const dyeG = makeDyeSelect('Green');
     const dyeB = makeDyeSelect('Blue');
-    dyeR.value = String(seg.dyeMode?.r === 'EAT' ? 2 : 1);
-    dyeG.value = String(seg.dyeMode?.g === 'EAT' ? 2 : 1);
-    dyeB.value = String(seg.dyeMode?.b === 'EAT' ? 2 : 1);
+    dyeR.value = String(seg.dyeMode?.r === 'REMOVE' || seg.dyeMode?.r === 'EAT' ? 2 : 1);
+    dyeG.value = String(seg.dyeMode?.g === 'REMOVE' || seg.dyeMode?.g === 'EAT' ? 2 : 1);
+    dyeB.value = String(seg.dyeMode?.b === 'REMOVE' || seg.dyeMode?.b === 'EAT' ? 2 : 1);
 
     const commitEdit = () => {
       applySegmentPolicyOverride(seg, {
@@ -1294,7 +1294,7 @@ function drawFields() {
     softPermeabilityImg.data[i * 4 + 2] = spg;
     softPermeabilityImg.data[i * 4 + 3] = 255;
 
-    // Soft edge dye mode map (RGB channels show NO-OP/EAT quantized policy intensity).
+    // Soft edge dye mode map (RGB channels show NO-OP/REMOVE quantized policy intensity).
     softEdgeDyeModeImg.data[i * 4] = edgeModeScalarPreview(softDyeR);
     softEdgeDyeModeImg.data[i * 4 + 1] = edgeModeScalarPreview(softDyeG);
     softEdgeDyeModeImg.data[i * 4 + 2] = edgeModeScalarPreview(softDyeB);
@@ -1328,7 +1328,7 @@ function drawFields() {
     rigidEdgeVelocityModeImg.data[i * 4 + 2] = rvg;
     rigidEdgeVelocityModeImg.data[i * 4 + 3] = 255;
 
-    // Rigid edge dye mode map (RGB channels show NO-OP/EAT quantized policy intensity).
+    // Rigid edge dye mode map (RGB channels show NO-OP/REMOVE quantized policy intensity).
     rigidEdgeDyeModeImg.data[i * 4] = edgeModeScalarPreview(rigidDyeR);
     rigidEdgeDyeModeImg.data[i * 4 + 1] = edgeModeScalarPreview(rigidDyeG);
     rigidEdgeDyeModeImg.data[i * 4 + 2] = edgeModeScalarPreview(rigidDyeB);
@@ -1802,12 +1802,12 @@ function syncFieldHelpText(target) {
     membraneEdge: 'Active field: Perimeter edge-length map. Dark paint drives shorter edges; bright paint drives longer edges.',
     membraneShape: 'Active field: Membrane stiffness map. Dark paint makes softer perimeter response; bright paint makes stiffer response.',
     softPermeability: 'Active field: Soft edge permeability. Darker zones block more flow; brighter zones allow more flow through soft edges.',
-    softEdgeDyeMode: 'Active field: Soft edge dye policy. Pick channel + mode, then paint where soft edges should EAT or NO-OP for dye.',
+    softEdgeDyeMode: 'Active field: Soft edge dye policy. Pick channel + mode, then paint where soft edges should REMOVE or NO-OP for dye.',
     softEdgeVelocityMode: 'Active field: Soft edge velocity mode. Paint BLOCK vs PASS behavior for fluid velocity coupling at soft edges.',
     softEdgeMomentumMode: 'Active field: Soft edge momentum coupling. 0 keeps velocity exchange low; 1 allows full momentum coupling.',
     rigidPermeability: 'Active field: Rigid edge permeability. Darker zones block more flow; brighter zones allow more flow through rigid edges.',
     rigidEdgeVelocityMode: 'Active field: Rigid edge velocity mode. Paint BLOCK vs PASS behavior for fluid velocity coupling at rigid edges.',
-    rigidEdgeDyeMode: 'Active field: Rigid edge dye policy. Pick channel + mode, then paint where rigid edges should EAT or NO-OP for dye.',
+    rigidEdgeDyeMode: 'Active field: Rigid edge dye policy. Pick channel + mode, then paint where rigid edges should REMOVE or NO-OP for dye.',
   };
   activeFieldHelpEl.textContent = textByTarget[target] || textByTarget.trait;
 }

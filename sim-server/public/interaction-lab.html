@@ -92,8 +92,8 @@
       </label>
       <label id="dyeModeLabel">Dye mode
         <select id="dyeMode">
-          <option value="noop" selected>NO-OP (EATS=false)</option>
-          <option value="eat">EAT (EATS=true)</option>
+          <option value="noop" selected>NO-OP (REMOVE=false)</option>
+          <option value="eat">REMOVE (REMOVE=true)</option>
         </select>
       </label>
       <label>Velocity mode
@@ -125,7 +125,7 @@
       <span class="hint">Goal: visually confront each truth-table row under a controlled micro setup while keeping full GPU solver path active.</span>
     </div>
     <div class="row">
-      <span id="velocityContractHint" class="hint">Current contract note: velocity BLOCK/PASS and selected-channel dye EAT/NO-OP co-exist. With moving blockers, swept displacement transport subtracts eaten channels before relocating remaining dye mass.</span>
+      <span id="velocityContractHint" class="hint">Current contract note: velocity BLOCK/PASS and selected-channel dye REMOVE/NO-OP co-exist. With moving blockers, swept displacement transport subtracts removed channels before relocating remaining dye mass.</span>
     </div>
   </div>
 
@@ -152,6 +152,6 @@
     </div>
   </div>
 
-  <script type="module" src="/interaction-lab.js?v=20260217o"></script>
+  <script type="module" src="/interaction-lab.js?v=20260218a"></script>
 </body>
 </html>

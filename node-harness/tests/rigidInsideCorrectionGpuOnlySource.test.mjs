@@ -45,8 +45,14 @@ test('rigid-inside gpu-only path publishes deterministic WGSL prep layout + sour
 
   assert.match(
     source,
-    /wgslOffload\.state\.lastInsideCorrectionCount = corrected;[\s\S]*lastAuthoritativeInsideSource = 'cpu-rigid-inside-authoritative';[\s\S]*lastSourceRoute = 'cpu-rigid-inside-authoritative';/,
-    'expected explicit authoritative source route to remain CPU while WGSL prep ownership becomes available',
+    /function canApplyAuthoritativeRigidInsideProposal\([\s\S]*enableAuthoritativeInsideCorrection !== true[\s\S]*lastInsideCorrectionProposalSource !== expectedSource[\s\S]*if \(!Number\.isFinite\(cx\) \|\| !Number\.isFinite\(cy\) \|\| !Number\.isFinite\(rbi\)\) return false;/,
+    'expected rigid-inside stage to gate WGSL authoritative apply behind explicit opt-in, signature/source-route match, and hard finite validation fallback',
+  );
+
+  assert.match(
+    source,
+    /applyAuthoritativeRigidInsideProposal\([\s\S]*usedAuthoritativeWgslProposal = true;[\s\S]*lastAuthoritativeInsideSource = usedAuthoritativeWgslProposal[\s\S]*'wgsl-rigid-inside-authoritative'[\s\S]*'cpu-rigid-inside-authoritative'/,
+    'expected rigid-inside stage to support WGSL authoritative apply path with explicit authoritative source-route visibility and CPU fallback route retention',
   );
 });
 

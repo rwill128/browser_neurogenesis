@@ -59,3 +59,30 @@ test('rigid-inside correction parity: wgsl-prep-enabled path preserves CPU autho
   assert.equal(offload.state.lastSourceRoute, 'cpu-rigid-inside-authoritative');
   assert.equal(offload.state.lastAuthoritativeInsideSource, 'cpu-rigid-inside-authoritative');
 });
+
+
+test('rigid-inside correction applies cached WGSL authoritative proposal when enabled and proposal is finite', () => {
+  const prepFixture = buildFixture();
+  const offload = { enabled: true, state: { modeProfile: 'gpu-only-validated' } };
+
+  // First pass prepares deterministic proposal signature/layout metadata.
+  applyRigidInsideCorrectionPassGpuOnly({ ...prepFixture, wgslOffload: offload });
+
+  const fixture = buildFixture();
+  const signature = offload.state.lastPreparedInsideProposalSignature >>> 0;
+  offload.state.enableAuthoritativeInsideCorrection = true;
+  offload.state.lastInsideCorrectionProposalSource = 'wgsl-rigid-inside-correction-proposal';
+  offload.state.lastInsideCorrectionProposalSignature = signature;
+  offload.state.lastInsideCorrectionProposalCorrX = new Float32Array([0.2, 0.0]);
+  offload.state.lastInsideCorrectionProposalCorrY = new Float32Array([0.0, 0.0]);
+  offload.state.lastInsideCorrectionProposalRigidIndex = new Uint32Array([0, 0]);
+  offload.state.lastInsideCorrectionProposalError = null;
+
+  const beforeX = fixture.soft.nodes[0].x;
+  const corrected = applyRigidInsideCorrectionPassGpuOnly({ ...fixture, wgslOffload: offload });
+
+  assert.ok(corrected > 0);
+  assert.ok(fixture.soft.nodes[0].x > beforeX);
+  assert.equal(offload.state.lastAuthoritativeInsideSource, 'wgsl-rigid-inside-authoritative');
+  assert.equal(offload.state.lastSourceRoute, 'wgsl-rigid-inside-authoritative');
+});

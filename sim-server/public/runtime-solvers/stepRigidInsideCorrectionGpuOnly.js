@@ -854,6 +854,102 @@ function resolveRigidInsideProjection(rb, node, poly, correctionSlop = 0.04) {
   return true;
 }
 
+function canApplyAuthoritativeRigidInsideProposal({
+  wgslOffload,
+  proposalSignature,
+  nodeCount,
+  rigidCount,
+}) {
+  const state = wgslOffload?.state;
+  if (!state || state.enableAuthoritativeInsideCorrection !== true) return false;
+  const fastMode = isGpuOnlyFastMode(wgslOffload);
+  const expectedSource = fastMode
+    ? 'wgsl-rigid-inside-correction-proposal-fast'
+    : 'wgsl-rigid-inside-correction-proposal';
+  if (state.lastInsideCorrectionProposalSource !== expectedSource) return false;
+  if ((state.lastInsideCorrectionProposalSignature >>> 0) !== (proposalSignature >>> 0)) return false;
+  if (!(state.lastInsideCorrectionProposalCorrX instanceof Float32Array)) return false;
+  if (!(state.lastInsideCorrectionProposalCorrY instanceof Float32Array)) return false;
+  if (!(state.lastInsideCorrectionProposalRigidIndex instanceof Uint32Array)) return false;
+  if (state.lastInsideCorrectionProposalCorrX.length !== nodeCount) return false;
+  if (state.lastInsideCorrectionProposalCorrY.length !== nodeCount) return false;
+  if (state.lastInsideCorrectionProposalRigidIndex.length !== nodeCount) return false;
+  if (!fastMode) {
+    const err = state.lastInsideCorrectionProposalError;
+    if (typeof err === 'string' && err.length > 0) return false;
+  }
+  for (let i = 0; i < nodeCount; i++) {
+    const cx = Number(state.lastInsideCorrectionProposalCorrX[i]);
+    const cy = Number(state.lastInsideCorrectionProposalCorrY[i]);
+    const rbi = Number(state.lastInsideCorrectionProposalRigidIndex[i]);
+    if (!Number.isFinite(cx) || !Number.isFinite(cy) || !Number.isFinite(rbi)) return false;
+    if (rbi < 0 || rbi >= rigidCount) return false;
+  }
+  return true;
+}
+
+function applyAuthoritativeRigidInsideProposal({
+  rigidBodies,
+  soft,
+  proposalCorrX,
+  proposalCorrY,
+  proposalRigidIndex,
+  correctionIters,
+}) {
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const rigids = Array.isArray(rigidBodies) ? rigidBodies : [];
+  const nodeCount = Math.min(
+    nodes.length,
+    proposalCorrX.length,
+    proposalCorrY.length,
+    proposalRigidIndex.length,
+  );
+
+  let corrected = 0;
+  const iters = Math.max(1, Number(correctionIters) || 1);
+  for (let iter = 0; iter < iters; iter++) {
+    for (let ni = 0; ni < nodeCount; ni++) {
+      const node = nodes[ni];
+      if (!node) continue;
+      const corrX = Number(proposalCorrX[ni]);
+      const corrY = Number(proposalCorrY[ni]);
+      const corrLen = Math.hypot(corrX, corrY);
+      if (!Number.isFinite(corrLen) || corrLen < EPS) continue;
+
+      const rbi = Number(proposalRigidIndex[ni]);
+      if (!Number.isFinite(rbi) || rbi < 0 || rbi >= rigids.length) continue;
+      const rb = rigids[rbi];
+      if (!rb) continue;
+
+      const mNode = Math.max(0.02, Number(node.mass) || 1);
+      const mRigid = Math.max(0.05, Number(rb.mass) || 1);
+      const invNode = 1 / mNode;
+      const invRigid = 1 / mRigid;
+      const invSum = Math.max(EPS, invNode + invRigid);
+      const nodeShare = invNode / invSum;
+      const rigidShare = invRigid / invSum;
+
+      node.x = (Number(node.x) || 0) + corrX * nodeShare;
+      node.y = (Number(node.y) || 0) + corrY * nodeShare;
+      rb.x = (Number(rb.x) || 0) - corrX * rigidShare * 0.45;
+      rb.y = (Number(rb.y) || 0) - corrY * rigidShare * 0.45;
+
+      const nx = corrX / corrLen;
+      const ny = corrY / corrLen;
+      const vn = (Number(node.vx) || 0) * nx + (Number(node.vy) || 0) * ny;
+      if (vn < 0) {
+        node.vx = (Number(node.vx) || 0) - nx * vn;
+        node.vy = (Number(node.vy) || 0) - ny * vn;
+      }
+
+      corrected += 1;
+    }
+  }
+
+  return corrected;
+}
+
+
 export function applyRigidInsideCorrectionPassGpuOnly({
   rigidBodies,
   soft,
@@ -984,23 +1080,43 @@ export function applyRigidInsideCorrectionPassGpuOnly({
     }
   }
 
-  for (let iter = 0; iter < correctionIters; iter++) {
-    for (let rbi = 0; rbi < rigidBodies.length; rbi++) {
-      const rb = rigidBodies[rbi];
-      if (!rb || rb.insideCorrectionEnabled === false) continue;
-      const polys = getRigidPolysWorld(rb);
-      if (!Array.isArray(polys) || polys.length === 0) continue;
-      const attachedNodeSet = hybridAttachedByRigid?.get?.(rbi) || null;
+  let usedAuthoritativeWgslProposal = false;
+  const canUseAuthoritativeWgsl = canApplyAuthoritativeRigidInsideProposal({
+    wgslOffload,
+    proposalSignature,
+    nodeCount,
+    rigidCount,
+  });
 
-      for (let ni = 0; ni < soft.nodes.length; ni++) {
-        if (attachedNodeSet && attachedNodeSet.has(ni)) continue;
-        const node = soft.nodes[ni];
-        if (!node) continue;
-        for (const poly of polys) {
-          if (!Array.isArray(poly) || poly.length < 3) continue;
-          if (!pointInPolygonInclusive(node.x, node.y, poly)) continue;
-          if (resolveRigidInsideProjection(rb, node, poly, correctionSlop)) corrected += 1;
-          break;
+  if (canUseAuthoritativeWgsl) {
+    corrected = applyAuthoritativeRigidInsideProposal({
+      rigidBodies,
+      soft,
+      proposalCorrX: wgslOffload.state.lastInsideCorrectionProposalCorrX,
+      proposalCorrY: wgslOffload.state.lastInsideCorrectionProposalCorrY,
+      proposalRigidIndex: wgslOffload.state.lastInsideCorrectionProposalRigidIndex,
+      correctionIters,
+    });
+    usedAuthoritativeWgslProposal = true;
+  } else {
+    for (let iter = 0; iter < correctionIters; iter++) {
+      for (let rbi = 0; rbi < rigidBodies.length; rbi++) {
+        const rb = rigidBodies[rbi];
+        if (!rb || rb.insideCorrectionEnabled === false) continue;
+        const polys = getRigidPolysWorld(rb);
+        if (!Array.isArray(polys) || polys.length === 0) continue;
+        const attachedNodeSet = hybridAttachedByRigid?.get?.(rbi) || null;
+
+        for (let ni = 0; ni < soft.nodes.length; ni++) {
+          if (attachedNodeSet && attachedNodeSet.has(ni)) continue;
+          const node = soft.nodes[ni];
+          if (!node) continue;
+          for (const poly of polys) {
+            if (!Array.isArray(poly) || poly.length < 3) continue;
+            if (!pointInPolygonInclusive(node.x, node.y, poly)) continue;
+            if (resolveRigidInsideProjection(rb, node, poly, correctionSlop)) corrected += 1;
+            break;
+          }
         }
       }
     }
@@ -1066,11 +1182,15 @@ export function applyRigidInsideCorrectionPassGpuOnly({
     }
 
     wgslOffload.state.lastInsideCorrectionCount = corrected;
-    wgslOffload.state.lastAuthoritativeInsideSource = 'cpu-rigid-inside-authoritative';
-    wgslOffload.state.lastSourceRoute = 'cpu-rigid-inside-authoritative';
-    wgslOffload.state.lastMode = fastMode
-      ? 'cpu-rigid-inside-authoritative-fast'
+    wgslOffload.state.lastAuthoritativeInsideSource = usedAuthoritativeWgslProposal
+      ? (fastMode ? 'wgsl-rigid-inside-authoritative-fast' : 'wgsl-rigid-inside-authoritative')
       : 'cpu-rigid-inside-authoritative';
+    wgslOffload.state.lastSourceRoute = usedAuthoritativeWgslProposal
+      ? (fastMode ? 'wgsl-rigid-inside-authoritative-fast' : 'wgsl-rigid-inside-authoritative')
+      : 'cpu-rigid-inside-authoritative';
+    wgslOffload.state.lastMode = usedAuthoritativeWgslProposal
+      ? (fastMode ? 'wgsl-rigid-inside-authoritative-fast' : 'wgsl-rigid-inside-authoritative')
+      : (fastMode ? 'cpu-rigid-inside-authoritative-fast' : 'cpu-rigid-inside-authoritative');
   }
 
   return corrected;

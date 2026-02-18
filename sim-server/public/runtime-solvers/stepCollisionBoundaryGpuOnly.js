@@ -25,8 +25,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= params.count) { return; }
 
-  let x = posX[i];
-  let y = posY[i];
+  var x = posX[i];
+  var y = posY[i];
   var vx = velX[i];
   var vy = velY[i];
   var w = omega[i];

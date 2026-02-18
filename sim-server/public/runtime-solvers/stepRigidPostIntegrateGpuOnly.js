@@ -40,7 +40,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     vyv = vyv * inv;
   }
 
-  let w = omega[i];
+  var w = omega[i];
   w = max(-params.wCap, min(params.wCap, w));
 
   vx[i] = vxv;

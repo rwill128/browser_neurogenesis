@@ -2162,27 +2162,55 @@ function isFiniteArray(arr, expectedLength) {
   return true;
 }
 
-function canApplyRigidSoftAuthoritativeProposal({ proposal, impulseSeed, signature }) {
-  if (!proposal || !impulseSeed) return false;
-  if ((signature >>> 0) !== ((impulseSeed.signature || 0) >>> 0)) return false;
+function isBinaryMask(arr, expectedLength) {
+  if (!(arr instanceof Uint32Array) || arr.length !== expectedLength) return false;
+  for (let i = 0; i < arr.length; i++) {
+    const bit = arr[i] >>> 0;
+    if (bit !== 0 && bit !== 1) return false;
+  }
+  return true;
+}
+
+function isFiniteArrayWithin(arr, expectedLength, absLimit) {
+  if (!isFiniteArray(arr, expectedLength)) return false;
+  for (let i = 0; i < arr.length; i++) {
+    if (Math.abs(arr[i]) > absLimit) return false;
+  }
+  return true;
+}
+
+function validateRigidSoftAuthoritativeProposal({ proposal, impulseSeed, signature }) {
+  if (!proposal || !impulseSeed) return { ok: false, reason: 'missing-proposal-or-seed' };
+  if ((signature >>> 0) !== ((impulseSeed.signature || 0) >>> 0)) return { ok: false, reason: 'signature-mismatch' };
   const np = Number(impulseSeed.nodePairCount) || 0;
   const ep = Number(impulseSeed.edgePairCount) || 0;
-  if (!isFiniteArray(proposal.nodeDx || new Float32Array(0), np)) return false;
-  if (!isFiniteArray(proposal.nodeDy || new Float32Array(0), np)) return false;
-  if (!isFiniteArray(proposal.nodeDVx || new Float32Array(0), np)) return false;
-  if (!isFiniteArray(proposal.nodeDVy || new Float32Array(0), np)) return false;
-  if (!isFiniteArray(proposal.nodeRigidDx || new Float32Array(0), np)) return false;
-  if (!isFiniteArray(proposal.nodeRigidDy || new Float32Array(0), np)) return false;
-  if (!isFiniteArray(proposal.nodeRigidDVx || new Float32Array(0), np)) return false;
-  if (!isFiniteArray(proposal.nodeRigidDVy || new Float32Array(0), np)) return false;
-  if (!isFiniteArray(proposal.nodeRigidDOmega || new Float32Array(0), np)) return false;
-  if (!(proposal.nodeContactMask instanceof Uint32Array) || proposal.nodeContactMask.length !== np) return false;
-  if (!isFiniteArray(proposal.edgeRigidDx || new Float32Array(0), ep)) return false;
-  if (!isFiniteArray(proposal.edgeRigidDy || new Float32Array(0), ep)) return false;
-  if (!isFiniteArray(proposal.edgeRigidDVx || new Float32Array(0), ep)) return false;
-  if (!isFiniteArray(proposal.edgeRigidDVy || new Float32Array(0), ep)) return false;
-  if (!(proposal.edgeContactMask instanceof Uint32Array) || proposal.edgeContactMask.length !== ep) return false;
-  return true;
+  const posLimit = 2048;
+  const velLimit = 4096;
+  const omegaLimit = 4096;
+
+  if (!isFiniteArrayWithin(proposal.nodeDx || new Float32Array(0), np, posLimit)) return { ok: false, reason: 'nodeDx-invalid' };
+  if (!isFiniteArrayWithin(proposal.nodeDy || new Float32Array(0), np, posLimit)) return { ok: false, reason: 'nodeDy-invalid' };
+  if (!isFiniteArrayWithin(proposal.nodeDVx || new Float32Array(0), np, velLimit)) return { ok: false, reason: 'nodeDVx-invalid' };
+  if (!isFiniteArrayWithin(proposal.nodeDVy || new Float32Array(0), np, velLimit)) return { ok: false, reason: 'nodeDVy-invalid' };
+  if (!isFiniteArrayWithin(proposal.nodeRigidDx || new Float32Array(0), np, posLimit)) return { ok: false, reason: 'nodeRigidDx-invalid' };
+  if (!isFiniteArrayWithin(proposal.nodeRigidDy || new Float32Array(0), np, posLimit)) return { ok: false, reason: 'nodeRigidDy-invalid' };
+  if (!isFiniteArrayWithin(proposal.nodeRigidDVx || new Float32Array(0), np, velLimit)) return { ok: false, reason: 'nodeRigidDVx-invalid' };
+  if (!isFiniteArrayWithin(proposal.nodeRigidDVy || new Float32Array(0), np, velLimit)) return { ok: false, reason: 'nodeRigidDVy-invalid' };
+  if (!isFiniteArrayWithin(proposal.nodeRigidDOmega || new Float32Array(0), np, omegaLimit)) return { ok: false, reason: 'nodeRigidDOmega-invalid' };
+  if (!isBinaryMask(proposal.nodeContactMask, np)) return { ok: false, reason: 'nodeContactMask-invalid' };
+  if (!isFiniteArrayWithin(proposal.edgeRigidDx || new Float32Array(0), ep, posLimit)) return { ok: false, reason: 'edgeRigidDx-invalid' };
+  if (!isFiniteArrayWithin(proposal.edgeRigidDy || new Float32Array(0), ep, posLimit)) return { ok: false, reason: 'edgeRigidDy-invalid' };
+  if (!isFiniteArrayWithin(proposal.edgeRigidDVx || new Float32Array(0), ep, velLimit)) return { ok: false, reason: 'edgeRigidDVx-invalid' };
+  if (!isFiniteArrayWithin(proposal.edgeRigidDVy || new Float32Array(0), ep, velLimit)) return { ok: false, reason: 'edgeRigidDVy-invalid' };
+  if (!isBinaryMask(proposal.edgeContactMask, ep)) return { ok: false, reason: 'edgeContactMask-invalid' };
+
+  return { ok: true, reason: null };
+}
+
+function canApplyRigidSoftAuthoritativeProposal({ proposal, impulseSeed, signature, out = null }) {
+  const validation = validateRigidSoftAuthoritativeProposal({ proposal, impulseSeed, signature });
+  if (out && typeof out === 'object') out.reason = validation.reason;
+  return validation.ok;
 }
 
 function applyRigidSoftAuthoritativeProposal({ rigidBodies, soft, impulseSeed, proposal }) {
@@ -2235,14 +2263,14 @@ function applyCpuRigidSoftResponseFallback({
   nodeSlop,
   edgeSlop,
   wgslOffload,
-  cpuNodeSolver,
-  cpuEdgeSolver,
+  cpuNodeObserver,
+  cpuEdgeObserver,
 }) {
-  const solveNodeCollision = typeof cpuNodeSolver === 'function'
-    ? (rb, sn) => cpuNodeSolver(rb, sn, null, nodeSlop)
+  const solveNodeCollision = typeof cpuNodeObserver === 'function'
+    ? (rb, sn) => cpuNodeObserver(rb, sn, null, nodeSlop)
     : (rb, sn) => resolveRigidSoftNodeCollisionCpuFallback(rb, sn, nodeSlop);
-  const solveEdgeCollision = typeof cpuEdgeSolver === 'function'
-    ? (rb, a, b) => cpuEdgeSolver(rb, a, b, edgeSlop)
+  const solveEdgeCollision = typeof cpuEdgeObserver === 'function'
+    ? (rb, a, b) => cpuEdgeObserver(rb, a, b, edgeSlop)
     : (rb, a, b) => resolveRigidSoftEdgeCollisionCpuFallback(rb, a, b, edgeSlop);
 
   const compactNodeRigidIndex = compactNodePairs?.compactRigidIndex;
@@ -2606,7 +2634,8 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         edgeSlop,
       });
       const signature = Number(wgslOffload.state.lastPreparedNarrowphaseImpulseSeedSignature) || 0;
-      if (canApplyRigidSoftAuthoritativeProposal({ proposal, impulseSeed, signature })) {
+      const validationOut = { reason: null };
+      if (canApplyRigidSoftAuthoritativeProposal({ proposal, impulseSeed, signature, out: validationOut })) {
         applyRigidSoftAuthoritativeProposal({ rigidBodies, soft, impulseSeed, proposal });
         wgslOffload.state.lastNodeCollisionResponseSource = 'wgsl-rigid-soft-node-response-authoritative';
         wgslOffload.state.lastEdgeCollisionResponseSource = 'wgsl-rigid-soft-edge-response-authoritative';
@@ -2620,10 +2649,10 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         wgslOffload.state.lastMode = 'wgsl-rigid-soft-response-authoritative';
         usedWgslAuthoritativeResponse = true;
       } else {
-        wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-nonfinite';
+        wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-validation';
         wgslOffload.state.lastRigidSoftResponseOwnership = 'cpu-fallback';
         wgslOffload.state.lastRigidSoftResponseRoute = 'cpu-fallback';
-        wgslOffload.state.lastRigidSoftResponseFallbackReason = 'nonfinite-or-signature-mismatch';
+        wgslOffload.state.lastRigidSoftResponseFallbackReason = validationOut.reason || 'proposal-validation-failed';
       }
     } catch (err) {
       wgslOffload.state.lastError = String(err?.message || err || 'rigid-soft-response-wgsl-error');
@@ -2660,7 +2689,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     nodeSlop,
     edgeSlop,
     wgslOffload,
-    cpuNodeSolver: resolveRigidVsSoftNodeCollision,
-    cpuEdgeSolver: resolveRigidVsSoftEdgeCollision,
+    cpuNodeObserver: resolveRigidVsSoftNodeCollision,
+    cpuEdgeObserver: resolveRigidVsSoftEdgeCollision,
   });
 }

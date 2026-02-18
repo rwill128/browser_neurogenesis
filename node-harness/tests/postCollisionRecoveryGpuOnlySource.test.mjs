@@ -22,7 +22,13 @@ test('post-collision recovery WGSL source-route supports authoritative soft-clus
 
   assert.match(
     gpuLabSource,
-    /postCollisionBoundaryWgslState \|\|= \{\}[\s\S]*enableAuthoritativeSoftClusterProjection !== false[\s\S]*enableAuthoritativeSoftClusterProjection = true;[\s\S]*enableAuthoritativeMembraneInsideCorrection !== false[\s\S]*enableAuthoritativeMembraneInsideCorrection = true;/,
-    'expected gpu-only post-collision state bootstrap to enable authoritative membrane inside-correction WGSL replay by default (while preserving explicit opt-out)',
+    /postCollisionBoundaryWgslState \|\|= \{\}[\s\S]*enableAuthoritativeSoftClusterMass !== false[\s\S]*enableAuthoritativeSoftClusterMass = true;[\s\S]*return st\.enableAuthoritativeSoftClusterMass === true;/,
+    'expected gpu-only post-collision state bootstrap to default-enable authoritative soft-cluster mass replay (while preserving explicit opt-out)',
+  );
+
+  assert.match(
+    gpuLabSource,
+    /authoritativeSoftClusterMass:[\s\S]*enableAuthoritativeSoftClusterProjection !== false[\s\S]*enableAuthoritativeSoftClusterProjection = true;[\s\S]*enableAuthoritativeMembraneInsideCorrection !== false[\s\S]*enableAuthoritativeMembraneInsideCorrection = true;/,
+    'expected gpu-only post-collision WGSL offload wiring to expose authoritative mass + projection/membrane defaults together',
   );
 });

@@ -4663,6 +4663,13 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         wgslOffload: {
           enabled: true,
           device: sim?.device,
+          authoritativeSoftClusterMass: (() => {
+            const st = (sim.postCollisionBoundaryWgslState ||= {});
+            if (st.enableAuthoritativeSoftClusterMass !== false) {
+              st.enableAuthoritativeSoftClusterMass = true;
+            }
+            return st.enableAuthoritativeSoftClusterMass === true;
+          })(),
           state: (() => {
             const st = (sim.postCollisionBoundaryWgslState ||= {});
             if (st.enableAuthoritativeSoftClusterProjection !== false) {

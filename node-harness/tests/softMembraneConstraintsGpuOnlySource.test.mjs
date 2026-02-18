@@ -30,6 +30,18 @@ test('membrane constraints gpu-only module defines concrete WGSL shape-memory pr
 
   assert.match(
     moduleSource,
+    /canApplyAuthoritativeShapeMemoryProposal\([\s\S]*enableAuthoritativeShapeMemory !== true[\s\S]*lastShapeMemoryProposalSource !== 'wgsl-shape-memory-proposal'/,
+    'expected authoritative WGSL shape-memory gating with explicit source-route + hard opt-in flag',
+  );
+
+  assert.match(
+    moduleSource,
+    /lastShapeMemoryAuthoritativeSource = authoritativeFromWgsl\s*\? 'wgsl-shape-memory-authoritative'\s*:\s*'cpu-shape-memory-authoritative'/,
+    'expected explicit authoritative source telemetry for WGSL vs CPU membrane shape-memory apply path',
+  );
+
+  assert.match(
+    moduleSource,
     /pendingWgslShapeMemoryProposalPromise[\s\S]*dispatchSoftMembraneShapeMemoryProposal\([\s\S]*lastShapeMemoryProposalSource = 'cpu-shape-memory-authoritative'[\s\S]*lastMode = 'cpu-shape-memory-authoritative'/,
     'expected serialized WGSL proposal dispatch with hard CPU fallback source-route when dispatch fails',
   );

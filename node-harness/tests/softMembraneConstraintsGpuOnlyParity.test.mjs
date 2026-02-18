@@ -281,6 +281,97 @@ function applySoftMembraneShapeMemoryVelocityBaseline(sim, soft, loops, dtPos, m
   return touched;
 }
 
+test('soft membrane shape-memory can consume cached WGSL proposal as authoritative source', () => {
+  const dtPos = 0.11;
+  const loops = [{ clusterId: 1, indices: [0, 1, 2, 3] }];
+  const soft = {
+    nodes: [
+      { x: 8, y: 9, vx: 0.2, vy: -0.06, mass: 1.1, clusterId: 1, shapeMemoryWeight: 1 },
+      { x: 12.8, y: 8.5, vx: -0.1, vy: 0.12, mass: 0.9, clusterId: 1, shapeMemoryWeight: 0.7 },
+      { x: 13.4, y: 12.9, vx: 0.09, vy: -0.15, mass: 1.2, clusterId: 1, shapeMemoryWeight: 0.9 },
+      { x: 8.6, y: 13.4, vx: -0.07, vy: 0.11, mass: 1.0, clusterId: 1, shapeMemoryWeight: 1 },
+    ],
+  };
+  const membraneClusterMap = new Map([[1, { clusterId: 1, shapeMemoryGain: 0.05 }]]);
+  const sim = {
+    softMembraneLoopState: new Map(),
+    softMembraneClusterMap: membraneClusterMap,
+  };
+
+  const wgslState = {
+    enableAuthoritativeShapeMemory: true,
+  };
+
+  applySoftMembraneBoundaryXPBDVelocityGpuOnly({
+    sim,
+    soft,
+    loops,
+    dtPos,
+    membraneClusterSet: new Set([1]),
+    clamp,
+    membraneEdgeXpbdIters: MEMBRANE_EDGE_XPBD_ITERS,
+    membraneEdgeBaseCompliance: MEMBRANE_EDGE_BASE_COMPLIANCE,
+    membraneBendXpbdIters: MEMBRANE_BEND_XPBD_ITERS,
+    membraneBendBaseCompliance: MEMBRANE_BEND_BASE_COMPLIANCE,
+  });
+
+  const firstSoft = structuredClone(soft);
+  const touchedFirst = applySoftMembraneShapeMemoryVelocityGpuOnly({
+    sim,
+    soft: firstSoft,
+    loops,
+    dtPos,
+    membraneClusterMap,
+    clamp,
+    membraneShapeMemoryIters: MEMBRANE_SHAPE_MEMORY_ITERS,
+    membraneShapeMemoryGain: MEMBRANE_SHAPE_MEMORY_GAIN,
+    membraneShapeMemoryMaxShiftFrac: MEMBRANE_SHAPE_MEMORY_MAX_SHIFT_FRAC,
+    wgslOffload: {
+      enabled: false,
+      state: wgslState,
+    },
+  });
+
+  const preparedSig = wgslState.lastShapeMemoryAuthoritativeSignature;
+  assert.ok(preparedSig, 'expected non-empty prepared signature');
+
+  const authoritativeDeltaVx = Float32Array.from([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
+  const authoritativeDeltaVy = Float32Array.from([-0.25, -0.25, -0.25, -0.25, -0.25, -0.25, -0.25, -0.25]);
+  wgslState.lastShapeMemoryProposalSource = 'wgsl-shape-memory-proposal';
+  wgslState.lastShapeMemoryProposalSignature = preparedSig;
+  wgslState.lastShapeMemoryProposalFinite = { allFinite: true };
+  wgslState.lastShapeMemoryProposalDeltaVx = authoritativeDeltaVx;
+  wgslState.lastShapeMemoryProposalDeltaVy = authoritativeDeltaVy;
+
+  const secondSoft = structuredClone(soft);
+  const before = secondSoft.nodes.map((n) => ({ vx: n.vx, vy: n.vy }));
+  const touchedSecond = applySoftMembraneShapeMemoryVelocityGpuOnly({
+    sim,
+    soft: secondSoft,
+    loops,
+    dtPos,
+    membraneClusterMap,
+    clamp,
+    membraneShapeMemoryIters: MEMBRANE_SHAPE_MEMORY_ITERS,
+    membraneShapeMemoryGain: MEMBRANE_SHAPE_MEMORY_GAIN,
+    membraneShapeMemoryMaxShiftFrac: MEMBRANE_SHAPE_MEMORY_MAX_SHIFT_FRAC,
+    wgslOffload: {
+      enabled: true,
+      state: wgslState,
+    },
+  });
+
+  assert.equal(touchedSecond, touchedFirst, 'shape-memory touched count should stay stable for authoritative replay');
+  assert.equal(wgslState.lastShapeMemoryAuthoritativeSource, 'wgsl-shape-memory-authoritative');
+
+  const expectedVxDelta = [1, 1, 1, 1];
+  const expectedVyDelta = [-0.5, -0.5, -0.5, -0.5];
+  for (let i = 0; i < secondSoft.nodes.length; i++) {
+    assert.ok(Math.abs(secondSoft.nodes[i].vx - (before[i].vx + expectedVxDelta[i])) < 1e-12, `node ${i} authoritative vx mismatch`);
+    assert.ok(Math.abs(secondSoft.nodes[i].vy - (before[i].vy + expectedVyDelta[i])) < 1e-12, `node ${i} authoritative vy mismatch`);
+  }
+});
+
 test('soft membrane boundary+shape constraints parity: baseline and gpu-only match', () => {
   const dtPos = 0.11;
   const loops = [

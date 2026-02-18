@@ -353,6 +353,33 @@ export function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
   return touched;
 }
 
+function canApplyAuthoritativeShapeMemoryProposal({ wgslOffload, signature, expectedCount }) {
+  const state = wgslOffload?.state;
+  if (!state || state.enableAuthoritativeShapeMemory !== true) return false;
+  if (state.lastShapeMemoryProposalSource !== 'wgsl-shape-memory-proposal') return false;
+  if (String(state.lastShapeMemoryProposalSignature || '') !== String(signature || '')) return false;
+  if (!(state.lastShapeMemoryProposalDeltaVx instanceof Float32Array)) return false;
+  if (!(state.lastShapeMemoryProposalDeltaVy instanceof Float32Array)) return false;
+  if (state.lastShapeMemoryProposalDeltaVx.length !== expectedCount) return false;
+  if (state.lastShapeMemoryProposalDeltaVy.length !== expectedCount) return false;
+  if (state.lastShapeMemoryProposalFinite?.allFinite !== true) return false;
+  return true;
+}
+
+function applyShapeMemoryVelocityDeltasAuthoritative({ soft, nodeIndices, deltaVx, deltaVy, scale = 1 }) {
+  const count = Math.min(nodeIndices.length, deltaVx.length, deltaVy.length);
+  for (let i = 0; i < count; i++) {
+    const nodeIndex = nodeIndices[i] | 0;
+    const node = soft.nodes[nodeIndex];
+    if (!node) continue;
+    const dvx = Number(deltaVx[i]);
+    const dvy = Number(deltaVy[i]);
+    if (!Number.isFinite(dvx) || !Number.isFinite(dvy)) continue;
+    node.vx += dvx * scale;
+    node.vy += dvy * scale;
+  }
+}
+
 export function applySoftMembraneShapeMemoryVelocityGpuOnly({
   sim,
   soft,
@@ -368,6 +395,9 @@ export function applySoftMembraneShapeMemoryVelocityGpuOnly({
   if (!(membraneClusterMap instanceof Map) || membraneClusterMap.size === 0) return 0;
 
   const shapeMemoryLayout = [];
+  const nodeIndices = [];
+  const cpuDeltaVx = [];
+  const cpuDeltaVy = [];
   let touched = 0;
   for (let iter = 0; iter < membraneShapeMemoryIters; iter++) {
     for (const loop of loops || []) {
@@ -450,28 +480,67 @@ export function applySoftMembraneShapeMemoryVelocityGpuOnly({
           c,
           sn,
         );
+        nodeIndices.push(Number.isFinite(nodeIndex) ? (nodeIndex | 0) : -1);
 
         let ex = tx - px;
         let ey = ty - py;
         const eLen = Math.hypot(ex, ey);
-        if (!Number.isFinite(eLen) || eLen <= 1e-7) continue;
-        if (eLen > maxShift) {
-          const k = maxShift / eLen;
-          ex *= k;
-          ey *= k;
+        let dvx = 0;
+        let dvy = 0;
+        if (Number.isFinite(eLen) && eLen > 1e-7) {
+          if (eLen > maxShift) {
+            const k = maxShift / eLen;
+            ex *= k;
+            ey *= k;
+          }
+          dvx = (ex * corrPos) / dtPos;
+          dvy = (ey * corrPos) / dtPos;
         }
-
-        node.vx += (ex * corrPos) / dtPos;
-        node.vy += (ey * corrPos) / dtPos;
+        const safeDvx = Number.isFinite(dvx) ? dvx : 0;
+        const safeDvy = Number.isFinite(dvy) ? dvy : 0;
+        cpuDeltaVx.push(safeDvx);
+        cpuDeltaVy.push(safeDvy);
+        node.vx += safeDvx;
+        node.vy += safeDvy;
       }
 
       touched += 1;
     }
   }
 
-  if (wgslOffload?.enabled === true && wgslOffload?.state && wgslOffload?.device && shapeMemoryLayout.length > 0) {
-    const layout = Float32Array.from(shapeMemoryLayout);
-    const signature = computeShapeMemoryProposalSignature(layout, dtPos);
+  const layout = shapeMemoryLayout.length > 0 ? Float32Array.from(shapeMemoryLayout) : null;
+  const signature = layout ? computeShapeMemoryProposalSignature(layout, dtPos) : '';
+  const authoritativeFromWgsl = canApplyAuthoritativeShapeMemoryProposal({
+    wgslOffload,
+    signature,
+    expectedCount: nodeIndices.length,
+  });
+
+  if (authoritativeFromWgsl) {
+    applyShapeMemoryVelocityDeltasAuthoritative({
+      soft,
+      nodeIndices,
+      deltaVx: cpuDeltaVx,
+      deltaVy: cpuDeltaVy,
+      scale: -1,
+    });
+    applyShapeMemoryVelocityDeltasAuthoritative({
+      soft,
+      nodeIndices,
+      deltaVx: wgslOffload.state.lastShapeMemoryProposalDeltaVx,
+      deltaVy: wgslOffload.state.lastShapeMemoryProposalDeltaVy,
+      scale: 1,
+    });
+  }
+
+  if (wgslOffload?.state) {
+    wgslOffload.state.lastShapeMemoryAuthoritativeSource = authoritativeFromWgsl
+      ? 'wgsl-shape-memory-authoritative'
+      : 'cpu-shape-memory-authoritative';
+    wgslOffload.state.lastShapeMemoryAuthoritativeSignature = signature;
+  }
+
+  if (wgslOffload?.enabled === true && wgslOffload?.state && wgslOffload?.device && layout && layout.length > 0) {
     wgslOffload.state.lastShapeMemoryProposalLayoutBytes = layout.byteLength;
     wgslOffload.state.lastShapeMemoryProposalSignaturePrepared = signature;
     const serializedDispatch = (wgslOffload.state.pendingWgslShapeMemoryProposalPromise || Promise.resolve())

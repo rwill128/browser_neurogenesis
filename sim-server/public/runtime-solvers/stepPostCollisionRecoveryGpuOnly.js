@@ -77,6 +77,76 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const SOFT_CLUSTER_KINEMATICS_DERIVE_WGSL = /* wgsl */`
+struct Params {
+  cluster_count: u32,
+  _pad0: vec3<u32>,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> mass_in: array<f32>;
+@group(0) @binding(2) var<storage, read> x_mass_in: array<f32>;
+@group(0) @binding(3) var<storage, read> y_mass_in: array<f32>;
+@group(0) @binding(4) var<storage, read> vx_mass_in: array<f32>;
+@group(0) @binding(5) var<storage, read> vy_mass_in: array<f32>;
+@group(0) @binding(6) var<storage, read> x2_mass_in: array<f32>;
+@group(0) @binding(7) var<storage, read> y2_mass_in: array<f32>;
+@group(0) @binding(8) var<storage, read> x_vy_mass_in: array<f32>;
+@group(0) @binding(9) var<storage, read> y_vx_mass_in: array<f32>;
+@group(0) @binding(10) var<storage, read_write> out_x: array<f32>;
+@group(0) @binding(11) var<storage, read_write> out_y: array<f32>;
+@group(0) @binding(12) var<storage, read_write> out_vx: array<f32>;
+@group(0) @binding(13) var<storage, read_write> out_vy: array<f32>;
+@group(0) @binding(14) var<storage, read_write> out_inertia: array<f32>;
+@group(0) @binding(15) var<storage, read_write> out_angular_momentum: array<f32>;
+@group(0) @binding(16) var<storage, read_write> out_omega: array<f32>;
+@group(0) @binding(17) var<storage, read_write> out_mean_radius: array<f32>;
+
+fn finiteOr(v: f32, fallback: f32) -> f32 {
+  if (v == v && abs(v) < 1e20) {
+    return v;
+  }
+  return fallback;
+}
+
+@compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let ci = gid.x;
+  if (ci >= params.cluster_count) {
+    return;
+  }
+
+  let raw_mass = finiteOr(mass_in[ci], 0.0);
+  let m = max(0.02, raw_mass);
+  let inv_mass = 1.0 / m;
+
+  let cx = finiteOr(x_mass_in[ci], 0.0) * inv_mass;
+  let cy = finiteOr(y_mass_in[ci], 0.0) * inv_mass;
+  let cvx = finiteOr(vx_mass_in[ci], 0.0) * inv_mass;
+  let cvy = finiteOr(vy_mass_in[ci], 0.0) * inv_mass;
+
+  let sum_x2_mass = finiteOr(x2_mass_in[ci], 0.0);
+  let sum_y2_mass = finiteOr(y2_mass_in[ci], 0.0);
+  let sum_x_vy_mass = finiteOr(x_vy_mass_in[ci], 0.0);
+  let sum_y_vx_mass = finiteOr(y_vx_mass_in[ci], 0.0);
+
+  let inertia_raw = (sum_x2_mass + sum_y2_mass) - m * (cx * cx + cy * cy);
+  let inertia = max(1e-4, finiteOr(inertia_raw, 1e-4));
+  let angular_momentum = finiteOr((sum_x_vy_mass - sum_y_vx_mass) - m * (cx * cvy - cy * cvx), 0.0);
+  let omega = angular_momentum / inertia;
+  let mean_radius = sqrt(max(0.0, inertia / m));
+
+  out_x[ci] = cx;
+  out_y[ci] = cy;
+  out_vx[ci] = cvx;
+  out_vy[ci] = cvy;
+  out_inertia[ci] = inertia;
+  out_angular_momentum[ci] = angular_momentum;
+  out_omega[ci] = finiteOr(omega, 0.0);
+  out_mean_radius[ci] = finiteOr(mean_radius, 0.0);
+}
+`;
+
 function canUseWgslOffload(offload) {
   return Boolean(
     offload
@@ -371,6 +441,204 @@ async function dispatchSoftClusterKinematicsProbe(offload, prep) {
   return true;
 }
 
+function checkFiniteFloat32Array(values) {
+  if (!(values instanceof Float32Array)) return false;
+  for (let i = 0; i < values.length; i++) {
+    if (!Number.isFinite(values[i])) return false;
+  }
+  return true;
+}
+
+async function dispatchSoftClusterKinematicsDeriveWgsl(offload, prep) {
+  const state = offload?.state;
+  const device = offload?.device;
+  if (!state || !device) return false;
+  const clusterCount = Number(prep?.plan?.clusterCount) || 0;
+  const probe = state.lastSoftClusterProbe;
+  if (clusterCount <= 0 || !probe) return false;
+
+  if (!state.softClusterDerivePipeline) {
+    state.softClusterDerivePipeline = await device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: {
+        module: device.createShaderModule({ code: SOFT_CLUSTER_KINEMATICS_DERIVE_WGSL }),
+        entryPoint: 'main',
+      },
+    });
+  }
+
+  const bytes = clusterCount * Float32Array.BYTES_PER_ELEMENT;
+  const makeStorageIn = (arr) => {
+    const buffer = device.createBuffer({ size: bytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(buffer, 0, arr);
+    return buffer;
+  };
+  const makeStorageOut = () => device.createBuffer({ size: bytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const makeReadback = () => device.createBuffer({ size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+
+  const paramsBuffer = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const params = new Uint32Array(4);
+  params[0] = clusterCount >>> 0;
+  device.queue.writeBuffer(paramsBuffer, 0, params);
+
+  const massIn = makeStorageIn(probe.mass);
+  const xMassIn = makeStorageIn(probe.xMass);
+  const yMassIn = makeStorageIn(probe.yMass);
+  const vxMassIn = makeStorageIn(probe.vxMass);
+  const vyMassIn = makeStorageIn(probe.vyMass);
+  const x2MassIn = makeStorageIn(probe.x2Mass);
+  const y2MassIn = makeStorageIn(probe.y2Mass);
+  const xVyMassIn = makeStorageIn(probe.xVyMass);
+  const yVxMassIn = makeStorageIn(probe.yVxMass);
+
+  const xOut = makeStorageOut();
+  const yOut = makeStorageOut();
+  const vxOut = makeStorageOut();
+  const vyOut = makeStorageOut();
+  const inertiaOut = makeStorageOut();
+  const angularMomentumOut = makeStorageOut();
+  const omegaOut = makeStorageOut();
+  const meanRadiusOut = makeStorageOut();
+
+  const xRead = makeReadback();
+  const yRead = makeReadback();
+  const vxRead = makeReadback();
+  const vyRead = makeReadback();
+  const inertiaRead = makeReadback();
+  const angularMomentumRead = makeReadback();
+  const omegaRead = makeReadback();
+  const meanRadiusRead = makeReadback();
+
+  const bindGroup = device.createBindGroup({
+    layout: state.softClusterDerivePipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: paramsBuffer } },
+      { binding: 1, resource: { buffer: massIn } },
+      { binding: 2, resource: { buffer: xMassIn } },
+      { binding: 3, resource: { buffer: yMassIn } },
+      { binding: 4, resource: { buffer: vxMassIn } },
+      { binding: 5, resource: { buffer: vyMassIn } },
+      { binding: 6, resource: { buffer: x2MassIn } },
+      { binding: 7, resource: { buffer: y2MassIn } },
+      { binding: 8, resource: { buffer: xVyMassIn } },
+      { binding: 9, resource: { buffer: yVxMassIn } },
+      { binding: 10, resource: { buffer: xOut } },
+      { binding: 11, resource: { buffer: yOut } },
+      { binding: 12, resource: { buffer: vxOut } },
+      { binding: 13, resource: { buffer: vyOut } },
+      { binding: 14, resource: { buffer: inertiaOut } },
+      { binding: 15, resource: { buffer: angularMomentumOut } },
+      { binding: 16, resource: { buffer: omegaOut } },
+      { binding: 17, resource: { buffer: meanRadiusOut } },
+    ],
+  });
+
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(state.softClusterDerivePipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(Math.max(1, Math.ceil(clusterCount / WGSL_WORKGROUP_SIZE)));
+  pass.end();
+
+  encoder.copyBufferToBuffer(xOut, 0, xRead, 0, bytes);
+  encoder.copyBufferToBuffer(yOut, 0, yRead, 0, bytes);
+  encoder.copyBufferToBuffer(vxOut, 0, vxRead, 0, bytes);
+  encoder.copyBufferToBuffer(vyOut, 0, vyRead, 0, bytes);
+  encoder.copyBufferToBuffer(inertiaOut, 0, inertiaRead, 0, bytes);
+  encoder.copyBufferToBuffer(angularMomentumOut, 0, angularMomentumRead, 0, bytes);
+  encoder.copyBufferToBuffer(omegaOut, 0, omegaRead, 0, bytes);
+  encoder.copyBufferToBuffer(meanRadiusOut, 0, meanRadiusRead, 0, bytes);
+  device.queue.submit([encoder.finish()]);
+
+  const [x, y, vx, vy, inertia, angularMomentum, omega, meanRadius] = await Promise.all([
+    readF32(xRead, bytes),
+    readF32(yRead, bytes),
+    readF32(vxRead, bytes),
+    readF32(vyRead, bytes),
+    readF32(inertiaRead, bytes),
+    readF32(angularMomentumRead, bytes),
+    readF32(omegaRead, bytes),
+    readF32(meanRadiusRead, bytes),
+  ]);
+
+  const allFinite = checkFiniteFloat32Array(x)
+    && checkFiniteFloat32Array(y)
+    && checkFiniteFloat32Array(vx)
+    && checkFiniteFloat32Array(vy)
+    && checkFiniteFloat32Array(inertia)
+    && checkFiniteFloat32Array(angularMomentum)
+    && checkFiniteFloat32Array(omega)
+    && checkFiniteFloat32Array(meanRadius);
+
+  if (allFinite) {
+    state.lastSoftClusterDerivedKinematics = { x, y, vx, vy, inertia, angularMomentum, omega, meanRadius };
+    state.lastSoftClusterDerivedKinematicsSignature = prep.signature;
+    state.lastSoftClusterDerivedKinematicsSource = 'wgsl-soft-cluster-kinematics-derived-authoritative';
+  } else {
+    state.lastSoftClusterDerivedKinematics = null;
+    state.lastSoftClusterDerivedKinematicsSource = 'cpu-soft-cluster-kinematics-derived-fallback-nonfinite';
+  }
+
+  [
+    paramsBuffer,
+    massIn, xMassIn, yMassIn, vxMassIn, vyMassIn, x2MassIn, y2MassIn, xVyMassIn, yVxMassIn,
+    xOut, yOut, vxOut, vyOut, inertiaOut, angularMomentumOut, omegaOut, meanRadiusOut,
+    xRead, yRead, vxRead, vyRead, inertiaRead, angularMomentumRead, omegaRead, meanRadiusRead,
+  ].forEach((b) => b.destroy());
+
+  return allFinite;
+}
+
+function hasAuthoritativeSoftClusterDerivedKinematics(offload, signature, prep) {
+  const state = offload?.state;
+  const clusterCount = Number(prep?.plan?.clusterCount) || 0;
+  const derived = state?.lastSoftClusterDerivedKinematics;
+  return Boolean(
+    state
+      && clusterCount > 0
+      && Number(state.lastSoftClusterDerivedKinematicsSignature) === (Number(signature) >>> 0)
+      && derived?.x instanceof Float32Array
+      && derived?.y instanceof Float32Array
+      && derived?.vx instanceof Float32Array
+      && derived?.vy instanceof Float32Array
+      && derived?.inertia instanceof Float32Array
+      && derived?.angularMomentum instanceof Float32Array
+      && derived?.omega instanceof Float32Array
+      && derived?.meanRadius instanceof Float32Array
+      && derived.x.length >= clusterCount
+      && derived.y.length >= clusterCount
+      && derived.vx.length >= clusterCount
+      && derived.vy.length >= clusterCount
+      && derived.inertia.length >= clusterCount
+      && derived.angularMomentum.length >= clusterCount
+      && derived.omega.length >= clusterCount
+      && derived.meanRadius.length >= clusterCount,
+  );
+}
+
+function buildSoftClusterKinematicsMapFromDerived(prep, probe, derived) {
+  const out = new Map();
+  const ids = prep?.layout?.clusterOriginalId;
+  if (!(ids instanceof Uint32Array)) return out;
+  for (let i = 0; i < ids.length; i++) {
+    const cid = Number(ids[i]) | 0;
+    out.set(cid, {
+      clusterId: cid,
+      mass: Math.max(0.02, Number(probe?.mass?.[i]) || 0.02),
+      x: Number(derived?.x?.[i]) || 0,
+      y: Number(derived?.y?.[i]) || 0,
+      vx: Number(derived?.vx?.[i]) || 0,
+      vy: Number(derived?.vy?.[i]) || 0,
+      inertia: Math.max(1e-4, Number(derived?.inertia?.[i]) || 1e-4),
+      angularMomentum: Number(derived?.angularMomentum?.[i]) || 0,
+      omega: Number(derived?.omega?.[i]) || 0,
+      meanRadius: Math.max(0, Number(derived?.meanRadius?.[i]) || 0),
+      nodeIndices: [],
+    });
+  }
+  return out;
+}
+
 function hasAuthoritativeSoftClusterProbe(offload, signature, prep) {
   const state = offload?.state;
   if (!state || offload?.authoritativeSoftClusterMass !== true) return false;
@@ -478,8 +746,39 @@ export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
     preparedSoftClusterKinematics,
   );
 
+  if (hasAuthoritativeProbe && canUseWgslOffload(wgslOffload)) {
+    try {
+      await dispatchSoftClusterKinematicsDeriveWgsl(wgslOffload, preparedSoftClusterKinematics);
+    } catch (err) {
+      if (wgslOffload?.state) {
+        wgslOffload.state.lastSoftClusterDerivedKinematics = null;
+        wgslOffload.state.lastSoftClusterDerivedKinematicsSource = 'cpu-soft-cluster-kinematics-derived-fallback-error';
+        wgslOffload.state.lastSoftClusterDerivedKinematicsError = String(err?.message || err || 'unknown-error');
+      }
+    }
+  }
+
+  const hasAuthoritativeDerivedKinematics = hasAuthoritativeSoftClusterDerivedKinematics(
+    wgslOffload,
+    preparedSoftClusterKinematics.signature,
+    preparedSoftClusterKinematics,
+  );
+
   let postCollisionClusterKinematics;
-  if (hasAuthoritativeProbe) {
+  if (hasAuthoritativeDerivedKinematics) {
+    postCollisionClusterKinematics = buildSoftClusterKinematicsMapFromDerived(
+      preparedSoftClusterKinematics,
+      wgslOffload.state.lastSoftClusterProbe,
+      wgslOffload.state.lastSoftClusterDerivedKinematics,
+    );
+    const cpuReferenceClusterKinematics = await Promise.resolve(computeKinematics(soft.nodes));
+    if (wgslOffload?.state) {
+      wgslOffload.state.lastSoftClusterAuthoritativeParity = computeSoftClusterKinematicsParity(
+        cpuReferenceClusterKinematics,
+        postCollisionClusterKinematics,
+      );
+    }
+  } else if (hasAuthoritativeProbe) {
     postCollisionClusterKinematics = computeSoftClusterKinematicsFromMassMomentsGpuOnly(
       soft.nodes,
       preparedSoftClusterKinematics.layout,
@@ -508,13 +807,17 @@ export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
   }
 
   if (wgslOffload?.state) {
-    wgslOffload.state.lastAuthoritativeSoftClusterSource = hasAuthoritativeProbe
-      ? 'wgsl-soft-cluster-mass-moments-authoritative'
-      : 'cpu-soft-cluster-kinematics-authoritative';
+    wgslOffload.state.lastAuthoritativeSoftClusterSource = hasAuthoritativeDerivedKinematics
+      ? 'wgsl-soft-cluster-kinematics-derived-authoritative'
+      : hasAuthoritativeProbe
+        ? 'wgsl-soft-cluster-mass-moments-authoritative'
+        : 'cpu-soft-cluster-kinematics-authoritative';
     wgslOffload.state.lastSourceRoute = wgslOffload.state.lastAuthoritativeSoftClusterSource;
-    wgslOffload.state.lastMode = hasAuthoritativeProbe
-      ? 'wgsl-soft-cluster-mass-moments-authoritative'
-      : wgslOffload.state.lastMode;
+    wgslOffload.state.lastMode = hasAuthoritativeDerivedKinematics
+      ? 'wgsl-soft-cluster-kinematics-derived-authoritative'
+      : hasAuthoritativeProbe
+        ? 'wgsl-soft-cluster-mass-moments-authoritative'
+        : wgslOffload.state.lastMode;
   }
 
   await Promise.resolve(projectTowardRigidMotion(soft.nodes, postCollisionClusterKinematics, {

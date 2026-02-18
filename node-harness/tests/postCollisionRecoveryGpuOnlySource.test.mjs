@@ -16,8 +16,8 @@ test('post-collision recovery WGSL source-route supports authoritative soft-clus
 
   assert.match(
     source,
-    /computeSoftClusterKinematicsFromMassMomentsGpuOnly\([\s\S]*lastSoftClusterAuthoritativeParity = computeSoftClusterKinematicsParity\([\s\S]*lastAuthoritativeSoftClusterSource = hasAuthoritativeProbe[\s\S]*'wgsl-soft-cluster-mass-moments-authoritative'[\s\S]*'cpu-soft-cluster-kinematics-authoritative'[\s\S]*lastSourceRoute = wgslOffload\.state\.lastAuthoritativeSoftClusterSource/,
-    'expected authoritative WGSL mass replay path to publish parity and source-route ownership',
+    /dispatchSoftClusterKinematicsDeriveWgsl\([\s\S]*hasAuthoritativeSoftClusterDerivedKinematics\([\s\S]*buildSoftClusterKinematicsMapFromDerived\([\s\S]*lastSoftClusterAuthoritativeParity = computeSoftClusterKinematicsParity\([\s\S]*lastAuthoritativeSoftClusterSource = hasAuthoritativeDerivedKinematics[\s\S]*'wgsl-soft-cluster-kinematics-derived-authoritative'[\s\S]*'wgsl-soft-cluster-mass-moments-authoritative'[\s\S]*'cpu-soft-cluster-kinematics-authoritative'[\s\S]*lastSourceRoute = wgslOffload\.state\.lastAuthoritativeSoftClusterSource/,
+    'expected post-collision recovery path to promote WGSL mass-moment derived kinematics to authoritative routing with explicit fallback ownership',
   );
 
   assert.match(

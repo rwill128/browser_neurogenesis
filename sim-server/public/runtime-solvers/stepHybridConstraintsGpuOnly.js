@@ -5,9 +5,219 @@
  * runtime solver path while preserving baseline/default behavior contracts.
  */
 
+const WGSL_WORKGROUP_SIZE = 64;
+
+const hybridAttachmentErrorProbeWgsl = /* wgsl */`
+struct Params {
+  nodeCount: u32,
+  attachmentCount: u32,
+  _pad0: u32,
+  _pad1: u32,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> nodeX: array<f32>;
+@group(0) @binding(2) var<storage, read> nodeY: array<f32>;
+@group(0) @binding(3) var<storage, read> nodeIndex: array<u32>;
+@group(0) @binding(4) var<storage, read> anchorAX: array<f32>;
+@group(0) @binding(5) var<storage, read> anchorAY: array<f32>;
+@group(0) @binding(6) var<storage, read> anchorBX: array<f32>;
+@group(0) @binding(7) var<storage, read> anchorBY: array<f32>;
+@group(0) @binding(8) var<storage, read> restA: array<f32>;
+@group(0) @binding(9) var<storage, read> restB: array<f32>;
+@group(0) @binding(10) var<storage, read_write> maxErrorOut: array<f32>;
+
+@compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let ai = gid.x;
+  if (ai >= params.attachmentCount) { return; }
+
+  let ni = nodeIndex[ai];
+  if (ni >= params.nodeCount) {
+    maxErrorOut[ai] = 0.0;
+    return;
+  }
+
+  let px = nodeX[ni];
+  let py = nodeY[ni];
+
+  let dax = px - anchorAX[ai];
+  let day = py - anchorAY[ai];
+  let dbx = px - anchorBX[ai];
+  let dby = py - anchorBY[ai];
+
+  let distA = max(length(vec2<f32>(dax, day)), 1e-6);
+  let distB = max(length(vec2<f32>(dbx, dby)), 1e-6);
+
+  let errA = abs(distA - max(restA[ai], 0.0));
+  let errB = abs(distB - max(restB[ai], 0.0));
+  maxErrorOut[ai] = max(errA, errB);
+}
+`;
+
 function clampFinite(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function canUseWgslOffload(offload) {
+  if (!offload || offload.enabled !== true) return false;
+  if (!offload.state) return false;
+  if (!offload.device || typeof offload.device.createComputePipelineAsync !== 'function') return false;
+  if (typeof globalThis.GPUBufferUsage === 'undefined') return false;
+  if (typeof globalThis.GPUMapMode === 'undefined') return false;
+  return true;
+}
+
+function ensureHybridAttachmentProbeBuffers(offload, nodeCount, attachmentCount) {
+  const state = offload.state;
+  const device = offload.device;
+  const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
+
+  const requiredNodeCapacity = Math.max(1, nodeCount);
+  if ((state.probeNodeCapacity || 0) < requiredNodeCapacity) {
+    const capacity = Math.max(requiredNodeCapacity, state.probeNodeCapacity ? state.probeNodeCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.probeNodeX?.destroy?.();
+    state.probeNodeY?.destroy?.();
+    state.probeNodeX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeNodeY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeNodeCapacity = capacity;
+    state.probeBindGroup = null;
+  }
+
+  const requiredAttachmentCapacity = Math.max(1, attachmentCount);
+  if ((state.probeAttachmentCapacity || 0) < requiredAttachmentCapacity) {
+    const capacity = Math.max(requiredAttachmentCapacity, state.probeAttachmentCapacity ? state.probeAttachmentCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.probeNodeIndex?.destroy?.();
+    state.probeAnchorAX?.destroy?.();
+    state.probeAnchorAY?.destroy?.();
+    state.probeAnchorBX?.destroy?.();
+    state.probeAnchorBY?.destroy?.();
+    state.probeRestA?.destroy?.();
+    state.probeRestB?.destroy?.();
+    state.probeMaxErrorOut?.destroy?.();
+    state.probeMaxErrorReadback?.destroy?.();
+    state.probeNodeIndex = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeAnchorAX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeAnchorAY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeAnchorBX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeAnchorBY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeRestA = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeRestB = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeMaxErrorOut = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC,
+    });
+    state.probeMaxErrorReadback = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
+    });
+    state.probeAttachmentCapacity = capacity;
+    state.probeBindGroup = null;
+  }
+
+  if (!state.probeParams) {
+    state.probeParams = device.createBuffer({
+      size: 16,
+      usage: globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST,
+    });
+    state.probeBindGroup = null;
+  }
+
+  return state;
+}
+
+async function dispatchHybridAttachmentErrorProbe(offload, prep, soft) {
+  const state = offload.state;
+  const device = offload.device;
+  const nodeCount = prep.plan.softNodeCount >>> 0;
+  const attachmentCount = prep.plan.attachmentCount >>> 0;
+  if (attachmentCount === 0 || nodeCount === 0) return;
+
+  ensureHybridAttachmentProbeBuffers(offload, nodeCount, attachmentCount);
+
+  if (!state.probePipeline) {
+    state.probeShaderModule = device.createShaderModule({ code: hybridAttachmentErrorProbeWgsl });
+    state.probePipeline = await device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: {
+        module: state.probeShaderModule,
+        entryPoint: 'main',
+      },
+    });
+    state.probeBindGroup = null;
+  }
+
+  if (!state.probeBindGroup) {
+    state.probeBindGroup = device.createBindGroup({
+      layout: state.probePipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.probeParams } },
+        { binding: 1, resource: { buffer: state.probeNodeX } },
+        { binding: 2, resource: { buffer: state.probeNodeY } },
+        { binding: 3, resource: { buffer: state.probeNodeIndex } },
+        { binding: 4, resource: { buffer: state.probeAnchorAX } },
+        { binding: 5, resource: { buffer: state.probeAnchorAY } },
+        { binding: 6, resource: { buffer: state.probeAnchorBX } },
+        { binding: 7, resource: { buffer: state.probeAnchorBY } },
+        { binding: 8, resource: { buffer: state.probeRestA } },
+        { binding: 9, resource: { buffer: state.probeRestB } },
+        { binding: 10, resource: { buffer: state.probeMaxErrorOut } },
+      ],
+    });
+  }
+
+  const nodeX = new Float32Array(nodeCount);
+  const nodeY = new Float32Array(nodeCount);
+  for (let i = 0; i < nodeCount; i++) {
+    const n = soft.nodes[i];
+    nodeX[i] = clampFinite(n?.x);
+    nodeY[i] = clampFinite(n?.y);
+  }
+
+  const params = new Uint32Array(4);
+  params[0] = nodeCount;
+  params[1] = attachmentCount;
+
+  device.queue.writeBuffer(state.probeParams, 0, params.buffer, params.byteOffset, params.byteLength);
+  device.queue.writeBuffer(state.probeNodeX, 0, nodeX.buffer, nodeX.byteOffset, nodeX.byteLength);
+  device.queue.writeBuffer(state.probeNodeY, 0, nodeY.buffer, nodeY.byteOffset, nodeY.byteLength);
+  device.queue.writeBuffer(state.probeNodeIndex, 0, prep.layout.nodeIndex.buffer, prep.layout.nodeIndex.byteOffset, prep.layout.nodeIndex.byteLength);
+  device.queue.writeBuffer(state.probeAnchorAX, 0, prep.layout.anchorAX.buffer, prep.layout.anchorAX.byteOffset, prep.layout.anchorAX.byteLength);
+  device.queue.writeBuffer(state.probeAnchorAY, 0, prep.layout.anchorAY.buffer, prep.layout.anchorAY.byteOffset, prep.layout.anchorAY.byteLength);
+  device.queue.writeBuffer(state.probeAnchorBX, 0, prep.layout.anchorBX.buffer, prep.layout.anchorBX.byteOffset, prep.layout.anchorBX.byteLength);
+  device.queue.writeBuffer(state.probeAnchorBY, 0, prep.layout.anchorBY.buffer, prep.layout.anchorBY.byteOffset, prep.layout.anchorBY.byteLength);
+  device.queue.writeBuffer(state.probeRestA, 0, prep.layout.restA.buffer, prep.layout.restA.byteOffset, prep.layout.restA.byteLength);
+  device.queue.writeBuffer(state.probeRestB, 0, prep.layout.restB.buffer, prep.layout.restB.byteOffset, prep.layout.restB.byteLength);
+
+  const bytes = attachmentCount * 4;
+  const encoder = device.createCommandEncoder({ label: 'hybrid-attachment-probe-encoder' });
+  const pass = encoder.beginComputePass({ label: 'hybrid-attachment-probe-pass' });
+  pass.setPipeline(state.probePipeline);
+  pass.setBindGroup(0, state.probeBindGroup);
+  pass.dispatchWorkgroups(Math.max(1, Math.ceil(attachmentCount / WGSL_WORKGROUP_SIZE)));
+  pass.end();
+  encoder.copyBufferToBuffer(state.probeMaxErrorOut, 0, state.probeMaxErrorReadback, 0, bytes);
+  device.queue.submit([encoder.finish()]);
+
+  await state.probeMaxErrorReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
+  const mapped = state.probeMaxErrorReadback.getMappedRange(0, bytes);
+  const errors = new Float32Array(mapped.slice(0));
+  state.probeMaxErrorReadback.unmap();
+
+  let maxError = 0;
+  let sumError = 0;
+  for (let i = 0; i < attachmentCount; i++) {
+    const value = clampFinite(errors[i]);
+    if (value > maxError) maxError = value;
+    sumError += value;
+  }
+  state.lastProbeMaxAttachmentError = maxError;
+  state.lastProbeAvgAttachmentError = attachmentCount > 0 ? sumError / attachmentCount : 0;
+  state.lastProbeAttachmentCount = attachmentCount;
+  state.lastProbeMode = 'wgsl-error-probe';
 }
 
 export function buildHybridAttachmentWgslPrep({ rigidBodies, soft, hybrid, rigidVertexWorld }) {
@@ -91,17 +301,34 @@ export function applyHybridAttachmentConstraintsGpuOnly({
   const totalIterations = Math.max(0, Number(iterations) | 0);
   if (totalIterations <= 0 || safeDtNorm === 0) return;
 
+  let prep = null;
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
-    const { plan, layout } = buildHybridAttachmentWgslPrep({ rigidBodies, soft, hybrid, rigidVertexWorld });
-    wgslOffload.state.preparedPlan = plan;
-    wgslOffload.state.preparedLayout = layout;
-    wgslOffload.state.lastPreparedAttachmentCount = plan.attachmentCount;
-    wgslOffload.state.lastPreparedValidAttachmentCount = plan.validAttachmentCount;
-    wgslOffload.state.lastPreparedRigidBodyCount = plan.rigidBodyCount;
-    wgslOffload.state.lastPreparedSoftNodeCount = plan.softNodeCount;
-    wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
+    prep = buildHybridAttachmentWgslPrep({ rigidBodies, soft, hybrid, rigidVertexWorld });
+    wgslOffload.state.preparedPlan = prep.plan;
+    wgslOffload.state.preparedLayout = prep.layout;
+    wgslOffload.state.lastPreparedAttachmentCount = prep.plan.attachmentCount;
+    wgslOffload.state.lastPreparedValidAttachmentCount = prep.plan.validAttachmentCount;
+    wgslOffload.state.lastPreparedRigidBodyCount = prep.plan.rigidBodyCount;
+    wgslOffload.state.lastPreparedSoftNodeCount = prep.plan.softNodeCount;
+    wgslOffload.state.lastPreparedLayoutBytes = prep.layout.byteLength;
     wgslOffload.state.lastMode = 'cpu-prepared';
     wgslOffload.state.lastError = null;
+
+    if (canUseWgslOffload(wgslOffload)) {
+      const serializedDispatch = (wgslOffload.state.pendingWgslProbePromise || Promise.resolve())
+        .catch(() => {})
+        .then(() => dispatchHybridAttachmentErrorProbe(wgslOffload, prep, soft));
+      wgslOffload.state.pendingWgslProbePromise = serializedDispatch;
+      serializedDispatch
+        .then(() => {
+          wgslOffload.state.lastMode = 'wgsl-error-probe';
+          wgslOffload.state.lastError = null;
+        })
+        .catch((error) => {
+          wgslOffload.state.lastMode = 'cpu-fallback';
+          wgslOffload.state.lastError = error?.message || String(error);
+        });
+    }
   }
 
   for (let iter = 0; iter < totalIterations; iter++) {

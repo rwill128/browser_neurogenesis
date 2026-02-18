@@ -1139,53 +1139,66 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
     // on color-ordered batches. CPU remains authoritative for node updates while
     // we validate deterministic GPU deltas before reduction offload lands.
     if (canUseWgslOffload(wgslOffload)) {
-      void Promise.all([
-        dispatchSoftSpringWgslProbe({ soft, offload: wgslOffload, layout }),
-        dispatchSoftSpringWgslLambdaProposal({
-          soft,
-          offload: wgslOffload,
-          layout,
-          dtPos,
-          alpha,
-          lambdaCache,
-        }),
-      ])
-        .then(async ([probeRan, proposalRan]) => {
-          if (proposalRan) {
-            const velocityProposal = await dispatchSoftSpringWgslVelocityDeltaProposal({
-              soft,
-              offload: wgslOffload,
-              layout,
-              dtPos,
-              deltaLambdaByColor: wgslOffload.state.lastProposalDeltaLambdaByColor,
-            });
-            if (velocityProposal) {
-              wgslOffload.state.lastVelocityDeltaProposalDispatch = velocityProposal.dispatchCount;
-              wgslOffload.state.lastVelocityDeltaReductionDispatch = velocityProposal.reductionDispatchCount;
-              wgslOffload.state.lastVelocityDeltaProposalEndpointVxByColor = velocityProposal.endpointDeltaVX;
-              wgslOffload.state.lastVelocityDeltaProposalEndpointVyByColor = velocityProposal.endpointDeltaVY;
-              wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor = velocityProposal.nodeDeltaVx;
-              wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor = velocityProposal.nodeDeltaVy;
-            } else {
-              const proposalReduction = reduceSoftSpringVelocityDeltasDeterministic({
+      if (wgslOffload.state.wgslInFlight) {
+        wgslOffload.state.wgslSkippedWhileBusy = (wgslOffload.state.wgslSkippedWhileBusy || 0) + 1;
+      } else {
+        const runId = (wgslOffload.state.wgslRunId || 0) + 1;
+        wgslOffload.state.wgslRunId = runId;
+        wgslOffload.state.wgslInFlight = true;
+        void Promise.all([
+          dispatchSoftSpringWgslProbe({ soft, offload: wgslOffload, layout }),
+          dispatchSoftSpringWgslLambdaProposal({
+            soft,
+            offload: wgslOffload,
+            layout,
+            dtPos,
+            alpha,
+            lambdaCache,
+          }),
+        ])
+          .then(async ([probeRan, proposalRan]) => {
+            if (proposalRan) {
+              const velocityProposal = await dispatchSoftSpringWgslVelocityDeltaProposal({
                 soft,
-                dtPos,
+                offload: wgslOffload,
                 layout,
+                dtPos,
                 deltaLambdaByColor: wgslOffload.state.lastProposalDeltaLambdaByColor,
               });
-              wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor = proposalReduction.deltaVxByNode;
-              wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor = proposalReduction.deltaVyByNode;
+              if (velocityProposal) {
+                wgslOffload.state.lastVelocityDeltaProposalDispatch = velocityProposal.dispatchCount;
+                wgslOffload.state.lastVelocityDeltaReductionDispatch = velocityProposal.reductionDispatchCount;
+                wgslOffload.state.lastVelocityDeltaProposalEndpointVxByColor = velocityProposal.endpointDeltaVX;
+                wgslOffload.state.lastVelocityDeltaProposalEndpointVyByColor = velocityProposal.endpointDeltaVY;
+                wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor = velocityProposal.nodeDeltaVx;
+                wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor = velocityProposal.nodeDeltaVy;
+              } else {
+                const proposalReduction = reduceSoftSpringVelocityDeltasDeterministic({
+                  soft,
+                  dtPos,
+                  layout,
+                  deltaLambdaByColor: wgslOffload.state.lastProposalDeltaLambdaByColor,
+                });
+                wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor = proposalReduction.deltaVxByNode;
+                wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor = proposalReduction.deltaVyByNode;
+              }
             }
-          }
-          if (probeRan || proposalRan) {
-            wgslOffload.state.lastError = null;
-            wgslOffload.state.lastMode = proposalRan ? 'wgsl-velocity-proposal' : 'wgsl-probe';
-          }
-        })
-        .catch((err) => {
-          wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
-          wgslOffload.state.lastMode = 'cpu-fallback';
-        });
+            if (probeRan || proposalRan) {
+              wgslOffload.state.lastError = null;
+              wgslOffload.state.lastMode = proposalRan ? 'wgsl-velocity-proposal' : 'wgsl-probe';
+            }
+          })
+          .catch((err) => {
+            wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
+            wgslOffload.state.lastMode = 'cpu-fallback';
+          })
+          .finally(() => {
+            if (wgslOffload.state.wgslRunId === runId) {
+              wgslOffload.state.wgslInFlight = false;
+              wgslOffload.state.lastCompletedWgslRunId = runId;
+            }
+          });
+      }
     }
   }
 

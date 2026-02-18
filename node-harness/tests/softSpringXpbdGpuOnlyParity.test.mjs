@@ -14,7 +14,7 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
-function createSoftSpringMockWgslDevice() {
+function createSoftSpringMockWgslDevice({ mapDelayMs = 0 } = {}) {
   const storage = new WeakMap();
 
   function ensure(buffer, size) {
@@ -49,7 +49,11 @@ function createSoftSpringMockWgslDevice() {
       const buf = {
         size,
         destroy() {},
-        mapAsync: async () => {},
+        mapAsync: async () => {
+          if (mapDelayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, mapDelayMs));
+          }
+        },
         getMappedRange: (offset = 0, len = size) => ensure(buf, size).slice(offset, offset + len),
         unmap() {},
       };
@@ -601,6 +605,68 @@ test('soft spring XPBD WGSL proposal stage runs on gpu-only path while CPU remai
     'expected lambda-next telemetry remapped back to original spring ownership order',
   );
   assert.equal(wgslState.lastProbeSpringCount, 2);
+});
+
+test('soft spring XPBD WGSL proposal skips overlapping dispatch while prior readback is in flight', async () => {
+  globalThis.GPUBufferUsage = {
+    STORAGE: 1 << 0,
+    COPY_DST: 1 << 1,
+    COPY_SRC: 1 << 2,
+    MAP_READ: 1 << 3,
+    UNIFORM: 1 << 4,
+  };
+  globalThis.GPUMapMode = { READ: 1 };
+
+  const dtPos = 0.18;
+  const stiffnessScale = 3.0;
+  const seed = {
+    nodes: [
+      { x: 20, y: 25, vx: 0.2, vy: -0.1, mass: 1.1, clusterId: 1 },
+      { x: 30, y: 21, vx: -0.3, vy: 0.4, mass: 0.8, clusterId: 1 },
+      { x: 39, y: 28, vx: 0.5, vy: 0.2, mass: 1.4, clusterId: 2 },
+    ],
+    springs: [
+      [0, 1, 11.2],
+      [1, 2, 10.8],
+    ],
+  };
+
+  const wgslState = {};
+  const sharedOffload = {
+    enabled: true,
+    device: createSoftSpringMockWgslDevice({ mapDelayMs: 5 }),
+    state: wgslState,
+  };
+
+  applySoftSpringsXPBDVelocityGpuOnly({
+    soft: structuredClone(seed),
+    dtPos,
+    stiffnessScale,
+    lambdaCache: new Float32Array(seed.springs.length),
+    softXpbdIters: SOFT_XPBD_ITERS,
+    softXpbdBaseCompliance: SOFT_XPBD_BASE_COMPLIANCE,
+    clamp,
+    wgslOffload: sharedOffload,
+  });
+
+  applySoftSpringsXPBDVelocityGpuOnly({
+    soft: structuredClone(seed),
+    dtPos,
+    stiffnessScale,
+    lambdaCache: new Float32Array(seed.springs.length),
+    softXpbdIters: SOFT_XPBD_ITERS,
+    softXpbdBaseCompliance: SOFT_XPBD_BASE_COMPLIANCE,
+    clamp,
+    wgslOffload: sharedOffload,
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  assert.equal(wgslState.wgslSkippedWhileBusy, 1);
+  assert.equal(wgslState.wgslInFlight, false);
+  assert.equal(wgslState.lastCompletedWgslRunId, 1);
+  assert.equal(wgslState.lastMode, 'wgsl-velocity-proposal');
+  assert.equal(wgslState.lastError, null);
 });
 
 

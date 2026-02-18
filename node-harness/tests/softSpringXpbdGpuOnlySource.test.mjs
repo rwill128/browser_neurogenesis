@@ -40,6 +40,14 @@ test('soft spring gpu-only path dispatches real WGSL probe + lambda proposal sta
   );
 });
 
+test('soft spring gpu-only WGSL dispatch path guards against overlapping map/readback passes', () => {
+  assert.match(
+    source,
+    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*if \(wgslOffload\.state\.wgslInFlight\) \{[\s\S]*wgslSkippedWhileBusy[\s\S]*\} else \{[\s\S]*wgslInFlight = true;[\s\S]*Promise\.all\([\s\S]*\.finally\(\(\) => \{[\s\S]*wgslInFlight = false;[\s\S]*lastCompletedWgslRunId/,
+    'expected gpu-only soft spring branch to serialize WGSL readback passes so overlapping mapAsync work does not race the next frame',
+  );
+});
+
 test('soft spring gpu-only WGSL probe copies stretch output into readback buffer for deterministic parity telemetry', () => {
   assert.match(
     source,

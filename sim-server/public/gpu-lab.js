@@ -12,6 +12,7 @@ import { applySoftSpringsXPBDVelocityGpuOnly } from '/runtime-solvers/stepSoftSp
 import { applySoftAreaXPBDVelocityGpuOnly } from '/runtime-solvers/stepSoftAreaXpbdGpuOnly.js';
 import { resolveSoftSoftCollisionPassGpuOnly } from '/runtime-solvers/stepSoftCollisionGpuOnly.js';
 import { applyHybridAttachmentConstraintsGpuOnly } from '/runtime-solvers/stepHybridConstraintsGpuOnly.js';
+import { applySoftMembraneCellPressureGpuOnly } from '/runtime-solvers/stepSoftMembranePressureGpuOnly.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -3926,7 +3927,18 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   } else {
     applySoftAreaXPBDVelocity(sim, s, softClusterLoops, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT);
   }
-  const membranePressureClusters = applySoftMembraneCellPressure(sim, s, softClusterLoops, dtPos);
+  const membranePressureClusters = solverPath === 'gpu-only'
+    ? applySoftMembraneCellPressureGpuOnly({
+      sim,
+      soft: s,
+      loops: softClusterLoops,
+      dtPos,
+      signedAreaCurrent,
+      clamp,
+      membraneCellBasePressureGain: MEMBRANE_CELL_BASE_PRESSURE_GAIN,
+      membraneCellBaseRadialDamping: MEMBRANE_CELL_BASE_RADIAL_DAMPING,
+    })
+    : applySoftMembraneCellPressure(sim, s, softClusterLoops, dtPos);
 
   if (solverPath === 'gpu-only') {
     applyHybridAttachmentConstraintsGpuOnly({

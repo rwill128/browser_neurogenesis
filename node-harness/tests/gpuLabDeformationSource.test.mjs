@@ -295,3 +295,17 @@ test('gpu-lab routes hybrid rigid-soft attachment constraints through isolated g
     'expected explicit gpu-only hybrid attachment dispatch with baseline fallback loops',
   );
 });
+
+test('gpu-lab routes soft membrane cell-pressure stepping through isolated gpu-only runtime solver module', () => {
+  assert.match(
+    source,
+    /import \{ applySoftMembraneCellPressureGpuOnly \} from '\/runtime-solvers\/stepSoftMembranePressureGpuOnly\.js';/,
+    'expected isolated gpu-only membrane pressure module import',
+  );
+
+  assert.match(
+    source,
+    /const membranePressureClusters = solverPath === 'gpu-only'[\s\S]*applySoftMembraneCellPressureGpuOnly\(\{[\s\S]*\}\)[\s\S]*: applySoftMembraneCellPressure\(sim, s, softClusterLoops, dtPos\);/,
+    'expected explicit gpu-only membrane pressure dispatch with baseline fallback call',
+  );
+});

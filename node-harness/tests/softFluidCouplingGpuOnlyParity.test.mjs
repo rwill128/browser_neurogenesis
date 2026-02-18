@@ -324,3 +324,69 @@ test('soft fluid coupling parity: gpu-only module matches baseline cluster-coupl
     assert.ok(Math.abs(g.y - b.y) < 1e-12, `node ${i} y mismatch: ${g.y} vs ${b.y}`);
   }
 });
+
+test('soft fluid coupling wgsl prep telemetry: gpu-only publishes deterministic sampled-layout source route without changing cpu authority', () => {
+  const n = 12;
+  const cells = n * n;
+  const vxField = new Float32Array(cells);
+  const vyField = new Float32Array(cells);
+  for (let i = 0; i < cells; i++) {
+    vxField[i] = Math.sin(i * 0.07) * 0.21;
+    vyField[i] = Math.cos(i * 0.11) * 0.18;
+  }
+
+  const soft = {
+    nodes: [
+      { x: 2.2, y: 3.4, vx: 0.12, vy: -0.09, mass: 1.0, clusterId: 0 },
+      { x: 3.8, y: 4.1, vx: -0.02, vy: 0.17, mass: 1.05, clusterId: 0 },
+      { x: 7.1, y: 8.3, vx: 0.09, vy: 0.05, mass: 0.95, clusterId: 1 },
+    ],
+  };
+
+  const wgslState = {};
+  const constants = {
+    SOFT_NODE_FLOW_COUPLING: 0.052,
+    SOFT_NODE_LOCAL_FLOW_SHARE: 0.72,
+    SOFT_CLUSTER_TUG_COUPLING: 0.095,
+    SOFT_CLUSTER_RELATIVE_DRAG: 0.065,
+    softClusterFluidTorqueCoupling: 0.082,
+    SOFT_CLUSTER_LINEAR_PROJECTION: 0.24,
+    softClusterAngularProjection: 0.11,
+  };
+
+  applySoftFluidCouplingGpuOnly({
+    sim: { frame: 11, controls: { massSoft: 1.0 } },
+    soft,
+    n,
+    dt: 0.016,
+    dtNorm: 1,
+    vxField,
+    vyField,
+    dragK: 0.35,
+    swimGain: 0.58,
+    localHoneyDrag: () => 0.3,
+    viscosityMotionResponse,
+    obstacleMask: null,
+    bodyFeedbackPrevVx: new Float32Array(cells),
+    bodyFeedbackPrevVy: new Float32Array(cells),
+    selfFeedbackSuppression: 0.82,
+    softMembraneClusterSet: new Set([1]),
+    softNodeMomentumScale: (idx) => (idx % 2 === 0 ? 0.9 : 1.0),
+    constants,
+    computeSoftCentroid,
+    computeSoftClusterKinematics,
+    projectNodesTowardClusterRigidMotion,
+    sampleFluidForBodyCoupling,
+    wgslOffload: { enabled: true, state: wgslState },
+  });
+
+  assert.equal(wgslState.lastMode, 'cpu-prepared');
+  assert.equal(wgslState.lastSourceRoute, 'cpu-sampled-layout');
+  assert.ok(wgslState.lastPreparedLayoutBytes > 0, 'expected deterministic structural layout bytes');
+  assert.ok(wgslState.lastPreparedSampleLayoutBytes > 0, 'expected deterministic sampled-fluid layout bytes');
+  assert.ok(Number.isInteger(wgslState.lastPreparedLayoutSignature));
+  assert.ok(Number.isInteger(wgslState.lastPreparedSampleLayoutSignature));
+  assert.equal(wgslState.lastPreparedSampleNodeCount, soft.nodes.length);
+  assert.equal(wgslState.preparedSampleLayout.fluidSampleVx.length, soft.nodes.length);
+  assert.equal(wgslState.preparedSampleLayout.sampleDeltaVy.length, soft.nodes.length);
+});

@@ -106,6 +106,104 @@ function buildSoftFluidCouplingWgslLayout({ nodes, softNodeMomentumScale, softMe
   };
 }
 
+function buildSoftFluidCouplingCpuSampleLayout({
+  sim,
+  nodes,
+  n,
+  vxField,
+  vyField,
+  obstacleMask,
+  bodyFeedbackPrevVx,
+  bodyFeedbackPrevVy,
+  selfFeedbackSuppression,
+  computeSoftCentroid,
+  computeSoftClusterKinematics,
+  sampleFluidForBodyCoupling,
+}) {
+  const nodeCount = Number(nodes?.length) || 0;
+  const fluidSampleVx = new Float32Array(nodeCount);
+  const fluidSampleVy = new Float32Array(nodeCount);
+  const clusterLocalVx = new Float32Array(nodeCount);
+  const clusterLocalVy = new Float32Array(nodeCount);
+  const sampleDeltaVx = new Float32Array(nodeCount);
+  const sampleDeltaVy = new Float32Array(nodeCount);
+
+  const centroid = computeSoftCentroid(nodes);
+  const clusterKinematics = computeSoftClusterKinematics(nodes);
+
+  for (let i = 0; i < nodeCount; i++) {
+    const node = nodes[i] || {};
+    const cid = node.clusterId ?? 0;
+    const clusterKin = clusterKinematics.get(cid);
+    const clusterX = Number.isFinite(Number(clusterKin?.x)) ? Number(clusterKin.x) : centroid.x;
+    const clusterY = Number.isFinite(Number(clusterKin?.y)) ? Number(clusterKin.y) : centroid.y;
+    const vx = Number.isFinite(Number(clusterKin?.vx)) ? Number(clusterKin.vx) : 0;
+    const vy = Number.isFinite(Number(clusterKin?.vy)) ? Number(clusterKin.vy) : 0;
+    const omega = Number.isFinite(Number(clusterKin?.omega)) ? Number(clusterKin.omega) : 0;
+    const rx = (Number(node.x) || 0) - clusterX;
+    const ry = (Number(node.y) || 0) - clusterY;
+
+    const fx = Number(sampleFluidForBodyCoupling(
+      vxField,
+      n,
+      Number(node.x) || 0,
+      Number(node.y) || 0,
+      rx,
+      ry,
+      obstacleMask,
+      bodyFeedbackPrevVx,
+      selfFeedbackSuppression,
+    )) || 0;
+    const fy = Number(sampleFluidForBodyCoupling(
+      vyField,
+      n,
+      Number(node.x) || 0,
+      Number(node.y) || 0,
+      rx,
+      ry,
+      obstacleMask,
+      bodyFeedbackPrevVy,
+      selfFeedbackSuppression,
+    )) || 0;
+    const localVx = vx - omega * ry;
+    const localVy = vy + omega * rx;
+
+    fluidSampleVx[i] = fx;
+    fluidSampleVy[i] = fy;
+    clusterLocalVx[i] = localVx;
+    clusterLocalVy[i] = localVy;
+    sampleDeltaVx[i] = fx - localVx;
+    sampleDeltaVy[i] = fy - localVy;
+  }
+
+  const layout = {
+    fluidSampleVx,
+    fluidSampleVy,
+    clusterLocalVx,
+    clusterLocalVy,
+    sampleDeltaVx,
+    sampleDeltaVy,
+  };
+  const signatureSeed = [nodeCount, Number(sim?.frame) || 0, Number(n) || 0];
+  let signature = hashU32ArrayFnv1a(signatureSeed);
+  signature ^= hashF32ArrayFnv1a(fluidSampleVx);
+  signature = Math.imul(signature, 0x01000193) >>> 0;
+  signature ^= hashF32ArrayFnv1a(fluidSampleVy);
+  signature = Math.imul(signature, 0x01000193) >>> 0;
+  signature ^= hashF32ArrayFnv1a(sampleDeltaVx);
+  signature = Math.imul(signature, 0x01000193) >>> 0;
+  signature ^= hashF32ArrayFnv1a(sampleDeltaVy);
+  signature >>>= 0;
+
+  const byteLength = Object.values(layout).reduce((sum, arr) => sum + (arr?.byteLength || 0), 0);
+  return {
+    layout,
+    nodeCount,
+    signature,
+    byteLength,
+  };
+}
+
 export function applySoftFluidCouplingGpuOnly({
   sim,
   soft,
@@ -149,16 +247,36 @@ export function applySoftFluidCouplingGpuOnly({
       softNodeMomentumScale,
       softMembraneClusterSet,
     });
+    const samplePrep = buildSoftFluidCouplingCpuSampleLayout({
+      sim,
+      nodes,
+      n,
+      vxField,
+      vyField,
+      obstacleMask,
+      bodyFeedbackPrevVx,
+      bodyFeedbackPrevVy,
+      selfFeedbackSuppression,
+      computeSoftCentroid,
+      computeSoftClusterKinematics,
+      sampleFluidForBodyCoupling,
+    });
     wgslOffload.state.preparedLayout = prep.layout;
+    wgslOffload.state.preparedSampleLayout = samplePrep.layout;
     wgslOffload.state.lastPreparedNodeCount = prep.nodeCount;
     wgslOffload.state.lastPreparedClusterCount = prep.clusterCount;
     wgslOffload.state.lastPreparedLayoutBytes = prep.byteLength;
     wgslOffload.state.lastPreparedLayoutSignature = prep.signature;
+    wgslOffload.state.lastPreparedSampleLayoutBytes = samplePrep.byteLength;
+    wgslOffload.state.lastPreparedSampleLayoutSignature = samplePrep.signature;
+    wgslOffload.state.lastPreparedSampleNodeCount = samplePrep.nodeCount;
+    wgslOffload.state.lastSourceRoute = 'cpu-sampled-layout';
     wgslOffload.state.lastMode = 'cpu-prepared';
     wgslOffload.state.lastError = null;
     // Blocker for immediate WGSL stage in this pass: this module still consumes
-    // CPU-side sampled fluid fields/callbacks, so deterministic packed layout is
-    // prepared first as the handoff contract for the upcoming compute kernel.
+    // CPU-side sampled fluid fields/callbacks. This run lands deterministic
+    // sampled-fluid packing so the next WGSL kernel can consume fixed arrays
+    // (sample + cluster-local velocity deltas) without callback ownership.
   }
 
   const softCentroid = computeSoftCentroid(nodes);

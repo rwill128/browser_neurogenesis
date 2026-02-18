@@ -15,13 +15,19 @@ test('soft fluid-coupling gpu-only publishes deterministic WGSL prep layout for 
 
   assert.match(
     source,
-    /if \(wgslOffload\?\.enabled === true && wgslOffload\?\.state\) \{[\s\S]*preparedLayout = prep\.layout;[\s\S]*lastPreparedLayoutBytes = prep\.byteLength;[\s\S]*lastPreparedLayoutSignature = prep\.signature;/,
-    'expected gpu-only path to publish WGSL prep telemetry into offload state',
+    /function buildSoftFluidCouplingCpuSampleLayout\(\{[\s\S]*fluidSampleVx = new Float32Array\(nodeCount\);[\s\S]*sampleDeltaVy = new Float32Array\(nodeCount\);/,
+    'expected deterministic sampled-fluid layout builder that removes callback ownership from the next WGSL stage',
   );
 
   assert.match(
     source,
-    /lastMode = 'cpu-prepared';[\s\S]*handoff contract for the upcoming compute kernel\./,
-    'expected explicit cpu-prepared source-route marker and blocker note for imminent WGSL kernel handoff',
+    /if \(wgslOffload\?\.enabled === true && wgslOffload\?\.state\) \{[\s\S]*preparedLayout = prep\.layout;[\s\S]*preparedSampleLayout = samplePrep\.layout;[\s\S]*lastPreparedLayoutBytes = prep\.byteLength;[\s\S]*lastPreparedSampleLayoutBytes = samplePrep\.byteLength;[\s\S]*lastPreparedSampleLayoutSignature = samplePrep\.signature;/,
+    'expected gpu-only path to publish both structural and sampled-fluid WGSL prep telemetry into offload state',
+  );
+
+  assert.match(
+    source,
+    /lastSourceRoute = 'cpu-sampled-layout';[\s\S]*lastMode = 'cpu-prepared';[\s\S]*next WGSL kernel can consume fixed arrays/,
+    'expected explicit sampled-layout source-route marker and blocker note for imminent WGSL kernel handoff',
   );
 });

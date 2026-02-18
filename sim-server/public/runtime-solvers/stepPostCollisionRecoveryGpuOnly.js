@@ -1,3 +1,5 @@
+import { applyRigidInsideCorrectionPassGpuOnly } from './stepRigidInsideCorrectionGpuOnly.js';
+
 export function applyPostCollisionRecoveryGpuOnly(args = {}) {
   const {
     bodies,
@@ -41,7 +43,11 @@ export function applyPostCollisionRecoveryGpuOnly(args = {}) {
   const rigidInsideCorrections =
     typeof applyRigidInsideCorrectionPass === 'function'
       ? applyRigidInsideCorrectionPass(bodies, soft, args.hybridAttachedByRigid)
-      : 0;
+      : applyRigidInsideCorrectionPassGpuOnly({
+        rigidBodies: bodies.rigid,
+        soft,
+        hybridAttachedByRigid: args.hybridAttachedByRigid,
+      });
 
   const membraneInsideCorrections =
     typeof applyMembraneInsideCorrectionPass === 'function'

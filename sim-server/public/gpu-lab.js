@@ -4398,7 +4398,6 @@ function stepBodiesAndInject(sim, vxField, vyField) {
         membraneGainScale: 0.72,
         computeSoftClusterKinematics,
         projectNodesTowardClusterRigidMotion,
-        applyRigidInsideCorrectionPass,
         applyMembraneInsideCorrectionPass,
         applyBounceBoundary,
         n,

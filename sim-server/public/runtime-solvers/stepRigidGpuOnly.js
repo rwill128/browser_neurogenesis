@@ -408,9 +408,11 @@ export async function stepRigidBodiesGpuOnly({
       });
     wgslOffload.state.pendingWgslRigidStepProposalPromise = serializedDispatch;
 
+    const modeProfile = getGpuOnlyPipelineModeProfile(wgslOffload);
     const authoritativeEnabled = wgslOffload?.state?.enableAuthoritativeRigidStep === true;
+    const authoritativeRequested = authoritativeEnabled || modeProfile === 'gpu-only-fast';
     const wgslApplied = await serializedDispatch;
-    const proposalReady = authoritativeEnabled
+    const proposalReady = authoritativeRequested
       && wgslApplied === true
       && String(wgslOffload?.state?.lastRigidStepProposalSignature || '') === signature
       && wgslOffload?.state?.lastRigidStepProposalVx instanceof Float32Array
@@ -449,16 +451,16 @@ export async function stepRigidBodiesGpuOnly({
         carrySum += carry[i] || 0;
       }
       rigidCarryTransfer = carrySum;
-      wgslOffload.state.lastRigidStepAuthoritativeSource = getGpuOnlyPipelineModeProfile(wgslOffload) === 'gpu-only-fast'
+      wgslOffload.state.lastRigidStepAuthoritativeSource = modeProfile === 'gpu-only-fast'
         ? 'wgsl-rigid-step-authoritative-fast'
         : 'wgsl-rigid-step-authoritative';
       wgslOffload.state.lastSourceRoute = wgslOffload.state.lastRigidStepAuthoritativeSource;
       wgslOffload.state.lastMode = wgslOffload.state.lastRigidStepAuthoritativeSource;
       wgslOffload.state.lastRigidStepAuthoritativeSignature = signature;
-    } else if (authoritativeEnabled) {
+    } else if (authoritativeRequested) {
       wgslOffload.state.lastRigidStepAuthoritativeSource = 'cpu-rigid-step-authoritative-fallback';
       wgslOffload.state.lastSourceRoute = 'cpu-rigid-step-authoritative';
-      wgslOffload.state.lastMode = getGpuOnlyPipelineModeProfile(wgslOffload) === 'gpu-only-fast'
+      wgslOffload.state.lastMode = modeProfile === 'gpu-only-fast'
         ? 'cpu-rigid-step-authoritative-fast'
         : 'cpu-rigid-step-authoritative';
       wgslOffload.state.lastRigidStepAuthoritativeSignature = signature;

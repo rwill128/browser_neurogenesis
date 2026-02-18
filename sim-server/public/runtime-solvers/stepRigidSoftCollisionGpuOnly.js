@@ -717,6 +717,57 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const rigidSoftNodeNarrowphaseAabbProbeWgsl = /* wgsl */
+`
+struct Params {
+  pairCount: u32,
+  _pad0: u32,
+  _pad1: u32,
+  _pad2: u32,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> pairRigidIndex: array<u32>;
+@group(0) @binding(2) var<storage, read> pairNodeIndex: array<u32>;
+@group(0) @binding(3) var<storage, read> nodeX: array<f32>;
+@group(0) @binding(4) var<storage, read> nodeY: array<f32>;
+@group(0) @binding(5) var<storage, read> nodeR: array<f32>;
+@group(0) @binding(6) var<storage, read> rigidMinX: array<f32>;
+@group(0) @binding(7) var<storage, read> rigidMinY: array<f32>;
+@group(0) @binding(8) var<storage, read> rigidMaxX: array<f32>;
+@group(0) @binding(9) var<storage, read> rigidMaxY: array<f32>;
+@group(0) @binding(10) var<storage, read_write> pairOut: array<vec2<f32>>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let pairIndex = gid.x;
+  if (pairIndex >= params.pairCount) { return; }
+
+  let rigidIndex = pairRigidIndex[pairIndex];
+  let nodeIndex = pairNodeIndex[pairIndex];
+  let x = nodeX[nodeIndex];
+  let y = nodeY[nodeIndex];
+  let r = max(0.0, nodeR[nodeIndex]);
+
+  let minX = rigidMinX[rigidIndex];
+  let minY = rigidMinY[rigidIndex];
+  let maxX = rigidMaxX[rigidIndex];
+  let maxY = rigidMaxY[rigidIndex];
+
+  let dxLo = max((minX - x) - r, 0.0);
+  let dxHi = max((x - maxX) - r, 0.0);
+  let dyLo = max((minY - y) - r, 0.0);
+  let dyHi = max((y - maxY) - r, 0.0);
+  let dx = max(dxLo, dxHi);
+  let dy = max(dyLo, dyHi);
+  let separation = sqrt(dx * dx + dy * dy);
+
+  let inside = x >= (minX - r) && x <= (maxX + r) && y >= (minY - r) && y <= (maxY + r);
+  pairOut[pairIndex] = vec2<f32>(separation, select(0.0, 1.0, inside));
+}
+`;
+
+
 function canUseWgslOffload(offload) {
   if (!offload || offload.enabled !== true) return false;
   if (!offload.device || typeof offload.device.createComputePipelineAsync !== 'function') return false;
@@ -1244,6 +1295,122 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
   });
 }
 
+
+async function dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl({ rigidBodies, soft, offload, nodePairs, rigidAabb = null }) {
+  if (!canUseWgslOffload(offload)) return false;
+  const pairCount = Number(nodePairs?.pairCount) || 0;
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const rigidCount = Array.isArray(rigidBodies) ? rigidBodies.length : 0;
+  if (pairCount <= 0 || nodes.length <= 0 || rigidCount <= 0) return false;
+  const state = offload.state || (offload.state = {});
+  const device = offload.device;
+
+  if (!state.rigidSoftNodeNarrowphaseAabbProbePipelinePromise) {
+    const module = device.createShaderModule({ code: rigidSoftNodeNarrowphaseAabbProbeWgsl });
+    state.rigidSoftNodeNarrowphaseAabbProbePipelinePromise = device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: { module, entryPoint: 'main' },
+    }).then((pipeline) => {
+      state.rigidSoftNodeNarrowphaseAabbProbePipeline = pipeline;
+      return pipeline;
+    });
+  }
+  const pipeline = state.rigidSoftNodeNarrowphaseAabbProbePipeline;
+  if (!pipeline) return false;
+
+  const nodeX = new Float32Array(nodes.length);
+  const nodeY = new Float32Array(nodes.length);
+  const nodeR = new Float32Array(nodes.length);
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i] || {};
+    nodeX[i] = Number(n.x) || 0;
+    nodeY[i] = Number(n.y) || 0;
+    nodeR[i] = Math.max(0, Number(n.r) || 0);
+  }
+  const computedRigidAabb = rigidAabb || computeRigidBodyAabbs(rigidBodies);
+  const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
+  const pairBytes = pairCount * 4;
+  const pairVec2Bytes = pairCount * 8;
+
+  const params = device.createBuffer({ size: 16, usage: globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST });
+  const pairRigidIndex = device.createBuffer({ size: pairBytes, usage: storageUsage });
+  const pairNodeIndex = device.createBuffer({ size: pairBytes, usage: storageUsage });
+  const nodeXBuf = device.createBuffer({ size: nodes.length * 4, usage: storageUsage });
+  const nodeYBuf = device.createBuffer({ size: nodes.length * 4, usage: storageUsage });
+  const nodeRBuf = device.createBuffer({ size: nodes.length * 4, usage: storageUsage });
+  const minXBuf = device.createBuffer({ size: rigidCount * 4, usage: storageUsage });
+  const minYBuf = device.createBuffer({ size: rigidCount * 4, usage: storageUsage });
+  const maxXBuf = device.createBuffer({ size: rigidCount * 4, usage: storageUsage });
+  const maxYBuf = device.createBuffer({ size: rigidCount * 4, usage: storageUsage });
+  const outBuf = device.createBuffer({ size: pairVec2Bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+  const readback = device.createBuffer({ size: pairVec2Bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+
+  const bindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: params } },
+      { binding: 1, resource: { buffer: pairRigidIndex } },
+      { binding: 2, resource: { buffer: pairNodeIndex } },
+      { binding: 3, resource: { buffer: nodeXBuf } },
+      { binding: 4, resource: { buffer: nodeYBuf } },
+      { binding: 5, resource: { buffer: nodeRBuf } },
+      { binding: 6, resource: { buffer: minXBuf } },
+      { binding: 7, resource: { buffer: minYBuf } },
+      { binding: 8, resource: { buffer: maxXBuf } },
+      { binding: 9, resource: { buffer: maxYBuf } },
+      { binding: 10, resource: { buffer: outBuf } },
+    ],
+  });
+
+  const paramBytes = new ArrayBuffer(16);
+  new Uint32Array(paramBytes)[0] = pairCount >>> 0;
+  device.queue.writeBuffer(params, 0, paramBytes);
+  device.queue.writeBuffer(pairRigidIndex, 0, nodePairs.compactRigidIndex);
+  device.queue.writeBuffer(pairNodeIndex, 0, nodePairs.compactNodeIndex);
+  device.queue.writeBuffer(nodeXBuf, 0, nodeX);
+  device.queue.writeBuffer(nodeYBuf, 0, nodeY);
+  device.queue.writeBuffer(nodeRBuf, 0, nodeR);
+  device.queue.writeBuffer(minXBuf, 0, computedRigidAabb.minX);
+  device.queue.writeBuffer(minYBuf, 0, computedRigidAabb.minY);
+  device.queue.writeBuffer(maxXBuf, 0, computedRigidAabb.maxX);
+  device.queue.writeBuffer(maxYBuf, 0, computedRigidAabb.maxY);
+
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(Math.ceil(pairCount / WGSL_WORKGROUP_SIZE));
+  pass.end();
+  encoder.copyBufferToBuffer(outBuf, 0, readback, 0, pairVec2Bytes);
+  device.queue.submit([encoder.finish()]);
+
+  await readback.mapAsync(globalThis.GPUMapMode.READ, 0, pairVec2Bytes);
+  const packed = new Float32Array(readback.getMappedRange(0, pairVec2Bytes).slice(0));
+  readback.unmap();
+
+  const separation = new Float32Array(pairCount);
+  const insideMask = new Uint32Array(pairCount);
+  let finite = true;
+  for (let i = 0; i < pairCount; i++) {
+    const sep = Number(packed[i * 2]) || 0;
+    const inside = Number(packed[i * 2 + 1]) || 0;
+    if (!Number.isFinite(sep) || !Number.isFinite(inside)) finite = false;
+    separation[i] = Number.isFinite(sep) ? sep : 0;
+    insideMask[i] = inside >= 0.5 ? 1 : 0;
+  }
+
+  state.lastNodeNarrowphaseAabbProbePairCount = pairCount;
+  state.lastNodeNarrowphaseAabbProbeSeparation = separation;
+  state.lastNodeNarrowphaseAabbProbeInsideMask = insideMask;
+  state.lastNodeNarrowphaseAabbProbeFinite = finite;
+  state.lastNodeNarrowphaseAabbProbeSource = finite
+    ? 'wgsl-rigid-soft-node-aabb-probe'
+    : 'cpu-rigid-soft-node-aabb-probe-fallback-nonfinite';
+
+  [params, pairRigidIndex, pairNodeIndex, nodeXBuf, nodeYBuf, nodeRBuf, minXBuf, minYBuf, maxXBuf, maxYBuf, outBuf, readback].forEach((b) => b?.destroy?.());
+  return finite;
+}
+
 export async function resolveRigidSoftCollisionPassGpuOnly({
   rigidBodies,
   soft,
@@ -1303,6 +1470,15 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         wgslOffload.state.lastPreparedNodeNarrowphasePairCount = compactNodePairs.pairCount;
         wgslOffload.state.lastPreparedNodeNarrowphaseBytes = compactNodePairs.byteLength;
         wgslOffload.state.lastPreparedNodeNarrowphaseSignature = compactNodePairs.signature;
+      }
+      if (compactNodePairs?.pairCount > 0) {
+        await dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl({
+          rigidBodies,
+          soft,
+          offload: wgslOffload,
+          nodePairs: compactNodePairs,
+          rigidAabb,
+        });
       }
     } else if (wgslNodeBroadphaseMask) {
       wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-node-broadphase-mask-fallback';

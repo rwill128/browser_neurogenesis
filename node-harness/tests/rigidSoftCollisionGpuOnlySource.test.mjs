@@ -71,3 +71,17 @@ test('rigid-soft gpu-only module emits deterministic narrowphase scene state lay
   assert.match(source, /lastPreparedNarrowphaseSceneRigidInvInertia/, 'expected rigid-soft gpu-only path to publish rigid inverse-inertia scene ownership in offload state');
   assert.match(source, /lastPreparedNarrowphaseSceneSignature/, 'expected rigid-soft gpu-only path to continue publishing deterministic scene signature');
 });
+
+test('rigid-soft gpu-only module lands concrete WGSL node narrowphase AABB probe math as next-stage collision unblocker', () => {
+  assert.match(
+    source,
+    /const rigidSoftNodeNarrowphaseAabbProbeWgsl = \/\* wgsl \*\/[\s\S]*pairOut: array<vec2<f32>>[\s\S]*let separation = sqrt\(dx \* dx \+ dy \* dy\);[\s\S]*pairOut\[pairIndex\] = vec2<f32>\(separation, select\(0\.0, 1\.0, inside\)\);/,
+    'expected rigid-soft gpu-only module to add concrete WGSL node-pair AABB separation math for narrowphase prepass ownership',
+  );
+
+  assert.match(
+    source,
+    /dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl\([\s\S]*lastNodeNarrowphaseAabbProbeSeparation[\s\S]*lastNodeNarrowphaseAabbProbeInsideMask[\s\S]*lastNodeNarrowphaseAabbProbeSource/,
+    'expected rigid-soft gpu-only pass to dispatch node-pair AABB probe and publish deterministic source-route telemetry',
+  );
+});

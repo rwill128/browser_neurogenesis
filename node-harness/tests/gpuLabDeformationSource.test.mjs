@@ -362,25 +362,7 @@ test('gpu-lab routes soft area XPBD stepping through isolated gpu-only runtime s
   );
 });
 
-test('gpu-lab routes hybrid rigid-soft attachment constraints through isolated gpu-only runtime solver module', () => {
-  assert.match(
-    source,
-    /import \{ applyHybridAttachmentConstraintsGpuOnly \} from '\/runtime-solvers\/stepHybridConstraintsGpuOnly\.js';/,
-    'expected isolated gpu-only hybrid attachment module import',
-  );
-
-  assert.match(
-    source,
-    /if \(solverPath === 'gpu-only'\) \{[\s\S]*applyHybridAttachmentConstraintsGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*for \(let iter = 0; iter < 5; iter\+\+\) \{/,
-    'expected explicit gpu-only hybrid attachment dispatch with baseline fallback loops',
-  );
-
-  assert.match(
-    source,
-    /applyHybridAttachmentConstraintsGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*state: \(sim\.hybridConstraintsWgslState \|\|= \{\}\),[\s\S]*\}\);/,
-    'expected gpu-only hybrid attachment dispatch to wire optional WGSL prep context',
-  );
-});
+// hybrid rigid-soft attachment constraints removed from gpu-lab.
 
 test('gpu-lab routes soft membrane cell-pressure stepping through isolated gpu-only runtime solver module', () => {
   assert.match(
@@ -405,8 +387,14 @@ test('gpu-lab routes post-collision soft-cluster projection and inside-correctio
 
   assert.match(
     source,
-    /if \(solverPath === 'gpu-only'\) \{[\s\S]*await applyPostCollisionRecoveryGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*computeSoftClusterKinematics\(s\.nodes\);[\s\S]*applyRigidInsideCorrectionPass\(bodies, s, hybridAttachedByRigid\);/,
+    /if \(solverPath === 'gpu-only'\) \{[\s\S]*await applyPostCollisionRecoveryGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*computeSoftClusterKinematics\(s\.nodes\);[\s\S]*applyRigidInsideCorrectionPass\(bodies, s\);/,
     'expected explicit gpu-only post-collision recovery dispatch with baseline fallback branch',
+  );
+
+  assert.match(
+    source,
+    /state: \(\(\) => \{[\s\S]*const st = \(sim\.postCollisionBoundaryWgslState \|\|= \{\}\);[\s\S]*st\.enableAuthoritativeSoftClusterProjection !== false[\s\S]*st\.enableAuthoritativeSoftClusterProjection = true;[\s\S]*\}\)\(\),/,
+    'expected gpu-only post-collision recovery to default soft-cluster rigid-motion projection to WGSL authority while preserving explicit opt-out',
   );
 });
 

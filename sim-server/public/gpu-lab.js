@@ -11,7 +11,6 @@ import { resolveRigidSoftCollisionPassGpuOnly } from '/runtime-solvers/stepRigid
 import { applySoftSpringsXPBDVelocityGpuOnly } from '/runtime-solvers/stepSoftSpringsXpbdGpuOnly.js';
 import { applySoftAreaXPBDVelocityGpuOnly } from '/runtime-solvers/stepSoftAreaXpbdGpuOnly.js';
 import { resolveSoftSoftCollisionPassGpuOnly } from '/runtime-solvers/stepSoftCollisionGpuOnly.js';
-import { applyHybridAttachmentConstraintsGpuOnly } from '/runtime-solvers/stepHybridConstraintsGpuOnly.js';
 import { applySoftMembraneCellPressureGpuOnly } from '/runtime-solvers/stepSoftMembranePressureGpuOnly.js';
 import {
   applySoftMembraneBoundaryXPBDVelocityGpuOnly,
@@ -131,7 +130,7 @@ const SOFT_AREA_BASE_COMPLIANCE = 0.0009;
 const SOFT_INTEGRATION_SCALE = 24;
 const DEFAULT_FLUID_VELOCITY_CAP = 24.0;
 const DEFAULT_FLUID_COUPLING_COMPONENT_LIMIT = 24;
-const ENABLE_HYBRID_BODY_LINKS = false;
+// rigid-soft hybrid links removed from runtime pipelines.
 
 // Soft deformation color-state thresholds:
 // - warning (yellow/orange): first-level shape drift alert
@@ -379,7 +378,6 @@ const GPU_FALLBACK_STAGE_LABELS = Object.freeze({
   softMembraneShapeMemoryWgslState: 'Membrane shape memory',
   softAreaXpbdWgslState: 'Soft area XPBD',
   softMembranePressureWgslState: 'Membrane pressure',
-  hybridConstraintsWgslState: 'Hybrid constraints',
   softIntegrateWgslState: 'Soft integrate',
   rigidPostIntegrateWgslState: 'Rigid post-integrate',
   rigidSoftCollisionWgslState: 'Rigid-soft collision',
@@ -1635,61 +1633,6 @@ function initBodies(n, controls) {
   }
 
   const hybrid = [];
-  // Minimal hybrid archetype: rigid triangle edge-attached to a soft triangle with one free soft apex.
-  const triangleCandidates = rigid
-    .map((rb, idx) => ({ rb, idx }))
-    .filter(({ rb }) => (rb.sides || 0) === 3)
-    .sort((a, b) => {
-      const ma = Math.min(a.rb.x, n - a.rb.x, a.rb.y, n - a.rb.y) - a.rb.r;
-      const mb = Math.min(b.rb.x, n - b.rb.x, b.rb.y, n - b.rb.y) - b.rb.r;
-      return mb - ma;
-    });
-
-  if (ENABLE_HYBRID_BODY_LINKS && triangleCandidates.length > 0) {
-    const triRigidIndex = triangleCandidates[0].idx;
-    const rb = rigid[triRigidIndex];
-    const va = rigidVertexWorld(rb, 1);
-    const vb = rigidVertexWorld(rb, 2);
-    const mx = (va.x + vb.x) * 0.5;
-    const my = (va.y + vb.y) * 0.5;
-    const ex = vb.x - va.x, ey = vb.y - va.y;
-    const el = Math.max(1e-6, Math.hypot(ex, ey));
-
-    // Choose the edge normal that points further into the domain to avoid corner clipping.
-    const n1 = { x: -ey / el, y: ex / el };
-    const n2 = { x: -n1.x, y: -n1.y };
-    const marginScore = (px, py) => Math.min(px, n - px, py, n - py);
-    const apexDist = rb.r * 0.95;
-    const a1 = { x: mx + n1.x * apexDist, y: my + n1.y * apexDist };
-    const a2 = { x: mx + n2.x * apexDist, y: my + n2.y * apexDist };
-    const apexRaw = marginScore(a1.x, a1.y) >= marginScore(a2.x, a2.y) ? a1 : a2;
-    const margin = rb.r * 0.75;
-    const apex = {
-      x: Math.max(margin, Math.min(n - margin, apexRaw.x)),
-      y: Math.max(margin, Math.min(n - margin, apexRaw.y)),
-    };
-
-    const nodeIndex = softNodes.length;
-    softNodes.push({
-      x: apex.x,
-      y: apex.y,
-      vx: 0,
-      vy: 0,
-      mass: controls.massSoft,
-      r: 1.4 * scale * bodyScale * softNodeRadiusScale,
-      clusterId: softClusterCount + 1000,
-      digestEnabled: false,
-      digestRGB: [1, 1, 1],
-    });
-    hybrid.push({
-      rigidIndex: triRigidIndex,
-      nodeIndex,
-      vertexA: 1,
-      vertexB: 2,
-      restA: Math.hypot(apex.x - va.x, apex.y - va.y),
-      restB: Math.hypot(apex.x - vb.x, apex.y - vb.y),
-    });
-  }
 
   return { rigid, soft: { nodes: softNodes, springs }, hybrid, softMembraneClusters };
 }
@@ -1928,16 +1871,7 @@ function cloneMiniBodies(miniBodies, controls) {
     Number.isFinite(Number(sp[6])) ? clamp(Number(sp[6]), 0, 1) : 1,
   ]);
 
-  const hybrid = (ENABLE_HYBRID_BODY_LINKS && Array.isArray(miniBodies?.hybrid))
-    ? miniBodies.hybrid.map((h) => ({
-        rigidIndex: Number(h?.rigidIndex) | 0,
-        nodeIndex: Number(h?.nodeIndex) | 0,
-        vertexA: Number(h?.vertexA) | 0,
-        vertexB: Number(h?.vertexB) | 0,
-        restA: Math.max(0.8, Number(h?.restA) || 0.8),
-        restB: Math.max(0.8, Number(h?.restB) || 0.8),
-      }))
-    : [];
+  const hybrid = [];
 
   const softMembraneClusters = Array.isArray(miniBodies?.softMembraneClusters)
     ? miniBodies.softMembraneClusters
@@ -2398,7 +2332,7 @@ function resolveRigidInsideProjection(rb, node, poly) {
   return true;
 }
 
-function applyRigidInsideCorrectionPass(bodies, soft, hybridAttachedByRigid) {
+function applyRigidInsideCorrectionPass(bodies, soft) {
   if (!bodies?.rigid?.length || !soft?.nodes?.length) return 0;
   let corrected = 0;
 
@@ -2408,10 +2342,8 @@ function applyRigidInsideCorrectionPass(bodies, soft, hybridAttachedByRigid) {
       if (!rb || rb.insideCorrectionEnabled === false) continue;
       const polys = getRigidCollisionPolysWorld(rb);
       if (!Array.isArray(polys) || polys.length === 0) continue;
-      const attachedNodeSet = hybridAttachedByRigid.get(rbi) || null;
 
       for (let ni = 0; ni < soft.nodes.length; ni++) {
-        if (attachedNodeSet && attachedNodeSet.has(ni)) continue;
         const node = soft.nodes[ni];
         if (!node) continue;
         for (const poly of polys) {
@@ -4542,48 +4474,6 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       : applySoftMembraneCellPressure(sim, s, softClusterLoops, dtPos))
     : 0;
 
-  if (solverPath === 'gpu-only') {
-    applyHybridAttachmentConstraintsGpuOnly({
-      rigidBodies: bodies.rigid,
-      soft: s,
-      hybrid: bodies.hybrid || [],
-      rigidVertexWorld,
-      dtNorm,
-      iterations: 5,
-      wgslOffload: {
-        enabled: true,
-        device: sim?.device,
-        modeProfile: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
-        state: (sim.hybridConstraintsWgslState ||= {}),
-      },
-    });
-  } else {
-    for (let iter = 0; iter < 5; iter++) {
-      // Hybrid rigid-soft attachment constraints (weld-like springs to rigid edge vertices).
-      for (const h of (bodies.hybrid || [])) {
-        const rb = bodies.rigid[h.rigidIndex];
-        const node = s.nodes[h.nodeIndex];
-        if (!rb || !node) continue;
-        const va = rigidVertexWorld(rb, h.vertexA);
-        const vb = rigidVertexWorld(rb, h.vertexB);
-        const pairs = [[va, h.restA], [vb, h.restB]];
-        for (const [anchor, rest] of pairs) {
-          const dx = node.x - anchor.x;
-          const dy = node.y - anchor.y;
-          const d = Math.max(1e-6, Math.hypot(dx, dy));
-          const err = (d - rest) * 0.74;
-          const nx = dx / d, ny = dy / d;
-          node.vx -= nx * err * 0.052 * dtNorm;
-          node.vy -= ny * err * 0.052 * dtNorm;
-          // Matched, softer reaction into rigid body to avoid hybrid jitter.
-          rb.vx += nx * err * 0.0075 * dtNorm;
-          rb.vy += ny * err * 0.0075 * dtNorm;
-          rb.omega = (rb.omega || 0) + (nx * ny) * err * 0.00075 * dtNorm;
-        }
-      }
-    }
-  }
-
   const hybridNodeVCap = 3.2;
   if (solverPath === 'gpu-only') {
     const softIntegrateRuntime = await integrateSoftBodiesGpuOnly({
@@ -4640,13 +4530,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   }
 
   const rigidContactDebug = [];
-  let hybridAttachedByRigid;
 
   if (solverPath === 'gpu-only') {
     const collisionResult = await runCollisionIterationsGpuOnly({
       rigidBodies: bodies.rigid,
       soft: s,
-      hybrid: bodies.hybrid || [],
       rigidContactDebug,
       collisionIterations: 2,
       rigidRigidSlop: 0.32,
@@ -4687,19 +4575,9 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         },
       },
     });
-    hybridAttachedByRigid = collisionResult.hybridAttachedByRigid;
     sim.collisionBoundaryRuntime = collisionResult.boundaryRuntime || { mode: 'cpu-fallback', reason: 'unknown' };
   } else {
     sim.collisionBoundaryRuntime = { mode: 'cpu-baseline', reason: 'baseline-path' };
-    hybridAttachedByRigid = new Map();
-    for (const h of (bodies.hybrid || [])) {
-      const ri = Number(h?.rigidIndex) | 0;
-      const ni = Number(h?.nodeIndex) | 0;
-      if (ri < 0 || ri >= bodies.rigid.length) continue;
-      if (ni < 0 || ni >= s.nodes.length) continue;
-      if (!hybridAttachedByRigid.has(ri)) hybridAttachedByRigid.set(ri, new Set());
-      hybridAttachedByRigid.get(ri).add(ni);
-    }
 
     // Body-body collisions: rigid↔rigid, rigid↔soft, soft↔soft
     for (let iter = 0; iter < 2; iter++) {
@@ -4717,9 +4595,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
 
       for (let rbi = 0; rbi < bodies.rigid.length; rbi++) {
         const rb = bodies.rigid[rbi];
-        const attachedNodeSet = hybridAttachedByRigid.get(rbi) || null;
         for (let ni = 0; ni < s.nodes.length; ni++) {
-          if (attachedNodeSet && attachedNodeSet.has(ni)) continue; // avoid parent rigid fighting its own hybrid-attached node
           const sn = s.nodes[ni];
           // Recompute rigid polygon from latest body state per-contact;
           // stale hull snapshots caused missed/odd contacts after position updates.
@@ -4727,7 +4603,6 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         }
         for (const [i, j, _rest, edgeBodyMode] of s.springs) {
           if (edgeBodyMode !== EDGE_BODY_MODE.BLOCK) continue;
-          if (attachedNodeSet && (attachedNodeSet.has(i) || attachedNodeSet.has(j))) continue;
           resolveRigidVsSoftEdgeCollision(rb, s.nodes[i], s.nodes[j], 0.16);
         }
       }
@@ -4788,11 +4663,16 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         wgslOffload: {
           enabled: true,
           device: sim?.device,
-          state: (sim.postCollisionBoundaryWgslState ||= {}),
+          state: (() => {
+            const st = (sim.postCollisionBoundaryWgslState ||= {});
+            if (st.enableAuthoritativeSoftClusterProjection !== false) {
+              st.enableAuthoritativeSoftClusterProjection = true;
+            }
+            return st;
+          })(),
         },
         n,
         softClusterLoops,
-        hybridAttachedByRigid,
       });
       rigidInsideCorrections = postCollisionRecovery.rigidInsideCorrections;
       membraneInsideCorrections = postCollisionRecovery.membraneInsideCorrections;
@@ -4805,7 +4685,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         membraneGainScale: 0.72,
       });
 
-      rigidInsideCorrections = applyRigidInsideCorrectionPass(bodies, s, hybridAttachedByRigid);
+      rigidInsideCorrections = applyRigidInsideCorrectionPass(bodies, s);
       membraneInsideCorrections = applyMembraneInsideCorrectionPass(sim, s, softClusterLoops);
       for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
       for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
@@ -5419,10 +5299,7 @@ function scaleImportedBodies(bodies, scale) {
     }
   }
 
-  for (const h of bodies.hybrid || []) {
-    if (Number.isFinite(Number(h.restA))) h.restA = Math.max(0.1, Number(h.restA) * s);
-    if (Number.isFinite(Number(h.restB))) h.restB = Math.max(0.1, Number(h.restB) * s);
-  }
+  // rigid-soft hybrid links removed from runtime pipelines.
 
   for (const c of bodies.softMembraneClusters || []) {
     if (Number.isFinite(Number(c?.restArea))) {
@@ -5437,10 +5314,8 @@ function mergeBodiesIntoSim(target, incoming) {
   if (!target || !incoming) return;
   target.rigid = target.rigid || [];
   target.soft = target.soft || { nodes: [], springs: [] };
-  target.hybrid = target.hybrid || [];
   target.softMembraneClusters = target.softMembraneClusters || [];
 
-  const rigidOffset = target.rigid.length;
   const nodeOffset = target.soft.nodes.length;
   const maxCluster = target.soft.nodes.reduce((m, n) => Math.max(m, n.clusterId || 0), -1);
   const clusterOffset = maxCluster + 1;
@@ -5455,13 +5330,7 @@ function mergeBodiesIntoSim(target, incoming) {
     target.soft.springs.push([a + nodeOffset, b + nodeOffset, rest, edgeBodyMode, edgeDyeMode, edgeVelocityMode, edgeMomentumTransfer]);
   }
 
-  for (const h of incoming.hybrid || []) {
-    target.hybrid.push({
-      ...h,
-      rigidIndex: (h.rigidIndex || 0) + rigidOffset,
-      nodeIndex: (h.nodeIndex || 0) + nodeOffset,
-    });
-  }
+  // rigid-soft hybrid links removed from runtime pipelines.
 
   for (const c of incoming.softMembraneClusters || []) {
     const cid = Number(c?.clusterId);
@@ -5694,7 +5563,7 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
   };
 
   const imported = buildBodiesFromCreatureSpec(spec, sim.controls.n, sim.controls);
-  if (!ENABLE_HYBRID_BODY_LINKS) imported.hybrid = [];
+  imported.hybrid = [];
   scaleImportedBodies(imported, importScale);
   centerBodiesInWorld(imported, sim.controls.n, targetSpanFraction);
   mergeBodiesIntoSim(sim.bodies, imported);
@@ -6028,20 +5897,7 @@ function drawBodiesOverlay(sim) {
       ctx.fill();
     }
 
-    // Visualize hybrid rigid-soft attachments.
-    for (const h of (sim.bodies.hybrid || [])) {
-      const rb = sim.bodies.rigid[h.rigidIndex];
-      const node = s.nodes[h.nodeIndex];
-      if (!rb || !node) continue;
-      const va = rigidVertexWorld(rb, h.vertexA);
-      const vb = rigidVertexWorld(rb, h.vertexB);
-      const pA = worldToScreen(sim, va.x, va.y);
-      const pB = worldToScreen(sim, vb.x, vb.y);
-      const pN = worldToScreen(sim, node._rx, node._ry);
-      ctx.strokeStyle = 'rgba(255,120,220,0.95)';
-      ctx.beginPath(); ctx.moveTo(pA.x, pA.y); ctx.lineTo(pN.x, pN.y); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(pB.x, pB.y); ctx.lineTo(pN.x, pN.y); ctx.stroke();
-    }
+    // rigid-soft hybrid link visualization removed.
 
     if (collisionDebug && Array.isArray(sim.lastRigidContacts)) {
       ctx.fillStyle = 'rgba(255,90,90,0.95)';
@@ -6063,9 +5919,7 @@ function drawBodiesOverlay(sim) {
     ctx.fillStyle = 'rgba(0,255,208,0.95)';
     const line2 = collisionDebug
       ? 'Body edges: BLOCK solid vs PASS dashed | segment IDs: R<body>:<edge>, S<soft-spring> | soft momentum: thin→thick (0→1) | dashed green/cyan=solver hull, dashed amber=rigid-rigid convex proxies | soft deform warn=orange, severe=red'
-      : (ENABLE_HYBRID_BODY_LINKS
-        ? 'Body edges: BLOCK solid vs PASS dashed | segment IDs: R<body>:<edge>, S<soft-spring> | soft momentum: thin→thick (0→1) | hybrid links=magenta | soft deform warn=orange, severe=red'
-        : 'Body edges: BLOCK solid vs PASS dashed | segment IDs: R<body>:<edge>, S<soft-spring> | soft momentum: thin→thick (0→1) | hybrids disabled (rigid/soft separated) | soft deform warn=orange, severe=red');
+      : 'Body edges: BLOCK solid vs PASS dashed | segment IDs: R<body>:<edge>, S<soft-spring> | soft momentum: thin→thick (0→1) | soft deform warn=orange, severe=red';
     ctx.fillText(line2, 10, canvas.height - 12);
   }
   ctx.restore();
@@ -6469,7 +6323,7 @@ async function start() {
       const spec = entry?.spec || entry;
       const importScale = entry?.importScale ?? 0.1;
       const imported = buildBodiesFromCreatureSpec(spec, sim.controls.n, sim.controls);
-      if (!ENABLE_HYBRID_BODY_LINKS) imported.hybrid = [];
+      imported.hybrid = [];
       scaleImportedBodies(imported, importScale);
       mergeBodiesIntoSim(sim.bodies, imported);
       lastImported = imported;
@@ -6567,7 +6421,7 @@ if (importSpecBtn && importSpecFile) {
       const importScale = readImportScale();
       if (simMatchesTargetGrid) {
         const imported = buildBodiesFromCreatureSpec(spec, sim.controls.n, sim.controls);
-        if (!ENABLE_HYBRID_BODY_LINKS) imported.hybrid = [];
+        imported.hybrid = [];
         scaleImportedBodies(imported, importScale);
         mergeBodiesIntoSim(sim.bodies, imported);
         sim.softDeformReferenceState = null;

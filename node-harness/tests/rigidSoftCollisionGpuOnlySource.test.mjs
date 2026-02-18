@@ -52,3 +52,11 @@ test('rigid-soft gpu-only module compacts WGSL-filtered edge pairs into determin
     'expected rigid-soft gpu-only module to compact WGSL-active edge broadphase pairs into deterministic typed-array ownership metadata for the next WGSL edge narrowphase stage',
   );
 });
+
+test('rigid-soft gpu-only module builds combined deterministic narrowphase layout/signature for upcoming WGSL narrowphase kernel bring-up', () => {
+  assert.match(
+    source,
+    /export function buildRigidSoftNarrowphaseWgslLayout\([\s\S]*nodePairRigidIndex[\s\S]*edgePairSpringIndex[\s\S]*signature[\s\S]*lastPreparedNarrowphaseCombinedSignature/,
+    'expected rigid-soft gpu-only module to assemble node+edge compact pairs into one deterministic layout/signature for next-stage WGSL narrowphase authority',
+  );
+});

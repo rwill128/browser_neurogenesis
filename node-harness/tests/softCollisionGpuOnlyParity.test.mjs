@@ -45,7 +45,7 @@ function runBaseline(soft, calls) {
   }
 }
 
-test('gpu-only soft collision pass matches baseline soft-soft collision visitation/filtering', () => {
+test('gpu-only soft collision pass matches baseline soft-soft collision visitation/filtering', async () => {
   const baselineSoft = makeState();
   const gpuSoft = makeState();
 
@@ -53,7 +53,7 @@ test('gpu-only soft collision pass matches baseline soft-soft collision visitati
   runBaseline(baselineSoft, baselineCalls);
 
   const gpuCalls = { nodeNode: [], nodeEdge: [] };
-  resolveSoftSoftCollisionPassGpuOnly({
+  await resolveSoftSoftCollisionPassGpuOnly({
     soft: gpuSoft,
     resolveCircleCollision: (a, b) => {
       gpuCalls.nodeNode.push(`${a.id}-${b.id}`);

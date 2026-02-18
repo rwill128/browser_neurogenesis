@@ -121,7 +121,7 @@ async function runPreviousInlineGpuOnlyOrchestration(state) {
       edgeSlop: 0.16,
     });
 
-    resolveSoftSoftCollisionPassGpuOnly({
+    await resolveSoftSoftCollisionPassGpuOnly({
       soft: state.soft,
       resolveCircleCollision: resolveCircleCollisionStub,
       resolveSoftNodeVsSoftEdgeCollision: resolveSoftNodeVsSoftEdgeCollisionStub,

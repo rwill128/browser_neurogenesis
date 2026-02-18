@@ -60,6 +60,12 @@ test('membrane constraints gpu-only module defines concrete WGSL membrane-bounda
     'expected boundary+bend stage to await same-frame WGSL proposal completion before authoritative replay gating',
   );
 
+  assert.doesNotMatch(
+    moduleSource,
+    /runWgslBoundaryProbe\s*&&\s*iter\s*===\s*0/,
+    'expected boundary+bend WGSL proposal capture to cover all XPBD iterations (not only iter===0) before authoritative replay',
+  );
+
   assert.match(
     moduleSource,
     /const softMembraneBendProposalWgsl = \/\* wgsl \*\/[\s\S]*let C = clamp\(d - rest, -cLimit, cLimit\);[\s\S]*deltaVxPrevOut\[i\] = \(-wP \* dl \* ux\) \* invDt;[\s\S]*lambdaNextOut\[i\] = lambdaNext;/,

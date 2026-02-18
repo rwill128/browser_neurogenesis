@@ -862,7 +862,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
         const cpuDeltaVxB = (wB * dl * nx) / dtPos;
         const cpuDeltaVyB = (wB * dl * ny) / dtPos;
 
-        if (runWgslBoundaryProbe && iter === 0) {
+        if (runWgslBoundaryProbe) {
           const cLimit = Math.max(0.08, rest * 0.28);
           edgeProposalLayout.push(
             ax,
@@ -948,7 +948,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
         const cpuDeltaVxNext = (wN * dl * ux) / dtPos;
         const cpuDeltaVyNext = (wN * dl * uy) / dtPos;
 
-        if (runWgslBoundaryProbe && iter === 0) {
+        if (runWgslBoundaryProbe) {
           const cLimit = Math.max(0.1, rest * 0.35);
           bendProposalLayout.push(
             px,

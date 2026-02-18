@@ -67,7 +67,7 @@ export async function runCollisionIterationsGpuOnly({
       resolveRigidVsRigidPolygonCollision,
     });
 
-    resolveRigidSoftCollisionPassGpuOnly({
+    await resolveRigidSoftCollisionPassGpuOnly({
       rigidBodies: rigid,
       soft: softBody,
       hybridAttachedByRigid,

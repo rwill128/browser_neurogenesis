@@ -429,11 +429,16 @@ function ensureRigidSoftNodeBroadphaseBuffers(offload, nodeCount, rigidCount, pa
     state.rigidSoftNodeBroadphasePairRigidIndex?.destroy?.();
     state.rigidSoftNodeBroadphasePairNodeIndex?.destroy?.();
     state.rigidSoftNodeBroadphaseActiveMaskOut?.destroy?.();
+    state.rigidSoftNodeBroadphaseActiveMaskReadback?.destroy?.();
     state.rigidSoftNodeBroadphasePairRigidIndex = device.createBuffer({ size: bytes, usage: storageUsage });
     state.rigidSoftNodeBroadphasePairNodeIndex = device.createBuffer({ size: bytes, usage: storageUsage });
     state.rigidSoftNodeBroadphaseActiveMaskOut = device.createBuffer({
       size: bytes,
       usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC,
+    });
+    state.rigidSoftNodeBroadphaseActiveMaskReadback = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
     });
     state.rigidSoftNodeBroadphasePairCapacity = cap;
     state.rigidSoftNodeBroadphaseBindGroup = null;
@@ -480,12 +485,12 @@ function computeRigidBodyAabbs(rigidBodies) {
   return { minX, minY, maxX, maxY };
 }
 
-function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload, layout }) {
-  if (!canUseWgslOffload(offload)) return false;
+async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload, layout }) {
+  if (!canUseWgslOffload(offload)) return null;
   const pairCount = Number(layout?.nodePairCount) || 0;
   const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
   const rigidCount = Array.isArray(rigidBodies) ? rigidBodies.length : 0;
-  if (pairCount <= 0 || nodes.length <= 0 || rigidCount <= 0) return false;
+  if (pairCount <= 0 || nodes.length <= 0 || rigidCount <= 0) return null;
 
   const state = ensureRigidSoftNodeBroadphaseBuffers(offload, nodes.length, rigidCount, pairCount);
   const device = offload.device;
@@ -506,7 +511,7 @@ function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload, layou
   if (!pipeline) {
     state.lastNodeBroadphaseDispatched = false;
     state.lastNodeBroadphaseReason = 'pipeline-pending';
-    return false;
+    return null;
   }
 
   if (!state.rigidSoftNodeBroadphaseBindGroup) {
@@ -558,6 +563,13 @@ function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload, layou
   pass.setBindGroup(0, state.rigidSoftNodeBroadphaseBindGroup);
   pass.dispatchWorkgroups(dispatchCount);
   pass.end();
+  encoder.copyBufferToBuffer(
+    state.rigidSoftNodeBroadphaseActiveMaskOut,
+    0,
+    state.rigidSoftNodeBroadphaseActiveMaskReadback,
+    0,
+    pairCount * 4,
+  );
   device.queue.submit([encoder.finish()]);
 
   state.lastNodeBroadphaseDispatched = true;
@@ -565,9 +577,22 @@ function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload, layou
   state.lastNodeBroadphaseDispatch = dispatchCount;
   state.lastNodeBroadphasePairCount = pairCount;
   state.lastNodeBroadphaseSourceRoute = 'wgsl-rigid-soft-node-broadphase-proposal';
-  return true;
+
+  try {
+    await state.rigidSoftNodeBroadphaseActiveMaskReadback.mapAsync(globalThis.GPUMapMode.READ, 0, pairCount * 4);
+    const mapped = state.rigidSoftNodeBroadphaseActiveMaskReadback.getMappedRange(0, pairCount * 4);
+    const activeMask = new Uint32Array(mapped.slice(0));
+    state.rigidSoftNodeBroadphaseActiveMaskReadback.unmap();
+    state.lastNodeBroadphaseReadbackSourceRoute = 'wgsl-rigid-soft-node-broadphase-readback';
+    return activeMask;
+  } catch (err) {
+    try { state.rigidSoftNodeBroadphaseActiveMaskReadback.unmap(); } catch {}
+    state.lastNodeBroadphaseReason = String(err?.message || err || 'readback-failed');
+    state.lastNodeBroadphaseReadbackSourceRoute = 'cpu-rigid-soft-node-broadphase-readback-fallback';
+    return null;
+  }
 }
-export function resolveRigidSoftCollisionPassGpuOnly({
+export async function resolveRigidSoftCollisionPassGpuOnly({
   rigidBodies,
   soft,
   hybridAttachedByRigid,
@@ -582,6 +607,7 @@ export function resolveRigidSoftCollisionPassGpuOnly({
   if (!soft || !Array.isArray(soft.nodes) || !Array.isArray(soft.springs)) return;
 
   let wgslPrep = null;
+  let wgslNodeBroadphaseMask = null;
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     wgslPrep = buildRigidSoftCollisionWgslLayout({
       rigidBodies,
@@ -598,24 +624,36 @@ export function resolveRigidSoftCollisionPassGpuOnly({
     wgslOffload.state.lastMode = 'cpu-prepared';
     wgslOffload.state.lastError = null;
 
-    const dispatched = dispatchRigidSoftNodeBroadphaseWgsl({
+    wgslNodeBroadphaseMask = await dispatchRigidSoftNodeBroadphaseWgsl({
       rigidBodies,
       soft,
       offload: wgslOffload,
       layout: wgslPrep,
     });
-    if (dispatched) {
-      wgslOffload.state.lastSourceRoute = 'wgsl-rigid-soft-node-broadphase-proposal';
-      wgslOffload.state.lastMode = 'cpu-authoritative-wgsl-broadphase-proposal';
+    if (wgslNodeBroadphaseMask && wgslNodeBroadphaseMask.length === (wgslPrep.nodePairCount >>> 0)) {
+      wgslOffload.state.lastSourceRoute = 'wgsl-rigid-soft-node-broadphase-authoritative-filter';
+      wgslOffload.state.lastMode = 'wgsl-broadphase-authoritative-filter';
+      wgslOffload.state.lastNodeBroadphaseReadbackCount = wgslNodeBroadphaseMask.length;
+    } else if (wgslNodeBroadphaseMask) {
+      wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-node-broadphase-mask-fallback';
+      wgslOffload.state.lastMode = 'cpu-authoritative-mask-fallback';
+      wgslOffload.state.lastError = 'rigid-soft-broadphase-mask-size-mismatch';
+      wgslNodeBroadphaseMask = null;
     }
   }
 
+  let nodePairCursor = 0;
   for (let rbi = 0; rbi < rigidBodies.length; rbi++) {
     const rb = rigidBodies[rbi];
     const attachedNodeSet = hybridAttachedByRigid?.get?.(rbi) || null;
 
     for (let ni = 0; ni < soft.nodes.length; ni++) {
       if (attachedNodeSet && attachedNodeSet.has(ni)) continue;
+      const broadphaseActive = wgslNodeBroadphaseMask
+        ? (wgslNodeBroadphaseMask[nodePairCursor] === 1)
+        : true;
+      nodePairCursor++;
+      if (!broadphaseActive) continue;
       const sn = soft.nodes[ni];
       resolveRigidVsSoftNodeCollision(rb, sn, null, nodeSlop);
     }

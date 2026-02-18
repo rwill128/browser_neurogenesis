@@ -57,7 +57,7 @@ function runBaseline(state, calls) {
   }
 }
 
-test('gpu-only rigid-soft collision pass matches baseline contact visitation and filtering', () => {
+test('gpu-only rigid-soft collision pass matches baseline contact visitation and filtering', async () => {
   const baselineState = makeState();
   const gpuState = makeState();
 
@@ -65,7 +65,7 @@ test('gpu-only rigid-soft collision pass matches baseline contact visitation and
   runBaseline(baselineState, baselineCalls);
 
   const gpuCalls = { nodes: [], edges: [] };
-  resolveRigidSoftCollisionPassGpuOnly({
+  await resolveRigidSoftCollisionPassGpuOnly({
     rigidBodies: gpuState.rigid,
     soft: gpuState.soft,
     hybridAttachedByRigid: gpuState.hybridAttachedByRigid,
@@ -174,11 +174,11 @@ function snapshotRuntimeState(state) {
   };
 }
 
-test('gpu-only rigid-soft pass default runtime collision solver matches baseline physics outcomes', () => {
+test('gpu-only rigid-soft pass default runtime collision solver matches baseline physics outcomes', async () => {
   const baseline = makeRuntimeState();
   const gpuOnly = deepClone(baseline);
 
-  resolveRigidSoftCollisionPassGpuOnly({
+  await resolveRigidSoftCollisionPassGpuOnly({
     rigidBodies: baseline.rigidBodies,
     soft: baseline.soft,
     hybridAttachedByRigid: baseline.hybridAttachedByRigid,
@@ -189,7 +189,7 @@ test('gpu-only rigid-soft pass default runtime collision solver matches baseline
     edgeSlop: 0.16,
   });
 
-  resolveRigidSoftCollisionPassGpuOnly({
+  await resolveRigidSoftCollisionPassGpuOnly({
     rigidBodies: gpuOnly.rigidBodies,
     soft: gpuOnly.soft,
     hybridAttachedByRigid: gpuOnly.hybridAttachedByRigid,
@@ -239,7 +239,7 @@ test('gpu-only rigid-soft pass default runtime collision solver matches baseline
   assert.equal(moved, false);
 });
 
-test('gpu-only rigid-soft pass publishes deterministic WGSL candidate layout source-route telemetry while preserving parity', () => {
+test('gpu-only rigid-soft pass publishes deterministic WGSL candidate layout source-route telemetry while preserving parity', async () => {
   const baselineState = makeState();
   const gpuState = makeState();
   const wgslState = {};
@@ -248,7 +248,7 @@ test('gpu-only rigid-soft pass publishes deterministic WGSL candidate layout sou
   runBaseline(baselineState, baselineCalls);
 
   const gpuCalls = { nodes: [], edges: [] };
-  resolveRigidSoftCollisionPassGpuOnly({
+  await resolveRigidSoftCollisionPassGpuOnly({
     rigidBodies: gpuState.rigid,
     soft: gpuState.soft,
     hybridAttachedByRigid: gpuState.hybridAttachedByRigid,
@@ -275,12 +275,16 @@ test('gpu-only rigid-soft pass publishes deterministic WGSL candidate layout sou
   assert.equal(wgslState.preparedLayout.edgePairSpringIndex.length, baselineCalls.edges.length);
 });
 
-test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when device is available while preserving CPU collision visitation parity', () => {
+test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when device is available while preserving CPU collision visitation parity', async () => {
   globalThis.GPUBufferUsage ??= {
     STORAGE: 1 << 0,
     COPY_DST: 1 << 1,
     UNIFORM: 1 << 2,
     COPY_SRC: 1 << 3,
+    MAP_READ: 1 << 4,
+  };
+  globalThis.GPUMapMode ??= {
+    READ: 1,
   };
 
   const baselineState = makeState();
@@ -292,8 +296,18 @@ test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when dev
   const writes = [];
   const dispatches = [];
   const mockPipeline = { getBindGroupLayout: () => ({}) };
+  const makeReadableBuffer = () => {
+    const data = new Uint32Array(1024);
+    data.fill(1);
+    return {
+      destroy() {},
+      async mapAsync() {},
+      getMappedRange(_offset = 0, size = data.byteLength) { return data.buffer.slice(0, size); },
+      unmap() {},
+    };
+  };
   const mockDevice = {
-    createBuffer: () => ({ destroy() {} }),
+    createBuffer: () => makeReadableBuffer(),
     createShaderModule: ({ code }) => ({ code }),
     createComputePipelineAsync: () => Promise.resolve(mockPipeline),
     createBindGroup: () => ({}),
@@ -304,6 +318,7 @@ test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when dev
         dispatchWorkgroups(count) { dispatches.push(count); },
         end() {},
       }),
+      copyBufferToBuffer() {},
       finish: () => ({}),
     }),
     queue: {
@@ -316,7 +331,7 @@ test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when dev
     rigidSoftNodeBroadphasePipeline: mockPipeline,
   };
 
-  resolveRigidSoftCollisionPassGpuOnly({
+  await resolveRigidSoftCollisionPassGpuOnly({
     rigidBodies: gpuState.rigid,
     soft: gpuState.soft,
     hybridAttachedByRigid: gpuState.hybridAttachedByRigid,
@@ -332,8 +347,8 @@ test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when dev
 
   assert.deepEqual(gpuCalls, baselineCalls);
   assert.equal(wgslState.lastNodeBroadphaseDispatched, true);
-  assert.equal(wgslState.lastSourceRoute, 'wgsl-rigid-soft-node-broadphase-proposal');
-  assert.equal(wgslState.lastMode, 'cpu-authoritative-wgsl-broadphase-proposal');
+  assert.equal(wgslState.lastSourceRoute, 'wgsl-rigid-soft-node-broadphase-authoritative-filter');
+  assert.equal(wgslState.lastMode, 'wgsl-broadphase-authoritative-filter');
   assert.ok(dispatches[0] >= 1);
   assert.ok(writes.length >= 8);
 });

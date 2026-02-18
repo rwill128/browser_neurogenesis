@@ -13,18 +13,18 @@ test('rigid-soft gpu-only module prepares deterministic candidate layout ownersh
   );
 });
 
-test('rigid-soft gpu-only pass publishes cpu-prepared source route while keeping cpu-authoritative collision behavior', () => {
+test('rigid-soft gpu-only pass publishes cpu-prepared source route before WGSL broadphase bring-up', () => {
   assert.match(
     source,
     /if \(wgslOffload\?\.enabled === true && wgslOffload\?\.state\) \{[\s\S]*lastSourceRoute = 'cpu-rigid-soft-candidate-layout';[\s\S]*lastMode = 'cpu-prepared';/,
-    'expected rigid-soft gpu-only pass to persist source-route ownership for deterministic candidate layout prep before WGSL dispatch lands',
+    'expected rigid-soft gpu-only pass to persist source-route ownership for deterministic candidate layout prep before WGSL broadphase dispatch/readback',
   );
 });
 
-test('rigid-soft gpu-only module dispatches concrete WGSL node broadphase proposal stage and records source-route ownership', () => {
+test('rigid-soft gpu-only module dispatches WGSL broadphase with active-mask readback and can promote it to authoritative collision filtering', () => {
   assert.match(
     source,
-    /const rigidSoftNodeBroadphaseWgsl = \/\* wgsl \*\/[\s\S]*activeMaskOut\[pairIndex\][\s\S]*dispatchRigidSoftNodeBroadphaseWgsl\([\s\S]*lastMode = 'cpu-authoritative-wgsl-broadphase-proposal';/,
-    'expected rigid-soft gpu-only module to run a concrete WGSL node broadphase dispatch and publish source-route ownership while CPU narrowphase remains authoritative',
+    /encoder\.copyBufferToBuffer\([\s\S]*rigidSoftNodeBroadphaseActiveMaskReadback[\s\S]*mapAsync\(globalThis\.GPUMapMode\.READ[\s\S]*lastSourceRoute = 'wgsl-rigid-soft-node-broadphase-authoritative-filter';[\s\S]*lastMode = 'wgsl-broadphase-authoritative-filter';/,
+    'expected rigid-soft gpu-only module to read back concrete WGSL broadphase masks and apply them as authoritative node-collision filtering when valid',
   );
 });

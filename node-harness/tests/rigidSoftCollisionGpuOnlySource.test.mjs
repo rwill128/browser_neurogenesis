@@ -102,3 +102,17 @@ test('rigid-soft gpu-only module lands concrete WGSL edge narrowphase AABB probe
     'expected rigid-soft gpu-only pass to dispatch edge-pair AABB probe and publish deterministic source-route telemetry',
   );
 });
+
+test('rigid-soft gpu-only module prepares deterministic narrowphase impulse-seed layout ownership for next WGSL narrowphase impulse kernel', () => {
+  assert.match(
+    source,
+    /export function buildRigidSoftNarrowphaseImpulseSeedLayout\([\s\S]*nodePairRigidIndex[\s\S]*edgePairSpringIndex[\s\S]*rigidInvMass[\s\S]*nodeInvMass[\s\S]*signature/,
+    'expected rigid-soft gpu-only module to build a deterministic impulse-seed layout from narrowphase pairs + scene streams for next WGSL narrowphase impulse stage',
+  );
+
+  assert.match(
+    source,
+    /lastPreparedNarrowphaseImpulseSeedLayoutBytes[\s\S]*lastPreparedNarrowphaseImpulseSeedSignature[\s\S]*lastPreparedNarrowphaseImpulseSeedSource = 'cpu-rigid-soft-narrowphase-impulse-seed-layout';/,
+    'expected rigid-soft gpu-only pass to persist impulse-seed layout telemetry/source-route ownership for immediate WGSL narrowphase impulse kernel follow-up',
+  );
+});

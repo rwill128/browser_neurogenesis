@@ -1610,6 +1610,117 @@ async function dispatchRigidSoftEdgeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
   return finite;
 }
 
+export function buildRigidSoftNarrowphaseImpulseSeedLayout({
+  narrowphaseLayout,
+  narrowphaseSceneLayout,
+}) {
+  const nodePairRigidIndex = narrowphaseLayout?.nodePairRigidIndex;
+  const nodePairNodeIndex = narrowphaseLayout?.nodePairNodeIndex;
+  const edgePairRigidIndex = narrowphaseLayout?.edgePairRigidIndex;
+  const edgePairSpringIndex = narrowphaseLayout?.edgePairSpringIndex;
+  const edgePairNodeAIndex = narrowphaseLayout?.edgePairNodeAIndex;
+  const edgePairNodeBIndex = narrowphaseLayout?.edgePairNodeBIndex;
+
+  const rigidX = narrowphaseSceneLayout?.rigidX;
+  const rigidY = narrowphaseSceneLayout?.rigidY;
+  const rigidMinX = narrowphaseSceneLayout?.rigidMinX;
+  const rigidMinY = narrowphaseSceneLayout?.rigidMinY;
+  const rigidMaxX = narrowphaseSceneLayout?.rigidMaxX;
+  const rigidMaxY = narrowphaseSceneLayout?.rigidMaxY;
+  const rigidInvMass = narrowphaseSceneLayout?.rigidInvMass;
+  const rigidInvInertia = narrowphaseSceneLayout?.rigidInvInertia;
+  const nodeX = narrowphaseSceneLayout?.nodeX;
+  const nodeY = narrowphaseSceneLayout?.nodeY;
+  const nodeVx = narrowphaseSceneLayout?.nodeVx;
+  const nodeVy = narrowphaseSceneLayout?.nodeVy;
+  const nodeR = narrowphaseSceneLayout?.nodeR;
+  const nodeInvMass = narrowphaseSceneLayout?.nodeInvMass;
+
+  if (!(nodePairRigidIndex instanceof Uint32Array)
+    || !(nodePairNodeIndex instanceof Uint32Array)
+    || !(edgePairRigidIndex instanceof Uint32Array)
+    || !(edgePairSpringIndex instanceof Uint32Array)
+    || !(edgePairNodeAIndex instanceof Uint32Array)
+    || !(edgePairNodeBIndex instanceof Uint32Array)
+    || !(rigidX instanceof Float32Array)
+    || !(rigidY instanceof Float32Array)
+    || !(rigidMinX instanceof Float32Array)
+    || !(rigidMinY instanceof Float32Array)
+    || !(rigidMaxX instanceof Float32Array)
+    || !(rigidMaxY instanceof Float32Array)
+    || !(rigidInvMass instanceof Float32Array)
+    || !(rigidInvInertia instanceof Float32Array)
+    || !(nodeX instanceof Float32Array)
+    || !(nodeY instanceof Float32Array)
+    || !(nodeVx instanceof Float32Array)
+    || !(nodeVy instanceof Float32Array)
+    || !(nodeR instanceof Float32Array)
+    || !(nodeInvMass instanceof Float32Array)) {
+    return null;
+  }
+
+  let signature = 0x811c9dc5;
+  signature = fnv1aMix(signature, nodePairRigidIndex.length >>> 0);
+  signature = fnv1aMix(signature, edgePairRigidIndex.length >>> 0);
+  signature = fnv1aMix(signature, rigidX.length >>> 0);
+  signature = fnv1aMix(signature, nodeX.length >>> 0);
+  signature = fnv1aMix(signature, narrowphaseLayout?.signature >>> 0);
+  signature = fnv1aMix(signature, narrowphaseSceneLayout?.signature >>> 0);
+
+  const sampleNodeCount = Math.min(nodePairNodeIndex.length, 64);
+  for (let i = 0; i < sampleNodeCount; i++) {
+    signature = fnv1aMix(signature, nodePairRigidIndex[i] >>> 0);
+    signature = fnv1aMix(signature, nodePairNodeIndex[i] >>> 0);
+  }
+
+  return {
+    nodePairRigidIndex,
+    nodePairNodeIndex,
+    edgePairRigidIndex,
+    edgePairSpringIndex,
+    edgePairNodeAIndex,
+    edgePairNodeBIndex,
+    rigidX,
+    rigidY,
+    rigidMinX,
+    rigidMinY,
+    rigidMaxX,
+    rigidMaxY,
+    rigidInvMass,
+    rigidInvInertia,
+    nodeX,
+    nodeY,
+    nodeVx,
+    nodeVy,
+    nodeR,
+    nodeInvMass,
+    nodePairCount: nodePairRigidIndex.length,
+    edgePairCount: edgePairRigidIndex.length,
+    byteLength:
+      nodePairRigidIndex.byteLength
+      + nodePairNodeIndex.byteLength
+      + edgePairRigidIndex.byteLength
+      + edgePairSpringIndex.byteLength
+      + edgePairNodeAIndex.byteLength
+      + edgePairNodeBIndex.byteLength
+      + rigidX.byteLength
+      + rigidY.byteLength
+      + rigidMinX.byteLength
+      + rigidMinY.byteLength
+      + rigidMaxX.byteLength
+      + rigidMaxY.byteLength
+      + rigidInvMass.byteLength
+      + rigidInvInertia.byteLength
+      + nodeX.byteLength
+      + nodeY.byteLength
+      + nodeVx.byteLength
+      + nodeVy.byteLength
+      + nodeR.byteLength
+      + nodeInvMass.byteLength,
+    signature: signature >>> 0,
+  };
+}
+
 export async function resolveRigidSoftCollisionPassGpuOnly({
   rigidBodies,
   soft,
@@ -1771,6 +1882,32 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       wgslOffload.state.lastPreparedNarrowphaseSceneSpringNodeB = narrowphaseSceneLayout.springNodeB;
       wgslOffload.state.lastPreparedNarrowphaseSceneSpringRestLen = narrowphaseSceneLayout.springRestLen;
       wgslOffload.state.lastPreparedNarrowphaseSceneSource = 'cpu-rigid-soft-narrowphase-scene-layout';
+    }
+
+    const narrowphaseImpulseSeedLayout = buildRigidSoftNarrowphaseImpulseSeedLayout({
+      narrowphaseLayout,
+      narrowphaseSceneLayout,
+    });
+    if (narrowphaseImpulseSeedLayout) {
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedLayoutBytes = narrowphaseImpulseSeedLayout.byteLength;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedSignature = narrowphaseImpulseSeedLayout.signature;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodePairCount = narrowphaseImpulseSeedLayout.nodePairCount;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedEdgePairCount = narrowphaseImpulseSeedLayout.edgePairCount;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodePairRigidIndex = narrowphaseImpulseSeedLayout.nodePairRigidIndex;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodePairNodeIndex = narrowphaseImpulseSeedLayout.nodePairNodeIndex;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedEdgePairRigidIndex = narrowphaseImpulseSeedLayout.edgePairRigidIndex;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedEdgePairSpringIndex = narrowphaseImpulseSeedLayout.edgePairSpringIndex;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedEdgePairNodeAIndex = narrowphaseImpulseSeedLayout.edgePairNodeAIndex;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedEdgePairNodeBIndex = narrowphaseImpulseSeedLayout.edgePairNodeBIndex;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedRigidInvMass = narrowphaseImpulseSeedLayout.rigidInvMass;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedRigidInvInertia = narrowphaseImpulseSeedLayout.rigidInvInertia;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodeX = narrowphaseImpulseSeedLayout.nodeX;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodeY = narrowphaseImpulseSeedLayout.nodeY;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodeVx = narrowphaseImpulseSeedLayout.nodeVx;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodeVy = narrowphaseImpulseSeedLayout.nodeVy;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodeR = narrowphaseImpulseSeedLayout.nodeR;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodeInvMass = narrowphaseImpulseSeedLayout.nodeInvMass;
+      wgslOffload.state.lastPreparedNarrowphaseImpulseSeedSource = 'cpu-rigid-soft-narrowphase-impulse-seed-layout';
     }
   }
 

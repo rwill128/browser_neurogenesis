@@ -74,6 +74,7 @@ export async function runCollisionIterationsGpuOnly({
       edgeBodyModeBlock,
       nodeSlop: rigidSoftNodeSlop,
       edgeSlop: rigidSoftEdgeSlop,
+      wgslOffload,
     });
 
     resolveSoftSoftCollisionPassGpuOnly({

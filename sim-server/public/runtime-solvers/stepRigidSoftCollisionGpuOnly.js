@@ -259,6 +259,73 @@ export function resolveRigidVsSoftEdgeCollisionGpuOnly(rigid, a, b, restitution 
   return true;
 }
 
+function fnv1aMix(seed, value) {
+  let h = seed >>> 0;
+  h ^= Number(value) >>> 0;
+  h = Math.imul(h, 16777619) >>> 0;
+  return h >>> 0;
+}
+
+function buildRigidSoftCollisionWgslLayout({ rigidBodies, soft, hybridAttachedByRigid, edgeBodyModeBlock }) {
+  const rigid = Array.isArray(rigidBodies) ? rigidBodies : [];
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const springs = Array.isArray(soft?.springs) ? soft.springs : [];
+
+  const nodePairRigidIndex = [];
+  const nodePairNodeIndex = [];
+  const edgePairRigidIndex = [];
+  const edgePairSpringIndex = [];
+
+  let signature = 0x811c9dc5;
+
+  for (let rbi = 0; rbi < rigid.length; rbi++) {
+    const attachedNodeSet = hybridAttachedByRigid?.get?.(rbi) || null;
+
+    for (let ni = 0; ni < nodes.length; ni++) {
+      if (attachedNodeSet && attachedNodeSet.has(ni)) continue;
+      nodePairRigidIndex.push(rbi);
+      nodePairNodeIndex.push(ni);
+      signature = fnv1aMix(signature, rbi);
+      signature = fnv1aMix(signature, ni);
+    }
+
+    for (let si = 0; si < springs.length; si++) {
+      const spring = springs[si];
+      if (!Array.isArray(spring) || spring.length < 4) continue;
+      const i = Number(spring[0]) | 0;
+      const j = Number(spring[1]) | 0;
+      const edgeBodyMode = spring[3];
+      if (edgeBodyMode !== edgeBodyModeBlock) continue;
+      if (i < 0 || j < 0 || i >= nodes.length || j >= nodes.length) continue;
+      if (attachedNodeSet && (attachedNodeSet.has(i) || attachedNodeSet.has(j))) continue;
+      edgePairRigidIndex.push(rbi);
+      edgePairSpringIndex.push(si);
+      signature = fnv1aMix(signature, rbi);
+      signature = fnv1aMix(signature, si);
+    }
+  }
+
+  const layout = {
+    nodePairRigidIndex: new Uint32Array(nodePairRigidIndex),
+    nodePairNodeIndex: new Uint32Array(nodePairNodeIndex),
+    edgePairRigidIndex: new Uint32Array(edgePairRigidIndex),
+    edgePairSpringIndex: new Uint32Array(edgePairSpringIndex),
+  };
+
+  const byteLength = layout.nodePairRigidIndex.byteLength
+    + layout.nodePairNodeIndex.byteLength
+    + layout.edgePairRigidIndex.byteLength
+    + layout.edgePairSpringIndex.byteLength;
+
+  return {
+    layout,
+    nodePairCount: layout.nodePairRigidIndex.length,
+    edgePairCount: layout.edgePairRigidIndex.length,
+    byteLength,
+    signature: signature >>> 0,
+  };
+}
+
 export function resolveRigidSoftCollisionPassGpuOnly({
   rigidBodies,
   soft,
@@ -268,9 +335,27 @@ export function resolveRigidSoftCollisionPassGpuOnly({
   edgeBodyModeBlock,
   nodeSlop = 0.18,
   edgeSlop = 0.16,
+  wgslOffload,
 }) {
   if (!Array.isArray(rigidBodies) || rigidBodies.length === 0) return;
   if (!soft || !Array.isArray(soft.nodes) || !Array.isArray(soft.springs)) return;
+
+  if (wgslOffload?.enabled === true && wgslOffload?.state) {
+    const prep = buildRigidSoftCollisionWgslLayout({
+      rigidBodies,
+      soft,
+      hybridAttachedByRigid,
+      edgeBodyModeBlock,
+    });
+    wgslOffload.state.preparedLayout = prep.layout;
+    wgslOffload.state.lastPreparedNodePairCount = prep.nodePairCount;
+    wgslOffload.state.lastPreparedEdgePairCount = prep.edgePairCount;
+    wgslOffload.state.lastPreparedLayoutBytes = prep.byteLength;
+    wgslOffload.state.lastPreparedLayoutSignature = prep.signature;
+    wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-candidate-layout';
+    wgslOffload.state.lastMode = 'cpu-prepared';
+    wgslOffload.state.lastError = null;
+  }
 
   for (let rbi = 0; rbi < rigidBodies.length; rbi++) {
     const rb = rigidBodies[rbi];

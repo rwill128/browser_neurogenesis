@@ -238,3 +238,39 @@ test('gpu-only rigid-soft pass default runtime collision solver matches baseline
   const moved = resolveRigidVsSoftEdgeCollisionGpuOnly(probeRigid, { x: 10, y: 10, vx: 0, vy: 0 }, { x: 12, y: 10, vx: 0, vy: 0 }, 0.16);
   assert.equal(moved, false);
 });
+
+test('gpu-only rigid-soft pass publishes deterministic WGSL candidate layout source-route telemetry while preserving parity', () => {
+  const baselineState = makeState();
+  const gpuState = makeState();
+  const wgslState = {};
+
+  const baselineCalls = { nodes: [], edges: [] };
+  runBaseline(baselineState, baselineCalls);
+
+  const gpuCalls = { nodes: [], edges: [] };
+  resolveRigidSoftCollisionPassGpuOnly({
+    rigidBodies: gpuState.rigid,
+    soft: gpuState.soft,
+    hybridAttachedByRigid: gpuState.hybridAttachedByRigid,
+    resolveRigidVsSoftNodeCollision: (rb, sn) => {
+      gpuCalls.nodes.push(`${rb.id}->${sn.id}`);
+    },
+    resolveRigidVsSoftEdgeCollision: (rb, a, b) => {
+      gpuCalls.edges.push(`${rb.id}->${a.id}-${b.id}`);
+    },
+    edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
+    wgslOffload: { enabled: true, state: wgslState },
+  });
+
+  assert.deepEqual(gpuCalls, baselineCalls);
+  assert.equal(wgslState.lastMode, 'cpu-prepared');
+  assert.equal(wgslState.lastSourceRoute, 'cpu-rigid-soft-candidate-layout');
+  assert.ok(Number.isInteger(wgslState.lastPreparedLayoutSignature));
+  assert.ok(wgslState.lastPreparedLayoutBytes > 0);
+  assert.equal(wgslState.lastPreparedNodePairCount, baselineCalls.nodes.length);
+  assert.equal(wgslState.lastPreparedEdgePairCount, baselineCalls.edges.length);
+  assert.equal(wgslState.preparedLayout.nodePairRigidIndex.length, baselineCalls.nodes.length);
+  assert.equal(wgslState.preparedLayout.nodePairNodeIndex.length, baselineCalls.nodes.length);
+  assert.equal(wgslState.preparedLayout.edgePairRigidIndex.length, baselineCalls.edges.length);
+  assert.equal(wgslState.preparedLayout.edgePairSpringIndex.length, baselineCalls.edges.length);
+});

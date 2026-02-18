@@ -527,11 +527,10 @@ export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
 
   const rigidInsideCorrections =
     typeof applyRigidInsideCorrectionPass === 'function'
-      ? applyRigidInsideCorrectionPass(bodies, soft, args.hybridAttachedByRigid)
+      ? applyRigidInsideCorrectionPass(bodies, soft)
       : applyRigidInsideCorrectionPassGpuOnly({
         rigidBodies: bodies.rigid,
         soft,
-        hybridAttachedByRigid: args.hybridAttachedByRigid,
       });
 
   const membraneInsideCorrections =

@@ -27,7 +27,6 @@ function makeState() {
     dtNorm: 1.35,
     n: 32,
     softClusterLoops: [{ clusterId: 1 }, { clusterId: 3 }],
-    hybridAttachedByRigid: new Map([[0, new Set([0])]]),
     softMembraneClusterSet: new Set([3]),
     softClusterCollisionLinearProjection: 0.22,
     softClusterCollisionAngularProjection: 0.14,
@@ -107,7 +106,7 @@ function runBaselineInline(state, callbacks) {
     membraneGainScale: 0.72,
   });
 
-  const rigidInsideCorrections = callbacks.applyRigidInsideCorrectionPass(state.bodies, state.soft, state.hybridAttachedByRigid);
+  const rigidInsideCorrections = callbacks.applyRigidInsideCorrectionPass(state.bodies, state.soft);
   const membraneInsideCorrections = callbacks.applyMembraneInsideCorrectionPass(state.sim, state.soft, state.softClusterLoops);
   for (const rb of state.bodies.rigid) callbacks.applyBounceBoundary(rb, state.n, 0.84);
   for (const sn of state.soft.nodes) callbacks.applyBounceBoundary(sn, state.n, 0.78);
@@ -140,7 +139,6 @@ test('post-collision recovery parity: gpu-only module matches baseline projectio
     applyBounceBoundary: gpuCallbacks.applyBounceBoundary,
     n: gpuState.n,
     softClusterLoops: gpuState.softClusterLoops,
-    hybridAttachedByRigid: gpuState.hybridAttachedByRigid,
   });
 
   assert.equal(gpu.rigidInsideCorrections, baseline.rigidInsideCorrections);
@@ -185,7 +183,6 @@ test('post-collision recovery parity: gpu-only module awaits async projection ca
     },
     n: state.n,
     softClusterLoops: state.softClusterLoops,
-    hybridAttachedByRigid: state.hybridAttachedByRigid,
   });
 
   assert.equal(gpu.rigidInsideCorrections, 0);
@@ -209,7 +206,6 @@ test('post-collision recovery parity: gpu-only module uses isolated cluster kine
   const baselineRigidInsideCorrections = baselineCallbacks.applyRigidInsideCorrectionPass(
     baselineState.bodies,
     baselineState.soft,
-    baselineState.hybridAttachedByRigid,
   );
   const baselineMembraneInsideCorrections = baselineCallbacks.applyMembraneInsideCorrectionPass(
     baselineState.sim,
@@ -233,7 +229,6 @@ test('post-collision recovery parity: gpu-only module uses isolated cluster kine
     applyBounceBoundary: baselineCallbacks.applyBounceBoundary,
     n: gpuState.n,
     softClusterLoops: gpuState.softClusterLoops,
-    hybridAttachedByRigid: gpuState.hybridAttachedByRigid,
   });
 
   assert.equal(gpu.rigidInsideCorrections, baselineRigidInsideCorrections);
@@ -263,7 +258,6 @@ function makeDefaultMembraneState() {
     dtNorm: 1.1,
     n: 32,
     softClusterLoops: [{ clusterId: 1, indices: [0, 1, 2, 3] }],
-    hybridAttachedByRigid: new Map(),
     softMembraneClusterSet: new Set([1]),
     softClusterCollisionLinearProjection: 0.2,
     softClusterCollisionAngularProjection: 0.1,
@@ -293,7 +287,6 @@ test('post-collision recovery parity: records deterministic soft-cluster WGSL so
     wgslOffload,
     n: state.n,
     softClusterLoops: state.softClusterLoops,
-    hybridAttachedByRigid: state.hybridAttachedByRigid,
   });
 
   assert.equal(wgslOffload.state.lastMode, 'cpu-prepared-soft-cluster-kinematics');
@@ -358,7 +351,6 @@ test('post-collision recovery parity: replays authoritative WGSL soft-cluster ma
     wgslOffload,
     n: state.n,
     softClusterLoops: state.softClusterLoops,
-    hybridAttachedByRigid: state.hybridAttachedByRigid,
   });
 
   assert.equal(wgslOffload.state.lastAuthoritativeSoftClusterSource, 'wgsl-soft-cluster-mass-moments-authoritative');
@@ -408,7 +400,6 @@ test('post-collision recovery parity: delegates boundary pass to gpu-only collis
     wgslOffload: { enabled: true, device: {}, state: {} },
     n: state.n,
     softClusterLoops: state.softClusterLoops,
-    hybridAttachedByRigid: state.hybridAttachedByRigid,
   });
 
   assert.deepEqual(calls, ['boundary:0.84:0.78']);
@@ -441,7 +432,6 @@ test('post-collision recovery parity: default gpu-only membrane inside-correctio
   const baselineRigidInsideCorrections = rigidInside(
     baselineState.bodies,
     baselineState.soft,
-    baselineState.hybridAttachedByRigid,
   );
   const baselineMembraneInsideCorrections = applySoftMembraneInsideCorrectionPassGpuOnly({
     sim: baselineState.sim,
@@ -464,7 +454,6 @@ test('post-collision recovery parity: default gpu-only membrane inside-correctio
     applyBounceBoundary: bounce,
     n: gpuState.n,
     softClusterLoops: gpuState.softClusterLoops,
-    hybridAttachedByRigid: gpuState.hybridAttachedByRigid,
   });
 
   assert.equal(gpu.rigidInsideCorrections, baselineRigidInsideCorrections);

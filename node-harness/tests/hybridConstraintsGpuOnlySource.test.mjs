@@ -69,3 +69,17 @@ test('hybrid constraints gpu-only path dispatches real WGSL attachment probe + v
     'expected wgsl node-reduction dispatch to publish deterministic cpu reference + parity ownership',
   );
 });
+
+test('hybrid constraints gpu-only fast mode skips cpu parity/reference work while preserving finite safety guards and source-route visibility', () => {
+  assert.match(
+    source,
+    /isGpuOnlyFastMode\(wgslOffload\)[\s\S]*dispatchHybridAttachmentVelocityDeltaProposal\([\s\S]*includeCpuParity: !fastMode[\s\S]*checkFiniteFloat32Array\([\s\S]*lastVelocityNodeReductionFinite[\s\S]*if \(fastMode\) \{[\s\S]*lastVelocityNodeReductionSource = 'wgsl-node-reduction-proposal-fast'[\s\S]*lastVelocityNodeReductionCpuReference = null;[\s\S]*validation: 'skipped-cpu-parity'/,
+    'expected fast mode branch to cut cpu parity/reference overhead while retaining finite checks and explicit source-route ownership',
+  );
+
+  assert.match(
+    source,
+    /function applyHybridAuthoritativeCachedProposal\([\s\S]*if \(fastMode\) \{[\s\S]*finite\?\.allFinite !== true[\s\S]*\} else if \(!parity[\s\S]*maxAbsError > 1e-5\)/,
+    'expected authoritative replay gate to switch to finite safety checks in fast mode while keeping validated parity gate intact',
+  );
+});

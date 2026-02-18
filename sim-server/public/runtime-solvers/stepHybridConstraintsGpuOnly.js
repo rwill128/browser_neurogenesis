@@ -172,6 +172,23 @@ function canUseWgslOffload(offload) {
   return true;
 }
 
+function isGpuOnlyFastMode(wgslOffload) {
+  return String(wgslOffload?.modeProfile || '').trim().toLowerCase() === 'gpu-only-fast';
+}
+
+function checkFiniteFloat32Array(values) {
+  if (!(values instanceof Float32Array)) return { allFinite: false, nonFiniteCount: 0, comparedCount: 0 };
+  let nonFiniteCount = 0;
+  for (let i = 0; i < values.length; i++) {
+    if (!Number.isFinite(values[i])) nonFiniteCount += 1;
+  }
+  return {
+    allFinite: nonFiniteCount === 0,
+    nonFiniteCount,
+    comparedCount: values.length,
+  };
+}
+
 function ensureHybridAttachmentProbeBuffers(offload, nodeCount, attachmentCount) {
   const state = offload.state;
   const device = offload.device;
@@ -447,16 +464,19 @@ function computeHybridVelocityProposalSignature({ prep, soft, dtNorm, nodeErrorG
   return JSON.stringify(seed);
 }
 
-function applyHybridAuthoritativeCachedProposal({ soft, state }) {
+function applyHybridAuthoritativeCachedProposal({ soft, state, fastMode = false }) {
   const nodeDvx = state?.lastVelocityNodeReductionDeltaVx;
   const nodeDvy = state?.lastVelocityNodeReductionDeltaVy;
   const nodeContribution = state?.lastVelocityNodeReductionContributionCount;
   const parity = state?.lastVelocityNodeReductionParity;
+  const finite = state?.lastVelocityNodeReductionFinite;
   const nodeCount = soft?.nodes?.length || 0;
   if (!nodeCount || nodeDvx?.length !== nodeCount || nodeDvy?.length !== nodeCount || nodeContribution?.length !== nodeCount) {
     return false;
   }
-  if (!parity || (parity.mismatchedContributionCount || 0) !== 0 || !Number.isFinite(parity.maxAbsError) || parity.maxAbsError > 1e-5) {
+  if (fastMode) {
+    if (finite?.allFinite !== true || finite?.comparedCount !== nodeCount) return false;
+  } else if (!parity || (parity.mismatchedContributionCount || 0) !== 0 || !Number.isFinite(parity.maxAbsError) || parity.maxAbsError > 1e-5) {
     return false;
   }
   for (let i = 0; i < nodeCount; i++) {
@@ -649,7 +669,7 @@ async function dispatchHybridAttachmentVelocityNodeReduction(offload, prep) {
   state.lastVelocityNodeReductionSource = 'wgsl-node-reduction-proposal';
 }
 
-async function dispatchHybridAttachmentVelocityDeltaProposal(offload, prep, soft, paramsConfig) {
+async function dispatchHybridAttachmentVelocityDeltaProposal(offload, prep, soft, paramsConfig, { includeCpuParity = true } = {}) {
   const state = offload.state;
   const device = offload.device;
   const nodeCount = prep.plan.softNodeCount >>> 0;
@@ -745,21 +765,34 @@ async function dispatchHybridAttachmentVelocityDeltaProposal(offload, prep, soft
   state.velocityDeltaVxReadback.unmap();
   state.velocityDeltaVyReadback.unmap();
 
-  const cpuDelta = buildCpuHybridAttachmentVelocityDelta({
-    layout: prep.layout,
-    soft,
-    nodeErrorGain,
-    nodeImpulseScale,
-    dtNorm,
-  });
   const wgslDelta = { cellDeltaVx: deltaVx, cellDeltaVy: deltaVy };
-  state.lastVelocityDeltaCpuReference = cpuDelta;
   state.lastVelocityDeltaTelemetry = wgslDelta;
-  state.lastVelocityDeltaParity = {
-    source: 'wgsl-attachment-proposal',
-    ...computeHybridVelocityDeltaParity(cpuDelta, wgslDelta),
-  };
-  state.lastVelocityDeltaProposalSource = 'wgsl-attachment-proposal';
+  if (includeCpuParity) {
+    const cpuDelta = buildCpuHybridAttachmentVelocityDelta({
+      layout: prep.layout,
+      soft,
+      nodeErrorGain,
+      nodeImpulseScale,
+      dtNorm,
+    });
+    state.lastVelocityDeltaCpuReference = cpuDelta;
+    state.lastVelocityDeltaParity = {
+      source: 'wgsl-attachment-proposal',
+      ...computeHybridVelocityDeltaParity(cpuDelta, wgslDelta),
+    };
+    state.lastVelocityDeltaProposalSource = 'wgsl-attachment-proposal';
+  } else {
+    state.lastVelocityDeltaCpuReference = null;
+    state.lastVelocityDeltaParity = {
+      source: 'wgsl-attachment-proposal-fast',
+      comparedAttachmentCount: attachmentCount,
+      maxAbsError: 0,
+      avgAbsError: 0,
+      mode: 'gpu-only-fast',
+      validation: 'skipped-cpu-parity',
+    };
+    state.lastVelocityDeltaProposalSource = 'wgsl-attachment-proposal-fast';
+  }
 }
 
 export function buildHybridAttachmentWgslPrep({ rigidBodies, soft, hybrid, rigidVertexWorld }) {
@@ -863,12 +896,13 @@ export function applyHybridAttachmentConstraintsGpuOnly({
       nodeErrorGain,
       nodeImpulseScale,
     });
+    const fastMode = isGpuOnlyFastMode(wgslOffload);
     wgslOffload.state.lastPreparedVelocityProposalSignature = proposalSignature;
 
     if (
       wgslOffload?.authoritativeHybridConstraints === true
       && wgslOffload.state.lastVelocityProposalSignature === proposalSignature
-      && applyHybridAuthoritativeCachedProposal({ soft, state: wgslOffload.state })
+      && applyHybridAuthoritativeCachedProposal({ soft, state: wgslOffload.state, fastMode })
     ) {
       wgslOffload.state.lastMode = 'wgsl-velocity-authoritative';
       wgslOffload.state.lastAuthoritativeVelocityProposalSignature = proposalSignature;
@@ -884,15 +918,40 @@ export function applyHybridAttachmentConstraintsGpuOnly({
             nodeErrorGain,
             nodeImpulseScale,
             dtNorm: safeDtNorm,
+          }, {
+            includeCpuParity: !fastMode,
           });
           await dispatchHybridAttachmentVelocityNodeReduction(wgslOffload, prep);
 
-          const nodeReference = buildHybridVelocityNodeReference({
-            prep,
-            cpuDelta: wgslOffload.state.lastVelocityDeltaCpuReference,
-          });
-          wgslOffload.state.lastVelocityNodeReductionCpuReference = nodeReference;
-          publishHybridVelocityNodeReductionParity({ state: wgslOffload.state, reference: nodeReference });
+          const finiteDx = checkFiniteFloat32Array(wgslOffload.state.lastVelocityNodeReductionDeltaVx);
+          const finiteDy = checkFiniteFloat32Array(wgslOffload.state.lastVelocityNodeReductionDeltaVy);
+          wgslOffload.state.lastVelocityNodeReductionFinite = {
+            allFinite: finiteDx.allFinite && finiteDy.allFinite,
+            nonFiniteCount: (finiteDx.nonFiniteCount || 0) + (finiteDy.nonFiniteCount || 0),
+            comparedCount: Math.min(finiteDx.comparedCount || 0, finiteDy.comparedCount || 0),
+            source: wgslOffload.state.lastVelocityNodeReductionSource,
+          };
+
+          if (fastMode) {
+            wgslOffload.state.lastVelocityNodeReductionSource = 'wgsl-node-reduction-proposal-fast';
+            wgslOffload.state.lastVelocityNodeReductionCpuReference = null;
+            wgslOffload.state.lastVelocityNodeReductionParity = {
+              source: 'wgsl-node-reduction-proposal-fast',
+              comparedNodeCount: prep.plan.softNodeCount,
+              maxAbsError: 0,
+              avgAbsError: 0,
+              mismatchedContributionCount: 0,
+              mode: 'gpu-only-fast',
+              validation: 'skipped-cpu-parity',
+            };
+          } else {
+            const nodeReference = buildHybridVelocityNodeReference({
+              prep,
+              cpuDelta: wgslOffload.state.lastVelocityDeltaCpuReference,
+            });
+            wgslOffload.state.lastVelocityNodeReductionCpuReference = nodeReference;
+            publishHybridVelocityNodeReductionParity({ state: wgslOffload.state, reference: nodeReference });
+          }
           wgslOffload.state.lastVelocityProposalSignature = proposalSignature;
         });
       wgslOffload.state.pendingWgslProbePromise = serializedDispatch;

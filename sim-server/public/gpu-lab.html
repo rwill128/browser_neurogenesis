@@ -166,6 +166,21 @@
     <label style="display:inline-flex;align-items:center;gap:6px" title="Enable/disable post-collision recovery pass (cluster projection + inside correction + final bounce re-apply) for both baseline and gpu-only solver paths.">
       <input id="enablePostCollisionRecovery" type="checkbox" checked /> Post-collision recovery
     </label>
+    <label style="display:inline-flex;align-items:center;gap:6px" title="Enable/disable soft cluster stabilizer layers (cluster tug redistribution, relative drift damping, and rigid-motion projection) in both baseline and gpu-only paths.">
+      <input id="enableSoftClusterStabilizers" type="checkbox" checked /> Soft cluster stabilizers
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:6px" title="Enable/disable adaptive soft spring-rest recovery layer in both baseline and gpu-only paths.">
+      <input id="enableSoftSpringRestRecovery" type="checkbox" checked /> Soft spring-rest recovery
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:6px" title="Enable/disable membrane boundary XPBD correction in both baseline and gpu-only paths.">
+      <input id="enableMembraneBoundaryXpbd" type="checkbox" checked /> Membrane boundary XPBD
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:6px" title="Enable/disable membrane shape-memory correction in both baseline and gpu-only paths.">
+      <input id="enableMembraneShapeMemory" type="checkbox" checked /> Membrane shape memory
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:6px" title="Enable/disable membrane cell-pressure solve in both baseline and gpu-only paths.">
+      <input id="enableMembranePressure" type="checkbox" checked /> Membrane pressure
+    </label>
   </div>
 
   <div class="pane-row">

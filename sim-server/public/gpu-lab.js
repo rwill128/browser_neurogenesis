@@ -13,6 +13,10 @@ import { applySoftAreaXPBDVelocityGpuOnly } from '/runtime-solvers/stepSoftAreaX
 import { resolveSoftSoftCollisionPassGpuOnly } from '/runtime-solvers/stepSoftCollisionGpuOnly.js';
 import { applyHybridAttachmentConstraintsGpuOnly } from '/runtime-solvers/stepHybridConstraintsGpuOnly.js';
 import { applySoftMembraneCellPressureGpuOnly } from '/runtime-solvers/stepSoftMembranePressureGpuOnly.js';
+import {
+  applySoftMembraneBoundaryXPBDVelocityGpuOnly,
+  applySoftMembraneShapeMemoryVelocityGpuOnly,
+} from '/runtime-solvers/stepSoftMembraneConstraintsGpuOnly.js';
 import { applySoftFluidCouplingGpuOnly } from '/runtime-solvers/stepSoftFluidCouplingGpuOnly.js';
 import { applyPostCollisionRecoveryGpuOnly } from '/runtime-solvers/stepPostCollisionRecoveryGpuOnly.js';
 
@@ -56,6 +60,11 @@ const spawnMembraneCellsEl = document.getElementById('spawnMembraneCells');
 const enableWarningDeformInterventionsEl = document.getElementById('enableWarningDeformInterventions');
 const enableSevereDeformInterventionsEl = document.getElementById('enableSevereDeformInterventions');
 const enablePostCollisionRecoveryEl = document.getElementById('enablePostCollisionRecovery');
+const enableSoftClusterStabilizersEl = document.getElementById('enableSoftClusterStabilizers');
+const enableSoftSpringRestRecoveryEl = document.getElementById('enableSoftSpringRestRecovery');
+const enableMembraneBoundaryXpbdEl = document.getElementById('enableMembraneBoundaryXpbd');
+const enableMembraneShapeMemoryEl = document.getElementById('enableMembraneShapeMemory');
+const enableMembranePressureEl = document.getElementById('enableMembranePressure');
 const runtimeSolverPathEls = Array.from(document.querySelectorAll('input[name="runtimeSolverPath"]'));
 
 const GENERATED_MINI_SCENARIOS_URL = '/generated-mini-scenarios.json';
@@ -179,6 +188,11 @@ function readControls() {
     enableWarningDeformInterventions: (enableWarningDeformInterventionsEl?.checked !== false),
     enableSevereDeformInterventions: (enableSevereDeformInterventionsEl?.checked !== false),
     enablePostCollisionRecovery: (enablePostCollisionRecoveryEl?.checked !== false),
+    enableSoftClusterStabilizers: (enableSoftClusterStabilizersEl?.checked !== false),
+    enableSoftSpringRestRecovery: (enableSoftSpringRestRecoveryEl?.checked !== false),
+    enableMembraneBoundaryXpbd: (enableMembraneBoundaryXpbdEl?.checked !== false),
+    enableMembraneShapeMemory: (enableMembraneShapeMemoryEl?.checked !== false),
+    enableMembranePressure: (enableMembranePressureEl?.checked !== false),
     runtimeSolverPath: getRuntimeSolverPath(),
   };
 }
@@ -3515,6 +3529,15 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   const softClusterFluidTorqueCoupling = Math.max(0, Number(sim.controls?.softClusterFluidTorqueCoupling) || SOFT_CLUSTER_FLOW_FORCE_SHARE);
   const softClusterAngularProjection = Math.max(0, Number(sim.controls?.softClusterAngularProjection) || SOFT_CLUSTER_ANGULAR_PROJECTION);
   const softClusterCollisionAngularProjection = Math.max(0, Number(sim.controls?.softClusterCollisionAngularProjection) || SOFT_CLUSTER_COLLISION_ANGULAR_PROJECTION);
+  const softClusterStabilizersOn = sim.controls?.enableSoftClusterStabilizers !== false;
+  const softClusterTugCouplingBase = softClusterStabilizersOn ? SOFT_CLUSTER_TUG_COUPLING : 0;
+  const softClusterRelativeDragBase = softClusterStabilizersOn ? SOFT_CLUSTER_RELATIVE_DRAG : 0;
+  const softClusterLinearProjectionBase = softClusterStabilizersOn ? SOFT_CLUSTER_LINEAR_PROJECTION : 0;
+  const softClusterAngularProjectionBase = softClusterStabilizersOn ? softClusterAngularProjection : 0;
+  const softSpringRestRecoveryOn = sim.controls?.enableSoftSpringRestRecovery !== false;
+  const membraneBoundaryXpbdOn = sim.controls?.enableMembraneBoundaryXpbd !== false;
+  const membraneShapeMemoryOn = sim.controls?.enableMembraneShapeMemory !== false;
+  const membranePressureOn = sim.controls?.enableMembranePressure !== false;
   const swimGain = sim.controls?.enableArtificialSwim ? 1 : 0;
   const viscMap = sim.viscMapCpu;
 
@@ -3729,11 +3752,11 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       constants: {
         SOFT_NODE_FLOW_COUPLING,
         SOFT_NODE_LOCAL_FLOW_SHARE,
-        SOFT_CLUSTER_TUG_COUPLING,
-        SOFT_CLUSTER_RELATIVE_DRAG,
+        SOFT_CLUSTER_TUG_COUPLING: softClusterTugCouplingBase,
+        SOFT_CLUSTER_RELATIVE_DRAG: softClusterRelativeDragBase,
         softClusterFluidTorqueCoupling,
-        SOFT_CLUSTER_LINEAR_PROJECTION,
-        softClusterAngularProjection,
+        SOFT_CLUSTER_LINEAR_PROJECTION: softClusterLinearProjectionBase,
+        softClusterAngularProjection: softClusterAngularProjectionBase,
       },
       computeSoftCentroid,
       computeSoftClusterKinematics,
@@ -3884,7 +3907,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       const meanY = st.sumY / st.count;
       const pullX = meanX * 0.6 + st.maxX * 0.4;
       const pullY = meanY * 0.6 + st.maxY * 0.4;
-      const tugCoupling = softMembraneClusterSet.has(cid) ? (SOFT_CLUSTER_TUG_COUPLING * 0.45) : (SOFT_CLUSTER_TUG_COUPLING * 0.72);
+      const tugCoupling = softMembraneClusterSet.has(cid) ? (softClusterTugCouplingBase * 0.45) : (softClusterTugCouplingBase * 0.72);
       node.vx += pullX * tugCoupling * dt * 60;
       node.vy += pullY * tugCoupling * dt * 60;
     }
@@ -3905,7 +3928,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       if (!st || st.count <= 0) continue;
       const meanVx = st.sumVx / st.count;
       const meanVy = st.sumVy / st.count;
-      const relDamp = softMembraneClusterSet.has(cid) ? (SOFT_CLUSTER_RELATIVE_DRAG * 0.65) : SOFT_CLUSTER_RELATIVE_DRAG;
+      const relDamp = softMembraneClusterSet.has(cid) ? (softClusterRelativeDragBase * 0.65) : softClusterRelativeDragBase;
       node.vx -= (node.vx - meanVx) * relDamp * dtNorm;
       node.vy -= (node.vy - meanVy) * relDamp * dtNorm;
     }
@@ -3913,8 +3936,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     // Explicit soft angular inertia response: project nodes toward cluster rigid motion field.
     softClusterKinematics = computeSoftClusterKinematics(s.nodes);
     projectNodesTowardClusterRigidMotion(s.nodes, softClusterKinematics, {
-      linearGain: SOFT_CLUSTER_LINEAR_PROJECTION * dtNorm,
-      angularGain: softClusterAngularProjection * dtNorm,
+      linearGain: softClusterLinearProjectionBase * dtNorm,
+      angularGain: softClusterAngularProjectionBase * dtNorm,
       membraneClusterSet: softMembraneClusterSet,
       membraneGainScale: 0.72,
     });
@@ -3951,8 +3974,37 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   const softClusterLoops = buildSoftClusterBoundaryLoops(s.nodes, s.springs, {
     blockMode: EDGE_BODY_MODE.BLOCK,
   });
-  const membraneBoundaryClusters = applySoftMembraneBoundaryXPBDVelocity(sim, s, softClusterLoops, dtPos);
-  const membraneShapeClusters = applySoftMembraneShapeMemoryVelocity(sim, s, softClusterLoops, dtPos);
+  const membraneBoundaryClusters = membraneBoundaryXpbdOn
+    ? (solverPath === 'gpu-only'
+      ? applySoftMembraneBoundaryXPBDVelocityGpuOnly({
+        sim,
+        soft: s,
+        loops: softClusterLoops,
+        dtPos,
+        membraneClusterSet: softMembraneClusterSet,
+        clamp,
+        membraneEdgeXpbdIters: MEMBRANE_EDGE_XPBD_ITERS,
+        membraneEdgeBaseCompliance: MEMBRANE_EDGE_BASE_COMPLIANCE,
+        membraneBendXpbdIters: MEMBRANE_BEND_XPBD_ITERS,
+        membraneBendBaseCompliance: MEMBRANE_BEND_BASE_COMPLIANCE,
+      })
+      : applySoftMembraneBoundaryXPBDVelocity(sim, s, softClusterLoops, dtPos))
+    : 0;
+  const membraneShapeClusters = membraneShapeMemoryOn
+    ? (solverPath === 'gpu-only'
+      ? applySoftMembraneShapeMemoryVelocityGpuOnly({
+        sim,
+        soft: s,
+        loops: softClusterLoops,
+        dtPos,
+        membraneClusterMap: sim.softMembraneClusterMap,
+        clamp,
+        membraneShapeMemoryIters: MEMBRANE_SHAPE_MEMORY_ITERS,
+        membraneShapeMemoryGain: MEMBRANE_SHAPE_MEMORY_GAIN,
+        membraneShapeMemoryMaxShiftFrac: MEMBRANE_SHAPE_MEMORY_MAX_SHIFT_FRAC,
+      })
+      : applySoftMembraneShapeMemoryVelocity(sim, s, softClusterLoops, dtPos))
+    : 0;
   ensureSoftAreaRestState(sim, s, softClusterLoops, dtPos);
   if (solverPath === 'gpu-only') {
     applySoftAreaXPBDVelocityGpuOnly({
@@ -3967,18 +4019,20 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   } else {
     applySoftAreaXPBDVelocity(sim, s, softClusterLoops, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT);
   }
-  const membranePressureClusters = solverPath === 'gpu-only'
-    ? applySoftMembraneCellPressureGpuOnly({
-      sim,
-      soft: s,
-      loops: softClusterLoops,
-      dtPos,
-      signedAreaCurrent,
-      clamp,
-      membraneCellBasePressureGain: MEMBRANE_CELL_BASE_PRESSURE_GAIN,
-      membraneCellBaseRadialDamping: MEMBRANE_CELL_BASE_RADIAL_DAMPING,
-    })
-    : applySoftMembraneCellPressure(sim, s, softClusterLoops, dtPos);
+  const membranePressureClusters = membranePressureOn
+    ? (solverPath === 'gpu-only'
+      ? applySoftMembraneCellPressureGpuOnly({
+        sim,
+        soft: s,
+        loops: softClusterLoops,
+        dtPos,
+        signedAreaCurrent,
+        clamp,
+        membraneCellBasePressureGain: MEMBRANE_CELL_BASE_PRESSURE_GAIN,
+        membraneCellBaseRadialDamping: MEMBRANE_CELL_BASE_RADIAL_DAMPING,
+      })
+      : applySoftMembraneCellPressure(sim, s, softClusterLoops, dtPos))
+    : 0;
 
   if (solverPath === 'gpu-only') {
     applyHybridAttachmentConstraintsGpuOnly({
@@ -4223,7 +4277,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     deform = buildSoftDeformationState(sim, s, softClusterLoops);
   }
 
-  if (sim.softSpringRestBaseline && sim.softSpringRestBaseline.length === s.springs.length) {
+  if (softSpringRestRecoveryOn && sim.softSpringRestBaseline && sim.softSpringRestBaseline.length === s.springs.length) {
     const severeProfile = severeInterventionsOn && deform.severeCollapseCount > 0;
     const warningProfile = warningInterventionsOn && !severeProfile && deform.warningCount > 0;
     const profile = severeProfile ? 'severe' : (warningProfile ? 'warning' : 'baseline');
@@ -5728,6 +5782,11 @@ async function stepAndRender() {
         warningInterventions: s.controls.enableWarningDeformInterventions !== false,
         severeInterventions: s.controls.enableSevereDeformInterventions !== false,
         postCollisionRecovery: s.controls.enablePostCollisionRecovery !== false,
+        softClusterStabilizers: s.controls.enableSoftClusterStabilizers !== false,
+        softSpringRestRecovery: s.controls.enableSoftSpringRestRecovery !== false,
+        membraneBoundaryXpbd: s.controls.enableMembraneBoundaryXpbd !== false,
+        membraneShapeMemory: s.controls.enableMembraneShapeMemory !== false,
+        membranePressure: s.controls.enableMembranePressure !== false,
         membraneClusters: Array.isArray(s.bodies?.softMembraneClusters) ? s.bodies.softMembraneClusters.length : 0,
         fluidObstacleEdgesNow: obstacleEdgesNow,
         fluidObstacleCellsNow: Number(s?.lastFluidObstacleStats?.blockedCells) || 0,

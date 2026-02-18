@@ -319,8 +319,8 @@ test('gpu-lab routes soft membrane cell-pressure stepping through isolated gpu-o
 
   assert.match(
     source,
-    /const membranePressureClusters = solverPath === 'gpu-only'[\s\S]*applySoftMembraneCellPressureGpuOnly\(\{[\s\S]*\}\)[\s\S]*: applySoftMembraneCellPressure\(sim, s, softClusterLoops, dtPos\);/,
-    'expected explicit gpu-only membrane pressure dispatch with baseline fallback call',
+    /const membranePressureClusters = membranePressureOn[\s\S]*solverPath === 'gpu-only'[\s\S]*applySoftMembraneCellPressureGpuOnly\(\{[\s\S]*\}\)[\s\S]*: applySoftMembraneCellPressure\(sim, s, softClusterLoops, dtPos\)[\s\S]*: 0;/,
+    'expected membrane pressure pass to be toggle-gated with gpu-only dispatch and baseline fallback',
   );
 });
 
@@ -355,5 +355,25 @@ test('gpu-lab gates post-collision recovery pass with shared toggle across basel
     source,
     /const postCollisionRecoveryOn = sim\.controls\?\.enablePostCollisionRecovery !== false;[\s\S]*if \(postCollisionRecoveryOn\) \{[\s\S]*if \(solverPath === 'gpu-only'\) \{/,
     'expected post-collision recovery execution to be gated for both solver paths',
+  );
+});
+
+test('gpu-lab gates always-on stabilizer layers with shared toggles across baseline and gpu-only paths', () => {
+  assert.match(
+    source,
+    /const enableSoftClusterStabilizersEl = document\.getElementById\('enableSoftClusterStabilizers'\);[\s\S]*const enableSoftSpringRestRecoveryEl = document\.getElementById\('enableSoftSpringRestRecovery'\);[\s\S]*const enableMembraneBoundaryXpbdEl = document\.getElementById\('enableMembraneBoundaryXpbd'\);[\s\S]*const enableMembraneShapeMemoryEl = document\.getElementById\('enableMembraneShapeMemory'\);[\s\S]*const enableMembranePressureEl = document\.getElementById\('enableMembranePressure'\);/,
+    'expected checkbox bindings for newly-gated always-on stabilizer layers',
+  );
+
+  assert.match(
+    source,
+    /enableSoftClusterStabilizers: \(enableSoftClusterStabilizersEl\?\.checked !== false\),[\s\S]*enableSoftSpringRestRecovery: \(enableSoftSpringRestRecoveryEl\?\.checked !== false\),[\s\S]*enableMembraneBoundaryXpbd: \(enableMembraneBoundaryXpbdEl\?\.checked !== false\),[\s\S]*enableMembraneShapeMemory: \(enableMembraneShapeMemoryEl\?\.checked !== false\),[\s\S]*enableMembranePressure: \(enableMembranePressureEl\?\.checked !== false\),/,
+    'expected readControls to surface always-on stabilizer toggles',
+  );
+
+  assert.match(
+    source,
+    /const softClusterStabilizersOn = sim\.controls\?\.enableSoftClusterStabilizers !== false;[\s\S]*const softSpringRestRecoveryOn = sim\.controls\?\.enableSoftSpringRestRecovery !== false;[\s\S]*const membraneBoundaryXpbdOn = sim\.controls\?\.enableMembraneBoundaryXpbd !== false;[\s\S]*const membraneShapeMemoryOn = sim\.controls\?\.enableMembraneShapeMemory !== false;[\s\S]*const membranePressureOn = sim\.controls\?\.enableMembranePressure !== false;/,
+    'expected runtime to derive stabilizer gates from controls for both solver branches',
   );
 });

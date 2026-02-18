@@ -112,12 +112,16 @@ test('soft deformation wgsl prep unblocker: deterministic layout/signature and g
   const sim = { frame: 91 };
   const soft = {
     nodes: [
-      { x: 1.25, y: 2.5, mass: 2 },
-      { x: -3.5, y: 4.75, mass: 0.5 },
-      { x: 8, y: -1.5, mass: 0 },
+      { x: 1.25, y: 2.5, mass: 2, clusterId: 7 },
+      { x: -3.5, y: 4.75, mass: 0.5, clusterId: 7 },
+      { x: 8, y: -1.5, mass: 0, clusterId: 9 },
+    ],
+    springs: [
+      [0, 1, 1.75],
+      [1, 2, 2.5],
     ],
   };
-  const softClusterLoops = [[0, 1, 2], [2, 99]];
+  const softClusterLoops = [{ clusterId: 7, indices: [0, 1, 2] }, { clusterId: 9, indices: [2, 99] }];
 
   const prepA = buildSoftDeformationInterventionsWgslPrep({ sim, soft, softClusterLoops });
   const prepB = buildSoftDeformationInterventionsWgslPrep({ sim, soft, softClusterLoops });
@@ -125,7 +129,13 @@ test('soft deformation wgsl prep unblocker: deterministic layout/signature and g
   assert.equal(prepA.signature, prepB.signature);
   assert.deepEqual(Array.from(prepA.layout.loopOffsets), [0, 3, 5]);
   assert.deepEqual(Array.from(prepA.layout.loopNodeIndex), [0, 1, 2, 2, 2]);
+  assert.deepEqual(Array.from(prepA.layout.loopClusterId), [7, 9]);
   assert.deepEqual(Array.from(prepA.layout.nodeInvMass).map((v) => Number(v.toFixed(6))), [0.5, 2, 0]);
+  assert.deepEqual(Array.from(prepA.layout.nodeClusterId), [7, 7, 9]);
+  assert.deepEqual(Array.from(prepA.layout.springNodeA), [0, 1]);
+  assert.deepEqual(Array.from(prepA.layout.springNodeB), [1, 2]);
+  assert.deepEqual(Array.from(prepA.layout.springRest).map((v) => Number(v.toFixed(6))), [1.75, 2.5]);
+  assert.deepEqual(Array.from(prepA.layout.springClusterId), [7, 7]);
 
   const wgslOffload = { enabled: true, state: {} };
   applySoftDeformationInterventionsGpuOnly({
@@ -140,6 +150,7 @@ test('soft deformation wgsl prep unblocker: deterministic layout/signature and g
 
   assert.equal(wgslOffload.state.lastPreparedSoftDeformationNodeCount, 3);
   assert.equal(wgslOffload.state.lastPreparedSoftDeformationLoopCount, 2);
+  assert.equal(wgslOffload.state.lastPreparedSoftDeformationSpringCount, 2);
   assert.equal(wgslOffload.state.lastPreparedSoftDeformationFrame, 91);
   assert.equal(wgslOffload.state.lastSourceRoute, 'cpu-soft-deformation-authoritative');
   assert.equal(wgslOffload.state.lastMode, 'cpu-soft-deformation-authoritative');

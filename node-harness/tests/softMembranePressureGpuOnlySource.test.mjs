@@ -12,8 +12,8 @@ const gpuLabSource = readFileSync(gpuLabPath, 'utf8');
 test('soft membrane pressure gpu-only module publishes deterministic WGSL prep layout ownership', () => {
   assert.match(
     source,
-    /function buildSoftMembranePressureWgslPrep\([\s\S]*const membraneOffsets = new Uint32Array\(membraneCount \+ 1\);[\s\S]*const loopIndices = new Uint32Array\(indexCount\);[\s\S]*const areaBase = new Float32Array\(membraneCount\);[\s\S]*const nodeX = new Float32Array\(nodeCount\);/,
-    'expected gpu-only membrane pressure pass to build deterministic typed-array layout for membrane loops and node positions',
+    /function buildSoftMembranePressureWgslPrep\([\s\S]*const membraneOffsets = new Uint32Array\(membraneCount \+ 1\);[\s\S]*const loopIndices = new Uint32Array\(indexCount\);[\s\S]*const loopMembraneIndex = new Uint32Array\(indexCount\);[\s\S]*const areaBase = new Float32Array\(membraneCount\);[\s\S]*const pressureGain = new Float32Array\(membraneCount\);[\s\S]*const nodeX = new Float32Array\(nodeCount\);[\s\S]*const nodeMass = new Float32Array\(nodeCount\);/,
+    'expected gpu-only membrane pressure pass to build deterministic typed-array layout for membrane loops and node ownership/mass proposal buffers',
   );
 
   assert.match(
@@ -23,7 +23,7 @@ test('soft membrane pressure gpu-only module publishes deterministic WGSL prep l
   );
 });
 
-test('soft membrane pressure gpu-only path dispatches WGSL area-probe stage with serialized readback', () => {
+test('soft membrane pressure gpu-only path dispatches WGSL area-probe + velocity-proposal stages with serialized readback', () => {
   assert.match(
     source,
     /const softMembranePressureAreaProbeWgsl = \/\* wgsl \*\/[\s\S]*@compute @workgroup_size\([\s\S]*area_now_out\[mi\] = now;[\s\S]*function dispatchSoftMembranePressureAreaProbe\([\s\S]*pass\.dispatchWorkgroups\([\s\S]*copyBufferToBuffer\([\s\S]*mapAsync\(globalThis\.GPUMapMode\.READ/,
@@ -32,8 +32,14 @@ test('soft membrane pressure gpu-only path dispatches WGSL area-probe stage with
 
   assert.match(
     source,
-    /const serializedDispatch = \(wgslOffload\.state\.pendingWgslAreaProbePromise \|\| Promise\.resolve\(\)\)[\s\S]*dispatchSoftMembranePressureAreaProbe\(wgslOffload, prep\)[\s\S]*pendingWgslAreaProbePromise = serializedDispatch;/,
-    'expected membrane pressure WGSL dispatch to serialize map/readback work and avoid overlapping mapAsync races',
+    /const softMembranePressureVelocityProposalWgsl = \/\* wgsl \*\/[\s\S]*delta_vx_out\[li\] = nx \* impulse;[\s\S]*delta_vy_out\[li\] = ny \* impulse;[\s\S]*function dispatchSoftMembranePressureVelocityDeltaProposal\([\s\S]*pass\.dispatchWorkgroups\([\s\S]*copyBufferToBuffer\(state\.velocityProposalDeltaVx,[\s\S]*copyBufferToBuffer\(state\.velocityProposalDeltaVy,[\s\S]*mapAsync\(globalThis\.GPUMapMode\.READ/,
+    'expected membrane pressure module to run a concrete WGSL velocity-delta proposal dispatch with readback telemetry',
+  );
+
+  assert.match(
+    source,
+    /const serializedDispatch = \(wgslOffload\.state\.pendingWgslAreaProbePromise \|\| Promise\.resolve\(\)\)[\s\S]*dispatchSoftMembranePressureAreaProbe\(wgslOffload, prep\)[\s\S]*dispatchSoftMembranePressureVelocityDeltaProposal\(wgslOffload, prep, dtPos\)[\s\S]*lastMode = proposalRan[\s\S]*'wgsl-velocity-proposal'[\s\S]*'wgsl-area-probe'[\s\S]*pendingWgslAreaProbePromise = serializedDispatch;/,
+    'expected membrane pressure WGSL dispatch chain to serialize probe+proposal readbacks and publish staged mode ownership',
   );
 });
 

@@ -169,6 +169,9 @@ test('soft membrane pressure gpu-only path matches baseline while publishing WGS
   assert.equal(wgslState.lastPreparedMembraneCount, seedMembranes.length);
   assert.equal(wgslState.preparedLayout?.membraneOffsets instanceof Uint32Array, true);
   assert.equal(wgslState.preparedLayout?.loopIndices instanceof Uint32Array, true);
+  assert.equal(wgslState.preparedLayout?.loopMembraneIndex instanceof Uint32Array, true);
   assert.equal(wgslState.preparedLayout?.nodeX instanceof Float32Array, true);
+  assert.equal(wgslState.preparedLayout?.nodeMass instanceof Float32Array, true);
+  assert.equal(wgslState.lastVelocityProposalSource, 'cpu-membrane-authoritative');
   assert.ok((wgslState.lastPreparedLayoutBytes || 0) > 0);
 });

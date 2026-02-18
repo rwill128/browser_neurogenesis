@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyPostCollisionRecoveryGpuOnly } from '../../sim-server/public/runtime-solvers/stepPostCollisionRecoveryGpuOnly.js';
+import {
+  computeSoftClusterKinematics,
+  projectNodesTowardClusterRigidMotion,
+} from '../../sim-server/public/soft-cluster-kinematics.js';
 
 function makeState() {
   return {
@@ -141,4 +145,51 @@ test('post-collision recovery parity: gpu-only module matches baseline projectio
   assert.equal(gpu.membraneInsideCorrections, baseline.membraneInsideCorrections);
   assert.deepEqual(gpuState, baselineState);
   assert.deepEqual(gpuLog, baselineLog, 'gpu-only orchestration sequence should match baseline sequencing');
+});
+
+test('post-collision recovery parity: gpu-only module uses isolated cluster kinematics/projection defaults matching baseline math', () => {
+  const baselineState = makeState();
+  const gpuState = makeState();
+
+  const baselineCallbacks = makeCallbacks([]);
+  const kinematics = computeSoftClusterKinematics(baselineState.soft.nodes);
+  projectNodesTowardClusterRigidMotion(baselineState.soft.nodes, kinematics, {
+    linearGain: baselineState.softClusterCollisionLinearProjection * baselineState.dtNorm,
+    angularGain: baselineState.softClusterCollisionAngularProjection * baselineState.dtNorm,
+    membraneClusterSet: baselineState.softMembraneClusterSet,
+    membraneGainScale: 0.72,
+  });
+  const baselineRigidInsideCorrections = baselineCallbacks.applyRigidInsideCorrectionPass(
+    baselineState.bodies,
+    baselineState.soft,
+    baselineState.hybridAttachedByRigid,
+  );
+  const baselineMembraneInsideCorrections = baselineCallbacks.applyMembraneInsideCorrectionPass(
+    baselineState.sim,
+    baselineState.soft,
+    baselineState.softClusterLoops,
+  );
+  for (const rb of baselineState.bodies.rigid) baselineCallbacks.applyBounceBoundary(rb, baselineState.n, 0.84);
+  for (const sn of baselineState.soft.nodes) baselineCallbacks.applyBounceBoundary(sn, baselineState.n, 0.78);
+
+  const gpu = applyPostCollisionRecoveryGpuOnly({
+    sim: gpuState.sim,
+    bodies: gpuState.bodies,
+    soft: gpuState.soft,
+    dtNorm: gpuState.dtNorm,
+    softMembraneClusterSet: gpuState.softMembraneClusterSet,
+    softClusterCollisionLinearProjection: gpuState.softClusterCollisionLinearProjection,
+    softClusterCollisionAngularProjection: gpuState.softClusterCollisionAngularProjection,
+    membraneGainScale: 0.72,
+    applyRigidInsideCorrectionPass: baselineCallbacks.applyRigidInsideCorrectionPass,
+    applyMembraneInsideCorrectionPass: baselineCallbacks.applyMembraneInsideCorrectionPass,
+    applyBounceBoundary: baselineCallbacks.applyBounceBoundary,
+    n: gpuState.n,
+    softClusterLoops: gpuState.softClusterLoops,
+    hybridAttachedByRigid: gpuState.hybridAttachedByRigid,
+  });
+
+  assert.equal(gpu.rigidInsideCorrections, baselineRigidInsideCorrections);
+  assert.equal(gpu.membraneInsideCorrections, baselineMembraneInsideCorrections);
+  assert.deepEqual(gpuState, baselineState);
 });

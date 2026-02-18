@@ -1,4 +1,8 @@
 import { applyRigidInsideCorrectionPassGpuOnly } from './stepRigidInsideCorrectionGpuOnly.js';
+import {
+  computeSoftClusterKinematicsGpuOnly,
+  projectNodesTowardClusterRigidMotionGpuOnly,
+} from './stepSoftClusterKinematicsGpuOnly.js';
 
 export function applyPostCollisionRecoveryGpuOnly(args = {}) {
   const {
@@ -26,19 +30,22 @@ export function applyPostCollisionRecoveryGpuOnly(args = {}) {
   const linearGain = (Number(softClusterCollisionLinearProjection) || 0) * dtNormSafe;
   const angularGain = (Number(softClusterCollisionAngularProjection) || 0) * dtNormSafe;
 
-  const postCollisionClusterKinematics =
+  const computeKinematics =
     typeof computeSoftClusterKinematics === 'function'
-      ? computeSoftClusterKinematics(soft.nodes)
-      : new Map();
+      ? computeSoftClusterKinematics
+      : computeSoftClusterKinematicsGpuOnly;
+  const projectTowardRigidMotion =
+    typeof projectNodesTowardClusterRigidMotion === 'function'
+      ? projectNodesTowardClusterRigidMotion
+      : projectNodesTowardClusterRigidMotionGpuOnly;
 
-  if (typeof projectNodesTowardClusterRigidMotion === 'function') {
-    projectNodesTowardClusterRigidMotion(soft.nodes, postCollisionClusterKinematics, {
-      linearGain,
-      angularGain,
-      membraneClusterSet: softMembraneClusterSet,
-      membraneGainScale: Number(membraneGainScale) || 0.72,
-    });
-  }
+  const postCollisionClusterKinematics = computeKinematics(soft.nodes);
+  projectTowardRigidMotion(soft.nodes, postCollisionClusterKinematics, {
+    linearGain,
+    angularGain,
+    membraneClusterSet: softMembraneClusterSet,
+    membraneGainScale: Number(membraneGainScale) || 0.72,
+  });
 
   const rigidInsideCorrections =
     typeof applyRigidInsideCorrectionPass === 'function'

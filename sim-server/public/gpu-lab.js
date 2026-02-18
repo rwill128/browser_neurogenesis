@@ -4396,8 +4396,6 @@ function stepBodiesAndInject(sim, vxField, vyField) {
         softClusterCollisionLinearProjection: SOFT_CLUSTER_COLLISION_LINEAR_PROJECTION,
         softClusterCollisionAngularProjection,
         membraneGainScale: 0.72,
-        computeSoftClusterKinematics,
-        projectNodesTowardClusterRigidMotion,
         applyMembraneInsideCorrectionPass,
         applyBounceBoundary,
         n,

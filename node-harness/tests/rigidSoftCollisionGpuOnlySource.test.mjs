@@ -64,11 +64,14 @@ test('rigid-soft gpu-only module builds combined deterministic narrowphase layou
 test('rigid-soft gpu-only module emits deterministic narrowphase scene state layout needed for next WGSL narrowphase math stage', () => {
   assert.match(
     source,
-    /export function buildRigidSoftNarrowphaseSceneWgslLayout\([\s\S]*rigidX[\s\S]*rigidTheta[\s\S]*rigidOmega[\s\S]*rigidInvMass[\s\S]*rigidInvInertia[\s\S]*nodeVx[\s\S]*nodeInvMass[\s\S]*springRestLen[\s\S]*signature/,
-    'expected rigid-soft gpu-only path to include rigid inverse-mass/inertia arrays in deterministic scene layout for upcoming WGSL narrowphase impulse math',
+    /export function buildRigidSoftNarrowphaseSceneWgslLayout\([\s\S]*rigidX[\s\S]*rigidTheta[\s\S]*rigidOmega[\s\S]*rigidInvMass[\s\S]*rigidInvInertia[\s\S]*rigidVertexStart[\s\S]*rigidVertexX[\s\S]*rigidVertexY[\s\S]*nodeVx[\s\S]*nodeInvMass[\s\S]*springRestLen[\s\S]*signature/,
+    'expected rigid-soft gpu-only path to include rigid inverse-mass/inertia + rigid polygon streams in deterministic scene layout for upcoming WGSL narrowphase impulse math',
   );
   assert.match(source, /lastPreparedNarrowphaseSceneRigidInvMass/, 'expected rigid-soft gpu-only path to publish rigid inverse-mass scene ownership in offload state');
   assert.match(source, /lastPreparedNarrowphaseSceneRigidInvInertia/, 'expected rigid-soft gpu-only path to publish rigid inverse-inertia scene ownership in offload state');
+  assert.match(source, /lastPreparedNarrowphaseSceneRigidVertexStart/, 'expected rigid-soft gpu-only path to publish rigid polygon start offsets for WGSL narrowphase edge traversal');
+  assert.match(source, /lastPreparedNarrowphaseSceneRigidVertexX/, 'expected rigid-soft gpu-only path to publish rigid polygon x stream for WGSL narrowphase edge traversal');
+  assert.match(source, /lastPreparedNarrowphaseSceneRigidVertexY/, 'expected rigid-soft gpu-only path to publish rigid polygon y stream for WGSL narrowphase edge traversal');
   assert.match(source, /lastPreparedNarrowphaseSceneSignature/, 'expected rigid-soft gpu-only path to continue publishing deterministic scene signature');
 });
 

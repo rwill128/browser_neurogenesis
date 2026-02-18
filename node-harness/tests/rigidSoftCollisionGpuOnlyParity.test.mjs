@@ -5,6 +5,7 @@ import { resolveRigidVsSoftNodeCollision } from '../../sim-server/public/rigid-c
 import {
   buildActiveRigidSoftNodeNarrowphasePairs,
   buildRigidSoftNarrowphaseGeometryLayout,
+  buildRigidSoftNarrowphaseSceneWgslLayout,
   resolveRigidSoftCollisionPassGpuOnly,
   resolveRigidVsSoftEdgeCollisionGpuOnly,
 } from '../../sim-server/public/runtime-solvers/stepRigidSoftCollisionGpuOnly.js';
@@ -587,4 +588,30 @@ test('gpu-only rigid-soft pass prepares deterministic finite rigid narrowphase g
 
   assert.equal(preparedA.signature, preparedB.signature);
   assert.equal(preparedA.byteLength, preparedB.byteLength);
+});
+
+test('gpu-only rigid-soft narrowphase scene layout includes deterministic rigid polygon streams for next WGSL narrowphase kernel', () => {
+  const state = makeRuntimeState();
+  const layoutA = buildRigidSoftNarrowphaseSceneWgslLayout({
+    rigidBodies: state.rigidBodies,
+    soft: state.soft,
+  });
+  const layoutB = buildRigidSoftNarrowphaseSceneWgslLayout({
+    rigidBodies: structuredClone(state.rigidBodies),
+    soft: structuredClone(state.soft),
+  });
+
+  assert.ok(layoutA);
+  assert.equal(layoutA.rigidVertexStart.length, state.rigidBodies.length + 1);
+  assert.equal(layoutA.rigidVertexStart[0], 0);
+  assert.ok(layoutA.rigidVertexStart[layoutA.rigidVertexStart.length - 1] >= 3);
+  assert.equal(layoutA.rigidVertexX.length, layoutA.rigidVertexY.length);
+  assert.equal(layoutA.rigidVertexX.length, layoutA.rigidVertexStart[layoutA.rigidVertexStart.length - 1]);
+  for (let i = 0; i < layoutA.rigidVertexX.length; i++) {
+    assert.ok(Number.isFinite(layoutA.rigidVertexX[i]));
+    assert.ok(Number.isFinite(layoutA.rigidVertexY[i]));
+  }
+
+  assert.equal(layoutA.signature, layoutB.signature);
+  assert.equal(layoutA.byteLength, layoutB.byteLength);
 });

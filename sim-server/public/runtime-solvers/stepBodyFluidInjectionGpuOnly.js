@@ -70,6 +70,53 @@ function canUseWgslOffload(offload) {
   );
 }
 
+function hashU32ArrayFnv1a(arr) {
+  let hash = 0x811c9dc5;
+  const len = Number(arr?.length) || 0;
+  for (let i = 0; i < len; i++) {
+    hash ^= (Number(arr[i]) || 0) >>> 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function hashF32ArrayFnv1a(arr) {
+  const len = Number(arr?.length) || 0;
+  const scratch = new ArrayBuffer(4);
+  const asF32 = new Float32Array(scratch);
+  const asU32 = new Uint32Array(scratch);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < len; i++) {
+    asF32[0] = Number(arr[i]) || 0;
+    hash ^= asU32[0] >>> 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function buildBodyFluidInjectionGatherSignature(gatherLayout) {
+  const pointCount = Number(gatherLayout?.pointRelX?.length) || 0;
+  const cellCount = Math.max(0, (Number(gatherLayout?.cellOffsets?.length) || 1) - 1);
+  const contributionCount = Number(gatherLayout?.contribPointIndex?.length) || 0;
+
+  let hash = 0x811c9dc5;
+  hash ^= pointCount >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= cellCount >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= contributionCount >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+
+  hash ^= hashU32ArrayFnv1a(gatherLayout?.cellOffsets) >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashU32ArrayFnv1a(gatherLayout?.contribPointIndex) >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32ArrayFnv1a(gatherLayout?.contribWeight) >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+
+  return hash >>> 0;
+}
+
 function buildBodyFluidInjectionWgslPrep({
   sim,
   bodies,
@@ -442,7 +489,7 @@ function ensureWgslGatherState({ offload, gatherLayout }) {
   return state;
 }
 
-async function dispatchBodyFluidInjectionGatherProposal({ offload, gatherLayout, couplingLimit, n }) {
+async function dispatchBodyFluidInjectionGatherProposal({ offload, gatherLayout, gatherSignature, couplingLimit, n }) {
   if (!canUseWgslOffload(offload)) return false;
 
   const state = ensureWgslGatherState({ offload, gatherLayout });
@@ -494,6 +541,8 @@ async function dispatchBodyFluidInjectionGatherProposal({ offload, gatherLayout,
   state.lastGatherProposalDispatchCount = dispatchCount;
   state.lastGatherProposalDeltaVx = deltaVx;
   state.lastGatherProposalDeltaVy = deltaVy;
+  state.lastGatherProposalSignature = gatherSignature >>> 0;
+  state.lastGatherProposalFrame = Number(offload?.state?.preparedPlan?.frame) || 0;
   return true;
 }
 
@@ -550,6 +599,10 @@ export function applyBodyFluidInjectionGpuOnly({
     couplingLimit,
     n,
   });
+  const gatherSignature = buildBodyFluidInjectionGatherSignature(gatherLayout);
+
+  let gatherDeltaToApply = cpuGatherDelta;
+  let gatherSource = 'cpu-gather-authoritative';
 
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     wgslOffload.state.preparedPlan = plan;
@@ -563,7 +616,27 @@ export function applyBodyFluidInjectionGpuOnly({
     wgslOffload.state.lastPreparedGatherContributionCount = gatherLayout.contributionCount;
     wgslOffload.state.lastCpuGatherDeltaVx = cpuGatherDelta.cellDeltaVx;
     wgslOffload.state.lastCpuGatherDeltaVy = cpuGatherDelta.cellDeltaVy;
+    wgslOffload.state.lastPreparedGatherSignature = gatherSignature;
     wgslOffload.state.lastMode = 'cpu-prepared';
+
+    const hasMatchingWgslGather =
+      wgslOffload.state.lastGatherProposalSignature === gatherSignature
+      && Number(wgslOffload.state.lastGatherProposalCellCount) === (n * n)
+      && wgslOffload.state.lastGatherProposalDeltaVx instanceof Float32Array
+      && wgslOffload.state.lastGatherProposalDeltaVy instanceof Float32Array;
+
+    if (hasMatchingWgslGather) {
+      gatherDeltaToApply = {
+        cellDeltaVx: wgslOffload.state.lastGatherProposalDeltaVx,
+        cellDeltaVy: wgslOffload.state.lastGatherProposalDeltaVy,
+      };
+      gatherSource = 'wgsl-gather-authoritative';
+      wgslOffload.state.lastMode = 'wgsl-gather-authoritative';
+      wgslOffload.state.lastError = null;
+      wgslOffload.state.lastAuthoritativeGatherSource = gatherSource;
+      wgslOffload.state.lastAuthoritativeGatherSignature = gatherSignature;
+      wgslOffload.state.lastAuthoritativeGatherFrame = Number(sim?.frame) || 0;
+    }
 
     if (canUseWgslOffload(wgslOffload)) {
       if (wgslOffload.state.wgslInFlight) {
@@ -575,6 +648,7 @@ export function applyBodyFluidInjectionGpuOnly({
         void dispatchBodyFluidInjectionGatherProposal({
           offload: wgslOffload,
           gatherLayout,
+          gatherSignature,
           couplingLimit,
           n,
         }).then((wgslGatherRan) => {
@@ -594,10 +668,16 @@ export function applyBodyFluidInjectionGpuOnly({
     // migrate from JS arrays to GPU storage buffers (or staged readback).
   }
 
+  if (wgslOffload?.state) {
+    wgslOffload.state.lastAuthoritativeGatherSource = gatherSource;
+    wgslOffload.state.lastAuthoritativeGatherSignature = gatherSignature;
+    wgslOffload.state.lastAuthoritativeGatherFrame = Number(sim?.frame) || 0;
+  }
+
   injectedMomentum = applyBodyFluidInjectionCellDeltas({
     n,
-    cellDeltaVx: cpuGatherDelta.cellDeltaVx,
-    cellDeltaVy: cpuGatherDelta.cellDeltaVy,
+    cellDeltaVx: gatherDeltaToApply.cellDeltaVx,
+    cellDeltaVy: gatherDeltaToApply.cellDeltaVy,
     couplingLimit,
     vxField,
     vyField,

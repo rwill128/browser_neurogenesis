@@ -33,8 +33,14 @@ test('body-fluid injection gpu-only wires deterministic gather layout metadata i
 
   assert.match(
     source,
-    /wgslOffload\.state\.lastCpuGatherDeltaVx = cpuGatherDelta\.cellDeltaVx;[\s\S]*wgslOffload\.state\.lastCpuGatherDeltaVy = cpuGatherDelta\.cellDeltaVy;/,
-    'expected offload telemetry to publish CPU gather delta arrays for upcoming WGSL parity/readback checks',
+    /wgslOffload\.state\.lastCpuGatherDeltaVx = cpuGatherDelta\.cellDeltaVx;[\s\S]*wgslOffload\.state\.lastCpuGatherDeltaVy = cpuGatherDelta\.cellDeltaVy;[\s\S]*wgslOffload\.state\.lastPreparedGatherSignature = gatherSignature;/,
+    'expected offload telemetry to publish CPU gather deltas plus deterministic gather signatures for WGSL source routing',
+  );
+
+  assert.match(
+    source,
+    /const hasMatchingWgslGather =[\s\S]*lastGatherProposalSignature === gatherSignature[\s\S]*gatherSource = 'wgsl-gather-authoritative';/,
+    'expected gpu-only gather apply path to route authoritative deltas to WGSL readback when deterministic signatures match',
   );
 
   assert.match(

@@ -380,9 +380,25 @@ function ensureWgslGatherState({ offload, gatherLayout }) {
     state.gatherProposalCellOffsets?.destroy?.();
     state.gatherProposalDeltaVx?.destroy?.();
     state.gatherProposalDeltaVy?.destroy?.();
+    state.gatherProposalDeltaVxReadback?.destroy?.();
+    state.gatherProposalDeltaVyReadback?.destroy?.();
     state.gatherProposalCellOffsets = device.createBuffer({ size: offsetBytes, usage: storageUsage });
-    state.gatherProposalDeltaVx = device.createBuffer({ size: cellBytes, usage: storageUsage });
-    state.gatherProposalDeltaVy = device.createBuffer({ size: cellBytes, usage: storageUsage });
+    state.gatherProposalDeltaVx = device.createBuffer({
+      size: cellBytes,
+      usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC,
+    });
+    state.gatherProposalDeltaVy = device.createBuffer({
+      size: cellBytes,
+      usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC,
+    });
+    state.gatherProposalDeltaVxReadback = device.createBuffer({
+      size: cellBytes,
+      usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
+    });
+    state.gatherProposalDeltaVyReadback = device.createBuffer({
+      size: cellBytes,
+      usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
+    });
     state.gatherProposalCellCapacity = cellCapacity;
     state.gatherProposalBindGroup = null;
   }
@@ -426,7 +442,7 @@ function ensureWgslGatherState({ offload, gatherLayout }) {
   return state;
 }
 
-function dispatchBodyFluidInjectionGatherProposal({ offload, gatherLayout, couplingLimit, n }) {
+async function dispatchBodyFluidInjectionGatherProposal({ offload, gatherLayout, couplingLimit, n }) {
   if (!canUseWgslOffload(offload)) return false;
 
   const state = ensureWgslGatherState({ offload, gatherLayout });
@@ -450,17 +466,34 @@ function dispatchBodyFluidInjectionGatherProposal({ offload, gatherLayout, coupl
     device.queue.writeBuffer(state.gatherProposalContribWeight, 0, gatherLayout.contribWeight);
   }
 
+  const dispatchCount = Math.max(1, Math.ceil(cellCount / 64));
+  const cellBytes = cellCount * 4;
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   pass.setPipeline(state.gatherProposalPipeline);
   pass.setBindGroup(0, state.gatherProposalBindGroup);
-  pass.dispatchWorkgroups(Math.max(1, Math.ceil(cellCount / 64)));
+  pass.dispatchWorkgroups(dispatchCount);
   pass.end();
+
+  encoder.copyBufferToBuffer(state.gatherProposalDeltaVx, 0, state.gatherProposalDeltaVxReadback, 0, cellBytes);
+  encoder.copyBufferToBuffer(state.gatherProposalDeltaVy, 0, state.gatherProposalDeltaVyReadback, 0, cellBytes);
   device.queue.submit([encoder.finish()]);
+
+  await state.gatherProposalDeltaVxReadback.mapAsync(globalThis.GPUMapMode.READ, 0, cellBytes);
+  const mappedVx = state.gatherProposalDeltaVxReadback.getMappedRange(0, cellBytes);
+  const deltaVx = new Float32Array(mappedVx.slice(0));
+  state.gatherProposalDeltaVxReadback.unmap();
+
+  await state.gatherProposalDeltaVyReadback.mapAsync(globalThis.GPUMapMode.READ, 0, cellBytes);
+  const mappedVy = state.gatherProposalDeltaVyReadback.getMappedRange(0, cellBytes);
+  const deltaVy = new Float32Array(mappedVy.slice(0));
+  state.gatherProposalDeltaVyReadback.unmap();
 
   state.lastGatherProposalCellCount = cellCount;
   state.lastGatherProposalContributionCount = gatherLayout.contributionCount;
-  state.lastGatherProposalDispatchCount = Math.max(1, Math.ceil(cellCount / 64));
+  state.lastGatherProposalDispatchCount = dispatchCount;
+  state.lastGatherProposalDeltaVx = deltaVx;
+  state.lastGatherProposalDeltaVy = deltaVy;
   return true;
 }
 
@@ -530,24 +563,35 @@ export function applyBodyFluidInjectionGpuOnly({
     wgslOffload.state.lastPreparedGatherContributionCount = gatherLayout.contributionCount;
     wgslOffload.state.lastCpuGatherDeltaVx = cpuGatherDelta.cellDeltaVx;
     wgslOffload.state.lastCpuGatherDeltaVy = cpuGatherDelta.cellDeltaVy;
+    wgslOffload.state.lastMode = 'cpu-prepared';
 
-    let wgslGatherRan = false;
-    try {
-      wgslGatherRan = dispatchBodyFluidInjectionGatherProposal({
-        offload: wgslOffload,
-        gatherLayout,
-        couplingLimit,
-        n,
-      });
-      wgslOffload.state.lastError = null;
-    } catch (err) {
-      wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
-      wgslGatherRan = false;
+    if (canUseWgslOffload(wgslOffload)) {
+      if (wgslOffload.state.wgslInFlight) {
+        wgslOffload.state.wgslSkippedWhileBusy = (wgslOffload.state.wgslSkippedWhileBusy || 0) + 1;
+      } else {
+        const runId = (wgslOffload.state.lastWgslRunId || 0) + 1;
+        wgslOffload.state.lastWgslRunId = runId;
+        wgslOffload.state.wgslInFlight = true;
+        void dispatchBodyFluidInjectionGatherProposal({
+          offload: wgslOffload,
+          gatherLayout,
+          couplingLimit,
+          n,
+        }).then((wgslGatherRan) => {
+          wgslOffload.state.lastError = null;
+          wgslOffload.state.lastMode = wgslGatherRan ? 'wgsl-gather-proposal' : 'cpu-gather-authoritative';
+        }).catch((err) => {
+          wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
+          wgslOffload.state.lastMode = 'cpu-gather-authoritative';
+        }).finally(() => {
+          wgslOffload.state.wgslInFlight = false;
+          wgslOffload.state.lastCompletedWgslRunId = runId;
+        });
+      }
     }
 
     // CPU gather apply remains authoritative until solver-owned fluid fields
     // migrate from JS arrays to GPU storage buffers (or staged readback).
-    wgslOffload.state.lastMode = wgslGatherRan ? 'wgsl-gather-proposal' : 'cpu-gather-authoritative';
   }
 
   injectedMomentum = applyBodyFluidInjectionCellDeltas({

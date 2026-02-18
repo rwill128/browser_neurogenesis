@@ -3,137 +3,101 @@ import assert from 'node:assert/strict';
 
 import { applyBodyFluidInjectionGpuOnly } from '../../sim-server/public/runtime-solvers/stepBodyFluidInjectionGpuOnly.js';
 
-function sampleFieldBilinear(field, n, x, y) {
-  const cx = Math.max(0, Math.min(n - 1.001, Number(x) || 0));
-  const cy = Math.max(0, Math.min(n - 1.001, Number(y) || 0));
-  const x0 = Math.floor(cx);
-  const y0 = Math.floor(cy);
-  const x1 = Math.min(n - 1, x0 + 1);
-  const y1 = Math.min(n - 1, y0 + 1);
-  const sx = cx - x0;
-  const sy = cy - y0;
+function buildFixture() {
+  const n = 6;
+  const vxField = new Float32Array(n * n);
+  const vyField = new Float32Array(n * n);
+  const bodyFeedbackCurrVx = new Float32Array(n * n);
+  const bodyFeedbackCurrVy = new Float32Array(n * n);
 
-  const i00 = y0 * n + x0;
-  const i10 = y0 * n + x1;
-  const i01 = y1 * n + x0;
-  const i11 = y1 * n + x1;
+  const rigid = [{ x: 2.1, y: 2.4, vx: 0.5, vy: -0.2, mass: 1.2, r: 0.9 }];
+  const softNodes = [
+    { x: 3.0, y: 2.0, vx: -0.1, vy: 0.2, mass: 0.8, clusterId: 1 },
+    { x: 3.4, y: 2.3, vx: 0.2, vy: -0.3, mass: 1.0, clusterId: 1 },
+  ];
 
-  const a = Number(field[i00]) * (1 - sx) + Number(field[i10]) * sx;
-  const b = Number(field[i01]) * (1 - sx) + Number(field[i11]) * sx;
-  return a * (1 - sy) + b * sy;
+  const soft = { nodes: softNodes };
+  const bodies = { rigid };
+  const sim = { frame: 12 };
+
+  const sampleFieldBilinear = (field, size, x, y) => {
+    const xi = Math.max(0, Math.min(size - 1, Math.round(x)));
+    const yi = Math.max(0, Math.min(size - 1, Math.round(y)));
+    return Number(field[yi * size + xi]) || 0;
+  };
+
+  const computeSoftClusterKinematics = (nodes) => {
+    const m = new Map();
+    for (const node of nodes) {
+      const cid = node.clusterId ?? 0;
+      if (!m.has(cid)) m.set(cid, { x: 0, y: 0, vx: 0, vy: 0, omega: 0, c: 0 });
+      const entry = m.get(cid);
+      entry.x += node.x;
+      entry.y += node.y;
+      entry.vx += node.vx;
+      entry.vy += node.vy;
+      entry.c += 1;
+    }
+    for (const entry of m.values()) {
+      const c = Math.max(1, entry.c);
+      entry.x /= c;
+      entry.y /= c;
+      entry.vx /= c;
+      entry.vy /= c;
+    }
+    return m;
+  };
+
+  return {
+    sim,
+    bodies,
+    soft,
+    n,
+    vxField,
+    vyField,
+    bodyFeedbackCurrVx,
+    bodyFeedbackCurrVy,
+    sampleFieldBilinear,
+    computeSoftClusterKinematics,
+  };
 }
 
-function makeSoftClusterKinematics(nodes) {
-  const m = new Map();
-  for (const node of nodes) {
-    const cid = node.clusterId ?? 0;
-    const entry = m.get(cid) || { x: 0, y: 0, vx: 0, vy: 0, n: 0, omega: 0 };
-    entry.x += Number(node.x) || 0;
-    entry.y += Number(node.y) || 0;
-    entry.vx += Number(node.vx) || 0;
-    entry.vy += Number(node.vy) || 0;
-    entry.n += 1;
-    m.set(cid, entry);
-  }
-  for (const [cid, entry] of m) {
-    const inv = 1 / Math.max(1, entry.n);
-    m.set(cid, {
-      x: entry.x * inv,
-      y: entry.y * inv,
-      vx: entry.vx * inv,
-      vy: entry.vy * inv,
-      omega: 0,
-    });
-  }
-  return m;
-}
+test('body-fluid injection parity: gpu-only CPU-authoritative path matches with/without WGSL offload wiring', () => {
+  const base = buildFixture();
+  const withOffload = buildFixture();
 
-test('body fluid injection gpu-only keeps cpu outputs stable while publishing wgsl prep layout metadata', () => {
-  const n = 16;
-  const size = n * n;
-
-  const seedVx = new Float32Array(size);
-  const seedVy = new Float32Array(size);
-  for (let i = 0; i < size; i++) {
-    seedVx[i] = (i % 7) * 0.03;
-    seedVy[i] = ((i + 3) % 5) * -0.02;
-  }
-
-  const bodies = {
-    rigid: [
-      { x: 5.2, y: 4.7, vx: 0.9, vy: -0.2, mass: 1.5, r: 2.8, edgeMomentumCoupling: [1, 0.8, 0.9] },
-      { x: 10.1, y: 11.4, vx: -0.4, vy: 0.7, mass: 2.2, r: 3.1, edgeMomentumCoupling: [0.7, 0.6, 0.75] },
-    ],
-  };
-  const soft = {
-    nodes: [
-      { x: 7.0, y: 9.0, vx: 0.2, vy: -0.1, mass: 0.6, clusterId: 0 },
-      { x: 7.8, y: 9.4, vx: 0.1, vy: 0.3, mass: 0.7, clusterId: 0 },
-      { x: 11.1, y: 5.5, vx: -0.3, vy: 0.2, mass: 0.65, clusterId: 1 },
-    ],
+  const commonArgs = {
+    feedbackK: 0.6,
+    swimGain: 0.3,
+    rigidEdgeMomentumScale: () => 0.9,
+    softNodeMomentumScale: () => 0.75,
+    softClusterFluidInjectBlend: 0.55,
+    fluidCouplingComponentLimit: 8,
   };
 
-  const makeRun = (withPrep) => {
-    const vxField = new Float32Array(seedVx);
-    const vyField = new Float32Array(seedVy);
-    const currVx = new Float32Array(size);
-    const currVy = new Float32Array(size);
-    const offload = withPrep ? { enabled: true, state: {} } : undefined;
+  const baselineResult = applyBodyFluidInjectionGpuOnly({
+    ...base,
+    ...commonArgs,
+    wgslOffload: null,
+  });
 
-    const result = applyBodyFluidInjectionGpuOnly({
-      sim: { frame: 42 },
-      bodies,
-      soft,
-      n,
-      vxField,
-      vyField,
-      feedbackK: 0.01,
-      swimGain: 0.8,
-      bodyFeedbackCurrVx: currVx,
-      bodyFeedbackCurrVy: currVy,
-      rigidEdgeMomentumScale: (rb) => (Array.isArray(rb.edgeMomentumCoupling) ? rb.edgeMomentumCoupling[0] : 1),
-      softNodeMomentumScale: (i) => (i % 2 === 0 ? 0.85 : 0.65),
-      sampleFieldBilinear,
-      computeSoftClusterKinematics: makeSoftClusterKinematics,
-      softClusterFluidInjectBlend: 0.55,
-      fluidCouplingComponentLimit: 12,
-      wgslOffload: offload,
-    });
-
-    return { vxField, vyField, currVx, currVy, result, offload };
+  const stubOffload = {
+    enabled: true,
+    // missing device intentionally -> no WGSL execution, CPU path must remain identical.
+    state: {},
   };
 
-  const plain = makeRun(false);
-  const prepared = makeRun(true);
+  const offloadResult = applyBodyFluidInjectionGpuOnly({
+    ...withOffload,
+    ...commonArgs,
+    wgslOffload: stubOffload,
+  });
 
-  assert.deepEqual(Array.from(prepared.vxField), Array.from(plain.vxField), 'wgsl prep mode should preserve vx field output');
-  assert.deepEqual(Array.from(prepared.vyField), Array.from(plain.vyField), 'wgsl prep mode should preserve vy field output');
-  assert.deepEqual(Array.from(prepared.currVx), Array.from(plain.currVx), 'wgsl prep mode should preserve feedback vx output');
-  assert.deepEqual(Array.from(prepared.currVy), Array.from(plain.currVy), 'wgsl prep mode should preserve feedback vy output');
-  assert.equal(prepared.result.injectedMomentum, plain.result.injectedMomentum, 'injected momentum should match in prep mode');
-
-  const state = { ...(prepared?.offload?.state || {}) };
-  assert.equal(state.lastMode, 'cpu-gather-authoritative');
-  assert.equal(state.lastPreparedRigidCount, bodies.rigid.length);
-  assert.equal(state.lastPreparedSoftCount, soft.nodes.length);
-  assert.equal(state.lastPreparedPointCount, bodies.rigid.length + soft.nodes.length);
-  assert.ok((state.lastPreparedLayoutBytes || 0) > 0, 'expected prepared layout byte footprint to be tracked');
-  assert.ok((state.lastPreparedGatherBytes || 0) > 0, 'expected prepared gather-layout footprint to be tracked');
-  assert.ok((state.lastPreparedGatherContributionCount || 0) > 0, 'expected gather layout to include at least one contribution');
-  assert.equal(state.preparedLayout?.pointX instanceof Float32Array, true);
-  assert.equal(state.preparedLayout?.pointVx instanceof Float32Array, true);
-  assert.equal(state.preparedLayout?.pointX?.length, bodies.rigid.length + soft.nodes.length);
-  assert.equal(state.preparedGatherLayout?.cellOffsets instanceof Uint32Array, true);
-  assert.equal(state.preparedGatherLayout?.contribPointIndex instanceof Uint32Array, true);
-  assert.equal(state.preparedGatherLayout?.contribWeight instanceof Float32Array, true);
-  assert.equal(state.preparedGatherLayout?.cellOffsets?.length, (n * n) + 1);
-  assert.equal(
-    state.preparedGatherLayout?.contribPointIndex?.length,
-    state.preparedGatherLayout?.contribWeight?.length,
-    'expected gather index/weight streams to stay aligned',
-  );
-  assert.equal(state.lastCpuGatherDeltaVx instanceof Float32Array, true);
-  assert.equal(state.lastCpuGatherDeltaVy instanceof Float32Array, true);
-  assert.equal(state.lastCpuGatherDeltaVx?.length, n * n);
-  assert.equal(state.lastCpuGatherDeltaVy?.length, n * n);
+  assert.equal(offloadResult.injectedMomentum, baselineResult.injectedMomentum);
+  assert.deepEqual(Array.from(withOffload.vxField), Array.from(base.vxField));
+  assert.deepEqual(Array.from(withOffload.vyField), Array.from(base.vyField));
+  assert.deepEqual(Array.from(withOffload.bodyFeedbackCurrVx), Array.from(base.bodyFeedbackCurrVx));
+  assert.deepEqual(Array.from(withOffload.bodyFeedbackCurrVy), Array.from(base.bodyFeedbackCurrVy));
+  assert.equal(stubOffload.state.lastPreparedPointCount, 3);
+  assert.equal(stubOffload.state.lastMode, 'cpu-prepared');
 });

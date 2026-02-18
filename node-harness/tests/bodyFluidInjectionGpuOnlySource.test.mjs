@@ -21,8 +21,8 @@ test('body-fluid injection gpu-only wires deterministic gather layout metadata i
 
   assert.match(
     source,
-    /dispatchBodyFluidInjectionGatherProposal\(\{[\s\S]*gatherLayout,[\s\S]*couplingLimit,[\s\S]*n,[\s\S]*\}\);/,
-    'expected gather proposal dispatch to consume deterministic gather layout streams',
+    /void dispatchBodyFluidInjectionGatherProposal\(\{[\s\S]*gatherLayout,[\s\S]*couplingLimit,[\s\S]*n,[\s\S]*\}\)\.then\(/,
+    'expected gather proposal dispatch to consume deterministic gather layout streams via async WGSL readback pipeline',
   );
 
   assert.match(
@@ -39,7 +39,13 @@ test('body-fluid injection gpu-only wires deterministic gather layout metadata i
 
   assert.match(
     source,
-    /wgslOffload\.state\.lastMode = wgslGatherRan \? 'wgsl-gather-proposal' : 'cpu-gather-authoritative';/,
-    'expected mode telemetry to report wgsl gather proposal dispatch versus cpu gather authoritative fallback',
+    /encoder\.copyBufferToBuffer\(state\.gatherProposalDeltaVx, 0, state\.gatherProposalDeltaVxReadback, 0, cellBytes\)[\s\S]*mapAsync\(globalThis\.GPUMapMode\.READ, 0, cellBytes\)[\s\S]*state\.lastGatherProposalDeltaVx = deltaVx;[\s\S]*state\.lastGatherProposalDeltaVy = deltaVy;/,
+    'expected WGSL gather proposal stage to read back deterministic cell-delta telemetry for parity checks',
+  );
+
+  assert.match(
+    source,
+    /if \(wgslOffload\.state\.wgslInFlight\) \{[\s\S]*wgslSkippedWhileBusy[\s\S]*\} else \{[\s\S]*wgslInFlight = true;[\s\S]*lastCompletedWgslRunId/,
+    'expected gpu-only body-fluid WGSL dispatch to serialize map/readback work and avoid overlapping mapAsync races',
   );
 });

@@ -2598,15 +2598,21 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         wgslOffload.state.lastNodeCollisionResponsePairCount = impulseSeed.nodePairCount;
         wgslOffload.state.lastEdgeCollisionResponsePairCount = impulseSeed.edgePairCount;
         wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'wgsl-rigid-soft-response-authoritative';
+        wgslOffload.state.lastRigidSoftResponseOwnership = 'wgsl-authoritative';
+        wgslOffload.state.lastRigidSoftResponseFallbackReason = null;
         wgslOffload.state.lastSourceRoute = 'wgsl-rigid-soft-response-authoritative';
         wgslOffload.state.lastMode = 'wgsl-rigid-soft-response-authoritative';
         usedWgslAuthoritativeResponse = true;
       } else {
         wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-nonfinite';
+        wgslOffload.state.lastRigidSoftResponseOwnership = 'cpu-fallback';
+        wgslOffload.state.lastRigidSoftResponseFallbackReason = 'nonfinite-or-signature-mismatch';
       }
     } catch (err) {
       wgslOffload.state.lastError = String(err?.message || err || 'rigid-soft-response-wgsl-error');
       wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-error';
+      wgslOffload.state.lastRigidSoftResponseOwnership = 'cpu-fallback';
+      wgslOffload.state.lastRigidSoftResponseFallbackReason = 'wgsl-dispatch-error';
     }
   }
 
@@ -2616,6 +2622,10 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     if (!wgslOffload.state.lastRigidSoftResponseAuthoritativeSource) {
       wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-hard-fallback-prep';
     }
+    if (!wgslOffload.state.lastRigidSoftResponseFallbackReason) {
+      wgslOffload.state.lastRigidSoftResponseFallbackReason = 'hard-fallback';
+    }
+    wgslOffload.state.lastRigidSoftResponseOwnership = 'cpu-fallback';
     wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-response-hard-fallback';
     wgslOffload.state.lastMode = 'cpu-rigid-soft-response-hard-fallback';
   }

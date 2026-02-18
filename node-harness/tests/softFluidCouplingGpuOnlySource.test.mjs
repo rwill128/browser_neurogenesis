@@ -51,13 +51,19 @@ test('soft fluid-coupling gpu-only publishes deterministic WGSL prep layout for 
 
   assert.match(
     source,
+    /hasAuthoritativeWgslClusterLoadProposal\([\s\S]*authoritativeClusterLoad === true[\s\S]*clusterLoadSource = canUseAuthoritativeClusterLoad[\s\S]*'wgsl-cluster-load-authoritative'[\s\S]*'cpu-cluster-load-authoritative';/,
+    'expected gpu-only soft-fluid branch to gate authoritative WGSL cluster-load acceleration replay on deterministic signature+parity checks',
+  );
+
+  assert.match(
+    source,
     /lastClusterLoadParity = \{[\s\S]*source: 'wgsl-cluster-load-proposal-vs-cpu',[\s\S]*mismatchCount: clusterLoadMismatchCount,[\s\S]*signature: clusterLoadProposalSignature >>> 0,[\s\S]*\};/,
     'expected gpu-only soft-fluid branch to publish deterministic WGSL-vs-CPU cluster-load parity telemetry before authoritative cutover',
   );
 
   assert.match(
     source,
-    /hasAuthoritativeWgslCarryProposal\([\s\S]*carrySource = authoritativeCarryProposal \? 'wgsl-carry-authoritative' : 'cpu-carry-authoritative';[\s\S]*lastCpuCarryProposalForceX = cpuProposalForceX;[\s\S]*lastAuthoritativeCarrySource = carrySource;[\s\S]*lastMode = carrySource === 'wgsl-carry-authoritative'/,
-    'expected gpu-only soft-fluid branch to publish deterministic CPU carry proposal arrays and route authoritative ownership to matching WGSL proposals',
+    /hasAuthoritativeWgslCarryProposal\([\s\S]*carrySource = authoritativeCarryProposal \? 'wgsl-carry-authoritative' : 'cpu-carry-authoritative';[\s\S]*lastCpuCarryProposalForceX = cpuProposalForceX;[\s\S]*lastAuthoritativeCarrySource = carrySource;[\s\S]*lastAuthoritativeClusterLoadSource = clusterLoadSource;[\s\S]*lastSourceRoute = `\$\{carrySource\}\+\$\{clusterLoadSource\}`;[\s\S]*lastMode = carrySource === 'wgsl-carry-authoritative' \|\| clusterLoadSource === 'wgsl-cluster-load-authoritative'/,
+    'expected gpu-only soft-fluid branch to publish deterministic CPU carry proposal arrays and route authoritative carry+cluster ownership to matching WGSL proposals',
   );
 });

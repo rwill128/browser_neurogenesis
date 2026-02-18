@@ -250,6 +250,20 @@ function hasAuthoritativeWgslCarryProposal(wgslOffload, proposalSignature, nodeC
     && state.lastCarryProposalLocalCarryY.length === nodeCount;
 }
 
+function hasAuthoritativeWgslClusterLoadProposal(wgslOffload, proposalSignature, clusterCount) {
+  const state = wgslOffload?.state;
+  if (!state) return false;
+  return state.lastClusterLoadProposalSignature === proposalSignature
+    && state.lastClusterLoadProposalForceX instanceof Float32Array
+    && state.lastClusterLoadProposalForceY instanceof Float32Array
+    && state.lastClusterLoadProposalTorque instanceof Float32Array
+    && state.lastClusterLoadProposalCount instanceof Uint32Array
+    && state.lastClusterLoadProposalForceX.length === clusterCount
+    && state.lastClusterLoadProposalForceY.length === clusterCount
+    && state.lastClusterLoadProposalTorque.length === clusterCount
+    && state.lastClusterLoadProposalCount.length === clusterCount;
+}
+
 const SOFT_FLUID_CARRY_PROPOSAL_WGSL = /* wgsl */`
 struct Params {
   nodeCount: u32,
@@ -965,18 +979,71 @@ export function applySoftFluidCouplingGpuOnly({
     wgslOffload.state.lastClusterLoadProposalDispatched = wgslClusterLoadDispatched;
   }
 
+  const clusterIds = wgslOffload?.state?.preparedLayout?.clusterIds;
+  const proposalForceX = wgslOffload?.state?.lastClusterLoadProposalForceX;
+  const proposalForceY = wgslOffload?.state?.lastClusterLoadProposalForceY;
+  const proposalTorque = wgslOffload?.state?.lastClusterLoadProposalTorque;
+  const proposalCount = wgslOffload?.state?.lastClusterLoadProposalCount;
+  let clusterLoadMismatchCount = 0;
+  if (clusterIds instanceof Int32Array
+    && proposalForceX instanceof Float32Array
+    && proposalForceY instanceof Float32Array
+    && proposalTorque instanceof Float32Array
+    && proposalCount instanceof Uint32Array
+    && wgslOffload?.state?.lastClusterLoadProposalSignature === clusterLoadProposalSignature
+    && proposalForceX.length === clusterIds.length
+    && proposalForceY.length === clusterIds.length
+    && proposalTorque.length === clusterIds.length
+    && proposalCount.length === clusterIds.length) {
+    for (let i = 0; i < clusterIds.length; i++) {
+      const cid = clusterIds[i];
+      const cpuLoad = clusterFluidLoadMap.get(cid) || { forceX: 0, forceY: 0, torque: 0, count: 0 };
+      if (Math.abs((proposalForceX[i] || 0) - (cpuLoad.forceX || 0)) > 1e-5
+        || Math.abs((proposalForceY[i] || 0) - (cpuLoad.forceY || 0)) > 1e-5
+        || Math.abs((proposalTorque[i] || 0) - (cpuLoad.torque || 0)) > 1e-5
+        || Math.abs((proposalCount[i] || 0) - (cpuLoad.count || 0)) > 0) {
+        clusterLoadMismatchCount += 1;
+      }
+    }
+  }
+
+  const canUseAuthoritativeClusterLoad = wgslOffload?.authoritativeClusterLoad === true
+    && clusterLoadMismatchCount === 0
+    && clusterIds instanceof Int32Array
+    && hasAuthoritativeWgslClusterLoadProposal(wgslOffload, clusterLoadProposalSignature, clusterIds.length);
+  const clusterLoadSource = canUseAuthoritativeClusterLoad
+    ? 'wgsl-cluster-load-authoritative'
+    : 'cpu-cluster-load-authoritative';
+
   const clusterAccelMap = new Map();
-  for (const [cid, load] of clusterFluidLoadMap.entries()) {
-    const clusterKin = softClusterKinematics.get(cid);
-    const clusterMass = Math.max(0.02, Number(clusterKin?.mass) || (Math.max(1, load.count) * sim.controls.massSoft));
-    const clusterInertia = Math.max(1e-4, Number(clusterKin?.inertia) || 1e-4);
-    clusterAccelMap.set(cid, {
-      x: Number.isFinite(Number(clusterKin?.x)) ? Number(clusterKin.x) : softCentroid.x,
-      y: Number.isFinite(Number(clusterKin?.y)) ? Number(clusterKin.y) : softCentroid.y,
-      ax: load.forceX / clusterMass,
-      ay: load.forceY / clusterMass,
-      alpha: load.torque / clusterInertia,
-    });
+  if (canUseAuthoritativeClusterLoad) {
+    for (let i = 0; i < clusterIds.length; i++) {
+      const cid = clusterIds[i];
+      const clusterKin = softClusterKinematics.get(cid);
+      const count = Number(proposalCount[i]) || 0;
+      const clusterMass = Math.max(0.02, Number(clusterKin?.mass) || (Math.max(1, count) * sim.controls.massSoft));
+      const clusterInertia = Math.max(1e-4, Number(clusterKin?.inertia) || 1e-4);
+      clusterAccelMap.set(cid, {
+        x: Number.isFinite(Number(clusterKin?.x)) ? Number(clusterKin.x) : softCentroid.x,
+        y: Number.isFinite(Number(clusterKin?.y)) ? Number(clusterKin.y) : softCentroid.y,
+        ax: (proposalForceX[i] || 0) / clusterMass,
+        ay: (proposalForceY[i] || 0) / clusterMass,
+        alpha: (proposalTorque[i] || 0) / clusterInertia,
+      });
+    }
+  } else {
+    for (const [cid, load] of clusterFluidLoadMap.entries()) {
+      const clusterKin = softClusterKinematics.get(cid);
+      const clusterMass = Math.max(0.02, Number(clusterKin?.mass) || (Math.max(1, load.count) * sim.controls.massSoft));
+      const clusterInertia = Math.max(1e-4, Number(clusterKin?.inertia) || 1e-4);
+      clusterAccelMap.set(cid, {
+        x: Number.isFinite(Number(clusterKin?.x)) ? Number(clusterKin.x) : softCentroid.x,
+        y: Number.isFinite(Number(clusterKin?.y)) ? Number(clusterKin.y) : softCentroid.y,
+        ax: load.forceX / clusterMass,
+        ay: load.forceY / clusterMass,
+        alpha: load.torque / clusterInertia,
+      });
+    }
   }
 
   for (const node of nodes) {
@@ -1040,28 +1107,22 @@ export function applySoftFluidCouplingGpuOnly({
     wgslOffload.state.lastCpuCarryProposalCarryY = cpuProposalCarryY;
     wgslOffload.state.lastCpuCarryProposalLocalCarryX = cpuProposalLocalCarryX;
     wgslOffload.state.lastCpuCarryProposalLocalCarryY = cpuProposalLocalCarryY;
-    const clusterIds = wgslOffload.state.preparedLayout?.clusterIds;
-    const proposalForceX = wgslOffload.state.lastClusterLoadProposalForceX;
-    const proposalForceY = wgslOffload.state.lastClusterLoadProposalForceY;
-    const proposalTorque = wgslOffload.state.lastClusterLoadProposalTorque;
-    let clusterLoadMismatchCount = 0;
-    if (clusterIds instanceof Int32Array
-      && proposalForceX instanceof Float32Array
-      && proposalForceY instanceof Float32Array
-      && proposalTorque instanceof Float32Array
-      && wgslOffload.state.lastClusterLoadProposalSignature === clusterLoadProposalSignature
-      && proposalForceX.length === clusterIds.length
-      && proposalForceY.length === clusterIds.length
-      && proposalTorque.length === clusterIds.length) {
+    if (clusterIds instanceof Int32Array) {
+      const cpuClusterForceX = new Float32Array(clusterIds.length);
+      const cpuClusterForceY = new Float32Array(clusterIds.length);
+      const cpuClusterTorque = new Float32Array(clusterIds.length);
+      const cpuClusterCount = new Uint32Array(clusterIds.length);
       for (let i = 0; i < clusterIds.length; i++) {
-        const cid = clusterIds[i];
-        const cpuLoad = clusterFluidLoadMap.get(cid) || { forceX: 0, forceY: 0, torque: 0 };
-        if (Math.abs((proposalForceX[i] || 0) - (cpuLoad.forceX || 0)) > 1e-5
-          || Math.abs((proposalForceY[i] || 0) - (cpuLoad.forceY || 0)) > 1e-5
-          || Math.abs((proposalTorque[i] || 0) - (cpuLoad.torque || 0)) > 1e-5) {
-          clusterLoadMismatchCount += 1;
-        }
+        const cpuLoad = clusterFluidLoadMap.get(clusterIds[i]) || { forceX: 0, forceY: 0, torque: 0, count: 0 };
+        cpuClusterForceX[i] = Number(cpuLoad.forceX) || 0;
+        cpuClusterForceY[i] = Number(cpuLoad.forceY) || 0;
+        cpuClusterTorque[i] = Number(cpuLoad.torque) || 0;
+        cpuClusterCount[i] = (Number(cpuLoad.count) || 0) >>> 0;
       }
+      wgslOffload.state.lastCpuClusterLoadForceX = cpuClusterForceX;
+      wgslOffload.state.lastCpuClusterLoadForceY = cpuClusterForceY;
+      wgslOffload.state.lastCpuClusterLoadTorque = cpuClusterTorque;
+      wgslOffload.state.lastCpuClusterLoadCount = cpuClusterCount;
     }
     wgslOffload.state.lastClusterLoadParity = {
       source: 'wgsl-cluster-load-proposal-vs-cpu',
@@ -1071,10 +1132,12 @@ export function applySoftFluidCouplingGpuOnly({
     };
     wgslOffload.state.lastAuthoritativeCarrySource = carrySource;
     wgslOffload.state.lastAuthoritativeCarrySignature = carryProposalSignature;
-    wgslOffload.state.lastSourceRoute = carrySource;
-    wgslOffload.state.lastMode = carrySource === 'wgsl-carry-authoritative'
-      ? 'wgsl-carry-authoritative'
-      : 'cpu-carry-authoritative';
+    wgslOffload.state.lastAuthoritativeClusterLoadSource = clusterLoadSource;
+    wgslOffload.state.lastAuthoritativeClusterLoadSignature = clusterLoadProposalSignature;
+    wgslOffload.state.lastSourceRoute = `${carrySource}+${clusterLoadSource}`;
+    wgslOffload.state.lastMode = carrySource === 'wgsl-carry-authoritative' || clusterLoadSource === 'wgsl-cluster-load-authoritative'
+      ? 'wgsl-carry-or-cluster-authoritative'
+      : 'cpu-carry+cluster-authoritative';
   }
 
   return {

@@ -22,6 +22,7 @@ import { applyPostCollisionRecoveryGpuOnly } from '/runtime-solvers/stepPostColl
 import { stabilizeRigidPostIntegrateGpuOnly } from '/runtime-solvers/stepRigidPostIntegrateGpuOnly.js';
 import { applyCollisionBoundaryPassGpuOnly } from '/runtime-solvers/stepCollisionBoundaryGpuOnly.js';
 import { applySoftRestRecoveryGpuOnly } from '/runtime-solvers/stepSoftRestRecoveryGpuOnly.js';
+import { applyBodyFluidInjectionGpuOnly } from '/runtime-solvers/stepBodyFluidInjectionGpuOnly.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -53,6 +54,8 @@ const massSoftEl = document.getElementById('massSoft');
 const rigidBodyCountEl = document.getElementById('rigidBodyCount');
 const bodyDragEl = document.getElementById('bodyDrag');
 const bodyFeedbackEl = document.getElementById('bodyFeedback');
+const fluidVelocityCapEl = document.getElementById('fluidVelocityCap');
+const fluidCouplingComponentLimitEl = document.getElementById('fluidCouplingComponentLimit');
 const softClusterFluidTorqueCouplingEl = document.getElementById('softClusterFluidTorqueCoupling');
 const softClusterAngularProjectionEl = document.getElementById('softClusterAngularProjection');
 const softClusterCollisionAngularProjectionEl = document.getElementById('softClusterCollisionAngularProjection');
@@ -103,7 +106,8 @@ const SOFT_XPBD_BASE_COMPLIANCE = 0.0012;
 const SOFT_AREA_XPBD_ITERS = 6;
 const SOFT_AREA_BASE_COMPLIANCE = 0.0009;
 const SOFT_INTEGRATION_SCALE = 24;
-const FLUID_COUPLING_COMPONENT_LIMIT = 12;
+const DEFAULT_FLUID_VELOCITY_CAP = 6.0;
+const DEFAULT_FLUID_COUPLING_COMPONENT_LIMIT = 12;
 const ENABLE_HYBRID_BODY_LINKS = false;
 
 // Soft deformation color-state thresholds:
@@ -134,6 +138,24 @@ const RIGID_INSIDE_CORRECTION_SLOP = 0.04;
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
+}
+
+function normalizeFluidVelocityCap(raw) {
+  const v = Number(raw);
+  if (!Number.isFinite(v)) return DEFAULT_FLUID_VELOCITY_CAP;
+  return clamp(v, 0.1, 24);
+}
+
+function normalizeFluidCouplingComponentLimit(raw) {
+  const v = Number(raw);
+  if (!Number.isFinite(v)) return DEFAULT_FLUID_COUPLING_COMPONENT_LIMIT;
+  return clamp(v, 0.25, 48);
+}
+
+function clampFluidComponent(v, limitRaw) {
+  const limit = normalizeFluidCouplingComponentLimit(limitRaw);
+  if (!Number.isFinite(v)) return 0;
+  return clamp(v, -limit, limit);
 }
 
 function rigidEdgeMomentumScale(rb) {
@@ -190,6 +212,7 @@ function readControls() {
     dt: Number(dtEl.value) || 0.01,
     fade: Number(fadeEl.value) || 0.9999,
     viscosity: Number(viscosityEl.value) || 0.00001,
+    fluidVelocityCap: normalizeFluidVelocityCap(fluidVelocityCapEl?.value),
     impulse: Number(impulseEl.value) || 2.5,
     radius: Number(radiusEl.value) || 6,
     massLight: Math.max(0.05, Number(massLightEl.value) || 1.2),
@@ -198,6 +221,7 @@ function readControls() {
     rigidBodyCount: Math.max(1, Math.min(1000, Math.round(Number(rigidBodyCountEl?.value) || 10))),
     bodyDrag: Math.max(0, Number(bodyDragEl.value) || 0.55),
     bodyFeedback: Math.max(0, Number(bodyFeedbackEl.value) || 0.012),
+    fluidCouplingComponentLimit: normalizeFluidCouplingComponentLimit(fluidCouplingComponentLimitEl?.value),
     softClusterFluidTorqueCoupling: Math.max(0, Math.min(2, Number(softClusterFluidTorqueCouplingEl?.value) || SOFT_CLUSTER_FLOW_FORCE_SHARE)),
     softClusterAngularProjection: Math.max(0, Math.min(1, Number(softClusterAngularProjectionEl?.value) || SOFT_CLUSTER_ANGULAR_PROJECTION)),
     softClusterCollisionAngularProjection: Math.max(0, Math.min(1, Number(softClusterCollisionAngularProjectionEl?.value) || SOFT_CLUSTER_COLLISION_ANGULAR_PROJECTION)),
@@ -275,6 +299,8 @@ function uploadUniforms(device, uniformBuffer, s) {
   f32[3] = s.impulse;
   f32[4] = s.radius;
   f32[5] = s.viscosity;
+  f32[6] = normalizeFluidVelocityCap(s.fluidVelocityCap);
+  f32[7] = 0;
   device.queue.writeBuffer(uniformBuffer, 0, a);
 }
 
@@ -292,7 +318,7 @@ struct Params {
   impulse: f32,
   radius: f32,
   viscosity_scale: f32,
-  _pad0: f32,
+  fluid_velocity_cap: f32,
   _pad1: f32,
 };
 @group(0) @binding(0) var<uniform> p: Params;
@@ -354,7 +380,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let decay = 1.0 / (1.0 + 4.0 * localVisc * p.dt);
   var nx = sampleBilinear(&vx0, px, py) * decay;
   var ny = sampleBilinear(&vy0, px, py) * decay;
-  let vmax = 6.0;
+  let vmax = max(0.1, p.fluid_velocity_cap);
   let mag = sqrt(nx * nx + ny * ny);
   if (mag > vmax) {
     let s = vmax / mag;
@@ -905,7 +931,7 @@ function sampleFieldBilinear(field, n, x, y) {
   const b = (Number.isFinite(v01) ? v01 : 0) * (1 - sx) + (Number.isFinite(v11) ? v11 : 0) * sx;
   const out = a * (1 - sy) + b * sy;
   if (!Number.isFinite(out)) return 0;
-  return Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, out));
+  return clampFluidComponent(out, sim?.controls?.fluidCouplingComponentLimit);
 }
 
 function sampleObstacleMaskNearest(mask, n, x, y) {
@@ -935,7 +961,7 @@ function sampleFluidForBodyCoupling(
     const own = sampleFieldBilinear(selfFeedbackField, n, sx, sy);
     const v = base - own * suppress;
     if (!Number.isFinite(v)) return 0;
-    return Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, v));
+    return clampFluidComponent(v, sim?.controls?.fluidCouplingComponentLimit);
   };
 
   const samples = [];
@@ -4433,95 +4459,120 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   applyInteractionLabBodyMotion(sim);
 
   let injectedMomentum = 0;
-  const injectPoint = (px, py, pvx, pvy, localFluidX, localFluidY, mass, rad=3.0, swimInjectX = 0, swimInjectY = 0, momentumScale = 1) => {
-    if (!Number.isFinite(px) || !Number.isFinite(py)) return;
-    const radius = Math.max(0.4, Number.isFinite(rad) ? rad : 3.0);
-    const minX = Math.max(0, Math.floor(px - radius));
-    const maxX = Math.min(n - 1, Math.ceil(px + radius));
-    const minY = Math.max(0, Math.floor(py - radius));
-    const maxY = Math.min(n - 1, Math.ceil(py + radius));
-    const relXRaw = pvx - localFluidX + swimInjectX;
-    const relYRaw = pvy - localFluidY + swimInjectY;
-    const relX = Number.isFinite(relXRaw) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, relXRaw)) : 0;
-    const relY = Number.isFinite(relYRaw) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, relYRaw)) : 0;
-    const scaleRaw = feedbackK * Math.max(0.1, Number.isFinite(mass) ? mass : 0.1) * clamp(Number(momentumScale), 0, 1);
-    const scale = Number.isFinite(scaleRaw) ? Math.max(0, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, scaleRaw)) : 0;
-    if (scale <= 0) return;
+  let softClusterForInjection;
+  if (solverPath === 'gpu-only') {
+    const fluidInjectionResult = applyBodyFluidInjectionGpuOnly({
+      sim,
+      bodies,
+      soft: s,
+      n,
+      vxField,
+      vyField,
+      feedbackK,
+      swimGain,
+      bodyFeedbackCurrVx,
+      bodyFeedbackCurrVy,
+      rigidEdgeMomentumScale,
+      softNodeMomentumScale,
+      sampleFieldBilinear,
+      computeSoftClusterKinematics,
+      softClusterFluidInjectBlend: SOFT_CLUSTER_FLUID_INJECT_BLEND,
+      fluidCouplingComponentLimit: sim?.controls?.fluidCouplingComponentLimit,
+    });
+    injectedMomentum = fluidInjectionResult.injectedMomentum || 0;
+    softClusterForInjection = fluidInjectionResult.softClusterForInjection || computeSoftClusterKinematics(s.nodes);
+  } else {
+    const injectPoint = (px, py, pvx, pvy, localFluidX, localFluidY, mass, rad=3.0, swimInjectX = 0, swimInjectY = 0, momentumScale = 1) => {
+      if (!Number.isFinite(px) || !Number.isFinite(py)) return;
+      const radius = Math.max(0.4, Number.isFinite(rad) ? rad : 3.0);
+      const minX = Math.max(0, Math.floor(px - radius));
+      const maxX = Math.min(n - 1, Math.ceil(px + radius));
+      const minY = Math.max(0, Math.floor(py - radius));
+      const maxY = Math.min(n - 1, Math.ceil(py + radius));
+      const couplingLimit = normalizeFluidCouplingComponentLimit(sim?.controls?.fluidCouplingComponentLimit);
+      const relXRaw = pvx - localFluidX + swimInjectX;
+      const relYRaw = pvy - localFluidY + swimInjectY;
+      const relX = clampFluidComponent(relXRaw, couplingLimit);
+      const relY = clampFluidComponent(relYRaw, couplingLimit);
+      const scaleRaw = feedbackK * Math.max(0.1, Number.isFinite(mass) ? mass : 0.1) * clamp(Number(momentumScale), 0, 1);
+      const scale = Number.isFinite(scaleRaw) ? clamp(scaleRaw, 0, couplingLimit) : 0;
+      if (scale <= 0) return;
 
-    for (let y = minY; y <= maxY; y++) {
-      for (let x = minX; x <= maxX; x++) {
-        const dx = x - px, dy = y - py;
-        const d = Math.hypot(dx, dy);
-        if (d > radius) continue;
-        const w = 1 - d / radius;
-        const idx = y * n + x;
-        const jxRaw = relX * scale * w;
-        const jyRaw = relY * scale * w;
-        const jx = Number.isFinite(jxRaw) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, jxRaw)) : 0;
-        const jy = Number.isFinite(jyRaw) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, jyRaw)) : 0;
-        const nextVx = Number(vxField[idx]) + jx;
-        const nextVy = Number(vyField[idx]) + jy;
-        vxField[idx] = Number.isFinite(nextVx) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, nextVx)) : 0;
-        vyField[idx] = Number.isFinite(nextVy) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, nextVy)) : 0;
-        bodyFeedbackCurrVx[idx] += jx;
-        bodyFeedbackCurrVy[idx] += jy;
-        injectedMomentum += Math.hypot(jx, jy);
+      for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+          const dx = x - px, dy = y - py;
+          const d = Math.hypot(dx, dy);
+          if (d > radius) continue;
+          const w = 1 - d / radius;
+          const idx = y * n + x;
+          const jxRaw = relX * scale * w;
+          const jyRaw = relY * scale * w;
+          const jx = clampFluidComponent(jxRaw, couplingLimit);
+          const jy = clampFluidComponent(jyRaw, couplingLimit);
+          const nextVx = Number(vxField[idx]) + jx;
+          const nextVy = Number(vyField[idx]) + jy;
+          vxField[idx] = clampFluidComponent(nextVx, couplingLimit);
+          vyField[idx] = clampFluidComponent(nextVy, couplingLimit);
+          bodyFeedbackCurrVx[idx] += jx;
+          bodyFeedbackCurrVy[idx] += jy;
+          injectedMomentum += Math.hypot(jx, jy);
+        }
       }
-    }
-  };
+    };
 
-  for (let bi = 0; bi < bodies.rigid.length; bi++) {
-    const b = bodies.rigid[bi];
-    const fx = sampleFieldBilinear(vxField, n, b.x, b.y);
-    const fy = sampleFieldBilinear(vyField, n, b.x, b.y);
-    const swimPhase = sim.frame * 0.08 + bi * 2.1;
-    injectPoint(
-      b.x,
-      b.y,
-      b.vx,
-      b.vy,
-      fx,
-      fy,
-      b.mass,
-      b.r * 0.8,
-      swimGain * Math.cos(swimPhase) * 0.015,
-      swimGain * Math.sin(swimPhase) * 0.012,
-      rigidEdgeMomentumScale(b),
-    );
-  }
-  const softClusterForInjection = computeSoftClusterKinematics(s.nodes);
-  for (let i = 0; i < s.nodes.length; i++) {
-    const node = s.nodes[i];
-    const fx = sampleFieldBilinear(vxField, n, node.x, node.y);
-    const fy = sampleFieldBilinear(vyField, n, node.x, node.y);
-    const cid = node.clusterId ?? 0;
-    const c = softClusterForInjection.get(cid);
-    const cx = Number.isFinite(Number(c?.x)) ? Number(c.x) : node.x;
-    const cy = Number.isFinite(Number(c?.y)) ? Number(c.y) : node.y;
-    const cvx = Number.isFinite(Number(c?.vx)) ? Number(c.vx) : node.vx;
-    const cvy = Number.isFinite(Number(c?.vy)) ? Number(c.vy) : node.vy;
-    const omega = Number.isFinite(Number(c?.omega)) ? Number(c.omega) : 0;
-    const rx = node.x - cx;
-    const ry = node.y - cy;
-    const rigidLikeVx = cvx - omega * ry;
-    const rigidLikeVy = cvy + omega * rx;
-    const blend = SOFT_CLUSTER_FLUID_INJECT_BLEND;
-    const injectVx = node.vx * (1 - blend) + rigidLikeVx * blend;
-    const injectVy = node.vy * (1 - blend) + rigidLikeVy * blend;
-    const swimPhase = sim.frame * 0.12 + i * 1.57;
-    injectPoint(
-      node.x,
-      node.y,
-      injectVx,
-      injectVy,
-      fx,
-      fy,
-      node.mass,
-      2.2,
-      swimGain * Math.cos(swimPhase) * 0.01,
-      swimGain * Math.sin(swimPhase) * 0.01,
-      softNodeMomentumScale(i),
-    );
+    for (let bi = 0; bi < bodies.rigid.length; bi++) {
+      const b = bodies.rigid[bi];
+      const fx = sampleFieldBilinear(vxField, n, b.x, b.y);
+      const fy = sampleFieldBilinear(vyField, n, b.x, b.y);
+      const swimPhase = sim.frame * 0.08 + bi * 2.1;
+      injectPoint(
+        b.x,
+        b.y,
+        b.vx,
+        b.vy,
+        fx,
+        fy,
+        b.mass,
+        b.r * 0.8,
+        swimGain * Math.cos(swimPhase) * 0.015,
+        swimGain * Math.sin(swimPhase) * 0.012,
+        rigidEdgeMomentumScale(b),
+      );
+    }
+    softClusterForInjection = computeSoftClusterKinematics(s.nodes);
+    for (let i = 0; i < s.nodes.length; i++) {
+      const node = s.nodes[i];
+      const fx = sampleFieldBilinear(vxField, n, node.x, node.y);
+      const fy = sampleFieldBilinear(vyField, n, node.x, node.y);
+      const cid = node.clusterId ?? 0;
+      const c = softClusterForInjection.get(cid);
+      const cx = Number.isFinite(Number(c?.x)) ? Number(c.x) : node.x;
+      const cy = Number.isFinite(Number(c?.y)) ? Number(c.y) : node.y;
+      const cvx = Number.isFinite(Number(c?.vx)) ? Number(c.vx) : node.vx;
+      const cvy = Number.isFinite(Number(c?.vy)) ? Number(c.vy) : node.vy;
+      const omega = Number.isFinite(Number(c?.omega)) ? Number(c.omega) : 0;
+      const rx = node.x - cx;
+      const ry = node.y - cy;
+      const rigidLikeVx = cvx - omega * ry;
+      const rigidLikeVy = cvy + omega * rx;
+      const blend = SOFT_CLUSTER_FLUID_INJECT_BLEND;
+      const injectVx = node.vx * (1 - blend) + rigidLikeVx * blend;
+      const injectVy = node.vy * (1 - blend) + rigidLikeVy * blend;
+      const swimPhase = sim.frame * 0.12 + i * 1.57;
+      injectPoint(
+        node.x,
+        node.y,
+        injectVx,
+        injectVy,
+        fx,
+        fy,
+        node.mass,
+        2.2,
+        swimGain * Math.cos(swimPhase) * 0.01,
+        swimGain * Math.sin(swimPhase) * 0.01,
+        softNodeMomentumScale(i),
+      );
+    }
   }
 
   const softCentroidAfter = computeSoftCentroid(s.nodes);
@@ -5796,11 +5847,12 @@ async function stepAndRender() {
 
     // Last-resort guardrail: prevent non-finite/unsafe velocity components from
     // being re-uploaded into the next GPU fluid step.
+    const couplingLimit = normalizeFluidCouplingComponentLimit(s.controls?.fluidCouplingComponentLimit);
     for (let i = 0; i < s.cells; i++) {
       const vxi = Number(vx[i]);
       const vyi = Number(vy[i]);
-      vx[i] = Number.isFinite(vxi) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, vxi)) : 0;
-      vy[i] = Number.isFinite(vyi) ? Math.max(-FLUID_COUPLING_COMPONENT_LIMIT, Math.min(FLUID_COUPLING_COMPONENT_LIMIT, vyi)) : 0;
+      vx[i] = clampFluidComponent(vxi, couplingLimit);
+      vy[i] = clampFluidComponent(vyi, couplingLimit);
     }
 
     s.device.queue.writeBuffer(s.vx0, 0, vx);
@@ -5861,11 +5913,13 @@ async function stepAndRender() {
         fps: fpsNow,
         dyeEnergy: +sum.toFixed(1),
         viscosityScale: s.controls.viscosity,
+        fluidVelocityCap: normalizeFluidVelocityCap(s.controls.fluidVelocityCap),
         massLight: s.controls.massLight,
         massHeavy: s.controls.massHeavy,
         massSoft: s.controls.massSoft,
         bodyDrag: s.controls.bodyDrag,
         bodyFeedback: s.controls.bodyFeedback,
+        fluidCouplingComponentLimit: normalizeFluidCouplingComponentLimit(s.controls.fluidCouplingComponentLimit),
         enableArtificialSwim: !!s.controls.enableArtificialSwim,
         softClusterFluidTorqueCoupling: s.controls.softClusterFluidTorqueCoupling,
         softClusterAngularProjection: s.controls.softClusterAngularProjection,

@@ -114,6 +114,7 @@
     <label class="slider-control">dt <input id="dt" type="range" min="0.001" max="0.05" step="0.001" value="0.01" data-decimals="3" /><span class="slider-value" data-readout-for="dt">0.010</span></label>
     <label class="slider-control">fade <input id="fade" type="range" min="0.99" max="1" step="0.0001" value="0.9999" data-decimals="4" /><span class="slider-value" data-readout-for="fade">0.9999</span></label>
     <label class="slider-control">viscosity scale <input id="viscosity" type="range" min="0" max="0.001" step="0.00001" value="0.00001" data-decimals="5" /><span class="slider-value" data-readout-for="viscosity">0.00001</span></label>
+    <label class="slider-control" title="GPU advection velocity magnitude cap (lower = calmer/slower flow).">fluid velocity cap <input id="fluidVelocityCap" type="range" min="0.1" max="24" step="0.1" value="6.0" data-decimals="1" /><span class="slider-value" data-readout-for="fluidVelocityCap">6.0</span></label>
     <label class="slider-control">impulse <input id="impulse" type="range" min="0" max="10" step="0.1" value="2.5" data-decimals="1" /><span class="slider-value" data-readout-for="impulse">2.5</span></label>
     <label class="slider-control">radius <input id="radius" type="range" min="1" max="24" step="0.5" value="6.0" data-decimals="1" /><span class="slider-value" data-readout-for="radius">6.0</span></label>
   </div>
@@ -150,6 +151,7 @@
     <label class="slider-control" title="Number of rigid bodies spawned in GPU Lab baseline scenario; high counts are expensive.">rigid bodies <input id="rigidBodyCount" type="range" min="1" max="1000" step="1" value="10" data-decimals="0" /><span class="slider-value" data-readout-for="rigidBodyCount">10</span></label>
     <label class="slider-control">drag <input id="bodyDrag" type="range" min="0" max="2" step="0.01" value="0.55" data-decimals="2" /><span class="slider-value" data-readout-for="bodyDrag">0.55</span></label>
     <label class="slider-control">feedback <input id="bodyFeedback" type="range" min="0" max="0.1" step="0.001" value="0.012" data-decimals="3" /><span class="slider-value" data-readout-for="bodyFeedback">0.012</span></label>
+    <label class="slider-control" title="Clamp for CPU-side body↔fluid coupling velocity components (guardrail before re-upload).">coupling component cap <input id="fluidCouplingComponentLimit" type="range" min="0.25" max="48" step="0.25" value="12" data-decimals="2" /><span class="slider-value" data-readout-for="fluidCouplingComponentLimit">12.00</span></label>
     <label class="slider-control" title="How strongly cluster-level fluid force/torque accelerates soft clusters.">fluid torque coupling <input id="softClusterFluidTorqueCoupling" type="range" step="0.02" min="0" max="2" value="0.58" data-decimals="2" /><span class="slider-value" data-readout-for="softClusterFluidTorqueCoupling">0.58</span></label>
     <label class="slider-control" title="Angular projection gain for ongoing soft-cluster rotational coupling.">cluster angular projection <input id="softClusterAngularProjection" type="range" step="0.01" min="0" max="1" value="0.14" data-decimals="2" /><span class="slider-value" data-readout-for="softClusterAngularProjection">0.14</span></label>
     <label class="slider-control" title="Angular projection gain applied after collision passes.">collision angular redistribution <input id="softClusterCollisionAngularProjection" type="range" step="0.01" min="0" max="1" value="0.22" data-decimals="2" /><span class="slider-value" data-readout-for="softClusterCollisionAngularProjection">0.22</span></label>
@@ -200,6 +202,6 @@
   </div>
 
   <pre id="out">idle</pre>
-  <script type="module" src="/gpu-lab.js?v=20260217l"></script>
+  <script type="module" src="/gpu-lab.js?v=20260217m"></script>
 </body>
 </html>

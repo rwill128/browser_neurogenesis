@@ -2714,46 +2714,85 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     : null;
 
   let usedWgslAuthoritativeResponse = false;
+  const applyAuthoritativeResponseProposal = ({ proposal, sourceTag, routeTag }) => {
+    applyRigidSoftAuthoritativeProposal({ rigidBodies, soft, impulseSeed, proposal });
+    if (sourceTag === 'authoritative') {
+      wgslOffload.state.lastNodeCollisionResponseSource = 'wgsl-rigid-soft-node-response-authoritative';
+      wgslOffload.state.lastEdgeCollisionResponseSource = 'wgsl-rigid-soft-edge-response-authoritative';
+      wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'wgsl-rigid-soft-response-authoritative';
+    } else {
+      wgslOffload.state.lastNodeCollisionResponseSource = `wgsl-rigid-soft-node-response-${sourceTag}`;
+      wgslOffload.state.lastEdgeCollisionResponseSource = `wgsl-rigid-soft-edge-response-${sourceTag}`;
+      wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = `wgsl-rigid-soft-response-${sourceTag}`;
+    }
+    wgslOffload.state.lastNodeCollisionResponsePairCount = impulseSeed.nodePairCount;
+    wgslOffload.state.lastEdgeCollisionResponsePairCount = impulseSeed.edgePairCount;
+    wgslOffload.state.lastRigidSoftResponseOwnership = 'wgsl-authoritative';
+    wgslOffload.state.lastRigidSoftResponseOwnershipDetailed = `wgsl-authoritative:${sourceTag}`;
+    wgslOffload.state.lastRigidSoftResponseRoute = routeTag;
+    wgslOffload.state.lastRigidSoftResponseFallbackReason = null;
+    wgslOffload.state.lastSourceRoute = `wgsl-rigid-soft-response-${sourceTag}`;
+    wgslOffload.state.lastMode = `wgsl-rigid-soft-response-${sourceTag}`;
+    if (profile) {
+      profile.route = 'wgsl-authoritative';
+      profile.responseOwnership = 'wgsl-authoritative';
+      profile.fallbackReason = null;
+      profile.usedWgslAuthoritativeResponse = true;
+    }
+    usedWgslAuthoritativeResponse = true;
+  };
+
   if (wgslOffload?.state && impulseSeed && wgslOffloadAvailable) {
+    const signature = Number(wgslOffload.state.lastPreparedNarrowphaseImpulseSeedSignature) || 0;
     try {
       const proposal = await dispatchRigidSoftResponseWgsl({
         offload: wgslOffload,
         impulseSeed,
         edgeSlop,
       });
-      const signature = Number(wgslOffload.state.lastPreparedNarrowphaseImpulseSeedSignature) || 0;
       const validationOut = { reason: null };
       if (canApplyRigidSoftAuthoritativeProposal({ proposal, impulseSeed, signature, out: validationOut })) {
-        applyRigidSoftAuthoritativeProposal({ rigidBodies, soft, impulseSeed, proposal });
-        wgslOffload.state.lastNodeCollisionResponseSource = 'wgsl-rigid-soft-node-response-authoritative';
-        wgslOffload.state.lastEdgeCollisionResponseSource = 'wgsl-rigid-soft-edge-response-authoritative';
-        wgslOffload.state.lastNodeCollisionResponsePairCount = impulseSeed.nodePairCount;
-        wgslOffload.state.lastEdgeCollisionResponsePairCount = impulseSeed.edgePairCount;
-        wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'wgsl-rigid-soft-response-authoritative';
-        wgslOffload.state.lastRigidSoftResponseOwnership = 'wgsl-authoritative';
-        wgslOffload.state.lastRigidSoftResponseOwnershipDetailed = 'wgsl-authoritative';
-        wgslOffload.state.lastRigidSoftResponseRoute = 'wgsl-authoritative';
-        wgslOffload.state.lastRigidSoftResponseFallbackReason = null;
-        wgslOffload.state.lastSourceRoute = 'wgsl-rigid-soft-response-authoritative';
-        wgslOffload.state.lastMode = 'wgsl-rigid-soft-response-authoritative';
-        if (profile) {
-          profile.route = 'wgsl-authoritative';
-          profile.responseOwnership = 'wgsl-authoritative';
-          profile.fallbackReason = null;
-          profile.usedWgslAuthoritativeResponse = true;
-        }
-        usedWgslAuthoritativeResponse = true;
+        applyAuthoritativeResponseProposal({
+          proposal,
+          sourceTag: 'authoritative',
+          routeTag: 'wgsl-authoritative',
+        });
+        wgslOffload.state.lastGoodRigidSoftResponseProposal = proposal;
+        wgslOffload.state.lastGoodRigidSoftResponseSignature = signature >>> 0;
       } else {
         const fallbackReason = validationOut.reason || 'proposal-validation-failed';
-        wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-nonfinite';
-        wgslOffload.state.lastRigidSoftResponseOwnership = 'cpu-fallback';
-        wgslOffload.state.lastRigidSoftResponseOwnershipDetailed = `cpu-hard-fallback:${fallbackReason}`;
-        wgslOffload.state.lastRigidSoftResponseRoute = 'cpu-fallback';
-        wgslOffload.state.lastRigidSoftResponseFallbackReason = fallbackReason;
-        if (profile) {
-          profile.route = 'cpu-fallback';
-          profile.responseOwnership = 'cpu-hard-fallback';
-          profile.fallbackReason = fallbackReason;
+        const cachedProposal = wgslOffload.state.lastGoodRigidSoftResponseProposal;
+        const cachedSignature = Number(wgslOffload.state.lastGoodRigidSoftResponseSignature) >>> 0;
+        const replayValidationOut = { reason: null };
+        if (
+          cachedProposal
+          && cachedSignature === (signature >>> 0)
+          && canApplyRigidSoftAuthoritativeProposal({
+            proposal: cachedProposal,
+            impulseSeed,
+            signature,
+            out: replayValidationOut,
+          })
+        ) {
+          applyAuthoritativeResponseProposal({
+            proposal: cachedProposal,
+            sourceTag: 'authoritative-replay',
+            routeTag: 'wgsl-authoritative-replay',
+          });
+          wgslOffload.state.lastRigidSoftResponseReplayReason = fallbackReason;
+        } else {
+          const replayReason = replayValidationOut.reason || 'cached-proposal-invalid';
+          const combinedReason = `${fallbackReason}|${replayReason}`;
+          wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-nonfinite';
+          wgslOffload.state.lastRigidSoftResponseOwnership = 'cpu-fallback';
+          wgslOffload.state.lastRigidSoftResponseOwnershipDetailed = `cpu-hard-fallback:${combinedReason}`;
+          wgslOffload.state.lastRigidSoftResponseRoute = 'cpu-fallback';
+          wgslOffload.state.lastRigidSoftResponseFallbackReason = combinedReason;
+          if (profile) {
+            profile.route = 'cpu-fallback';
+            profile.responseOwnership = 'cpu-hard-fallback';
+            profile.fallbackReason = combinedReason;
+          }
         }
       }
     } catch (err) {

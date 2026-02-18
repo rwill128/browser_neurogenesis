@@ -75,4 +75,16 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
     /copyBufferToBuffer\(state\.areaVelocityDeltaVXOut, 0, state\.areaVelocityDeltaVXReadback, 0, bytes\)[\s\S]*copyBufferToBuffer\(state\.areaVelocityDeltaVYOut, 0, state\.areaVelocityDeltaVYReadback, 0, bytes\)[\s\S]*lastAreaVelocityProposalDeltaVxByEndpoint[\s\S]*lastAreaVelocityProposalDeltaVyByEndpoint[\s\S]*lastAreaVelocityProposalAbsDeltaMean[\s\S]*lastAreaVelocityProposalAbsDeltaMax/,
     'expected WGSL area velocity proposal stage to read back deterministic per-endpoint node delta telemetry for upcoming reduction offload',
   );
+
+  assert.match(
+    areaSource,
+    /function reduceSoftAreaVelocityProposalToNodeDeltas\([\s\S]*lastAreaVelocityProposalNodeDeltaVx[\s\S]*lastAreaVelocityProposalNodeDeltaVy[\s\S]*lastAreaVelocityProposalNodeContributionCount/,
+    'expected gpu-only area module to publish deterministic endpoint->node reduced velocity deltas as reduction-kernel parity baseline',
+  );
+
+  assert.match(
+    areaSource,
+    /velocityProposalRan = await dispatchSoftAreaWgslVelocityDeltaProposal\([\s\S]*if \(velocityProposalRan\) \{[\s\S]*reduceSoftAreaVelocityProposalToNodeDeltas\(/,
+    'expected gpu-only area branch to run CPU deterministic reduction immediately after WGSL endpoint proposal for next WGSL node-reduction stage bring-up',
+  );
 });

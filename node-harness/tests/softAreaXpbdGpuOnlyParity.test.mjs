@@ -419,4 +419,18 @@ test('soft area XPBD WGSL proposal stage runs on gpu-only path while CPU remains
   assert.equal(wgslState.lastAreaVelocityProposalDeltaVyByEndpoint instanceof Float32Array, true);
   assert.equal(wgslState.lastAreaVelocityProposalDeltaVxByEndpoint.length, 4);
   assert.equal(wgslState.lastAreaVelocityProposalDeltaVyByEndpoint.length, 4);
+  assert.equal(wgslState.lastAreaVelocityProposalNodeDeltaVx instanceof Float32Array, true);
+  assert.equal(wgslState.lastAreaVelocityProposalNodeDeltaVy instanceof Float32Array, true);
+  assert.equal(wgslState.lastAreaVelocityProposalNodeContributionCount instanceof Uint32Array, true);
+  assert.equal(wgslState.lastAreaVelocityProposalNodeDeltaVx.length, gpuOnlySoft.nodes.length);
+  assert.equal(wgslState.lastAreaVelocityProposalNodeDeltaVy.length, gpuOnlySoft.nodes.length);
+  assert.equal(wgslState.lastAreaVelocityProposalNodeContributionCount.length, gpuOnlySoft.nodes.length);
+
+  const reducedSumVx = wgslState.lastAreaVelocityProposalNodeDeltaVx.reduce((sum, v) => sum + v, 0);
+  const reducedSumVy = wgslState.lastAreaVelocityProposalNodeDeltaVy.reduce((sum, v) => sum + v, 0);
+  const endpointSumVx = wgslState.lastAreaVelocityProposalDeltaVxByEndpoint.reduce((sum, v) => sum + v, 0);
+  const endpointSumVy = wgslState.lastAreaVelocityProposalDeltaVyByEndpoint.reduce((sum, v) => sum + v, 0);
+  assert.ok(Math.abs(reducedSumVx - endpointSumVx) < 1e-6, 'node-reduced vx should conserve endpoint proposal sum');
+  assert.ok(Math.abs(reducedSumVy - endpointSumVy) < 1e-6, 'node-reduced vy should conserve endpoint proposal sum');
+  assert.deepEqual(Array.from(wgslState.lastAreaVelocityProposalNodeContributionCount), [1, 1, 1, 1]);
 });

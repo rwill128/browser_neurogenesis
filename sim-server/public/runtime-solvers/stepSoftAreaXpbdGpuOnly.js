@@ -513,6 +513,48 @@ async function dispatchSoftAreaWgslVelocityDeltaProposal({ soft, offload, plan, 
   return true;
 }
 
+function reduceSoftAreaVelocityProposalToNodeDeltas({ soft, offload, plan }) {
+  const state = offload?.state;
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const endpointCount = Number(plan?.endpointCount) || 0;
+  if (!state || nodes.length <= 0 || endpointCount <= 0) return false;
+
+  const deltaVxByEndpoint = state.lastAreaVelocityProposalDeltaVxByEndpoint;
+  const deltaVyByEndpoint = state.lastAreaVelocityProposalDeltaVyByEndpoint;
+  if (!(deltaVxByEndpoint instanceof Float32Array) || !(deltaVyByEndpoint instanceof Float32Array)) return false;
+  if (deltaVxByEndpoint.length < endpointCount || deltaVyByEndpoint.length < endpointCount) return false;
+
+  const endpointNodeIndices = plan.clusterNodeIndices;
+  if (!(endpointNodeIndices instanceof Uint32Array) || endpointNodeIndices.length < endpointCount) return false;
+
+  const deltaVxByNode = new Float32Array(nodes.length);
+  const deltaVyByNode = new Float32Array(nodes.length);
+  const contributionCountByNode = new Uint32Array(nodes.length);
+
+  let maxAbsDelta = 0;
+  let sumAbsDelta = 0;
+  for (let ei = 0; ei < endpointCount; ei++) {
+    const ni = endpointNodeIndices[ei] >>> 0;
+    if (ni >= nodes.length) continue;
+    const dvx = deltaVxByEndpoint[ei] || 0;
+    const dvy = deltaVyByEndpoint[ei] || 0;
+    deltaVxByNode[ni] += dvx;
+    deltaVyByNode[ni] += dvy;
+    contributionCountByNode[ni] += 1;
+
+    const abs = Math.hypot(dvx, dvy);
+    if (abs > maxAbsDelta) maxAbsDelta = abs;
+    sumAbsDelta += abs;
+  }
+
+  state.lastAreaVelocityProposalNodeDeltaVx = deltaVxByNode;
+  state.lastAreaVelocityProposalNodeDeltaVy = deltaVyByNode;
+  state.lastAreaVelocityProposalNodeContributionCount = contributionCountByNode;
+  state.lastAreaVelocityProposalNodeReductionAbsDeltaMean = endpointCount > 0 ? sumAbsDelta / endpointCount : 0;
+  state.lastAreaVelocityProposalNodeReductionAbsDeltaMax = maxAbsDelta;
+  return true;
+}
+
 async function dispatchSoftAreaWgslLambdaProposal({ soft, offload, plan, dtPos, alpha }) {
   if (!canUseWgslOffload(offload)) return false;
   const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
@@ -849,6 +891,13 @@ export function applySoftAreaXPBDVelocityGpuOnly({
             dtPos,
             deltaByCluster: wgslOffload.state.lastAreaProposalDeltaLambdaByCluster,
           });
+          if (velocityProposalRan) {
+            reduceSoftAreaVelocityProposalToNodeDeltas({
+              soft,
+              offload: wgslOffload,
+              plan,
+            });
+          }
         }
 
         if (probeRan || proposalRan || velocityProposalRan) {

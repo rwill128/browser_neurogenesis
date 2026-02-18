@@ -266,6 +266,12 @@ test('gpu-lab routes soft integration stepping through isolated gpu-only runtime
     /const hybridNodeVCap = 3\.2;[\s\S]*if \(solverPath === 'gpu-only'\) \{[\s\S]*integrateSoftBodiesGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*for \(const node of s\.nodes\)/,
     'expected explicit gpu-only soft integration dispatch with baseline fallback loop',
   );
+
+  assert.match(
+    source,
+    /integrateSoftBodiesGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*state: \(sim\.softIntegrateWgslState \|\|= \{\}\),[\s\S]*\}\);/,
+    'expected gpu-only soft integration dispatch to wire the optional WGSL offload context',
+  );
 });
 
 test('gpu-lab routes soft spring rest-recovery stepping through isolated gpu-only runtime solver module', () => {

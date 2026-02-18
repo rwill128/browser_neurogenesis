@@ -35,7 +35,7 @@ function runBaselineSoftIntegration({ soft, n, dt, scale, cap }) {
   }
 }
 
-test('soft integration parity: baseline loop and gpu-only module produce matching node states', () => {
+test('soft integration parity: baseline loop and gpu-only module produce matching node states', async () => {
   const n = 128;
   const dt = 0.013;
   const softIntegrationScale = 24;
@@ -52,7 +52,7 @@ test('soft integration parity: baseline loop and gpu-only module produce matchin
   const gpuOnly = { nodes: structuredClone(seedNodes) };
 
   runBaselineSoftIntegration({ soft: baseline, n, dt, scale: softIntegrationScale, cap: hybridNodeVCap });
-  integrateSoftBodiesGpuOnly({
+  await integrateSoftBodiesGpuOnly({
     soft: gpuOnly,
     n,
     dt,

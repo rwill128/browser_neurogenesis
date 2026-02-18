@@ -3659,7 +3659,7 @@ function stabilizeSeverelyDeformedSoftClusters(sim, s, loops, deform) {
   }
 }
 
-function stepBodiesAndInject(sim, vxField, vyField) {
+async function stepBodiesAndInject(sim, vxField, vyField) {
   const n = sim.controls.n;
   const dtRaw = Number(sim.controls.dt) || 0.01;
   const dt = Math.max(0.001, Math.min(0.02, dtRaw));
@@ -4236,13 +4236,18 @@ function stepBodiesAndInject(sim, vxField, vyField) {
 
   const hybridNodeVCap = 3.2;
   if (solverPath === 'gpu-only') {
-    integrateSoftBodiesGpuOnly({
+    await integrateSoftBodiesGpuOnly({
       soft: s,
       n,
       dt,
       softIntegrationScale: SOFT_INTEGRATION_SCALE,
       hybridNodeVCap,
       applyBounceBoundary,
+      wgslOffload: {
+        enabled: true,
+        device: sim?.device,
+        state: (sim.softIntegrateWgslState ||= {}),
+      },
     });
   } else {
     for (const node of s.nodes) {
@@ -5894,7 +5899,7 @@ async function stepAndRender() {
     s.readR.unmap(); s.readG.unmap(); s.readB.unmap(); s.readVx.unmap(); s.readVy.unmap();
 
     // Rigid + soft coupling: carry/drag from flow + two-way pushback/swim impulses.
-    const couplingInstant = stepBodiesAndInject(s, vx, vy);
+    const couplingInstant = await stepBodiesAndInject(s, vx, vy);
     applyEmitters(s, r, g, b, vx, vy);
     const obstacleEdgesNow = Number(s?.lastFluidObstacleStats?.blockedEdgeCount) || 0;
     applyDigestiveCapture(s, r, g, b);

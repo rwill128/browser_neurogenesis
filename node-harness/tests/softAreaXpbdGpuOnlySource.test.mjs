@@ -33,4 +33,10 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
     /wgslOffload\.state\.lastPreparedClusterCount = plan\.clusterCount;[\s\S]*wgslOffload\.state\.lastPreparedEndpointCount = plan\.endpointCount;[\s\S]*wgslOffload\.state\.lastPreparedLayoutBytes = layout\.byteLength;/,
     'expected prepared WGSL layout telemetry counters for next-stage offload bring-up',
   );
+
+  assert.match(
+    areaSource,
+    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*dispatchSoftAreaWgslProbe\(\{ sim, soft, offload: wgslOffload, plan, dtPos \}\)[\s\S]*lastMode = 'wgsl-probe'/,
+    'expected gpu-only soft area pass to dispatch a concrete WGSL probe stage while retaining CPU-authoritative fallback',
+  );
 });

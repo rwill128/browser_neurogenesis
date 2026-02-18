@@ -19,6 +19,8 @@ export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
     applyRigidInsideCorrectionPass,
     applyMembraneInsideCorrectionPass,
     applyBounceBoundary,
+    applyCollisionBoundaryPassGpuOnly,
+    wgslOffload,
     n,
     softClusterLoops,
   } = args;
@@ -66,14 +68,29 @@ export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
         loops: softClusterLoops,
       });
 
-  if (typeof applyBounceBoundary === 'function') {
+  let boundaryRuntime = { mode: 'cpu-inline', reason: 'bounce-callback' };
+  if (typeof applyCollisionBoundaryPassGpuOnly === 'function') {
+    boundaryRuntime =
+      (await Promise.resolve(applyCollisionBoundaryPassGpuOnly({
+        rigidBodies: bodies.rigid,
+        soft,
+        n,
+        rigidBounce: 0.84,
+        softBounce: 0.78,
+        applyBounceBoundary,
+        wgslOffload,
+      }))) || { mode: 'cpu-fallback', reason: 'unknown' };
+  } else if (typeof applyBounceBoundary === 'function') {
     for (const rb of (bodies.rigid || [])) applyBounceBoundary(rb, n, 0.84);
     for (const sn of (soft.nodes || [])) applyBounceBoundary(sn, n, 0.78);
+  } else {
+    boundaryRuntime = { mode: 'cpu-inline', reason: 'no-boundary-handler' };
   }
 
   return {
     rigidInsideCorrections,
     membraneInsideCorrections,
     postCollisionClusterKinematics,
+    boundaryRuntime,
   };
 }

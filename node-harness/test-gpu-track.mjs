@@ -18,6 +18,8 @@ const tests = [
   'node-harness/tests/collisionBoundaryGpuOnlySource.test.mjs',
   'node-harness/tests/rigidCollisionGpuOnlyParity.test.mjs',
   'node-harness/tests/rigidSoftCollisionGpuOnlyParity.test.mjs',
+  'node-harness/tests/postCollisionRecoveryGpuOnlyParity.test.mjs',
+  'node-harness/tests/postCollisionRecoveryGpuOnlySource.test.mjs',
   'node-harness/tests/softMembranePressureGpuOnlyParity.test.mjs',
   'node-harness/tests/softSpringXpbdGpuOnlyParity.test.mjs',
   'node-harness/tests/softSpringXpbdGpuOnlySource.test.mjs',

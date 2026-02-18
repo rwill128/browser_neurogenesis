@@ -4454,6 +4454,12 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         softClusterCollisionAngularProjection,
         membraneGainScale: 0.72,
         applyBounceBoundary,
+        applyCollisionBoundaryPassGpuOnly,
+        wgslOffload: {
+          enabled: true,
+          device: sim?.device,
+          state: (sim.postCollisionBoundaryWgslState ||= {}),
+        },
         n,
         softClusterLoops,
         hybridAttachedByRigid,

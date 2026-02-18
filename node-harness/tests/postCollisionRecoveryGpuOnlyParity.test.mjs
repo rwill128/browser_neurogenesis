@@ -269,6 +269,54 @@ function makeDefaultMembraneState() {
   };
 }
 
+test('post-collision recovery parity: delegates boundary pass to gpu-only collision boundary module when provided', async () => {
+  const state = makeState();
+  const calls = [];
+
+  const result = await applyPostCollisionRecoveryGpuOnly({
+    sim: state.sim,
+    bodies: state.bodies,
+    soft: state.soft,
+    dtNorm: state.dtNorm,
+    softMembraneClusterSet: state.softMembraneClusterSet,
+    softClusterCollisionLinearProjection: state.softClusterCollisionLinearProjection,
+    softClusterCollisionAngularProjection: state.softClusterCollisionAngularProjection,
+    membraneGainScale: 0.72,
+    computeSoftClusterKinematics(nodes) {
+      return computeSoftClusterKinematics(nodes);
+    },
+    projectNodesTowardClusterRigidMotion,
+    applyRigidInsideCorrectionPass() {
+      return 0;
+    },
+    applyMembraneInsideCorrectionPass() {
+      return 0;
+    },
+    applyBounceBoundary() {
+      calls.push('legacy-bounce');
+    },
+    applyCollisionBoundaryPassGpuOnly(args) {
+      calls.push(`boundary:${args.rigidBounce}:${args.softBounce}`);
+      for (const rb of (args.rigidBodies || [])) {
+        rb.vx *= args.rigidBounce;
+        rb.vy *= args.rigidBounce;
+      }
+      for (const sn of (args.soft?.nodes || [])) {
+        sn.vx *= args.softBounce;
+        sn.vy *= args.softBounce;
+      }
+      return { mode: 'wgsl', reason: 'ok' };
+    },
+    wgslOffload: { enabled: true, device: {}, state: {} },
+    n: state.n,
+    softClusterLoops: state.softClusterLoops,
+    hybridAttachedByRigid: state.hybridAttachedByRigid,
+  });
+
+  assert.deepEqual(calls, ['boundary:0.84:0.78']);
+  assert.deepEqual(result.boundaryRuntime, { mode: 'wgsl', reason: 'ok' });
+});
+
 test('post-collision recovery parity: default gpu-only membrane inside-correction path matches baseline sequencing', async () => {
   const baselineState = makeDefaultMembraneState();
   const gpuState = makeDefaultMembraneState();

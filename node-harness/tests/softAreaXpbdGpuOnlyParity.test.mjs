@@ -471,3 +471,89 @@ test('soft area XPBD WGSL proposal stage runs on gpu-only path while CPU remains
   assert.ok(Math.abs(reducedSumVy - endpointSumVy) < 1e-6, 'node-reduced vy should conserve endpoint proposal sum');
   assert.deepEqual(Array.from(wgslState.lastAreaVelocityProposalNodeContributionCount), [1, 1, 1, 1]);
 });
+
+test('soft area XPBD can consume signature-matched WGSL proposal as authoritative replay when explicitly enabled', async () => {
+  globalThis.GPUBufferUsage = {
+    STORAGE: 1 << 0,
+    COPY_DST: 1 << 1,
+    COPY_SRC: 1 << 2,
+    MAP_READ: 1 << 3,
+    UNIFORM: 1 << 4,
+  };
+  globalThis.GPUMapMode = { READ: 1 };
+
+  const dtPos = 0.16;
+  const stiffnessScale = 3.4;
+  const softSeed = {
+    nodes: [
+      { x: 14, y: 18, vx: 0.3, vy: -0.2, mass: 1.0, clusterId: 7 },
+      { x: 22, y: 17, vx: -0.2, vy: 0.1, mass: 0.9, clusterId: 7 },
+      { x: 26, y: 24, vx: 0.4, vy: 0.3, mass: 1.2, clusterId: 7 },
+      { x: 19, y: 29, vx: -0.3, vy: -0.1, mass: 1.4, clusterId: 7 },
+    ],
+  };
+  const loops = [{ clusterId: 7, indices: [0, 1, 2, 3] }];
+  const device = createSoftAreaMockWgslDevice();
+  const wgslState = {};
+
+  const firstSoft = structuredClone(softSeed);
+  const firstSim = {
+    frame: 1,
+    softAreaRest: new Map([[7, 44.2]]),
+    softAreaLambda: new Map([[7, 0.07]]),
+  };
+
+  applySoftAreaXPBDVelocityGpuOnly({
+    sim: firstSim,
+    soft: firstSoft,
+    loops,
+    dtPos,
+    stiffnessScale,
+    softAreaXpbdIters: SOFT_AREA_XPBD_ITERS,
+    softAreaBaseCompliance: SOFT_AREA_BASE_COMPLIANCE,
+    wgslOffload: {
+      enabled: true,
+      authoritativeAreaXpbd: true,
+      device,
+      state: wgslState,
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(wgslState.lastMode, 'wgsl-velocity-proposal');
+  assert.equal(typeof wgslState.lastAreaVelocityProposalSignature, 'string');
+
+  const secondSoft = structuredClone(softSeed);
+  const secondSim = {
+    frame: 2,
+    softAreaRest: new Map([[7, 44.2]]),
+    softAreaLambda: new Map([[7, 0.07]]),
+  };
+
+  applySoftAreaXPBDVelocityGpuOnly({
+    sim: secondSim,
+    soft: secondSoft,
+    loops,
+    dtPos,
+    stiffnessScale,
+    softAreaXpbdIters: SOFT_AREA_XPBD_ITERS,
+    softAreaBaseCompliance: SOFT_AREA_BASE_COMPLIANCE,
+    wgslOffload: {
+      enabled: true,
+      authoritativeAreaXpbd: true,
+      device,
+      state: wgslState,
+    },
+  });
+
+  assert.equal(wgslState.lastMode, 'wgsl-area-authoritative');
+  assert.equal(wgslState.lastAuthoritativeProposalSignature, wgslState.lastAreaVelocityProposalSignature);
+  assert.equal(secondSim.softAreaLambda.get(7), wgslState.lastAreaProposalLambdaNextByCluster[0]);
+
+  const dvx = wgslState.lastAreaVelocityProposalNodeDeltaVx;
+  const dvy = wgslState.lastAreaVelocityProposalNodeDeltaVy;
+  for (let i = 0; i < secondSoft.nodes.length; i++) {
+    assert.ok(Math.abs(secondSoft.nodes[i].vx - (softSeed.nodes[i].vx + dvx[i])) < 1e-12);
+    assert.ok(Math.abs(secondSoft.nodes[i].vy - (softSeed.nodes[i].vy + dvy[i])) < 1e-12);
+  }
+});

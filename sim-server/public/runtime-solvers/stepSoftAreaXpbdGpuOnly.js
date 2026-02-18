@@ -1112,6 +1112,39 @@ function buildSoftAreaXpbdWgslLayout(plan) {
   };
 }
 
+function computeSoftAreaProposalSignature({ soft, plan, dtPos, alpha, softAreaXpbdIters }) {
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  let acc = `${nodes.length}|${Number(plan?.clusterCount) || 0}|${Number(plan?.endpointCount) || 0}|${Number(softAreaXpbdIters) || 0}|${Number(dtPos) || 0}|${Number(alpha) || 0}`;
+  for (let i = 0; i < Math.min(nodes.length, 128); i++) {
+    const node = nodes[i] || {};
+    acc += `|${Number(node.x) || 0},${Number(node.y) || 0},${Number(node.vx) || 0},${Number(node.vy) || 0}`;
+  }
+  if (plan?.clusterLambda instanceof Float32Array) {
+    for (let i = 0; i < plan.clusterLambda.length; i++) acc += `|${plan.clusterLambda[i] || 0}`;
+  }
+  return acc;
+}
+
+function applySoftAreaAuthoritativeCachedProposal({ sim, soft, loops, state }) {
+  if (!(state?.lastAreaProposalLambdaNextByCluster instanceof Float32Array)) return false;
+  if (!(state?.lastAreaVelocityProposalNodeDeltaVx instanceof Float32Array)) return false;
+  if (!(state?.lastAreaVelocityProposalNodeDeltaVy instanceof Float32Array)) return false;
+
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  if (state.lastAreaVelocityProposalNodeDeltaVx.length !== nodes.length) return false;
+  if (state.lastAreaVelocityProposalNodeDeltaVy.length !== nodes.length) return false;
+
+  for (let ci = 0; ci < loops.length; ci++) {
+    sim?.softAreaLambda?.set?.(loops[ci]?.clusterId, Number(state.lastAreaProposalLambdaNextByCluster[ci]) || 0);
+  }
+
+  for (let ni = 0; ni < nodes.length; ni++) {
+    nodes[ni].vx += Number(state.lastAreaVelocityProposalNodeDeltaVx[ni]) || 0;
+    nodes[ni].vy += Number(state.lastAreaVelocityProposalNodeDeltaVy[ni]) || 0;
+  }
+  return true;
+}
+
 export function applySoftAreaXPBDVelocityGpuOnly({
   sim,
   soft,
@@ -1137,9 +1170,34 @@ export function applySoftAreaXPBDVelocityGpuOnly({
     wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
     wgslOffload.state.lastMode = 'cpu-prepared';
 
+    const proposalSignature = computeSoftAreaProposalSignature({
+      soft,
+      plan,
+      dtPos,
+      alpha,
+      softAreaXpbdIters,
+    });
+    wgslOffload.state.lastPreparedProposalSignature = proposalSignature;
+
+    if (
+      wgslOffload?.authoritativeAreaXpbd === true
+      && wgslOffload.state.lastAreaVelocityProposalSignature === proposalSignature
+      && applySoftAreaAuthoritativeCachedProposal({
+        sim,
+        soft,
+        loops,
+        state: wgslOffload.state,
+      })
+    ) {
+      wgslOffload.state.lastMode = 'wgsl-area-authoritative';
+      wgslOffload.state.lastAuthoritativeProposalSignature = proposalSignature;
+      wgslOffload.state.lastAuthoritativeProposalFrame = Number(sim?.frame) || 0;
+      return;
+    }
+
     // Concrete WGSL area stages: per-cluster area probe + lambda proposal.
-    // CPU remains authoritative for velocity updates until reduction kernels
-    // land; these kernels validate deterministic area/lambda parity telemetry.
+    // CPU remains authoritative by default; optional authoritative replay can
+    // consume a deterministic signature-matched WGSL proposal on the next frame.
     if (canUseWgslOffload(wgslOffload)) {
       void (async () => {
         const [probeRan, proposalRan] = await Promise.all([
@@ -1188,6 +1246,9 @@ export function applySoftAreaXPBDVelocityGpuOnly({
           wgslOffload.state.lastMode = velocityProposalRan
             ? 'wgsl-velocity-proposal'
             : (proposalRan ? 'wgsl-proposal' : 'wgsl-probe');
+          if (proposalRan && velocityProposalRan) {
+            wgslOffload.state.lastAreaVelocityProposalSignature = proposalSignature;
+          }
         }
       })().catch((err) => {
         wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');

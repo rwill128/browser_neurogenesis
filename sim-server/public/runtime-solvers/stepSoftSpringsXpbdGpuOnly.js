@@ -3,6 +3,158 @@
  * Keeps spring-constraint stepping isolated for the gpu-only runtime path while
  * preserving baseline/default behavior and call contracts.
  */
+const WGSL_WORKGROUP_SIZE = 64;
+
+const softSpringStretchProbeWgsl = /* wgsl */`
+struct Params {
+  nodeCount: u32,
+  springCount: u32,
+  _pad0: u32,
+  _pad1: u32,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> nodeX: array<f32>;
+@group(0) @binding(2) var<storage, read> nodeY: array<f32>;
+@group(0) @binding(3) var<storage, read> springNodeA: array<u32>;
+@group(0) @binding(4) var<storage, read> springNodeB: array<u32>;
+@group(0) @binding(5) var<storage, read> springRest: array<f32>;
+@group(0) @binding(6) var<storage, read_write> stretchOut: array<f32>;
+
+@compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let si = gid.x;
+  if (si >= params.springCount) { return; }
+
+  let ia = springNodeA[si];
+  let ib = springNodeB[si];
+  if (ia >= params.nodeCount || ib >= params.nodeCount) {
+    stretchOut[si] = 0.0;
+    return;
+  }
+
+  let dx = nodeX[ib] - nodeX[ia];
+  let dy = nodeY[ib] - nodeY[ia];
+  let d = max(length(vec2<f32>(dx, dy)), 1e-6);
+  let rest = max(abs(springRest[si]), 1e-6);
+  stretchOut[si] = (d - rest) / rest;
+}
+`;
+
+function canUseWgslOffload(offload) {
+  if (!offload || offload.enabled !== true) return false;
+  if (!offload.device || typeof offload.device.createComputePipelineAsync !== 'function') return false;
+  if (typeof globalThis.GPUBufferUsage === 'undefined') return false;
+  return true;
+}
+
+function ensureProbeBuffers(offload, nodeCount, springCount) {
+  const state = offload.state || (offload.state = {});
+  const device = offload.device;
+  const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
+  const uniformUsage = globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST;
+
+  const requiredNodeCapacity = Math.max(1, nodeCount);
+  if ((state.probeNodeCapacity || 0) < requiredNodeCapacity) {
+    const capacity = Math.max(requiredNodeCapacity, state.probeNodeCapacity ? state.probeNodeCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.probeNodeX?.destroy?.();
+    state.probeNodeY?.destroy?.();
+    state.probeNodeX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeNodeY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeNodeCapacity = capacity;
+    state.probeBindGroup = null;
+  }
+
+  const requiredSpringCapacity = Math.max(1, springCount);
+  if ((state.probeSpringCapacity || 0) < requiredSpringCapacity) {
+    const capacity = Math.max(requiredSpringCapacity, state.probeSpringCapacity ? state.probeSpringCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.probeSpringNodeA?.destroy?.();
+    state.probeSpringNodeB?.destroy?.();
+    state.probeSpringRest?.destroy?.();
+    state.probeStretchOut?.destroy?.();
+    state.probeSpringNodeA = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeSpringNodeB = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeSpringRest = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeStretchOut = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.probeSpringCapacity = capacity;
+    state.probeBindGroup = null;
+  }
+
+  if (!state.probeParams) {
+    state.probeParams = device.createBuffer({ size: 16, usage: uniformUsage });
+    state.probeBindGroup = null;
+  }
+
+  return state;
+}
+
+async function dispatchSoftSpringWgslProbe({ soft, offload, layout }) {
+  if (!canUseWgslOffload(offload)) return false;
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const springCount = Number(layout?.springRestByColor?.length) || 0;
+  if (nodes.length <= 0 || springCount <= 0) return false;
+
+  const state = ensureProbeBuffers(offload, nodes.length, springCount);
+  const device = offload.device;
+
+  if (!state.probePipeline) {
+    const module = device.createShaderModule({ code: softSpringStretchProbeWgsl });
+    state.probePipeline = await device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: { module, entryPoint: 'main' },
+    });
+    state.probeBindGroup = null;
+  }
+
+  if (!state.probeBindGroup) {
+    state.probeBindGroup = device.createBindGroup({
+      layout: state.probePipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.probeParams } },
+        { binding: 1, resource: { buffer: state.probeNodeX } },
+        { binding: 2, resource: { buffer: state.probeNodeY } },
+        { binding: 3, resource: { buffer: state.probeSpringNodeA } },
+        { binding: 4, resource: { buffer: state.probeSpringNodeB } },
+        { binding: 5, resource: { buffer: state.probeSpringRest } },
+        { binding: 6, resource: { buffer: state.probeStretchOut } },
+      ],
+    });
+  }
+
+  const nodeX = new Float32Array(nodes.length);
+  const nodeY = new Float32Array(nodes.length);
+  for (let ni = 0; ni < nodes.length; ni++) {
+    nodeX[ni] = Number(nodes[ni]?.x) || 0;
+    nodeY[ni] = Number(nodes[ni]?.y) || 0;
+  }
+
+  const params = new Uint32Array(4);
+  params[0] = nodes.length >>> 0;
+  params[1] = springCount >>> 0;
+
+  device.queue.writeBuffer(state.probeParams, 0, params);
+  device.queue.writeBuffer(state.probeNodeX, 0, nodeX);
+  device.queue.writeBuffer(state.probeNodeY, 0, nodeY);
+  device.queue.writeBuffer(state.probeSpringNodeA, 0, layout.springNodeAByColor);
+  device.queue.writeBuffer(state.probeSpringNodeB, 0, layout.springNodeBByColor);
+  device.queue.writeBuffer(state.probeSpringRest, 0, layout.springRestByColor);
+
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(state.probePipeline);
+  pass.setBindGroup(0, state.probeBindGroup);
+  pass.dispatchWorkgroups(Math.ceil(springCount / WGSL_WORKGROUP_SIZE));
+  pass.end();
+  device.queue.submit([encoder.finish()]);
+
+  state.lastProbeNodeCount = nodes.length;
+  state.lastProbeSpringCount = springCount;
+  state.lastProbeDispatch = Math.ceil(springCount / WGSL_WORKGROUP_SIZE);
+  return true;
+}
+
 export function buildSoftSpringXpbdWgslPlan({
   soft,
   skipClusterSet = null,
@@ -232,6 +384,23 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
     wgslOffload.state.lastPreparedEndpointCount = plan.endpointCount;
     wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
     wgslOffload.state.lastMode = 'cpu-prepared';
+
+    // First concrete WGSL stage for soft-spring XPBD path: dispatch a compute
+    // probe over color-ordered springs so gpu-only runtime exercises real
+    // spring buffer ownership on-device while CPU remains authoritative.
+    if (canUseWgslOffload(wgslOffload)) {
+      void dispatchSoftSpringWgslProbe({ soft, offload: wgslOffload, layout })
+        .then((ran) => {
+          if (ran) {
+            wgslOffload.state.lastError = null;
+            wgslOffload.state.lastMode = 'wgsl-probe';
+          }
+        })
+        .catch((err) => {
+          wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
+          wgslOffload.state.lastMode = 'cpu-fallback';
+        });
+    }
   }
 
   const alpha = (softXpbdBaseCompliance / Math.max(0.2, stiffnessScale)) / Math.max(1e-8, dtPos * dtPos);

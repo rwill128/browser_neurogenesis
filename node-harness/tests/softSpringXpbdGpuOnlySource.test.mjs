@@ -22,3 +22,11 @@ test('soft spring gpu-only WGSL prep branch stores deterministic spring color ba
     'expected WGSL prep branch to retain spring color batches for no-atomic per-color dispatch staging',
   );
 });
+
+test('soft spring gpu-only path dispatches a real WGSL probe stage when offload device is available', () => {
+  assert.match(
+    source,
+    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*dispatchSoftSpringWgslProbe\(\{ soft, offload: wgslOffload, layout \}\)[\s\S]*lastMode = 'wgsl-probe'/,
+    'expected gpu-only soft spring branch to execute WGSL compute dispatch (with cpu fallback semantics preserved)',
+  );
+});

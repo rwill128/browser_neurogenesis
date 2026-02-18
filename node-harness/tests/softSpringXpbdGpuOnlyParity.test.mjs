@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applySoftSpringsXPBDVelocityGpuOnly } from '../../sim-server/public/runtime-solvers/stepSoftSpringsXpbdGpuOnly.js';
+import {
+  applySoftSpringsXPBDVelocityGpuOnly,
+  buildSoftSpringXpbdWgslPlan,
+} from '../../sim-server/public/runtime-solvers/stepSoftSpringsXpbdGpuOnly.js';
 
 const SOFT_XPBD_ITERS = 10;
 const SOFT_XPBD_BASE_COMPLIANCE = 0.0012;
@@ -105,4 +108,108 @@ test('soft spring XPBD parity: baseline stepping and gpu-only module produce mat
     assert.ok(Math.abs(g.x - b.x) < 1e-12, `node ${i} x mismatch: ${g.x} vs ${b.x}`);
     assert.ok(Math.abs(g.y - b.y) < 1e-12, `node ${i} y mismatch: ${g.y} vs ${b.y}`);
   }
+});
+
+
+test('soft spring XPBD WGSL plan builder emits deterministic CSR endpoint ownership for active springs', () => {
+  const soft = {
+    nodes: [
+      { clusterId: 0 },
+      { clusterId: 1 },
+      { clusterId: 2 },
+      { clusterId: 3 },
+    ],
+    springs: [
+      [0, 1, 10],
+      [1, 2, 9],
+      [2, 3, 8],
+      [0, 99, 7],
+      [3, 0, Number.NaN],
+    ],
+  };
+
+  const plan = buildSoftSpringXpbdWgslPlan({
+    soft,
+    skipClusterSet: new Set([3]),
+  });
+
+  assert.equal(plan.nodeCount, 4);
+  assert.equal(plan.springCount, 5);
+  assert.equal(plan.activeSpringCount, 2, 'should include only valid, non-skipped springs');
+  assert.equal(plan.endpointCount, 4, 'each active spring should contribute two endpoints');
+  assert.deepEqual(Array.from(plan.activeSpringIndices), [0, 1]);
+
+  assert.deepEqual(
+    Array.from(plan.nodeEndpointOffsets),
+    [0, 1, 3, 4, 4],
+    'CSR offsets should group endpoint ownership by node index',
+  );
+  assert.deepEqual(
+    Array.from(plan.endpointNodeIndices),
+    [0, 1, 1, 2],
+    'endpoints should be stably grouped by node index',
+  );
+  assert.deepEqual(
+    Array.from(plan.endpointSpringIndices),
+    [0, 0, 1, 1],
+    'endpoint spring indices should map grouped endpoints back to active-spring rows',
+  );
+  assert.deepEqual(
+    Array.from(plan.endpointSigns),
+    [-1, 1, -1, 1],
+    'endpoint signs should preserve i/j ownership direction for gather-reduce kernels',
+  );
+});
+
+test('soft spring XPBD stores WGSL-prep state while preserving cpu parity outputs', () => {
+  const dtPos = 0.18;
+  const stiffnessScale = 3.0;
+  const seed = {
+    nodes: [
+      { x: 20, y: 25, vx: 0.2, vy: -0.1, mass: 1.1, clusterId: 1 },
+      { x: 30, y: 21, vx: -0.3, vy: 0.4, mass: 0.8, clusterId: 1 },
+      { x: 39, y: 28, vx: 0.5, vy: 0.2, mass: 1.4, clusterId: 2 },
+    ],
+    springs: [
+      [0, 1, 11.2],
+      [1, 2, 10.8],
+    ],
+  };
+
+  const softA = structuredClone(seed);
+  const softB = structuredClone(seed);
+  const lambdaA = new Float32Array(seed.springs.length);
+  const lambdaB = new Float32Array(seed.springs.length);
+
+  applySoftSpringsXPBDVelocityGpuOnly({
+    soft: softA,
+    dtPos,
+    stiffnessScale,
+    lambdaCache: lambdaA,
+    softXpbdIters: SOFT_XPBD_ITERS,
+    softXpbdBaseCompliance: SOFT_XPBD_BASE_COMPLIANCE,
+    clamp,
+  });
+
+  const wgslState = {};
+  applySoftSpringsXPBDVelocityGpuOnly({
+    soft: softB,
+    dtPos,
+    stiffnessScale,
+    lambdaCache: lambdaB,
+    softXpbdIters: SOFT_XPBD_ITERS,
+    softXpbdBaseCompliance: SOFT_XPBD_BASE_COMPLIANCE,
+    clamp,
+    wgslOffload: {
+      enabled: true,
+      state: wgslState,
+    },
+  });
+
+  assert.deepEqual(Array.from(lambdaB), Array.from(lambdaA), 'wgsl prep mode should preserve cpu lambda outputs');
+  assert.deepEqual(softB.nodes, softA.nodes, 'wgsl prep mode should preserve cpu node outputs');
+  assert.equal(wgslState.lastMode, 'cpu-prepared');
+  assert.equal(wgslState.lastPreparedSpringCount, 2);
+  assert.equal(wgslState.lastPreparedEndpointCount, 4);
+  assert.equal(wgslState.preparedPlan?.nodeEndpointOffsets?.length, seed.nodes.length + 1);
 });

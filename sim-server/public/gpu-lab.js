@@ -4128,6 +4128,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       softXpbdBaseCompliance: softSpringBaseCompliance,
       clamp,
       skipClusterSet: softMembraneClusterSet,
+      wgslOffload: {
+        enabled: true,
+        device: sim?.device,
+        state: (sim.softSpringXpbdWgslState ||= {}),
+      },
     });
   } else {
     applySoftSpringsXPBDVelocity(s, dtPos, softSpringStiffness, sim.softXPBDLambda, {

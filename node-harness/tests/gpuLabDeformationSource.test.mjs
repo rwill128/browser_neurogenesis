@@ -325,7 +325,7 @@ test('gpu-lab routes soft spring XPBD stepping through isolated gpu-only runtime
 
   assert.match(
     source,
-    /if \(solverPath === 'gpu-only'\) \{[\s\S]*applySoftSpringsXPBDVelocityGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*applySoftSpringsXPBDVelocity\(s, dtPos, [A-Za-z0-9_.$]+, sim\.softXPBDLambda, \{/,
+    /if \(solverPath === 'gpu-only'\) \{[\s\S]*applySoftSpringsXPBDVelocityGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*state: \(sim\.softSpringXpbdWgslState \|\|= \{\}\),[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*applySoftSpringsXPBDVelocity\(s, dtPos, [A-Za-z0-9_.$]+, sim\.softXPBDLambda, \{/,
     'expected explicit gpu-only soft spring XPBD dispatch with baseline fallback call',
   );
 });

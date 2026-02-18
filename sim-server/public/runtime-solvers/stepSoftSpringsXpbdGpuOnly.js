@@ -3,6 +3,77 @@
  * Keeps spring-constraint stepping isolated for the gpu-only runtime path while
  * preserving baseline/default behavior and call contracts.
  */
+export function buildSoftSpringXpbdWgslPlan({
+  soft,
+  skipClusterSet = null,
+} = {}) {
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const springs = Array.isArray(soft?.springs) ? soft.springs : [];
+
+  const activeSpringIndices = [];
+  const endpointNodeIndicesRaw = [];
+  const endpointSpringIndicesRaw = [];
+  const endpointSignsRaw = [];
+
+  for (let si = 0; si < springs.length; si++) {
+    const spring = springs[si];
+    const i = Number(spring?.[0]);
+    const j = Number(spring?.[1]);
+    const rest = Number(spring?.[2]);
+    if (!Number.isInteger(i) || !Number.isInteger(j)) continue;
+    if (i < 0 || i >= nodes.length || j < 0 || j >= nodes.length) continue;
+    if (!Number.isFinite(rest)) continue;
+
+    const a = nodes[i];
+    const b = nodes[j];
+    if (!a || !b) continue;
+    if (skipClusterSet && (skipClusterSet.has(a.clusterId ?? 0) || skipClusterSet.has(b.clusterId ?? 0))) continue;
+
+    const activeIndex = activeSpringIndices.length;
+    activeSpringIndices.push(si);
+
+    endpointNodeIndicesRaw.push(i, j);
+    endpointSpringIndicesRaw.push(activeIndex, activeIndex);
+    endpointSignsRaw.push(-1, 1);
+  }
+
+  const endpointCount = endpointNodeIndicesRaw.length;
+  const nodeEndpointCounts = new Uint32Array(nodes.length);
+  for (let ei = 0; ei < endpointCount; ei++) {
+    nodeEndpointCounts[endpointNodeIndicesRaw[ei]] += 1;
+  }
+
+  const nodeEndpointOffsets = new Uint32Array(nodes.length + 1);
+  for (let ni = 0; ni < nodes.length; ni++) {
+    nodeEndpointOffsets[ni + 1] = nodeEndpointOffsets[ni] + nodeEndpointCounts[ni];
+  }
+
+  const endpointNodeIndices = new Uint32Array(endpointCount);
+  const endpointSpringIndices = new Uint32Array(endpointCount);
+  const endpointSigns = new Int8Array(endpointCount);
+  const cursor = nodeEndpointOffsets.slice(0, nodes.length);
+
+  for (let ei = 0; ei < endpointCount; ei++) {
+    const ni = endpointNodeIndicesRaw[ei];
+    const dst = cursor[ni]++;
+    endpointNodeIndices[dst] = ni;
+    endpointSpringIndices[dst] = endpointSpringIndicesRaw[ei];
+    endpointSigns[dst] = endpointSignsRaw[ei];
+  }
+
+  return {
+    nodeCount: nodes.length,
+    springCount: springs.length,
+    activeSpringCount: activeSpringIndices.length,
+    endpointCount,
+    activeSpringIndices: Uint32Array.from(activeSpringIndices),
+    endpointNodeIndices,
+    endpointSpringIndices,
+    endpointSigns,
+    nodeEndpointOffsets,
+  };
+}
+
 export function applySoftSpringsXPBDVelocityGpuOnly({
   soft,
   dtPos,
@@ -12,6 +83,7 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
   softXpbdBaseCompliance,
   clamp,
   skipClusterSet = null,
+  wgslOffload,
 }) {
   if (!soft?.nodes?.length || !soft?.springs?.length) return;
   if (!Array.isArray(lambdaCache) && !(lambdaCache instanceof Float32Array)) {
@@ -19,6 +91,17 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
   }
   if (typeof clamp !== 'function') {
     throw new Error('gpu-only soft spring XPBD pass requires clamp callback');
+  }
+
+  if (wgslOffload?.enabled === true && wgslOffload?.state) {
+    // Unblocker for upcoming WGSL XPBD stage: prepare deterministic CSR endpoint
+    // ownership now so the compute stage can run spring solve + node reduction
+    // without atomics changing integration ownership semantics.
+    const plan = buildSoftSpringXpbdWgslPlan({ soft, skipClusterSet });
+    wgslOffload.state.preparedPlan = plan;
+    wgslOffload.state.lastPreparedSpringCount = plan.activeSpringCount;
+    wgslOffload.state.lastPreparedEndpointCount = plan.endpointCount;
+    wgslOffload.state.lastMode = 'cpu-prepared';
   }
 
   const alpha = (softXpbdBaseCompliance / Math.max(0.2, stiffnessScale)) / Math.max(1e-8, dtPos * dtPos);

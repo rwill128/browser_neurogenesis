@@ -162,8 +162,40 @@ function createSoftAreaMockWgslDevice() {
               const offsets = readU32(buffers.get(5), clusterCount + 1);
               const endpointCount = offsets[clusterCount] || 0;
               const nodeIdx = readU32(buffers.get(6), endpointCount);
+              const endpointCountParam = paramsU32[2] || 0;
 
-              if (buffers.has(11)) {
+              if (endpointCountParam > 0 && buffers.has(11) && buffers.has(10) && buffers.has(9) && buffers.has(8)) {
+                const invMass = readF32(buffers.get(7), endpointCount);
+                const endpointCluster = readU32(buffers.get(8), endpointCount);
+                const deltaLambda = readF32(buffers.get(9), clusterCount);
+                const outVX = new Float32Array(endpointCount);
+                const outVY = new Float32Array(endpointCount);
+                const invDt = dtPos > 1e-8 ? (1 / dtPos) : 0;
+
+                for (let ei = 0; ei < endpointCount; ei++) {
+                  const ci = endpointCluster[ei];
+                  if (ci >= clusterCount || invDt === 0) continue;
+                  const start = offsets[ci];
+                  const end = offsets[ci + 1];
+                  if (end <= start + 1 || ei < start || ei >= end) continue;
+                  const dl = deltaLambda[ci] || 0;
+                  if (!dl) continue;
+                  const pi = nodeIdx[ei > start ? (ei - 1) : (end - 1)];
+                  const ni2 = nodeIdx[(ei + 1) < end ? (ei + 1) : start];
+                  if (pi >= nodeCount || ni2 >= nodeCount) continue;
+                  const px = nodeX[pi] + nodeVX[pi] * dtPos;
+                  const py = nodeY[pi] + nodeVY[pi] * dtPos;
+                  const nx = nodeX[ni2] + nodeVX[ni2] * dtPos;
+                  const ny = nodeY[ni2] + nodeVY[ni2] * dtPos;
+                  const gx = 0.5 * (ny - py);
+                  const gy = 0.5 * (px - nx);
+                  outVX[ei] = invMass[ei] * gx * dl * invDt;
+                  outVY[ei] = invMass[ei] * gy * dl * invDt;
+                }
+
+                writeF32(buffers.get(10), outVX);
+                writeF32(buffers.get(11), outVY);
+              } else if (buffers.has(11)) {
                 const invMass = readF32(buffers.get(7), endpointCount);
                 const restArea = readF32(buffers.get(8), clusterCount);
                 const lambdaPrev = readF32(buffers.get(9), clusterCount);
@@ -218,36 +250,6 @@ function createSoftAreaMockWgslDevice() {
 
                 writeF32(buffers.get(10), deltaOut);
                 writeF32(buffers.get(11), nextOut);
-              } else if (buffers.has(10) && buffers.has(9)) {
-                const invMass = readF32(buffers.get(7), endpointCount);
-                const deltaLambda = readF32(buffers.get(8), clusterCount);
-                const outVX = new Float32Array(endpointCount);
-                const outVY = new Float32Array(endpointCount);
-                const invDt = dtPos > 1e-8 ? (1 / dtPos) : 0;
-
-                for (let ci = 0; ci < clusterCount; ci++) {
-                  const start = offsets[ci];
-                  const end = offsets[ci + 1];
-                  if (end <= start + 1 || invDt === 0) continue;
-                  const dl = deltaLambda[ci] || 0;
-                  if (!dl) continue;
-                  for (let ei = start; ei < end; ei++) {
-                    const pi = nodeIdx[ei > start ? (ei - 1) : (end - 1)];
-                    const ni2 = nodeIdx[(ei + 1) < end ? (ei + 1) : start];
-                    if (pi >= nodeCount || ni2 >= nodeCount) continue;
-                    const px = nodeX[pi] + nodeVX[pi] * dtPos;
-                    const py = nodeY[pi] + nodeVY[pi] * dtPos;
-                    const nx = nodeX[ni2] + nodeVX[ni2] * dtPos;
-                    const ny = nodeY[ni2] + nodeVY[ni2] * dtPos;
-                    const gx = 0.5 * (ny - py);
-                    const gy = 0.5 * (px - nx);
-                    outVX[ei] = invMass[ei] * gx * dl * invDt;
-                    outVY[ei] = invMass[ei] * gy * dl * invDt;
-                  }
-                }
-
-                writeF32(buffers.get(9), outVX);
-                writeF32(buffers.get(10), outVY);
               } else {
                 const out = new Float32Array(clusterCount);
                 for (let ci = 0; ci < clusterCount; ci++) {
@@ -336,6 +338,8 @@ test('soft area XPBD parity: baseline stepping and gpu-only module produce match
   assert.equal(wgslOffload.state.lastMode, 'cpu-prepared', 'expected gpu-only area pass to publish WGSL-prepared layout mode');
   assert.equal(wgslOffload.state.lastPreparedClusterCount, 3, 'expected prepared cluster count to include all loops');
   assert.equal(wgslOffload.state.lastPreparedEndpointCount, 9, 'expected prepared endpoint count to match flattened loop endpoints');
+  assert.equal(wgslOffload.state.preparedLayout?.endpointClusterIndex instanceof Uint32Array, true, 'expected prepared WGSL layout to expose deterministic endpoint->cluster ownership');
+  assert.equal(wgslOffload.state.preparedLayout?.endpointClusterIndex?.length, 9, 'expected endpoint ownership lookup length to match flattened endpoints');
   assert.ok((wgslOffload.state.lastPreparedLayoutBytes || 0) > 0, 'expected prepared WGSL layout byte footprint to be tracked');
 
   for (let i = 0; i < baselineSoft.nodes.length; i++) {

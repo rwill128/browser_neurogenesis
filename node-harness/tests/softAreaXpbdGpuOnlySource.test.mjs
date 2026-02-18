@@ -54,6 +54,24 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
 
   assert.match(
     areaSource,
+    /endpointClusterIndex = new Uint32Array\(endpointCount\)[\s\S]*endpointClusterIndex\[write\] = li/,
+    'expected WGSL area plan builder to materialize deterministic endpoint->cluster ownership lookup',
+  );
+
+  assert.match(
+    areaSource,
+    /state\.areaVelocityEndpointClusterIndex[\s\S]*device\.queue\.writeBuffer\(state\.areaVelocityEndpointClusterIndex, 0, plan\.endpointClusterIndex\)/,
+    'expected WGSL area velocity proposal stage to upload deterministic endpoint->cluster ownership lookup',
+  );
+
+  assert.match(
+    areaSource,
+    /let ci = endpointClusterIndex\[ei\];/,
+    'expected WGSL velocity proposal shader to use direct endpoint->cluster lookup instead of scanning offsets per endpoint',
+  );
+
+  assert.match(
+    areaSource,
     /copyBufferToBuffer\(state\.areaVelocityDeltaVXOut, 0, state\.areaVelocityDeltaVXReadback, 0, bytes\)[\s\S]*copyBufferToBuffer\(state\.areaVelocityDeltaVYOut, 0, state\.areaVelocityDeltaVYReadback, 0, bytes\)[\s\S]*lastAreaVelocityProposalDeltaVxByEndpoint[\s\S]*lastAreaVelocityProposalDeltaVyByEndpoint[\s\S]*lastAreaVelocityProposalAbsDeltaMean[\s\S]*lastAreaVelocityProposalAbsDeltaMax/,
     'expected WGSL area velocity proposal stage to read back deterministic per-endpoint node delta telemetry for upcoming reduction offload',
   );

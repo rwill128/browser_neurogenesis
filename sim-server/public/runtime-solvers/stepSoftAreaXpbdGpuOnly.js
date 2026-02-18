@@ -149,31 +149,17 @@ struct Params {
 @group(0) @binding(5) var<storage, read> clusterOffsets: array<u32>;
 @group(0) @binding(6) var<storage, read> clusterNodeIndices: array<u32>;
 @group(0) @binding(7) var<storage, read> clusterNodeInvMass: array<f32>;
-@group(0) @binding(8) var<storage, read> clusterDeltaLambda: array<f32>;
-@group(0) @binding(9) var<storage, read_write> endpointDeltaVXOut: array<f32>;
-@group(0) @binding(10) var<storage, read_write> endpointDeltaVYOut: array<f32>;
-
-fn findClusterIndex(ei: u32) -> u32 {
-  var ci = 0u;
-  loop {
-    if (ci + 1u >= params.clusterCount + 1u) { break; }
-    let start = clusterOffsets[ci];
-    let end = clusterOffsets[ci + 1u];
-    if (ei >= start && ei < end) {
-      return ci;
-    }
-    ci = ci + 1u;
-    if (ci >= params.clusterCount) { break; }
-  }
-  return params.clusterCount;
-}
+@group(0) @binding(8) var<storage, read> endpointClusterIndex: array<u32>;
+@group(0) @binding(9) var<storage, read> clusterDeltaLambda: array<f32>;
+@group(0) @binding(10) var<storage, read_write> endpointDeltaVXOut: array<f32>;
+@group(0) @binding(11) var<storage, read_write> endpointDeltaVYOut: array<f32>;
 
 @compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let ei = gid.x;
   if (ei >= params.endpointCount) { return; }
 
-  let ci = findClusterIndex(ei);
+  let ci = endpointClusterIndex[ei];
   if (ci >= params.clusterCount) {
     endpointDeltaVXOut[ei] = 0.0;
     endpointDeltaVYOut[ei] = 0.0;
@@ -381,12 +367,14 @@ function ensureSoftAreaVelocityDeltaProposalBuffers(offload, nodeCount, endpoint
     const bytes = capacity * 4;
     state.areaVelocityClusterNodeIndices?.destroy?.();
     state.areaVelocityClusterNodeInvMass?.destroy?.();
+    state.areaVelocityEndpointClusterIndex?.destroy?.();
     state.areaVelocityDeltaVXOut?.destroy?.();
     state.areaVelocityDeltaVYOut?.destroy?.();
     state.areaVelocityDeltaVXReadback?.destroy?.();
     state.areaVelocityDeltaVYReadback?.destroy?.();
     state.areaVelocityClusterNodeIndices = device.createBuffer({ size: bytes, usage: storageUsage });
     state.areaVelocityClusterNodeInvMass = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaVelocityEndpointClusterIndex = device.createBuffer({ size: bytes, usage: storageUsage });
     state.areaVelocityDeltaVXOut = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
     state.areaVelocityDeltaVYOut = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
     state.areaVelocityDeltaVXReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
@@ -447,9 +435,10 @@ async function dispatchSoftAreaWgslVelocityDeltaProposal({ soft, offload, plan, 
         { binding: 5, resource: { buffer: state.areaVelocityClusterOffsets } },
         { binding: 6, resource: { buffer: state.areaVelocityClusterNodeIndices } },
         { binding: 7, resource: { buffer: state.areaVelocityClusterNodeInvMass } },
-        { binding: 8, resource: { buffer: state.areaVelocityClusterDeltaLambda } },
-        { binding: 9, resource: { buffer: state.areaVelocityDeltaVXOut } },
-        { binding: 10, resource: { buffer: state.areaVelocityDeltaVYOut } },
+        { binding: 8, resource: { buffer: state.areaVelocityEndpointClusterIndex } },
+        { binding: 9, resource: { buffer: state.areaVelocityClusterDeltaLambda } },
+        { binding: 10, resource: { buffer: state.areaVelocityDeltaVXOut } },
+        { binding: 11, resource: { buffer: state.areaVelocityDeltaVYOut } },
       ],
     });
   }
@@ -482,6 +471,7 @@ async function dispatchSoftAreaWgslVelocityDeltaProposal({ soft, offload, plan, 
   device.queue.writeBuffer(state.areaVelocityClusterOffsets, 0, plan.clusterOffsets);
   device.queue.writeBuffer(state.areaVelocityClusterNodeIndices, 0, plan.clusterNodeIndices);
   device.queue.writeBuffer(state.areaVelocityClusterNodeInvMass, 0, plan.clusterNodeInvMass);
+  device.queue.writeBuffer(state.areaVelocityEndpointClusterIndex, 0, plan.endpointClusterIndex);
   device.queue.writeBuffer(state.areaVelocityClusterDeltaLambda, 0, deltaByCluster);
 
   const dispatchCount = Math.ceil(endpointCount / WGSL_WORKGROUP_SIZE);
@@ -763,6 +753,7 @@ function buildSoftAreaXpbdWgslPlan({ sim, soft, loops }) {
 
   const clusterNodeIndices = new Uint32Array(endpointCount);
   const clusterNodeInvMass = new Float32Array(endpointCount);
+  const endpointClusterIndex = new Uint32Array(endpointCount);
   const clusterRestArea = new Float32Array(loopList.length);
   const clusterLambda = new Float32Array(loopList.length);
 
@@ -777,6 +768,7 @@ function buildSoftAreaXpbdWgslPlan({ sim, soft, loops }) {
     for (let k = 0; k < ids.length; k++) {
       const ni = Number(ids[k]) || 0;
       clusterNodeIndices[write] = ni;
+      endpointClusterIndex[write] = li;
       const node = nodes[ni];
       clusterNodeInvMass[write] = 1 / Math.max(0.02, Number(node?.mass) || 1);
       write += 1;
@@ -789,6 +781,7 @@ function buildSoftAreaXpbdWgslPlan({ sim, soft, loops }) {
     clusterOffsets,
     clusterNodeIndices,
     clusterNodeInvMass,
+    endpointClusterIndex,
     clusterRestArea,
     clusterLambda,
   };
@@ -799,12 +792,14 @@ function buildSoftAreaXpbdWgslLayout(plan) {
     clusterOffsets: plan.clusterOffsets,
     clusterNodeIndices: plan.clusterNodeIndices,
     clusterNodeInvMass: plan.clusterNodeInvMass,
+    endpointClusterIndex: plan.endpointClusterIndex,
     clusterRestArea: plan.clusterRestArea,
     clusterLambda: plan.clusterLambda,
     byteLength:
       plan.clusterOffsets.byteLength
       + plan.clusterNodeIndices.byteLength
       + plan.clusterNodeInvMass.byteLength
+      + plan.endpointClusterIndex.byteLength
       + plan.clusterRestArea.byteLength
       + plan.clusterLambda.byteLength,
   };

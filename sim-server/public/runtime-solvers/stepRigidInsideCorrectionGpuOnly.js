@@ -858,7 +858,7 @@ function canApplyAuthoritativeRigidInsideProposal({
   rigidCount,
 }) {
   const state = wgslOffload?.state;
-  if (!state || state.enableAuthoritativeInsideCorrection !== true) return false;
+  if (!state) return false;
   const fastMode = isGpuOnlyFastMode(wgslOffload);
   const source = String(state.lastInsideCorrectionProposalSource || '');
   if (fastMode) {
@@ -1054,13 +1054,12 @@ export function applyRigidInsideCorrectionPassGpuOnly({
               ? 'skipped-readback-telemetry'
               : (validatedMode ? 'readback-telemetry-validated' : 'readback-telemetry');
 
-            const authoritativeInsideEnabled = wgslOffload?.state?.enableAuthoritativeInsideCorrection === true;
             const correctionProposalRan = dispatchRigidInsideCorrectionProposal({
               offload: wgslOffload,
               prep,
               proposalSignature,
               correctionSlop,
-              includeReadbackTelemetry: !fastMode || authoritativeInsideEnabled,
+              includeReadbackTelemetry: true,
             });
             if (correctionProposalRan) {
               wgslOffload.state.lastSourceRoute = fastMode

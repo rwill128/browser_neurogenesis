@@ -45,8 +45,8 @@ test('rigid-inside gpu-only path publishes deterministic WGSL prep layout + sour
 
   assert.match(
     source,
-    /function canApplyAuthoritativeRigidInsideProposal\([\s\S]*enableAuthoritativeInsideCorrection !== true[\s\S]*const source = String\(state\.lastInsideCorrectionProposalSource \|\| ''\);[\s\S]*wgsl-rigid-inside-correction-proposal-fast[\s\S]*wgsl-rigid-inside-correction-proposal[\s\S]*if \(!Number\.isFinite\(cx\) \|\| !Number\.isFinite\(cy\) \|\| !Number\.isFinite\(rbi\)\) return false;/,
-    'expected rigid-inside stage to gate WGSL authoritative apply behind explicit opt-in, signature/source-route match, and hard finite validation fallback',
+    /function canApplyAuthoritativeRigidInsideProposal\([\s\S]*const state = wgslOffload\?\.state;[\s\S]*if \(!state\) return false;[\s\S]*const source = String\(state\.lastInsideCorrectionProposalSource \|\| ''\);[\s\S]*wgsl-rigid-inside-correction-proposal-fast[\s\S]*wgsl-rigid-inside-correction-proposal[\s\S]*if \(!Number\.isFinite\(cx\) \|\| !Number\.isFinite\(cy\) \|\| !Number\.isFinite\(rbi\)\) return false;/,
+    'expected rigid-inside stage to gate WGSL authoritative apply behind signature/source-route match and hard finite validation fallback',
   );
 
   assert.match(

@@ -60,7 +60,7 @@ test('rigid-inside correction parity: wgsl-prep-enabled path preserves CPU autho
 });
 
 
-test('rigid-inside correction applies cached WGSL authoritative proposal when enabled and proposal is finite', () => {
+test('rigid-inside correction applies cached WGSL authoritative proposal when proposal is finite', () => {
   const prepFixture = buildFixture();
   const offload = { enabled: true, modeProfile: 'gpu-only-validated', state: {} };
 
@@ -69,7 +69,6 @@ test('rigid-inside correction applies cached WGSL authoritative proposal when en
 
   const fixture = buildFixture();
   const signature = offload.state.lastPreparedInsideProposalSignature >>> 0;
-  offload.state.enableAuthoritativeInsideCorrection = true;
   offload.state.lastInsideCorrectionProposalSource = 'wgsl-rigid-inside-correction-proposal';
   offload.state.lastInsideCorrectionProposalSignature = signature;
   offload.state.lastInsideCorrectionProposalCorrX = new Float32Array([0.2, 0.0]);
@@ -86,7 +85,7 @@ test('rigid-inside correction applies cached WGSL authoritative proposal when en
   assert.equal(offload.state.lastSourceRoute, 'wgsl-rigid-inside-authoritative');
 });
 
-test('rigid-inside correction fast mode can consume same-frame WGSL correction proposal when authoritative replay is enabled', () => {
+test('rigid-inside correction fast mode can consume same-frame WGSL correction proposal from prepared WGSL proposals', () => {
   const fixture = buildFixture();
   const baseline = buildFixture();
   const prepFixture = buildFixture();
@@ -97,7 +96,6 @@ test('rigid-inside correction fast mode can consume same-frame WGSL correction p
     enabled: true,
     modeProfile: 'gpu-only-fast',
     state: {
-      enableAuthoritativeInsideCorrection: true,
     },
   };
 

@@ -1032,6 +1032,7 @@ function pushMembraneCellCluster({
   controls,
   scale,
   bodyScale,
+  nodeRadiusScale = 1,
 }) {
   const base = softNodes.length;
   const ring = [];
@@ -1054,7 +1055,7 @@ function pushMembraneCellCluster({
       vx: 0,
       vy: 0,
       mass: controls.massSoft,
-      r: 1.35 * scale * bodyScale,
+      r: 1.35 * scale * bodyScale * Math.max(0.45, Number(nodeRadiusScale) || 1),
       clusterId,
       digestEnabled: false,
       digestRGB,
@@ -1100,9 +1101,12 @@ function initBodies(n, controls) {
 
   const rigidShapeCycle = [3, 4, 5, 6];
   const rigid = [];
+  const membraneCount = controls.spawnMembraneCells
+    ? Math.max(2, Math.round(MEMBRANE_CELL_BASE_COUNT * Math.min(2.0, Math.max(0.7, scale))))
+    : 0;
 
-  // High rigid counts (especially on 1024/2048 grids) need structured placement
-  // and adaptive sizing so seeds don't begin in dense clumps.
+  // High body counts (especially on 1024/2048 grids) need structured placement
+  // and adaptive sizing so rigid/soft/membrane seeds don't begin in dense clumps.
   const spawnMinX = n * 0.08;
   const spawnMaxX = n * 0.92;
   const spawnMinY = n * 0.12;
@@ -1110,14 +1114,32 @@ function initBodies(n, controls) {
   const spawnW = Math.max(1, spawnMaxX - spawnMinX);
   const spawnH = Math.max(1, spawnMaxY - spawnMinY);
   const spawnAspect = spawnW / spawnH;
-  const cols = Math.max(1, Math.ceil(Math.sqrt(rigidCount * spawnAspect)));
-  const rows = Math.max(1, Math.ceil(rigidCount / cols));
+  const totalSeedGroups = Math.max(1, rigidCount + softClusterCount + membraneCount);
+  const cols = Math.max(1, Math.ceil(Math.sqrt(totalSeedGroups * spawnAspect)));
+  const rows = Math.max(1, Math.ceil(totalSeedGroups / cols));
   const cellW = spawnW / cols;
   const cellH = spawnH / rows;
-  const jitterFrac = rigidCount > 64 ? 0.22 : 0.35;
+  const jitterFrac = totalSeedGroups > 64 ? 0.2 : 0.33;
   const crowdScale = rigidCount <= 24
     ? 1
     : Math.max(0.35, Math.min(1, Math.sqrt(24 / Math.max(1, rigidCount))));
+  const softRadiusScale = Math.max(0.45, crowdScale);
+  const softNodeRadiusScale = Math.max(0.55, Math.sqrt(softRadiusScale));
+
+  const seedCenterAt = (seedIndex, radiusPad = 0) => {
+    const idx = Math.max(0, Number(seedIndex) || 0);
+    const row = Math.floor(idx / cols);
+    const col = idx % cols;
+    const jitterX = (Math.random() - 0.5) * cellW * jitterFrac;
+    const jitterY = (Math.random() - 0.5) * cellH * jitterFrac;
+    const baseX = spawnMinX + (col + 0.5) * cellW;
+    const baseY = spawnMinY + (row + 0.5) * cellH;
+    const pad = Math.max(0, Number(radiusPad) || 0);
+    return {
+      x: clamp(baseX + jitterX, spawnMinX + pad, spawnMaxX - pad),
+      y: clamp(baseY + jitterY, spawnMinY + pad, spawnMaxY - pad),
+    };
+  };
 
   for (let i = 0; i < rigidCount; i++) {
     const mass = (i % 2 === 0) ? controls.massLight : controls.massHeavy;
@@ -1135,16 +1157,11 @@ function initBodies(n, controls) {
     const digestRGB = (i % 3 === 0) ? [1, 0.2, 0.2] : ((i % 3 === 1) ? [0.2, 1, 0.2] : [0.2, 0.2, 1]);
     const consumeDyeRGB = (i % 2) === 0 ? [1, 1, 1] : [0, 0, 0];
 
-    const row = Math.floor(i / cols);
-    const col = i % cols;
-    const jitterX = (Math.random() - 0.5) * cellW * jitterFrac;
-    const jitterY = (Math.random() - 0.5) * cellH * jitterFrac;
-    const baseX = spawnMinX + (col + 0.5) * cellW;
-    const baseY = spawnMinY + (row + 0.5) * cellH;
+    const center = seedCenterAt(i, r);
 
     rigid.push({
-      x: clamp(baseX + jitterX, spawnMinX + r, spawnMaxX - r),
-      y: clamp(baseY + jitterY, spawnMinY + r, spawnMaxY - r),
+      x: center.x,
+      y: center.y,
       vx: 0,
       vy: 0,
       r,
@@ -1169,10 +1186,11 @@ function initBodies(n, controls) {
   const softShapeCycle = [3, 4, 6];
 
   for (let c = 0; c < softClusterCount; c++) {
-    const cx = n * (0.18 + 0.64 * Math.random());
-    const cy = n * (0.2 + 0.6 * Math.random());
     const nodeCount = softShapeCycle[c % softShapeCycle.length];
-    const radius = (8 + (nodeCount === 6 ? 2 : 0)) * scale * bodyScale;
+    const radius = (8 + (nodeCount === 6 ? 2 : 0)) * scale * bodyScale * softRadiusScale;
+    const center = seedCenterAt(rigidCount + c, radius);
+    const cx = center.x;
+    const cy = center.y;
     const base = softNodes.length;
 
     const local = [];
@@ -1189,7 +1207,7 @@ function initBodies(n, controls) {
         vx: 0,
         vy: 0,
         mass: controls.massSoft,
-        r: 1.4 * scale * bodyScale,
+        r: 1.4 * scale * bodyScale * softNodeRadiusScale,
         clusterId: c,
         digestEnabled: (c % 2) === 0,
         digestRGB: clusterDigestRGB,
@@ -1258,12 +1276,12 @@ function initBodies(n, controls) {
   }
 
   if (controls.spawnMembraneCells) {
-    const membraneCount = Math.max(2, Math.round(MEMBRANE_CELL_BASE_COUNT * Math.min(2.0, Math.max(0.7, scale))));
     for (let ci = 0; ci < membraneCount; ci++) {
-      const cx = n * (0.16 + 0.68 * Math.random());
-      const cy = n * (0.16 + 0.68 * Math.random());
       const nodeCount = 10 + ((ci % 3) * 2);
-      const radius = (7.2 + (ci % 2) * 1.8) * scale * bodyScale;
+      const radius = (7.2 + (ci % 2) * 1.8) * scale * bodyScale * softRadiusScale;
+      const center = seedCenterAt(rigidCount + softClusterCount + ci, radius);
+      const cx = center.x;
+      const cy = center.y;
       const clusterId = softClusterCount + ci;
       const membrane = pushMembraneCellCluster({
         softNodes,
@@ -1276,6 +1294,7 @@ function initBodies(n, controls) {
         controls,
         scale,
         bodyScale,
+        nodeRadiusScale: softNodeRadiusScale,
       });
       softMembraneClusters.push(membrane);
     }
@@ -1323,7 +1342,7 @@ function initBodies(n, controls) {
       vx: 0,
       vy: 0,
       mass: controls.massSoft,
-      r: 1.4 * scale * bodyScale,
+      r: 1.4 * scale * bodyScale * softNodeRadiusScale,
       clusterId: softClusterCount + 1000,
       digestEnabled: false,
       digestRGB: [1, 1, 1],

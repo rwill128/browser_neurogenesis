@@ -727,6 +727,99 @@ function reduceSoftAreaVelocityProposalToNodeDeltas({ soft, offload, plan }) {
   return true;
 }
 
+function buildSoftAreaVelocityNodeReference({ soft, plan, dtPos, deltaByCluster }) {
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const clusterCount = Number(plan?.clusterCount) || 0;
+  const endpointCount = Number(plan?.endpointCount) || 0;
+  if (nodes.length <= 0 || clusterCount <= 0 || endpointCount <= 0) return null;
+  if (!(deltaByCluster instanceof Float32Array) || deltaByCluster.length < clusterCount) return null;
+
+  const endpointDeltaVx = new Float32Array(endpointCount);
+  const endpointDeltaVy = new Float32Array(endpointCount);
+  const nodeDeltaVx = new Float32Array(nodes.length);
+  const nodeDeltaVy = new Float32Array(nodes.length);
+  const nodeContributionCount = new Uint32Array(nodes.length);
+  if (!(Number.isFinite(dtPos) && dtPos > 1e-8)) {
+    return { endpointDeltaVx, endpointDeltaVy, nodeDeltaVx, nodeDeltaVy, nodeContributionCount };
+  }
+
+  const invDtPos = 1 / dtPos;
+  const offsets = plan.clusterOffsets;
+  const nodeIndices = plan.clusterNodeIndices;
+  const endpointCluster = plan.endpointClusterIndex;
+  const invMass = plan.clusterNodeInvMass;
+
+  for (let ei = 0; ei < endpointCount; ei++) {
+    const ci = endpointCluster[ei] >>> 0;
+    if (ci >= clusterCount) continue;
+    const start = offsets[ci] >>> 0;
+    const end = offsets[ci + 1] >>> 0;
+    if (end <= start + 1 || ei < start || ei >= end) continue;
+
+    const ni = nodeIndices[ei] >>> 0;
+    const prevEi = ei > start ? (ei - 1) : (end - 1);
+    const nextEi = (ei + 1) < end ? (ei + 1) : start;
+    const pi = nodeIndices[prevEi] >>> 0;
+    const ni2 = nodeIndices[nextEi] >>> 0;
+    if (ni >= nodes.length || pi >= nodes.length || ni2 >= nodes.length) continue;
+
+    const prev = nodes[pi] || {};
+    const next = nodes[ni2] || {};
+    const px = (Number(prev.x) || 0) + (Number(prev.vx) || 0) * dtPos;
+    const py = (Number(prev.y) || 0) + (Number(prev.vy) || 0) * dtPos;
+    const nx = (Number(next.x) || 0) + (Number(next.vx) || 0) * dtPos;
+    const ny = (Number(next.y) || 0) + (Number(next.vy) || 0) * dtPos;
+    const gx = 0.5 * (ny - py);
+    const gy = 0.5 * (px - nx);
+
+    const dl = deltaByCluster[ci] || 0;
+    const w = invMass[ei] || 0;
+    const dvx = w * gx * dl * invDtPos;
+    const dvy = w * gy * dl * invDtPos;
+    endpointDeltaVx[ei] = dvx;
+    endpointDeltaVy[ei] = dvy;
+
+    nodeDeltaVx[ni] += dvx;
+    nodeDeltaVy[ni] += dvy;
+    nodeContributionCount[ni] += 1;
+  }
+
+  return { endpointDeltaVx, endpointDeltaVy, nodeDeltaVx, nodeDeltaVy, nodeContributionCount };
+}
+
+function publishSoftAreaVelocityNodeParity({ offload, reference }) {
+  const state = offload?.state;
+  if (!state || !reference) return false;
+
+  const actualVx = state.lastAreaVelocityProposalNodeDeltaVx;
+  const actualVy = state.lastAreaVelocityProposalNodeDeltaVy;
+  const actualCount = state.lastAreaVelocityProposalNodeContributionCount;
+  if (!(actualVx instanceof Float32Array) || !(actualVy instanceof Float32Array) || !(actualCount instanceof Uint32Array)) return false;
+  if (actualVx.length !== reference.nodeDeltaVx.length || actualVy.length !== reference.nodeDeltaVy.length || actualCount.length !== reference.nodeContributionCount.length) return false;
+
+  let maxNodeDeltaError = 0;
+  let sumNodeDeltaError = 0;
+  let maxContributionError = 0;
+  for (let ni = 0; ni < actualVx.length; ni++) {
+    const dvxErr = Math.abs((actualVx[ni] || 0) - (reference.nodeDeltaVx[ni] || 0));
+    const dvyErr = Math.abs((actualVy[ni] || 0) - (reference.nodeDeltaVy[ni] || 0));
+    const pairErr = Math.max(dvxErr, dvyErr);
+    if (pairErr > maxNodeDeltaError) maxNodeDeltaError = pairErr;
+    sumNodeDeltaError += pairErr;
+
+    const countErr = Math.abs((actualCount[ni] || 0) - (reference.nodeContributionCount[ni] || 0));
+    if (countErr > maxContributionError) maxContributionError = countErr;
+  }
+
+  state.lastAreaVelocityProposalNodeParityReferenceDeltaVx = reference.nodeDeltaVx;
+  state.lastAreaVelocityProposalNodeParityReferenceDeltaVy = reference.nodeDeltaVy;
+  state.lastAreaVelocityProposalNodeParityReferenceContributionCount = reference.nodeContributionCount;
+  state.lastAreaVelocityProposalNodeParityMaxError = maxNodeDeltaError;
+  state.lastAreaVelocityProposalNodeParityMeanError = actualVx.length > 0 ? (sumNodeDeltaError / actualVx.length) : 0;
+  state.lastAreaVelocityProposalNodeContributionParityMaxError = maxContributionError;
+  return true;
+}
+
 async function dispatchSoftAreaWgslLambdaProposal({ soft, offload, plan, dtPos, alpha }) {
   if (!canUseWgslOffload(offload)) return false;
   const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
@@ -1076,6 +1169,17 @@ export function applySoftAreaXPBDVelocityGpuOnly({
                 plan,
               });
             }
+
+            const nodeReference = buildSoftAreaVelocityNodeReference({
+              soft,
+              plan,
+              dtPos,
+              deltaByCluster: wgslOffload.state.lastAreaProposalDeltaLambdaByCluster,
+            });
+            publishSoftAreaVelocityNodeParity({
+              offload: wgslOffload,
+              reference: nodeReference,
+            });
           }
         }
 

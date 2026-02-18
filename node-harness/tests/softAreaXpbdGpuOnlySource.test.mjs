@@ -90,7 +90,13 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
 
   assert.match(
     areaSource,
-    /velocityProposalRan = await dispatchSoftAreaWgslVelocityDeltaProposal\([\s\S]*const nodeReductionRan = await dispatchSoftAreaWgslVelocityNodeReduction\([\s\S]*if \(!nodeReductionRan\) \{[\s\S]*reduceSoftAreaVelocityProposalToNodeDeltas\(/,
-    'expected gpu-only area branch to run WGSL node-reduction after endpoint proposal and keep CPU deterministic fallback on WGSL reduction failure',
+    /velocityProposalRan = await dispatchSoftAreaWgslVelocityDeltaProposal\([\s\S]*const nodeReductionRan = await dispatchSoftAreaWgslVelocityNodeReduction\([\s\S]*if \(!nodeReductionRan\) \{[\s\S]*reduceSoftAreaVelocityProposalToNodeDeltas\([\s\S]*buildSoftAreaVelocityNodeReference\([\s\S]*publishSoftAreaVelocityNodeParity\(/,
+    'expected gpu-only area branch to run WGSL node-reduction after endpoint proposal, preserve CPU reduction fallback, and publish deterministic node-parity telemetry for authoritative offload bring-up',
+  );
+
+  assert.match(
+    areaSource,
+    /state\.lastAreaVelocityProposalNodeParityMaxError = maxNodeDeltaError;[\s\S]*state\.lastAreaVelocityProposalNodeParityMeanError = actualVx\.length > 0 \? \(sumNodeDeltaError \/ actualVx\.length\) : 0;[\s\S]*state\.lastAreaVelocityProposalNodeContributionParityMaxError = maxContributionError;/,
+    'expected WGSL area node-reduction parity helper to publish deterministic per-node delta/count error telemetry against CPU reference',
   );
 });

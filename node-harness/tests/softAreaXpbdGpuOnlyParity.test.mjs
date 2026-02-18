@@ -457,6 +457,11 @@ test('soft area XPBD WGSL proposal stage runs on gpu-only path while CPU remains
   assert.equal(wgslState.lastAreaVelocityProposalNodeDeltaVy.length, gpuOnlySoft.nodes.length);
   assert.equal(wgslState.lastAreaVelocityProposalNodeContributionCount.length, gpuOnlySoft.nodes.length);
   assert.ok((wgslState.lastAreaVelocityProposalNodeReductionDispatch || 0) > 0, 'expected WGSL node-reduction dispatch telemetry to be published');
+  assert.equal(wgslState.lastAreaVelocityProposalNodeParityReferenceDeltaVx instanceof Float32Array, true);
+  assert.equal(wgslState.lastAreaVelocityProposalNodeParityReferenceDeltaVy instanceof Float32Array, true);
+  assert.equal(wgslState.lastAreaVelocityProposalNodeParityReferenceContributionCount instanceof Uint32Array, true);
+  assert.ok((wgslState.lastAreaVelocityProposalNodeParityMaxError || 0) < 1e-6, 'expected WGSL node reduction deltas to match deterministic CPU reference');
+  assert.ok((wgslState.lastAreaVelocityProposalNodeContributionParityMaxError || 0) === 0, 'expected WGSL node reduction ownership counts to match deterministic CPU reference exactly');
 
   const reducedSumVx = wgslState.lastAreaVelocityProposalNodeDeltaVx.reduce((sum, v) => sum + v, 0);
   const reducedSumVy = wgslState.lastAreaVelocityProposalNodeDeltaVy.reduce((sum, v) => sum + v, 0);

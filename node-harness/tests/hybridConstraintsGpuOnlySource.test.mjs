@@ -20,7 +20,7 @@ test('hybrid constraints gpu-only module publishes deterministic WGSL prep layou
   );
 });
 
-test('hybrid constraints gpu-only path dispatches a real WGSL attachment error probe stage when WebGPU offload is available', () => {
+test('hybrid constraints gpu-only path dispatches real WGSL attachment probe + velocity proposal stages when WebGPU offload is available', () => {
   assert.match(
     source,
     /const hybridAttachmentErrorProbeWgsl = \/\* wgsl \*\/[\s\S]*@compute @workgroup_size\([\s\S]*maxErrorOut\[ai\] = max\(errA, errB\);[\s\S]*function dispatchHybridAttachmentErrorProbe\([\s\S]*pass\.dispatchWorkgroups\([\s\S]*copyBufferToBuffer\([\s\S]*mapAsync\(globalThis\.GPUMapMode\.READ/,
@@ -29,7 +29,13 @@ test('hybrid constraints gpu-only path dispatches a real WGSL attachment error p
 
   assert.match(
     source,
-    /const serializedDispatch = \(wgslOffload\.state\.pendingWgslProbePromise \|\| Promise\.resolve\(\)\)[\s\S]*\.then\(\(\) => dispatchHybridAttachmentErrorProbe\(wgslOffload, prep, soft\)\);[\s\S]*pendingWgslProbePromise = serializedDispatch;/,
-    'expected gpu-only hybrid WGSL probe dispatch to serialize map/readback work and avoid overlapping mapAsync races',
+    /const hybridAttachmentVelocityProposalWgsl = \/\* wgsl \*\/[\s\S]*deltaVxOut\[ai\] = deltaVx;[\s\S]*deltaVyOut\[ai\] = deltaVy;[\s\S]*function dispatchHybridAttachmentVelocityDeltaProposal\([\s\S]*pass\.dispatchWorkgroups\([\s\S]*copyBufferToBuffer\(state\.velocityDeltaVxOut[\s\S]*copyBufferToBuffer\(state\.velocityDeltaVyOut[\s\S]*Promise\.all\(\[[\s\S]*mapAsync\(globalThis\.GPUMapMode\.READ/,
+    'expected gpu-only hybrid module to run a concrete WGSL attachment velocity-delta proposal stage with deterministic readback telemetry',
+  );
+
+  assert.match(
+    source,
+    /const serializedDispatch = \(wgslOffload\.state\.pendingWgslProbePromise \|\| Promise\.resolve\(\)\)[\s\S]*dispatchHybridAttachmentErrorProbe\(wgslOffload, prep, soft\);[\s\S]*dispatchHybridAttachmentVelocityDeltaProposal\(wgslOffload, prep, soft,[\s\S]*pendingWgslProbePromise = serializedDispatch;[\s\S]*lastMode = 'wgsl-velocity-proposal';/,
+    'expected gpu-only hybrid WGSL dispatch chain to serialize probe+proposal readbacks and publish source-route ownership for authoritative bring-up',
   );
 });

@@ -55,6 +55,68 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+
+
+const hybridAttachmentVelocityProposalWgsl = /* wgsl */`
+struct VelocityParams {
+  nodeCount: u32,
+  attachmentCount: u32,
+  _pad0: u32,
+  _pad1: u32,
+  nodeErrorGain: f32,
+  nodeImpulseScale: f32,
+  dtNorm: f32,
+  _pad2: f32,
+};
+
+@group(0) @binding(0) var<uniform> params: VelocityParams;
+@group(0) @binding(1) var<storage, read> nodeX: array<f32>;
+@group(0) @binding(2) var<storage, read> nodeY: array<f32>;
+@group(0) @binding(3) var<storage, read> nodeIndex: array<u32>;
+@group(0) @binding(4) var<storage, read> anchorAX: array<f32>;
+@group(0) @binding(5) var<storage, read> anchorAY: array<f32>;
+@group(0) @binding(6) var<storage, read> anchorBX: array<f32>;
+@group(0) @binding(7) var<storage, read> anchorBY: array<f32>;
+@group(0) @binding(8) var<storage, read> restA: array<f32>;
+@group(0) @binding(9) var<storage, read> restB: array<f32>;
+@group(0) @binding(10) var<storage, read_write> deltaVxOut: array<f32>;
+@group(0) @binding(11) var<storage, read_write> deltaVyOut: array<f32>;
+
+fn accumulate(anchorX: f32, anchorY: f32, restLen: f32, px: f32, py: f32, inoutDx: ptr<function, f32>, inoutDy: ptr<function, f32>) {
+  let dx = px - anchorX;
+  let dy = py - anchorY;
+  let d = max(length(vec2<f32>(dx, dy)), 1e-6);
+  let err = (d - max(restLen, 0.0)) * params.nodeErrorGain;
+  let nx = dx / d;
+  let ny = dy / d;
+  *inoutDx = *inoutDx - nx * err * params.nodeImpulseScale * params.dtNorm;
+  *inoutDy = *inoutDy - ny * err * params.nodeImpulseScale * params.dtNorm;
+}
+
+@compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let ai = gid.x;
+  if (ai >= params.attachmentCount) { return; }
+
+  let ni = nodeIndex[ai];
+  if (ni >= params.nodeCount) {
+    deltaVxOut[ai] = 0.0;
+    deltaVyOut[ai] = 0.0;
+    return;
+  }
+
+  let px = nodeX[ni];
+  let py = nodeY[ni];
+
+  var deltaVx = 0.0;
+  var deltaVy = 0.0;
+  accumulate(anchorAX[ai], anchorAY[ai], restA[ai], px, py, &deltaVx, &deltaVy);
+  accumulate(anchorBX[ai], anchorBY[ai], restB[ai], px, py, &deltaVx, &deltaVy);
+
+  deltaVxOut[ai] = deltaVx;
+  deltaVyOut[ai] = deltaVy;
+}
+`;
 function clampFinite(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -220,6 +282,238 @@ async function dispatchHybridAttachmentErrorProbe(offload, prep, soft) {
   state.lastProbeMode = 'wgsl-error-probe';
 }
 
+
+
+function buildCpuHybridAttachmentVelocityDelta({ layout, soft, nodeErrorGain, nodeImpulseScale, dtNorm }) {
+  const attachmentCount = layout?.nodeIndex?.length || 0;
+  const cellDeltaVx = new Float32Array(attachmentCount);
+  const cellDeltaVy = new Float32Array(attachmentCount);
+  for (let i = 0; i < attachmentCount; i++) {
+    const node = soft?.nodes?.[layout.nodeIndex[i]];
+    if (!node) continue;
+
+    const px = clampFinite(node.x);
+    const py = clampFinite(node.y);
+    const runPair = (anchorX, anchorY, restLen) => {
+      const dx = px - anchorX;
+      const dy = py - anchorY;
+      const d = Math.max(1e-6, Math.hypot(dx, dy));
+      const err = (d - Math.max(0, restLen)) * nodeErrorGain;
+      const nx = dx / d;
+      const ny = dy / d;
+      cellDeltaVx[i] -= nx * err * nodeImpulseScale * dtNorm;
+      cellDeltaVy[i] -= ny * err * nodeImpulseScale * dtNorm;
+    };
+
+    runPair(layout.anchorAX[i], layout.anchorAY[i], layout.restA[i]);
+    runPair(layout.anchorBX[i], layout.anchorBY[i], layout.restB[i]);
+  }
+  return { cellDeltaVx, cellDeltaVy };
+}
+
+function computeHybridVelocityDeltaParity(cpuDelta, wgslDelta) {
+  const count = Math.min(cpuDelta?.cellDeltaVx?.length || 0, wgslDelta?.cellDeltaVx?.length || 0);
+  let maxAbsError = 0;
+  let sumAbsError = 0;
+  for (let i = 0; i < count; i++) {
+    const errX = Math.abs(clampFinite(wgslDelta.cellDeltaVx[i]) - clampFinite(cpuDelta.cellDeltaVx[i]));
+    const errY = Math.abs(clampFinite(wgslDelta.cellDeltaVy[i]) - clampFinite(cpuDelta.cellDeltaVy[i]));
+    const err = Math.max(errX, errY);
+    if (err > maxAbsError) maxAbsError = err;
+    sumAbsError += err;
+  }
+  return {
+    comparedAttachmentCount: count,
+    maxAbsError,
+    avgAbsError: count > 0 ? sumAbsError / count : 0,
+  };
+}
+
+function ensureHybridAttachmentVelocityProposalBuffers(offload, nodeCount, attachmentCount) {
+  const state = offload.state;
+  const device = offload.device;
+  const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
+
+  const requiredNodeCapacity = Math.max(1, nodeCount);
+  if ((state.velocityNodeCapacity || 0) < requiredNodeCapacity) {
+    const capacity = Math.max(requiredNodeCapacity, state.velocityNodeCapacity ? state.velocityNodeCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.velocityNodeX?.destroy?.();
+    state.velocityNodeY?.destroy?.();
+    state.velocityNodeX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.velocityNodeY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.velocityNodeCapacity = capacity;
+    state.velocityBindGroup = null;
+  }
+
+  const requiredAttachmentCapacity = Math.max(1, attachmentCount);
+  if ((state.velocityAttachmentCapacity || 0) < requiredAttachmentCapacity) {
+    const capacity = Math.max(requiredAttachmentCapacity, state.velocityAttachmentCapacity ? state.velocityAttachmentCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.velocityNodeIndex?.destroy?.();
+    state.velocityAnchorAX?.destroy?.();
+    state.velocityAnchorAY?.destroy?.();
+    state.velocityAnchorBX?.destroy?.();
+    state.velocityAnchorBY?.destroy?.();
+    state.velocityRestA?.destroy?.();
+    state.velocityRestB?.destroy?.();
+    state.velocityDeltaVxOut?.destroy?.();
+    state.velocityDeltaVyOut?.destroy?.();
+    state.velocityDeltaVxReadback?.destroy?.();
+    state.velocityDeltaVyReadback?.destroy?.();
+
+    state.velocityNodeIndex = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.velocityAnchorAX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.velocityAnchorAY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.velocityAnchorBX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.velocityAnchorBY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.velocityRestA = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.velocityRestB = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.velocityDeltaVxOut = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC,
+    });
+    state.velocityDeltaVyOut = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC,
+    });
+    state.velocityDeltaVxReadback = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
+    });
+    state.velocityDeltaVyReadback = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
+    });
+
+    state.velocityAttachmentCapacity = capacity;
+    state.velocityBindGroup = null;
+  }
+
+  if (!state.velocityParams) {
+    state.velocityParams = device.createBuffer({
+      size: 32,
+      usage: globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST,
+    });
+    state.velocityBindGroup = null;
+  }
+
+  return state;
+}
+
+async function dispatchHybridAttachmentVelocityDeltaProposal(offload, prep, soft, paramsConfig) {
+  const state = offload.state;
+  const device = offload.device;
+  const nodeCount = prep.plan.softNodeCount >>> 0;
+  const attachmentCount = prep.plan.attachmentCount >>> 0;
+  if (attachmentCount === 0 || nodeCount === 0) return;
+
+  const nodeErrorGain = clampFinite(paramsConfig?.nodeErrorGain, 0.74);
+  const nodeImpulseScale = clampFinite(paramsConfig?.nodeImpulseScale, 0.052);
+  const dtNorm = clampFinite(paramsConfig?.dtNorm, 0);
+
+  ensureHybridAttachmentVelocityProposalBuffers(offload, nodeCount, attachmentCount);
+
+  if (!state.velocityPipeline) {
+    state.velocityShaderModule = device.createShaderModule({ code: hybridAttachmentVelocityProposalWgsl });
+    state.velocityPipeline = await device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: {
+        module: state.velocityShaderModule,
+        entryPoint: 'main',
+      },
+    });
+    state.velocityBindGroup = null;
+  }
+
+  if (!state.velocityBindGroup) {
+    state.velocityBindGroup = device.createBindGroup({
+      layout: state.velocityPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.velocityParams } },
+        { binding: 1, resource: { buffer: state.velocityNodeX } },
+        { binding: 2, resource: { buffer: state.velocityNodeY } },
+        { binding: 3, resource: { buffer: state.velocityNodeIndex } },
+        { binding: 4, resource: { buffer: state.velocityAnchorAX } },
+        { binding: 5, resource: { buffer: state.velocityAnchorAY } },
+        { binding: 6, resource: { buffer: state.velocityAnchorBX } },
+        { binding: 7, resource: { buffer: state.velocityAnchorBY } },
+        { binding: 8, resource: { buffer: state.velocityRestA } },
+        { binding: 9, resource: { buffer: state.velocityRestB } },
+        { binding: 10, resource: { buffer: state.velocityDeltaVxOut } },
+        { binding: 11, resource: { buffer: state.velocityDeltaVyOut } },
+      ],
+    });
+  }
+
+  const nodeX = new Float32Array(nodeCount);
+  const nodeY = new Float32Array(nodeCount);
+  for (let i = 0; i < nodeCount; i++) {
+    const n = soft.nodes[i];
+    nodeX[i] = clampFinite(n?.x);
+    nodeY[i] = clampFinite(n?.y);
+  }
+
+  const paramPack = new ArrayBuffer(32);
+  const paramsU32 = new Uint32Array(paramPack, 0, 4);
+  const paramsF32 = new Float32Array(paramPack, 16, 4);
+  paramsU32[0] = nodeCount;
+  paramsU32[1] = attachmentCount;
+  paramsF32[0] = nodeErrorGain;
+  paramsF32[1] = nodeImpulseScale;
+  paramsF32[2] = dtNorm;
+
+  device.queue.writeBuffer(state.velocityParams, 0, paramPack, 0, paramPack.byteLength);
+  device.queue.writeBuffer(state.velocityNodeX, 0, nodeX.buffer, nodeX.byteOffset, nodeX.byteLength);
+  device.queue.writeBuffer(state.velocityNodeY, 0, nodeY.buffer, nodeY.byteOffset, nodeY.byteLength);
+  device.queue.writeBuffer(state.velocityNodeIndex, 0, prep.layout.nodeIndex.buffer, prep.layout.nodeIndex.byteOffset, prep.layout.nodeIndex.byteLength);
+  device.queue.writeBuffer(state.velocityAnchorAX, 0, prep.layout.anchorAX.buffer, prep.layout.anchorAX.byteOffset, prep.layout.anchorAX.byteLength);
+  device.queue.writeBuffer(state.velocityAnchorAY, 0, prep.layout.anchorAY.buffer, prep.layout.anchorAY.byteOffset, prep.layout.anchorAY.byteLength);
+  device.queue.writeBuffer(state.velocityAnchorBX, 0, prep.layout.anchorBX.buffer, prep.layout.anchorBX.byteOffset, prep.layout.anchorBX.byteLength);
+  device.queue.writeBuffer(state.velocityAnchorBY, 0, prep.layout.anchorBY.buffer, prep.layout.anchorBY.byteOffset, prep.layout.anchorBY.byteLength);
+  device.queue.writeBuffer(state.velocityRestA, 0, prep.layout.restA.buffer, prep.layout.restA.byteOffset, prep.layout.restA.byteLength);
+  device.queue.writeBuffer(state.velocityRestB, 0, prep.layout.restB.buffer, prep.layout.restB.byteOffset, prep.layout.restB.byteLength);
+
+  const bytes = attachmentCount * 4;
+  const encoder = device.createCommandEncoder({ label: 'hybrid-attachment-velocity-proposal-encoder' });
+  const pass = encoder.beginComputePass({ label: 'hybrid-attachment-velocity-proposal-pass' });
+  pass.setPipeline(state.velocityPipeline);
+  pass.setBindGroup(0, state.velocityBindGroup);
+  pass.dispatchWorkgroups(Math.max(1, Math.ceil(attachmentCount / WGSL_WORKGROUP_SIZE)));
+  pass.end();
+  encoder.copyBufferToBuffer(state.velocityDeltaVxOut, 0, state.velocityDeltaVxReadback, 0, bytes);
+  encoder.copyBufferToBuffer(state.velocityDeltaVyOut, 0, state.velocityDeltaVyReadback, 0, bytes);
+  device.queue.submit([encoder.finish()]);
+
+  await Promise.all([
+    state.velocityDeltaVxReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes),
+    state.velocityDeltaVyReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes),
+  ]);
+
+  const mappedDeltaVx = state.velocityDeltaVxReadback.getMappedRange(0, bytes);
+  const mappedDeltaVy = state.velocityDeltaVyReadback.getMappedRange(0, bytes);
+  const deltaVx = new Float32Array(mappedDeltaVx.slice(0));
+  const deltaVy = new Float32Array(mappedDeltaVy.slice(0));
+  state.velocityDeltaVxReadback.unmap();
+  state.velocityDeltaVyReadback.unmap();
+
+  const cpuDelta = buildCpuHybridAttachmentVelocityDelta({
+    layout: prep.layout,
+    soft,
+    nodeErrorGain,
+    nodeImpulseScale,
+    dtNorm,
+  });
+  const wgslDelta = { cellDeltaVx: deltaVx, cellDeltaVy: deltaVy };
+  state.lastVelocityDeltaCpuReference = cpuDelta;
+  state.lastVelocityDeltaTelemetry = wgslDelta;
+  state.lastVelocityDeltaParity = {
+    source: 'wgsl-attachment-proposal',
+    ...computeHybridVelocityDeltaParity(cpuDelta, wgslDelta),
+  };
+  state.lastVelocityDeltaProposalSource = 'wgsl-attachment-proposal';
+}
+
 export function buildHybridAttachmentWgslPrep({ rigidBodies, soft, hybrid, rigidVertexWorld }) {
   const attachments = Array.isArray(hybrid) ? hybrid : [];
   const count = attachments.length;
@@ -317,11 +611,18 @@ export function applyHybridAttachmentConstraintsGpuOnly({
     if (canUseWgslOffload(wgslOffload)) {
       const serializedDispatch = (wgslOffload.state.pendingWgslProbePromise || Promise.resolve())
         .catch(() => {})
-        .then(() => dispatchHybridAttachmentErrorProbe(wgslOffload, prep, soft));
+        .then(async () => {
+          await dispatchHybridAttachmentErrorProbe(wgslOffload, prep, soft);
+          await dispatchHybridAttachmentVelocityDeltaProposal(wgslOffload, prep, soft, {
+            nodeErrorGain,
+            nodeImpulseScale,
+            dtNorm: safeDtNorm,
+          });
+        });
       wgslOffload.state.pendingWgslProbePromise = serializedDispatch;
       serializedDispatch
         .then(() => {
-          wgslOffload.state.lastMode = 'wgsl-error-probe';
+          wgslOffload.state.lastMode = 'wgsl-velocity-proposal';
           wgslOffload.state.lastError = null;
         })
         .catch((error) => {

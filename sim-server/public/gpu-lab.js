@@ -294,7 +294,7 @@ function readControls() {
     softClusterCollisionAngularProjection: Math.max(0, Math.min(1, Number(softClusterCollisionAngularProjectionEl?.value) || SOFT_CLUSTER_COLLISION_ANGULAR_PROJECTION)),
     enableArtificialSwim: !!enableArtificialSwimEl?.checked,
     seedRigidBodies: (seedRigidBodiesEl?.checked !== false),
-    seedSpringSoftBodies: (seedSpringSoftBodiesEl?.checked !== false),
+    seedSpringSoftBodies: (seedSpringSoftBodiesEl?.checked === true),
     spawnMembraneCells: !!spawnMembraneCellsEl?.checked,
     enableWarningDeformInterventions: (enableWarningDeformInterventionsEl?.checked !== false),
     enableSevereDeformInterventions: (enableSevereDeformInterventionsEl?.checked !== false),

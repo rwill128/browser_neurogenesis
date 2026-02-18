@@ -212,6 +212,20 @@ test('gpu-lab routes rigid stepping through isolated gpu-only runtime solver mod
   );
 });
 
+test('gpu-lab defines rigid edge momentum helper used by fluid feedback injection', () => {
+  assert.match(
+    source,
+    /function rigidEdgeMomentumScale\(rb\) \{[\s\S]*return c > 0 \? \(sum \/ c\) : 1;[\s\S]*\}/,
+    'expected rigid edge momentum helper to exist in gpu-lab runtime source',
+  );
+
+  assert.match(
+    source,
+    /injectPoint\([\s\S]*rigidEdgeMomentumScale\(b\),/,
+    'expected fluid feedback injection path to use rigid edge momentum helper',
+  );
+});
+
 test('gpu-lab routes soft fluid-coupling stepping through isolated gpu-only runtime solver module', () => {
   assert.match(
     source,

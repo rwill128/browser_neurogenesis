@@ -20,6 +20,7 @@ import {
 import { applySoftFluidCouplingGpuOnly } from '/runtime-solvers/stepSoftFluidCouplingGpuOnly.js';
 import { applyPostCollisionRecoveryGpuOnly } from '/runtime-solvers/stepPostCollisionRecoveryGpuOnly.js';
 import { stabilizeRigidPostIntegrateGpuOnly } from '/runtime-solvers/stepRigidPostIntegrateGpuOnly.js';
+import { applyCollisionBoundaryPassGpuOnly } from '/runtime-solvers/stepCollisionBoundaryGpuOnly.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -132,6 +133,23 @@ const RIGID_INSIDE_CORRECTION_SLOP = 0.04;
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
+}
+
+function rigidEdgeMomentumScale(rb) {
+  const arr = Array.isArray(rb?.edgeMomentumCoupling)
+    ? rb.edgeMomentumCoupling
+    : (Array.isArray(rb?.edgeMomentumTransfer) ? rb.edgeMomentumTransfer : null);
+  if (!arr || arr.length === 0) return 1;
+  let sum = 0;
+  let c = 0;
+  for (const v of arr) {
+    const n = Number(v);
+    if (Number.isFinite(n)) {
+      sum += clamp(n, 0, 1);
+      c += 1;
+    }
+  }
+  return c > 0 ? (sum / c) : 1;
 }
 
 function normalizeRuntimeSolverPath(raw) {
@@ -4226,8 +4244,19 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       }
     }
 
-    for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
-    for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
+    if (solverPath === 'gpu-only') {
+      applyCollisionBoundaryPassGpuOnly({
+        rigidBodies: bodies.rigid,
+        soft: s,
+        n,
+        rigidBounce: 0.84,
+        softBounce: 0.78,
+        applyBounceBoundary,
+      });
+    } else {
+      for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
+      for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
+    }
   }
 
   // After collision impulses, optionally redistribute linear/angular momentum

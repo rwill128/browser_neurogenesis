@@ -25,3 +25,11 @@ test('post-collision recovery gpu-only source routes boundary pass through colli
     'expected boundary runtime source-route telemetry to be returned to gpu-only orchestrator',
   );
 });
+
+test('post-collision recovery gpu-only source publishes deterministic soft-cluster WGSL prep metadata in offload state', () => {
+  assert.match(
+    source,
+    /buildSoftClusterKinematicsWgslPrep\(soft\.nodes\)[\s\S]*preparedSoftClusterPlan = prep\.plan;[\s\S]*preparedSoftClusterLayout = prep\.layout;[\s\S]*preparedSoftClusterSignature = prep\.signature;[\s\S]*lastPreparedSoftClusterLayoutBytes = prep\.layout\.byteLength;[\s\S]*lastMode = 'cpu-prepared-soft-cluster-kinematics';/,
+    'expected gpu-only post-collision recovery path to persist deterministic soft-cluster prep ownership for next WGSL reduction stage',
+  );
+});

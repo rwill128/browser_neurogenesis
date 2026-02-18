@@ -1,5 +1,6 @@
 import { applyRigidInsideCorrectionPassGpuOnly } from './stepRigidInsideCorrectionGpuOnly.js';
 import {
+  buildSoftClusterKinematicsWgslPrep,
   computeSoftClusterKinematicsGpuOnly,
   projectNodesTowardClusterRigidMotionGpuOnly,
 } from './stepSoftClusterKinematicsGpuOnly.js';
@@ -41,6 +42,17 @@ export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
     typeof projectNodesTowardClusterRigidMotion === 'function'
       ? projectNodesTowardClusterRigidMotion
       : projectNodesTowardClusterRigidMotionGpuOnly;
+
+  if (wgslOffload?.enabled === true && wgslOffload?.state) {
+    const prep = buildSoftClusterKinematicsWgslPrep(soft.nodes);
+    wgslOffload.state.preparedSoftClusterPlan = prep.plan;
+    wgslOffload.state.preparedSoftClusterLayout = prep.layout;
+    wgslOffload.state.preparedSoftClusterSignature = prep.signature;
+    wgslOffload.state.lastPreparedSoftClusterNodeCount = prep.plan.nodeCount;
+    wgslOffload.state.lastPreparedSoftClusterCount = prep.plan.clusterCount;
+    wgslOffload.state.lastPreparedSoftClusterLayoutBytes = prep.layout.byteLength;
+    wgslOffload.state.lastMode = 'cpu-prepared-soft-cluster-kinematics';
+  }
 
   const postCollisionClusterKinematics = await Promise.resolve(computeKinematics(soft.nodes));
   await Promise.resolve(projectTowardRigidMotion(soft.nodes, postCollisionClusterKinematics, {

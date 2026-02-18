@@ -11,6 +11,167 @@ function nodeMass(node, minMass) {
   return Math.max(minMass, finiteOr(node?.mass, minMass));
 }
 
+function hashU32ArrayFnv1a(arr) {
+  let hash = 0x811c9dc5;
+  const len = Number(arr?.length) || 0;
+  for (let i = 0; i < len; i++) {
+    hash ^= (Number(arr[i]) || 0) >>> 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function hashF32ArrayFnv1a(arr) {
+  const len = Number(arr?.length) || 0;
+  const scratch = new ArrayBuffer(4);
+  const asF32 = new Float32Array(scratch);
+  const asU32 = new Uint32Array(scratch);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < len; i++) {
+    asF32[0] = Number(arr[i]) || 0;
+    hash ^= asU32[0] >>> 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+export function computeSoftClusterKinematicsPrepSignature(layout) {
+  const nodeCount = Number(layout?.nodeIndex?.length) || 0;
+  const clusterCount = Math.max(0, (Number(layout?.clusterOffsets?.length) || 1) - 1);
+  let hash = 0x811c9dc5;
+  hash ^= nodeCount >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= clusterCount >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashU32ArrayFnv1a(layout?.clusterOriginalId) >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashU32ArrayFnv1a(layout?.clusterOffsets) >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashU32ArrayFnv1a(layout?.nodeIndex) >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32ArrayFnv1a(layout?.nodeX) >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32ArrayFnv1a(layout?.nodeY) >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32ArrayFnv1a(layout?.nodeVx) >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32ArrayFnv1a(layout?.nodeVy) >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32ArrayFnv1a(layout?.nodeMass) >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  return hash >>> 0;
+}
+
+export function buildSoftClusterKinematicsWgslPrep(nodes, {
+  minMass = 0.02,
+} = {}) {
+  const accepted = [];
+  const clusterBuckets = new Map();
+
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    const emptyLayout = {
+      clusterOriginalId: new Uint32Array(0),
+      clusterOffsets: new Uint32Array(1),
+      nodeIndex: new Uint32Array(0),
+      nodeX: new Float32Array(0),
+      nodeY: new Float32Array(0),
+      nodeVx: new Float32Array(0),
+      nodeVy: new Float32Array(0),
+      nodeMass: new Float32Array(0),
+      byteLength: 4,
+    };
+    return {
+      plan: {
+        nodeCount: 0,
+        clusterCount: 0,
+      },
+      layout: emptyLayout,
+      signature: computeSoftClusterKinematicsPrepSignature(emptyLayout),
+    };
+  }
+
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    const x = Number(node?.x);
+    const y = Number(node?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+    const cidRaw = Number.isFinite(Number(node?.clusterId)) ? Number(node.clusterId) : 0;
+    const cid = Math.max(0, Math.floor(cidRaw)) >>> 0;
+    if (!clusterBuckets.has(cid)) clusterBuckets.set(cid, []);
+
+    const acceptedIndex = accepted.length;
+    accepted.push({
+      nodeIndex: i,
+      x,
+      y,
+      vx: finiteOr(node?.vx, 0),
+      vy: finiteOr(node?.vy, 0),
+      mass: nodeMass(node, minMass),
+      clusterId: cid,
+    });
+    clusterBuckets.get(cid).push(acceptedIndex);
+  }
+
+  const clusterOriginalId = Uint32Array.from([...clusterBuckets.keys()].sort((a, b) => a - b));
+  const clusterCount = clusterOriginalId.length;
+  const nodeCount = accepted.length;
+  const clusterOffsets = new Uint32Array(clusterCount + 1);
+  const nodeIndex = new Uint32Array(nodeCount);
+  const nodeX = new Float32Array(nodeCount);
+  const nodeY = new Float32Array(nodeCount);
+  const nodeVx = new Float32Array(nodeCount);
+  const nodeVy = new Float32Array(nodeCount);
+  const nodeMassArray = new Float32Array(nodeCount);
+
+  let write = 0;
+  for (let ci = 0; ci < clusterCount; ci++) {
+    const cid = clusterOriginalId[ci];
+    const bucket = clusterBuckets.get(cid) || [];
+    clusterOffsets[ci] = write;
+    for (let bi = 0; bi < bucket.length; bi++) {
+      const a = accepted[bucket[bi]];
+      nodeIndex[write] = a.nodeIndex >>> 0;
+      nodeX[write] = a.x;
+      nodeY[write] = a.y;
+      nodeVx[write] = a.vx;
+      nodeVy[write] = a.vy;
+      nodeMassArray[write] = a.mass;
+      write += 1;
+    }
+  }
+  clusterOffsets[clusterCount] = write;
+
+  const layout = {
+    clusterOriginalId,
+    clusterOffsets,
+    nodeIndex,
+    nodeX,
+    nodeY,
+    nodeVx,
+    nodeVy,
+    nodeMass: nodeMassArray,
+  };
+  layout.byteLength =
+    layout.clusterOriginalId.byteLength
+    + layout.clusterOffsets.byteLength
+    + layout.nodeIndex.byteLength
+    + layout.nodeX.byteLength
+    + layout.nodeY.byteLength
+    + layout.nodeVx.byteLength
+    + layout.nodeVy.byteLength
+    + layout.nodeMass.byteLength;
+
+  return {
+    plan: {
+      nodeCount,
+      clusterCount,
+    },
+    layout,
+    signature: computeSoftClusterKinematicsPrepSignature(layout),
+  };
+}
+
 export function computeSoftClusterKinematicsGpuOnly(nodes, {
   minMass = 0.02,
   minInertia = 1e-4,

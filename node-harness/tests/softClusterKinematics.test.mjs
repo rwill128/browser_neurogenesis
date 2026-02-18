@@ -5,6 +5,10 @@ import {
   computeSoftClusterKinematics,
   projectNodesTowardClusterRigidMotion,
 } from '../../sim-server/public/soft-cluster-kinematics.js';
+import {
+  buildSoftClusterKinematicsWgslPrep,
+  computeSoftClusterKinematicsPrepSignature,
+} from '../../sim-server/public/runtime-solvers/stepSoftClusterKinematicsGpuOnly.js';
 
 test('computeSoftClusterKinematics returns mass-weighted COM, inertia, and omega', () => {
   const nodes = [
@@ -80,4 +84,26 @@ test('projectNodesTowardClusterRigidMotion honors membrane gain scale', () => {
   // Full target vy would be +2; with 0.5 scale and starting at 0, expect halfway.
   assert.equal(nodes[0].vx, 0);
   assert.equal(nodes[0].vy, 1);
+});
+
+test('buildSoftClusterKinematicsWgslPrep emits deterministic CSR layout for next WGSL reduction stage', () => {
+  const nodes = [
+    { x: 2, y: 4, vx: 1, vy: 0, mass: 2, clusterId: 5 },
+    { x: 1, y: 3, vx: 0, vy: 1, mass: 1, clusterId: 2 },
+    { x: 3, y: 5, vx: -1, vy: 0, mass: 3, clusterId: 5 },
+    { x: Number.NaN, y: 9, vx: 0, vy: 0, mass: 1, clusterId: 9 },
+  ];
+
+  const prepA = buildSoftClusterKinematicsWgslPrep(nodes);
+  const prepB = buildSoftClusterKinematicsWgslPrep(nodes);
+
+  assert.deepEqual([...prepA.layout.clusterOriginalId], [2, 5]);
+  assert.deepEqual([...prepA.layout.clusterOffsets], [0, 1, 3]);
+  assert.deepEqual([...prepA.layout.nodeIndex], [1, 0, 2]);
+  assert.ok(prepA.layout.byteLength > 0);
+  assert.equal(prepA.plan.nodeCount, 3);
+  assert.equal(prepA.plan.clusterCount, 2);
+
+  assert.equal(prepA.signature, prepB.signature);
+  assert.equal(prepA.signature, computeSoftClusterKinematicsPrepSignature(prepA.layout));
 });

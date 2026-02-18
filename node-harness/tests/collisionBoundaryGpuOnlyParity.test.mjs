@@ -56,7 +56,13 @@ function assertBoundaryStateApprox(actual, expected, eps = 1e-5) {
       const a = alist[i];
       const e = elist[i];
       for (const key of ['x', 'y', 'vx', 'vy']) {
-        assert.ok(Math.abs(Number(a[key]) - Number(e[key])) <= eps, `${key} mismatch at index ${i}`);
+        const av = Number(a[key]);
+        const ev = Number(e[key]);
+        if (Number.isNaN(ev)) {
+          assert.ok(Number.isNaN(av), `${key} mismatch at index ${i}: expected NaN`);
+        } else {
+          assert.ok(Math.abs(av - ev) <= eps, `${key} mismatch at index ${i}`);
+        }
       }
       if (typeof e.omega === 'number') {
         assert.ok(Math.abs(Number(a.omega) - Number(e.omega)) <= eps, `omega mismatch at index ${i}`);
@@ -253,5 +259,47 @@ test('collision boundary WGSL offload matches baseline boundary semantics', asyn
   assert.deepEqual(runtime, { mode: 'wgsl', reason: 'ok' });
   assert.equal(wgslOffload.state.lastMode, 'wgsl');
   assert.equal(wgslOffload.state.lastError, null);
+  assert.equal(wgslOffload.state.lastFiniteEntryCount, 5);
+  assert.equal(wgslOffload.state.lastNonFiniteEntryCount, 0);
+  assertBoundaryStateApprox(gpuOnly, baseline);
+});
+
+test('collision boundary WGSL offload keeps non-finite entries on CPU while running finite entries on WGSL', async () => {
+  globalThis.GPUBufferUsage = {
+    STORAGE: 1 << 0,
+    COPY_DST: 1 << 1,
+    COPY_SRC: 1 << 2,
+    MAP_READ: 1 << 3,
+    UNIFORM: 1 << 4,
+  };
+  globalThis.GPUMapMode = { READ: 1 };
+
+  const baseline = makeState();
+  const gpuOnly = makeState();
+  baseline.bodies.rigid[0].vx = Number.NaN;
+  gpuOnly.bodies.rigid[0].vx = Number.NaN;
+
+  const wgslOffload = {
+    enabled: true,
+    device: createMockWgslDevice(),
+    state: {},
+  };
+
+  runBaselineInline(baseline);
+  const runtime = await applyCollisionBoundaryPassGpuOnly({
+    rigidBodies: gpuOnly.bodies.rigid,
+    soft: gpuOnly.soft,
+    n: gpuOnly.n,
+    rigidBounce: 0.84,
+    softBounce: 0.78,
+    applyBounceBoundary: bounceStub,
+    wgslOffload,
+  });
+
+  assert.deepEqual(runtime, { mode: 'wgsl-partial', reason: 'ok-with-cpu-nonfinite' });
+  assert.equal(wgslOffload.state.lastMode, 'wgsl-partial');
+  assert.equal(wgslOffload.state.lastError, null);
+  assert.equal(wgslOffload.state.lastFiniteEntryCount, 4);
+  assert.equal(wgslOffload.state.lastNonFiniteEntryCount, 1);
   assertBoundaryStateApprox(gpuOnly, baseline);
 });

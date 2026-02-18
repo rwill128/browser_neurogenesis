@@ -76,14 +76,22 @@ function createBuffer(device, size, usage) {
   return device.createBuffer({ size, usage });
 }
 
-function hasFiniteBoundaryAbi(entries) {
-  for (const entry of entries) {
-    if (!entry) return false;
-    if (!Number.isFinite(Number(entry.x)) || !Number.isFinite(Number(entry.y))) return false;
-    if (!Number.isFinite(Number(entry.vx)) || !Number.isFinite(Number(entry.vy))) return false;
-    if (!Number.isFinite(Number(entry.r))) return false;
-  }
+function isFiniteBoundaryEntry(entry) {
+  if (!entry) return false;
+  if (!Number.isFinite(Number(entry.x)) || !Number.isFinite(Number(entry.y))) return false;
+  if (!Number.isFinite(Number(entry.vx)) || !Number.isFinite(Number(entry.vy))) return false;
+  if (!Number.isFinite(Number(entry.r))) return false;
   return true;
+}
+
+function splitFiniteBoundaryEntries(entries) {
+  const finite = [];
+  const nonFinite = [];
+  for (const entry of entries) {
+    if (isFiniteBoundaryEntry(entry)) finite.push(entry);
+    else nonFinite.push(entry);
+  }
+  return { finite, nonFinite };
 }
 
 async function ensureWgslState(offload, count) {
@@ -267,41 +275,59 @@ export async function applyCollisionBoundaryPassGpuOnly({
     throw new Error('gpu-only collision boundary pass requires applyBounceBoundary callback');
   }
 
-  const wgslAvailable = canUseWgslOffload(wgslOffload)
-    && hasFiniteBoundaryAbi(rigidList)
-    && hasFiniteBoundaryAbi(softNodes);
+  const { finite: finiteRigid, nonFinite: nonFiniteRigid } = splitFiniteBoundaryEntries(rigidList);
+  const { finite: finiteSoft, nonFinite: nonFiniteSoft } = splitFiniteBoundaryEntries(softNodes);
+  const finiteEntryCount = finiteRigid.length + finiteSoft.length;
+  const nonFiniteEntryCount = nonFiniteRigid.length + nonFiniteSoft.length;
+
+  const wgslAvailable = canUseWgslOffload(wgslOffload) && finiteEntryCount > 0;
 
   if (!wgslAvailable) {
     applyBoundaryCpu(rigidList, n, rigidBounce, applyBounceBoundary);
     applyBoundaryCpu(softNodes, n, softBounce, applyBounceBoundary);
-    return { mode: 'cpu', reason: 'wgsl-unavailable' };
+    return {
+      mode: 'cpu',
+      reason: finiteEntryCount === 0 ? 'non-finite-boundary-abi' : 'wgsl-unavailable',
+    };
   }
 
   try {
-    await runBoundaryWgsl(rigidList, {
+    await runBoundaryWgsl(finiteRigid, {
       n,
       damping: rigidBounce,
       hasOmega: true,
       offload: wgslOffload,
     });
-    await runBoundaryWgsl(softNodes, {
+    await runBoundaryWgsl(finiteSoft, {
       n,
       damping: softBounce,
       hasOmega: false,
       offload: wgslOffload,
     });
 
+    if (nonFiniteEntryCount > 0) {
+      applyBoundaryCpu(nonFiniteRigid, n, rigidBounce, applyBounceBoundary);
+      applyBoundaryCpu(nonFiniteSoft, n, softBounce, applyBounceBoundary);
+    }
+
     if (wgslOffload?.state) {
       wgslOffload.state.lastError = null;
-      wgslOffload.state.lastMode = 'wgsl';
+      wgslOffload.state.lastMode = nonFiniteEntryCount > 0 ? 'wgsl-partial' : 'wgsl';
+      wgslOffload.state.lastFiniteEntryCount = finiteEntryCount;
+      wgslOffload.state.lastNonFiniteEntryCount = nonFiniteEntryCount;
     }
-    return { mode: 'wgsl', reason: 'ok' };
+    return {
+      mode: nonFiniteEntryCount > 0 ? 'wgsl-partial' : 'wgsl',
+      reason: nonFiniteEntryCount > 0 ? 'ok-with-cpu-nonfinite' : 'ok',
+    };
   } catch (err) {
     applyBoundaryCpu(rigidList, n, rigidBounce, applyBounceBoundary);
     applyBoundaryCpu(softNodes, n, softBounce, applyBounceBoundary);
     if (wgslOffload?.state) {
       wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
       wgslOffload.state.lastMode = 'cpu-fallback';
+      wgslOffload.state.lastFiniteEntryCount = finiteEntryCount;
+      wgslOffload.state.lastNonFiniteEntryCount = nonFiniteEntryCount;
     }
     return { mode: 'cpu-fallback', reason: String(err?.message || err || 'unknown-error') };
   }

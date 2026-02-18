@@ -32,11 +32,11 @@ test('soft spring gpu-only WGSL layout publishes color-batched endpoint ownershi
   );
 });
 
-test('soft spring gpu-only path dispatches real WGSL probe + lambda proposal stages when offload device is available', () => {
+test('soft spring gpu-only path dispatches WGSL lambda proposal every run while fast mode can skip probe readback work', () => {
   assert.match(
     source,
-    /canUseWgslOffload\(wgslOffload\)[\s\S]*Promise\.all\(\[[\s\S]*dispatchSoftSpringWgslProbe\(\{ soft, offload: wgslOffload, layout \}\)[\s\S]*dispatchSoftSpringWgslLambdaProposal\([\s\S]*lastMode = proposalRan \? 'wgsl-velocity-proposal' : 'wgsl-probe'/,
-    'expected gpu-only soft spring branch to execute WGSL probe + lambda proposal dispatches (with cpu fallback semantics preserved)',
+    /canUseWgslOffload\(wgslOffload\)[\s\S]*const probePromise = fastMode[\s\S]*Promise\.resolve\(false\)[\s\S]*dispatchSoftSpringWgslProbe\(\{ soft, offload: wgslOffload, layout \}\)[\s\S]*lastProbeMode = 'skipped-fast-mode'[\s\S]*Promise\.all\(\[[\s\S]*probePromise[\s\S]*dispatchSoftSpringWgslLambdaProposal\([\s\S]*lastMode = proposalRan \? 'wgsl-velocity-proposal' : 'wgsl-probe'/,
+    'expected gpu-only soft spring branch to keep WGSL lambda proposal dispatch active while allowing fast mode to skip probe pass/readback overhead with explicit route telemetry',
   );
 });
 

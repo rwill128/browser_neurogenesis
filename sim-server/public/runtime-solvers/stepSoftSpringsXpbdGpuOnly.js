@@ -1386,8 +1386,14 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
         const runId = (wgslOffload.state.wgslRunId || 0) + 1;
         wgslOffload.state.wgslRunId = runId;
         wgslOffload.state.wgslInFlight = true;
+        const probePromise = fastMode
+          ? Promise.resolve(false)
+          : dispatchSoftSpringWgslProbe({ soft, offload: wgslOffload, layout });
+        if (fastMode) {
+          wgslOffload.state.lastProbeMode = 'skipped-fast-mode';
+        }
         void Promise.all([
-          dispatchSoftSpringWgslProbe({ soft, offload: wgslOffload, layout }),
+          probePromise,
           dispatchSoftSpringWgslLambdaProposal({
             soft,
             offload: wgslOffload,
@@ -1492,6 +1498,9 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
               wgslOffload.state.lastVelocityDeltaProposalSignature = proposalSignature;
             }
             if (probeRan || proposalRan) {
+              if (probeRan) {
+                wgslOffload.state.lastProbeMode = 'wgsl-probe';
+              }
               wgslOffload.state.lastError = null;
               wgslOffload.state.lastMode = proposalRan ? 'wgsl-velocity-proposal' : 'wgsl-probe';
             }

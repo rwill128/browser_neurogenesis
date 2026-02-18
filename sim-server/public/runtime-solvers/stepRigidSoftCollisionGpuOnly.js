@@ -481,6 +481,9 @@ export function buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft }) 
   const rigidX = new Float32Array(rigidCount);
   const rigidY = new Float32Array(rigidCount);
   const rigidTheta = new Float32Array(rigidCount);
+  const rigidVx = new Float32Array(rigidCount);
+  const rigidVy = new Float32Array(rigidCount);
+  const rigidOmega = new Float32Array(rigidCount);
   const rigidMinX = new Float32Array(rigidCount);
   const rigidMinY = new Float32Array(rigidCount);
   const rigidMaxX = new Float32Array(rigidCount);
@@ -488,6 +491,8 @@ export function buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft }) 
 
   const nodeX = new Float32Array(nodeCount);
   const nodeY = new Float32Array(nodeCount);
+  const nodeVx = new Float32Array(nodeCount);
+  const nodeVy = new Float32Array(nodeCount);
   const nodeR = new Float32Array(nodeCount);
   const nodeInvMass = new Float32Array(nodeCount);
 
@@ -505,6 +510,9 @@ export function buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft }) 
     const x = Number(rb.x) || 0;
     const y = Number(rb.y) || 0;
     const theta = Number(rb.theta) || 0;
+    const vx = Number(rb.vx) || 0;
+    const vy = Number(rb.vy) || 0;
+    const omega = Number(rb.omega) || 0;
     const minX = Number(rb._aabb?.minX) || 0;
     const minY = Number(rb._aabb?.minY) || 0;
     const maxX = Number(rb._aabb?.maxX) || 0;
@@ -512,6 +520,9 @@ export function buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft }) 
     rigidX[i] = x;
     rigidY[i] = y;
     rigidTheta[i] = theta;
+    rigidVx[i] = vx;
+    rigidVy[i] = vy;
+    rigidOmega[i] = omega;
     rigidMinX[i] = minX;
     rigidMinY[i] = minY;
     rigidMaxX[i] = maxX;
@@ -519,20 +530,29 @@ export function buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft }) 
     signature = fnv1aMix(signature, Math.fround(x));
     signature = fnv1aMix(signature, Math.fround(y));
     signature = fnv1aMix(signature, Math.fround(theta));
+    signature = fnv1aMix(signature, Math.fround(vx));
+    signature = fnv1aMix(signature, Math.fround(vy));
+    signature = fnv1aMix(signature, Math.fround(omega));
   }
 
   for (let i = 0; i < nodeCount; i++) {
     const node = soft.nodes[i] || {};
     const x = Number(node.x) || 0;
     const y = Number(node.y) || 0;
+    const vx = Number(node.vx) || 0;
+    const vy = Number(node.vy) || 0;
     const r = Math.max(0, Number(node.r) || 0);
     const invMass = 1 / Math.max(0.02, Number(node.mass) || 0.02);
     nodeX[i] = x;
     nodeY[i] = y;
+    nodeVx[i] = vx;
+    nodeVy[i] = vy;
     nodeR[i] = r;
     nodeInvMass[i] = invMass;
     signature = fnv1aMix(signature, Math.fround(x));
     signature = fnv1aMix(signature, Math.fround(y));
+    signature = fnv1aMix(signature, Math.fround(vx));
+    signature = fnv1aMix(signature, Math.fround(vy));
     signature = fnv1aMix(signature, Math.fround(r));
   }
 
@@ -553,12 +573,17 @@ export function buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft }) 
     rigidX,
     rigidY,
     rigidTheta,
+    rigidVx,
+    rigidVy,
+    rigidOmega,
     rigidMinX,
     rigidMinY,
     rigidMaxX,
     rigidMaxY,
     nodeX,
     nodeY,
+    nodeVx,
+    nodeVy,
     nodeR,
     nodeInvMass,
     springNodeA,
@@ -567,12 +592,17 @@ export function buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft }) 
     byteLength: rigidX.byteLength
       + rigidY.byteLength
       + rigidTheta.byteLength
+      + rigidVx.byteLength
+      + rigidVy.byteLength
+      + rigidOmega.byteLength
       + rigidMinX.byteLength
       + rigidMinY.byteLength
       + rigidMaxX.byteLength
       + rigidMaxY.byteLength
       + nodeX.byteLength
       + nodeY.byteLength
+      + nodeVx.byteLength
+      + nodeVy.byteLength
       + nodeR.byteLength
       + nodeInvMass.byteLength
       + springNodeA.byteLength
@@ -1322,12 +1352,17 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       wgslOffload.state.lastPreparedNarrowphaseSceneRigidX = narrowphaseSceneLayout.rigidX;
       wgslOffload.state.lastPreparedNarrowphaseSceneRigidY = narrowphaseSceneLayout.rigidY;
       wgslOffload.state.lastPreparedNarrowphaseSceneRigidTheta = narrowphaseSceneLayout.rigidTheta;
+      wgslOffload.state.lastPreparedNarrowphaseSceneRigidVx = narrowphaseSceneLayout.rigidVx;
+      wgslOffload.state.lastPreparedNarrowphaseSceneRigidVy = narrowphaseSceneLayout.rigidVy;
+      wgslOffload.state.lastPreparedNarrowphaseSceneRigidOmega = narrowphaseSceneLayout.rigidOmega;
       wgslOffload.state.lastPreparedNarrowphaseSceneRigidMinX = narrowphaseSceneLayout.rigidMinX;
       wgslOffload.state.lastPreparedNarrowphaseSceneRigidMinY = narrowphaseSceneLayout.rigidMinY;
       wgslOffload.state.lastPreparedNarrowphaseSceneRigidMaxX = narrowphaseSceneLayout.rigidMaxX;
       wgslOffload.state.lastPreparedNarrowphaseSceneRigidMaxY = narrowphaseSceneLayout.rigidMaxY;
       wgslOffload.state.lastPreparedNarrowphaseSceneNodeX = narrowphaseSceneLayout.nodeX;
       wgslOffload.state.lastPreparedNarrowphaseSceneNodeY = narrowphaseSceneLayout.nodeY;
+      wgslOffload.state.lastPreparedNarrowphaseSceneNodeVx = narrowphaseSceneLayout.nodeVx;
+      wgslOffload.state.lastPreparedNarrowphaseSceneNodeVy = narrowphaseSceneLayout.nodeVy;
       wgslOffload.state.lastPreparedNarrowphaseSceneNodeR = narrowphaseSceneLayout.nodeR;
       wgslOffload.state.lastPreparedNarrowphaseSceneNodeInvMass = narrowphaseSceneLayout.nodeInvMass;
       wgslOffload.state.lastPreparedNarrowphaseSceneSpringNodeA = narrowphaseSceneLayout.springNodeA;

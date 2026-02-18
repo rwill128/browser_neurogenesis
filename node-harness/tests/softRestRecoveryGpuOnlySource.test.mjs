@@ -49,3 +49,18 @@ test('soft rest-recovery gpu-only module dispatches concrete WGSL rest-length pr
     'expected WGSL rest proposal branch to persist deterministic CPU-vs-WGSL parity telemetry and source route',
   );
 });
+
+
+test('soft rest-recovery gpu-only fast mode skips cpu parity while preserving finite safety + source-route telemetry', () => {
+  assert.match(
+    moduleSource,
+    /isGpuOnlyFastMode\(offload\)[\s\S]*checkFiniteFloat32Array\(proposalBySpring\)[\s\S]*if \(!fastMode\) \{[\s\S]*buildCpuRestProposalBySpring\([\s\S]*state\.lastProposalFinite = finite;[\s\S]*if \(fastMode\) \{[\s\S]*source: 'wgsl-rest-recovery-proposal-fast'[\s\S]*validation: 'skipped-cpu-parity'[\s\S]*lastProposalSource = 'wgsl-rest-recovery-proposal-fast'/,
+    'expected rest-recovery fast mode to bypass cpu parity/reference work while retaining finite checks and explicit fast source-route ownership',
+  );
+
+  assert.match(
+    moduleSource,
+    /canApplyAuthoritativeRestRecoveryProposal\([\s\S]*const fastMode = isGpuOnlyFastMode\(wgslOffload\)[\s\S]*expectedSource = fastMode \? 'wgsl-rest-recovery-proposal-fast' : 'wgsl-rest-recovery-proposal'[\s\S]*if \(fastMode\) \{[\s\S]*state\.lastProposalFinite\?\.allFinite !== true/,
+    'expected authoritative replay gate to switch to finite safety checks in fast mode while keeping validated mode parity gate intact',
+  );
+});

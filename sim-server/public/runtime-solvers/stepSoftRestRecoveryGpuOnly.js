@@ -81,6 +81,23 @@ function canUseWgslOffload(offload) {
   return true;
 }
 
+function isGpuOnlyFastMode(wgslOffload) {
+  return String(wgslOffload?.modeProfile || '').trim().toLowerCase() === 'gpu-only-fast';
+}
+
+function checkFiniteFloat32Array(values) {
+  if (!(values instanceof Float32Array)) return { allFinite: false, nonFiniteCount: 0, comparedCount: 0 };
+  let nonFiniteCount = 0;
+  for (let i = 0; i < values.length; i++) {
+    if (!Number.isFinite(values[i])) nonFiniteCount += 1;
+  }
+  return {
+    allFinite: nonFiniteCount === 0,
+    nonFiniteCount,
+    comparedCount: values.length,
+  };
+}
+
 function buildSoftRestRecoveryWgslPlan({ springs, softNodes } = {}) {
   const nodes = Array.isArray(softNodes) ? softNodes : [];
   const springList = Array.isArray(springs) ? springs : [];
@@ -279,12 +296,18 @@ function computeRestProposalParity({ proposalBySpring, cpuProposalBySpring, acti
 function canApplyAuthoritativeRestRecoveryProposal({ wgslOffload, proposalSignature, springCount }) {
   const state = wgslOffload?.state;
   if (!state || state.enableAuthoritativeRestRecovery !== true) return false;
-  if (state.lastProposalSource !== 'wgsl-rest-recovery-proposal') return false;
+  const fastMode = isGpuOnlyFastMode(wgslOffload);
+  const expectedSource = fastMode ? 'wgsl-rest-recovery-proposal-fast' : 'wgsl-rest-recovery-proposal';
+  if (state.lastProposalSource !== expectedSource) return false;
   if ((state.lastProposalSignature >>> 0) !== (proposalSignature >>> 0)) return false;
   if (!(state.lastProposalBySpring instanceof Float32Array)) return false;
   if (state.lastProposalBySpring.length !== springCount) return false;
-  const parity = state.lastProposalParity;
-  if (!parity || !Number.isFinite(parity.maxAbs) || parity.maxAbs > 1e-5) return false;
+  if (fastMode) {
+    if (state.lastProposalFinite?.allFinite !== true) return false;
+  } else {
+    const parity = state.lastProposalParity;
+    if (!parity || !Number.isFinite(parity.maxAbs) || parity.maxAbs > 1e-5) return false;
+  }
   return true;
 }
 
@@ -387,6 +410,7 @@ async function dispatchSoftRestRecoveryWgslProposal({ springs, restBaseline, lay
   if (!canUseWgslOffload(offload)) return false;
   const springCount = Number(layout?.restByActiveSpring?.length) || 0;
   if (springCount <= 0) return false;
+  const fastMode = isGpuOnlyFastMode(offload);
 
   const state = ensureProposalBuffers(offload, springCount);
   const device = offload.device;
@@ -458,28 +482,49 @@ async function dispatchSoftRestRecoveryWgslProposal({ springs, restBaseline, lay
     if (si < proposalBySpring.length) proposalBySpring[si] = proposalByActiveSpring[i];
   }
 
-  const cpuProposalBySpring = buildCpuRestProposalBySpring({
-    springs,
-    restBaseline,
-    layout,
-    options,
-  });
-  const parity = computeRestProposalParity({
-    proposalBySpring,
-    cpuProposalBySpring,
-    activeSpringIndices: layout.activeSpringIndices,
-  });
+  const finite = checkFiniteFloat32Array(proposalBySpring);
+
+  let cpuProposalBySpring = null;
+  let parity = {
+    maxAbs: null,
+    meanAbs: null,
+    comparedCount: 0,
+  };
+  if (!fastMode) {
+    cpuProposalBySpring = buildCpuRestProposalBySpring({
+      springs,
+      restBaseline,
+      layout,
+      options,
+    });
+    parity = computeRestProposalParity({
+      proposalBySpring,
+      cpuProposalBySpring,
+      activeSpringIndices: layout.activeSpringIndices,
+    });
+  }
 
   state.lastProposalDispatch = dispatchCount;
   state.lastProposalSpringCount = springCount;
   state.lastProposalByActiveSpring = proposalByActiveSpring;
   state.lastProposalBySpring = proposalBySpring;
   state.lastCpuProposalBySpring = cpuProposalBySpring;
-  state.lastProposalParity = {
-    ...parity,
-    source: 'wgsl-rest-recovery-proposal-vs-cpu',
-  };
-  state.lastProposalSource = 'wgsl-rest-recovery-proposal';
+  state.lastProposalFinite = finite;
+  if (fastMode) {
+    state.lastProposalParity = {
+      ...parity,
+      source: 'wgsl-rest-recovery-proposal-fast',
+      validation: 'skipped-cpu-parity',
+    };
+    state.lastProposalSource = 'wgsl-rest-recovery-proposal-fast';
+  } else {
+    state.lastProposalParity = {
+      ...parity,
+      source: 'wgsl-rest-recovery-proposal-vs-cpu',
+      validation: 'cpu-parity',
+    };
+    state.lastProposalSource = 'wgsl-rest-recovery-proposal';
+  }
   state.lastProposalSignature = proposalSignature >>> 0;
   return true;
 }

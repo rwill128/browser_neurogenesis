@@ -73,20 +73,20 @@ test('soft spring gpu-only WGSL proposal branch dispatches velocity-delta propos
   );
 });
 
-test('soft spring gpu-only path can promote cached WGSL velocity proposal to authoritative node/lambda apply when signature matches', () => {
+test('soft spring gpu-only path can promote cached WGSL velocity proposal to authoritative node/lambda apply when signature + contribution parity match', () => {
   assert.match(
     source,
-    /computeSoftSpringVelocityProposalSignature\([\s\S]*lastPreparedProposalSignature = proposalSignature[\s\S]*enableAuthoritativeVelocityDelta === true[\s\S]*lastVelocityDeltaProposalSignature === proposalSignature[\s\S]*applySoftSpringWgslAuthoritativeProposal\([\s\S]*lastMode = 'wgsl-velocity-authoritative'/,
-    'expected soft spring gpu-only branch to gate authoritative WGSL node/lambda replay on deterministic input signature parity',
+    /computeSoftSpringVelocityProposalSignature\([\s\S]*lastPreparedProposalSignature = proposalSignature[\s\S]*enableAuthoritativeVelocityDelta === true[\s\S]*lastVelocityDeltaProposalSignature === proposalSignature[\s\S]*lastContributionCountParity\?\.mismatchCount === 0[\s\S]*applySoftSpringWgslAuthoritativeProposal\([\s\S]*lastMode = 'wgsl-velocity-authoritative'/,
+    'expected soft spring gpu-only branch to gate authoritative WGSL node/lambda replay on deterministic input signature + node-contribution parity',
   );
 });
 
 
-test('soft spring gpu-only WGSL velocity proposal stage runs WGSL node-reduction dispatch before readback', () => {
+test('soft spring gpu-only WGSL velocity proposal stage runs WGSL node-reduction dispatch with per-node contribution counts before readback', () => {
   assert.match(
     source,
-    /const softSpringVelocityNodeReductionWgsl = \/\* wgsl \*\/[\s\S]*velocityReductionPipeline[\s\S]*nodeReductionPass\.setPipeline\(state\.velocityReductionPipeline\)[\s\S]*nodeReductionPass\.dispatchWorkgroups\([\s\S]*copyBufferToBuffer\(state\.velocityNodeDeltaVXOut, 0, state\.velocityNodeDeltaVXReadback, 0, nodeBytes\)[\s\S]*lastVelocityDeltaReductionDispatch/,
-    'expected velocity proposal path to include a concrete WGSL node-reduction stage (not CPU-only reduction loop)',
+    /const softSpringVelocityNodeReductionWgsl = \/\* wgsl \*\/[\s\S]*nodeContributionCountOut[\s\S]*velocityReductionPipeline[\s\S]*nodeReductionPass\.setPipeline\(state\.velocityReductionPipeline\)[\s\S]*nodeReductionPass\.dispatchWorkgroups\([\s\S]*copyBufferToBuffer\(state\.velocityNodeDeltaVXOut, 0, state\.velocityNodeDeltaVXReadback, 0, nodeBytes\)[\s\S]*copyBufferToBuffer\(state\.velocityNodeContributionCountOut, 0, state\.velocityNodeContributionCountReadback, 0, nodeBytes\)[\s\S]*lastVelocityDeltaReductionDispatch/,
+    'expected velocity proposal path to include a concrete WGSL node-reduction stage with deterministic per-node contribution ownership telemetry',
   );
 });
 
@@ -94,7 +94,7 @@ test('soft spring gpu-only WGSL velocity proposal stage runs WGSL node-reduction
 test('soft spring gpu-only WGSL velocity proposal branch records source route + deterministic parity metrics against CPU ownership reduction', () => {
   assert.match(
     source,
-    /reduceSoftSpringVelocityDeltasDeterministic\([\s\S]*lastVelocityDeltaExpectedNodeVxByColor[\s\S]*lastVelocityDeltaExpectedNodeVyByColor[\s\S]*lastVelocityDeltaProposalSource = 'wgsl-node-reduction'[\s\S]*lastVelocityDeltaProposalSource = 'cpu-deterministic-reduction'[\s\S]*computeVelocityDeltaParityStats[\s\S]*lastVelocityDeltaParity = \{[\s\S]*source: wgslOffload\.state\.lastVelocityDeltaProposalSource/,
-    'expected WGSL velocity proposal branch to persist source-route ownership and CPU parity metrics required before switching to authoritative WGSL node deltas',
+    /reduceSoftSpringVelocityDeltasDeterministic\([\s\S]*lastVelocityDeltaExpectedNodeVxByColor[\s\S]*lastVelocityDeltaExpectedNodeVyByColor[\s\S]*lastVelocityDeltaExpectedNodeContributionCount[\s\S]*lastVelocityDeltaProposalNodeContributionCount[\s\S]*lastVelocityDeltaProposalSource = 'wgsl-node-reduction'[\s\S]*lastVelocityDeltaProposalSource = 'cpu-deterministic-reduction'[\s\S]*computeVelocityDeltaParityStats[\s\S]*computeContributionCountParityStats[\s\S]*lastContributionCountParity[\s\S]*lastVelocityDeltaParity = \{[\s\S]*source: wgslOffload\.state\.lastVelocityDeltaProposalSource/,
+    'expected WGSL velocity proposal branch to persist source-route ownership and CPU parity metrics (including node contribution counts) required before switching to authoritative WGSL node deltas',
   );
 });

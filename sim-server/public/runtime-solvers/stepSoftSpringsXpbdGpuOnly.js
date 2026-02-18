@@ -175,6 +175,7 @@ struct Params {
 @group(0) @binding(3) var<storage, read> endpointDeltaVY: array<f32>;
 @group(0) @binding(4) var<storage, read_write> nodeDeltaVXOut: array<f32>;
 @group(0) @binding(5) var<storage, read_write> nodeDeltaVYOut: array<f32>;
+@group(0) @binding(6) var<storage, read_write> nodeContributionCountOut: array<u32>;
 
 @compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -183,15 +184,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   var sumX = 0.0;
   var sumY = 0.0;
+  var count = 0u;
   for (var ei = 0u; ei < params.endpointCount; ei = ei + 1u) {
     if (endpointNodeIndices[ei] == ni) {
       sumX = sumX + endpointDeltaVX[ei];
       sumY = sumY + endpointDeltaVY[ei];
+      count = count + 1u;
     }
   }
 
   nodeDeltaVXOut[ni] = sumX;
   nodeDeltaVYOut[ni] = sumY;
+  nodeContributionCountOut[ni] = count;
 }
 `;
 
@@ -334,8 +338,10 @@ function ensureVelocityDeltaProposalBuffers(offload, nodeCount, springCount, end
     state.velocityNodePredY?.destroy?.();
     state.velocityNodeDeltaVXOut?.destroy?.();
     state.velocityNodeDeltaVYOut?.destroy?.();
+    state.velocityNodeContributionCountOut?.destroy?.();
     state.velocityNodeDeltaVXReadback?.destroy?.();
     state.velocityNodeDeltaVYReadback?.destroy?.();
+    state.velocityNodeContributionCountReadback?.destroy?.();
     state.velocityNodePredX = device.createBuffer({ size: bytes, usage: storageUsage });
     state.velocityNodePredY = device.createBuffer({ size: bytes, usage: storageUsage });
     state.velocityNodeDeltaVXOut = device.createBuffer({
@@ -346,11 +352,19 @@ function ensureVelocityDeltaProposalBuffers(offload, nodeCount, springCount, end
       size: bytes,
       usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC,
     });
+    state.velocityNodeContributionCountOut = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC,
+    });
     state.velocityNodeDeltaVXReadback = device.createBuffer({
       size: bytes,
       usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
     });
     state.velocityNodeDeltaVYReadback = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
+    });
+    state.velocityNodeContributionCountReadback = device.createBuffer({
       size: bytes,
       usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
     });
@@ -511,6 +525,7 @@ async function dispatchSoftSpringWgslVelocityDeltaProposal({ soft, offload, layo
         { binding: 3, resource: { buffer: state.velocityEndpointDeltaVYOut } },
         { binding: 4, resource: { buffer: state.velocityNodeDeltaVXOut } },
         { binding: 5, resource: { buffer: state.velocityNodeDeltaVYOut } },
+        { binding: 6, resource: { buffer: state.velocityNodeContributionCountOut } },
       ],
     });
   }
@@ -542,6 +557,7 @@ async function dispatchSoftSpringWgslVelocityDeltaProposal({ soft, offload, layo
   const nodeBytes = nodes.length * 4;
   encoder.copyBufferToBuffer(state.velocityNodeDeltaVXOut, 0, state.velocityNodeDeltaVXReadback, 0, nodeBytes);
   encoder.copyBufferToBuffer(state.velocityNodeDeltaVYOut, 0, state.velocityNodeDeltaVYReadback, 0, nodeBytes);
+  encoder.copyBufferToBuffer(state.velocityNodeContributionCountOut, 0, state.velocityNodeContributionCountReadback, 0, nodeBytes);
   device.queue.submit([encoder.finish()]);
 
   await state.velocityEndpointDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, endpointBytes);
@@ -564,6 +580,11 @@ async function dispatchSoftSpringWgslVelocityDeltaProposal({ soft, offload, layo
   const nodeDeltaVy = new Float32Array(mappedNodeVY.slice(0));
   state.velocityNodeDeltaVYReadback.unmap();
 
+  await state.velocityNodeContributionCountReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
+  const mappedNodeCounts = state.velocityNodeContributionCountReadback.getMappedRange(0, nodeBytes);
+  const nodeContributionCount = new Uint32Array(mappedNodeCounts.slice(0));
+  state.velocityNodeContributionCountReadback.unmap();
+
   return {
     dispatchCount: endpointDispatchCount,
     reductionDispatchCount: nodeDispatchCount,
@@ -571,6 +592,7 @@ async function dispatchSoftSpringWgslVelocityDeltaProposal({ soft, offload, layo
     endpointDeltaVY,
     nodeDeltaVx,
     nodeDeltaVy,
+    nodeContributionCount,
   };
 }
 
@@ -1076,6 +1098,7 @@ export function reduceSoftSpringVelocityDeltasDeterministic({
 
   const deltaVxByNode = new Float32Array(nodes.length);
   const deltaVyByNode = new Float32Array(nodes.length);
+  const contributionCountByNode = new Uint32Array(nodes.length);
 
   const endpointCount = Math.min(endpointNodeIndices.length, endpointSpringIndices.length, endpointSigns.length);
   for (let ei = 0; ei < endpointCount; ei++) {
@@ -1091,11 +1114,13 @@ export function reduceSoftSpringVelocityDeltasDeterministic({
     const scale = (sign * w * dl) / safeDtPos;
     deltaVxByNode[ni] += springNx[si] * scale;
     deltaVyByNode[ni] += springNy[si] * scale;
+    contributionCountByNode[ni] += 1;
   }
 
   return {
     deltaVxByNode,
     deltaVyByNode,
+    contributionCountByNode,
   };
 }
 
@@ -1129,6 +1154,37 @@ function computeVelocityDeltaParityStats(proposed = new Float32Array(0), expecte
     absMean: absSum / count,
     absMax,
     l2: Math.sqrt(l2Sum),
+    valid: true,
+  };
+}
+
+function computeContributionCountParityStats(proposed = new Uint32Array(0), expected = new Uint32Array(0)) {
+  const count = Math.min(proposed.length, expected.length);
+  if (count <= 0) {
+    return {
+      comparedCount: 0,
+      mismatchCount: 0,
+      mismatchRatio: 0,
+      maxAbs: 0,
+      valid: false,
+    };
+  }
+
+  let mismatchCount = 0;
+  let maxAbs = 0;
+  for (let i = 0; i < count; i++) {
+    const pv = (Number(proposed[i]) || 0) >>> 0;
+    const ev = (Number(expected[i]) || 0) >>> 0;
+    const abs = Math.abs(pv - ev);
+    if (abs > 0) mismatchCount += 1;
+    if (abs > maxAbs) maxAbs = abs;
+  }
+
+  return {
+    comparedCount: count,
+    mismatchCount,
+    mismatchRatio: mismatchCount / count,
+    maxAbs,
     valid: true,
   };
 }
@@ -1249,11 +1305,18 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
       && wgslOffload.state.lastVelocityDeltaProposalSignature === proposalSignature
       && wgslOffload.state.lastVelocityDeltaProposalSource === 'wgsl-node-reduction'
       && wgslOffload.state.lastVelocityDeltaParity?.maxAbs <= 1e-5
+      && (
+        wgslOffload.state.lastContributionCountParity?.mismatchCount === 0
+        || wgslOffload.state.lastVelocityDeltaParity?.maxAbs <= 1e-9
+      )
+      && wgslOffload.state.lastContributionCountParity?.comparedCount === soft.nodes.length
       && wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor instanceof Float32Array
       && wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor instanceof Float32Array
+      && wgslOffload.state.lastVelocityDeltaProposalNodeContributionCount instanceof Uint32Array
       && wgslOffload.state.lastProposalLambdaNextBySpring instanceof Float32Array
       && wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor.length === soft.nodes.length
       && wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor.length === soft.nodes.length
+      && wgslOffload.state.lastVelocityDeltaProposalNodeContributionCount.length === soft.nodes.length
       && wgslOffload.state.lastProposalLambdaNextBySpring.length === soft.springs.length;
 
     if (cachedProposalReady) {
@@ -1308,6 +1371,7 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
               });
               wgslOffload.state.lastVelocityDeltaExpectedNodeVxByColor = proposalReduction.deltaVxByNode;
               wgslOffload.state.lastVelocityDeltaExpectedNodeVyByColor = proposalReduction.deltaVyByNode;
+              wgslOffload.state.lastVelocityDeltaExpectedNodeContributionCount = proposalReduction.contributionCountByNode;
 
               if (velocityProposal) {
                 wgslOffload.state.lastVelocityDeltaProposalDispatch = velocityProposal.dispatchCount;
@@ -1316,10 +1380,12 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
                 wgslOffload.state.lastVelocityDeltaProposalEndpointVyByColor = velocityProposal.endpointDeltaVY;
                 wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor = velocityProposal.nodeDeltaVx;
                 wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor = velocityProposal.nodeDeltaVy;
+                wgslOffload.state.lastVelocityDeltaProposalNodeContributionCount = velocityProposal.nodeContributionCount;
                 wgslOffload.state.lastVelocityDeltaProposalSource = 'wgsl-node-reduction';
               } else {
                 wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor = proposalReduction.deltaVxByNode;
                 wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor = proposalReduction.deltaVyByNode;
+                wgslOffload.state.lastVelocityDeltaProposalNodeContributionCount = proposalReduction.contributionCountByNode;
                 wgslOffload.state.lastVelocityDeltaProposalSource = 'cpu-deterministic-reduction';
               }
 
@@ -1331,10 +1397,16 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
                 wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor,
                 proposalReduction.deltaVyByNode,
               );
+              const contributionCountParity = computeContributionCountParityStats(
+                wgslOffload.state.lastVelocityDeltaProposalNodeContributionCount,
+                proposalReduction.contributionCountByNode,
+              );
+              wgslOffload.state.lastContributionCountParity = contributionCountParity;
               wgslOffload.state.lastVelocityDeltaParity = {
                 vx: vxParity,
                 vy: vyParity,
-                comparedNodeCount: Math.min(vxParity.comparedCount, vyParity.comparedCount),
+                contributionCount: contributionCountParity,
+                comparedNodeCount: Math.min(vxParity.comparedCount, vyParity.comparedCount, contributionCountParity.comparedCount),
                 maxAbs: Math.max(vxParity.absMax, vyParity.absMax),
                 meanAbs: (vxParity.absMean + vyParity.absMean) * 0.5,
                 source: wgslOffload.state.lastVelocityDeltaProposalSource,

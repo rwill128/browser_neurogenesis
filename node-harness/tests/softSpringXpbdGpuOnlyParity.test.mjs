@@ -138,26 +138,32 @@ function createSoftSpringMockWgslDevice({ mapDelayMs = 0 } = {}) {
                 }
                 writeF32(buffers.get(11), outVX);
                 writeF32(buffers.get(12), outVY);
-              } else if (buffers.has(5) && !buffers.has(6)) {
+              } else if (buffers.has(6)) {
                 const endpointCount = paramsU32[1] || 0;
                 const endpointNodes = readU32(buffers.get(1), endpointCount);
                 const endpointVX = readF32(buffers.get(2), endpointCount);
                 const endpointVY = readF32(buffers.get(3), endpointCount);
                 const outVX = new Float32Array(nodeCount);
                 const outVY = new Float32Array(nodeCount);
+                const outCount = new Uint32Array(nodeCount);
                 for (let ni = 0; ni < nodeCount; ni++) {
                   let sumX = 0;
                   let sumY = 0;
+                  let count = 0;
                   for (let ei = 0; ei < endpointCount; ei++) {
                     if (endpointNodes[ei] !== ni) continue;
                     sumX += endpointVX[ei] || 0;
                     sumY += endpointVY[ei] || 0;
+                    count += 1;
                   }
                   outVX[ni] = sumX;
                   outVY[ni] = sumY;
+                  outCount[ni] = count >>> 0;
                 }
                 writeF32(buffers.get(4), outVX);
                 writeF32(buffers.get(5), outVY);
+                const outCountBytes = ensure(buffers.get(6), outCount.byteLength);
+                new Uint8Array(outCountBytes).set(new Uint8Array(outCount.buffer));
               } else if (buffers.has(10)) {
                 const nodeX = readF32(buffers.get(1), nodeCount);
                 const nodeY = readF32(buffers.get(2), nodeCount);
@@ -584,13 +590,18 @@ test('soft spring XPBD WGSL proposal stage runs on gpu-only path while CPU remai
   assert.equal(wgslState.lastVelocityDeltaProposalEndpointVyByColor instanceof Float32Array, true);
   assert.equal(wgslState.lastVelocityDeltaProposalNodeVxByColor instanceof Float32Array, true);
   assert.equal(wgslState.lastVelocityDeltaProposalNodeVyByColor instanceof Float32Array, true);
+  assert.equal(wgslState.lastVelocityDeltaProposalNodeContributionCount instanceof Uint32Array, true);
   assert.equal(wgslState.lastVelocityDeltaExpectedNodeVxByColor instanceof Float32Array, true);
   assert.equal(wgslState.lastVelocityDeltaExpectedNodeVyByColor instanceof Float32Array, true);
+  assert.equal(wgslState.lastVelocityDeltaExpectedNodeContributionCount instanceof Uint32Array, true);
   assert.equal(wgslState.lastVelocityDeltaProposalSource, 'wgsl-node-reduction');
   assert.equal(Number.isInteger(wgslState.lastVelocityDeltaReductionDispatch), true);
   assert.equal(wgslState.lastVelocityDeltaReductionDispatch > 0, true);
+  assert.equal(wgslState.lastContributionCountParity?.comparedCount, seed.nodes.length);
+  assert.equal(Number.isInteger(wgslState.lastContributionCountParity?.mismatchCount), true);
   assert.equal(wgslState.lastVelocityDeltaParity?.source, 'wgsl-node-reduction');
   assert.equal(wgslState.lastVelocityDeltaParity?.comparedNodeCount, seed.nodes.length);
+  assert.equal(Number.isInteger(wgslState.lastVelocityDeltaParity?.contributionCount?.mismatchCount), true);
   assert.ok((wgslState.lastVelocityDeltaParity?.maxAbs ?? 1) < 1e-6);
   assert.ok((wgslState.lastVelocityDeltaParity?.meanAbs ?? 1) < 1e-6);
 
@@ -677,6 +688,7 @@ test('soft spring XPBD WGSL authoritative replay applies cached node/lambda prop
   assert.equal(replaySoft.nodes.some((n) => Math.abs(n?.vx || 0) > 1e-8 || Math.abs(n?.vy || 0) > 1e-8), true);
   assert.equal(wgslState.lastMode, 'wgsl-velocity-authoritative');
   assert.equal(wgslState.lastAuthoritativeProposalSource, 'wgsl-node-reduction');
+  assert.equal(wgslState.lastContributionCountParity?.comparedCount, seed.nodes.length);
   assert.equal(typeof wgslState.lastAuthoritativeProposalSignature, 'string');
 });
 
@@ -775,4 +787,5 @@ test('reduceSoftSpringVelocityDeltasDeterministic deterministic endpoint ownersh
   assert.ok(Math.abs(reduced.deltaVxByNode[1] - expectedB) < 1e-6);
   assert.ok(Math.abs(reduced.deltaVyByNode[0]) < 1e-6);
   assert.ok(Math.abs(reduced.deltaVyByNode[1]) < 1e-6);
+  assert.deepEqual(Array.from(reduced.contributionCountByNode), [1, 1]);
 });

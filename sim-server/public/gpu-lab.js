@@ -21,6 +21,7 @@ import { applySoftFluidCouplingGpuOnly } from '/runtime-solvers/stepSoftFluidCou
 import { applyPostCollisionRecoveryGpuOnly } from '/runtime-solvers/stepPostCollisionRecoveryGpuOnly.js';
 import { stabilizeRigidPostIntegrateGpuOnly } from '/runtime-solvers/stepRigidPostIntegrateGpuOnly.js';
 import { applyCollisionBoundaryPassGpuOnly } from '/runtime-solvers/stepCollisionBoundaryGpuOnly.js';
+import { runCollisionIterationsGpuOnly } from '/runtime-solvers/stepCollisionIterationsGpuOnly.js';
 import { applySoftRestRecoveryGpuOnly } from '/runtime-solvers/stepSoftRestRecoveryGpuOnly.js';
 import { applyBodyFluidInjectionGpuOnly } from '/runtime-solvers/stepBodyFluidInjectionGpuOnly.js';
 
@@ -4274,28 +4275,47 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   }
 
   const rigidContactDebug = [];
-  const hybridAttachedByRigid = new Map();
-  for (const h of (bodies.hybrid || [])) {
-    const ri = Number(h?.rigidIndex) | 0;
-    const ni = Number(h?.nodeIndex) | 0;
-    if (ri < 0 || ri >= bodies.rigid.length) continue;
-    if (ni < 0 || ni >= s.nodes.length) continue;
-    if (!hybridAttachedByRigid.has(ri)) hybridAttachedByRigid.set(ri, new Set());
-    hybridAttachedByRigid.get(ri).add(ni);
-  }
+  let hybridAttachedByRigid;
 
-  // Body-body collisions: rigid↔rigid, rigid↔soft, soft↔soft
-  for (let iter = 0; iter < 2; iter++) {
-    if (solverPath === 'gpu-only') {
-      resolveRigidRigidCollisionPassGpuOnly({
-        rigidBodies: bodies.rigid,
-        slop: 0.32,
-        contacts: rigidContactDebug,
-        iter,
-        phase: 'pre-soft',
-        resolveRigidVsRigidPolygonCollision,
-      });
-    } else {
+  if (solverPath === 'gpu-only') {
+    const collisionResult = runCollisionIterationsGpuOnly({
+      rigidBodies: bodies.rigid,
+      soft: s,
+      hybrid: bodies.hybrid || [],
+      rigidContactDebug,
+      collisionIterations: 2,
+      rigidRigidSlop: 0.32,
+      rigidSoftNodeSlop: 0.18,
+      rigidSoftEdgeSlop: 0.16,
+      softNodeNodeSlop: 0.22,
+      softNodeEdgeSlop: 0.12,
+      edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
+      n,
+      rigidBounce: 0.84,
+      softBounce: 0.78,
+      resolveRigidRigidCollisionPassGpuOnly,
+      resolveRigidSoftCollisionPassGpuOnly,
+      resolveSoftSoftCollisionPassGpuOnly,
+      applyCollisionBoundaryPassGpuOnly,
+      resolveRigidVsRigidPolygonCollision,
+      resolveCircleCollision,
+      resolveSoftNodeVsSoftEdgeCollision,
+      applyBounceBoundary,
+    });
+    hybridAttachedByRigid = collisionResult.hybridAttachedByRigid;
+  } else {
+    hybridAttachedByRigid = new Map();
+    for (const h of (bodies.hybrid || [])) {
+      const ri = Number(h?.rigidIndex) | 0;
+      const ni = Number(h?.nodeIndex) | 0;
+      if (ri < 0 || ri >= bodies.rigid.length) continue;
+      if (ni < 0 || ni >= s.nodes.length) continue;
+      if (!hybridAttachedByRigid.has(ri)) hybridAttachedByRigid.set(ri, new Set());
+      hybridAttachedByRigid.get(ri).add(ni);
+    }
+
+    // Body-body collisions: rigid↔rigid, rigid↔soft, soft↔soft
+    for (let iter = 0; iter < 2; iter++) {
       for (let i = 0; i < bodies.rigid.length; i++) {
         for (let j = i + 1; j < bodies.rigid.length; j++) {
           resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
@@ -4307,17 +4327,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
           });
         }
       }
-    }
-    if (solverPath === 'gpu-only') {
-      resolveRigidSoftCollisionPassGpuOnly({
-        rigidBodies: bodies.rigid,
-        soft: s,
-        hybridAttachedByRigid,
-        edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
-        nodeSlop: 0.18,
-        edgeSlop: 0.16,
-      });
-    } else {
+
       for (let rbi = 0; rbi < bodies.rigid.length; rbi++) {
         const rb = bodies.rigid[rbi];
         const attachedNodeSet = hybridAttachedByRigid.get(rbi) || null;
@@ -4334,17 +4344,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
           resolveRigidVsSoftEdgeCollision(rb, s.nodes[i], s.nodes[j], 0.16);
         }
       }
-    }
-    if (solverPath === 'gpu-only') {
-      resolveSoftSoftCollisionPassGpuOnly({
-        soft: s,
-        resolveCircleCollision,
-        resolveSoftNodeVsSoftEdgeCollision,
-        edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
-        nodeNodeSlop: 0.22,
-        nodeEdgeSlop: 0.12,
-      });
-    } else {
+
       for (let i = 0; i < s.nodes.length; i++) {
         for (let j = i + 1; j < s.nodes.length; j++) {
           resolveCircleCollision(s.nodes[i], s.nodes[j], 0.22);
@@ -4361,19 +4361,8 @@ function stepBodiesAndInject(sim, vxField, vyField) {
           resolveSoftNodeVsSoftEdgeCollision(node, a, b, 0.12);
         }
       }
-    }
 
-    // Re-run rigid-rigid contacts after rigid-soft pushes to avoid late interpenetration.
-    if (solverPath === 'gpu-only') {
-      resolveRigidRigidCollisionPassGpuOnly({
-        rigidBodies: bodies.rigid,
-        slop: 0.32,
-        contacts: rigidContactDebug,
-        iter,
-        phase: 'post-soft',
-        resolveRigidVsRigidPolygonCollision,
-      });
-    } else {
+      // Re-run rigid-rigid contacts after rigid-soft pushes to avoid late interpenetration.
       for (let i = 0; i < bodies.rigid.length; i++) {
         for (let j = i + 1; j < bodies.rigid.length; j++) {
           resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
@@ -4385,18 +4374,7 @@ function stepBodiesAndInject(sim, vxField, vyField) {
           });
         }
       }
-    }
 
-    if (solverPath === 'gpu-only') {
-      applyCollisionBoundaryPassGpuOnly({
-        rigidBodies: bodies.rigid,
-        soft: s,
-        n,
-        rigidBounce: 0.84,
-        softBounce: 0.78,
-        applyBounceBoundary,
-      });
-    } else {
       for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
       for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
     }

@@ -282,31 +282,17 @@ test('gpu-lab routes soft spring rest-recovery stepping through isolated gpu-onl
   );
 });
 
-test('gpu-lab routes rigid-soft collision stepping through isolated gpu-only runtime solver module', () => {
+test('gpu-lab routes rigid-soft and soft-soft collision stepping through isolated gpu-only collision iteration orchestrator', () => {
   assert.match(
     source,
-    /import \{ resolveRigidSoftCollisionPassGpuOnly \} from '\/runtime-solvers\/stepRigidSoftCollisionGpuOnly\.js';/,
-    'expected isolated gpu-only rigid-soft collision module import',
+    /import \{ runCollisionIterationsGpuOnly \} from '\/runtime-solvers\/stepCollisionIterationsGpuOnly\.js';/,
+    'expected isolated gpu-only collision-iteration orchestrator import',
   );
 
   assert.match(
     source,
-    /if \(solverPath === 'gpu-only'\) \{[\s\S]*resolveRigidSoftCollisionPassGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*for \(let rbi = 0; rbi < bodies\.rigid\.length; rbi\+\+\)/,
-    'expected explicit gpu-only rigid-soft collision dispatch with baseline fallback loop',
-  );
-});
-
-test('gpu-lab routes soft-soft collision stepping through isolated gpu-only runtime solver module', () => {
-  assert.match(
-    source,
-    /import \{ resolveSoftSoftCollisionPassGpuOnly \} from '\/runtime-solvers\/stepSoftCollisionGpuOnly\.js';/,
-    'expected isolated gpu-only soft-soft collision module import',
-  );
-
-  assert.match(
-    source,
-    /if \(solverPath === 'gpu-only'\) \{[\s\S]*resolveSoftSoftCollisionPassGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*for \(let i = 0; i < s\.nodes\.length; i\+\+\)[\s\S]*resolveSoftNodeVsSoftEdgeCollision\(node, a, b, 0\.12\);/,
-    'expected explicit gpu-only soft-soft collision dispatch with baseline fallback loops',
+    /if \(solverPath === 'gpu-only'\) \{[\s\S]*runCollisionIterationsGpuOnly\(\{[\s\S]*resolveRigidSoftCollisionPassGpuOnly,[\s\S]*resolveSoftSoftCollisionPassGpuOnly,[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*for \(let rbi = 0; rbi < bodies\.rigid\.length; rbi\+\+\)[\s\S]*for \(let i = 0; i < s\.nodes\.length; i\+\+\)[\s\S]*resolveSoftNodeVsSoftEdgeCollision\(node, a, b, 0\.12\);/,
+    'expected gpu-only collision iteration orchestration with baseline inline fallback loops preserved',
   );
 });
 

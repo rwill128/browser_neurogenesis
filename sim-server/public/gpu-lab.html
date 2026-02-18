@@ -185,6 +185,15 @@
     </label>
   </div>
 
+  <div class="row">
+    <strong>Soft solver tuning:</strong>
+    <label class="slider-control" title="Higher = stiffer springs (lower = softer/more stretchy).">spring stiffness <input id="softSpringStiffness" type="range" min="0.2" max="16" step="0.1" value="4.2" data-decimals="1" /><span class="slider-value" data-readout-for="softSpringStiffness">4.2</span></label>
+    <label class="slider-control" title="Spring XPBD base compliance (lower = stiffer).">spring compliance <input id="softSpringBaseCompliance" type="range" min="0.0001" max="0.02" step="0.0001" value="0.0012" data-decimals="4" /><span class="slider-value" data-readout-for="softSpringBaseCompliance">0.0012</span></label>
+    <label class="slider-control" title="Area XPBD base compliance (lower = stronger area preservation).">area compliance <input id="softAreaBaseCompliance" type="range" min="0.0001" max="0.02" step="0.0001" value="0.0009" data-decimals="4" /><span class="slider-value" data-readout-for="softAreaBaseCompliance">0.0009</span></label>
+    <label class="slider-control" title="Membrane edge XPBD compliance (lower = stiffer membrane perimeter).">membrane edge compliance <input id="membraneEdgeBaseCompliance" type="range" min="0.0001" max="0.02" step="0.0001" value="0.0007" data-decimals="4" /><span class="slider-value" data-readout-for="membraneEdgeBaseCompliance">0.0007</span></label>
+    <label class="slider-control" title="Membrane bend XPBD compliance (lower = stronger anti-kink resistance).">membrane bend compliance <input id="membraneBendBaseCompliance" type="range" min="0.0001" max="0.03" step="0.0001" value="0.0022" data-decimals="4" /><span class="slider-value" data-readout-for="membraneBendBaseCompliance">0.0022</span></label>
+  </div>
+
   <div class="pane-row">
     <div class="pane">
       <div class="pane-title">GPU fluid visualization + viscosity overlay</div>
@@ -202,6 +211,6 @@
   </div>
 
   <pre id="out">idle</pre>
-  <script type="module" src="/gpu-lab.js?v=20260217n"></script>
+  <script type="module" src="/gpu-lab.js?v=20260217o"></script>
 </body>
 </html>

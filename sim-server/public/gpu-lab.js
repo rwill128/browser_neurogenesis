@@ -56,6 +56,11 @@ const bodyDragEl = document.getElementById('bodyDrag');
 const bodyFeedbackEl = document.getElementById('bodyFeedback');
 const fluidVelocityCapEl = document.getElementById('fluidVelocityCap');
 const fluidCouplingComponentLimitEl = document.getElementById('fluidCouplingComponentLimit');
+const softSpringStiffnessEl = document.getElementById('softSpringStiffness');
+const softSpringBaseComplianceEl = document.getElementById('softSpringBaseCompliance');
+const softAreaBaseComplianceEl = document.getElementById('softAreaBaseCompliance');
+const membraneEdgeBaseComplianceEl = document.getElementById('membraneEdgeBaseCompliance');
+const membraneBendBaseComplianceEl = document.getElementById('membraneBendBaseCompliance');
 const softClusterFluidTorqueCouplingEl = document.getElementById('softClusterFluidTorqueCoupling');
 const softClusterAngularProjectionEl = document.getElementById('softClusterAngularProjection');
 const softClusterCollisionAngularProjectionEl = document.getElementById('softClusterCollisionAngularProjection');
@@ -158,6 +163,19 @@ function clampFluidComponent(v, limitRaw) {
   return clamp(v, -limit, limit);
 }
 
+function normalizeSoftSpringStiffness(raw) {
+  const v = Number(raw);
+  if (!Number.isFinite(v)) return SOFT_SPRING_STIFFNESS_DEFAULT;
+  return clamp(v, 0.2, 16);
+}
+
+function normalizeCompliance(raw, fallback) {
+  const v = Number(raw);
+  const fb = Number.isFinite(Number(fallback)) ? Number(fallback) : 0.001;
+  if (!Number.isFinite(v)) return fb;
+  return clamp(v, 1e-6, 0.05);
+}
+
 function rigidEdgeMomentumScale(rb) {
   const arr = Array.isArray(rb?.edgeMomentumCoupling)
     ? rb.edgeMomentumCoupling
@@ -222,6 +240,11 @@ function readControls() {
     bodyDrag: Math.max(0, Number(bodyDragEl.value) || 0.55),
     bodyFeedback: Math.max(0, Number(bodyFeedbackEl.value) || 0.012),
     fluidCouplingComponentLimit: normalizeFluidCouplingComponentLimit(fluidCouplingComponentLimitEl?.value),
+    softSpringStiffness: normalizeSoftSpringStiffness(softSpringStiffnessEl?.value),
+    softSpringBaseCompliance: normalizeCompliance(softSpringBaseComplianceEl?.value, SOFT_XPBD_BASE_COMPLIANCE),
+    softAreaBaseCompliance: normalizeCompliance(softAreaBaseComplianceEl?.value, SOFT_AREA_BASE_COMPLIANCE),
+    membraneEdgeBaseCompliance: normalizeCompliance(membraneEdgeBaseComplianceEl?.value, MEMBRANE_EDGE_BASE_COMPLIANCE),
+    membraneBendBaseCompliance: normalizeCompliance(membraneBendBaseComplianceEl?.value, MEMBRANE_BEND_BASE_COMPLIANCE),
     softClusterFluidTorqueCoupling: Math.max(0, Math.min(2, Number(softClusterFluidTorqueCouplingEl?.value) || SOFT_CLUSTER_FLOW_FORCE_SHARE)),
     softClusterAngularProjection: Math.max(0, Math.min(1, Number(softClusterAngularProjectionEl?.value) || SOFT_CLUSTER_ANGULAR_PROJECTION)),
     softClusterCollisionAngularProjection: Math.max(0, Math.min(1, Number(softClusterCollisionAngularProjectionEl?.value) || SOFT_CLUSTER_COLLISION_ANGULAR_PROJECTION)),
@@ -2709,11 +2732,21 @@ function redistributeSweptEdgeDyeTransport(sim, r, g, b) {
   return { touchedCells, movedMass, deletedMass, eatenMass };
 }
 
-function applySoftSpringsXPBDVelocity(s, dtPos, stiffnessScale, lambdaCache, { skipClusterSet = null } = {}) {
+function applySoftSpringsXPBDVelocity(
+  s,
+  dtPos,
+  stiffnessScale,
+  lambdaCache,
+  {
+    skipClusterSet = null,
+    softXpbdBaseCompliance = SOFT_XPBD_BASE_COMPLIANCE,
+    softXpbdIters = SOFT_XPBD_ITERS,
+  } = {},
+) {
   if (!s?.nodes?.length || !s?.springs?.length) return;
-  const alpha = (SOFT_XPBD_BASE_COMPLIANCE / Math.max(0.2, stiffnessScale)) / Math.max(1e-8, dtPos * dtPos);
+  const alpha = (softXpbdBaseCompliance / Math.max(0.2, stiffnessScale)) / Math.max(1e-8, dtPos * dtPos);
 
-  for (let iter = 0; iter < SOFT_XPBD_ITERS; iter++) {
+  for (let iter = 0; iter < softXpbdIters; iter++) {
     for (let si = 0; si < s.springs.length; si++) {
       const [i, j, rest] = s.springs[si];
       const a = s.nodes[i];
@@ -2791,11 +2824,21 @@ function ensureSoftAreaRestState(sim, s, loops, dtPos) {
   }
 }
 
-function applySoftAreaXPBDVelocity(sim, s, loops, dtPos, stiffnessScale) {
+function applySoftAreaXPBDVelocity(
+  sim,
+  s,
+  loops,
+  dtPos,
+  stiffnessScale,
+  {
+    softAreaBaseCompliance = SOFT_AREA_BASE_COMPLIANCE,
+    softAreaXpbdIters = SOFT_AREA_XPBD_ITERS,
+  } = {},
+) {
   if (!loops.length) return;
-  const alpha = (SOFT_AREA_BASE_COMPLIANCE / Math.max(0.2, stiffnessScale)) / Math.max(1e-8, dtPos * dtPos);
+  const alpha = (softAreaBaseCompliance / Math.max(0.2, stiffnessScale)) / Math.max(1e-8, dtPos * dtPos);
 
-  for (let iter = 0; iter < SOFT_AREA_XPBD_ITERS; iter++) {
+  for (let iter = 0; iter < softAreaXpbdIters; iter++) {
     for (const loop of loops) {
       const ids = loop.indices;
       const m = ids.length;
@@ -2944,16 +2987,27 @@ function ensureSoftMembraneLoopState(sim, s, loops) {
   }
 }
 
-function applySoftMembraneBoundaryXPBDVelocity(sim, s, loops, dtPos) {
+function applySoftMembraneBoundaryXPBDVelocity(
+  sim,
+  s,
+  loops,
+  dtPos,
+  {
+    membraneEdgeBaseCompliance = MEMBRANE_EDGE_BASE_COMPLIANCE,
+    membraneBendBaseCompliance = MEMBRANE_BEND_BASE_COMPLIANCE,
+    membraneEdgeXpbdIters = MEMBRANE_EDGE_XPBD_ITERS,
+    membraneBendXpbdIters = MEMBRANE_BEND_XPBD_ITERS,
+  } = {},
+) {
   const membraneSet = ensureSoftMembraneClusterSet(sim);
   if (!membraneSet.size) return 0;
   ensureSoftMembraneLoopState(sim, s, loops);
 
-  const edgeAlpha = MEMBRANE_EDGE_BASE_COMPLIANCE / Math.max(1e-8, dtPos * dtPos);
-  const bendAlpha = MEMBRANE_BEND_BASE_COMPLIANCE / Math.max(1e-8, dtPos * dtPos);
+  const edgeAlpha = membraneEdgeBaseCompliance / Math.max(1e-8, dtPos * dtPos);
+  const bendAlpha = membraneBendBaseCompliance / Math.max(1e-8, dtPos * dtPos);
   let touched = 0;
 
-  for (let iter = 0; iter < MEMBRANE_EDGE_XPBD_ITERS; iter++) {
+  for (let iter = 0; iter < membraneEdgeXpbdIters; iter++) {
     for (const loop of loops || []) {
       const cid = loop.clusterId ?? 0;
       if (!membraneSet.has(cid)) continue;
@@ -3000,7 +3054,7 @@ function applySoftMembraneBoundaryXPBDVelocity(sim, s, loops, dtPos) {
     }
   }
 
-  for (let iter = 0; iter < MEMBRANE_BEND_XPBD_ITERS; iter++) {
+  for (let iter = 0; iter < membraneBendXpbdIters; iter++) {
     for (const loop of loops || []) {
       const cid = loop.clusterId ?? 0;
       if (!membraneSet.has(cid)) continue;
@@ -4036,6 +4090,12 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   }
 
   const dtPos = Math.max(1e-4, dt * SOFT_INTEGRATION_SCALE);
+  const softSpringStiffness = normalizeSoftSpringStiffness(sim.controls?.softSpringStiffness);
+  const softSpringBaseCompliance = normalizeCompliance(sim.controls?.softSpringBaseCompliance, SOFT_XPBD_BASE_COMPLIANCE);
+  const softAreaBaseCompliance = normalizeCompliance(sim.controls?.softAreaBaseCompliance, SOFT_AREA_BASE_COMPLIANCE);
+  const membraneEdgeBaseCompliance = normalizeCompliance(sim.controls?.membraneEdgeBaseCompliance, MEMBRANE_EDGE_BASE_COMPLIANCE);
+  const membraneBendBaseCompliance = normalizeCompliance(sim.controls?.membraneBendBaseCompliance, MEMBRANE_BEND_BASE_COMPLIANCE);
+
   if (!sim.softXPBDLambda || sim.softXPBDLambda.length !== s.springs.length) {
     sim.softXPBDLambda = ensureLambdaCacheSize(sim.softXPBDLambda, s.springs.length, 20);
   }
@@ -4050,16 +4110,18 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     applySoftSpringsXPBDVelocityGpuOnly({
       soft: s,
       dtPos,
-      stiffnessScale: SOFT_SPRING_STIFFNESS_DEFAULT,
+      stiffnessScale: softSpringStiffness,
       lambdaCache: sim.softXPBDLambda,
       softXpbdIters: SOFT_XPBD_ITERS,
-      softXpbdBaseCompliance: SOFT_XPBD_BASE_COMPLIANCE,
+      softXpbdBaseCompliance: softSpringBaseCompliance,
       clamp,
       skipClusterSet: softMembraneClusterSet,
     });
   } else {
-    applySoftSpringsXPBDVelocity(s, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT, sim.softXPBDLambda, {
+    applySoftSpringsXPBDVelocity(s, dtPos, softSpringStiffness, sim.softXPBDLambda, {
       skipClusterSet: softMembraneClusterSet,
+      softXpbdBaseCompliance: softSpringBaseCompliance,
+      softXpbdIters: SOFT_XPBD_ITERS,
     });
   }
 
@@ -4076,11 +4138,16 @@ function stepBodiesAndInject(sim, vxField, vyField) {
         membraneClusterSet: softMembraneClusterSet,
         clamp,
         membraneEdgeXpbdIters: MEMBRANE_EDGE_XPBD_ITERS,
-        membraneEdgeBaseCompliance: MEMBRANE_EDGE_BASE_COMPLIANCE,
+        membraneEdgeBaseCompliance,
         membraneBendXpbdIters: MEMBRANE_BEND_XPBD_ITERS,
-        membraneBendBaseCompliance: MEMBRANE_BEND_BASE_COMPLIANCE,
+        membraneBendBaseCompliance,
       })
-      : applySoftMembraneBoundaryXPBDVelocity(sim, s, softClusterLoops, dtPos))
+      : applySoftMembraneBoundaryXPBDVelocity(sim, s, softClusterLoops, dtPos, {
+        membraneEdgeBaseCompliance,
+        membraneBendBaseCompliance,
+        membraneEdgeXpbdIters: MEMBRANE_EDGE_XPBD_ITERS,
+        membraneBendXpbdIters: MEMBRANE_BEND_XPBD_ITERS,
+      }))
     : 0;
   const membraneShapeClusters = membraneShapeMemoryOn
     ? (solverPath === 'gpu-only'
@@ -4104,12 +4171,15 @@ function stepBodiesAndInject(sim, vxField, vyField) {
       soft: s,
       loops: softClusterLoops,
       dtPos,
-      stiffnessScale: SOFT_SPRING_STIFFNESS_DEFAULT,
+      stiffnessScale: softSpringStiffness,
       softAreaXpbdIters: SOFT_AREA_XPBD_ITERS,
-      softAreaBaseCompliance: SOFT_AREA_BASE_COMPLIANCE,
+      softAreaBaseCompliance,
     });
   } else {
-    applySoftAreaXPBDVelocity(sim, s, softClusterLoops, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT);
+    applySoftAreaXPBDVelocity(sim, s, softClusterLoops, dtPos, softSpringStiffness, {
+      softAreaBaseCompliance,
+      softAreaXpbdIters: SOFT_AREA_XPBD_ITERS,
+    });
   }
   const membranePressureClusters = membranePressureOn
     ? (solverPath === 'gpu-only'
@@ -5920,6 +5990,11 @@ async function stepAndRender() {
         bodyDrag: s.controls.bodyDrag,
         bodyFeedback: s.controls.bodyFeedback,
         fluidCouplingComponentLimit: normalizeFluidCouplingComponentLimit(s.controls.fluidCouplingComponentLimit),
+        softSpringStiffness: normalizeSoftSpringStiffness(s.controls.softSpringStiffness),
+        softSpringBaseCompliance: normalizeCompliance(s.controls.softSpringBaseCompliance, SOFT_XPBD_BASE_COMPLIANCE),
+        softAreaBaseCompliance: normalizeCompliance(s.controls.softAreaBaseCompliance, SOFT_AREA_BASE_COMPLIANCE),
+        membraneEdgeBaseCompliance: normalizeCompliance(s.controls.membraneEdgeBaseCompliance, MEMBRANE_EDGE_BASE_COMPLIANCE),
+        membraneBendBaseCompliance: normalizeCompliance(s.controls.membraneBendBaseCompliance, MEMBRANE_BEND_BASE_COMPLIANCE),
         enableArtificialSwim: !!s.controls.enableArtificialSwim,
         softClusterFluidTorqueCoupling: s.controls.softClusterFluidTorqueCoupling,
         softClusterAngularProjection: s.controls.softClusterAngularProjection,

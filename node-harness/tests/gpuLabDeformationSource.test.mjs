@@ -319,7 +319,7 @@ test('gpu-lab routes soft spring XPBD stepping through isolated gpu-only runtime
 
   assert.match(
     source,
-    /if \(solverPath === 'gpu-only'\) \{[\s\S]*applySoftSpringsXPBDVelocityGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*applySoftSpringsXPBDVelocity\(s, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT, sim\.softXPBDLambda, \{/,
+    /if \(solverPath === 'gpu-only'\) \{[\s\S]*applySoftSpringsXPBDVelocityGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*applySoftSpringsXPBDVelocity\(s, dtPos, [A-Za-z0-9_.$]+, sim\.softXPBDLambda, \{/,
     'expected explicit gpu-only soft spring XPBD dispatch with baseline fallback call',
   );
 });
@@ -333,7 +333,7 @@ test('gpu-lab routes soft area XPBD stepping through isolated gpu-only runtime s
 
   assert.match(
     source,
-    /ensureSoftAreaRestState\(sim, s, softClusterLoops, dtPos\);[\s\S]*if \(solverPath === 'gpu-only'\) \{[\s\S]*applySoftAreaXPBDVelocityGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*applySoftAreaXPBDVelocity\(sim, s, softClusterLoops, dtPos, SOFT_SPRING_STIFFNESS_DEFAULT\);/,
+    /ensureSoftAreaRestState\(sim, s, softClusterLoops, dtPos\);[\s\S]*if \(solverPath === 'gpu-only'\) \{[\s\S]*applySoftAreaXPBDVelocityGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*applySoftAreaXPBDVelocity\(sim, s, softClusterLoops, dtPos, [A-Za-z0-9_.$]+/,
     'expected explicit gpu-only soft area XPBD dispatch with baseline fallback call',
   );
 });

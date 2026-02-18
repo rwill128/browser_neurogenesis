@@ -56,6 +56,12 @@ test('membrane constraints gpu-only module defines concrete WGSL membrane-bounda
 
   assert.match(
     moduleSource,
+    /export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly\([\s\S]*pendingWgslMembraneBoundaryEdgeProposalPromise[\s\S]*pendingWgslMembraneBendProposalPromise[\s\S]*await Promise\.all\([\s\S]*canApplyAuthoritativeMembraneBoundaryEdgeProposal\([\s\S]*canApplyAuthoritativeMembraneBendProposal\(/,
+    'expected boundary+bend stage to await same-frame WGSL proposal completion before authoritative replay gating',
+  );
+
+  assert.match(
+    moduleSource,
     /const softMembraneBendProposalWgsl = \/\* wgsl \*\/[\s\S]*let C = clamp\(d - rest, -cLimit, cLimit\);[\s\S]*deltaVxPrevOut\[i\] = \(-wP \* dl \* ux\) \* invDt;[\s\S]*lambdaNextOut\[i\] = lambdaNext;/,
     'expected concrete WGSL kernel math for membrane bend XPBD velocity/lambda proposal deltas',
   );

@@ -772,7 +772,7 @@ function canApplyAuthoritativeMembraneBendProposal({ wgslOffload, signature, exp
   return true;
 }
 
-export function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
+export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
   sim,
   soft,
   loops,
@@ -903,38 +903,7 @@ export function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
     ? `${edgeProposalSampleCount}|${Math.fround(dtPos)}|${Math.fround(edgeProposalSignatureAccumulator)}`
     : '';
 
-  const authoritativeBoundaryFromWgsl = canApplyAuthoritativeMembraneBoundaryEdgeProposal({
-    wgslOffload,
-    signature: edgeSignature,
-    expectedCount: edgeProposalNodeAIndices.length,
-  });
-
-  if (authoritativeBoundaryFromWgsl) {
-    applyMembraneBoundaryVelocityDeltasAuthoritative({
-      sim,
-      soft,
-      nodeAIndices: edgeProposalNodeAIndices,
-      nodeBIndices: edgeProposalNodeBIndices,
-      loopClusterIds: edgeProposalLoopClusterIds,
-      loopEdgeIndices: edgeProposalLoopEdgeIndices,
-      cpuDeltaVxA: edgeProposalCpuDeltaVxA,
-      cpuDeltaVyA: edgeProposalCpuDeltaVyA,
-      cpuDeltaVxB: edgeProposalCpuDeltaVxB,
-      cpuDeltaVyB: edgeProposalCpuDeltaVyB,
-      wgslDeltaVxA: wgslOffload.state.lastMembraneBoundaryEdgeProposalDeltaVxA,
-      wgslDeltaVyA: wgslOffload.state.lastMembraneBoundaryEdgeProposalDeltaVyA,
-      wgslDeltaVxB: wgslOffload.state.lastMembraneBoundaryEdgeProposalDeltaVxB,
-      wgslDeltaVyB: wgslOffload.state.lastMembraneBoundaryEdgeProposalDeltaVyB,
-      wgslLambdaNext: wgslOffload.state.lastMembraneBoundaryEdgeProposalLambdaNext,
-    });
-  }
-
-  if (wgslOffload?.state) {
-    wgslOffload.state.lastMembraneBoundaryEdgeAuthoritativeSource = authoritativeBoundaryFromWgsl
-      ? 'wgsl-membrane-boundary-edge-authoritative'
-      : 'cpu-membrane-boundary-edge-authoritative';
-    wgslOffload.state.lastMembraneBoundaryEdgeAuthoritativeSignature = edgeSignature;
-  }
+  let authoritativeBoundaryFromWgsl = false;
 
   for (let iter = 0; iter < membraneBendXpbdIters; iter++) {
     for (const loop of loops || []) {
@@ -1020,7 +989,83 @@ export function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
     ? `${bendProposalSampleCount}|${Math.fround(dtPos)}|${Math.fround(bendProposalSignatureAccumulator)}`
     : '';
 
-  const authoritativeBendFromWgsl = canApplyAuthoritativeMembraneBendProposal({
+  let authoritativeBendFromWgsl = false;
+
+  if (runWgslBoundaryProbe) {
+    wgslOffload.state.lastMembraneBoundaryEdgeProposalSignaturePrepared = edgeSignature;
+    wgslOffload.state.lastMembraneBoundaryEdgeProposalLayoutBytes = edgeLayout?.byteLength || 0;
+    if (!wgslOffload.state.lastMembraneBoundaryEdgeProposalSource) {
+      wgslOffload.state.lastMembraneBoundaryEdgeProposalSource = 'cpu-membrane-boundary-edge-authoritative';
+    }
+    if (!wgslOffload.state.lastMode) {
+      wgslOffload.state.lastMode = 'cpu-membrane-boundary-edge-authoritative';
+    }
+
+    let serializedDispatch = null;
+    if (edgeLayout && edgeLayout.length > 0) {
+      serializedDispatch = (wgslOffload.state.pendingWgslMembraneBoundaryEdgeProposalPromise || Promise.resolve())
+        .catch(() => {})
+        .then(() => dispatchSoftMembraneBoundaryEdgeProposal(wgslOffload, edgeLayout, dtPos, edgeSignature))
+        .catch((err) => {
+          wgslOffload.state.lastMembraneBoundaryEdgeProposalError = String(err?.message || err || 'unknown-error');
+          wgslOffload.state.lastMembraneBoundaryEdgeProposalSource = 'cpu-membrane-boundary-edge-authoritative';
+          wgslOffload.state.lastMode = 'cpu-membrane-boundary-edge-authoritative';
+        });
+      wgslOffload.state.pendingWgslMembraneBoundaryEdgeProposalPromise = serializedDispatch;
+    }
+
+    wgslOffload.state.lastMembraneBendProposalSignaturePrepared = bendSignature;
+    wgslOffload.state.lastMembraneBendProposalLayoutBytes = bendLayout?.byteLength || 0;
+    if (!wgslOffload.state.lastMembraneBendProposalSource) {
+      wgslOffload.state.lastMembraneBendProposalSource = 'cpu-membrane-bend-authoritative';
+    }
+
+    let serializedBendDispatch = null;
+    if (bendLayout && bendLayout.length > 0) {
+      serializedBendDispatch = (wgslOffload.state.pendingWgslMembraneBendProposalPromise || Promise.resolve())
+        .catch(() => {})
+        .then(() => dispatchSoftMembraneBendProposal(wgslOffload, bendLayout, dtPos, bendSignature))
+        .catch((err) => {
+          wgslOffload.state.lastMembraneBendProposalError = String(err?.message || err || 'unknown-error');
+          wgslOffload.state.lastMembraneBendProposalSource = 'cpu-membrane-bend-authoritative';
+          wgslOffload.state.lastMode = 'cpu-membrane-bend-authoritative';
+        });
+      wgslOffload.state.pendingWgslMembraneBendProposalPromise = serializedBendDispatch;
+    }
+
+    await Promise.all([
+      serializedDispatch || Promise.resolve(),
+      serializedBendDispatch || Promise.resolve(),
+    ]);
+  }
+
+  authoritativeBoundaryFromWgsl = canApplyAuthoritativeMembraneBoundaryEdgeProposal({
+    wgslOffload,
+    signature: edgeSignature,
+    expectedCount: edgeProposalNodeAIndices.length,
+  });
+
+  if (authoritativeBoundaryFromWgsl) {
+    applyMembraneBoundaryVelocityDeltasAuthoritative({
+      sim,
+      soft,
+      nodeAIndices: edgeProposalNodeAIndices,
+      nodeBIndices: edgeProposalNodeBIndices,
+      loopClusterIds: edgeProposalLoopClusterIds,
+      loopEdgeIndices: edgeProposalLoopEdgeIndices,
+      cpuDeltaVxA: edgeProposalCpuDeltaVxA,
+      cpuDeltaVyA: edgeProposalCpuDeltaVyA,
+      cpuDeltaVxB: edgeProposalCpuDeltaVxB,
+      cpuDeltaVyB: edgeProposalCpuDeltaVyB,
+      wgslDeltaVxA: wgslOffload?.state?.lastMembraneBoundaryEdgeProposalDeltaVxA,
+      wgslDeltaVyA: wgslOffload?.state?.lastMembraneBoundaryEdgeProposalDeltaVyA,
+      wgslDeltaVxB: wgslOffload?.state?.lastMembraneBoundaryEdgeProposalDeltaVxB,
+      wgslDeltaVyB: wgslOffload?.state?.lastMembraneBoundaryEdgeProposalDeltaVyB,
+      wgslLambdaNext: wgslOffload?.state?.lastMembraneBoundaryEdgeProposalLambdaNext,
+    });
+  }
+
+  authoritativeBendFromWgsl = canApplyAuthoritativeMembraneBendProposal({
     wgslOffload,
     signature: bendSignature,
     expectedCount: bendProposalNodePrevIndices.length,
@@ -1038,60 +1083,24 @@ export function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
       cpuDeltaVyA: bendProposalCpuDeltaVyPrev,
       cpuDeltaVxB: bendProposalCpuDeltaVxNext,
       cpuDeltaVyB: bendProposalCpuDeltaVyNext,
-      wgslDeltaVxA: wgslOffload.state.lastMembraneBendProposalDeltaVxPrev,
-      wgslDeltaVyA: wgslOffload.state.lastMembraneBendProposalDeltaVyPrev,
-      wgslDeltaVxB: wgslOffload.state.lastMembraneBendProposalDeltaVxNext,
-      wgslDeltaVyB: wgslOffload.state.lastMembraneBendProposalDeltaVyNext,
-      wgslLambdaNext: wgslOffload.state.lastMembraneBendProposalLambdaNext,
+      wgslDeltaVxA: wgslOffload?.state?.lastMembraneBendProposalDeltaVxPrev,
+      wgslDeltaVyA: wgslOffload?.state?.lastMembraneBendProposalDeltaVyPrev,
+      wgslDeltaVxB: wgslOffload?.state?.lastMembraneBendProposalDeltaVxNext,
+      wgslDeltaVyB: wgslOffload?.state?.lastMembraneBendProposalDeltaVyNext,
+      wgslLambdaNext: wgslOffload?.state?.lastMembraneBendProposalLambdaNext,
     });
   }
 
   if (wgslOffload?.state) {
+    wgslOffload.state.lastMembraneBoundaryEdgeAuthoritativeSource = authoritativeBoundaryFromWgsl
+      ? 'wgsl-membrane-boundary-edge-authoritative'
+      : 'cpu-membrane-boundary-edge-authoritative';
+    wgslOffload.state.lastMembraneBoundaryEdgeAuthoritativeSignature = edgeSignature;
+
     wgslOffload.state.lastMembraneBendAuthoritativeSource = authoritativeBendFromWgsl
       ? 'wgsl-membrane-bend-authoritative'
       : 'cpu-membrane-bend-authoritative';
     wgslOffload.state.lastMembraneBendAuthoritativeSignature = bendSignature;
-  }
-
-  if (runWgslBoundaryProbe) {
-    wgslOffload.state.lastMembraneBoundaryEdgeProposalSignaturePrepared = edgeSignature;
-    wgslOffload.state.lastMembraneBoundaryEdgeProposalLayoutBytes = edgeLayout?.byteLength || 0;
-    if (!wgslOffload.state.lastMembraneBoundaryEdgeProposalSource) {
-      wgslOffload.state.lastMembraneBoundaryEdgeProposalSource = 'cpu-membrane-boundary-edge-authoritative';
-    }
-    if (!wgslOffload.state.lastMode) {
-      wgslOffload.state.lastMode = 'cpu-membrane-boundary-edge-authoritative';
-    }
-
-    if (edgeLayout && edgeLayout.length > 0) {
-      const serializedDispatch = (wgslOffload.state.pendingWgslMembraneBoundaryEdgeProposalPromise || Promise.resolve())
-        .catch(() => {})
-        .then(() => dispatchSoftMembraneBoundaryEdgeProposal(wgslOffload, edgeLayout, dtPos, edgeSignature))
-        .catch((err) => {
-          wgslOffload.state.lastMembraneBoundaryEdgeProposalError = String(err?.message || err || 'unknown-error');
-          wgslOffload.state.lastMembraneBoundaryEdgeProposalSource = 'cpu-membrane-boundary-edge-authoritative';
-          wgslOffload.state.lastMode = 'cpu-membrane-boundary-edge-authoritative';
-        });
-      wgslOffload.state.pendingWgslMembraneBoundaryEdgeProposalPromise = serializedDispatch;
-    }
-
-    wgslOffload.state.lastMembraneBendProposalSignaturePrepared = bendSignature;
-    wgslOffload.state.lastMembraneBendProposalLayoutBytes = bendLayout?.byteLength || 0;
-    if (!wgslOffload.state.lastMembraneBendProposalSource) {
-      wgslOffload.state.lastMembraneBendProposalSource = 'cpu-membrane-bend-authoritative';
-    }
-
-    if (bendLayout && bendLayout.length > 0) {
-      const serializedBendDispatch = (wgslOffload.state.pendingWgslMembraneBendProposalPromise || Promise.resolve())
-        .catch(() => {})
-        .then(() => dispatchSoftMembraneBendProposal(wgslOffload, bendLayout, dtPos, bendSignature))
-        .catch((err) => {
-          wgslOffload.state.lastMembraneBendProposalError = String(err?.message || err || 'unknown-error');
-          wgslOffload.state.lastMembraneBendProposalSource = 'cpu-membrane-bend-authoritative';
-          wgslOffload.state.lastMode = 'cpu-membrane-bend-authoritative';
-        });
-      wgslOffload.state.pendingWgslMembraneBendProposalPromise = serializedBendDispatch;
-    }
   }
 
   return touched;

@@ -302,7 +302,7 @@ test('soft membrane shape-memory can consume same-frame WGSL proposal as authori
     enableAuthoritativeShapeMemory: true,
   };
 
-  applySoftMembraneBoundaryXPBDVelocityGpuOnly({
+  await applySoftMembraneBoundaryXPBDVelocityGpuOnly({
     sim,
     soft,
     loops,
@@ -372,7 +372,7 @@ test('soft membrane shape-memory can consume same-frame WGSL proposal as authori
   }
 });
 
-test('soft membrane bend can consume cached WGSL proposal as authoritative source', () => {
+test('soft membrane bend keeps hard CPU fallback when WGSL dispatch is unavailable', async () => {
   const dtPos = 0.11;
   const loops = [{ clusterId: 1, indices: [0, 1, 2, 3] }];
   const soft = {
@@ -395,7 +395,7 @@ test('soft membrane bend can consume cached WGSL proposal as authoritative sourc
   };
 
   const firstSoft = structuredClone(soft);
-  const touchedFirst = applySoftMembraneBoundaryXPBDVelocityGpuOnly({
+  const touchedFirst = await applySoftMembraneBoundaryXPBDVelocityGpuOnly({
     sim,
     soft: firstSoft,
     loops,
@@ -427,7 +427,7 @@ test('soft membrane bend can consume cached WGSL proposal as authoritative sourc
 
   sim.softMembraneLoopState = new Map();
   const secondSoft = structuredClone(soft);
-  const touchedSecond = applySoftMembraneBoundaryXPBDVelocityGpuOnly({
+  const touchedSecond = await applySoftMembraneBoundaryXPBDVelocityGpuOnly({
     sim,
     soft: secondSoft,
     loops,
@@ -447,8 +447,8 @@ test('soft membrane bend can consume cached WGSL proposal as authoritative sourc
   });
 
   assert.equal(touchedSecond, touchedFirst, 'bend touched count should stay stable for authoritative replay');
-  assert.equal(wgslState.lastMembraneBendAuthoritativeSource, 'wgsl-membrane-bend-authoritative');
-  assert.equal(wgslState.lastMembraneBendProposalSource, 'wgsl-membrane-bend-proposal');
+  assert.equal(wgslState.lastMembraneBendAuthoritativeSource, 'cpu-membrane-bend-authoritative');
+  assert.equal(wgslState.lastMembraneBendProposalSource, 'cpu-membrane-bend-authoritative');
 });
 
 test('soft membrane boundary+shape constraints parity: baseline and gpu-only match', async () => {
@@ -497,7 +497,7 @@ test('soft membrane boundary+shape constraints parity: baseline and gpu-only mat
     dtPos,
     membraneClusterSet,
   );
-  const gpuBoundaryTouched = applySoftMembraneBoundaryXPBDVelocityGpuOnly({
+  const gpuBoundaryTouched = await applySoftMembraneBoundaryXPBDVelocityGpuOnly({
     sim: gpuOnlySim,
     soft: gpuOnlySoft,
     loops,

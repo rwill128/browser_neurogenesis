@@ -4371,7 +4371,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   });
   const membraneBoundaryClusters = membraneBoundaryXpbdOn
     ? (solverPath === 'gpu-only'
-      ? applySoftMembraneBoundaryXPBDVelocityGpuOnly({
+      ? await applySoftMembraneBoundaryXPBDVelocityGpuOnly({
         sim,
         soft: s,
         loops: softClusterLoops,

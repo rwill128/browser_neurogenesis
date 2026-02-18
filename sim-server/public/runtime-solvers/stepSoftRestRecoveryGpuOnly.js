@@ -204,6 +204,33 @@ function ensureProposalBuffers(offload, springCount) {
   return state;
 }
 
+
+function hashMixF32(hash, value) {
+  const scaled = Math.round((Number(value) || 0) * 1e6);
+  const word = scaled >>> 0;
+  hash ^= word;
+  hash = Math.imul(hash, 16777619) >>> 0;
+  return hash;
+}
+
+function computeSoftRestRecoveryProposalSignature({ layout, springs, restBaseline, options } = {}) {
+  const active = layout?.activeSpringIndices instanceof Uint32Array ? layout.activeSpringIndices : new Uint32Array(0);
+  let hash = 2166136261 >>> 0;
+  hash = hashMixF32(hash, active.length);
+  hash = hashMixF32(hash, options?.recoverRate);
+  hash = hashMixF32(hash, options?.hardMinFactor);
+  hash = hashMixF32(hash, options?.hardMaxFactor);
+
+  for (let i = 0; i < active.length; i++) {
+    const si = active[i] >>> 0;
+    hash = hashMixF32(hash, si);
+    hash = hashMixF32(hash, springs?.[si]?.[2]);
+    hash = hashMixF32(hash, restBaseline?.[si]);
+  }
+
+  return hash >>> 0;
+}
+
 function computeRestProposalParity({ proposalBySpring, cpuBySpring, activeSpringIndices }) {
   const active = activeSpringIndices instanceof Uint32Array ? activeSpringIndices : new Uint32Array(0);
   let maxAbs = 0;
@@ -311,7 +338,7 @@ async function dispatchSoftRestRecoveryWgslProbe({ softNodes, layout, offload })
   return true;
 }
 
-async function dispatchSoftRestRecoveryWgslProposal({ springs, restBaseline, layout, options, offload }) {
+async function dispatchSoftRestRecoveryWgslProposal({ springs, restBaseline, layout, options, proposalSignature, offload }) {
   if (!canUseWgslOffload(offload)) return false;
   const springCount = Number(layout?.restByActiveSpring?.length) || 0;
   if (springCount <= 0) return false;
@@ -401,6 +428,7 @@ async function dispatchSoftRestRecoveryWgslProposal({ springs, restBaseline, lay
     source: 'wgsl-rest-recovery-proposal',
   };
   state.lastProposalSource = 'wgsl-rest-recovery-proposal';
+  state.lastProposalSignature = proposalSignature >>> 0;
   return true;
 }
 
@@ -469,6 +497,14 @@ export function applySoftRestRecoveryGpuOnly({
     wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
     wgslOffload.state.lastPreparedActiveSpringCount = plan.activeSpringCount;
 
+    const proposalSignature = computeSoftRestRecoveryProposalSignature({
+      layout,
+      springs,
+      restBaseline,
+      options,
+    });
+    wgslOffload.state.lastPreparedProposalSignature = proposalSignature;
+
     if (canUseWgslOffload(wgslOffload) && plan.activeSpringCount > 0) {
       const serializedProbe = (wgslOffload.state.pendingWgslRestRecoveryProbePromise || Promise.resolve())
         .then(async () => {
@@ -479,6 +515,7 @@ export function applySoftRestRecoveryGpuOnly({
               restBaseline,
               layout,
               options,
+              proposalSignature,
               offload: wgslOffload,
             })
             : false;
@@ -488,6 +525,7 @@ export function applySoftRestRecoveryGpuOnly({
             : (probeRan ? 'wgsl-rest-recovery-probe' : 'cpu-rest-recovery-authoritative');
           if (!probeRan) wgslOffload.state.lastProbeSource = 'cpu-rest-recovery-authoritative';
           if (!proposalRan) wgslOffload.state.lastProposalSource = 'cpu-rest-recovery-authoritative';
+          if (proposalRan) wgslOffload.state.lastProposalSignature = proposalSignature;
         })
         .catch((err) => {
           wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');

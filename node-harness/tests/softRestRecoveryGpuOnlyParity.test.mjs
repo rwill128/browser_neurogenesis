@@ -117,4 +117,9 @@ test('soft rest-recovery gpu-only defaults proposal source-route telemetry to cp
     'cpu-rest-recovery-authoritative',
     'expected explicit proposal source-route fallback when wgsl offload cannot run',
   );
+  assert.equal(
+    typeof wgslOffload.state.lastPreparedProposalSignature,
+    'number',
+    'expected deterministic proposal signature prep even when wgsl device is unavailable',
+  );
 });

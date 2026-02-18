@@ -1099,6 +1099,40 @@ export function reduceSoftSpringVelocityDeltasDeterministic({
   };
 }
 
+function computeVelocityDeltaParityStats(proposed = new Float32Array(0), expected = new Float32Array(0)) {
+  const count = Math.min(proposed.length, expected.length);
+  if (count <= 0) {
+    return {
+      comparedCount: 0,
+      absMean: 0,
+      absMax: 0,
+      l2: 0,
+      valid: false,
+    };
+  }
+
+  let absSum = 0;
+  let absMax = 0;
+  let l2Sum = 0;
+  for (let i = 0; i < count; i++) {
+    const pv = Number(proposed[i]) || 0;
+    const ev = Number(expected[i]) || 0;
+    const diff = pv - ev;
+    const abs = Math.abs(diff);
+    absSum += abs;
+    absMax = Math.max(absMax, abs);
+    l2Sum += diff * diff;
+  }
+
+  return {
+    comparedCount: count,
+    absMean: absSum / count,
+    absMax,
+    l2: Math.sqrt(l2Sum),
+    valid: true,
+  };
+}
+
 export function applySoftSpringsXPBDVelocityGpuOnly({
   soft,
   dtPos,
@@ -1165,6 +1199,15 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
                 dtPos,
                 deltaLambdaByColor: wgslOffload.state.lastProposalDeltaLambdaByColor,
               });
+              const proposalReduction = reduceSoftSpringVelocityDeltasDeterministic({
+                soft,
+                dtPos,
+                layout,
+                deltaLambdaByColor: wgslOffload.state.lastProposalDeltaLambdaByColor,
+              });
+              wgslOffload.state.lastVelocityDeltaExpectedNodeVxByColor = proposalReduction.deltaVxByNode;
+              wgslOffload.state.lastVelocityDeltaExpectedNodeVyByColor = proposalReduction.deltaVyByNode;
+
               if (velocityProposal) {
                 wgslOffload.state.lastVelocityDeltaProposalDispatch = velocityProposal.dispatchCount;
                 wgslOffload.state.lastVelocityDeltaReductionDispatch = velocityProposal.reductionDispatchCount;
@@ -1172,16 +1215,29 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
                 wgslOffload.state.lastVelocityDeltaProposalEndpointVyByColor = velocityProposal.endpointDeltaVY;
                 wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor = velocityProposal.nodeDeltaVx;
                 wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor = velocityProposal.nodeDeltaVy;
+                wgslOffload.state.lastVelocityDeltaProposalSource = 'wgsl-node-reduction';
               } else {
-                const proposalReduction = reduceSoftSpringVelocityDeltasDeterministic({
-                  soft,
-                  dtPos,
-                  layout,
-                  deltaLambdaByColor: wgslOffload.state.lastProposalDeltaLambdaByColor,
-                });
                 wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor = proposalReduction.deltaVxByNode;
                 wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor = proposalReduction.deltaVyByNode;
+                wgslOffload.state.lastVelocityDeltaProposalSource = 'cpu-deterministic-reduction';
               }
+
+              const vxParity = computeVelocityDeltaParityStats(
+                wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor,
+                proposalReduction.deltaVxByNode,
+              );
+              const vyParity = computeVelocityDeltaParityStats(
+                wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor,
+                proposalReduction.deltaVyByNode,
+              );
+              wgslOffload.state.lastVelocityDeltaParity = {
+                vx: vxParity,
+                vy: vyParity,
+                comparedNodeCount: Math.min(vxParity.comparedCount, vyParity.comparedCount),
+                maxAbs: Math.max(vxParity.absMax, vyParity.absMax),
+                meanAbs: (vxParity.absMean + vyParity.absMean) * 0.5,
+                source: wgslOffload.state.lastVelocityDeltaProposalSource,
+              };
             }
             if (probeRan || proposalRan) {
               wgslOffload.state.lastError = null;

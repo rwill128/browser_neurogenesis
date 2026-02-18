@@ -81,3 +81,12 @@ test('soft spring gpu-only WGSL velocity proposal stage runs WGSL node-reduction
     'expected velocity proposal path to include a concrete WGSL node-reduction stage (not CPU-only reduction loop)',
   );
 });
+
+
+test('soft spring gpu-only WGSL velocity proposal branch records source route + deterministic parity metrics against CPU ownership reduction', () => {
+  assert.match(
+    source,
+    /reduceSoftSpringVelocityDeltasDeterministic\([\s\S]*lastVelocityDeltaExpectedNodeVxByColor[\s\S]*lastVelocityDeltaExpectedNodeVyByColor[\s\S]*lastVelocityDeltaProposalSource = 'wgsl-node-reduction'[\s\S]*lastVelocityDeltaProposalSource = 'cpu-deterministic-reduction'[\s\S]*computeVelocityDeltaParityStats[\s\S]*lastVelocityDeltaParity = \{[\s\S]*source: wgslOffload\.state\.lastVelocityDeltaProposalSource/,
+    'expected WGSL velocity proposal branch to persist source-route ownership and CPU parity metrics required before switching to authoritative WGSL node deltas',
+  );
+});

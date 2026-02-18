@@ -584,8 +584,15 @@ test('soft spring XPBD WGSL proposal stage runs on gpu-only path while CPU remai
   assert.equal(wgslState.lastVelocityDeltaProposalEndpointVyByColor instanceof Float32Array, true);
   assert.equal(wgslState.lastVelocityDeltaProposalNodeVxByColor instanceof Float32Array, true);
   assert.equal(wgslState.lastVelocityDeltaProposalNodeVyByColor instanceof Float32Array, true);
+  assert.equal(wgslState.lastVelocityDeltaExpectedNodeVxByColor instanceof Float32Array, true);
+  assert.equal(wgslState.lastVelocityDeltaExpectedNodeVyByColor instanceof Float32Array, true);
+  assert.equal(wgslState.lastVelocityDeltaProposalSource, 'wgsl-node-reduction');
   assert.equal(Number.isInteger(wgslState.lastVelocityDeltaReductionDispatch), true);
   assert.equal(wgslState.lastVelocityDeltaReductionDispatch > 0, true);
+  assert.equal(wgslState.lastVelocityDeltaParity?.source, 'wgsl-node-reduction');
+  assert.equal(wgslState.lastVelocityDeltaParity?.comparedNodeCount, seed.nodes.length);
+  assert.ok((wgslState.lastVelocityDeltaParity?.maxAbs ?? 1) < 1e-6);
+  assert.ok((wgslState.lastVelocityDeltaParity?.meanAbs ?? 1) < 1e-6);
 
   const invOrder = wgslState.preparedPlan.springColorOrderedIndices;
   const remappedDelta = new Float32Array(invOrder.length);

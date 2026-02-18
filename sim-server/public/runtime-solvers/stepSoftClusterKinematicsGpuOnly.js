@@ -271,6 +271,10 @@ export function computeSoftClusterKinematicsFromMassMomentsGpuOnly(nodes, layout
   const yMass = probe.yMass;
   const vxMass = probe.vxMass;
   const vyMass = probe.vyMass;
+  const x2Mass = probe.x2Mass;
+  const y2Mass = probe.y2Mass;
+  const xVyMass = probe.xVyMass;
+  const yVxMass = probe.yVxMass;
 
   const clusterCount = Math.max(0, Number(clusterIds?.length) || 0);
   if (clusterCount === 0) return clusters;
@@ -292,6 +296,43 @@ export function computeSoftClusterKinematicsFromMassMomentsGpuOnly(nodes, layout
       meanRadius: 0,
       nodeIndices: [],
     });
+  }
+
+  const hasWgslSecondMomentProbe = (
+    x2Mass instanceof Float32Array
+    && y2Mass instanceof Float32Array
+    && xVyMass instanceof Float32Array
+    && yVxMass instanceof Float32Array
+    && x2Mass.length >= clusterCount
+    && y2Mass.length >= clusterCount
+    && xVyMass.length >= clusterCount
+    && yVxMass.length >= clusterCount
+  );
+
+  if (hasWgslSecondMomentProbe) {
+    for (let ci = 0; ci < clusterCount; ci++) {
+      const cid = Number(clusterIds[ci]) || 0;
+      const st = clusters.get(cid);
+      if (!st) continue;
+      const m = Math.max(minMass, Number(st.mass) || 0);
+      const cx = Number(st.x) || 0;
+      const cy = Number(st.y) || 0;
+      const cvx = Number(st.vx) || 0;
+      const cvy = Number(st.vy) || 0;
+
+      const sumX2Mass = Number(x2Mass[ci]) || 0;
+      const sumY2Mass = Number(y2Mass[ci]) || 0;
+      const sumXVyMass = Number(xVyMass[ci]) || 0;
+      const sumYVxMass = Number(yVxMass[ci]) || 0;
+
+      const inertia = Math.max(minInertia, (sumX2Mass + sumY2Mass) - m * (cx * cx + cy * cy));
+      const angularMomentum = (sumXVyMass - sumYVxMass) - m * (cx * cvy - cy * cvx);
+      st.inertia = Number.isFinite(inertia) ? inertia : minInertia;
+      st.angularMomentum = Number.isFinite(angularMomentum) ? angularMomentum : 0;
+      st.omega = Number.isFinite(st.angularMomentum) ? (st.angularMomentum / st.inertia) : 0;
+      st.meanRadius = Math.sqrt(Math.max(0, st.inertia / Math.max(minMass, m)));
+    }
+    return clusters;
   }
 
   const nodeCount = Math.max(0, Number(layout.nodeIndex?.length) || 0);

@@ -27,6 +27,10 @@ struct Params {
 @group(0) @binding(9) var<storage, read_write> out_y_mass: array<f32>;
 @group(0) @binding(10) var<storage, read_write> out_vx_mass: array<f32>;
 @group(0) @binding(11) var<storage, read_write> out_vy_mass: array<f32>;
+@group(0) @binding(12) var<storage, read_write> out_x2_mass: array<f32>;
+@group(0) @binding(13) var<storage, read_write> out_y2_mass: array<f32>;
+@group(0) @binding(14) var<storage, read_write> out_x_vy_mass: array<f32>;
+@group(0) @binding(15) var<storage, read_write> out_y_vx_mass: array<f32>;
 
 @compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -43,6 +47,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var sum_y_mass = 0.0;
   var sum_vx_mass = 0.0;
   var sum_vy_mass = 0.0;
+  var sum_x2_mass = 0.0;
+  var sum_y2_mass = 0.0;
+  var sum_x_vy_mass = 0.0;
+  var sum_y_vx_mass = 0.0;
 
   for (var i = start; i < stop; i = i + 1u) {
     let m = max(0.02, node_mass[i]);
@@ -51,6 +59,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     sum_y_mass = sum_y_mass + node_y[i] * m;
     sum_vx_mass = sum_vx_mass + node_vx[i] * m;
     sum_vy_mass = sum_vy_mass + node_vy[i] * m;
+    sum_x2_mass = sum_x2_mass + node_x[i] * node_x[i] * m;
+    sum_y2_mass = sum_y2_mass + node_y[i] * node_y[i] * m;
+    sum_x_vy_mass = sum_x_vy_mass + node_x[i] * node_vy[i] * m;
+    sum_y_vx_mass = sum_y_vx_mass + node_y[i] * node_vx[i] * m;
   }
 
   out_mass[ci] = sum_mass;
@@ -58,6 +70,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   out_y_mass[ci] = sum_y_mass;
   out_vx_mass[ci] = sum_vx_mass;
   out_vy_mass[ci] = sum_vy_mass;
+  out_x2_mass[ci] = sum_x2_mass;
+  out_y2_mass[ci] = sum_y2_mass;
+  out_x_vy_mass[ci] = sum_x_vy_mass;
+  out_y_vx_mass[ci] = sum_y_vx_mass;
 }
 `;
 
@@ -82,6 +98,10 @@ function computeSoftClusterMassParity(layout, probe) {
   let yMassAbsMax = 0;
   let vxMassAbsMax = 0;
   let vyMassAbsMax = 0;
+  let x2MassAbsMax = 0;
+  let y2MassAbsMax = 0;
+  let xVyMassAbsMax = 0;
+  let yVxMassAbsMax = 0;
 
   for (let ci = 0; ci < clusterCount; ci++) {
     const start = layout.clusterOffsets[ci] >>> 0;
@@ -91,6 +111,10 @@ function computeSoftClusterMassParity(layout, probe) {
     let yMass = 0;
     let vxMass = 0;
     let vyMass = 0;
+    let x2Mass = 0;
+    let y2Mass = 0;
+    let xVyMass = 0;
+    let yVxMass = 0;
     for (let i = start; i < stop; i++) {
       const m = Math.max(0.02, Number(layout.nodeMass?.[i]) || 0.02);
       mass += m;
@@ -98,12 +122,24 @@ function computeSoftClusterMassParity(layout, probe) {
       yMass += (Number(layout.nodeY?.[i]) || 0) * m;
       vxMass += (Number(layout.nodeVx?.[i]) || 0) * m;
       vyMass += (Number(layout.nodeVy?.[i]) || 0) * m;
+      const x = Number(layout.nodeX?.[i]) || 0;
+      const y = Number(layout.nodeY?.[i]) || 0;
+      const vx = Number(layout.nodeVx?.[i]) || 0;
+      const vy = Number(layout.nodeVy?.[i]) || 0;
+      x2Mass += x * x * m;
+      y2Mass += y * y * m;
+      xVyMass += x * vy * m;
+      yVxMass += y * vx * m;
     }
     massAbsMax = Math.max(massAbsMax, Math.abs((probe.mass?.[ci] || 0) - mass));
     xMassAbsMax = Math.max(xMassAbsMax, Math.abs((probe.xMass?.[ci] || 0) - xMass));
     yMassAbsMax = Math.max(yMassAbsMax, Math.abs((probe.yMass?.[ci] || 0) - yMass));
     vxMassAbsMax = Math.max(vxMassAbsMax, Math.abs((probe.vxMass?.[ci] || 0) - vxMass));
     vyMassAbsMax = Math.max(vyMassAbsMax, Math.abs((probe.vyMass?.[ci] || 0) - vyMass));
+    x2MassAbsMax = Math.max(x2MassAbsMax, Math.abs((probe.x2Mass?.[ci] || 0) - x2Mass));
+    y2MassAbsMax = Math.max(y2MassAbsMax, Math.abs((probe.y2Mass?.[ci] || 0) - y2Mass));
+    xVyMassAbsMax = Math.max(xVyMassAbsMax, Math.abs((probe.xVyMass?.[ci] || 0) - xVyMass));
+    yVxMassAbsMax = Math.max(yVxMassAbsMax, Math.abs((probe.yVxMass?.[ci] || 0) - yVxMass));
   }
 
   return {
@@ -113,6 +149,10 @@ function computeSoftClusterMassParity(layout, probe) {
     yMassAbsMax,
     vxMassAbsMax,
     vyMassAbsMax,
+    x2MassAbsMax,
+    y2MassAbsMax,
+    xVyMassAbsMax,
+    yVxMassAbsMax,
   };
 }
 
@@ -181,11 +221,19 @@ async function ensureSoftClusterProbeState(offload, prep) {
     state.softClusterProbeYMass?.destroy?.();
     state.softClusterProbeVxMass?.destroy?.();
     state.softClusterProbeVyMass?.destroy?.();
+    state.softClusterProbeX2Mass?.destroy?.();
+    state.softClusterProbeY2Mass?.destroy?.();
+    state.softClusterProbeXVyMass?.destroy?.();
+    state.softClusterProbeYVxMass?.destroy?.();
     state.softClusterProbeMassReadback?.destroy?.();
     state.softClusterProbeXMassReadback?.destroy?.();
     state.softClusterProbeYMassReadback?.destroy?.();
     state.softClusterProbeVxMassReadback?.destroy?.();
     state.softClusterProbeVyMassReadback?.destroy?.();
+    state.softClusterProbeX2MassReadback?.destroy?.();
+    state.softClusterProbeY2MassReadback?.destroy?.();
+    state.softClusterProbeXVyMassReadback?.destroy?.();
+    state.softClusterProbeYVxMassReadback?.destroy?.();
 
     state.softClusterProbeOffsets = device.createBuffer({ size: (clusterCount + 1) * 4, usage: storageUsage });
     state.softClusterProbeMass = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
@@ -193,12 +241,20 @@ async function ensureSoftClusterProbeState(offload, prep) {
     state.softClusterProbeYMass = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
     state.softClusterProbeVxMass = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
     state.softClusterProbeVyMass = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.softClusterProbeX2Mass = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.softClusterProbeY2Mass = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.softClusterProbeXVyMass = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.softClusterProbeYVxMass = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
 
     state.softClusterProbeMassReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
     state.softClusterProbeXMassReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
     state.softClusterProbeYMassReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
     state.softClusterProbeVxMassReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
     state.softClusterProbeVyMassReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.softClusterProbeX2MassReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.softClusterProbeY2MassReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.softClusterProbeXVyMassReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.softClusterProbeYVxMassReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
 
     state.softClusterProbeClusterCapacity = clusterCount;
     state.softClusterProbeBindGroup = null;
@@ -238,6 +294,10 @@ async function ensureSoftClusterProbeState(offload, prep) {
         { binding: 9, resource: { buffer: state.softClusterProbeYMass } },
         { binding: 10, resource: { buffer: state.softClusterProbeVxMass } },
         { binding: 11, resource: { buffer: state.softClusterProbeVyMass } },
+        { binding: 12, resource: { buffer: state.softClusterProbeX2Mass } },
+        { binding: 13, resource: { buffer: state.softClusterProbeY2Mass } },
+        { binding: 14, resource: { buffer: state.softClusterProbeXVyMass } },
+        { binding: 15, resource: { buffer: state.softClusterProbeYVxMass } },
       ],
     });
   }
@@ -284,6 +344,10 @@ async function dispatchSoftClusterKinematicsProbe(offload, prep) {
   encoder.copyBufferToBuffer(state.softClusterProbeYMass, 0, state.softClusterProbeYMassReadback, 0, bytes);
   encoder.copyBufferToBuffer(state.softClusterProbeVxMass, 0, state.softClusterProbeVxMassReadback, 0, bytes);
   encoder.copyBufferToBuffer(state.softClusterProbeVyMass, 0, state.softClusterProbeVyMassReadback, 0, bytes);
+  encoder.copyBufferToBuffer(state.softClusterProbeX2Mass, 0, state.softClusterProbeX2MassReadback, 0, bytes);
+  encoder.copyBufferToBuffer(state.softClusterProbeY2Mass, 0, state.softClusterProbeY2MassReadback, 0, bytes);
+  encoder.copyBufferToBuffer(state.softClusterProbeXVyMass, 0, state.softClusterProbeXVyMassReadback, 0, bytes);
+  encoder.copyBufferToBuffer(state.softClusterProbeYVxMass, 0, state.softClusterProbeYVxMassReadback, 0, bytes);
   device.queue.submit([encoder.finish()]);
 
   const probe = {
@@ -292,6 +356,10 @@ async function dispatchSoftClusterKinematicsProbe(offload, prep) {
     yMass: await readF32(state.softClusterProbeYMassReadback, bytes),
     vxMass: await readF32(state.softClusterProbeVxMassReadback, bytes),
     vyMass: await readF32(state.softClusterProbeVyMassReadback, bytes),
+    x2Mass: await readF32(state.softClusterProbeX2MassReadback, bytes),
+    y2Mass: await readF32(state.softClusterProbeY2MassReadback, bytes),
+    xVyMass: await readF32(state.softClusterProbeXVyMassReadback, bytes),
+    yVxMass: await readF32(state.softClusterProbeYVxMassReadback, bytes),
   };
 
   state.lastSoftClusterProbe = probe;
@@ -315,11 +383,19 @@ function hasAuthoritativeSoftClusterProbe(offload, signature, prep) {
     && state.lastSoftClusterProbe?.yMass instanceof Float32Array
     && state.lastSoftClusterProbe?.vxMass instanceof Float32Array
     && state.lastSoftClusterProbe?.vyMass instanceof Float32Array
+    && state.lastSoftClusterProbe?.x2Mass instanceof Float32Array
+    && state.lastSoftClusterProbe?.y2Mass instanceof Float32Array
+    && state.lastSoftClusterProbe?.xVyMass instanceof Float32Array
+    && state.lastSoftClusterProbe?.yVxMass instanceof Float32Array
     && state.lastSoftClusterProbe.mass.length >= clusterCount
     && state.lastSoftClusterProbe.xMass.length >= clusterCount
     && state.lastSoftClusterProbe.yMass.length >= clusterCount
     && state.lastSoftClusterProbe.vxMass.length >= clusterCount
-    && state.lastSoftClusterProbe.vyMass.length >= clusterCount;
+    && state.lastSoftClusterProbe.vyMass.length >= clusterCount
+    && state.lastSoftClusterProbe.x2Mass.length >= clusterCount
+    && state.lastSoftClusterProbe.y2Mass.length >= clusterCount
+    && state.lastSoftClusterProbe.xVyMass.length >= clusterCount
+    && state.lastSoftClusterProbe.yVxMass.length >= clusterCount;
 }
 
 export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
@@ -433,11 +509,11 @@ export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
 
   if (wgslOffload?.state) {
     wgslOffload.state.lastAuthoritativeSoftClusterSource = hasAuthoritativeProbe
-      ? 'wgsl-soft-cluster-mass-authoritative'
+      ? 'wgsl-soft-cluster-mass-moments-authoritative'
       : 'cpu-soft-cluster-kinematics-authoritative';
     wgslOffload.state.lastSourceRoute = wgslOffload.state.lastAuthoritativeSoftClusterSource;
     wgslOffload.state.lastMode = hasAuthoritativeProbe
-      ? 'wgsl-soft-cluster-mass-authoritative'
+      ? 'wgsl-soft-cluster-mass-moments-authoritative'
       : wgslOffload.state.lastMode;
   }
 

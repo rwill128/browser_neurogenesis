@@ -124,6 +124,10 @@ test('computeSoftClusterKinematicsFromMassMomentsGpuOnly reconstructs authoritat
     yMass: new Float32Array(prep.plan.clusterCount),
     vxMass: new Float32Array(prep.plan.clusterCount),
     vyMass: new Float32Array(prep.plan.clusterCount),
+    x2Mass: new Float32Array(prep.plan.clusterCount),
+    y2Mass: new Float32Array(prep.plan.clusterCount),
+    xVyMass: new Float32Array(prep.plan.clusterCount),
+    yVxMass: new Float32Array(prep.plan.clusterCount),
   };
 
   for (let ci = 0; ci < prep.plan.clusterCount; ci++) {
@@ -136,6 +140,10 @@ test('computeSoftClusterKinematicsFromMassMomentsGpuOnly reconstructs authoritat
       probe.yMass[ci] += prep.layout.nodeY[i] * m;
       probe.vxMass[ci] += prep.layout.nodeVx[i] * m;
       probe.vyMass[ci] += prep.layout.nodeVy[i] * m;
+      probe.x2Mass[ci] += prep.layout.nodeX[i] * prep.layout.nodeX[i] * m;
+      probe.y2Mass[ci] += prep.layout.nodeY[i] * prep.layout.nodeY[i] * m;
+      probe.xVyMass[ci] += prep.layout.nodeX[i] * prep.layout.nodeVy[i] * m;
+      probe.yVxMass[ci] += prep.layout.nodeY[i] * prep.layout.nodeVx[i] * m;
     }
   }
 

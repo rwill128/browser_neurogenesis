@@ -311,6 +311,10 @@ test('post-collision recovery parity: replays authoritative WGSL soft-cluster ma
     yMass: new Float32Array(prep.plan.clusterCount),
     vxMass: new Float32Array(prep.plan.clusterCount),
     vyMass: new Float32Array(prep.plan.clusterCount),
+    x2Mass: new Float32Array(prep.plan.clusterCount),
+    y2Mass: new Float32Array(prep.plan.clusterCount),
+    xVyMass: new Float32Array(prep.plan.clusterCount),
+    yVxMass: new Float32Array(prep.plan.clusterCount),
   };
 
   for (let ci = 0; ci < prep.plan.clusterCount; ci++) {
@@ -323,6 +327,10 @@ test('post-collision recovery parity: replays authoritative WGSL soft-cluster ma
       probe.yMass[ci] += prep.layout.nodeY[i] * m;
       probe.vxMass[ci] += prep.layout.nodeVx[i] * m;
       probe.vyMass[ci] += prep.layout.nodeVy[i] * m;
+      probe.x2Mass[ci] += prep.layout.nodeX[i] * prep.layout.nodeX[i] * m;
+      probe.y2Mass[ci] += prep.layout.nodeY[i] * prep.layout.nodeY[i] * m;
+      probe.xVyMass[ci] += prep.layout.nodeX[i] * prep.layout.nodeVy[i] * m;
+      probe.yVxMass[ci] += prep.layout.nodeY[i] * prep.layout.nodeVx[i] * m;
     }
   }
 
@@ -353,9 +361,9 @@ test('post-collision recovery parity: replays authoritative WGSL soft-cluster ma
     hybridAttachedByRigid: state.hybridAttachedByRigid,
   });
 
-  assert.equal(wgslOffload.state.lastAuthoritativeSoftClusterSource, 'wgsl-soft-cluster-mass-authoritative');
-  assert.equal(wgslOffload.state.lastSourceRoute, 'wgsl-soft-cluster-mass-authoritative');
-  assert.equal(wgslOffload.state.lastMode, 'wgsl-soft-cluster-mass-authoritative');
+  assert.equal(wgslOffload.state.lastAuthoritativeSoftClusterSource, 'wgsl-soft-cluster-mass-moments-authoritative');
+  assert.equal(wgslOffload.state.lastSourceRoute, 'wgsl-soft-cluster-mass-moments-authoritative');
+  assert.equal(wgslOffload.state.lastMode, 'wgsl-soft-cluster-mass-moments-authoritative');
   assert.equal(wgslOffload.state.lastSoftClusterAuthoritativeParity?.source, 'wgsl-soft-cluster-mass-authoritative-vs-cpu');
 });
 

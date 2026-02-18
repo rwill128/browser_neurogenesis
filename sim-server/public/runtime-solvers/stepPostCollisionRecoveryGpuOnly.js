@@ -2,6 +2,7 @@ import { applyRigidInsideCorrectionPassGpuOnly } from './stepRigidInsideCorrecti
 import {
   buildSoftClusterKinematicsWgslPrep,
   computeSoftClusterKinematicsGpuOnly,
+  computeSoftClusterKinematicsFromMassMomentsGpuOnly,
   projectNodesTowardClusterRigidMotionGpuOnly,
 } from './stepSoftClusterKinematicsGpuOnly.js';
 import { applySoftMembraneInsideCorrectionPassGpuOnly } from './stepSoftMembraneInsideCorrectionGpuOnly.js';
@@ -112,6 +113,39 @@ function computeSoftClusterMassParity(layout, probe) {
     yMassAbsMax,
     vxMassAbsMax,
     vyMassAbsMax,
+  };
+}
+
+function computeSoftClusterKinematicsParity(referenceMap, candidateMap) {
+  const clusterIds = new Set([
+    ...Array.from(referenceMap?.keys?.() || []),
+    ...Array.from(candidateMap?.keys?.() || []),
+  ]);
+
+  let xAbsMax = 0;
+  let yAbsMax = 0;
+  let vxAbsMax = 0;
+  let vyAbsMax = 0;
+  let omegaAbsMax = 0;
+
+  for (const cid of clusterIds) {
+    const ref = referenceMap?.get?.(cid) || null;
+    const cand = candidateMap?.get?.(cid) || null;
+    xAbsMax = Math.max(xAbsMax, Math.abs((Number(cand?.x) || 0) - (Number(ref?.x) || 0)));
+    yAbsMax = Math.max(yAbsMax, Math.abs((Number(cand?.y) || 0) - (Number(ref?.y) || 0)));
+    vxAbsMax = Math.max(vxAbsMax, Math.abs((Number(cand?.vx) || 0) - (Number(ref?.vx) || 0)));
+    vyAbsMax = Math.max(vyAbsMax, Math.abs((Number(cand?.vy) || 0) - (Number(ref?.vy) || 0)));
+    omegaAbsMax = Math.max(omegaAbsMax, Math.abs((Number(cand?.omega) || 0) - (Number(ref?.omega) || 0)));
+  }
+
+  return {
+    clusterCount: clusterIds.size,
+    xAbsMax,
+    yAbsMax,
+    vxAbsMax,
+    vyAbsMax,
+    omegaAbsMax,
+    source: 'wgsl-soft-cluster-mass-authoritative-vs-cpu',
   };
 }
 
@@ -269,6 +303,25 @@ async function dispatchSoftClusterKinematicsProbe(offload, prep) {
   return true;
 }
 
+function hasAuthoritativeSoftClusterProbe(offload, signature, prep) {
+  const state = offload?.state;
+  if (!state || offload?.authoritativeSoftClusterMass !== true) return false;
+
+  const clusterCount = Number(prep?.plan?.clusterCount) || 0;
+  return clusterCount > 0
+    && Number(state.lastSoftClusterProbeSignature) === (Number(signature) >>> 0)
+    && state.lastSoftClusterProbe?.mass instanceof Float32Array
+    && state.lastSoftClusterProbe?.xMass instanceof Float32Array
+    && state.lastSoftClusterProbe?.yMass instanceof Float32Array
+    && state.lastSoftClusterProbe?.vxMass instanceof Float32Array
+    && state.lastSoftClusterProbe?.vyMass instanceof Float32Array
+    && state.lastSoftClusterProbe.mass.length >= clusterCount
+    && state.lastSoftClusterProbe.xMass.length >= clusterCount
+    && state.lastSoftClusterProbe.yMass.length >= clusterCount
+    && state.lastSoftClusterProbe.vxMass.length >= clusterCount
+    && state.lastSoftClusterProbe.vyMass.length >= clusterCount;
+}
+
 export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
   const {
     bodies,
@@ -306,8 +359,10 @@ export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
       ? projectNodesTowardClusterRigidMotion
       : projectNodesTowardClusterRigidMotionGpuOnly;
 
+  const preparedSoftClusterKinematics = buildSoftClusterKinematicsWgslPrep(soft.nodes);
+
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
-    const prep = buildSoftClusterKinematicsWgslPrep(soft.nodes);
+    const prep = preparedSoftClusterKinematics;
     wgslOffload.state.preparedSoftClusterPlan = prep.plan;
     wgslOffload.state.preparedSoftClusterLayout = prep.layout;
     wgslOffload.state.preparedSoftClusterSignature = prep.signature;
@@ -316,6 +371,7 @@ export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
     wgslOffload.state.lastPreparedSoftClusterLayoutBytes = prep.layout.byteLength;
     wgslOffload.state.lastMode = 'cpu-prepared-soft-cluster-kinematics';
     wgslOffload.state.lastSoftClusterProbeSource = 'cpu-prepared-soft-cluster-kinematics';
+    wgslOffload.state.lastSourceRoute = 'cpu-soft-cluster-kinematics-authoritative';
 
     if (canUseWgslOffload(wgslOffload) && prep.plan.clusterCount > 0) {
       const serializedDispatch = (wgslOffload.state.pendingSoftClusterProbePromise || Promise.resolve())
@@ -340,7 +396,51 @@ export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
     }
   }
 
-  const postCollisionClusterKinematics = await Promise.resolve(computeKinematics(soft.nodes));
+  const hasAuthoritativeProbe = hasAuthoritativeSoftClusterProbe(
+    wgslOffload,
+    preparedSoftClusterKinematics.signature,
+    preparedSoftClusterKinematics,
+  );
+
+  let postCollisionClusterKinematics;
+  if (hasAuthoritativeProbe) {
+    postCollisionClusterKinematics = computeSoftClusterKinematicsFromMassMomentsGpuOnly(
+      soft.nodes,
+      preparedSoftClusterKinematics.layout,
+      wgslOffload.state.lastSoftClusterProbe,
+    );
+    const cpuReferenceClusterKinematics = await Promise.resolve(computeKinematics(soft.nodes));
+    if (wgslOffload?.state) {
+      wgslOffload.state.lastSoftClusterAuthoritativeParity = computeSoftClusterKinematicsParity(
+        cpuReferenceClusterKinematics,
+        postCollisionClusterKinematics,
+      );
+    }
+  } else {
+    postCollisionClusterKinematics = await Promise.resolve(computeKinematics(soft.nodes));
+    if (wgslOffload?.state) {
+      wgslOffload.state.lastSoftClusterAuthoritativeParity = {
+        clusterCount: Math.max(0, Number(postCollisionClusterKinematics?.size) || 0),
+        xAbsMax: 0,
+        yAbsMax: 0,
+        vxAbsMax: 0,
+        vyAbsMax: 0,
+        omegaAbsMax: 0,
+        source: 'cpu-soft-cluster-kinematics-authoritative',
+      };
+    }
+  }
+
+  if (wgslOffload?.state) {
+    wgslOffload.state.lastAuthoritativeSoftClusterSource = hasAuthoritativeProbe
+      ? 'wgsl-soft-cluster-mass-authoritative'
+      : 'cpu-soft-cluster-kinematics-authoritative';
+    wgslOffload.state.lastSourceRoute = wgslOffload.state.lastAuthoritativeSoftClusterSource;
+    wgslOffload.state.lastMode = hasAuthoritativeProbe
+      ? 'wgsl-soft-cluster-mass-authoritative'
+      : wgslOffload.state.lastMode;
+  }
+
   await Promise.resolve(projectTowardRigidMotion(soft.nodes, postCollisionClusterKinematics, {
     linearGain,
     angularGain,

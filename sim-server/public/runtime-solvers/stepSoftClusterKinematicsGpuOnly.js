@@ -257,6 +257,84 @@ export function computeSoftClusterKinematicsGpuOnly(nodes, {
   return clusters;
 }
 
+export function computeSoftClusterKinematicsFromMassMomentsGpuOnly(nodes, layout, probe, {
+  minMass = 0.02,
+  minInertia = 1e-4,
+} = {}) {
+  const clusters = new Map();
+  if (!Array.isArray(nodes) || !layout || !probe) return clusters;
+
+  const clusterIds = layout.clusterOriginalId;
+  const clusterOffsets = layout.clusterOffsets;
+  const mass = probe.mass;
+  const xMass = probe.xMass;
+  const yMass = probe.yMass;
+  const vxMass = probe.vxMass;
+  const vyMass = probe.vyMass;
+
+  const clusterCount = Math.max(0, Number(clusterIds?.length) || 0);
+  if (clusterCount === 0) return clusters;
+
+  for (let ci = 0; ci < clusterCount; ci++) {
+    const cid = Number(clusterIds[ci]) || 0;
+    const totalMass = Math.max(minMass, Number(mass?.[ci]) || 0);
+    const invMass = 1 / totalMass;
+    clusters.set(cid, {
+      clusterId: cid,
+      mass: totalMass,
+      x: (Number(xMass?.[ci]) || 0) * invMass,
+      y: (Number(yMass?.[ci]) || 0) * invMass,
+      vx: (Number(vxMass?.[ci]) || 0) * invMass,
+      vy: (Number(vyMass?.[ci]) || 0) * invMass,
+      inertia: 0,
+      angularMomentum: 0,
+      omega: 0,
+      meanRadius: 0,
+      nodeIndices: [],
+    });
+  }
+
+  const nodeCount = Math.max(0, Number(layout.nodeIndex?.length) || 0);
+  let clusterListIndex = 0;
+  for (let li = 0; li < nodeCount; li++) {
+    const nodeIdx = Number(layout.nodeIndex[li]);
+    if (!Number.isFinite(nodeIdx) || nodeIdx < 0 || nodeIdx >= nodes.length) continue;
+    const node = nodes[nodeIdx];
+    if (!node) continue;
+
+    while (clusterListIndex + 1 < clusterOffsets.length && li >= (clusterOffsets[clusterListIndex + 1] >>> 0)) {
+      clusterListIndex += 1;
+    }
+    const cid = Number(clusterIds[clusterListIndex]) || 0;
+    const st = clusters.get(cid);
+    if (!st) continue;
+
+    const x = Number(node.x);
+    const y = Number(node.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+    st.nodeIndices.push(nodeIdx);
+    const m = nodeMass(node, minMass);
+    const rx = x - st.x;
+    const ry = y - st.y;
+    const dvx = finiteOr(node.vx, 0) - st.vx;
+    const dvy = finiteOr(node.vy, 0) - st.vy;
+    const r2 = rx * rx + ry * ry;
+    st.inertia += m * r2;
+    st.angularMomentum += m * (rx * dvy - ry * dvx);
+    st.meanRadius += Math.sqrt(r2);
+  }
+
+  for (const st of clusters.values()) {
+    const count = st.nodeIndices.length;
+    st.inertia = Math.max(minInertia, st.inertia);
+    st.omega = Number.isFinite(st.angularMomentum) ? (st.angularMomentum / st.inertia) : 0;
+    st.meanRadius = count > 0 ? (st.meanRadius / count) : 0;
+  }
+
+  return clusters;
+}
+
 export function projectNodesTowardClusterRigidMotionGpuOnly(nodes, clusterKinematics, {
   linearGain = 0.08,
   angularGain = 0.18,

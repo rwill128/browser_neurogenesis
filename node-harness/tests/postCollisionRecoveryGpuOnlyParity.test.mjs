@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyPostCollisionRecoveryGpuOnly } from '../../sim-server/public/runtime-solvers/stepPostCollisionRecoveryGpuOnly.js';
+import { buildSoftClusterKinematicsWgslPrep } from '../../sim-server/public/runtime-solvers/stepSoftClusterKinematicsGpuOnly.js';
 import {
   computeSoftClusterKinematics,
   projectNodesTowardClusterRigidMotion,
@@ -299,6 +300,63 @@ test('post-collision recovery parity: records deterministic soft-cluster WGSL so
   assert.equal(wgslOffload.state.lastSoftClusterProbeSource, 'cpu-prepared-soft-cluster-kinematics');
   assert.ok((wgslOffload.state.lastPreparedSoftClusterCount || 0) > 0);
   assert.ok((wgslOffload.state.lastPreparedSoftClusterLayoutBytes || 0) > 0);
+});
+
+test('post-collision recovery parity: replays authoritative WGSL soft-cluster mass moments when signature matches', async () => {
+  const state = makeState();
+  const prep = buildSoftClusterKinematicsWgslPrep(state.soft.nodes);
+  const probe = {
+    mass: new Float32Array(prep.plan.clusterCount),
+    xMass: new Float32Array(prep.plan.clusterCount),
+    yMass: new Float32Array(prep.plan.clusterCount),
+    vxMass: new Float32Array(prep.plan.clusterCount),
+    vyMass: new Float32Array(prep.plan.clusterCount),
+  };
+
+  for (let ci = 0; ci < prep.plan.clusterCount; ci++) {
+    const start = prep.layout.clusterOffsets[ci];
+    const stop = prep.layout.clusterOffsets[ci + 1];
+    for (let i = start; i < stop; i++) {
+      const m = Math.max(0.02, prep.layout.nodeMass[i]);
+      probe.mass[ci] += m;
+      probe.xMass[ci] += prep.layout.nodeX[i] * m;
+      probe.yMass[ci] += prep.layout.nodeY[i] * m;
+      probe.vxMass[ci] += prep.layout.nodeVx[i] * m;
+      probe.vyMass[ci] += prep.layout.nodeVy[i] * m;
+    }
+  }
+
+  const wgslOffload = {
+    enabled: true,
+    authoritativeSoftClusterMass: true,
+    state: {
+      lastSoftClusterProbeSignature: prep.signature,
+      lastSoftClusterProbe: probe,
+    },
+  };
+
+  await applyPostCollisionRecoveryGpuOnly({
+    sim: state.sim,
+    bodies: state.bodies,
+    soft: state.soft,
+    dtNorm: state.dtNorm,
+    softMembraneClusterSet: state.softMembraneClusterSet,
+    softClusterCollisionLinearProjection: state.softClusterCollisionLinearProjection,
+    softClusterCollisionAngularProjection: state.softClusterCollisionAngularProjection,
+    membraneGainScale: 0.72,
+    applyRigidInsideCorrectionPass() { return 0; },
+    applyMembraneInsideCorrectionPass() { return 0; },
+    applyBounceBoundary() {},
+    wgslOffload,
+    n: state.n,
+    softClusterLoops: state.softClusterLoops,
+    hybridAttachedByRigid: state.hybridAttachedByRigid,
+  });
+
+  assert.equal(wgslOffload.state.lastAuthoritativeSoftClusterSource, 'wgsl-soft-cluster-mass-authoritative');
+  assert.equal(wgslOffload.state.lastSourceRoute, 'wgsl-soft-cluster-mass-authoritative');
+  assert.equal(wgslOffload.state.lastMode, 'wgsl-soft-cluster-mass-authoritative');
+  assert.equal(wgslOffload.state.lastSoftClusterAuthoritativeParity?.source, 'wgsl-soft-cluster-mass-authoritative-vs-cpu');
 });
 
 test('post-collision recovery parity: delegates boundary pass to gpu-only collision boundary module when provided', async () => {

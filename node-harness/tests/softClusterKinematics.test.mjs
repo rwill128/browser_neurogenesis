@@ -7,6 +7,8 @@ import {
 } from '../../sim-server/public/soft-cluster-kinematics.js';
 import {
   buildSoftClusterKinematicsWgslPrep,
+  computeSoftClusterKinematicsFromMassMomentsGpuOnly,
+  computeSoftClusterKinematicsGpuOnly,
   computeSoftClusterKinematicsPrepSignature,
 } from '../../sim-server/public/runtime-solvers/stepSoftClusterKinematicsGpuOnly.js';
 
@@ -106,4 +108,49 @@ test('buildSoftClusterKinematicsWgslPrep emits deterministic CSR layout for next
 
   assert.equal(prepA.signature, prepB.signature);
   assert.equal(prepA.signature, computeSoftClusterKinematicsPrepSignature(prepA.layout));
+});
+
+test('computeSoftClusterKinematicsFromMassMomentsGpuOnly reconstructs authoritative cluster state from WGSL mass moments', () => {
+  const nodes = [
+    { x: -1, y: 0, vx: 0, vy: -2, mass: 1, clusterId: 0 },
+    { x: 1, y: 0, vx: 0, vy: 2, mass: 1, clusterId: 0 },
+    { x: 3, y: 2, vx: 1, vy: 0.5, mass: 2, clusterId: 4 },
+  ];
+
+  const prep = buildSoftClusterKinematicsWgslPrep(nodes);
+  const probe = {
+    mass: new Float32Array(prep.plan.clusterCount),
+    xMass: new Float32Array(prep.plan.clusterCount),
+    yMass: new Float32Array(prep.plan.clusterCount),
+    vxMass: new Float32Array(prep.plan.clusterCount),
+    vyMass: new Float32Array(prep.plan.clusterCount),
+  };
+
+  for (let ci = 0; ci < prep.plan.clusterCount; ci++) {
+    const start = prep.layout.clusterOffsets[ci];
+    const stop = prep.layout.clusterOffsets[ci + 1];
+    for (let i = start; i < stop; i++) {
+      const m = Math.max(0.02, prep.layout.nodeMass[i]);
+      probe.mass[ci] += m;
+      probe.xMass[ci] += prep.layout.nodeX[i] * m;
+      probe.yMass[ci] += prep.layout.nodeY[i] * m;
+      probe.vxMass[ci] += prep.layout.nodeVx[i] * m;
+      probe.vyMass[ci] += prep.layout.nodeVy[i] * m;
+    }
+  }
+
+  const reconstructed = computeSoftClusterKinematicsFromMassMomentsGpuOnly(nodes, prep.layout, probe);
+  const cpu = computeSoftClusterKinematicsGpuOnly(nodes);
+
+  assert.equal(reconstructed.size, cpu.size);
+  for (const [cid, ref] of cpu.entries()) {
+    const got = reconstructed.get(cid);
+    assert.ok(got, `missing cluster ${cid}`);
+    assert.ok(Math.abs(got.mass - ref.mass) < 1e-6);
+    assert.ok(Math.abs(got.x - ref.x) < 1e-6);
+    assert.ok(Math.abs(got.y - ref.y) < 1e-6);
+    assert.ok(Math.abs(got.vx - ref.vx) < 1e-6);
+    assert.ok(Math.abs(got.vy - ref.vy) < 1e-6);
+    assert.ok(Math.abs(got.omega - ref.omega) < 1e-6);
+  }
 });

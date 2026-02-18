@@ -20,3 +20,11 @@ test('rigid-soft gpu-only pass publishes cpu-prepared source route while keeping
     'expected rigid-soft gpu-only pass to persist source-route ownership for deterministic candidate layout prep before WGSL dispatch lands',
   );
 });
+
+test('rigid-soft gpu-only module dispatches concrete WGSL node broadphase proposal stage and records source-route ownership', () => {
+  assert.match(
+    source,
+    /const rigidSoftNodeBroadphaseWgsl = \/\* wgsl \*\/[\s\S]*activeMaskOut\[pairIndex\][\s\S]*dispatchRigidSoftNodeBroadphaseWgsl\([\s\S]*lastMode = 'cpu-authoritative-wgsl-broadphase-proposal';/,
+    'expected rigid-soft gpu-only module to run a concrete WGSL node broadphase dispatch and publish source-route ownership while CPU narrowphase remains authoritative',
+  );
+});

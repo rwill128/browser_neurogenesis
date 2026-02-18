@@ -274,3 +274,66 @@ test('gpu-only rigid-soft pass publishes deterministic WGSL candidate layout sou
   assert.equal(wgslState.preparedLayout.edgePairRigidIndex.length, baselineCalls.edges.length);
   assert.equal(wgslState.preparedLayout.edgePairSpringIndex.length, baselineCalls.edges.length);
 });
+
+test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when device is available while preserving CPU collision visitation parity', () => {
+  globalThis.GPUBufferUsage ??= {
+    STORAGE: 1 << 0,
+    COPY_DST: 1 << 1,
+    UNIFORM: 1 << 2,
+    COPY_SRC: 1 << 3,
+  };
+
+  const baselineState = makeState();
+  const gpuState = makeState();
+  const baselineCalls = { nodes: [], edges: [] };
+  const gpuCalls = { nodes: [], edges: [] };
+  runBaseline(baselineState, baselineCalls);
+
+  const writes = [];
+  const dispatches = [];
+  const mockPipeline = { getBindGroupLayout: () => ({}) };
+  const mockDevice = {
+    createBuffer: () => ({ destroy() {} }),
+    createShaderModule: ({ code }) => ({ code }),
+    createComputePipelineAsync: () => Promise.resolve(mockPipeline),
+    createBindGroup: () => ({}),
+    createCommandEncoder: () => ({
+      beginComputePass: () => ({
+        setPipeline() {},
+        setBindGroup() {},
+        dispatchWorkgroups(count) { dispatches.push(count); },
+        end() {},
+      }),
+      finish: () => ({}),
+    }),
+    queue: {
+      writeBuffer: (_buf, _offset, data) => writes.push(data?.constructor?.name || typeof data),
+      submit() {},
+    },
+  };
+
+  const wgslState = {
+    rigidSoftNodeBroadphasePipeline: mockPipeline,
+  };
+
+  resolveRigidSoftCollisionPassGpuOnly({
+    rigidBodies: gpuState.rigid,
+    soft: gpuState.soft,
+    hybridAttachedByRigid: gpuState.hybridAttachedByRigid,
+    resolveRigidVsSoftNodeCollision: (rb, sn) => {
+      gpuCalls.nodes.push(`${rb.id}->${sn.id}`);
+    },
+    resolveRigidVsSoftEdgeCollision: (rb, a, b) => {
+      gpuCalls.edges.push(`${rb.id}->${a.id}-${b.id}`);
+    },
+    edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
+    wgslOffload: { enabled: true, state: wgslState, device: mockDevice },
+  });
+
+  assert.deepEqual(gpuCalls, baselineCalls);
+  assert.equal(wgslState.lastNodeBroadphaseDispatched, true);
+  assert.equal(wgslState.lastSourceRoute, 'wgsl-rigid-soft-node-broadphase-proposal');
+  assert.equal(wgslState.lastMode, 'cpu-authoritative-wgsl-broadphase-proposal');
+  assert.ok(dispatches[0] >= 1);
+  assert.ok(writes.length >= 8);
+});

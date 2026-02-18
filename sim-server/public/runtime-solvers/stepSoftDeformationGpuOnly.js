@@ -363,6 +363,75 @@ function applyAuthoritativeWgslSpringMetrics(deform, prep, metrics) {
   return applied > 0;
 }
 
+function refreshSoftDeformationClassificationFromMetrics({
+  deform,
+  membraneClusterSet,
+  thresholds,
+}) {
+  if (!deform || !Array.isArray(deform.clusters)) return deform;
+
+  const membraneSet = membraneClusterSet instanceof Set ? membraneClusterSet : new Set();
+  const t = thresholds || {};
+  const warnStretch = Number.isFinite(Number(t.warnStretch)) ? Number(t.warnStretch) : 1.55;
+  const severeStretch = Number.isFinite(Number(t.severeStretch)) ? Number(t.severeStretch) : 2.4;
+  const warnAreaMin = Number.isFinite(Number(t.warnAreaMin)) ? Number(t.warnAreaMin) : 0.62;
+  const warnAreaMax = Number.isFinite(Number(t.warnAreaMax)) ? Number(t.warnAreaMax) : 1.55;
+  const severeAreaMin = Number.isFinite(Number(t.severeAreaMin)) ? Number(t.severeAreaMin) : 0.35;
+  const severeAreaMax = Number.isFinite(Number(t.severeAreaMax)) ? Number(t.severeAreaMax) : 2.35;
+  const warnPoseRms = Number.isFinite(Number(t.warnPoseRms)) ? Number(t.warnPoseRms) : 0.16;
+  const warnPoseMax = Number.isFinite(Number(t.warnPoseMax)) ? Number(t.warnPoseMax) : 0.3;
+  const severePoseRms = Number.isFinite(Number(t.severePoseRms)) ? Number(t.severePoseRms) : 0.35;
+  const severePoseMax = Number.isFinite(Number(t.severePoseMax)) ? Number(t.severePoseMax) : 0.65;
+
+  const warningClusters = [];
+  const severeClusters = [];
+  const severeCollapseClusters = [];
+  let worstStretch = 1;
+  let worstAreaRatio = 1;
+  let worstPoseError = 0;
+
+  for (const c of deform.clusters) {
+    if (!c) continue;
+    const legacyWarn = c.stretchMax >= warnStretch
+      || c.areaRatio <= warnAreaMin
+      || c.areaRatio >= warnAreaMax;
+    const legacySevere = c.stretchMax >= severeStretch
+      || c.stretchMin <= 0.12
+      || c.areaRatio <= severeAreaMin
+      || c.areaRatio >= severeAreaMax;
+    const poseAvailable = Number.isFinite(c.poseErrorRms) && Number.isFinite(c.poseErrorMax);
+    const poseWarn = c.poseErrorRms >= warnPoseRms || c.poseErrorMax >= warnPoseMax;
+    const poseSevere = c.poseErrorRms >= severePoseRms || c.poseErrorMax >= severePoseMax;
+    const isMembraneCluster = membraneSet.has(c.clusterId);
+
+    c.warning = c.warning || legacyWarn || (poseAvailable && poseWarn);
+    c.severeCollapse = c.severeCollapse || (!isMembraneCluster && legacySevere);
+    c.severe = c.severe || c.severeCollapse || (poseAvailable && poseSevere);
+
+    if (c.warning) warningClusters.push(c.clusterId);
+    if (c.severe) severeClusters.push(c.clusterId);
+    if (c.severeCollapse) severeCollapseClusters.push(c.clusterId);
+    worstStretch = Math.max(worstStretch, Number(c.stretchMax) || 1);
+    const areaRatio = Number(c.areaRatio) || 1;
+    worstAreaRatio = Math.max(worstAreaRatio, Math.max(areaRatio, areaRatio > 0 ? 1 / areaRatio : 1));
+    worstPoseError = Math.max(worstPoseError, Number(c.poseErrorRms) || 0);
+  }
+
+  deform.warningClusters = warningClusters;
+  deform.severeClusters = severeClusters;
+  deform.severeCollapseClusters = severeCollapseClusters;
+  deform.warningSet = new Set(warningClusters);
+  deform.severeSet = new Set(severeClusters);
+  deform.severeCollapseSet = new Set(severeCollapseClusters);
+  deform.warningCount = warningClusters.length;
+  deform.severeCount = severeClusters.length;
+  deform.severeCollapseCount = severeCollapseClusters.length;
+  deform.worstStretch = worstStretch;
+  deform.worstAreaRatio = worstAreaRatio;
+  deform.worstPoseError = worstPoseError;
+  return deform;
+}
+
 export async function applySoftDeformationInterventionsGpuOnly({
   sim,
   soft,
@@ -370,6 +439,8 @@ export async function applySoftDeformationInterventionsGpuOnly({
   severeInterventionsOn,
   buildSoftDeformationState,
   stabilizeSeverelyDeformedSoftClusters,
+  membraneClusterSet,
+  deformationThresholds,
   wgslOffload,
 }) {
   if (!sim || !soft || typeof buildSoftDeformationState !== 'function') {
@@ -403,6 +474,11 @@ export async function applySoftDeformationInterventionsGpuOnly({
       });
       wgslApplied = applyAuthoritativeWgslSpringMetrics(deform, prep, metrics);
       if (wgslApplied) {
+        refreshSoftDeformationClassificationFromMetrics({
+          deform,
+          membraneClusterSet,
+          thresholds: deformationThresholds,
+        });
         wgslOffload.state.lastSoftDeformationWgslMetricsSource = 'wgsl-soft-deformation-spring-metrics-authoritative';
       }
     } catch (err) {
@@ -424,7 +500,14 @@ export async function applySoftDeformationInterventionsGpuOnly({
           prep: postPrep,
           state: wgslOffload.state,
         });
-        applyAuthoritativeWgslSpringMetrics(deform, postPrep, metrics);
+        const postApplied = applyAuthoritativeWgslSpringMetrics(deform, postPrep, metrics);
+        if (postApplied) {
+          refreshSoftDeformationClassificationFromMetrics({
+            deform,
+            membraneClusterSet,
+            thresholds: deformationThresholds,
+          });
+        }
       } catch {
         // fall back silently to CPU-derived metrics for post-stabilization state
       }

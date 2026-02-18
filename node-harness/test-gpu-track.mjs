@@ -10,6 +10,7 @@ const tests = [
   'node-harness/tests/dyeBarrierIntegration.test.mjs',
   'node-harness/tests/softXpbdTopologyGuards.test.mjs',
   'node-harness/tests/softDeformationMetrics.test.mjs',
+  'node-harness/tests/softDeformationGpuOnlySource.test.mjs',
   'node-harness/tests/softClusterKinematics.test.mjs',
   'node-harness/tests/runtimeSolverRigidGpuOnlyParity.test.mjs',
   'node-harness/tests/softFluidCouplingGpuOnlyParity.test.mjs',

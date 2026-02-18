@@ -47,7 +47,7 @@ test('hybrid constraints gpu-only path dispatches real WGSL attachment probe + v
 
   assert.match(
     source,
-    /const serializedDispatch = \(wgslOffload\.state\.pendingWgslProbePromise \|\| Promise\.resolve\(\)\)[\s\S]*dispatchHybridAttachmentErrorProbe\(wgslOffload, prep, soft\);[\s\S]*dispatchHybridAttachmentVelocityDeltaProposal\(wgslOffload, prep, soft,[\s\S]*dispatchHybridAttachmentVelocityNodeReduction\(wgslOffload, prep\);[\s\S]*pendingWgslProbePromise = serializedDispatch;[\s\S]*lastMode = 'wgsl-velocity-proposal';/,
+    /const serializedDispatch = \(wgslOffload\.state\.pendingWgslProbePromise \|\| Promise\.resolve\(\)\)[\s\S]*if \(!fastMode\) \{[\s\S]*dispatchHybridAttachmentErrorProbe\(wgslOffload, prep, soft\);[\s\S]*\}[\s\S]*dispatchHybridAttachmentVelocityDeltaProposal\(wgslOffload, prep, soft,[\s\S]*dispatchHybridAttachmentVelocityNodeReduction\(wgslOffload, prep\);[\s\S]*pendingWgslProbePromise = serializedDispatch;[\s\S]*lastMode = 'wgsl-velocity-proposal';/,
     'expected gpu-only hybrid WGSL dispatch chain to serialize probe+proposal+node-reduction readbacks and publish source-route ownership for authoritative bring-up',
   );
 
@@ -73,7 +73,7 @@ test('hybrid constraints gpu-only path dispatches real WGSL attachment probe + v
 test('hybrid constraints gpu-only fast mode skips cpu parity/reference work while preserving finite safety guards and source-route visibility', () => {
   assert.match(
     source,
-    /isGpuOnlyFastMode\(wgslOffload\)[\s\S]*dispatchHybridAttachmentVelocityDeltaProposal\([\s\S]*includeCpuParity: !fastMode[\s\S]*checkFiniteFloat32Array\([\s\S]*lastVelocityNodeReductionFinite[\s\S]*if \(fastMode\) \{[\s\S]*lastVelocityNodeReductionSource = 'wgsl-node-reduction-proposal-fast'[\s\S]*lastVelocityNodeReductionCpuReference = null;[\s\S]*validation: 'skipped-cpu-parity'/,
+    /isGpuOnlyFastMode\(wgslOffload\)[\s\S]*if \(!fastMode\) \{[\s\S]*dispatchHybridAttachmentErrorProbe\([\s\S]*lastProbeMode = 'skipped-fast-mode'[\s\S]*dispatchHybridAttachmentVelocityDeltaProposal\([\s\S]*includeCpuParity: !fastMode,[\s\S]*includeEndpointTelemetry: !fastMode[\s\S]*checkFiniteFloat32Array\([\s\S]*lastVelocityNodeReductionFinite[\s\S]*if \(fastMode\) \{[\s\S]*lastVelocityNodeReductionSource = 'wgsl-node-reduction-proposal-fast'[\s\S]*lastVelocityNodeReductionCpuReference = null;[\s\S]*validation: 'skipped-cpu-parity'/,
     'expected fast mode branch to cut cpu parity/reference overhead while retaining finite checks and explicit source-route ownership',
   );
 

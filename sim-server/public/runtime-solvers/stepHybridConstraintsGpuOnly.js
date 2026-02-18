@@ -669,7 +669,13 @@ async function dispatchHybridAttachmentVelocityNodeReduction(offload, prep) {
   state.lastVelocityNodeReductionSource = 'wgsl-node-reduction-proposal';
 }
 
-async function dispatchHybridAttachmentVelocityDeltaProposal(offload, prep, soft, paramsConfig, { includeCpuParity = true } = {}) {
+async function dispatchHybridAttachmentVelocityDeltaProposal(
+  offload,
+  prep,
+  soft,
+  paramsConfig,
+  { includeCpuParity = true, includeEndpointTelemetry = true } = {},
+) {
   const state = offload.state;
   const device = offload.device;
   const nodeCount = prep.plan.softNodeCount >>> 0;
@@ -749,9 +755,26 @@ async function dispatchHybridAttachmentVelocityDeltaProposal(offload, prep, soft
   pass.setBindGroup(0, state.velocityBindGroup);
   pass.dispatchWorkgroups(Math.max(1, Math.ceil(attachmentCount / WGSL_WORKGROUP_SIZE)));
   pass.end();
-  encoder.copyBufferToBuffer(state.velocityDeltaVxOut, 0, state.velocityDeltaVxReadback, 0, bytes);
-  encoder.copyBufferToBuffer(state.velocityDeltaVyOut, 0, state.velocityDeltaVyReadback, 0, bytes);
+  if (includeEndpointTelemetry) {
+    encoder.copyBufferToBuffer(state.velocityDeltaVxOut, 0, state.velocityDeltaVxReadback, 0, bytes);
+    encoder.copyBufferToBuffer(state.velocityDeltaVyOut, 0, state.velocityDeltaVyReadback, 0, bytes);
+  }
   device.queue.submit([encoder.finish()]);
+
+  if (!includeEndpointTelemetry) {
+    state.lastVelocityDeltaTelemetry = null;
+    state.lastVelocityDeltaCpuReference = null;
+    state.lastVelocityDeltaParity = {
+      source: 'wgsl-attachment-proposal-fast',
+      comparedAttachmentCount: attachmentCount,
+      maxAbsError: 0,
+      avgAbsError: 0,
+      mode: 'gpu-only-fast',
+      validation: 'skipped-readback-and-cpu-parity',
+    };
+    state.lastVelocityDeltaProposalSource = 'wgsl-attachment-proposal-fast';
+    return;
+  }
 
   await Promise.all([
     state.velocityDeltaVxReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes),
@@ -913,13 +936,19 @@ export function applyHybridAttachmentConstraintsGpuOnly({
       const serializedDispatch = (wgslOffload.state.pendingWgslProbePromise || Promise.resolve())
         .catch(() => {})
         .then(async () => {
-          await dispatchHybridAttachmentErrorProbe(wgslOffload, prep, soft);
+          if (!fastMode) {
+            await dispatchHybridAttachmentErrorProbe(wgslOffload, prep, soft);
+          } else {
+            wgslOffload.state.lastProbeMode = 'skipped-fast-mode';
+            wgslOffload.state.lastProbeAttachmentCount = prep.plan.attachmentCount;
+          }
           await dispatchHybridAttachmentVelocityDeltaProposal(wgslOffload, prep, soft, {
             nodeErrorGain,
             nodeImpulseScale,
             dtNorm: safeDtNorm,
           }, {
             includeCpuParity: !fastMode,
+            includeEndpointTelemetry: !fastMode,
           });
           await dispatchHybridAttachmentVelocityNodeReduction(wgslOffload, prep);
 

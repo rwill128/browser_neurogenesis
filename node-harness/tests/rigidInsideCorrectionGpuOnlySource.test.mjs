@@ -15,8 +15,14 @@ test('rigid-inside gpu-only path publishes deterministic WGSL prep layout + sour
 
   assert.match(
     source,
-    /wgslOffload\.state\.preparedInsideLayout = prep\.layout;[\s\S]*lastPreparedInsideLayoutSignature = prep\.signature;[\s\S]*lastSourceRoute = 'cpu-rigid-inside-prepared-layout';/,
-    'expected gpu-only inside-correction path to publish layout signature + source-route telemetry for WGSL staging',
+    /computeRigidInsideCorrectionProposalSignature\([\s\S]*lastPreparedInsideLayoutSignature = preparedLayoutSignature;[\s\S]*lastPreparedInsideProposalSignature = proposalSignature;[\s\S]*lastSourceRoute = 'cpu-rigid-inside-prepared-layout';/,
+    'expected gpu-only inside-correction path to publish deterministic proposal+layout signatures and source-route telemetry for WGSL staging',
+  );
+
+  assert.match(
+    source,
+    /wgslOffload\.state\.lastInsideCpuReference = \{[\s\S]*source: 'cpu-rigid-inside-authoritative-reference',[\s\S]*\};[\s\S]*wgslOffload\.state\.lastInsideParity = \{[\s\S]*source: 'cpu-rigid-inside-authoritative-reference',[\s\S]*proposalSignature: proposalSignature >>> 0,[\s\S]*preparedLayoutSignature: preparedLayoutSignature >>> 0/,
+    'expected deterministic CPU reference/parity payload to be emitted for next WGSL inside-correction stage parity bring-up',
   );
 
   assert.match(

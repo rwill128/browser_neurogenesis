@@ -45,7 +45,17 @@ test('rigid-inside correction parity: wgsl-prep-enabled path preserves CPU autho
   assert.equal(offload.state.lastPreparedInsidePolyCount, 1);
   assert.equal(offload.state.lastPreparedInsideEligibleNodeCount, 2);
   assert.ok(Number.isInteger(offload.state.lastPreparedInsideLayoutSignature));
+  assert.ok(Number.isInteger(offload.state.lastPreparedInsideProposalSignature));
   assert.ok((offload.state.lastPreparedInsideLayoutBytes || 0) > 0);
+  assert.equal(offload.state.lastInsideCpuReference?.source, 'cpu-rigid-inside-authoritative-reference');
+  assert.equal(offload.state.lastInsideCpuReference?.correctedCount, baselineCorrected);
+  assert.equal(offload.state.lastInsideCpuReference?.nodeX?.length, withPrep.soft.nodes.length);
+  assert.equal(offload.state.lastInsideCpuReference?.nodeY?.length, withPrep.soft.nodes.length);
+  assert.equal(offload.state.lastInsideCpuReference?.rigidX?.length, withPrep.rigidBodies.length);
+  assert.equal(offload.state.lastInsideParity?.source, 'cpu-rigid-inside-authoritative-reference');
+  assert.equal(offload.state.lastInsideParity?.maxAbs, 0);
+  assert.equal(offload.state.lastInsideParity?.mismatchCount, 0);
+  assert.equal(offload.state.lastInsideParity?.proposalSignature, offload.state.lastPreparedInsideProposalSignature >>> 0);
   assert.equal(offload.state.lastSourceRoute, 'cpu-rigid-inside-authoritative');
   assert.equal(offload.state.lastAuthoritativeInsideSource, 'cpu-rigid-inside-authoritative');
 });

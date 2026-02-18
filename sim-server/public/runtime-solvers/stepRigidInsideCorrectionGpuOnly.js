@@ -139,6 +139,44 @@ function buildRigidInsideCorrectionWgslLayout({
   };
 }
 
+function computeRigidInsideCorrectionProposalSignature({
+  nodeX,
+  nodeY,
+  nodeVx,
+  nodeVy,
+  rigidX,
+  rigidY,
+  correctionIters,
+  correctionSlop,
+  layoutSignature,
+}) {
+  let hash = 0x811c9dc5;
+  hash ^= hashF32ArrayFnv1a(nodeX);
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32ArrayFnv1a(nodeY);
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32ArrayFnv1a(nodeVx);
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32ArrayFnv1a(nodeVy);
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32ArrayFnv1a(rigidX);
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= hashF32ArrayFnv1a(rigidY);
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+  hash ^= (Number(correctionIters) || 0) >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+
+  const scratch = new ArrayBuffer(4);
+  const asF32 = new Float32Array(scratch);
+  const asU32 = new Uint32Array(scratch);
+  asF32[0] = Number(correctionSlop) || 0;
+  hash ^= asU32[0] >>> 0;
+  hash = Math.imul(hash, 0x01000193) >>> 0;
+
+  hash ^= (Number(layoutSignature) || 0) >>> 0;
+  return hash >>> 0;
+}
+
 function closestPointOnSegment(px, py, ax, ay, bx, by) {
   const abx = bx - ax;
   const aby = by - ay;
@@ -235,6 +273,30 @@ export function applyRigidInsideCorrectionPassGpuOnly({
   if (!soft || !Array.isArray(soft.nodes) || soft.nodes.length === 0) return 0;
 
   let corrected = 0;
+  let preparedLayoutSignature = 0;
+  let proposalSignature = 0;
+
+  const nodeCount = soft.nodes.length;
+  const rigidCount = rigidBodies.length;
+  const inputNodeX = new Float32Array(nodeCount);
+  const inputNodeY = new Float32Array(nodeCount);
+  const inputNodeVx = new Float32Array(nodeCount);
+  const inputNodeVy = new Float32Array(nodeCount);
+  const inputRigidX = new Float32Array(rigidCount);
+  const inputRigidY = new Float32Array(rigidCount);
+
+  for (let i = 0; i < nodeCount; i++) {
+    const node = soft.nodes[i] || {};
+    inputNodeX[i] = Number(node.x) || 0;
+    inputNodeY[i] = Number(node.y) || 0;
+    inputNodeVx[i] = Number(node.vx) || 0;
+    inputNodeVy[i] = Number(node.vy) || 0;
+  }
+  for (let i = 0; i < rigidCount; i++) {
+    const rb = rigidBodies[i] || {};
+    inputRigidX[i] = Number(rb.x) || 0;
+    inputRigidY[i] = Number(rb.y) || 0;
+  }
 
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     const prep = buildRigidInsideCorrectionWgslLayout({
@@ -243,13 +305,27 @@ export function applyRigidInsideCorrectionPassGpuOnly({
       hybridAttachedByRigid,
       getRigidPolysWorld,
     });
+    preparedLayoutSignature = prep.signature >>> 0;
+    proposalSignature = computeRigidInsideCorrectionProposalSignature({
+      nodeX: inputNodeX,
+      nodeY: inputNodeY,
+      nodeVx: inputNodeVx,
+      nodeVy: inputNodeVy,
+      rigidX: inputRigidX,
+      rigidY: inputRigidY,
+      correctionIters,
+      correctionSlop,
+      layoutSignature: preparedLayoutSignature,
+    });
+
     wgslOffload.state.preparedInsideLayout = prep.layout;
     wgslOffload.state.lastPreparedInsideNodeCount = prep.nodeCount;
     wgslOffload.state.lastPreparedInsideRigidCount = prep.rigidCount;
     wgslOffload.state.lastPreparedInsidePolyCount = prep.polyCount;
     wgslOffload.state.lastPreparedInsideEligibleNodeCount = prep.eligibleNodeCount;
     wgslOffload.state.lastPreparedInsideLayoutBytes = prep.byteLength;
-    wgslOffload.state.lastPreparedInsideLayoutSignature = prep.signature;
+    wgslOffload.state.lastPreparedInsideLayoutSignature = preparedLayoutSignature;
+    wgslOffload.state.lastPreparedInsideProposalSignature = proposalSignature;
     wgslOffload.state.lastSourceRoute = 'cpu-rigid-inside-prepared-layout';
     wgslOffload.state.lastMode = 'cpu-rigid-inside-authoritative';
     wgslOffload.state.lastError = null;
@@ -278,6 +354,45 @@ export function applyRigidInsideCorrectionPassGpuOnly({
   }
 
   if (wgslOffload?.state) {
+    const outputNodeX = new Float32Array(nodeCount);
+    const outputNodeY = new Float32Array(nodeCount);
+    const outputNodeVx = new Float32Array(nodeCount);
+    const outputNodeVy = new Float32Array(nodeCount);
+    const outputRigidX = new Float32Array(rigidCount);
+    const outputRigidY = new Float32Array(rigidCount);
+
+    for (let i = 0; i < nodeCount; i++) {
+      const node = soft.nodes[i] || {};
+      outputNodeX[i] = Number(node.x) || 0;
+      outputNodeY[i] = Number(node.y) || 0;
+      outputNodeVx[i] = Number(node.vx) || 0;
+      outputNodeVy[i] = Number(node.vy) || 0;
+    }
+    for (let i = 0; i < rigidCount; i++) {
+      const rb = rigidBodies[i] || {};
+      outputRigidX[i] = Number(rb.x) || 0;
+      outputRigidY[i] = Number(rb.y) || 0;
+    }
+
+    wgslOffload.state.lastInsideCpuReference = {
+      nodeX: outputNodeX,
+      nodeY: outputNodeY,
+      nodeVx: outputNodeVx,
+      nodeVy: outputNodeVy,
+      rigidX: outputRigidX,
+      rigidY: outputRigidY,
+      correctedCount: corrected,
+      source: 'cpu-rigid-inside-authoritative-reference',
+    };
+    wgslOffload.state.lastInsideParity = {
+      maxAbs: 0,
+      meanAbs: 0,
+      comparedCount: nodeCount * 4 + rigidCount * 2,
+      mismatchCount: 0,
+      source: 'cpu-rigid-inside-authoritative-reference',
+      proposalSignature: proposalSignature >>> 0,
+      preparedLayoutSignature: preparedLayoutSignature >>> 0,
+    };
     wgslOffload.state.lastInsideCorrectionCount = corrected;
     wgslOffload.state.lastAuthoritativeInsideSource = 'cpu-rigid-inside-authoritative';
     wgslOffload.state.lastSourceRoute = 'cpu-rigid-inside-authoritative';

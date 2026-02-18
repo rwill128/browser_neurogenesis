@@ -45,6 +45,7 @@ test('gpu lab consumes and reports runtime solver path for embed resets/status',
   assert.match(gpuLabJs, /runtimeSolverPath:\s*normalizeRuntimeSolverPath\(sim\?\.controls\?\.runtimeSolverPath\)/, 'gpu-lab API status must report active runtime solver path');
   assert.match(gpuLabJs, /setRuntimePipelineMode\(options\?\.pipelineMode\s*\?\?\s*getRuntimePipelineMode\(selectedSolverPath\)/, 'gpu-lab embed reset must apply requested runtime pipeline mode');
   assert.match(gpuLabJs, /runtimePipelineMode:\s*normalizeRuntimePipelineMode\(sim\?\.controls\?\.runtimePipelineMode, sim\?\.controls\?\.runtimeSolverPath\)/, 'gpu-lab API status must report active runtime pipeline mode');
+  assert.match(gpuLabJs, /if \(mode === 'standard'\) return 'standard';/, 'gpu-lab pipeline normalization must preserve explicit standard mode even under gpu-only solver path');
 });
 
 test('gpu lab html exposes 3 runtime pipeline modes with explicit labels', async () => {

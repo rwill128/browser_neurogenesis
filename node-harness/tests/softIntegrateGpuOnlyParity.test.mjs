@@ -266,7 +266,7 @@ test('soft integration WGSL offload path matches baseline and survives capacity 
       assert.ok(Math.abs(g.vy - b.vy) < 5e-6, `large node ${i} vy mismatch: ${g.vy} vs ${b.vy}`);
     }
 
-    assert.equal(wgslOffload.state.lastMode, 'wgsl');
+    assert.equal(wgslOffload.state.lastMode, 'wgsl-validated');
     assert.equal(wgslOffload.state.lastSourceRoute, 'wgsl-integrate-authoritative');
     assert.ok(Number.isInteger(wgslOffload.state.lastProposalSignature), 'expected deterministic WGSL proposal signature');
     assert.equal(wgslOffload.state.lastParity?.source, 'wgsl-integrate-proposal-vs-cpu');

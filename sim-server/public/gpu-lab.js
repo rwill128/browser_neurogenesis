@@ -34,6 +34,7 @@ const importSpecBtn = document.getElementById('importSpecBtn');
 const importSpecFile = document.getElementById('importSpecFile');
 const importScaleEl = document.getElementById('importScale');
 const fpsHud = document.getElementById('fpsHud');
+const softIntegrateHudEl = document.getElementById('softIntegrateHud');
 const canvas = document.getElementById('view');
 const ctx = canvas.getContext('2d');
 
@@ -304,6 +305,15 @@ function bindSliderReadouts() {
     slider.addEventListener('change', update);
   }
   refreshAllSliderReadouts();
+}
+
+function softIntegrateHudLabel(state) {
+  const mode = String(state?.mode || '').toLowerCase();
+  if (mode === 'wgsl') return { text: 'Soft integrate: WGSL', color: '#6bff9a' };
+  if (mode === 'cpu-fallback') return { text: 'Soft integrate: CPU fallback', color: '#ffd36b' };
+  if (mode === 'cpu-baseline') return { text: 'Soft integrate: CPU baseline', color: '#b8c7ff' };
+  if (mode === 'cpu') return { text: 'Soft integrate: CPU (no WGSL)', color: '#ffd36b' };
+  return { text: 'Soft integrate: --', color: '#9faec7' };
 }
 
 function createBuffer(device, bytes, usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC) {
@@ -4236,7 +4246,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
 
   const hybridNodeVCap = 3.2;
   if (solverPath === 'gpu-only') {
-    await integrateSoftBodiesGpuOnly({
+    const softIntegrateRuntime = await integrateSoftBodiesGpuOnly({
       soft: s,
       n,
       dt,
@@ -4249,6 +4259,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         state: (sim.softIntegrateWgslState ||= {}),
       },
     });
+    sim.softIntegrateRuntime = softIntegrateRuntime || { mode: 'cpu-fallback', reason: 'unknown' };
   } else {
     for (const node of s.nodes) {
       const vmag = Math.hypot(node.vx, node.vy);
@@ -4260,6 +4271,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       node.y = node.y + node.vy * dt * SOFT_INTEGRATION_SCALE;
       applyBounceBoundary(node, n, 0.78);
     }
+    sim.softIntegrateRuntime = { mode: 'cpu-baseline', reason: 'baseline-path' };
   }
 
   if (solverPath === 'gpu-only') {
@@ -5762,6 +5774,7 @@ async function initSim() {
     overlayShowExtraVisuals: true,
     highlightSegmentId: null,
     highlightUntilFrame: 0,
+    softIntegrateRuntime: { mode: 'cpu-baseline', reason: 'init' },
     frame: 0, t0: performance.now(),
   };
 }
@@ -5959,6 +5972,11 @@ async function stepAndRender() {
     const elapsed = (performance.now() - s.t0) / 1000;
     const fpsNow = +(s.frame / Math.max(1e-6, elapsed)).toFixed(1);
     if (fpsHud) fpsHud.textContent = `FPS: ${fpsNow}`;
+    if (softIntegrateHudEl) {
+      const hud = softIntegrateHudLabel(s.softIntegrateRuntime);
+      softIntegrateHudEl.textContent = hud.text;
+      softIntegrateHudEl.style.color = hud.color;
+    }
     const couplingAverages = summarizeCouplingTelemetry(s.couplingTelemetry);
     const couplingSnapshot = { ...couplingAverages, ...Object.fromEntries(Object.entries(couplingInstant || {}).map(([k,v]) => [k+'Now', +((v || 0).toFixed(4))])) };
     const rigidContacts = Array.isArray(s.lastRigidContacts) ? s.lastRigidContacts : [];
@@ -5973,6 +5991,8 @@ async function stepAndRender() {
         grid: n,
         frames: s.frame,
         fps: fpsNow,
+        softIntegrateMode: s.softIntegrateRuntime?.mode || 'unknown',
+        softIntegrateReason: s.softIntegrateRuntime?.reason || 'n/a',
         dyeEnergy: +sum.toFixed(1),
         viscosityScale: s.controls.viscosity,
         fluidVelocityCap: normalizeFluidVelocityCap(s.controls.fluidVelocityCap),

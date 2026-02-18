@@ -10,6 +10,7 @@ import { resolveRigidRigidCollisionPassGpuOnly } from '/runtime-solvers/stepRigi
 import { resolveRigidSoftCollisionPassGpuOnly } from '/runtime-solvers/stepRigidSoftCollisionGpuOnly.js';
 import { applySoftSpringsXPBDVelocityGpuOnly } from '/runtime-solvers/stepSoftSpringsXpbdGpuOnly.js';
 import { applySoftAreaXPBDVelocityGpuOnly } from '/runtime-solvers/stepSoftAreaXpbdGpuOnly.js';
+import { resolveSoftSoftCollisionPassGpuOnly } from '/runtime-solvers/stepSoftCollisionGpuOnly.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -4048,20 +4049,31 @@ function stepBodiesAndInject(sim, vxField, vyField) {
         }
       }
     }
-    for (let i = 0; i < s.nodes.length; i++) {
-      for (let j = i + 1; j < s.nodes.length; j++) {
-        resolveCircleCollision(s.nodes[i], s.nodes[j], 0.22);
+    if (solverPath === 'gpu-only') {
+      resolveSoftSoftCollisionPassGpuOnly({
+        soft: s,
+        resolveCircleCollision,
+        resolveSoftNodeVsSoftEdgeCollision,
+        edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
+        nodeNodeSlop: 0.22,
+        nodeEdgeSlop: 0.12,
+      });
+    } else {
+      for (let i = 0; i < s.nodes.length; i++) {
+        for (let j = i + 1; j < s.nodes.length; j++) {
+          resolveCircleCollision(s.nodes[i], s.nodes[j], 0.22);
+        }
       }
-    }
-    // Soft-node vs foreign soft-edge blocking for solid edges.
-    for (let ni = 0; ni < s.nodes.length; ni++) {
-      const node = s.nodes[ni];
-      for (const [i, j, _rest, edgeBodyMode] of s.springs) {
-        if (edgeBodyMode !== EDGE_BODY_MODE.BLOCK) continue;
-        if (i === ni || j === ni) continue;
-        const a = s.nodes[i], b = s.nodes[j];
-        if (a.clusterId === node.clusterId && b.clusterId === node.clusterId) continue;
-        resolveSoftNodeVsSoftEdgeCollision(node, a, b, 0.12);
+      // Soft-node vs foreign soft-edge blocking for solid edges.
+      for (let ni = 0; ni < s.nodes.length; ni++) {
+        const node = s.nodes[ni];
+        for (const [i, j, _rest, edgeBodyMode] of s.springs) {
+          if (edgeBodyMode !== EDGE_BODY_MODE.BLOCK) continue;
+          if (i === ni || j === ni) continue;
+          const a = s.nodes[i], b = s.nodes[j];
+          if (a.clusterId === node.clusterId && b.clusterId === node.clusterId) continue;
+          resolveSoftNodeVsSoftEdgeCollision(node, a, b, 0.12);
+        }
       }
     }
 

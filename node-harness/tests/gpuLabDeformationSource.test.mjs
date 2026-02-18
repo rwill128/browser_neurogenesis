@@ -240,6 +240,20 @@ test('gpu-lab routes rigid-soft collision stepping through isolated gpu-only run
   );
 });
 
+test('gpu-lab routes soft-soft collision stepping through isolated gpu-only runtime solver module', () => {
+  assert.match(
+    source,
+    /import \{ resolveSoftSoftCollisionPassGpuOnly \} from '\/runtime-solvers\/stepSoftCollisionGpuOnly\.js';/,
+    'expected isolated gpu-only soft-soft collision module import',
+  );
+
+  assert.match(
+    source,
+    /if \(solverPath === 'gpu-only'\) \{[\s\S]*resolveSoftSoftCollisionPassGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*for \(let i = 0; i < s\.nodes\.length; i\+\+\)[\s\S]*resolveSoftNodeVsSoftEdgeCollision\(node, a, b, 0\.12\);/,
+    'expected explicit gpu-only soft-soft collision dispatch with baseline fallback loops',
+  );
+});
+
 test('gpu-lab routes soft spring XPBD stepping through isolated gpu-only runtime solver module', () => {
   assert.match(
     source,

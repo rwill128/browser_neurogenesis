@@ -254,6 +254,20 @@ test('gpu-lab routes soft integration stepping through isolated gpu-only runtime
   );
 });
 
+test('gpu-lab routes soft spring rest-recovery stepping through isolated gpu-only runtime solver module', () => {
+  assert.match(
+    source,
+    /import \{ applySoftRestRecoveryGpuOnly \} from '\/runtime-solvers\/stepSoftRestRecoveryGpuOnly\.js';/,
+    'expected isolated gpu-only soft rest-recovery module import',
+  );
+
+  assert.match(
+    source,
+    /if \(softSpringRestRecoveryOn && sim\.softSpringRestBaseline && sim\.softSpringRestBaseline\.length === s\.springs\.length\) \{[\s\S]*if \(solverPath === 'gpu-only'\) \{[\s\S]*applySoftRestRecoveryGpuOnly\(\{[\s\S]*recoverSoftSpringRests,[\s\S]*\}\);[\s\S]*\} else \{/,
+    'expected explicit gpu-only rest-recovery dispatch with baseline fallback branch',
+  );
+});
+
 test('gpu-lab routes rigid-soft collision stepping through isolated gpu-only runtime solver module', () => {
   assert.match(
     source,

@@ -21,6 +21,7 @@ import { applySoftFluidCouplingGpuOnly } from '/runtime-solvers/stepSoftFluidCou
 import { applyPostCollisionRecoveryGpuOnly } from '/runtime-solvers/stepPostCollisionRecoveryGpuOnly.js';
 import { stabilizeRigidPostIntegrateGpuOnly } from '/runtime-solvers/stepRigidPostIntegrateGpuOnly.js';
 import { applyCollisionBoundaryPassGpuOnly } from '/runtime-solvers/stepCollisionBoundaryGpuOnly.js';
+import { applySoftRestRecoveryGpuOnly } from '/runtime-solvers/stepSoftRestRecoveryGpuOnly.js';
 
 const out = document.getElementById('out');
 const runBtn = document.getElementById('runBtn');
@@ -4341,36 +4342,47 @@ function stepBodiesAndInject(sim, vxField, vyField) {
   }
 
   if (softSpringRestRecoveryOn && sim.softSpringRestBaseline && sim.softSpringRestBaseline.length === s.springs.length) {
-    const severeProfile = severeInterventionsOn && deform.severeCollapseCount > 0;
-    const warningProfile = warningInterventionsOn && !severeProfile && deform.warningCount > 0;
-    const profile = severeProfile ? 'severe' : (warningProfile ? 'warning' : 'baseline');
-    const pick = (baseline, warning, severe) => (profile === 'baseline' ? baseline : (profile === 'warning' ? warning : severe));
+    if (solverPath === 'gpu-only') {
+      applySoftRestRecoveryGpuOnly({
+        springs: s.springs,
+        restBaseline: sim.softSpringRestBaseline,
+        severeInterventionsOn,
+        warningInterventionsOn,
+        deform,
+        recoverSoftSpringRests,
+      });
+    } else {
+      const severeProfile = severeInterventionsOn && deform.severeCollapseCount > 0;
+      const warningProfile = warningInterventionsOn && !severeProfile && deform.warningCount > 0;
+      const profile = severeProfile ? 'severe' : (warningProfile ? 'warning' : 'baseline');
+      const pick = (baseline, warning, severe) => (profile === 'baseline' ? baseline : (profile === 'warning' ? warning : severe));
 
-    recoverSoftSpringRests(s.springs, sim.softSpringRestBaseline, {
-      recoverRate: pick(0.056, 0.036, 0.015),
-      hardMinFactor: 0.7,
-      hardMaxFactor: 1.45,
-      jitterDeadband: 1e-5,
-      adaptiveGainMax: pick(2.4, 1.85, 1.35),
-      adaptiveExponent: pick(0.78, 0.9, 1.0),
-      elongationBiasMax: pick(1.22, 1.14, 1.08),
-      compressionBiasMax: pick(1.12, 1.08, 1.04),
-      errorPivot: 0.16,
-      outlierRecoveryCouplingMax: pick(1.22, 1.12, 1.05),
-      outlierErrorPivot: pick(0.75, 0.85, 0.95),
-      localEndpointCouplingMax: pick(1.16, 1.08, 1.03),
-      localDirectionalCouplingMax: pick(1.1, 1.06, 1.02),
-      localImbalanceCouplingMax: pick(1.12, 1.07, 1.02),
-      localConsensusCouplingMax: pick(1.08, 1.04, 1.01),
-      localOutlierCouplingMax: pick(1.12, 1.07, 1.02),
-      localOutlierErrorPivot: pick(0.85, 0.95, 1.1),
-      localErrorPivot: pick(0.2, 0.25, 0.3),
-      counterPolarityCouplingMax: pick(1.09, 1.05, 1.02),
-      smallRestRecoveryCouplingMax: pick(1.14, 1.08, 1.0),
-      smallRestPivot: pick(0.9, 1.05, 1.2),
-      lowErrorRecoveryCouplingMax: pick(1.12, 1.06, 1.0),
-      lowErrorRecoveryGate: pick(0.08, 0.065, 0.05),
-    });
+      recoverSoftSpringRests(s.springs, sim.softSpringRestBaseline, {
+        recoverRate: pick(0.056, 0.036, 0.015),
+        hardMinFactor: 0.7,
+        hardMaxFactor: 1.45,
+        jitterDeadband: 1e-5,
+        adaptiveGainMax: pick(2.4, 1.85, 1.35),
+        adaptiveExponent: pick(0.78, 0.9, 1.0),
+        elongationBiasMax: pick(1.22, 1.14, 1.08),
+        compressionBiasMax: pick(1.12, 1.08, 1.04),
+        errorPivot: 0.16,
+        outlierRecoveryCouplingMax: pick(1.22, 1.12, 1.05),
+        outlierErrorPivot: pick(0.75, 0.85, 0.95),
+        localEndpointCouplingMax: pick(1.16, 1.08, 1.03),
+        localDirectionalCouplingMax: pick(1.1, 1.06, 1.02),
+        localImbalanceCouplingMax: pick(1.12, 1.07, 1.02),
+        localConsensusCouplingMax: pick(1.08, 1.04, 1.01),
+        localOutlierCouplingMax: pick(1.12, 1.07, 1.02),
+        localOutlierErrorPivot: pick(0.85, 0.95, 1.1),
+        localErrorPivot: pick(0.2, 0.25, 0.3),
+        counterPolarityCouplingMax: pick(1.09, 1.05, 1.02),
+        smallRestRecoveryCouplingMax: pick(1.14, 1.08, 1.0),
+        smallRestPivot: pick(0.9, 1.05, 1.2),
+        lowErrorRecoveryCouplingMax: pick(1.12, 1.06, 1.0),
+        lowErrorRecoveryGate: pick(0.08, 0.065, 0.05),
+      });
+    }
   }
   sim.softDeformationState = deform;
 

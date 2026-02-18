@@ -484,6 +484,8 @@ export function buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft }) 
   const rigidVx = new Float32Array(rigidCount);
   const rigidVy = new Float32Array(rigidCount);
   const rigidOmega = new Float32Array(rigidCount);
+  const rigidInvMass = new Float32Array(rigidCount);
+  const rigidInvInertia = new Float32Array(rigidCount);
   const rigidMinX = new Float32Array(rigidCount);
   const rigidMinY = new Float32Array(rigidCount);
   const rigidMaxX = new Float32Array(rigidCount);
@@ -513,6 +515,8 @@ export function buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft }) 
     const vx = Number(rb.vx) || 0;
     const vy = Number(rb.vy) || 0;
     const omega = Number(rb.omega) || 0;
+    const invMass = 1 / Math.max(0.05, Number(rb.mass) || 0.05);
+    const invInertia = 1 / Math.max(0.05, Number(rb.inertia) || (0.5 * Math.max(0.05, Number(rb.mass) || 1) * Math.max(1, Number(rb.r) || 1) ** 2));
     const minX = Number(rb._aabb?.minX) || 0;
     const minY = Number(rb._aabb?.minY) || 0;
     const maxX = Number(rb._aabb?.maxX) || 0;
@@ -523,6 +527,8 @@ export function buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft }) 
     rigidVx[i] = vx;
     rigidVy[i] = vy;
     rigidOmega[i] = omega;
+    rigidInvMass[i] = invMass;
+    rigidInvInertia[i] = invInertia;
     rigidMinX[i] = minX;
     rigidMinY[i] = minY;
     rigidMaxX[i] = maxX;
@@ -533,6 +539,8 @@ export function buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft }) 
     signature = fnv1aMix(signature, Math.fround(vx));
     signature = fnv1aMix(signature, Math.fround(vy));
     signature = fnv1aMix(signature, Math.fround(omega));
+    signature = fnv1aMix(signature, Math.fround(invMass));
+    signature = fnv1aMix(signature, Math.fround(invInertia));
   }
 
   for (let i = 0; i < nodeCount; i++) {
@@ -576,6 +584,8 @@ export function buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft }) 
     rigidVx,
     rigidVy,
     rigidOmega,
+    rigidInvMass,
+    rigidInvInertia,
     rigidMinX,
     rigidMinY,
     rigidMaxX,
@@ -595,6 +605,8 @@ export function buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft }) 
       + rigidVx.byteLength
       + rigidVy.byteLength
       + rigidOmega.byteLength
+      + rigidInvMass.byteLength
+      + rigidInvInertia.byteLength
       + rigidMinX.byteLength
       + rigidMinY.byteLength
       + rigidMaxX.byteLength
@@ -1355,6 +1367,8 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       wgslOffload.state.lastPreparedNarrowphaseSceneRigidVx = narrowphaseSceneLayout.rigidVx;
       wgslOffload.state.lastPreparedNarrowphaseSceneRigidVy = narrowphaseSceneLayout.rigidVy;
       wgslOffload.state.lastPreparedNarrowphaseSceneRigidOmega = narrowphaseSceneLayout.rigidOmega;
+      wgslOffload.state.lastPreparedNarrowphaseSceneRigidInvMass = narrowphaseSceneLayout.rigidInvMass;
+      wgslOffload.state.lastPreparedNarrowphaseSceneRigidInvInertia = narrowphaseSceneLayout.rigidInvInertia;
       wgslOffload.state.lastPreparedNarrowphaseSceneRigidMinX = narrowphaseSceneLayout.rigidMinX;
       wgslOffload.state.lastPreparedNarrowphaseSceneRigidMinY = narrowphaseSceneLayout.rigidMinY;
       wgslOffload.state.lastPreparedNarrowphaseSceneRigidMaxX = narrowphaseSceneLayout.rigidMaxX;

@@ -395,6 +395,8 @@ test('soft fluid coupling wgsl prep telemetry: gpu-only publishes deterministic 
   assert.equal(wgslState.preparedLayout.clusterNodeIndices.length, soft.nodes.length);
   assert.equal(wgslState.preparedSampleLayout.fluidSampleVx.length, soft.nodes.length);
   assert.equal(wgslState.preparedSampleLayout.sampleDeltaVy.length, soft.nodes.length);
+  assert.equal(wgslState.preparedSampleLayout.localHoney.length, soft.nodes.length);
+  assert.equal(wgslState.lastCarryProposalDispatched, false, 'expected no WGSL dispatch when device is unavailable in parity harness');
   assert.equal(wgslState.lastCpuCarryProposalForceX.length, soft.nodes.length);
   assert.equal(wgslState.lastCpuCarryProposalLocalCarryY.length, soft.nodes.length);
 });

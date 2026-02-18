@@ -137,6 +137,7 @@ function buildSoftFluidCouplingCpuSampleLayout({
   computeSoftCentroid,
   computeSoftClusterKinematics,
   sampleFluidForBodyCoupling,
+  localHoneyDrag,
 }) {
   const nodeCount = Number(nodes?.length) || 0;
   const fluidSampleVx = new Float32Array(nodeCount);
@@ -145,6 +146,7 @@ function buildSoftFluidCouplingCpuSampleLayout({
   const clusterLocalVy = new Float32Array(nodeCount);
   const sampleDeltaVx = new Float32Array(nodeCount);
   const sampleDeltaVy = new Float32Array(nodeCount);
+  const localHoney = new Float32Array(nodeCount);
 
   const centroid = computeSoftCentroid(nodes);
   const clusterKinematics = computeSoftClusterKinematics(nodes);
@@ -192,6 +194,7 @@ function buildSoftFluidCouplingCpuSampleLayout({
     clusterLocalVy[i] = localVy;
     sampleDeltaVx[i] = fx - localVx;
     sampleDeltaVy[i] = fy - localVy;
+    localHoney[i] = Number(localHoneyDrag?.(Number(node.x) || 0, Number(node.y) || 0)) || 0;
   }
 
   const layout = {
@@ -201,6 +204,7 @@ function buildSoftFluidCouplingCpuSampleLayout({
     clusterLocalVy,
     sampleDeltaVx,
     sampleDeltaVy,
+    localHoney,
   };
   const signatureSeed = [nodeCount, Number(sim?.frame) || 0, Number(n) || 0];
   let signature = hashU32ArrayFnv1a(signatureSeed);
@@ -238,6 +242,261 @@ function hasAuthoritativeWgslCarryProposal(wgslOffload, proposalSignature, nodeC
     && state.lastCarryProposalCarryY.length === nodeCount
     && state.lastCarryProposalLocalCarryX.length === nodeCount
     && state.lastCarryProposalLocalCarryY.length === nodeCount;
+}
+
+const SOFT_FLUID_CARRY_PROPOSAL_WGSL = /* wgsl */`
+struct Params {
+  nodeCount: u32,
+  _pad0: vec3<u32>,
+  dragK: f32,
+  nodeFlowCoupling: f32,
+  localFlowShare: f32,
+  _pad1: f32,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> sampleVx: array<f32>;
+@group(0) @binding(2) var<storage, read> sampleVy: array<f32>;
+@group(0) @binding(3) var<storage, read> nodeVx: array<f32>;
+@group(0) @binding(4) var<storage, read> nodeVy: array<f32>;
+@group(0) @binding(5) var<storage, read> sampleDeltaVx: array<f32>;
+@group(0) @binding(6) var<storage, read> sampleDeltaVy: array<f32>;
+@group(0) @binding(7) var<storage, read> mass: array<f32>;
+@group(0) @binding(8) var<storage, read> momentum: array<f32>;
+@group(0) @binding(9) var<storage, read> isMembraneCluster: array<u32>;
+@group(0) @binding(10) var<storage, read> honey: array<f32>;
+@group(0) @binding(11) var<storage, read_write> outForceX: array<f32>;
+@group(0) @binding(12) var<storage, read_write> outForceY: array<f32>;
+@group(0) @binding(13) var<storage, read_write> outCarryX: array<f32>;
+@group(0) @binding(14) var<storage, read_write> outCarryY: array<f32>;
+@group(0) @binding(15) var<storage, read_write> outLocalCarryX: array<f32>;
+@group(0) @binding(16) var<storage, read_write> outLocalCarryY: array<f32>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x;
+  if (i >= params.nodeCount) {
+    return;
+  }
+
+  let m = max(0.02, mass[i]);
+  let invM = 1.0 / m;
+  let membraneScale = select(1.0, 0.88, isMembraneCluster[i] > 0u);
+  let flowCoupling = params.nodeFlowCoupling * membraneScale * momentum[i];
+  let dragHoney = params.dragK * honey[i] * flowCoupling;
+
+  let fx = sampleDeltaVx[i] * dragHoney * m;
+  let fy = sampleDeltaVy[i] * dragHoney * m;
+  outForceX[i] = fx;
+  outForceY[i] = fy;
+  outCarryX[i] = fx * invM;
+  outCarryY[i] = fy * invM;
+
+  outLocalCarryX[i] = (sampleVx[i] - nodeVx[i]) * dragHoney * invM * params.localFlowShare;
+  outLocalCarryY[i] = (sampleVy[i] - nodeVy[i]) * dragHoney * invM * params.localFlowShare;
+}
+`;
+
+function writeFloatArrayToBuffer(device, buffer, arr) {
+  if (!device?.queue || !buffer || !(arr instanceof Float32Array)) return;
+  device.queue.writeBuffer(buffer, 0, arr);
+}
+
+function writeUintArrayToBuffer(device, buffer, arr) {
+  if (!device?.queue || !buffer || !(arr instanceof Uint32Array)) return;
+  device.queue.writeBuffer(buffer, 0, arr);
+}
+
+function ensureSoftFluidCarryProposalResources(state, device, nodeCount) {
+  if (!state || !device || !Number.isFinite(nodeCount) || nodeCount <= 0) return null;
+  if (typeof GPUBufferUsage === 'undefined' || typeof GPUMapMode === 'undefined') return null;
+
+  const capacity = Math.max(1, Number(nodeCount) | 0);
+  const bytes = capacity * Float32Array.BYTES_PER_ELEMENT;
+  const u32Bytes = capacity * Uint32Array.BYTES_PER_ELEMENT;
+  const recreate = !state.carryProposalResources || (Number(state.carryProposalResources.capacity) || 0) < capacity;
+
+  if (!recreate) return state.carryProposalResources;
+
+  state.carryProposalResources = null;
+
+  const createStorage = (label, byteSize) => device.createBuffer({
+    label,
+    size: Math.max(4, byteSize),
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+  const createOutputStorage = (label) => device.createBuffer({
+    label,
+    size: Math.max(4, bytes),
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+  });
+  const createReadback = (label) => device.createBuffer({
+    label,
+    size: Math.max(4, bytes),
+    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+  });
+
+  const module = device.createShaderModule({
+    label: 'soft-fluid-carry-proposal-wgsl',
+    code: SOFT_FLUID_CARRY_PROPOSAL_WGSL,
+  });
+  const pipeline = device.createComputePipeline({
+    label: 'soft-fluid-carry-proposal-pipeline',
+    layout: 'auto',
+    compute: {
+      module,
+      entryPoint: 'main',
+    },
+  });
+
+  const resources = {
+    capacity,
+    paramsBuffer: device.createBuffer({
+      label: 'soft-fluid-carry-proposal-params',
+      size: 32,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    }),
+    sampleVxBuffer: createStorage('soft-fluid-carry-sample-vx', bytes),
+    sampleVyBuffer: createStorage('soft-fluid-carry-sample-vy', bytes),
+    nodeVxBuffer: createStorage('soft-fluid-carry-node-vx', bytes),
+    nodeVyBuffer: createStorage('soft-fluid-carry-node-vy', bytes),
+    sampleDeltaVxBuffer: createStorage('soft-fluid-carry-delta-vx', bytes),
+    sampleDeltaVyBuffer: createStorage('soft-fluid-carry-delta-vy', bytes),
+    massBuffer: createStorage('soft-fluid-carry-mass', bytes),
+    momentumBuffer: createStorage('soft-fluid-carry-momentum', bytes),
+    membraneBuffer: createStorage('soft-fluid-carry-membrane', u32Bytes),
+    honeyBuffer: createStorage('soft-fluid-carry-honey', bytes),
+    outForceXBuffer: createOutputStorage('soft-fluid-carry-out-force-x'),
+    outForceYBuffer: createOutputStorage('soft-fluid-carry-out-force-y'),
+    outCarryXBuffer: createOutputStorage('soft-fluid-carry-out-carry-x'),
+    outCarryYBuffer: createOutputStorage('soft-fluid-carry-out-carry-y'),
+    outLocalCarryXBuffer: createOutputStorage('soft-fluid-carry-out-local-carry-x'),
+    outLocalCarryYBuffer: createOutputStorage('soft-fluid-carry-out-local-carry-y'),
+    readForceXBuffer: createReadback('soft-fluid-carry-read-force-x'),
+    readForceYBuffer: createReadback('soft-fluid-carry-read-force-y'),
+    readCarryXBuffer: createReadback('soft-fluid-carry-read-carry-x'),
+    readCarryYBuffer: createReadback('soft-fluid-carry-read-carry-y'),
+    readLocalCarryXBuffer: createReadback('soft-fluid-carry-read-local-carry-x'),
+    readLocalCarryYBuffer: createReadback('soft-fluid-carry-read-local-carry-y'),
+    pipeline,
+    bindGroup: null,
+  };
+
+  resources.bindGroup = device.createBindGroup({
+    label: 'soft-fluid-carry-proposal-bind-group',
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: resources.paramsBuffer } },
+      { binding: 1, resource: { buffer: resources.sampleVxBuffer } },
+      { binding: 2, resource: { buffer: resources.sampleVyBuffer } },
+      { binding: 3, resource: { buffer: resources.nodeVxBuffer } },
+      { binding: 4, resource: { buffer: resources.nodeVyBuffer } },
+      { binding: 5, resource: { buffer: resources.sampleDeltaVxBuffer } },
+      { binding: 6, resource: { buffer: resources.sampleDeltaVyBuffer } },
+      { binding: 7, resource: { buffer: resources.massBuffer } },
+      { binding: 8, resource: { buffer: resources.momentumBuffer } },
+      { binding: 9, resource: { buffer: resources.membraneBuffer } },
+      { binding: 10, resource: { buffer: resources.honeyBuffer } },
+      { binding: 11, resource: { buffer: resources.outForceXBuffer } },
+      { binding: 12, resource: { buffer: resources.outForceYBuffer } },
+      { binding: 13, resource: { buffer: resources.outCarryXBuffer } },
+      { binding: 14, resource: { buffer: resources.outCarryYBuffer } },
+      { binding: 15, resource: { buffer: resources.outLocalCarryXBuffer } },
+      { binding: 16, resource: { buffer: resources.outLocalCarryYBuffer } },
+    ],
+  });
+
+  state.carryProposalResources = resources;
+  return resources;
+}
+
+function dispatchSoftFluidCarryProposalWgsl({ wgslOffload, nodeCount, dragK, nodeFlowCoupling, localFlowShare, proposalSignature }) {
+  const state = wgslOffload?.state;
+  const device = wgslOffload?.device;
+  const prep = state?.preparedLayout;
+  const sample = state?.preparedSampleLayout;
+  if (!state || !device || !prep || !sample || !Number.isFinite(nodeCount) || nodeCount <= 0) return false;
+  if (state.pendingCarryProposalPromise) return false;
+
+  const resources = ensureSoftFluidCarryProposalResources(state, device, nodeCount);
+  if (!resources) return false;
+
+  const paramsBuffer = new ArrayBuffer(32);
+  const paramsU32 = new Uint32Array(paramsBuffer);
+  const paramsF32 = new Float32Array(paramsBuffer);
+  paramsU32[0] = (nodeCount >>> 0);
+  paramsF32[4] = Number(dragK) || 0;
+  paramsF32[5] = Number(nodeFlowCoupling) || 0;
+  paramsF32[6] = Number(localFlowShare) || 0;
+
+  writeFloatArrayToBuffer(device, resources.sampleVxBuffer, sample.fluidSampleVx);
+  writeFloatArrayToBuffer(device, resources.sampleVyBuffer, sample.fluidSampleVy);
+  writeFloatArrayToBuffer(device, resources.nodeVxBuffer, prep.nodeVx);
+  writeFloatArrayToBuffer(device, resources.nodeVyBuffer, prep.nodeVy);
+  writeFloatArrayToBuffer(device, resources.sampleDeltaVxBuffer, sample.sampleDeltaVx);
+  writeFloatArrayToBuffer(device, resources.sampleDeltaVyBuffer, sample.sampleDeltaVy);
+  writeFloatArrayToBuffer(device, resources.massBuffer, prep.nodeMass);
+  writeFloatArrayToBuffer(device, resources.momentumBuffer, prep.nodeMomentum);
+  writeUintArrayToBuffer(device, resources.membraneBuffer, prep.nodeIsMembraneCluster);
+  writeFloatArrayToBuffer(device, resources.honeyBuffer, sample.localHoney);
+  device.queue.writeBuffer(resources.paramsBuffer, 0, paramsBuffer);
+
+  const encoder = device.createCommandEncoder({ label: 'soft-fluid-carry-proposal-encoder' });
+  const pass = encoder.beginComputePass({ label: 'soft-fluid-carry-proposal-pass' });
+  pass.setPipeline(resources.pipeline);
+  pass.setBindGroup(0, resources.bindGroup);
+  pass.dispatchWorkgroups(Math.max(1, Math.ceil(nodeCount / 64)));
+  pass.end();
+
+  encoder.copyBufferToBuffer(resources.outForceXBuffer, 0, resources.readForceXBuffer, 0, nodeCount * 4);
+  encoder.copyBufferToBuffer(resources.outForceYBuffer, 0, resources.readForceYBuffer, 0, nodeCount * 4);
+  encoder.copyBufferToBuffer(resources.outCarryXBuffer, 0, resources.readCarryXBuffer, 0, nodeCount * 4);
+  encoder.copyBufferToBuffer(resources.outCarryYBuffer, 0, resources.readCarryYBuffer, 0, nodeCount * 4);
+  encoder.copyBufferToBuffer(resources.outLocalCarryXBuffer, 0, resources.readLocalCarryXBuffer, 0, nodeCount * 4);
+  encoder.copyBufferToBuffer(resources.outLocalCarryYBuffer, 0, resources.readLocalCarryYBuffer, 0, nodeCount * 4);
+
+  device.queue.submit([encoder.finish()]);
+
+  const readback = async () => {
+    const mapRead = async (buffer) => {
+      await buffer.mapAsync(GPUMapMode.READ);
+      try {
+        return new Float32Array(buffer.getMappedRange().slice(0));
+      } finally {
+        buffer.unmap();
+      }
+    };
+
+    const [forceX, forceY, carryX, carryY, localCarryX, localCarryY] = await Promise.all([
+      mapRead(resources.readForceXBuffer),
+      mapRead(resources.readForceYBuffer),
+      mapRead(resources.readCarryXBuffer),
+      mapRead(resources.readCarryYBuffer),
+      mapRead(resources.readLocalCarryXBuffer),
+      mapRead(resources.readLocalCarryYBuffer),
+    ]);
+
+    state.lastCarryProposalForceX = forceX;
+    state.lastCarryProposalForceY = forceY;
+    state.lastCarryProposalCarryX = carryX;
+    state.lastCarryProposalCarryY = carryY;
+    state.lastCarryProposalLocalCarryX = localCarryX;
+    state.lastCarryProposalLocalCarryY = localCarryY;
+    state.lastCarryProposalSignature = Number(proposalSignature) >>> 0;
+    state.lastCarryProposalSource = 'wgsl-carry-proposal';
+    state.lastMode = 'wgsl-carry-proposal';
+    state.lastSourceRoute = 'wgsl-carry-proposal';
+  };
+
+  state.pendingCarryProposalPromise = readback()
+    .catch((err) => {
+      state.lastCarryProposalError = String(err?.message || err);
+    })
+    .finally(() => {
+      state.pendingCarryProposalPromise = null;
+    });
+
+  return true;
 }
 
 export function applySoftFluidCouplingGpuOnly({
@@ -297,6 +556,7 @@ export function applySoftFluidCouplingGpuOnly({
       computeSoftCentroid,
       computeSoftClusterKinematics,
       sampleFluidForBodyCoupling,
+      localHoneyDrag,
     });
     wgslOffload.state.preparedLayout = prep.layout;
     wgslOffload.state.preparedSampleLayout = samplePrep.layout;
@@ -313,11 +573,20 @@ export function applySoftFluidCouplingGpuOnly({
     wgslOffload.state.lastSourceRoute = 'cpu-sampled-layout+cluster-ownership';
     wgslOffload.state.lastMode = 'cpu-prepared';
     wgslOffload.state.lastError = null;
-    // Blocker for immediate WGSL stage in this pass: applySoftFluidCouplingGpuOnly
-    // is synchronous, but real WGSL readback for carry/drag proposal is async.
-    // This run adds deterministic proposal-signature + authoritative-routing
-    // ownership so the next WGSL dispatch can publish typed-array proposals that
-    // are promoted only when signature/length checks pass.
+
+    const wgslProposalDispatched = dispatchSoftFluidCarryProposalWgsl({
+      wgslOffload,
+      nodeCount: nodes.length,
+      dragK,
+      nodeFlowCoupling: SOFT_NODE_FLOW_COUPLING,
+      localFlowShare: SOFT_NODE_LOCAL_FLOW_SHARE,
+      proposalSignature: carryProposalSignature,
+    });
+    wgslOffload.state.lastCarryProposalDispatched = wgslProposalDispatched;
+    if (wgslProposalDispatched) {
+      wgslOffload.state.lastMode = 'wgsl-carry-proposal-dispatched';
+      wgslOffload.state.lastSourceRoute = 'wgsl-carry-proposal-dispatched';
+    }
   }
 
   const softCentroid = computeSoftCentroid(nodes);

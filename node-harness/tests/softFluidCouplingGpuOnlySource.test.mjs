@@ -27,8 +27,14 @@ test('soft fluid-coupling gpu-only publishes deterministic WGSL prep layout for 
 
   assert.match(
     source,
-    /lastPreparedProposalSignature = carryProposalSignature;[\s\S]*lastSourceRoute = 'cpu-sampled-layout\+cluster-ownership';[\s\S]*lastMode = 'cpu-prepared';[\s\S]*synchronous,[\s\S]*real WGSL readback[\s\S]*authoritative-routing[\s\S]*signature\/length checks pass/,
-    'expected deterministic proposal-signature telemetry + explicit async WGSL blocker note for authoritative routing handoff',
+    /lastPreparedProposalSignature = carryProposalSignature;[\s\S]*lastSourceRoute = 'cpu-sampled-layout\+cluster-ownership';[\s\S]*dispatchSoftFluidCarryProposalWgsl\([\s\S]*proposalSignature: carryProposalSignature[\s\S]*lastCarryProposalDispatched = wgslProposalDispatched;/,
+    'expected gpu-only prep branch to dispatch a concrete WGSL carry proposal stage using deterministic layout/signature telemetry',
+  );
+
+  assert.match(
+    source,
+    /const SOFT_FLUID_CARRY_PROPOSAL_WGSL = \/\* wgsl \*\/[\s\S]*@compute @workgroup_size\(64\)[\s\S]*outCarryX\[i\] = fx \* invM;[\s\S]*outLocalCarryY\[i\] = \(sampleVy\[i\] - nodeVy\[i\]\) \* dragHoney \* invM \* params\.localFlowShare;/,
+    'expected concrete WGSL carry proposal shader to compute force/carry/local-carry outputs from deterministic prepared buffers',
   );
 
   assert.match(

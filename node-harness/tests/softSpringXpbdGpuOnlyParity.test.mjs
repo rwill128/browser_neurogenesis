@@ -741,6 +741,9 @@ test('soft spring XPBD gpu-only fast authoritative replay skips residual cpu XPB
 
   await new Promise((resolve) => setTimeout(resolve, 0));
 
+  assert.equal(wgslState.lastProposalDeltaLambdaByColor, null);
+  assert.ok(wgslState.lastProposalDeltaLambdaBuffer, 'expected fast mode lambda proposal to retain GPU-resident delta buffer for chained velocity dispatch');
+
   const replaySoft = structuredClone(seed);
   const replayLambda = new Float32Array(seed.springs.length);
   const expectedNodeDeltaVx = new Float32Array(wgslState.lastVelocityDeltaProposalNodeVxByColor || []);

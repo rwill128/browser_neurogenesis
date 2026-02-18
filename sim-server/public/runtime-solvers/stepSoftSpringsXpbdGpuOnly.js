@@ -443,6 +443,7 @@ async function dispatchSoftSpringWgslVelocityDeltaProposal({
   layout,
   dtPos,
   deltaLambdaByColor,
+  deltaLambdaByColorBuffer = null,
   includeEndpointTelemetry = true,
 }) {
   if (!canUseWgslOffload(offload)) return null;
@@ -511,7 +512,9 @@ async function dispatchSoftSpringWgslVelocityDeltaProposal({
   device.queue.writeBuffer(state.velocityEndpointNodeIndices, 0, layout.endpointNodeIndicesByColor);
   device.queue.writeBuffer(state.velocityEndpointSpringIndices, 0, layout.endpointSpringIndicesByColor);
   device.queue.writeBuffer(state.velocityEndpointSigns, 0, layout.endpointSignsI32ByColor);
-  device.queue.writeBuffer(state.velocityDeltaLambdaByColor, 0, deltaLambdaByColor);
+  if (!deltaLambdaByColorBuffer) {
+    device.queue.writeBuffer(state.velocityDeltaLambdaByColor, 0, deltaLambdaByColor);
+  }
 
   if (!state.velocityReductionPipeline) {
     const module = device.createShaderModule({ code: softSpringVelocityNodeReductionWgsl });
@@ -546,6 +549,10 @@ async function dispatchSoftSpringWgslVelocityDeltaProposal({
   device.queue.writeBuffer(state.velocityReductionParams, 0, reductionParams);
 
   const encoder = device.createCommandEncoder();
+  if (deltaLambdaByColorBuffer && deltaLambdaByColorBuffer !== state.velocityDeltaLambdaByColor) {
+    const springBytes = springCount * 4;
+    encoder.copyBufferToBuffer(deltaLambdaByColorBuffer, 0, state.velocityDeltaLambdaByColor, 0, springBytes);
+  }
   const endpointPass = encoder.beginComputePass();
   endpointPass.setPipeline(state.velocityPipeline);
   endpointPass.setBindGroup(0, state.velocityBindGroup);
@@ -694,7 +701,15 @@ async function dispatchSoftSpringWgslProbe({ soft, offload, layout }) {
   return true;
 }
 
-async function dispatchSoftSpringWgslLambdaProposal({ soft, offload, layout, dtPos, alpha, lambdaCache }) {
+async function dispatchSoftSpringWgslLambdaProposal({
+  soft,
+  offload,
+  layout,
+  dtPos,
+  alpha,
+  lambdaCache,
+  includeDeltaTelemetry = true,
+}) {
   if (!canUseWgslOffload(offload)) return false;
   const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
   const springCount = Number(layout?.springRestByColor?.length) || 0;
@@ -774,42 +789,50 @@ async function dispatchSoftSpringWgslLambdaProposal({ soft, offload, layout, dtP
   pass.setBindGroup(0, state.lambdaBindGroup);
   pass.dispatchWorkgroups(dispatchCount);
   pass.end();
-  encoder.copyBufferToBuffer(state.deltaLambdaOut, 0, state.deltaLambdaReadback, 0, bytes);
+  if (includeDeltaTelemetry) {
+    encoder.copyBufferToBuffer(state.deltaLambdaOut, 0, state.deltaLambdaReadback, 0, bytes);
+  }
   encoder.copyBufferToBuffer(state.lambdaNextOut, 0, state.lambdaNextReadback, 0, bytes);
   device.queue.submit([encoder.finish()]);
 
-  await state.deltaLambdaReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
-  const mappedDelta = state.deltaLambdaReadback.getMappedRange(0, bytes);
-  const deltaByColor = new Float32Array(mappedDelta.slice(0));
-  state.deltaLambdaReadback.unmap();
+  let deltaByColor = null;
+  if (includeDeltaTelemetry) {
+    await state.deltaLambdaReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
+    const mappedDelta = state.deltaLambdaReadback.getMappedRange(0, bytes);
+    deltaByColor = new Float32Array(mappedDelta.slice(0));
+    state.deltaLambdaReadback.unmap();
+  }
 
   await state.lambdaNextReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
   const mappedNext = state.lambdaNextReadback.getMappedRange(0, bytes);
   const lambdaNextByColor = new Float32Array(mappedNext.slice(0));
   state.lambdaNextReadback.unmap();
 
-  const deltaBySpring = new Float32Array(springCount);
+  const deltaBySpring = includeDeltaTelemetry ? new Float32Array(springCount) : null;
   const lambdaNextBySpring = new Float32Array(springCount);
   for (let oi = 0; oi < springCount; oi++) {
     const ai = invSpringOrder[oi];
     if (!Number.isInteger(ai) || ai < 0 || ai >= springCount) continue;
-    deltaBySpring[ai] = deltaByColor[oi];
+    if (deltaBySpring) deltaBySpring[ai] = deltaByColor[oi];
     lambdaNextBySpring[ai] = lambdaNextByColor[oi];
   }
 
   let maxAbsDelta = 0;
   let sumAbsDelta = 0;
-  for (let i = 0; i < deltaByColor.length; i++) {
-    const abs = Math.abs(deltaByColor[i]);
-    if (abs > maxAbsDelta) maxAbsDelta = abs;
-    sumAbsDelta += abs;
+  if (deltaByColor) {
+    for (let i = 0; i < deltaByColor.length; i++) {
+      const abs = Math.abs(deltaByColor[i]);
+      if (abs > maxAbsDelta) maxAbsDelta = abs;
+      sumAbsDelta += abs;
+    }
   }
 
   state.lastProposalSpringCount = springCount;
   state.lastProposalDispatch = dispatchCount;
-  state.lastProposalAbsDeltaMean = deltaByColor.length > 0 ? sumAbsDelta / deltaByColor.length : 0;
+  state.lastProposalAbsDeltaMean = deltaByColor?.length > 0 ? sumAbsDelta / deltaByColor.length : 0;
   state.lastProposalAbsDeltaMax = maxAbsDelta;
   state.lastProposalDeltaLambdaByColor = deltaByColor;
+  state.lastProposalDeltaLambdaBuffer = state.deltaLambdaOut;
   state.lastProposalLambdaNextByColor = lambdaNextByColor;
   state.lastProposalDeltaLambdaBySpring = deltaBySpring;
   state.lastProposalLambdaNextBySpring = lambdaNextBySpring;
@@ -1424,6 +1447,7 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
             dtPos,
             alpha,
             lambdaCache,
+            includeDeltaTelemetry: !fastMode,
           }),
         ])
           .then(async ([probeRan, proposalRan]) => {
@@ -1434,6 +1458,7 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
                 layout,
                 dtPos,
                 deltaLambdaByColor: wgslOffload.state.lastProposalDeltaLambdaByColor,
+                deltaLambdaByColorBuffer: wgslOffload.state.lastProposalDeltaLambdaBuffer,
                 includeEndpointTelemetry: !fastMode,
               });
               let proposalReduction = null;

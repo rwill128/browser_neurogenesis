@@ -85,6 +85,19 @@ test('soft spring gpu-only WGSL proposal branch dispatches velocity-delta propos
   );
 });
 
+test('soft spring gpu-only fast mode chains WGSL lambda buffer directly into velocity proposal to avoid cpu readback/writeback bounce', () => {
+  assert.match(
+    source,
+    /includeDeltaTelemetry: !fastMode[\s\S]*deltaLambdaByColorBuffer: wgslOffload\.state\.lastProposalDeltaLambdaBuffer/,
+    'expected fast-mode proposal wiring to disable delta readback and pass GPU-resident lambda buffer handle forward',
+  );
+  assert.match(
+    source,
+    /if \(deltaLambdaByColorBuffer && deltaLambdaByColorBuffer !== state\.velocityDeltaLambdaByColor\) \{[\s\S]*copyBufferToBuffer\(deltaLambdaByColorBuffer, 0, state\.velocityDeltaLambdaByColor, 0, springBytes\)/,
+    'expected velocity proposal dispatch to support GPU buffer chaining without CPU writeBuffer bounce',
+  );
+});
+
 test('soft spring gpu-only path can promote cached WGSL velocity proposal to authoritative node/lambda apply when signature + contribution parity match', () => {
   assert.match(
     source,

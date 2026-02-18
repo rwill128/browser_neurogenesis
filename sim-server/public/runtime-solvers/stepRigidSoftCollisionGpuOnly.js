@@ -867,11 +867,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 `;
 
 
+function getWgslOffloadUnavailableReason(offload) {
+  if (!offload || offload.enabled !== true) return 'wgsl-offload-disabled';
+  if (!offload.device) return 'wgsl-device-missing';
+  if (typeof offload.device.createComputePipelineAsync !== 'function') {
+    return 'wgsl-device-missing-createComputePipelineAsync';
+  }
+  if (typeof globalThis.GPUBufferUsage === 'undefined') return 'wgsl-buffer-usage-unavailable';
+  return null;
+}
+
 function canUseWgslOffload(offload) {
-  if (!offload || offload.enabled !== true) return false;
-  if (!offload.device || typeof offload.device.createComputePipelineAsync !== 'function') return false;
-  if (typeof globalThis.GPUBufferUsage === 'undefined') return false;
-  return true;
+  return getWgslOffloadUnavailableReason(offload) === null;
 }
 
 function safeUnmapBuffer(buffer) {
@@ -2398,6 +2405,8 @@ function applyCpuRigidSoftResponseFallback({
 export async function resolveRigidSoftCollisionPassGpuOnly({
   rigidBodies,
   soft,
+  resolveRigidVsSoftNodeCollision,
+  resolveRigidVsSoftEdgeCollision,
   edgeBodyModeBlock,
   nodeSlop = 0.18,
   edgeSlop = 0.16,
@@ -2409,6 +2418,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
 
   if (profile) {
     profile.route = 'cpu-fallback';
+    profile.responseOwnership = 'cpu-hard-fallback';
     profile.fallbackReason = null;
     profile.usedWgslAuthoritativeResponse = false;
     profile.cpuFallbackNodeWallMs = 0;
@@ -2438,12 +2448,45 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
   let wgslEdgeBroadphaseMask = null;
   let compactNodePairs = null;
   let compactEdgePairs = null;
+  const wgslUnavailableReason = getWgslOffloadUnavailableReason(wgslOffload);
+  const wgslOffloadAvailable = wgslUnavailableReason === null;
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
-    wgslPrep = buildRigidSoftCollisionWgslLayout({
-      rigidBodies,
-      soft,
-      edgeBodyModeBlock,
-    });
+    if (!wgslOffloadAvailable) {
+      wgslPrep = buildRigidSoftCollisionWgslLayout({
+        rigidBodies,
+        soft,
+        edgeBodyModeBlock,
+      });
+      const hasAnyCandidatePairs = (wgslPrep.nodePairCount | 0) > 0 || (wgslPrep.edgePairCount | 0) > 0;
+      wgslOffload.state.preparedLayout = wgslPrep.layout;
+      wgslOffload.state.lastPreparedNodePairCount = wgslPrep.nodePairCount;
+      wgslOffload.state.lastPreparedEdgePairCount = wgslPrep.edgePairCount;
+      wgslOffload.state.lastPreparedLayoutBytes = wgslPrep.byteLength;
+      wgslOffload.state.lastPreparedLayoutSignature = wgslPrep.signature;
+      wgslOffload.state.lastSourceRoute = hasAnyCandidatePairs
+        ? 'cpu-rigid-soft-candidate-layout'
+        : 'cpu-rigid-soft-empty-candidates';
+      wgslOffload.state.lastMode = hasAnyCandidatePairs ? 'cpu-prepared' : 'cpu-empty-candidates';
+      wgslOffload.state.lastError = wgslUnavailableReason;
+      wgslOffload.state.lastWgslUnavailableReason = wgslUnavailableReason;
+      wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-unavailable';
+      wgslOffload.state.lastRigidSoftResponseOwnership = 'cpu-fallback';
+      wgslOffload.state.lastRigidSoftResponseRoute = 'cpu-fallback';
+      wgslOffload.state.lastRigidSoftResponseFallbackReason = wgslUnavailableReason;
+
+      const wgslNarrowphaseGeometry = buildRigidSoftNarrowphaseGeometryLayout(rigidBodies);
+      wgslOffload.state.lastPreparedNarrowphaseGeometry = wgslNarrowphaseGeometry.layout;
+      wgslOffload.state.lastPreparedNarrowphaseRigidCount = wgslNarrowphaseGeometry.rigidCount;
+      wgslOffload.state.lastPreparedNarrowphaseEdgeCount = wgslNarrowphaseGeometry.edgeCount;
+      wgslOffload.state.lastPreparedNarrowphaseBytes = wgslNarrowphaseGeometry.byteLength;
+      wgslOffload.state.lastPreparedNarrowphaseSignature = wgslNarrowphaseGeometry.signature;
+      if (!hasAnyCandidatePairs) return;
+    } else {
+      wgslPrep = buildRigidSoftCollisionWgslLayout({
+        rigidBodies,
+        soft,
+        edgeBodyModeBlock,
+      });
     const hasAnyCandidatePairs = (wgslPrep.nodePairCount | 0) > 0 || (wgslPrep.edgePairCount | 0) > 0;
     wgslOffload.state.preparedLayout = wgslPrep.layout;
     wgslOffload.state.lastPreparedNodePairCount = wgslPrep.nodePairCount;
@@ -2639,6 +2682,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodeInvMass = narrowphaseImpulseSeedLayout.nodeInvMass;
       wgslOffload.state.lastPreparedNarrowphaseImpulseSeedSource = 'cpu-rigid-soft-narrowphase-impulse-seed-layout';
     }
+    }
   }
 
   const impulseSeed = wgslOffload?.state
@@ -2671,7 +2715,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     : null;
 
   let usedWgslAuthoritativeResponse = false;
-  if (wgslOffload?.state && impulseSeed && canUseWgslOffload(wgslOffload)) {
+  if (wgslOffload?.state && impulseSeed && wgslOffloadAvailable) {
     try {
       const proposal = await dispatchRigidSoftResponseWgsl({
         offload: wgslOffload,
@@ -2688,34 +2732,41 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         wgslOffload.state.lastEdgeCollisionResponsePairCount = impulseSeed.edgePairCount;
         wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'wgsl-rigid-soft-response-authoritative';
         wgslOffload.state.lastRigidSoftResponseOwnership = 'wgsl-authoritative';
+        wgslOffload.state.lastRigidSoftResponseOwnershipDetailed = 'wgsl-authoritative';
         wgslOffload.state.lastRigidSoftResponseRoute = 'wgsl-authoritative';
         wgslOffload.state.lastRigidSoftResponseFallbackReason = null;
         wgslOffload.state.lastSourceRoute = 'wgsl-rigid-soft-response-authoritative';
         wgslOffload.state.lastMode = 'wgsl-rigid-soft-response-authoritative';
         if (profile) {
           profile.route = 'wgsl-authoritative';
+          profile.responseOwnership = 'wgsl-authoritative';
           profile.fallbackReason = null;
           profile.usedWgslAuthoritativeResponse = true;
         }
         usedWgslAuthoritativeResponse = true;
       } else {
-        wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-validation';
+        const fallbackReason = validationOut.reason || 'proposal-validation-failed';
+        wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-nonfinite';
         wgslOffload.state.lastRigidSoftResponseOwnership = 'cpu-fallback';
+        wgslOffload.state.lastRigidSoftResponseOwnershipDetailed = `cpu-hard-fallback:${fallbackReason}`;
         wgslOffload.state.lastRigidSoftResponseRoute = 'cpu-fallback';
-        wgslOffload.state.lastRigidSoftResponseFallbackReason = validationOut.reason || 'proposal-validation-failed';
+        wgslOffload.state.lastRigidSoftResponseFallbackReason = fallbackReason;
         if (profile) {
           profile.route = 'cpu-fallback';
-          profile.fallbackReason = wgslOffload.state.lastRigidSoftResponseFallbackReason;
+          profile.responseOwnership = 'cpu-hard-fallback';
+          profile.fallbackReason = fallbackReason;
         }
       }
     } catch (err) {
       wgslOffload.state.lastError = String(err?.message || err || 'rigid-soft-response-wgsl-error');
       wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-error';
       wgslOffload.state.lastRigidSoftResponseOwnership = 'cpu-fallback';
+      wgslOffload.state.lastRigidSoftResponseOwnershipDetailed = 'cpu-hard-fallback:wgsl-dispatch-error';
       wgslOffload.state.lastRigidSoftResponseRoute = 'cpu-fallback';
       wgslOffload.state.lastRigidSoftResponseFallbackReason = 'wgsl-dispatch-error';
       if (profile) {
         profile.route = 'cpu-fallback';
+        profile.responseOwnership = 'cpu-hard-fallback';
         profile.fallbackReason = 'wgsl-dispatch-error';
       }
     }
@@ -2723,7 +2774,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
 
   if (usedWgslAuthoritativeResponse) return;
 
-  if (wgslOffload?.state && canUseWgslOffload(wgslOffload)) {
+  if (wgslOffload?.state && wgslOffloadAvailable) {
     if (!wgslOffload.state.lastRigidSoftResponseAuthoritativeSource) {
       wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-hard-fallback-prep';
     }
@@ -2731,20 +2782,23 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       wgslOffload.state.lastRigidSoftResponseFallbackReason = 'hard-fallback';
     }
     wgslOffload.state.lastRigidSoftResponseOwnership = 'cpu-fallback';
+    wgslOffload.state.lastRigidSoftResponseOwnershipDetailed = `cpu-hard-fallback:${wgslOffload.state.lastRigidSoftResponseFallbackReason || 'hard-fallback'}`;
     wgslOffload.state.lastRigidSoftResponseRoute = 'cpu-fallback';
     wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-response-hard-fallback';
     wgslOffload.state.lastMode = 'cpu-rigid-soft-response-hard-fallback';
     if (profile && !profile.fallbackReason) {
       profile.route = 'cpu-fallback';
+      profile.responseOwnership = 'cpu-hard-fallback';
       profile.fallbackReason = wgslOffload.state.lastRigidSoftResponseFallbackReason || 'hard-fallback';
     }
   }
 
   if (profile && !profile.fallbackReason) {
     profile.route = 'cpu-fallback';
-    profile.fallbackReason = canUseWgslOffload(wgslOffload)
+    profile.responseOwnership = 'cpu-hard-fallback';
+    profile.fallbackReason = wgslOffloadAvailable
       ? 'hard-fallback'
-      : 'wgsl-offload-unavailable';
+      : (wgslUnavailableReason || 'wgsl-offload-unavailable');
   }
 
   applyCpuRigidSoftResponseFallback({

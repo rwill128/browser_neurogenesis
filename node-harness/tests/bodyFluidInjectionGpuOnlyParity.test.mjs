@@ -62,7 +62,7 @@ function buildFixture() {
   };
 }
 
-test('body-fluid injection parity: gpu-only CPU-authoritative path matches with/without WGSL offload wiring', () => {
+test('body-fluid injection parity: gpu-only CPU-authoritative path matches with/without WGSL offload wiring', async () => {
   const base = buildFixture();
   const withOffload = buildFixture();
 
@@ -75,7 +75,7 @@ test('body-fluid injection parity: gpu-only CPU-authoritative path matches with/
     fluidCouplingComponentLimit: 8,
   };
 
-  const baselineResult = applyBodyFluidInjectionGpuOnly({
+  const baselineResult = await applyBodyFluidInjectionGpuOnly({
     ...base,
     ...commonArgs,
     wgslOffload: null,
@@ -87,7 +87,7 @@ test('body-fluid injection parity: gpu-only CPU-authoritative path matches with/
     state: {},
   };
 
-  const offloadResult = applyBodyFluidInjectionGpuOnly({
+  const offloadResult = await applyBodyFluidInjectionGpuOnly({
     ...withOffload,
     ...commonArgs,
     wgslOffload: stubOffload,

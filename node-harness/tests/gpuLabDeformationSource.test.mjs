@@ -269,7 +269,7 @@ test('gpu-lab routes body-fluid momentum injection through isolated gpu-only run
 
   assert.match(
     source,
-    /let injectedMomentum = 0;[\s\S]*if \(solverPath === 'gpu-only'\) \{[\s\S]*applyBodyFluidInjectionGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*const injectPoint = \(px, py, pvx, pvy/,
+    /let injectedMomentum = 0;[\s\S]*if \(solverPath === 'gpu-only'\) \{[\s\S]*await applyBodyFluidInjectionGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*const injectPoint = \(px, py, pvx, pvy/,
     'expected explicit gpu-only body-fluid injection dispatch with baseline fallback branch',
   );
 

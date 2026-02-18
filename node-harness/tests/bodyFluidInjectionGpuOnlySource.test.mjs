@@ -21,8 +21,8 @@ test('body-fluid injection gpu-only wires deterministic gather layout metadata i
 
   assert.match(
     source,
-    /void dispatchBodyFluidInjectionGatherProposal\(\{[\s\S]*gatherLayout,[\s\S]*couplingLimit,[\s\S]*n,[\s\S]*\}\)\.then\(/,
-    'expected gather proposal dispatch to consume deterministic gather layout streams via async WGSL readback pipeline',
+    /const wgslGatherRan = await dispatchBodyFluidInjectionGatherProposal\(\{[\s\S]*gatherLayout,[\s\S]*couplingLimit,[\s\S]*n,[\s\S]*\}\);/,
+    'expected gather proposal dispatch to run in-frame so WGSL deltas can be authoritative immediately',
   );
 
   assert.match(
@@ -51,7 +51,7 @@ test('body-fluid injection gpu-only wires deterministic gather layout metadata i
 
   assert.match(
     source,
-    /if \(wgslOffload\.state\.wgslInFlight\) \{[\s\S]*wgslSkippedWhileBusy[\s\S]*\} else \{[\s\S]*wgslInFlight = true;[\s\S]*lastCompletedWgslRunId/,
-    'expected gpu-only body-fluid WGSL dispatch to serialize map/readback work and avoid overlapping mapAsync races',
+    /const hasMatchingWgslGather =[\s\S]*lastGatherProposalSignature === gatherSignature[\s\S]*if \(hasMatchingWgslGather\) \{[\s\S]*gatherSource = 'wgsl-gather-authoritative';/,
+    'expected same-frame WGSL gather readback to become authoritative when signatures match',
   );
 });

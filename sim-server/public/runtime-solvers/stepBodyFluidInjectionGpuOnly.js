@@ -546,7 +546,7 @@ async function dispatchBodyFluidInjectionGatherProposal({ offload, gatherLayout,
   return true;
 }
 
-export function applyBodyFluidInjectionGpuOnly({
+export async function applyBodyFluidInjectionGpuOnly({
   sim,
   bodies,
   soft,
@@ -619,6 +619,27 @@ export function applyBodyFluidInjectionGpuOnly({
     wgslOffload.state.lastPreparedGatherSignature = gatherSignature;
     wgslOffload.state.lastMode = 'cpu-prepared';
 
+    if (canUseWgslOffload(wgslOffload)) {
+      const runId = (wgslOffload.state.lastWgslRunId || 0) + 1;
+      wgslOffload.state.lastWgslRunId = runId;
+      try {
+        const wgslGatherRan = await dispatchBodyFluidInjectionGatherProposal({
+          offload: wgslOffload,
+          gatherLayout,
+          gatherSignature,
+          couplingLimit,
+          n,
+        });
+        wgslOffload.state.lastError = null;
+        wgslOffload.state.lastMode = wgslGatherRan ? 'wgsl-gather-proposal' : 'cpu-gather-authoritative';
+      } catch (err) {
+        wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
+        wgslOffload.state.lastMode = 'cpu-gather-authoritative';
+      } finally {
+        wgslOffload.state.lastCompletedWgslRunId = runId;
+      }
+    }
+
     const hasMatchingWgslGather =
       wgslOffload.state.lastGatherProposalSignature === gatherSignature
       && Number(wgslOffload.state.lastGatherProposalCellCount) === (n * n)
@@ -637,35 +658,6 @@ export function applyBodyFluidInjectionGpuOnly({
       wgslOffload.state.lastAuthoritativeGatherSignature = gatherSignature;
       wgslOffload.state.lastAuthoritativeGatherFrame = Number(sim?.frame) || 0;
     }
-
-    if (canUseWgslOffload(wgslOffload)) {
-      if (wgslOffload.state.wgslInFlight) {
-        wgslOffload.state.wgslSkippedWhileBusy = (wgslOffload.state.wgslSkippedWhileBusy || 0) + 1;
-      } else {
-        const runId = (wgslOffload.state.lastWgslRunId || 0) + 1;
-        wgslOffload.state.lastWgslRunId = runId;
-        wgslOffload.state.wgslInFlight = true;
-        void dispatchBodyFluidInjectionGatherProposal({
-          offload: wgslOffload,
-          gatherLayout,
-          gatherSignature,
-          couplingLimit,
-          n,
-        }).then((wgslGatherRan) => {
-          wgslOffload.state.lastError = null;
-          wgslOffload.state.lastMode = wgslGatherRan ? 'wgsl-gather-proposal' : 'cpu-gather-authoritative';
-        }).catch((err) => {
-          wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
-          wgslOffload.state.lastMode = 'cpu-gather-authoritative';
-        }).finally(() => {
-          wgslOffload.state.wgslInFlight = false;
-          wgslOffload.state.lastCompletedWgslRunId = runId;
-        });
-      }
-    }
-
-    // CPU gather apply remains authoritative until solver-owned fluid fields
-    // migrate from JS arrays to GPU storage buffers (or staged readback).
   }
 
   if (wgslOffload?.state) {

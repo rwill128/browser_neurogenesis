@@ -4574,7 +4574,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   let injectedMomentum = 0;
   let softClusterForInjection;
   if (solverPath === 'gpu-only') {
-    const fluidInjectionResult = applyBodyFluidInjectionGpuOnly({
+    const fluidInjectionResult = await applyBodyFluidInjectionGpuOnly({
       sim,
       bodies,
       soft: s,

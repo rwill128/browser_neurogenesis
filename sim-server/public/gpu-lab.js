@@ -3833,6 +3833,19 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       rigidVerticesWorld,
       sampleFluidForBodyCoupling,
       applyBounceBoundary,
+      wgslOffload: {
+        enabled: true,
+        device: sim?.device,
+        modeProfile: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
+        state: (() => {
+          sim.rigidStepWgslState ||= {};
+          const st = sim.rigidStepWgslState;
+          if (st.enableAuthoritativeRigidStep !== false) {
+            st.enableAuthoritativeRigidStep = true;
+          }
+          return st;
+        })(),
+      },
     });
   } else {
     for (let bi = 0; bi < bodies.rigid.length; bi++) {

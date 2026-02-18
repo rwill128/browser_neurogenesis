@@ -212,6 +212,20 @@ test('gpu-lab routes rigid stepping through isolated gpu-only runtime solver mod
   );
 });
 
+test('gpu-lab routes soft fluid-coupling stepping through isolated gpu-only runtime solver module', () => {
+  assert.match(
+    source,
+    /import \{ applySoftFluidCouplingGpuOnly \} from '\/runtime-solvers\/stepSoftFluidCouplingGpuOnly\.js';/,
+    'expected isolated gpu-only soft fluid-coupling module import',
+  );
+
+  assert.match(
+    source,
+    /const softMembraneClusterSet = ensureSoftMembraneClusterSet\(sim\);[\s\S]*if \(solverPath === 'gpu-only'\) \{[\s\S]*applySoftFluidCouplingGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*for \(let i = 0; i < s\.nodes\.length; i\+\+\)/,
+    'expected explicit gpu-only soft fluid-coupling dispatch with baseline fallback loop',
+  );
+});
+
 test('gpu-lab routes soft integration stepping through isolated gpu-only runtime solver module', () => {
   assert.match(
     source,

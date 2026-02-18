@@ -31,7 +31,6 @@ const tests = [
   'node-harness/tests/softAreaXpbdGpuOnlyParity.test.mjs',
   'node-harness/tests/softAreaXpbdGpuOnlySource.test.mjs',
   'node-harness/tests/bodyFluidInjectionGpuOnlySource.test.mjs',
-  'node-harness/tests/hybridConstraintsGpuOnlySource.test.mjs',
   'node-harness/tests/softFluidCouplingGpuOnlySource.test.mjs',
   'node-harness/tests/gpuLabDeformationSource.test.mjs',
   'node-harness/tests/miniScenarioWatchdogSource.test.mjs',

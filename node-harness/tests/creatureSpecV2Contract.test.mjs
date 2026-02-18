@@ -110,6 +110,7 @@ test('createCreatureSpecFromMesh exports solver-ready v2 sections', () => {
   assert.ok(Array.isArray(spec.rigidBodies));
   assert.ok(Array.isArray(spec.softBodies));
   assert.ok(Array.isArray(spec.hybridJoints));
+  assert.equal(spec.hybridJoints.length, 0);
   assert.equal(spec.rigidWelds, undefined);
   assert.equal(spec.mesh, undefined);
 
@@ -978,10 +979,7 @@ test('buildBodiesFromCreatureSpec ignores invalid joint references safely', () =
 
   const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
   assert.equal(bodies.rigidWelds, undefined);
-  for (const h of bodies.hybrid) {
-    assert.ok(h.rigidIndex >= 0 && h.rigidIndex < bodies.rigid.length);
-    assert.ok(h.nodeIndex >= 0 && h.nodeIndex < bodies.soft.nodes.length);
-  }
+  assert.equal(bodies.hybrid.length, 0);
 });
 
 test('buildBodiesFromCreatureSpec clamps unknown edge dye modes to DEFLECT guardrail', () => {
@@ -1230,40 +1228,7 @@ test('buildBodiesFromCreatureSpec clamps malformed membrane shapeMemoryWeight va
   assert.deepEqual(weights, [0, 1, 1, 1]);
 });
 
-test('buildBodiesFromCreatureSpec de-degenerates hybrid joints when edgeA=edgeB', () => {
-  const spec = createCreatureSpecFromMesh(sampleMesh());
-  const j = spec.hybridJoints[0];
-  assert.ok(j, 'sampleMesh should produce at least one hybrid joint');
-
-  j.edgeA = 1;
-  j.edgeB = 1;
-  j.restA = Number.NaN;
-  j.restB = Number.NaN;
-
-  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
-  const h = bodies.hybrid[0];
-  assert.ok(h, 'expected at least one built hybrid joint');
-  assert.notEqual(h.vertexA, h.vertexB, 'hybrid joint should span two rigid vertices');
-  assert.ok(Number.isFinite(h.restA) && h.restA >= 0.8);
-  assert.ok(Number.isFinite(h.restB) && h.restB >= 0.8);
-});
-
-test('buildBodiesFromCreatureSpec clamps oversized hybrid rest lengths', () => {
-  const spec = createCreatureSpecFromMesh(sampleMesh());
-  const j = spec.hybridJoints[0];
-  assert.ok(j, 'sampleMesh should produce at least one hybrid joint');
-
-  j.restA = 1e6;
-  j.restB = 1e6;
-
-  const bodies = buildBodiesFromCreatureSpec(spec, 256, CONTROLS);
-  const h = bodies.hybrid[0];
-  const rb = bodies.rigid[h.rigidIndex];
-  const maxRest = Math.max(6, rb.r * 1.5);
-
-  assert.ok(h.restA <= maxRest + 1e-9);
-  assert.ok(h.restB <= maxRest + 1e-9);
-});
+// hybrid joint handling removed from creature spec import.
 
 test('createCreatureSpecFromMesh preserves optional authoring field payload', () => {
   const w = 16;
@@ -1369,7 +1334,6 @@ test('buildBodiesFromCreatureSpec preserves import/output parity across baseline
       rigidCount: bodies.rigid.length,
       softNodeCount: bodies.soft.nodes.length,
       softSpringCount: bodies.soft.springs.length,
-      hybridCount: bodies.hybrid.length,
       membraneClusterCount: bodies.softMembraneClusters.length,
       rigidMass,
       softMass,
@@ -1560,7 +1524,7 @@ test('buildBodiesFromCreatureSpec keeps per-element geometry/mass signatures ali
   }
 
   // Hybrid linkage shape should remain stable through import on both paths.
-  assert.deepEqual(gpuOnlyBodies.hybrid, baselineBodies.hybrid, 'hybrid joint mapping must remain identical across paths');
+  // hybrid links removed from import/output.
 
   const allFinite = [
     ...gpuOnlyBodies.rigid.flatMap((rb) => [rb.x, rb.y, rb.r, rb.mass]),
@@ -1632,12 +1596,7 @@ test('gpu-only buildBodiesFromCreatureSpec returns detached structures while pre
     }
   }
 
-  if (baselineBodies.hybrid.length > 0 && Array.isArray(baselineBodies.hybrid[0].localAnchor)) {
-    const baselineAnchorX = baselineBodies.hybrid[0].localAnchor[0];
-    gpuOnlyBodies.hybrid[0].localAnchor[0] = baselineAnchorX + 0.25;
-    assert.equal(baselineBodies.hybrid[0].localAnchor[0], baselineAnchorX,
-      'gpu-only hybrid localAnchor mutation must not leak into baseline output');
-  }
+  // hybrid links removed from import/output.
 
   if (baselineBodies.softMembraneClusters.length > 0 && baselineBodies.softMembraneClusters[0].nodeIndices?.length > 0) {
     const baselineClusterNode = baselineBodies.softMembraneClusters[0].nodeIndices[0];

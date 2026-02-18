@@ -27,10 +27,6 @@ function makeFixture() {
         [1, 2, 1.1, EDGE_BODY_MODE_BLOCK],
       ],
     },
-    hybrid: [
-      { rigidIndex: 0, nodeIndex: 0 },
-      { rigidIndex: 1, nodeIndex: 2 },
-    ],
   };
 }
 
@@ -152,7 +148,6 @@ test('collision iteration parity: gpu-only orchestrator matches prior inline col
   const gpuOnlyResult = await runCollisionIterationsGpuOnly({
     rigidBodies: gpuOnly.rigidBodies,
     soft: gpuOnly.soft,
-    hybrid: gpuOnly.hybrid,
     rigidContactDebug,
     collisionIterations: 2,
     rigidRigidSlop: 0.32,

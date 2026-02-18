@@ -2510,7 +2510,6 @@ importFile.addEventListener('change', async () => {
     schemaVersion: spec.schemaVersion,
     rigidBodies: spec.rigidBodies?.length || 0,
     softBodies: spec.softBodies?.length || 0,
-    hybridJoints: spec.hybridJoints?.length || 0,
     note: 'No authoring fields embedded; showing solver-structure preview.',
   }, null, 2);
   updateSegmentStatsPreview(spec);

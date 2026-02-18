@@ -51,14 +51,7 @@ function cloneBodies(result) {
         })
         : [],
     },
-    hybrid: Array.isArray(result?.hybrid)
-      ? result.hybrid.map((joint) => {
-        const out = { ...joint };
-        if (Array.isArray(joint?.localAnchor)) out.localAnchor = [...joint.localAnchor];
-        if (Array.isArray(joint?.localSoftAnchor)) out.localSoftAnchor = [...joint.localSoftAnchor];
-        return out;
-      })
-      : [],
+    hybrid: [],
     softMembraneClusters: Array.isArray(result?.softMembraneClusters)
       ? result.softMembraneClusters.map((cluster) => ({
         ...cluster,

@@ -139,12 +139,7 @@ export function createCreatureSpecFromMesh(mesh, options = {}) {
       })
     : buildSoftExport(triByKind.soft, nodes, options, width, height, mesh?.softCrossBeams || []);
 
-  const hybridJoints = buildHybridExport({
-    rigidComps: rigidBuild.components,
-    softComps: softBuild.components,
-    rigidBodies: rigidBuild.rigidBodies,
-    sourceNodes: nodes,
-  });
+  const hybridJoints = [];
 
   const out = {
     schemaVersion: CREATURE_SPEC_VERSION,
@@ -335,9 +330,10 @@ export function parseCreatureSpec(jsonText) {
   if (!obj.space || !Number.isFinite(obj.space.width) || !Number.isFinite(obj.space.height)) {
     throw new Error('CreatureSpec missing valid space.width/space.height');
   }
-  if (!Array.isArray(obj.rigidBodies) || !Array.isArray(obj.softBodies) || !Array.isArray(obj.hybridJoints)) {
-    throw new Error('CreatureSpec missing rigidBodies/softBodies/hybridJoints arrays');
+  if (!Array.isArray(obj.rigidBodies) || !Array.isArray(obj.softBodies)) {
+    throw new Error('CreatureSpec missing rigidBodies/softBodies arrays');
   }
+  if (!Array.isArray(obj.hybridJoints)) obj.hybridJoints = [];
   for (const rb of obj.rigidBodies) {
     if (!Array.isArray(rb.hull) || rb.hull.length < 3) throw new Error('Rigid body missing hull vertices');
   }
@@ -348,7 +344,7 @@ export function parseCreatureSpec(jsonText) {
 }
 
 /**
- * Convert a validated creature spec into runtime rigid/soft/hybrid body arrays.
+ * Convert a validated creature spec into runtime rigid/soft body arrays.
  *
  * Coordinates are scaled into an `n x n` simulation domain while preserving
  * relative morphology and solver-ready edge/node attributes.
@@ -431,7 +427,6 @@ function buildBodiesFromCreatureSpecBaseline(spec, n, controls) {
 
   const soft = { nodes: [], springs: [] };
   const softMembraneClusters = [];
-  const softNodeMap = new Map();
   let clusterId = 0;
   for (let sbi = 0; sbi < (spec.softBodies || []).length; sbi++) {
     const sb = spec.softBodies[sbi];
@@ -451,7 +446,7 @@ function buildBodiesFromCreatureSpecBaseline(spec, n, controls) {
         digestRGB: normalizeRGB(p.digestRGB),
         shapeMemoryWeight: clamp(Number.isFinite(Number(p.shapeMemoryWeight)) ? Number(p.shapeMemoryWeight) : 1, 0, 1),
       });
-      softNodeMap.set(`${sbi}:${i}`, base + i);
+      // rigid-soft hybrid mapping removed.
     }
 
     const springSource = (solverMode === 'membrane')
@@ -494,42 +489,8 @@ function buildBodiesFromCreatureSpecBaseline(spec, n, controls) {
     clusterId += 1;
   }
 
+  // rigid-soft hybrid links removed from runtime pipelines.
   const hybrid = [];
-  for (const j of (spec.hybridJoints || [])) {
-    const rigidIndex = Number(j.rigidBodyIndex);
-    const softBodyIndex = Number(j.softBodyIndex);
-    const softNodeIndex = Number(j.softNodeIndex);
-    if (!Number.isInteger(rigidIndex) || rigidIndex < 0 || rigidIndex >= rigid.length) continue;
-
-    const globalSoft = softNodeMap.get(`${softBodyIndex}:${softNodeIndex}`);
-    if (!Number.isInteger(globalSoft) || globalSoft < 0 || globalSoft >= soft.nodes.length) continue;
-
-    const rb = rigid[rigidIndex];
-    const edgeA = Math.max(0, Math.min(rb.sides - 1, Number(j.edgeA) | 0));
-    let edgeB = Math.max(0, Math.min(rb.sides - 1, Number(j.edgeB) | 0));
-    // Guardrail: avoid degenerate hybrid constraints that pin both rest links
-    // to the same rigid vertex (can inject solver jitter under fluid load).
-    if (rb.sides > 1 && edgeA === edgeB) edgeB = (edgeA + 1) % rb.sides;
-
-    const aPos = rigidVertexWorld(rb, edgeA);
-    const bPos = rigidVertexWorld(rb, edgeB);
-    const p = soft.nodes[globalSoft];
-
-    const defaultRestA = Math.hypot(p.x - aPos.x, p.y - aPos.y);
-    const defaultRestB = Math.hypot(p.x - bPos.x, p.y - bPos.y);
-    const maxRest = Math.max(6, rb.r * 1.5);
-    const restA = Math.min(maxRest, Math.max(0.8, finiteOr(Number(j.restA), defaultRestA)));
-    const restB = Math.min(maxRest, Math.max(0.8, finiteOr(Number(j.restB), defaultRestB)));
-
-    hybrid.push({
-      rigidIndex,
-      nodeIndex: globalSoft,
-      vertexA: edgeA,
-      vertexB: edgeB,
-      restA,
-      restB,
-    });
-  }
 
   return { rigid, soft, hybrid, softMembraneClusters };
 }
@@ -1949,46 +1910,7 @@ function buildSoftExport(tris, nodes, options, width, height, softCrossBeams = [
   return { softBodies, components };
 }
 
-function buildHybridExport({ rigidComps, softComps, rigidBodies, sourceNodes }) {
-  const links = [];
-  const used = new Set();
-
-  for (const rc of rigidComps) {
-    for (const sc of softComps) {
-      const shared = [];
-      for (const nid of rc.nodeIds) if (sc.nodeIds.has(nid)) shared.push(nid);
-      for (const nid of shared) {
-        const softNodeLocal = sc.sourceToLocal.get(nid);
-        if (softNodeLocal == null) continue;
-
-        const key = `${rc.index}:${sc.index}:${softNodeLocal}`;
-        if (used.has(key)) continue;
-        used.add(key);
-
-        const p = sourceNodes[nid];
-        const rb = rigidBodies[rc.index];
-        if (!p || !rb || !rb.hull?.length) continue;
-
-        const { vA, vB } = nearestHullEdgeForPoint(rb.hull, p.x, p.y);
-        const aPos = rb.hull[vA];
-        const bPos = rb.hull[vB];
-        const maxRest = Math.max(6, rc.radius * 0.55);
-
-        links.push({
-          rigidBodyIndex: rc.index,
-          softBodyIndex: sc.index,
-          softNodeIndex: softNodeLocal,
-          edgeA: vA,
-          edgeB: vB,
-          restA: Math.min(maxRest, Math.max(0.8, Math.hypot(p.x - aPos.x, p.y - aPos.y))),
-          restB: Math.min(maxRest, Math.max(0.8, Math.hypot(p.x - bPos.x, p.y - bPos.y))),
-        });
-      }
-    }
-  }
-
-  return links;
-}
+// rigid-soft hybrid export removed.
 
 function centroid(points) {
   let sx = 0;

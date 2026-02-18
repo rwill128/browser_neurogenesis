@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { resolveRigidVsSoftNodeCollision } from '../../sim-server/public/rigid-collision.js';
 import {
   buildActiveRigidSoftNodeNarrowphasePairs,
+  buildAuthoritativeRigidSoftNodePairsFromAabbProbe,
   buildRigidSoftNarrowphaseGeometryLayout,
   buildRigidSoftNarrowphaseSceneWgslLayout,
   resolveRigidSoftCollisionPassGpuOnly,
@@ -348,6 +349,10 @@ test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when dev
   assert.equal(wgslState.lastSourceRoute, 'wgsl-rigid-soft-node-broadphase-authoritative-filter');
   assert.equal(wgslState.lastMode, 'wgsl-broadphase-authoritative-filter');
   assert.equal(wgslState.lastEdgeBroadphaseAuthoritativeSource, 'wgsl-rigid-soft-edge-broadphase-authoritative-filter');
+  assert.equal(wgslState.lastNodeCollisionResponseSource, 'cpu-rigid-soft-compact-node-response');
+  assert.equal(wgslState.lastEdgeCollisionResponseSource, 'cpu-rigid-soft-compact-edge-response');
+  assert.equal(wgslState.lastNodeCollisionResponsePairCount, baselineCalls.nodes.length);
+  assert.equal(wgslState.lastEdgeCollisionResponsePairCount, baselineCalls.edges.length);
   assert.ok(dispatches[0] >= 1);
   assert.ok(dispatches[1] >= 1);
   assert.ok(writes.length >= 16);
@@ -460,6 +465,45 @@ test('gpu-only rigid-soft pass compacts WGSL-active node broadphase pairs into d
   assert.equal(compactA.signature, compactB.signature);
 
   assert.equal(buildActiveRigidSoftNodeNarrowphasePairs({ prep, activeMask: new Uint32Array([1, 1]) }), null);
+});
+
+test('gpu-only rigid-soft node AABB probe filter compacts authoritative narrowphase pairs with finite fallback guards', () => {
+  const nodePairs = {
+    compactRigidIndex: new Uint32Array([0, 0, 1, 1]),
+    compactNodeIndex: new Uint32Array([0, 1, 2, 3]),
+    pairCount: 4,
+  };
+  const separation = new Float32Array([0.05, 0.42, 0.08, 0.25]);
+  const insideMask = new Uint32Array([0, 1, 0, 0]);
+
+  const filtered = buildAuthoritativeRigidSoftNodePairsFromAabbProbe({
+    nodePairs,
+    separation,
+    insideMask,
+    nodeSlop: 0.1,
+  });
+
+  assert.ok(filtered);
+  assert.equal(filtered.pairCount, 3);
+  assert.deepEqual(Array.from(filtered.compactRigidIndex), [0, 0, 1]);
+  assert.deepEqual(Array.from(filtered.compactNodeIndex), [0, 1, 2]);
+  assert.ok(Number.isInteger(filtered.signature));
+
+  const nonFinite = buildAuthoritativeRigidSoftNodePairsFromAabbProbe({
+    nodePairs,
+    separation: new Float32Array([0.05, Number.NaN, 0.08, 0.25]),
+    insideMask,
+    nodeSlop: 0.1,
+  });
+  assert.equal(nonFinite, null);
+
+  const mismatch = buildAuthoritativeRigidSoftNodePairsFromAabbProbe({
+    nodePairs,
+    separation,
+    insideMask: new Uint32Array([1, 0]),
+    nodeSlop: 0.1,
+  });
+  assert.equal(mismatch, null);
 });
 
 test('gpu-only rigid-soft pass stores compact node broadphase ownership metadata after WGSL filter readback', async () => {

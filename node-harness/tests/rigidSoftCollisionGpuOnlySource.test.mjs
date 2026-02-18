@@ -16,8 +16,17 @@ test('rigid-soft gpu-only module prepares deterministic candidate layout ownersh
 test('rigid-soft gpu-only pass publishes cpu-prepared source route before WGSL broadphase bring-up', () => {
   assert.match(
     source,
-    /if \(wgslOffload\?\.enabled === true && wgslOffload\?\.state\) \{[\s\S]*lastSourceRoute = 'cpu-rigid-soft-candidate-layout';[\s\S]*lastMode = 'cpu-prepared';/,
+    /if \(wgslOffload\?\.enabled === true && wgslOffload\?\.state\) \{[\s\S]*lastSourceRoute = hasAnyCandidatePairs[\s\S]*'cpu-rigid-soft-candidate-layout'[\s\S]*lastMode = hasAnyCandidatePairs \? 'cpu-prepared' : 'cpu-empty-candidates';/,
     'expected rigid-soft gpu-only pass to persist source-route ownership for deterministic candidate layout prep before WGSL broadphase dispatch/readback',
+  );
+});
+
+
+test('rigid-soft gpu-only pass exits early for empty soft scenes to avoid no-op rigid-soft staging overhead', () => {
+  assert.match(
+    source,
+    /if \(soft\.nodes\.length === 0\) \{[\s\S]*lastSourceRoute = 'cpu-rigid-soft-empty-scene';[\s\S]*lastMode = 'cpu-empty-scene';[\s\S]*return;/,
+    'expected rigid-soft gpu-only pass to short-circuit empty soft scenes with explicit source-route telemetry',
   );
 });
 
@@ -75,7 +84,7 @@ test('rigid-soft gpu-only module emits deterministic narrowphase scene state lay
   assert.match(source, /lastPreparedNarrowphaseSceneSignature/, 'expected rigid-soft gpu-only path to continue publishing deterministic scene signature');
 });
 
-test('rigid-soft gpu-only module lands concrete WGSL node narrowphase AABB probe math as next-stage collision unblocker', () => {
+test('rigid-soft gpu-only module lands concrete WGSL node narrowphase AABB probe math as authoritative node narrowphase filter stage', () => {
   assert.match(
     source,
     /const rigidSoftNodeNarrowphaseAabbProbeWgsl = \/\* wgsl \*\/[\s\S]*pairOut: array<vec2<f32>>[\s\S]*let separation = sqrt\(dx \* dx \+ dy \* dy\);[\s\S]*pairOut\[pairIndex\] = vec2<f32>\(separation, select\(0\.0, 1\.0, inside\)\);/,
@@ -84,8 +93,14 @@ test('rigid-soft gpu-only module lands concrete WGSL node narrowphase AABB probe
 
   assert.match(
     source,
-    /dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl\([\s\S]*lastNodeNarrowphaseAabbProbeSeparation[\s\S]*lastNodeNarrowphaseAabbProbeInsideMask[\s\S]*lastNodeNarrowphaseAabbProbeSource/,
-    'expected rigid-soft gpu-only pass to dispatch node-pair AABB probe and publish deterministic source-route telemetry',
+    /dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl\([\s\S]*lastNodeNarrowphaseAabbProbeSeparation[\s\S]*lastNodeNarrowphaseAabbProbeInsideMask[\s\S]*buildAuthoritativeRigidSoftNodePairsFromAabbProbe[\s\S]*lastNodeNarrowphaseAuthoritativeSource = 'wgsl-rigid-soft-node-aabb-probe-authoritative-filter';/,
+    'expected rigid-soft gpu-only pass to dispatch node-pair AABB probe and apply it as authoritative node narrowphase filtering with explicit source-route ownership',
+  );
+
+  assert.match(
+    source,
+    /export function buildAuthoritativeRigidSoftNodePairsFromAabbProbe\([\s\S]*if \(!inside && sep > slop\) continue;[\s\S]*return \{[\s\S]*pairCount: compactRigidIndex\.length/,
+    'expected rigid-soft gpu-only module to expose deterministic compact-pair filtering from WGSL AABB probe outputs with finite fallback safety',
   );
 });
 
@@ -114,5 +129,20 @@ test('rigid-soft gpu-only module prepares deterministic narrowphase impulse-seed
     source,
     /lastPreparedNarrowphaseImpulseSeedLayoutBytes[\s\S]*lastPreparedNarrowphaseImpulseSeedSignature[\s\S]*lastPreparedNarrowphaseImpulseSeedSource = 'cpu-rigid-soft-narrowphase-impulse-seed-layout';/,
     'expected rigid-soft gpu-only pass to persist impulse-seed layout telemetry/source-route ownership for immediate WGSL narrowphase impulse kernel follow-up',
+  );
+});
+
+
+test('rigid-soft gpu-only collision response consumes compact WGSL-filtered pairs when available', () => {
+  assert.match(
+    source,
+    /if \(compactNodeRigidIndex instanceof Uint32Array && compactNodeNodeIndex instanceof Uint32Array\) \{[\s\S]*lastNodeCollisionResponseSource = 'cpu-rigid-soft-compact-node-response';[\s\S]*resolveRigidVsSoftNodeCollision\(/,
+    'expected rigid-soft response stage to iterate compact node pairs directly when WGSL-filtered ownership buffers are present',
+  );
+
+  assert.match(
+    source,
+    /if \([\s\S]*compactEdgeRigidIndex instanceof Uint32Array[\s\S]*compactEdgeNodeAIndex instanceof Uint32Array[\s\S]*compactEdgeNodeBIndex instanceof Uint32Array[\s\S]*lastEdgeCollisionResponseSource = 'cpu-rigid-soft-compact-edge-response';[\s\S]*resolveRigidVsSoftEdgeCollision\(/,
+    'expected rigid-soft response stage to iterate compact edge pairs directly when WGSL-filtered ownership buffers are present',
   );
 });

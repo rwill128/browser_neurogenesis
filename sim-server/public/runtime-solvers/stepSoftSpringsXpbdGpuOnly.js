@@ -41,6 +41,67 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const softSpringLambdaProposalWgsl = /* wgsl */`
+struct Params {
+  nodeCount: u32,
+  springCount: u32,
+  alpha: f32,
+  _pad0: f32,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> nodeX: array<f32>;
+@group(0) @binding(2) var<storage, read> nodeY: array<f32>;
+@group(0) @binding(3) var<storage, read> springNodeA: array<u32>;
+@group(0) @binding(4) var<storage, read> springNodeB: array<u32>;
+@group(0) @binding(5) var<storage, read> springRest: array<f32>;
+@group(0) @binding(6) var<storage, read> springInvMassA: array<f32>;
+@group(0) @binding(7) var<storage, read> springInvMassB: array<f32>;
+@group(0) @binding(8) var<storage, read> lambdaPrev: array<f32>;
+@group(0) @binding(9) var<storage, read_write> deltaLambdaOut: array<f32>;
+@group(0) @binding(10) var<storage, read_write> lambdaNextOut: array<f32>;
+
+@compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let si = gid.x;
+  if (si >= params.springCount) { return; }
+
+  let ia = springNodeA[si];
+  let ib = springNodeB[si];
+  if (ia >= params.nodeCount || ib >= params.nodeCount) {
+    deltaLambdaOut[si] = 0.0;
+    lambdaNextOut[si] = 0.0;
+    return;
+  }
+
+  let ax = nodeX[ia];
+  let ay = nodeY[ia];
+  let bx = nodeX[ib];
+  let by = nodeY[ib];
+  let dx = bx - ax;
+  let dy = by - ay;
+  let d = max(length(vec2<f32>(dx, dy)), 1e-6);
+  let restRaw = springRest[si];
+  let strainCap = max(0.05, abs(restRaw) * 0.45);
+  let c = clamp(d - restRaw, -strainCap, strainCap);
+
+  let wSum = springInvMassA[si] + springInvMassB[si];
+  if (wSum <= 1e-9) {
+    deltaLambdaOut[si] = 0.0;
+    lambdaNextOut[si] = lambdaPrev[si];
+    return;
+  }
+
+  let lambdaPrevValue = lambdaPrev[si];
+  let dlRaw = (-c - params.alpha * lambdaPrevValue) / (wSum + params.alpha);
+  let lambdaNext = clamp(lambdaPrevValue + dlRaw, -20.0, 20.0);
+  let dl = lambdaNext - lambdaPrevValue;
+
+  deltaLambdaOut[si] = dl;
+  lambdaNextOut[si] = lambdaNext;
+}
+`;
+
 function canUseWgslOffload(offload) {
   if (!offload || offload.enabled !== true) return false;
   if (!offload.device || typeof offload.device.createComputePipelineAsync !== 'function') return false;
@@ -94,6 +155,72 @@ function ensureProbeBuffers(offload, nodeCount, springCount) {
   if (!state.probeParams) {
     state.probeParams = device.createBuffer({ size: 16, usage: uniformUsage });
     state.probeBindGroup = null;
+  }
+
+  return state;
+}
+
+function ensureLambdaProposalBuffers(offload, nodeCount, springCount) {
+  const state = offload.state || (offload.state = {});
+  const device = offload.device;
+  const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
+  const uniformUsage = globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST;
+
+  const requiredNodeCapacity = Math.max(1, nodeCount);
+  if ((state.lambdaNodeCapacity || 0) < requiredNodeCapacity) {
+    const capacity = Math.max(requiredNodeCapacity, state.lambdaNodeCapacity ? state.lambdaNodeCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.lambdaNodePredX?.destroy?.();
+    state.lambdaNodePredY?.destroy?.();
+    state.lambdaNodePredX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.lambdaNodePredY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.lambdaNodeCapacity = capacity;
+    state.lambdaBindGroup = null;
+  }
+
+  const requiredSpringCapacity = Math.max(1, springCount);
+  if ((state.lambdaSpringCapacity || 0) < requiredSpringCapacity) {
+    const capacity = Math.max(requiredSpringCapacity, state.lambdaSpringCapacity ? state.lambdaSpringCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.lambdaSpringNodeA?.destroy?.();
+    state.lambdaSpringNodeB?.destroy?.();
+    state.lambdaSpringRest?.destroy?.();
+    state.lambdaSpringInvMassA?.destroy?.();
+    state.lambdaSpringInvMassB?.destroy?.();
+    state.lambdaPrev?.destroy?.();
+    state.deltaLambdaOut?.destroy?.();
+    state.lambdaNextOut?.destroy?.();
+    state.deltaLambdaReadback?.destroy?.();
+    state.lambdaNextReadback?.destroy?.();
+    state.lambdaSpringNodeA = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.lambdaSpringNodeB = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.lambdaSpringRest = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.lambdaSpringInvMassA = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.lambdaSpringInvMassB = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.lambdaPrev = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.deltaLambdaOut = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC,
+    });
+    state.lambdaNextOut = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC,
+    });
+    state.deltaLambdaReadback = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
+    });
+    state.lambdaNextReadback = device.createBuffer({
+      size: bytes,
+      usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
+    });
+    state.lambdaSpringCapacity = capacity;
+    state.lambdaBindGroup = null;
+  }
+
+  if (!state.lambdaParams) {
+    state.lambdaParams = device.createBuffer({ size: 16, usage: uniformUsage });
+    state.lambdaBindGroup = null;
   }
 
   return state;
@@ -181,6 +308,117 @@ async function dispatchSoftSpringWgslProbe({ soft, offload, layout }) {
   state.lastProbeAbsMax = absMax;
   state.lastProbeStretchByColor = stretchByColor;
   state.lastProbeColorBucketCount = Math.max(0, (layout?.springColorOffsets?.length || 1) - 1);
+  return true;
+}
+
+async function dispatchSoftSpringWgslLambdaProposal({ soft, offload, layout, dtPos, alpha, lambdaCache }) {
+  if (!canUseWgslOffload(offload)) return false;
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const springCount = Number(layout?.springRestByColor?.length) || 0;
+  if (nodes.length <= 0 || springCount <= 0) return false;
+
+  const state = ensureLambdaProposalBuffers(offload, nodes.length, springCount);
+  const device = offload.device;
+
+  if (!state.lambdaPipeline) {
+    const module = device.createShaderModule({ code: softSpringLambdaProposalWgsl });
+    state.lambdaPipeline = await device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: { module, entryPoint: 'main' },
+    });
+    state.lambdaBindGroup = null;
+  }
+
+  if (!state.lambdaBindGroup) {
+    state.lambdaBindGroup = device.createBindGroup({
+      layout: state.lambdaPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.lambdaParams } },
+        { binding: 1, resource: { buffer: state.lambdaNodePredX } },
+        { binding: 2, resource: { buffer: state.lambdaNodePredY } },
+        { binding: 3, resource: { buffer: state.lambdaSpringNodeA } },
+        { binding: 4, resource: { buffer: state.lambdaSpringNodeB } },
+        { binding: 5, resource: { buffer: state.lambdaSpringRest } },
+        { binding: 6, resource: { buffer: state.lambdaSpringInvMassA } },
+        { binding: 7, resource: { buffer: state.lambdaSpringInvMassB } },
+        { binding: 8, resource: { buffer: state.lambdaPrev } },
+        { binding: 9, resource: { buffer: state.deltaLambdaOut } },
+        { binding: 10, resource: { buffer: state.lambdaNextOut } },
+      ],
+    });
+  }
+
+  const nodePredX = new Float32Array(nodes.length);
+  const nodePredY = new Float32Array(nodes.length);
+  const invSpringOrder = layout?.springColorOrderedIndices instanceof Uint32Array
+    ? layout.springColorOrderedIndices
+    : new Uint32Array(0);
+  const lambdaPrevByColor = new Float32Array(springCount);
+
+  for (let ni = 0; ni < nodes.length; ni++) {
+    const node = nodes[ni] || {};
+    nodePredX[ni] = (Number(node.x) || 0) + (Number(node.vx) || 0) * dtPos;
+    nodePredY[ni] = (Number(node.y) || 0) + (Number(node.vy) || 0) * dtPos;
+  }
+
+  for (let oi = 0; oi < springCount; oi++) {
+    const ai = invSpringOrder[oi];
+    lambdaPrevByColor[oi] = Number(lambdaCache?.[ai]) || 0;
+  }
+
+  const paramsBytes = new ArrayBuffer(16);
+  const paramsU32 = new Uint32Array(paramsBytes);
+  const paramsF32 = new Float32Array(paramsBytes);
+  paramsU32[0] = nodes.length >>> 0;
+  paramsU32[1] = springCount >>> 0;
+  paramsF32[2] = Number.isFinite(alpha) ? alpha : 0;
+
+  device.queue.writeBuffer(state.lambdaParams, 0, paramsBytes);
+  device.queue.writeBuffer(state.lambdaNodePredX, 0, nodePredX);
+  device.queue.writeBuffer(state.lambdaNodePredY, 0, nodePredY);
+  device.queue.writeBuffer(state.lambdaSpringNodeA, 0, layout.springNodeAByColor);
+  device.queue.writeBuffer(state.lambdaSpringNodeB, 0, layout.springNodeBByColor);
+  device.queue.writeBuffer(state.lambdaSpringRest, 0, layout.springRestByColor);
+  device.queue.writeBuffer(state.lambdaSpringInvMassA, 0, layout.springInvMassAByColor);
+  device.queue.writeBuffer(state.lambdaSpringInvMassB, 0, layout.springInvMassBByColor);
+  device.queue.writeBuffer(state.lambdaPrev, 0, lambdaPrevByColor);
+
+  const dispatchCount = Math.ceil(springCount / WGSL_WORKGROUP_SIZE);
+  const bytes = springCount * 4;
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(state.lambdaPipeline);
+  pass.setBindGroup(0, state.lambdaBindGroup);
+  pass.dispatchWorkgroups(dispatchCount);
+  pass.end();
+  encoder.copyBufferToBuffer(state.deltaLambdaOut, 0, state.deltaLambdaReadback, 0, bytes);
+  encoder.copyBufferToBuffer(state.lambdaNextOut, 0, state.lambdaNextReadback, 0, bytes);
+  device.queue.submit([encoder.finish()]);
+
+  await state.deltaLambdaReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
+  const mappedDelta = state.deltaLambdaReadback.getMappedRange(0, bytes);
+  const deltaByColor = new Float32Array(mappedDelta.slice(0));
+  state.deltaLambdaReadback.unmap();
+
+  await state.lambdaNextReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
+  const mappedNext = state.lambdaNextReadback.getMappedRange(0, bytes);
+  const lambdaNextByColor = new Float32Array(mappedNext.slice(0));
+  state.lambdaNextReadback.unmap();
+
+  let maxAbsDelta = 0;
+  let sumAbsDelta = 0;
+  for (let i = 0; i < deltaByColor.length; i++) {
+    const abs = Math.abs(deltaByColor[i]);
+    if (abs > maxAbsDelta) maxAbsDelta = abs;
+    sumAbsDelta += abs;
+  }
+
+  state.lastProposalSpringCount = springCount;
+  state.lastProposalDispatch = dispatchCount;
+  state.lastProposalAbsDeltaMean = deltaByColor.length > 0 ? sumAbsDelta / deltaByColor.length : 0;
+  state.lastProposalAbsDeltaMax = maxAbsDelta;
+  state.lastProposalDeltaLambdaByColor = deltaByColor;
+  state.lastProposalLambdaNextByColor = lambdaNextByColor;
   return true;
 }
 
@@ -401,6 +639,8 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
     throw new Error('gpu-only soft spring XPBD pass requires clamp callback');
   }
 
+  const alpha = (softXpbdBaseCompliance / Math.max(0.2, stiffnessScale)) / Math.max(1e-8, dtPos * dtPos);
+
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     // Unblocker for upcoming WGSL XPBD stage: prepare deterministic CSR endpoint
     // ownership and spring SoA buffers now so the compute stage can run spring
@@ -414,15 +654,25 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
     wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
     wgslOffload.state.lastMode = 'cpu-prepared';
 
-    // First concrete WGSL stage for soft-spring XPBD path: dispatch a compute
-    // probe over color-ordered springs so gpu-only runtime exercises real
-    // spring buffer ownership on-device while CPU remains authoritative.
+    // Concrete WGSL soft-spring stage: compute per-spring XPBD lambda proposal
+    // on color-ordered batches. CPU remains authoritative for node updates while
+    // we validate deterministic GPU deltas before reduction offload lands.
     if (canUseWgslOffload(wgslOffload)) {
-      void dispatchSoftSpringWgslProbe({ soft, offload: wgslOffload, layout })
-        .then((ran) => {
-          if (ran) {
+      void Promise.all([
+        dispatchSoftSpringWgslProbe({ soft, offload: wgslOffload, layout }),
+        dispatchSoftSpringWgslLambdaProposal({
+          soft,
+          offload: wgslOffload,
+          layout,
+          dtPos,
+          alpha,
+          lambdaCache,
+        }),
+      ])
+        .then(([probeRan, proposalRan]) => {
+          if (probeRan || proposalRan) {
             wgslOffload.state.lastError = null;
-            wgslOffload.state.lastMode = 'wgsl-probe';
+            wgslOffload.state.lastMode = proposalRan ? 'wgsl-proposal' : 'wgsl-probe';
           }
         })
         .catch((err) => {
@@ -431,8 +681,6 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
         });
     }
   }
-
-  const alpha = (softXpbdBaseCompliance / Math.max(0.2, stiffnessScale)) / Math.max(1e-8, dtPos * dtPos);
 
   for (let iter = 0; iter < softXpbdIters; iter++) {
     for (let si = 0; si < soft.springs.length; si++) {

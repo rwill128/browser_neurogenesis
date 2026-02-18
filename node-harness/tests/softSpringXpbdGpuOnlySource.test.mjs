@@ -23,11 +23,11 @@ test('soft spring gpu-only WGSL prep branch stores deterministic spring color ba
   );
 });
 
-test('soft spring gpu-only path dispatches a real WGSL probe stage when offload device is available', () => {
+test('soft spring gpu-only path dispatches real WGSL probe + lambda proposal stages when offload device is available', () => {
   assert.match(
     source,
-    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*dispatchSoftSpringWgslProbe\(\{ soft, offload: wgslOffload, layout \}\)[\s\S]*lastMode = 'wgsl-probe'/,
-    'expected gpu-only soft spring branch to execute WGSL compute dispatch (with cpu fallback semantics preserved)',
+    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*Promise\.all\(\[[\s\S]*dispatchSoftSpringWgslProbe\(\{ soft, offload: wgslOffload, layout \}\)[\s\S]*dispatchSoftSpringWgslLambdaProposal\([\s\S]*lastMode = proposalRan \? 'wgsl-proposal' : 'wgsl-probe'/,
+    'expected gpu-only soft spring branch to execute WGSL probe + lambda proposal dispatches (with cpu fallback semantics preserved)',
   );
 });
 
@@ -36,5 +36,13 @@ test('soft spring gpu-only WGSL probe copies stretch output into readback buffer
     source,
     /copyBufferToBuffer\(state\.probeStretchOut, 0, state\.probeStretchReadback, 0, bytes\)[\s\S]*mapAsync\(globalThis\.GPUMapMode\.READ, 0, bytes\)[\s\S]*lastProbeAbsMean[\s\S]*lastProbeAbsMax[\s\S]*lastProbeStretchByColor/,
     'expected WGSL probe stage to read back stretch metrics for deterministic CPU-vs-WGSL parity harness checks',
+  );
+});
+
+test('soft spring gpu-only WGSL lambda proposal stage reads back per-spring delta telemetry for next reduction offload', () => {
+  assert.match(
+    source,
+    /copyBufferToBuffer\(state\.deltaLambdaOut, 0, state\.deltaLambdaReadback, 0, bytes\)[\s\S]*copyBufferToBuffer\(state\.lambdaNextOut, 0, state\.lambdaNextReadback, 0, bytes\)[\s\S]*lastProposalAbsDeltaMean[\s\S]*lastProposalAbsDeltaMax[\s\S]*lastProposalDeltaLambdaByColor[\s\S]*lastProposalLambdaNextByColor/,
+    'expected WGSL lambda proposal stage to read back deterministic per-spring lambda telemetry',
   );
 });

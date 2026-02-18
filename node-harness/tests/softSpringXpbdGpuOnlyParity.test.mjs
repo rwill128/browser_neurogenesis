@@ -13,6 +13,159 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+function createSoftSpringMockWgslDevice() {
+  const storage = new WeakMap();
+
+  function ensure(buffer, size) {
+    const current = storage.get(buffer);
+    if (!current || current.byteLength < size) {
+      storage.set(buffer, new ArrayBuffer(size));
+    }
+    return storage.get(buffer);
+  }
+
+  function readU32(buffer, count) {
+    return new Uint32Array(ensure(buffer, count * 4).slice(0, count * 4));
+  }
+
+  function readF32(buffer, count) {
+    return new Float32Array(ensure(buffer, count * 4).slice(0, count * 4));
+  }
+
+  function writeF32(buffer, values) {
+    const data = ensure(buffer, values.byteLength);
+    new Uint8Array(data).set(new Uint8Array(values.buffer, values.byteOffset, values.byteLength));
+  }
+
+  return {
+    createShaderModule() { return {}; },
+    async createComputePipelineAsync() {
+      return {
+        getBindGroupLayout() { return {}; },
+      };
+    },
+    createBuffer({ size }) {
+      const buf = {
+        size,
+        destroy() {},
+        mapAsync: async () => {},
+        getMappedRange: (offset = 0, len = size) => ensure(buf, size).slice(offset, offset + len),
+        unmap() {},
+      };
+      ensure(buf, size);
+      return buf;
+    },
+    createBindGroup({ entries }) {
+      const map = new Map(entries.map((entry) => [entry.binding, entry.resource.buffer]));
+      return { __buffers: map };
+    },
+    createCommandEncoder() {
+      const ops = [];
+      return {
+        beginComputePass() {
+          const pass = { bindGroup: null };
+          return {
+            setPipeline() {},
+            setBindGroup(_index, bindGroup) { pass.bindGroup = bindGroup; },
+            dispatchWorkgroups() {},
+            end() { ops.push({ type: 'compute', pass }); },
+          };
+        },
+        copyBufferToBuffer(src, srcOffset, dst, dstOffset, size) {
+          ops.push({ type: 'copy', src, srcOffset, dst, dstOffset, size });
+        },
+        finish() { return ops; },
+      };
+    },
+    queue: {
+      writeBuffer(buffer, offset, data) {
+        const bytes = data instanceof ArrayBuffer
+          ? new Uint8Array(data)
+          : new Uint8Array(data.buffer, data.byteOffset || 0, data.byteLength || data.length);
+        const target = ensure(buffer, offset + bytes.byteLength);
+        new Uint8Array(target).set(bytes, offset);
+      },
+      submit(commandsList) {
+        for (const commands of commandsList) {
+          for (const cmd of commands) {
+            if (cmd.type === 'compute') {
+              const buffers = cmd.pass.bindGroup.__buffers;
+              const paramsBuf = ensure(buffers.get(0), 16);
+              const paramsU32 = new Uint32Array(paramsBuf);
+              const paramsF32 = new Float32Array(paramsBuf);
+              const nodeCount = paramsU32[0] || 0;
+              const springCount = paramsU32[1] || 0;
+
+              if (buffers.has(10)) {
+                const nodeX = readF32(buffers.get(1), nodeCount);
+                const nodeY = readF32(buffers.get(2), nodeCount);
+                const springA = readU32(buffers.get(3), springCount);
+                const springB = readU32(buffers.get(4), springCount);
+                const springRest = readF32(buffers.get(5), springCount);
+                const invMassA = readF32(buffers.get(6), springCount);
+                const invMassB = readF32(buffers.get(7), springCount);
+                const lambdaPrev = readF32(buffers.get(8), springCount);
+                const alpha = paramsF32[2] || 0;
+
+                const deltaOut = new Float32Array(springCount);
+                const nextOut = new Float32Array(springCount);
+
+                for (let i = 0; i < springCount; i++) {
+                  const ia = springA[i];
+                  const ib = springB[i];
+                  if (ia >= nodeCount || ib >= nodeCount) continue;
+
+                  const dx = nodeX[ib] - nodeX[ia];
+                  const dy = nodeY[ib] - nodeY[ia];
+                  const d = Math.max(1e-6, Math.hypot(dx, dy));
+                  const rest = springRest[i];
+                  const strainCap = Math.max(0.05, Math.abs(rest) * 0.45);
+                  const C = clamp(d - rest, -strainCap, strainCap);
+                  const wSum = invMassA[i] + invMassB[i];
+                  if (wSum <= 1e-9) {
+                    nextOut[i] = lambdaPrev[i];
+                    continue;
+                  }
+                  const prev = lambdaPrev[i];
+                  const dlRaw = (-C - alpha * prev) / (wSum + alpha);
+                  const next = Math.max(-20, Math.min(20, prev + dlRaw));
+                  deltaOut[i] = next - prev;
+                  nextOut[i] = next;
+                }
+
+                writeF32(buffers.get(9), deltaOut);
+                writeF32(buffers.get(10), nextOut);
+              } else {
+                const nodeX = readF32(buffers.get(1), nodeCount);
+                const nodeY = readF32(buffers.get(2), nodeCount);
+                const springA = readU32(buffers.get(3), springCount);
+                const springB = readU32(buffers.get(4), springCount);
+                const springRest = readF32(buffers.get(5), springCount);
+                const stretch = new Float32Array(springCount);
+                for (let i = 0; i < springCount; i++) {
+                  const ia = springA[i];
+                  const ib = springB[i];
+                  if (ia >= nodeCount || ib >= nodeCount) continue;
+                  const dx = nodeX[ib] - nodeX[ia];
+                  const dy = nodeY[ib] - nodeY[ia];
+                  const d = Math.max(1e-6, Math.hypot(dx, dy));
+                  const rest = Math.max(Math.abs(springRest[i]), 1e-6);
+                  stretch[i] = (d - rest) / rest;
+                }
+                writeF32(buffers.get(6), stretch);
+              }
+            } else if (cmd.type === 'copy') {
+              const src = ensure(cmd.src, cmd.srcOffset + cmd.size);
+              const dst = ensure(cmd.dst, cmd.dstOffset + cmd.size);
+              new Uint8Array(dst).set(new Uint8Array(src, cmd.srcOffset, cmd.size), cmd.dstOffset);
+            }
+          }
+        }
+      },
+    },
+  };
+}
+
 function applySoftSpringsXPBDVelocityBaseline(soft, dtPos, stiffnessScale, lambdaCache, { skipClusterSet = null } = {}) {
   if (!soft?.nodes?.length || !soft?.springs?.length) return;
   const alpha = (SOFT_XPBD_BASE_COMPLIANCE / Math.max(0.2, stiffnessScale)) / Math.max(1e-8, dtPos * dtPos);
@@ -294,4 +447,64 @@ test('soft spring XPBD stores WGSL-prep state while preserving cpu parity output
   assert.equal(wgslState.preparedPlan?.springColorOffsets?.length, 3);
   assert.equal(wgslState.preparedLayout?.springNodeAByColor?.length, 2);
   assert.equal(wgslState.lastPreparedLayoutBytes, wgslState.preparedLayout?.byteLength);
+});
+
+test('soft spring XPBD WGSL proposal stage runs on gpu-only path while CPU remains authoritative', async () => {
+  globalThis.GPUBufferUsage = {
+    STORAGE: 1 << 0,
+    COPY_DST: 1 << 1,
+    COPY_SRC: 1 << 2,
+    MAP_READ: 1 << 3,
+    UNIFORM: 1 << 4,
+  };
+  globalThis.GPUMapMode = { READ: 1 };
+
+  const dtPos = 0.18;
+  const stiffnessScale = 3.0;
+  const seed = {
+    nodes: [
+      { x: 20, y: 25, vx: 0.2, vy: -0.1, mass: 1.1, clusterId: 1 },
+      { x: 30, y: 21, vx: -0.3, vy: 0.4, mass: 0.8, clusterId: 1 },
+      { x: 39, y: 28, vx: 0.5, vy: 0.2, mass: 1.4, clusterId: 2 },
+    ],
+    springs: [
+      [0, 1, 11.2],
+      [1, 2, 10.8],
+    ],
+  };
+
+  const baseline = structuredClone(seed);
+  const gpuOnly = structuredClone(seed);
+  const baselineLambda = new Float32Array(seed.springs.length);
+  const gpuLambda = new Float32Array(seed.springs.length);
+  const wgslState = {};
+
+  applySoftSpringsXPBDVelocityBaseline(baseline, dtPos, stiffnessScale, baselineLambda);
+  applySoftSpringsXPBDVelocityGpuOnly({
+    soft: gpuOnly,
+    dtPos,
+    stiffnessScale,
+    lambdaCache: gpuLambda,
+    softXpbdIters: SOFT_XPBD_ITERS,
+    softXpbdBaseCompliance: SOFT_XPBD_BASE_COMPLIANCE,
+    clamp,
+    wgslOffload: {
+      enabled: true,
+      device: createSoftSpringMockWgslDevice(),
+      state: wgslState,
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(Array.from(gpuLambda), Array.from(baselineLambda));
+  assert.deepEqual(gpuOnly.nodes, baseline.nodes);
+  assert.equal(wgslState.lastMode, 'wgsl-proposal');
+  assert.equal(wgslState.lastError, null);
+  assert.equal(wgslState.lastProposalSpringCount, 2);
+  assert.equal(wgslState.lastProposalDeltaLambdaByColor instanceof Float32Array, true);
+  assert.equal(wgslState.lastProposalLambdaNextByColor instanceof Float32Array, true);
+  assert.equal(wgslState.lastProposalDeltaLambdaByColor.length, 2);
+  assert.equal(wgslState.lastProposalLambdaNextByColor.length, 2);
+  assert.equal(wgslState.lastProbeSpringCount, 2);
 });

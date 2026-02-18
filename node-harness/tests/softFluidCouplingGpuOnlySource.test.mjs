@@ -89,8 +89,8 @@ test('soft fluid-coupling gpu-only fast mode skips cluster parity shadow work wh
 
   assert.match(
     source,
-    /const modeProfile = getGpuOnlyPipelineModeProfile\(wgslOffload\);[\s\S]*const fastMode = isGpuOnlyFastMode\(wgslOffload\);[\s\S]*const useFastAuthoritativeCarryShortcut = fastMode && canUseAuthoritativeCarryProposal;[\s\S]*if \(!useFastAuthoritativeCarryShortcut\) \{[\s\S]*sampleFluidForBodyCoupling\([\s\S]*if \(!fastMode && hasClusterProposal\) \{[\s\S]*clusterLoadMismatchCount \+= 1;/,
-    'expected fast mode to bypass per-node CPU fluid sampling when finite authoritative WGSL carry exists while validated mode retains parity-heavy checks',
+    /const modeProfile = getGpuOnlyPipelineModeProfile\(wgslOffload\);[\s\S]*const fastMode = isGpuOnlyFastMode\(wgslOffload\);[\s\S]*const useFastAuthoritativeCarryShortcut = fastMode && canUseAuthoritativeCarryProposal;[\s\S]*if \(useFastAuthoritativeCarryShortcut\) \{[\s\S]*authoritativeCarryProposal\.forceX\[i\];[\s\S]*\} else \{[\s\S]*sampleFluidForBodyCoupling\([\s\S]*if \(!fastMode && hasClusterProposal\) \{[\s\S]*clusterLoadMismatchCount \+= 1;/,
+    'expected fast mode to run a dedicated authoritative carry loop without CPU fluid sampling while validated mode retains parity-heavy checks',
   );
 
   assert.match(

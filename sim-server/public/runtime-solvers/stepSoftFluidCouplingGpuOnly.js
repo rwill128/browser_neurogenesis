@@ -972,40 +972,94 @@ export function applySoftFluidCouplingGpuOnly({
   const cpuProposalLocalCarryX = useFastAuthoritativeCarryShortcut ? null : new Float32Array(nodes.length);
   const cpuProposalLocalCarryY = useFastAuthoritativeCarryShortcut ? null : new Float32Array(nodes.length);
 
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i];
-    const mass = Math.max(0.02, node.mass);
-    const invMass = 1 / mass;
-    const cx = node.x - softCentroid.x;
-    const cy = node.y - softCentroid.y;
-    const activeSwimPhase = sim.frame * 0.12 + i * 1.57;
-    const activeSwimAmp = 0.008 * (1 + 0.2 * Math.sin(sim.frame * 0.05 + i));
-    const swimX = swimGain * (-cy * activeSwimAmp + Math.cos(activeSwimPhase) * 0.004) * invMass;
-    const swimY = swimGain * (cx * activeSwimAmp + Math.sin(activeSwimPhase) * 0.004) * invMass;
-    const honey = localHoneyDrag(node.x, node.y);
-    const cid = node.clusterId ?? 0;
-    const isMembraneCluster = softMembraneClusterSet.has(cid);
-    const nodeMomentum = softNodeMomentumScale(i);
-    const flowCouplingBase = isMembraneCluster ? (SOFT_NODE_FLOW_COUPLING * 0.88) : SOFT_NODE_FLOW_COUPLING;
-    const flowCoupling = flowCouplingBase * nodeMomentum;
+  if (useFastAuthoritativeCarryShortcut) {
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      const mass = Math.max(0.02, node.mass);
+      const invMass = 1 / mass;
+      const cx = node.x - softCentroid.x;
+      const cy = node.y - softCentroid.y;
+      const activeSwimPhase = sim.frame * 0.12 + i * 1.57;
+      const activeSwimAmp = 0.008 * (1 + 0.2 * Math.sin(sim.frame * 0.05 + i));
+      const swimX = swimGain * (-cy * activeSwimAmp + Math.cos(activeSwimPhase) * 0.004) * invMass;
+      const swimY = swimGain * (cx * activeSwimAmp + Math.sin(activeSwimPhase) * 0.004) * invMass;
+      const honey = localHoneyDrag(node.x, node.y);
+      const cid = node.clusterId ?? 0;
 
-    const clusterKin = softClusterKinematics.get(cid);
-    const clusterX = Number.isFinite(Number(clusterKin?.x)) ? Number(clusterKin.x) : softCentroid.x;
-    const clusterY = Number.isFinite(Number(clusterKin?.y)) ? Number(clusterKin.y) : softCentroid.y;
-    const clusterVx = Number.isFinite(Number(clusterKin?.vx)) ? Number(clusterKin.vx) : 0;
-    const clusterVy = Number.isFinite(Number(clusterKin?.vy)) ? Number(clusterKin.vy) : 0;
-    const clusterOmega = Number.isFinite(Number(clusterKin?.omega)) ? Number(clusterKin.omega) : 0;
+      const clusterKin = softClusterKinematics.get(cid);
+      const clusterX = Number.isFinite(Number(clusterKin?.x)) ? Number(clusterKin.x) : softCentroid.x;
+      const clusterY = Number.isFinite(Number(clusterKin?.y)) ? Number(clusterKin.y) : softCentroid.y;
+      const rx = node.x - clusterX;
+      const ry = node.y - clusterY;
 
-    const rx = node.x - clusterX;
-    const ry = node.y - clusterY;
-    let cpuForceX = 0;
-    let cpuForceY = 0;
-    let cpuCarryX = 0;
-    let cpuCarryY = 0;
-    let cpuLocalCarryX = 0;
-    let cpuLocalCarryY = 0;
+      const forceX = authoritativeCarryProposal.forceX[i];
+      const forceY = authoritativeCarryProposal.forceY[i];
+      const carryX = authoritativeCarryProposal.carryX[i];
+      const carryY = authoritativeCarryProposal.carryY[i];
+      const localCarryX = authoritativeCarryProposal.localCarryX[i];
+      const localCarryY = authoritativeCarryProposal.localCarryY[i];
 
-    if (!useFastAuthoritativeCarryShortcut) {
+      node.vx += localCarryX * dt * 60 + swimX * dtNorm;
+      node.vy += localCarryY * dt * 60 + swimY * dtNorm;
+
+      if (!canUseAuthoritativeClusterLoadPreloop) {
+        const load = ensureClusterLoad(cid);
+        load.forceX += forceX;
+        load.forceY += forceY;
+        load.torque += rx * forceY - ry * forceX;
+        load.count += 1;
+      }
+
+      const st = clusterCarryMap.get(cid) || { sumX: 0, sumY: 0, count: 0, maxX: 0, maxY: 0, maxMag: 0 };
+      st.sumX += carryX;
+      st.sumY += carryY;
+      st.count += 1;
+      const cmag = Math.hypot(carryX, carryY);
+      if (cmag > st.maxMag) {
+        st.maxMag = cmag;
+        st.maxX = carryX;
+        st.maxY = carryY;
+      }
+      clusterCarryMap.set(cid, st);
+
+      const softVisc = viscosityMotionResponse(honey, 2.8);
+      node.vx *= softVisc.damp;
+      node.vy *= softVisc.damp;
+      const nMax = softVisc.vmax;
+      const nMag = Math.hypot(node.vx, node.vy);
+      if (nMag > nMax) {
+        node.vx = (node.vx / nMag) * nMax;
+        node.vy = (node.vy / nMag) * nMax;
+      }
+      softCarryTransfer += Math.hypot(carryX, carryY);
+    }
+  } else {
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      const mass = Math.max(0.02, node.mass);
+      const invMass = 1 / mass;
+      const cx = node.x - softCentroid.x;
+      const cy = node.y - softCentroid.y;
+      const activeSwimPhase = sim.frame * 0.12 + i * 1.57;
+      const activeSwimAmp = 0.008 * (1 + 0.2 * Math.sin(sim.frame * 0.05 + i));
+      const swimX = swimGain * (-cy * activeSwimAmp + Math.cos(activeSwimPhase) * 0.004) * invMass;
+      const swimY = swimGain * (cx * activeSwimAmp + Math.sin(activeSwimPhase) * 0.004) * invMass;
+      const honey = localHoneyDrag(node.x, node.y);
+      const cid = node.clusterId ?? 0;
+      const isMembraneCluster = softMembraneClusterSet.has(cid);
+      const nodeMomentum = softNodeMomentumScale(i);
+      const flowCouplingBase = isMembraneCluster ? (SOFT_NODE_FLOW_COUPLING * 0.88) : SOFT_NODE_FLOW_COUPLING;
+      const flowCoupling = flowCouplingBase * nodeMomentum;
+
+      const clusterKin = softClusterKinematics.get(cid);
+      const clusterX = Number.isFinite(Number(clusterKin?.x)) ? Number(clusterKin.x) : softCentroid.x;
+      const clusterY = Number.isFinite(Number(clusterKin?.y)) ? Number(clusterKin.y) : softCentroid.y;
+      const clusterVx = Number.isFinite(Number(clusterKin?.vx)) ? Number(clusterKin.vx) : 0;
+      const clusterVy = Number.isFinite(Number(clusterKin?.vy)) ? Number(clusterKin.vy) : 0;
+      const clusterOmega = Number.isFinite(Number(clusterKin?.omega)) ? Number(clusterKin.omega) : 0;
+
+      const rx = node.x - clusterX;
+      const ry = node.y - clusterY;
       const fx = sampleFluidForBodyCoupling(
         vxField,
         n,
@@ -1031,13 +1085,13 @@ export function applySoftFluidCouplingGpuOnly({
       const clusterLocalVx = clusterVx - clusterOmega * ry;
       const clusterLocalVy = clusterVy + clusterOmega * rx;
 
-      cpuForceX = (fx - clusterLocalVx) * dragK * honey * flowCoupling * mass;
-      cpuForceY = (fy - clusterLocalVy) * dragK * honey * flowCoupling * mass;
-      cpuCarryX = cpuForceX * invMass;
-      cpuCarryY = cpuForceY * invMass;
+      const cpuForceX = (fx - clusterLocalVx) * dragK * honey * flowCoupling * mass;
+      const cpuForceY = (fy - clusterLocalVy) * dragK * honey * flowCoupling * mass;
+      const cpuCarryX = cpuForceX * invMass;
+      const cpuCarryY = cpuForceY * invMass;
 
-      cpuLocalCarryX = (fx - node.vx) * dragK * honey * invMass * flowCoupling * SOFT_NODE_LOCAL_FLOW_SHARE;
-      cpuLocalCarryY = (fy - node.vy) * dragK * honey * invMass * flowCoupling * SOFT_NODE_LOCAL_FLOW_SHARE;
+      const cpuLocalCarryX = (fx - node.vx) * dragK * honey * invMass * flowCoupling * SOFT_NODE_LOCAL_FLOW_SHARE;
+      const cpuLocalCarryY = (fy - node.vy) * dragK * honey * invMass * flowCoupling * SOFT_NODE_LOCAL_FLOW_SHARE;
 
       cpuProposalForceX[i] = cpuForceX;
       cpuProposalForceY[i] = cpuForceY;
@@ -1045,48 +1099,48 @@ export function applySoftFluidCouplingGpuOnly({
       cpuProposalCarryY[i] = cpuCarryY;
       cpuProposalLocalCarryX[i] = cpuLocalCarryX;
       cpuProposalLocalCarryY[i] = cpuLocalCarryY;
+
+      const forceX = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.forceX[i] : cpuForceX;
+      const forceY = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.forceY[i] : cpuForceY;
+      const carryX = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.carryX[i] : cpuCarryX;
+      const carryY = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.carryY[i] : cpuCarryY;
+      const localCarryX = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.localCarryX[i] : cpuLocalCarryX;
+      const localCarryY = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.localCarryY[i] : cpuLocalCarryY;
+
+      node.vx += localCarryX * dt * 60 + swimX * dtNorm;
+      node.vy += localCarryY * dt * 60 + swimY * dtNorm;
+
+      if (!canUseAuthoritativeClusterLoadPreloop) {
+        const load = ensureClusterLoad(cid);
+        load.forceX += forceX;
+        load.forceY += forceY;
+        load.torque += rx * forceY - ry * forceX;
+        load.count += 1;
+      }
+
+      const st = clusterCarryMap.get(cid) || { sumX: 0, sumY: 0, count: 0, maxX: 0, maxY: 0, maxMag: 0 };
+      st.sumX += carryX;
+      st.sumY += carryY;
+      st.count += 1;
+      const cmag = Math.hypot(carryX, carryY);
+      if (cmag > st.maxMag) {
+        st.maxMag = cmag;
+        st.maxX = carryX;
+        st.maxY = carryY;
+      }
+      clusterCarryMap.set(cid, st);
+
+      const softVisc = viscosityMotionResponse(honey, 2.8);
+      node.vx *= softVisc.damp;
+      node.vy *= softVisc.damp;
+      const nMax = softVisc.vmax;
+      const nMag = Math.hypot(node.vx, node.vy);
+      if (nMag > nMax) {
+        node.vx = (node.vx / nMag) * nMax;
+        node.vy = (node.vy / nMag) * nMax;
+      }
+      softCarryTransfer += Math.hypot(carryX, carryY);
     }
-
-    const forceX = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.forceX[i] : cpuForceX;
-    const forceY = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.forceY[i] : cpuForceY;
-    const carryX = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.carryX[i] : cpuCarryX;
-    const carryY = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.carryY[i] : cpuCarryY;
-    const localCarryX = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.localCarryX[i] : cpuLocalCarryX;
-    const localCarryY = canUseAuthoritativeCarryProposal ? authoritativeCarryProposal.localCarryY[i] : cpuLocalCarryY;
-
-    node.vx += localCarryX * dt * 60 + swimX * dtNorm;
-    node.vy += localCarryY * dt * 60 + swimY * dtNorm;
-
-    if (!canUseAuthoritativeClusterLoadPreloop) {
-      const load = ensureClusterLoad(cid);
-      load.forceX += forceX;
-      load.forceY += forceY;
-      load.torque += rx * forceY - ry * forceX;
-      load.count += 1;
-    }
-
-    const st = clusterCarryMap.get(cid) || { sumX: 0, sumY: 0, count: 0, maxX: 0, maxY: 0, maxMag: 0 };
-    st.sumX += carryX;
-    st.sumY += carryY;
-    st.count += 1;
-    const cmag = Math.hypot(carryX, carryY);
-    if (cmag > st.maxMag) {
-      st.maxMag = cmag;
-      st.maxX = carryX;
-      st.maxY = carryY;
-    }
-    clusterCarryMap.set(cid, st);
-
-    const softVisc = viscosityMotionResponse(honey, 2.8);
-    node.vx *= softVisc.damp;
-    node.vy *= softVisc.damp;
-    const nMax = softVisc.vmax;
-    const nMag = Math.hypot(node.vx, node.vy);
-    if (nMag > nMax) {
-      node.vx = (node.vx / nMag) * nMax;
-      node.vy = (node.vy / nMag) * nMax;
-    }
-    softCarryTransfer += Math.hypot(carryX, carryY);
   }
 
   if (wgslOffload?.state && clusterLoadProposalSignature !== 0) {

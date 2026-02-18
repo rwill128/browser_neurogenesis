@@ -10,6 +10,135 @@ import { getRigidCollisionPolysWorld, pointInPolygonInclusive } from '../rigid-c
 
 const EPS = 1e-8;
 
+function hashU32ArrayFnv1a(arr) {
+  let hash = 0x811c9dc5;
+  const len = Number(arr?.length) || 0;
+  for (let i = 0; i < len; i++) {
+    hash ^= (Number(arr[i]) || 0) >>> 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function hashF32ArrayFnv1a(arr) {
+  const len = Number(arr?.length) || 0;
+  const scratch = new ArrayBuffer(4);
+  const asF32 = new Float32Array(scratch);
+  const asU32 = new Uint32Array(scratch);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < len; i++) {
+    asF32[0] = Number(arr[i]) || 0;
+    hash ^= asU32[0] >>> 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function buildRigidInsideCorrectionWgslLayout({
+  rigidBodies,
+  soft,
+  hybridAttachedByRigid,
+  getRigidPolysWorld,
+}) {
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const rigid = Array.isArray(rigidBodies) ? rigidBodies : [];
+
+  const nodeCount = nodes.length;
+  const rigidCount = rigid.length;
+
+  const nodeX = new Float32Array(nodeCount);
+  const nodeY = new Float32Array(nodeCount);
+  const nodeR = new Float32Array(nodeCount);
+  const nodeMass = new Float32Array(nodeCount);
+  for (let i = 0; i < nodeCount; i++) {
+    const node = nodes[i] || {};
+    nodeX[i] = Number(node.x) || 0;
+    nodeY[i] = Number(node.y) || 0;
+    nodeR[i] = Math.max(0.25, Number(node.r) || 1);
+    nodeMass[i] = Math.max(0.02, Number(node.mass) || 1);
+  }
+
+  const rigidPolyOffsets = new Uint32Array(rigidCount + 1);
+  const eligibleNodeOffsets = new Uint32Array(rigidCount + 1);
+  const eligibleNodeList = [];
+  const polyPointX = [];
+  const polyPointY = [];
+  const polyPointOffsets = [0];
+  const polyRigidIndex = [];
+
+  let polyCount = 0;
+  for (let rbi = 0; rbi < rigidCount; rbi++) {
+    rigidPolyOffsets[rbi] = polyCount;
+    const rb = rigid[rbi];
+    if (!rb || rb.insideCorrectionEnabled === false) {
+      eligibleNodeOffsets[rbi] = eligibleNodeList.length;
+      continue;
+    }
+    const polys = getRigidPolysWorld(rb);
+    if (Array.isArray(polys)) {
+      for (const poly of polys) {
+        if (!Array.isArray(poly) || poly.length < 3) continue;
+        polyRigidIndex.push(rbi >>> 0);
+        for (let i = 0; i < poly.length; i++) {
+          const p = poly[i] || {};
+          polyPointX.push(Number(p.x) || 0);
+          polyPointY.push(Number(p.y) || 0);
+        }
+        polyPointOffsets.push(polyPointX.length);
+        polyCount += 1;
+      }
+    }
+
+    eligibleNodeOffsets[rbi] = eligibleNodeList.length;
+    const attachedNodeSet = hybridAttachedByRigid?.get?.(rbi) || null;
+    for (let ni = 0; ni < nodeCount; ni++) {
+      if (attachedNodeSet && attachedNodeSet.has(ni)) continue;
+      eligibleNodeList.push(ni >>> 0);
+    }
+  }
+  rigidPolyOffsets[rigidCount] = polyCount;
+  eligibleNodeOffsets[rigidCount] = eligibleNodeList.length;
+
+  const layout = {
+    nodeX,
+    nodeY,
+    nodeR,
+    nodeMass,
+    rigidPolyOffsets,
+    eligibleNodeOffsets,
+    eligibleNodeIndices: new Uint32Array(eligibleNodeList),
+    polyRigidIndex: new Uint32Array(polyRigidIndex),
+    polyPointOffsets: new Uint32Array(polyPointOffsets),
+    polyPointX: new Float32Array(polyPointX),
+    polyPointY: new Float32Array(polyPointY),
+  };
+
+  const byteLength = Object.values(layout).reduce((sum, arr) => sum + (arr?.byteLength || 0), 0);
+  let signature = 0x811c9dc5;
+  signature ^= hashU32ArrayFnv1a(layout.rigidPolyOffsets);
+  signature = Math.imul(signature, 0x01000193) >>> 0;
+  signature ^= hashU32ArrayFnv1a(layout.eligibleNodeOffsets);
+  signature = Math.imul(signature, 0x01000193) >>> 0;
+  signature ^= hashU32ArrayFnv1a(layout.eligibleNodeIndices);
+  signature = Math.imul(signature, 0x01000193) >>> 0;
+  signature ^= hashU32ArrayFnv1a(layout.polyPointOffsets);
+  signature = Math.imul(signature, 0x01000193) >>> 0;
+  signature ^= hashF32ArrayFnv1a(layout.polyPointX);
+  signature = Math.imul(signature, 0x01000193) >>> 0;
+  signature ^= hashF32ArrayFnv1a(layout.polyPointY);
+  signature >>>= 0;
+
+  return {
+    layout,
+    nodeCount,
+    rigidCount,
+    polyCount,
+    eligibleNodeCount: layout.eligibleNodeIndices.length,
+    byteLength,
+    signature,
+  };
+}
+
 function closestPointOnSegment(px, py, ax, ay, bx, by) {
   const abx = bx - ax;
   const aby = by - ay;
@@ -100,11 +229,31 @@ export function applyRigidInsideCorrectionPassGpuOnly({
   correctionIters = 2,
   correctionSlop = 0.04,
   getRigidPolysWorld = getRigidCollisionPolysWorld,
+  wgslOffload,
 } = {}) {
   if (!Array.isArray(rigidBodies) || rigidBodies.length === 0) return 0;
   if (!soft || !Array.isArray(soft.nodes) || soft.nodes.length === 0) return 0;
 
   let corrected = 0;
+
+  if (wgslOffload?.enabled === true && wgslOffload?.state) {
+    const prep = buildRigidInsideCorrectionWgslLayout({
+      rigidBodies,
+      soft,
+      hybridAttachedByRigid,
+      getRigidPolysWorld,
+    });
+    wgslOffload.state.preparedInsideLayout = prep.layout;
+    wgslOffload.state.lastPreparedInsideNodeCount = prep.nodeCount;
+    wgslOffload.state.lastPreparedInsideRigidCount = prep.rigidCount;
+    wgslOffload.state.lastPreparedInsidePolyCount = prep.polyCount;
+    wgslOffload.state.lastPreparedInsideEligibleNodeCount = prep.eligibleNodeCount;
+    wgslOffload.state.lastPreparedInsideLayoutBytes = prep.byteLength;
+    wgslOffload.state.lastPreparedInsideLayoutSignature = prep.signature;
+    wgslOffload.state.lastSourceRoute = 'cpu-rigid-inside-prepared-layout';
+    wgslOffload.state.lastMode = 'cpu-rigid-inside-authoritative';
+    wgslOffload.state.lastError = null;
+  }
 
   for (let iter = 0; iter < correctionIters; iter++) {
     for (let rbi = 0; rbi < rigidBodies.length; rbi++) {
@@ -126,6 +275,13 @@ export function applyRigidInsideCorrectionPassGpuOnly({
         }
       }
     }
+  }
+
+  if (wgslOffload?.state) {
+    wgslOffload.state.lastInsideCorrectionCount = corrected;
+    wgslOffload.state.lastAuthoritativeInsideSource = 'cpu-rigid-inside-authoritative';
+    wgslOffload.state.lastSourceRoute = 'cpu-rigid-inside-authoritative';
+    wgslOffload.state.lastMode = 'cpu-rigid-inside-authoritative';
   }
 
   return corrected;

@@ -209,7 +209,6 @@ function hashF32ArrayFnv1a(arr) {
 function buildRigidInsideCorrectionWgslLayout({
   rigidBodies,
   soft,
-  hybridAttachedByRigid,
   getRigidPolysWorld,
 }) {
   const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
@@ -262,9 +261,7 @@ function buildRigidInsideCorrectionWgslLayout({
     }
 
     eligibleNodeOffsets[rbi] = eligibleNodeList.length;
-    const attachedNodeSet = hybridAttachedByRigid?.get?.(rbi) || null;
     for (let ni = 0; ni < nodeCount; ni++) {
-      if (attachedNodeSet && attachedNodeSet.has(ni)) continue;
       eligibleNodeList.push(ni >>> 0);
     }
   }
@@ -863,10 +860,14 @@ function canApplyAuthoritativeRigidInsideProposal({
   const state = wgslOffload?.state;
   if (!state || state.enableAuthoritativeInsideCorrection !== true) return false;
   const fastMode = isGpuOnlyFastMode(wgslOffload);
-  const expectedSource = fastMode
-    ? 'wgsl-rigid-inside-correction-proposal-fast'
-    : 'wgsl-rigid-inside-correction-proposal';
-  if (state.lastInsideCorrectionProposalSource !== expectedSource) return false;
+  const source = String(state.lastInsideCorrectionProposalSource || '');
+  if (fastMode) {
+    const fastAccepted = source === 'wgsl-rigid-inside-correction-proposal-fast'
+      || source === 'wgsl-rigid-inside-correction-proposal';
+    if (!fastAccepted) return false;
+  } else if (source !== 'wgsl-rigid-inside-correction-proposal') {
+    return false;
+  }
   if ((state.lastInsideCorrectionProposalSignature >>> 0) !== (proposalSignature >>> 0)) return false;
   if (!(state.lastInsideCorrectionProposalCorrX instanceof Float32Array)) return false;
   if (!(state.lastInsideCorrectionProposalCorrY instanceof Float32Array)) return false;
@@ -953,7 +954,6 @@ function applyAuthoritativeRigidInsideProposal({
 export function applyRigidInsideCorrectionPassGpuOnly({
   rigidBodies,
   soft,
-  hybridAttachedByRigid,
   correctionIters = 2,
   correctionSlop = 0.04,
   getRigidPolysWorld = getRigidCollisionPolysWorld,
@@ -997,7 +997,6 @@ export function applyRigidInsideCorrectionPassGpuOnly({
     const prep = buildRigidInsideCorrectionWgslLayout({
       rigidBodies,
       soft,
-      hybridAttachedByRigid,
       getRigidPolysWorld,
     });
     preparedLayoutSignature = prep.signature >>> 0;
@@ -1055,12 +1054,13 @@ export function applyRigidInsideCorrectionPassGpuOnly({
               ? 'skipped-readback-telemetry'
               : (validatedMode ? 'readback-telemetry-validated' : 'readback-telemetry');
 
+            const authoritativeInsideEnabled = wgslOffload?.state?.enableAuthoritativeInsideCorrection === true;
             const correctionProposalRan = dispatchRigidInsideCorrectionProposal({
               offload: wgslOffload,
               prep,
               proposalSignature,
               correctionSlop,
-              includeReadbackTelemetry: !fastMode,
+              includeReadbackTelemetry: !fastMode || authoritativeInsideEnabled,
             });
             if (correctionProposalRan) {
               wgslOffload.state.lastSourceRoute = fastMode
@@ -1105,10 +1105,8 @@ export function applyRigidInsideCorrectionPassGpuOnly({
         if (!rb || rb.insideCorrectionEnabled === false) continue;
         const polys = getRigidPolysWorld(rb);
         if (!Array.isArray(polys) || polys.length === 0) continue;
-        const attachedNodeSet = hybridAttachedByRigid?.get?.(rbi) || null;
 
         for (let ni = 0; ni < soft.nodes.length; ni++) {
-          if (attachedNodeSet && attachedNodeSet.has(ni)) continue;
           const node = soft.nodes[ni];
           if (!node) continue;
           for (const poly of polys) {

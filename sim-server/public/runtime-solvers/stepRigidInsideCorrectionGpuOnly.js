@@ -94,6 +94,94 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const rigidInsideCorrectionProposalWgsl = /* wgsl */`
+struct Params {
+  node_count: u32,
+  poly_count: u32,
+  _pad0: u32,
+  _pad1: u32,
+  correction_slop: f32,
+  _pad2: f32,
+  _pad3: f32,
+  _pad4: f32,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> poly_rigid_index: array<u32>;
+@group(0) @binding(2) var<storage, read> poly_min_x: array<f32>;
+@group(0) @binding(3) var<storage, read> poly_min_y: array<f32>;
+@group(0) @binding(4) var<storage, read> poly_max_x: array<f32>;
+@group(0) @binding(5) var<storage, read> poly_max_y: array<f32>;
+@group(0) @binding(6) var<storage, read> node_x: array<f32>;
+@group(0) @binding(7) var<storage, read> node_y: array<f32>;
+@group(0) @binding(8) var<storage, read> node_r: array<f32>;
+@group(0) @binding(9) var<storage, read_write> out_corr_x: array<f32>;
+@group(0) @binding(10) var<storage, read_write> out_corr_y: array<f32>;
+@group(0) @binding(11) var<storage, read_write> out_rigid_index: array<u32>;
+
+@compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let node_index = gid.x;
+  if (node_index >= params.node_count) { return; }
+
+  let nx = node_x[node_index];
+  let ny = node_y[node_index];
+  let pad = max(node_r[node_index], 0.25) + max(params.correction_slop, 0.0);
+
+  var best_pen = -1.0;
+  var best_dx = 0.0;
+  var best_dy = 0.0;
+  var best_rigid = 0u;
+
+  for (var pi = 0u; pi < params.poly_count; pi = pi + 1u) {
+    let min_x = poly_min_x[pi] + pad;
+    let min_y = poly_min_y[pi] + pad;
+    let max_x = poly_max_x[pi] - pad;
+    let max_y = poly_max_y[pi] - pad;
+
+    if (max_x <= min_x || max_y <= min_y) { continue; }
+    if (nx < min_x || nx > max_x || ny < min_y || ny > max_y) { continue; }
+
+    let dx_left = nx - min_x;
+    let dx_right = max_x - nx;
+    let dy_bottom = ny - min_y;
+    let dy_top = max_y - ny;
+
+    var push_x = 0.0;
+    var push_y = 0.0;
+    var local_pen = dx_left;
+    push_x = -dx_left;
+
+    if (dx_right < local_pen) {
+      local_pen = dx_right;
+      push_x = dx_right;
+      push_y = 0.0;
+    }
+    if (dy_bottom < local_pen) {
+      local_pen = dy_bottom;
+      push_x = 0.0;
+      push_y = -dy_bottom;
+    }
+    if (dy_top < local_pen) {
+      local_pen = dy_top;
+      push_x = 0.0;
+      push_y = dy_top;
+    }
+
+    if (local_pen > best_pen) {
+      best_pen = local_pen;
+      best_dx = push_x;
+      best_dy = push_y;
+      best_rigid = poly_rigid_index[pi];
+    }
+  }
+
+  out_corr_x[node_index] = best_dx;
+  out_corr_y[node_index] = best_dy;
+  out_rigid_index[node_index] = best_rigid;
+}
+`;
+
 function hashU32ArrayFnv1a(arr) {
   let hash = 0x811c9dc5;
   const len = Number(arr?.length) || 0;
@@ -429,6 +517,86 @@ function ensureRigidInsideNodeCandidateState({ offload, prep }) {
   return state;
 }
 
+function ensureRigidInsideCorrectionProposalState({ offload, prep }) {
+  const state = offload.state;
+  const device = offload.device;
+  const polyCount = Math.max(1, Number(prep?.polyCount) || 0);
+  const nodeCount = Math.max(1, Number(prep?.nodeCount) || 0);
+
+  if (!state.insideCorrectionProposalPipeline) {
+    const module = device.createShaderModule({ code: rigidInsideCorrectionProposalWgsl });
+    state.insideCorrectionProposalPipeline = device.createComputePipeline({
+      layout: 'auto',
+      compute: { module, entryPoint: 'main' },
+    });
+  }
+
+  const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
+  const writeReadUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC;
+  const readbackUsage = globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ;
+
+  if ((state.insideCorrectionProposalPolyCapacity || 0) < polyCount) {
+    const bytes = polyCount * 4;
+    state.insideCorrectionProposalPolyRigidIndex?.destroy?.();
+    state.insideCorrectionProposalPolyRigidIndex = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insideCorrectionProposalPolyCapacity = polyCount;
+    state.insideCorrectionProposalBindGroup = null;
+  }
+
+  if ((state.insideCorrectionProposalNodeCapacity || 0) < nodeCount) {
+    const bytes = nodeCount * 4;
+    state.insideCorrectionProposalNodeX?.destroy?.();
+    state.insideCorrectionProposalNodeY?.destroy?.();
+    state.insideCorrectionProposalNodeR?.destroy?.();
+    state.insideCorrectionProposalCorrXOut?.destroy?.();
+    state.insideCorrectionProposalCorrYOut?.destroy?.();
+    state.insideCorrectionProposalRigidIndexOut?.destroy?.();
+    state.insideCorrectionProposalCorrXReadback?.destroy?.();
+    state.insideCorrectionProposalCorrYReadback?.destroy?.();
+    state.insideCorrectionProposalRigidIndexReadback?.destroy?.();
+    state.insideCorrectionProposalNodeX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insideCorrectionProposalNodeY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insideCorrectionProposalNodeR = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.insideCorrectionProposalCorrXOut = device.createBuffer({ size: bytes, usage: writeReadUsage });
+    state.insideCorrectionProposalCorrYOut = device.createBuffer({ size: bytes, usage: writeReadUsage });
+    state.insideCorrectionProposalRigidIndexOut = device.createBuffer({ size: bytes, usage: writeReadUsage });
+    state.insideCorrectionProposalCorrXReadback = device.createBuffer({ size: bytes, usage: readbackUsage });
+    state.insideCorrectionProposalCorrYReadback = device.createBuffer({ size: bytes, usage: readbackUsage });
+    state.insideCorrectionProposalRigidIndexReadback = device.createBuffer({ size: bytes, usage: readbackUsage });
+    state.insideCorrectionProposalNodeCapacity = nodeCount;
+    state.insideCorrectionProposalBindGroup = null;
+  }
+
+  if (!state.insideCorrectionProposalParams) {
+    state.insideCorrectionProposalParams = device.createBuffer({
+      size: 32,
+      usage: globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST,
+    });
+  }
+
+  if (!state.insideCorrectionProposalBindGroup) {
+    state.insideCorrectionProposalBindGroup = device.createBindGroup({
+      layout: state.insideCorrectionProposalPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.insideCorrectionProposalParams } },
+        { binding: 1, resource: { buffer: state.insideCorrectionProposalPolyRigidIndex } },
+        { binding: 2, resource: { buffer: state.insidePolyBoundsMinX } },
+        { binding: 3, resource: { buffer: state.insidePolyBoundsMinY } },
+        { binding: 4, resource: { buffer: state.insidePolyBoundsMaxX } },
+        { binding: 5, resource: { buffer: state.insidePolyBoundsMaxY } },
+        { binding: 6, resource: { buffer: state.insideCorrectionProposalNodeX } },
+        { binding: 7, resource: { buffer: state.insideCorrectionProposalNodeY } },
+        { binding: 8, resource: { buffer: state.insideCorrectionProposalNodeR } },
+        { binding: 9, resource: { buffer: state.insideCorrectionProposalCorrXOut } },
+        { binding: 10, resource: { buffer: state.insideCorrectionProposalCorrYOut } },
+        { binding: 11, resource: { buffer: state.insideCorrectionProposalRigidIndexOut } },
+      ],
+    });
+  }
+
+  return state;
+}
+
 
 function dispatchRigidInsidePolyBoundsProbe({ offload, prep, proposalSignature }) {
   if (!canUseWgslOffload(offload)) return false;
@@ -528,6 +696,89 @@ function dispatchRigidInsideNodeCandidateProposal({ offload, prep, proposalSigna
 
   state.lastInsideNodeCandidateDispatchCount = dispatchCount;
   state.lastInsideNodeCandidateProposalSignature = proposalSignature >>> 0;
+  return true;
+}
+
+function dispatchRigidInsideCorrectionProposal({
+  offload,
+  prep,
+  proposalSignature,
+  correctionSlop,
+  includeReadbackTelemetry = true,
+}) {
+  if (!canUseWgslOffload(offload)) return false;
+  if ((Number(prep?.polyCount) || 0) <= 0) return false;
+  if ((Number(prep?.nodeCount) || 0) <= 0) return false;
+
+  const state = ensureRigidInsideCorrectionProposalState({ offload, prep });
+  const device = offload.device;
+  const nodeCount = prep.nodeCount;
+  const nodeBytes = nodeCount * 4;
+
+  device.queue.writeBuffer(state.insideCorrectionProposalPolyRigidIndex, 0, prep.layout.polyRigidIndex);
+  device.queue.writeBuffer(state.insideCorrectionProposalNodeX, 0, prep.layout.nodeX);
+  device.queue.writeBuffer(state.insideCorrectionProposalNodeY, 0, prep.layout.nodeY);
+  device.queue.writeBuffer(state.insideCorrectionProposalNodeR, 0, prep.layout.nodeR);
+
+  const paramsBuffer = new ArrayBuffer(32);
+  const view = new DataView(paramsBuffer);
+  view.setUint32(0, nodeCount >>> 0, true);
+  view.setUint32(4, (prep.polyCount || 0) >>> 0, true);
+  view.setFloat32(16, Number(correctionSlop) || 0, true);
+  device.queue.writeBuffer(state.insideCorrectionProposalParams, 0, paramsBuffer);
+
+  const dispatchCount = Math.max(1, Math.ceil(nodeCount / WGSL_WORKGROUP_SIZE));
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(state.insideCorrectionProposalPipeline);
+  pass.setBindGroup(0, state.insideCorrectionProposalBindGroup);
+  pass.dispatchWorkgroups(dispatchCount);
+  pass.end();
+
+  if (includeReadbackTelemetry) {
+    encoder.copyBufferToBuffer(state.insideCorrectionProposalCorrXOut, 0, state.insideCorrectionProposalCorrXReadback, 0, nodeBytes);
+    encoder.copyBufferToBuffer(state.insideCorrectionProposalCorrYOut, 0, state.insideCorrectionProposalCorrYReadback, 0, nodeBytes);
+    encoder.copyBufferToBuffer(state.insideCorrectionProposalRigidIndexOut, 0, state.insideCorrectionProposalRigidIndexReadback, 0, nodeBytes);
+  }
+  device.queue.submit([encoder.finish()]);
+
+  if (includeReadbackTelemetry) {
+    const readbackPromise = Promise.all([
+      state.insideCorrectionProposalCorrXReadback.mapAsync(globalThis.GPUMapMode.READ),
+      state.insideCorrectionProposalCorrYReadback.mapAsync(globalThis.GPUMapMode.READ),
+      state.insideCorrectionProposalRigidIndexReadback.mapAsync(globalThis.GPUMapMode.READ),
+    ]).then(() => {
+      const corrX = new Float32Array(state.insideCorrectionProposalCorrXReadback.getMappedRange(0, nodeBytes).slice(0));
+      const corrY = new Float32Array(state.insideCorrectionProposalCorrYReadback.getMappedRange(0, nodeBytes).slice(0));
+      const rigidIndex = new Uint32Array(state.insideCorrectionProposalRigidIndexReadback.getMappedRange(0, nodeBytes).slice(0));
+      state.insideCorrectionProposalCorrXReadback.unmap();
+      state.insideCorrectionProposalCorrYReadback.unmap();
+      state.insideCorrectionProposalRigidIndexReadback.unmap();
+      state.lastInsideCorrectionProposalCorrX = corrX;
+      state.lastInsideCorrectionProposalCorrY = corrY;
+      state.lastInsideCorrectionProposalRigidIndex = rigidIndex;
+      state.lastInsideCorrectionProposalSource = 'wgsl-rigid-inside-correction-proposal';
+      state.lastInsideCorrectionProposalSignature = proposalSignature >>> 0;
+      state.lastInsideCorrectionProposalDispatchCount = dispatchCount;
+      state.lastInsideCorrectionProposalNodeCount = nodeCount;
+      state.lastInsideCorrectionProposalError = null;
+    }).catch((err) => {
+      state.lastInsideCorrectionProposalError = String(err?.message || err || 'unknown-error');
+    });
+    state.pendingInsideCorrectionProposalPromise = readbackPromise;
+  } else {
+    state.pendingInsideCorrectionProposalPromise = null;
+    state.lastInsideCorrectionProposalCorrX = null;
+    state.lastInsideCorrectionProposalCorrY = null;
+    state.lastInsideCorrectionProposalRigidIndex = null;
+    state.lastInsideCorrectionProposalSource = 'wgsl-rigid-inside-correction-proposal-fast';
+    state.lastInsideCorrectionProposalNodeCount = nodeCount;
+    state.lastInsideCorrectionProposalError = null;
+    state.lastInsideCorrectionProposalValidation = 'skipped-readback-telemetry';
+  }
+
+  state.lastInsideCorrectionProposalDispatchCount = dispatchCount;
+  state.lastInsideCorrectionProposalSignature = proposalSignature >>> 0;
   return true;
 }
 
@@ -707,6 +958,22 @@ export function applyRigidInsideCorrectionPassGpuOnly({
             wgslOffload.state.lastInsideNodeCandidateValidation = fastMode
               ? 'skipped-readback-telemetry'
               : (validatedMode ? 'readback-telemetry-validated' : 'readback-telemetry');
+
+            const correctionProposalRan = dispatchRigidInsideCorrectionProposal({
+              offload: wgslOffload,
+              prep,
+              proposalSignature,
+              correctionSlop,
+              includeReadbackTelemetry: !fastMode,
+            });
+            if (correctionProposalRan) {
+              wgslOffload.state.lastSourceRoute = fastMode
+                ? 'wgsl-rigid-inside-correction-proposal-fast'
+                : 'wgsl-rigid-inside-correction-proposal';
+              wgslOffload.state.lastMode = fastMode
+                ? 'cpu-rigid-inside-authoritative-wgsl-correction-proposal-fast'
+                : 'cpu-rigid-inside-authoritative-wgsl-correction-proposal';
+            }
           }
         }
       }

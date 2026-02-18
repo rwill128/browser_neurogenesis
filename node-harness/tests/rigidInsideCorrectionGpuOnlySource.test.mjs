@@ -33,6 +33,12 @@ test('rigid-inside gpu-only path publishes deterministic WGSL prep layout + sour
 
   assert.match(
     source,
+    /const rigidInsideCorrectionProposalWgsl = \/\* wgsl \*\/[\s\S]*out_corr_x\[node_index\] = best_dx;[\s\S]*out_corr_y\[node_index\] = best_dy;[\s\S]*dispatchRigidInsideCorrectionProposal\([\s\S]*lastInsideCorrectionProposalSource = 'wgsl-rigid-inside-correction-proposal';[\s\S]*lastInsideCorrectionProposalSource = 'wgsl-rigid-inside-correction-proposal-fast';[\s\S]*lastSourceRoute = fastMode[\s\S]*'wgsl-rigid-inside-correction-proposal-fast'[\s\S]*'wgsl-rigid-inside-correction-proposal'/,
+    'expected gpu-only inside-correction path to dispatch concrete WGSL correction vector proposal math with validated readback telemetry and explicit fast-mode route visibility',
+  );
+
+  assert.match(
+    source,
     /wgslOffload\.state\.lastInsideCpuReference = \{[\s\S]*source: 'cpu-rigid-inside-authoritative-reference',[\s\S]*\};[\s\S]*wgslOffload\.state\.lastInsideParity = \{[\s\S]*source: 'cpu-rigid-inside-authoritative-reference',[\s\S]*proposalSignature: proposalSignature >>> 0,[\s\S]*preparedLayoutSignature: preparedLayoutSignature >>> 0/,
     'expected deterministic CPU reference/parity payload to be emitted for next WGSL inside-correction stage parity bring-up',
   );

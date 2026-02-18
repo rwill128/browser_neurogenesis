@@ -3,6 +3,109 @@
  * Isolates soft-node fluid carry, cluster load redistribution, and
  * cluster rigid-motion projection from baseline loops in gpu-lab.js.
  */
+
+function hashU32ArrayFnv1a(arr) {
+  let hash = 0x811c9dc5;
+  const len = Number(arr?.length) || 0;
+  for (let i = 0; i < len; i++) {
+    hash ^= (Number(arr[i]) || 0) >>> 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function hashF32ArrayFnv1a(arr) {
+  const len = Number(arr?.length) || 0;
+  const scratch = new ArrayBuffer(4);
+  const asF32 = new Float32Array(scratch);
+  const asU32 = new Uint32Array(scratch);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < len; i++) {
+    asF32[0] = Number(arr[i]) || 0;
+    hash ^= asU32[0] >>> 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function buildSoftFluidCouplingWgslLayout({ nodes, softNodeMomentumScale, softMembraneClusterSet }) {
+  const nodeCount = Number(nodes?.length) || 0;
+  const nodeX = new Float32Array(nodeCount);
+  const nodeY = new Float32Array(nodeCount);
+  const nodeVx = new Float32Array(nodeCount);
+  const nodeVy = new Float32Array(nodeCount);
+  const nodeMass = new Float32Array(nodeCount);
+  const nodeMomentum = new Float32Array(nodeCount);
+  const nodeClusterId = new Int32Array(nodeCount);
+  const nodeIsMembraneCluster = new Uint32Array(nodeCount);
+
+  const clusterCounts = new Map();
+  for (let i = 0; i < nodeCount; i++) {
+    const node = nodes[i] || {};
+    const cid = Number.isFinite(Number(node.clusterId)) ? Math.floor(Number(node.clusterId)) : 0;
+    nodeX[i] = Number(node.x) || 0;
+    nodeY[i] = Number(node.y) || 0;
+    nodeVx[i] = Number(node.vx) || 0;
+    nodeVy[i] = Number(node.vy) || 0;
+    nodeMass[i] = Math.max(0.02, Number(node.mass) || 0.02);
+    nodeMomentum[i] = Number(softNodeMomentumScale(i)) || 0;
+    nodeClusterId[i] = cid;
+    nodeIsMembraneCluster[i] = softMembraneClusterSet.has(cid) ? 1 : 0;
+    clusterCounts.set(cid, (clusterCounts.get(cid) || 0) + 1);
+  }
+
+  const sortedClusterIds = Array.from(clusterCounts.keys()).sort((a, b) => a - b);
+  const clusterCount = sortedClusterIds.length;
+  const clusterIds = new Int32Array(clusterCount);
+  const clusterNodeOffsets = new Uint32Array(clusterCount + 1);
+  const clusterNodeCount = new Uint32Array(clusterCount);
+
+  let offset = 0;
+  for (let i = 0; i < clusterCount; i++) {
+    const cid = sortedClusterIds[i];
+    const count = Number(clusterCounts.get(cid)) || 0;
+    clusterIds[i] = cid;
+    clusterNodeOffsets[i] = offset;
+    clusterNodeCount[i] = count;
+    offset += count;
+  }
+  clusterNodeOffsets[clusterCount] = offset;
+
+  const layout = {
+    nodeX,
+    nodeY,
+    nodeVx,
+    nodeVy,
+    nodeMass,
+    nodeMomentum,
+    nodeClusterId,
+    nodeIsMembraneCluster,
+    clusterIds,
+    clusterNodeOffsets,
+    clusterNodeCount,
+  };
+
+  const signatureSeed = [nodeCount, clusterCount, offset];
+  let signature = hashU32ArrayFnv1a(signatureSeed);
+  signature ^= hashF32ArrayFnv1a(nodeX);
+  signature = Math.imul(signature, 0x01000193) >>> 0;
+  signature ^= hashF32ArrayFnv1a(nodeY);
+  signature = Math.imul(signature, 0x01000193) >>> 0;
+  signature ^= hashU32ArrayFnv1a(nodeClusterId);
+  signature = Math.imul(signature, 0x01000193) >>> 0;
+  signature ^= hashU32ArrayFnv1a(clusterNodeOffsets);
+  signature >>>= 0;
+
+  const byteLength = Object.values(layout).reduce((sum, arr) => sum + (arr?.byteLength || 0), 0);
+  return {
+    layout,
+    nodeCount,
+    clusterCount,
+    signature,
+    byteLength,
+  };
+}
+
 export function applySoftFluidCouplingGpuOnly({
   sim,
   soft,
@@ -26,6 +129,7 @@ export function applySoftFluidCouplingGpuOnly({
   computeSoftClusterKinematics,
   projectNodesTowardClusterRigidMotion,
   sampleFluidForBodyCoupling,
+  wgslOffload,
 }) {
   const {
     SOFT_NODE_FLOW_COUPLING,
@@ -38,6 +142,25 @@ export function applySoftFluidCouplingGpuOnly({
   } = constants;
 
   const nodes = soft?.nodes || [];
+
+  if (wgslOffload?.enabled === true && wgslOffload?.state) {
+    const prep = buildSoftFluidCouplingWgslLayout({
+      nodes,
+      softNodeMomentumScale,
+      softMembraneClusterSet,
+    });
+    wgslOffload.state.preparedLayout = prep.layout;
+    wgslOffload.state.lastPreparedNodeCount = prep.nodeCount;
+    wgslOffload.state.lastPreparedClusterCount = prep.clusterCount;
+    wgslOffload.state.lastPreparedLayoutBytes = prep.byteLength;
+    wgslOffload.state.lastPreparedLayoutSignature = prep.signature;
+    wgslOffload.state.lastMode = 'cpu-prepared';
+    wgslOffload.state.lastError = null;
+    // Blocker for immediate WGSL stage in this pass: this module still consumes
+    // CPU-side sampled fluid fields/callbacks, so deterministic packed layout is
+    // prepared first as the handoff contract for the upcoming compute kernel.
+  }
+
   const softCentroid = computeSoftCentroid(nodes);
   let softClusterKinematics = computeSoftClusterKinematics(nodes);
   const clusterCarryMap = new Map();

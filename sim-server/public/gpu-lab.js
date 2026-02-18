@@ -3920,6 +3920,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       computeSoftClusterKinematics,
       projectNodesTowardClusterRigidMotion,
       sampleFluidForBodyCoupling,
+      wgslOffload: {
+        enabled: true,
+        device: sim?.device,
+        state: (sim.softFluidCouplingWgslState ||= {}),
+      },
     });
     softCarryTransfer += softFluidResult.softCarryTransfer || 0;
   } else {

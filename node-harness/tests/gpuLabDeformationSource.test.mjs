@@ -252,6 +252,12 @@ test('gpu-lab routes soft fluid-coupling stepping through isolated gpu-only runt
     /const softMembraneClusterSet = ensureSoftMembraneClusterSet\(sim\);[\s\S]*if \(solverPath === 'gpu-only'\) \{[\s\S]*applySoftFluidCouplingGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*for \(let i = 0; i < s\.nodes\.length; i\+\+\)/,
     'expected explicit gpu-only soft fluid-coupling dispatch with baseline fallback loop',
   );
+
+  assert.match(
+    source,
+    /applySoftFluidCouplingGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*state: \(sim\.softFluidCouplingWgslState \|\|= \{\}\),[\s\S]*\}\);/,
+    'expected gpu-only soft fluid-coupling dispatch to wire optional WGSL prep context',
+  );
 });
 
 test('gpu-lab routes body-fluid momentum injection through isolated gpu-only runtime solver module', () => {

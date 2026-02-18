@@ -280,6 +280,28 @@ function computeProposalParityStats(expected, actual) {
   };
 }
 
+function computeMembraneProposalSignature(prep, dtPos) {
+  const plan = prep?.plan || {};
+  const layout = prep?.layout || {};
+  const indexCount = Number(plan.indexCount) || 0;
+  const membraneCount = Number(plan.membraneCount) || 0;
+  const nodeCount = Number(plan.nodeCount) || 0;
+  const dt = Number.isFinite(Number(dtPos)) ? Number(dtPos).toFixed(8) : '0.00000000';
+  const firstCluster = (layout.clusterId instanceof Int32Array && layout.clusterId.length > 0)
+    ? Number(layout.clusterId[0])
+    : -1;
+  const lastCluster = (layout.clusterId instanceof Int32Array && layout.clusterId.length > 0)
+    ? Number(layout.clusterId[layout.clusterId.length - 1])
+    : -1;
+  const firstIndex = (layout.loopIndices instanceof Uint32Array && layout.loopIndices.length > 0)
+    ? Number(layout.loopIndices[0])
+    : -1;
+  const lastIndex = (layout.loopIndices instanceof Uint32Array && layout.loopIndices.length > 0)
+    ? Number(layout.loopIndices[layout.loopIndices.length - 1])
+    : -1;
+  return `${membraneCount}|${indexCount}|${nodeCount}|${firstCluster}|${lastCluster}|${firstIndex}|${lastIndex}|${dt}`;
+}
+
 async function ensureSoftMembranePressureProbeState(offload, prep) {
   const device = offload.device;
   const state = offload.state;
@@ -468,7 +490,7 @@ async function dispatchSoftMembranePressureAreaProbe(offload, prep) {
   return true;
 }
 
-async function dispatchSoftMembranePressureVelocityDeltaProposal(offload, prep, dtPos) {
+async function dispatchSoftMembranePressureVelocityDeltaProposal(offload, prep, dtPos, proposalSignature) {
   const device = offload.device;
   const state = await ensureSoftMembranePressureProbeState(offload, prep);
   const contributionCount = prep.plan.indexCount;
@@ -517,6 +539,7 @@ async function dispatchSoftMembranePressureVelocityDeltaProposal(offload, prep, 
     source: 'wgsl-pressure-velocity-proposal',
   };
   state.lastVelocityProposalSource = 'wgsl-pressure-velocity-proposal';
+  state.lastVelocityProposalSignature = String(proposalSignature || '');
   return true;
 }
 
@@ -540,6 +563,8 @@ export function applySoftMembraneCellPressureGpuOnly({
     loopByCluster.set(loop.clusterId ?? 0, loop);
   }
 
+  let authoritativeProposal = null;
+  let authoritativeMembraneIndexByCluster = null;
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     const prep = buildSoftMembranePressureWgslPrep({
       membranes,
@@ -548,13 +573,38 @@ export function applySoftMembraneCellPressureGpuOnly({
       softMembraneAreaBaseline: sim.softMembraneAreaBaseline,
       membraneCellBasePressureGain,
     });
+    const proposalSignature = computeMembraneProposalSignature(prep, dtPos);
     wgslOffload.state.preparedPlan = prep.plan;
     wgslOffload.state.preparedLayout = prep.layout;
     wgslOffload.state.lastPreparedMembraneCount = prep.plan.membraneCount;
     wgslOffload.state.lastPreparedLoopIndexCount = prep.plan.indexCount;
     wgslOffload.state.lastPreparedLayoutBytes = prep.layout.byteLength;
+    wgslOffload.state.lastPreparedProposalSignature = proposalSignature;
     wgslOffload.state.lastMode = 'cpu-prepared';
     wgslOffload.state.lastVelocityProposalSource = 'cpu-membrane-authoritative';
+
+    const canUseAuthoritativeWgsl = prep.plan.indexCount > 0
+      && wgslOffload.state.lastVelocityProposalSignature === proposalSignature
+      && wgslOffload.state.lastVelocityProposalDeltaVx instanceof Float32Array
+      && wgslOffload.state.lastVelocityProposalDeltaVy instanceof Float32Array
+      && wgslOffload.state.lastVelocityProposalDeltaVx.length === prep.plan.indexCount
+      && wgslOffload.state.lastVelocityProposalDeltaVy.length === prep.plan.indexCount;
+
+    if (canUseAuthoritativeWgsl) {
+      authoritativeProposal = {
+        prep,
+        deltaVx: wgslOffload.state.lastVelocityProposalDeltaVx,
+        deltaVy: wgslOffload.state.lastVelocityProposalDeltaVy,
+      };
+      authoritativeMembraneIndexByCluster = new Map();
+      for (let i = 0; i < prep.layout.clusterId.length; i++) {
+        authoritativeMembraneIndexByCluster.set(Number(prep.layout.clusterId[i]), i);
+      }
+      wgslOffload.state.lastMode = 'wgsl-pressure-authoritative';
+      wgslOffload.state.lastVelocityProposalSource = 'wgsl-pressure-authoritative';
+      wgslOffload.state.lastAuthoritativeProposalSignature = proposalSignature;
+      wgslOffload.state.lastAuthoritativeProposalFrame = Number(sim?.frame) || 0;
+    }
 
     if (canUseWgslOffload(wgslOffload) && prep.plan.membraneCount > 0) {
       const serializedDispatch = (wgslOffload.state.pendingWgslAreaProbePromise || Promise.resolve())
@@ -562,7 +612,7 @@ export function applySoftMembraneCellPressureGpuOnly({
         .then(async () => {
           const probeRan = await dispatchSoftMembranePressureAreaProbe(wgslOffload, prep);
           const proposalRan = probeRan
-            ? await dispatchSoftMembranePressureVelocityDeltaProposal(wgslOffload, prep, dtPos)
+            ? await dispatchSoftMembranePressureVelocityDeltaProposal(wgslOffload, prep, dtPos, proposalSignature)
             : false;
           return { probeRan, proposalRan };
         })
@@ -573,14 +623,16 @@ export function applySoftMembraneCellPressureGpuOnly({
             : probeRan
               ? 'wgsl-area-probe'
               : 'cpu-membrane-authoritative';
-          if (!proposalRan) {
+          if (!proposalRan && !authoritativeProposal) {
             wgslOffload.state.lastVelocityProposalSource = 'cpu-membrane-authoritative';
           }
         })
         .catch((err) => {
           wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
-          wgslOffload.state.lastMode = 'cpu-membrane-authoritative';
-          wgslOffload.state.lastVelocityProposalSource = 'cpu-membrane-authoritative';
+          if (!authoritativeProposal) {
+            wgslOffload.state.lastMode = 'cpu-membrane-authoritative';
+            wgslOffload.state.lastVelocityProposalSource = 'cpu-membrane-authoritative';
+          }
         });
       wgslOffload.state.pendingWgslAreaProbePromise = serializedDispatch;
     }
@@ -641,10 +693,31 @@ export function applySoftMembraneCellPressureGpuOnly({
       nx /= nLen;
       ny /= nLen;
 
-      const invMass = 1 / Math.max(0.02, curr.mass || 1);
-      const impulse = err * gain * dtPos * invMass;
-      curr.vx += nx * impulse;
-      curr.vy += ny * impulse;
+      let proposalVx = 0;
+      let proposalVy = 0;
+      let hasAuthoritativeProposal = false;
+      if (authoritativeProposal && authoritativeMembraneIndexByCluster) {
+        const proposalMembraneIndex = authoritativeMembraneIndexByCluster.get(cid);
+        if (Number.isInteger(proposalMembraneIndex)) {
+          const start = authoritativeProposal.prep.layout.membraneOffsets[proposalMembraneIndex] >>> 0;
+          const li = start + k;
+          if (li >= 0 && li < authoritativeProposal.deltaVx.length) {
+            proposalVx = authoritativeProposal.deltaVx[li] || 0;
+            proposalVy = authoritativeProposal.deltaVy[li] || 0;
+            hasAuthoritativeProposal = true;
+          }
+        }
+      }
+
+      if (hasAuthoritativeProposal) {
+        curr.vx += proposalVx;
+        curr.vy += proposalVy;
+      } else {
+        const invMass = 1 / Math.max(0.02, curr.mass || 1);
+        const impulse = err * gain * dtPos * invMass;
+        curr.vx += nx * impulse;
+        curr.vy += ny * impulse;
+      }
 
       if (radialDamping > 0) {
         const rv = curr.vx * nx + curr.vy * ny;

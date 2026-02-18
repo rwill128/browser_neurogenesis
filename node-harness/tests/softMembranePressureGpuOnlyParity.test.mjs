@@ -175,3 +175,62 @@ test('soft membrane pressure gpu-only path matches baseline while publishing WGS
   assert.equal(wgslState.lastVelocityProposalSource, 'cpu-membrane-authoritative');
   assert.ok((wgslState.lastPreparedLayoutBytes || 0) > 0);
 });
+
+test('soft membrane pressure gpu-only route uses WGSL proposal as authoritative when deterministic signature matches', () => {
+  const loops = [
+    { clusterId: 0, indices: [0, 1, 2, 3] },
+  ];
+
+  const seedNodes = [
+    { x: 0.0, y: 0.0, vx: 0.0, vy: 0.0, mass: 1.0 },
+    { x: 1.0, y: 0.0, vx: 0.0, vy: 0.0, mass: 1.0 },
+    { x: 1.0, y: 1.0, vx: 0.0, vy: 0.0, mass: 1.0 },
+    { x: 0.0, y: 1.0, vx: 0.0, vy: 0.0, mass: 1.0 },
+  ];
+  const membranes = [{ clusterId: 0, restArea: 1.4, pressureGain: 0.09, radialDamping: 0.0 }];
+
+  const sim = {
+    frame: 42,
+    bodies: { softMembraneClusters: structuredClone(membranes) },
+    softMembraneAreaBaseline: new Map([[0, 1.4]]),
+  };
+  const soft = { nodes: structuredClone(seedNodes) };
+  const wgslState = {};
+
+  // First pass prepares deterministic signature/layout.
+  applySoftMembraneCellPressureGpuOnly({
+    sim,
+    soft: { nodes: structuredClone(seedNodes) },
+    loops,
+    dtPos: 0.5,
+    signedAreaCurrent,
+    clamp,
+    wgslOffload: { enabled: true, state: wgslState },
+  });
+
+  const signature = wgslState.lastPreparedProposalSignature;
+  const contributionCount = wgslState.preparedPlan.indexCount;
+  wgslState.lastVelocityProposalSignature = signature;
+  wgslState.lastVelocityProposalDeltaVx = new Float32Array(contributionCount).fill(0.02);
+  wgslState.lastVelocityProposalDeltaVy = new Float32Array(contributionCount).fill(-0.01);
+
+  applySoftMembraneCellPressureGpuOnly({
+    sim,
+    soft,
+    loops,
+    dtPos: 0.5,
+    signedAreaCurrent,
+    clamp,
+    wgslOffload: { enabled: true, state: wgslState },
+  });
+
+  for (const node of soft.nodes) {
+    assert.equal(Number.isFinite(node.vx), true);
+    assert.equal(Number.isFinite(node.vy), true);
+    assert.ok(Math.abs(node.vx) > 1e-5 || Math.abs(node.vy) > 1e-5);
+  }
+  assert.equal(wgslState.lastVelocityProposalSource, 'wgsl-pressure-authoritative');
+  assert.equal(wgslState.lastMode, 'wgsl-pressure-authoritative');
+  assert.equal(wgslState.lastAuthoritativeProposalSignature, signature);
+  assert.equal(wgslState.lastAuthoritativeProposalFrame, 42);
+});

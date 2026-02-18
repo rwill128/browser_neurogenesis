@@ -212,6 +212,20 @@ test('gpu-lab routes rigid stepping through isolated gpu-only runtime solver mod
   );
 });
 
+test('gpu-lab routes rigid post-integrate stabilization through isolated gpu-only runtime solver module with WGSL offload wiring', () => {
+  assert.match(
+    source,
+    /import \{ stabilizeRigidPostIntegrateGpuOnly \} from '\/runtime-solvers\/stepRigidPostIntegrateGpuOnly\.js';/,
+    'expected isolated gpu-only rigid post-integrate module import',
+  );
+
+  assert.match(
+    source,
+    /if \(solverPath === 'gpu-only'\) \{[\s\S]*await stabilizeRigidPostIntegrateGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*state: \(sim\.rigidPostIntegrateWgslState \|\|= \{\}\),[\s\S]*\}\);[\s\S]*\} else \{/,
+    'expected explicit gpu-only rigid post-integrate dispatch with WGSL state wiring and baseline fallback branch',
+  );
+});
+
 test('gpu-lab defines rigid edge momentum helper used by fluid feedback injection', () => {
   assert.match(
     source,

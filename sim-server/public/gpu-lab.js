@@ -4275,12 +4275,19 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   }
 
   if (solverPath === 'gpu-only') {
-    stabilizeRigidPostIntegrateGpuOnly({
+    const rigidPostIntegrateRuntime = await stabilizeRigidPostIntegrateGpuOnly({
       rigidBodies: bodies.rigid,
       velocityCap: 4.0,
       omegaCap: 0.22,
+      wgslOffload: {
+        enabled: true,
+        device: sim?.device,
+        state: (sim.rigidPostIntegrateWgslState ||= {}),
+      },
     });
+    sim.rigidPostIntegrateRuntime = rigidPostIntegrateRuntime || { mode: 'cpu-fallback', reason: 'unknown' };
   } else {
+    sim.rigidPostIntegrateRuntime = { mode: 'cpu-baseline', reason: 'baseline-path' };
     for (const rb of bodies.rigid) {
       const vmag = Math.hypot(rb.vx, rb.vy);
       const vcap = 4.0;

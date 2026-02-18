@@ -4407,7 +4407,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     : 0;
   const membraneShapeClusters = membraneShapeMemoryOn
     ? (solverPath === 'gpu-only'
-      ? applySoftMembraneShapeMemoryVelocityGpuOnly({
+      ? await applySoftMembraneShapeMemoryVelocityGpuOnly({
         sim,
         soft: s,
         loops: softClusterLoops,

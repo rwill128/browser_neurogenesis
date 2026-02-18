@@ -1124,7 +1124,7 @@ function applyShapeMemoryVelocityDeltasAuthoritative({ soft, nodeIndices, deltaV
   }
 }
 
-export function applySoftMembraneShapeMemoryVelocityGpuOnly({
+export async function applySoftMembraneShapeMemoryVelocityGpuOnly({
   sim,
   soft,
   loops,
@@ -1254,6 +1254,28 @@ export function applySoftMembraneShapeMemoryVelocityGpuOnly({
 
   const layout = shapeMemoryLayout.length > 0 ? Float32Array.from(shapeMemoryLayout) : null;
   const signature = layout ? computeShapeMemoryProposalSignature(layout, dtPos) : '';
+
+  if (wgslOffload?.enabled === true && wgslOffload?.state && wgslOffload?.device && layout && layout.length > 0) {
+    wgslOffload.state.lastShapeMemoryProposalLayoutBytes = layout.byteLength;
+    wgslOffload.state.lastShapeMemoryProposalSignaturePrepared = signature;
+    const serializedDispatch = (wgslOffload.state.pendingWgslShapeMemoryProposalPromise || Promise.resolve())
+      .catch(() => {})
+      .then(() => dispatchSoftMembraneShapeMemoryProposal(wgslOffload, layout, dtPos, signature))
+      .catch((err) => {
+        wgslOffload.state.lastShapeMemoryProposalError = String(err?.message || err || 'unknown-error');
+        wgslOffload.state.lastShapeMemoryProposalSource = 'cpu-shape-memory-authoritative';
+        wgslOffload.state.lastMode = 'cpu-shape-memory-authoritative';
+      });
+    wgslOffload.state.pendingWgslShapeMemoryProposalPromise = serializedDispatch;
+    await serializedDispatch;
+    if (!wgslOffload.state.lastShapeMemoryProposalSource) {
+      wgslOffload.state.lastShapeMemoryProposalSource = 'cpu-shape-memory-authoritative';
+    }
+    if (!wgslOffload.state.lastMode) {
+      wgslOffload.state.lastMode = 'cpu-shape-memory-authoritative';
+    }
+  }
+
   const authoritativeFromWgsl = canApplyAuthoritativeShapeMemoryProposal({
     wgslOffload,
     signature,
@@ -1282,26 +1304,6 @@ export function applySoftMembraneShapeMemoryVelocityGpuOnly({
       ? 'wgsl-shape-memory-authoritative'
       : 'cpu-shape-memory-authoritative';
     wgslOffload.state.lastShapeMemoryAuthoritativeSignature = signature;
-  }
-
-  if (wgslOffload?.enabled === true && wgslOffload?.state && wgslOffload?.device && layout && layout.length > 0) {
-    wgslOffload.state.lastShapeMemoryProposalLayoutBytes = layout.byteLength;
-    wgslOffload.state.lastShapeMemoryProposalSignaturePrepared = signature;
-    const serializedDispatch = (wgslOffload.state.pendingWgslShapeMemoryProposalPromise || Promise.resolve())
-      .catch(() => {})
-      .then(() => dispatchSoftMembraneShapeMemoryProposal(wgslOffload, layout, dtPos, signature))
-      .catch((err) => {
-        wgslOffload.state.lastShapeMemoryProposalError = String(err?.message || err || 'unknown-error');
-        wgslOffload.state.lastShapeMemoryProposalSource = 'cpu-shape-memory-authoritative';
-        wgslOffload.state.lastMode = 'cpu-shape-memory-authoritative';
-      });
-    wgslOffload.state.pendingWgslShapeMemoryProposalPromise = serializedDispatch;
-    if (!wgslOffload.state.lastShapeMemoryProposalSource) {
-      wgslOffload.state.lastShapeMemoryProposalSource = 'cpu-shape-memory-authoritative';
-    }
-    if (!wgslOffload.state.lastMode) {
-      wgslOffload.state.lastMode = 'cpu-shape-memory-authoritative';
-    }
   }
 
   return touched;

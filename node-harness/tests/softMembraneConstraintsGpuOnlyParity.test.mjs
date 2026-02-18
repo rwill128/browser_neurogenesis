@@ -281,7 +281,7 @@ function applySoftMembraneShapeMemoryVelocityBaseline(sim, soft, loops, dtPos, m
   return touched;
 }
 
-test('soft membrane shape-memory can consume cached WGSL proposal as authoritative source', () => {
+test('soft membrane shape-memory can consume same-frame WGSL proposal as authoritative source', async () => {
   const dtPos = 0.11;
   const loops = [{ clusterId: 1, indices: [0, 1, 2, 3] }];
   const soft = {
@@ -316,7 +316,7 @@ test('soft membrane shape-memory can consume cached WGSL proposal as authoritati
   });
 
   const firstSoft = structuredClone(soft);
-  const touchedFirst = applySoftMembraneShapeMemoryVelocityGpuOnly({
+  const touchedFirst = await applySoftMembraneShapeMemoryVelocityGpuOnly({
     sim,
     soft: firstSoft,
     loops,
@@ -345,7 +345,7 @@ test('soft membrane shape-memory can consume cached WGSL proposal as authoritati
 
   const secondSoft = structuredClone(soft);
   const before = secondSoft.nodes.map((n) => ({ vx: n.vx, vy: n.vy }));
-  const touchedSecond = applySoftMembraneShapeMemoryVelocityGpuOnly({
+  const touchedSecond = await applySoftMembraneShapeMemoryVelocityGpuOnly({
     sim,
     soft: secondSoft,
     loops,
@@ -451,7 +451,7 @@ test('soft membrane bend can consume cached WGSL proposal as authoritative sourc
   assert.equal(wgslState.lastMembraneBendProposalSource, 'wgsl-membrane-bend-proposal');
 });
 
-test('soft membrane boundary+shape constraints parity: baseline and gpu-only match', () => {
+test('soft membrane boundary+shape constraints parity: baseline and gpu-only match', async () => {
   const dtPos = 0.11;
   const loops = [
     { clusterId: 1, indices: [0, 1, 2, 3] },
@@ -517,7 +517,7 @@ test('soft membrane boundary+shape constraints parity: baseline and gpu-only mat
     dtPos,
     membraneClusterMap,
   );
-  const gpuShapeTouched = applySoftMembraneShapeMemoryVelocityGpuOnly({
+  const gpuShapeTouched = await applySoftMembraneShapeMemoryVelocityGpuOnly({
     sim: gpuOnlySim,
     soft: gpuOnlySoft,
     loops,

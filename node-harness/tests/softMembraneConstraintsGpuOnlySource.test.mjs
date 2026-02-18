@@ -18,8 +18,8 @@ test('gpu-lab wires membrane boundary xpbd gpu-only pass with WGSL offload state
 test('gpu-lab wires membrane shape-memory gpu-only pass with WGSL offload state bag', () => {
   assert.match(
     gpuLabSource,
-    /applySoftMembraneShapeMemoryVelocityGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*state: \(\(\) => \{[\s\S]*sim\.softMembraneShapeMemoryWgslState \|\|= \{\}[\s\S]*enableAuthoritativeShapeMemory !== false[\s\S]*enableAuthoritativeShapeMemory = true;[\s\S]*return st;[\s\S]*\}\)\(\),[\s\S]*\}\)/,
-    'expected gpu-lab membrane shape-memory gpu-only branch to wire isolated WGSL offload context with authoritative WGSL replay enabled by default (unless explicitly disabled)',
+    /\? await applySoftMembraneShapeMemoryVelocityGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*state: \(\(\) => \{[\s\S]*sim\.softMembraneShapeMemoryWgslState \|\|= \{\}[\s\S]*enableAuthoritativeShapeMemory !== false[\s\S]*enableAuthoritativeShapeMemory = true;[\s\S]*return st;[\s\S]*\}\)\(\),[\s\S]*\}\)/,
+    'expected gpu-lab membrane shape-memory gpu-only branch to await isolated WGSL offload apply path with authoritative WGSL replay enabled by default (unless explicitly disabled)',
   );
 });
 
@@ -100,7 +100,7 @@ test('membrane constraints gpu-only module defines concrete WGSL shape-memory pr
 
   assert.match(
     moduleSource,
-    /pendingWgslShapeMemoryProposalPromise[\s\S]*dispatchSoftMembraneShapeMemoryProposal\([\s\S]*lastShapeMemoryProposalSource = 'cpu-shape-memory-authoritative'[\s\S]*lastMode = 'cpu-shape-memory-authoritative'/,
-    'expected serialized WGSL proposal dispatch with hard CPU fallback source-route when dispatch fails',
+    /export async function applySoftMembraneShapeMemoryVelocityGpuOnly\([\s\S]*pendingWgslShapeMemoryProposalPromise[\s\S]*dispatchSoftMembraneShapeMemoryProposal\([\s\S]*await serializedDispatch[\s\S]*lastShapeMemoryProposalSource = 'cpu-shape-memory-authoritative'[\s\S]*lastMode = 'cpu-shape-memory-authoritative'/,
+    'expected async shape-memory stage to await serialized WGSL proposal dispatch with hard CPU fallback source-route when dispatch fails',
   );
 });

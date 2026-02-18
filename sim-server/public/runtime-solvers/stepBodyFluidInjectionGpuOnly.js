@@ -70,8 +70,15 @@ function canUseWgslOffload(offload) {
   );
 }
 
+function getGpuOnlyPipelineModeProfile(offload) {
+  const modeProfile = String(offload?.modeProfile || '').trim().toLowerCase();
+  if (modeProfile === 'gpu-only-fast') return 'gpu-only-fast';
+  if (modeProfile === 'gpu-only-validated') return 'gpu-only-validated';
+  return 'standard';
+}
+
 function isGpuOnlyFastMode(offload) {
-  return String(offload?.modeProfile || '').trim().toLowerCase() === 'gpu-only-fast';
+  return getGpuOnlyPipelineModeProfile(offload) === 'gpu-only-fast';
 }
 
 function checkFiniteFloat32Array(arr) {
@@ -606,7 +613,11 @@ export async function applyBodyFluidInjectionGpuOnly({
     fluidCouplingComponentLimit: couplingLimit,
   });
 
-  const fastMode = isGpuOnlyFastMode(wgslOffload);
+  const pipelineMode = getGpuOnlyPipelineModeProfile(wgslOffload);
+  const fastMode = pipelineMode === 'gpu-only-fast';
+  const validatedMode = pipelineMode === 'gpu-only-validated';
+  const standardMode = pipelineMode === 'standard';
+
   let cpuGatherDelta = null;
   if (!fastMode) {
     cpuGatherDelta = computeBodyFluidInjectionCellDeltasFromGatherLayout({
@@ -615,10 +626,10 @@ export async function applyBodyFluidInjectionGpuOnly({
       n,
     });
   }
-  const gatherSignature = fastMode ? 0 : buildBodyFluidInjectionGatherSignature(gatherLayout);
+  const gatherSignature = validatedMode ? buildBodyFluidInjectionGatherSignature(gatherLayout) : 0;
 
   let gatherDeltaToApply = cpuGatherDelta;
-  let gatherSource = 'cpu-gather-authoritative';
+  let gatherSource = standardMode ? 'cpu-standard-authoritative' : 'cpu-gather-authoritative';
 
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     wgslOffload.state.preparedPlan = plan;
@@ -633,9 +644,12 @@ export async function applyBodyFluidInjectionGpuOnly({
     wgslOffload.state.lastCpuGatherDeltaVx = cpuGatherDelta?.cellDeltaVx || null;
     wgslOffload.state.lastCpuGatherDeltaVy = cpuGatherDelta?.cellDeltaVy || null;
     wgslOffload.state.lastPreparedGatherSignature = gatherSignature;
-    wgslOffload.state.lastMode = fastMode ? 'cpu-prepared-fast' : 'cpu-prepared';
+    wgslOffload.state.lastPipelineModeProfile = pipelineMode;
+    wgslOffload.state.lastMode = standardMode
+      ? 'cpu-standard'
+      : (fastMode ? 'cpu-prepared-fast' : 'cpu-prepared');
 
-    if (canUseWgslOffload(wgslOffload)) {
+    if (!standardMode && canUseWgslOffload(wgslOffload)) {
       const runId = (wgslOffload.state.lastWgslRunId || 0) + 1;
       wgslOffload.state.lastWgslRunId = runId;
       try {
@@ -663,7 +677,8 @@ export async function applyBodyFluidInjectionGpuOnly({
         && Number(wgslOffload.state.lastGatherProposalFrame) === (Number(sim?.frame) || 0)
         && wgslOffload.state.lastGatherProposalDeltaVx instanceof Float32Array
         && wgslOffload.state.lastGatherProposalDeltaVy instanceof Float32Array
-      : wgslOffload.state.lastGatherProposalSignature === gatherSignature
+      : validatedMode
+        && wgslOffload.state.lastGatherProposalSignature === gatherSignature
         && Number(wgslOffload.state.lastGatherProposalCellCount) === (n * n)
         && wgslOffload.state.lastGatherProposalDeltaVx instanceof Float32Array
         && wgslOffload.state.lastGatherProposalDeltaVy instanceof Float32Array;
@@ -703,7 +718,9 @@ export async function applyBodyFluidInjectionGpuOnly({
       n,
     });
     gatherDeltaToApply = cpuGatherDelta;
-    gatherSource = fastMode ? 'cpu-gather-fallback-fast' : 'cpu-gather-authoritative';
+    gatherSource = fastMode
+      ? 'cpu-gather-fallback-fast'
+      : (standardMode ? 'cpu-standard-authoritative' : 'cpu-gather-authoritative');
   }
 
   if (wgslOffload?.state) {

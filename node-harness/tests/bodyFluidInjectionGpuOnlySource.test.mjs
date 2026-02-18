@@ -15,21 +15,41 @@ test('body-fluid injection gpu-only keeps deterministic WGSL gather layout + val
 
   assert.match(
     source,
-    /const gatherSignature = fastMode \? 0 : buildBodyFluidInjectionGatherSignature\(gatherLayout\);/,
-    'expected validated mode to retain deterministic gather signatures while fast mode skips signature/parity overhead',
+    /const gatherSignature = validatedMode \? buildBodyFluidInjectionGatherSignature\(gatherLayout\) : 0;/,
+    'expected validated mode to retain deterministic gather signatures while standard/fast modes skip signature overhead',
   );
 
   assert.match(
     source,
-    /const hasMatchingWgslGather = fastMode[\s\S]*lastGatherProposalFrame[\s\S]*: wgslOffload\.state\.lastGatherProposalSignature === gatherSignature/,
-    'expected validated mode to gate authoritative WGSL gather replay on deterministic signatures',
+    /const hasMatchingWgslGather = fastMode[\s\S]*lastGatherProposalFrame[\s\S]*: validatedMode[\s\S]*lastGatherProposalSignature === gatherSignature/,
+    'expected validated mode to gate authoritative WGSL gather replay on deterministic signatures while non-validated modes avoid signature gating',
+  );
+});
+
+test('body-fluid injection gpu-only pipeline mode exposes explicit standard vs validated vs fast runtime behavior', () => {
+  assert.match(
+    source,
+    /function getGpuOnlyPipelineModeProfile\(offload\) \{[\s\S]*modeProfile === 'gpu-only-fast'[\s\S]*modeProfile === 'gpu-only-validated'[\s\S]*return 'standard';[\s\S]*\}/,
+    'expected body-fluid injection path to normalize explicit standard/validated/fast mode profiles',
+  );
+
+  assert.match(
+    source,
+    /const pipelineMode = getGpuOnlyPipelineModeProfile\(wgslOffload\);[\s\S]*const standardMode = pipelineMode === 'standard';[\s\S]*if \(!standardMode && canUseWgslOffload\(wgslOffload\)\) \{/,
+    'expected standard mode to skip WGSL dispatch while validated/fast modes keep WGSL execution path',
+  );
+
+  assert.match(
+    source,
+    /let gatherSource = standardMode \? 'cpu-standard-authoritative' : 'cpu-gather-authoritative';/,
+    'expected standard mode to publish explicit cpu-standard source route ownership',
   );
 });
 
 test('body-fluid injection gpu-only fast mode skips shadow cpu parity while preserving finite checks + fallback route visibility', () => {
   assert.match(
     source,
-    /function isGpuOnlyFastMode\(offload\) \{[\s\S]*modeProfile[\s\S]*gpu-only-fast[\s\S]*\}/,
+    /function isGpuOnlyFastMode\(offload\) \{[\s\S]*getGpuOnlyPipelineModeProfile\(offload\) === 'gpu-only-fast';[\s\S]*\}/,
     'expected body-fluid injection path to detect explicit gpu-only-fast mode profile',
   );
 
@@ -47,7 +67,7 @@ test('body-fluid injection gpu-only fast mode skips shadow cpu parity while pres
 
   assert.match(
     source,
-    /if \(!gatherDeltaToApply\) \{[\s\S]*gatherSource = fastMode \? 'cpu-gather-fallback-fast' : 'cpu-gather-authoritative';/,
+    /if \(!gatherDeltaToApply\) \{[\s\S]*gatherSource = fastMode[\s\S]*'cpu-gather-fallback-fast'[\s\S]*'cpu-gather-authoritative'/,
     'expected fast mode to keep explicit CPU fallback source-route telemetry when WGSL gather is unavailable/non-finite',
   );
 });

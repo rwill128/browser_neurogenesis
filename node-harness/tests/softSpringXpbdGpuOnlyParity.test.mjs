@@ -614,6 +614,73 @@ test('soft spring XPBD WGSL proposal stage runs on gpu-only path while CPU remai
   assert.equal(wgslState.lastProbeSpringCount, 2);
 });
 
+test('soft spring XPBD WGSL authoritative replay applies cached node/lambda proposal when signature matches', async () => {
+  globalThis.GPUBufferUsage = {
+    STORAGE: 1 << 0,
+    COPY_DST: 1 << 1,
+    COPY_SRC: 1 << 2,
+    MAP_READ: 1 << 3,
+    UNIFORM: 1 << 4,
+  };
+  globalThis.GPUMapMode = { READ: 1 };
+
+  const dtPos = 0.18;
+  const stiffnessScale = 3.0;
+  const seed = {
+    nodes: [
+      { x: 20, y: 25, vx: 0.2, vy: -0.1, mass: 1.1, clusterId: 1 },
+      { x: 30, y: 21, vx: -0.3, vy: 0.4, mass: 0.8, clusterId: 1 },
+      { x: 39, y: 28, vx: 0.5, vy: 0.2, mass: 1.4, clusterId: 2 },
+    ],
+    springs: [
+      [0, 1, 11.2],
+      [1, 2, 10.8],
+    ],
+  };
+
+  const wgslState = {};
+  const offload = {
+    enabled: true,
+    device: createSoftSpringMockWgslDevice(),
+    state: wgslState,
+  };
+
+  applySoftSpringsXPBDVelocityGpuOnly({
+    soft: structuredClone(seed),
+    dtPos,
+    stiffnessScale,
+    lambdaCache: new Float32Array(seed.springs.length),
+    softXpbdIters: SOFT_XPBD_ITERS,
+    softXpbdBaseCompliance: SOFT_XPBD_BASE_COMPLIANCE,
+    clamp,
+    wgslOffload: offload,
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const replaySoft = structuredClone(seed);
+  const replayLambda = new Float32Array(seed.springs.length);
+  wgslState.enableAuthoritativeVelocityDelta = true;
+
+  applySoftSpringsXPBDVelocityGpuOnly({
+    soft: replaySoft,
+    dtPos,
+    stiffnessScale,
+    lambdaCache: replayLambda,
+    softXpbdIters: SOFT_XPBD_ITERS,
+    softXpbdBaseCompliance: SOFT_XPBD_BASE_COMPLIANCE,
+    clamp,
+    wgslOffload: offload,
+  });
+
+  assert.equal(replayLambda.some((v) => Math.abs(v || 0) > 1e-8), true);
+  assert.equal(replaySoft.nodes.some((n) => Math.abs(n?.vx || 0) > 1e-8 || Math.abs(n?.vy || 0) > 1e-8), true);
+  assert.equal(wgslState.lastMode, 'wgsl-velocity-authoritative');
+  assert.equal(wgslState.lastAuthoritativeProposalSource, 'wgsl-node-reduction');
+  assert.equal(typeof wgslState.lastAuthoritativeProposalSignature, 'string');
+});
+
+
 test('soft spring XPBD WGSL proposal skips overlapping dispatch while prior readback is in flight', async () => {
   globalThis.GPUBufferUsage = {
     STORAGE: 1 << 0,

@@ -1133,6 +1133,69 @@ function computeVelocityDeltaParityStats(proposed = new Float32Array(0), expecte
   };
 }
 
+function computeSoftSpringVelocityProposalSignature({ soft, layout, lambdaCache, dtPos, alpha }) {
+  const nodeCount = Array.isArray(soft?.nodes) ? soft.nodes.length : 0;
+  const springCount = layout?.springNodeA?.length || 0;
+  let hash = 2166136261;
+
+  const mix = (value) => {
+    const v = Number.isFinite(value) ? Number(value) : 0;
+    const scaled = Math.trunc(v * 1e6) | 0;
+    hash ^= (scaled >>> 0);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  };
+
+  mix(nodeCount);
+  mix(springCount);
+  mix(dtPos);
+  mix(alpha);
+
+  for (let ni = 0; ni < nodeCount; ni++) {
+    const node = soft.nodes[ni] || {};
+    mix((Number(node.x) || 0) + (Number(node.vx) || 0) * dtPos);
+    mix((Number(node.y) || 0) + (Number(node.vy) || 0) * dtPos);
+  }
+
+  const nodeA = layout?.springNodeA instanceof Uint32Array ? layout.springNodeA : new Uint32Array(0);
+  const nodeB = layout?.springNodeB instanceof Uint32Array ? layout.springNodeB : new Uint32Array(0);
+  const rest = layout?.springRest instanceof Float32Array ? layout.springRest : new Float32Array(0);
+  const invMassA = layout?.springInvMassA instanceof Float32Array ? layout.springInvMassA : new Float32Array(0);
+  const invMassB = layout?.springInvMassB instanceof Float32Array ? layout.springInvMassB : new Float32Array(0);
+
+  for (let si = 0; si < springCount; si++) {
+    mix(nodeA[si] || 0);
+    mix(nodeB[si] || 0);
+    mix(rest[si] || 0);
+    mix(invMassA[si] || 0);
+    mix(invMassB[si] || 0);
+    mix(lambdaCache?.[si] || 0);
+  }
+
+  return `spr-v1-${hash.toString(16)}-${nodeCount}-${springCount}`;
+}
+
+function applySoftSpringWgslAuthoritativeProposal({
+  soft,
+  lambdaCache,
+  nodeDeltaVx,
+  nodeDeltaVy,
+  lambdaNextBySpring,
+}) {
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const nodeCount = Math.min(nodes.length, nodeDeltaVx.length, nodeDeltaVy.length);
+  for (let ni = 0; ni < nodeCount; ni++) {
+    const node = nodes[ni];
+    if (!node) continue;
+    node.vx = (Number(node.vx) || 0) + (Number(nodeDeltaVx[ni]) || 0);
+    node.vy = (Number(node.vy) || 0) + (Number(nodeDeltaVy[ni]) || 0);
+  }
+
+  const springCount = Math.min(lambdaNextBySpring.length, lambdaCache?.length || 0);
+  for (let si = 0; si < springCount; si++) {
+    lambdaCache[si] = Number(lambdaNextBySpring[si]) || 0;
+  }
+}
+
 export function applySoftSpringsXPBDVelocityGpuOnly({
   soft,
   dtPos,
@@ -1153,6 +1216,7 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
   }
 
   const alpha = (softXpbdBaseCompliance / Math.max(0.2, stiffnessScale)) / Math.max(1e-8, dtPos * dtPos);
+  let xpbdIterStart = 0;
 
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     // Unblocker for upcoming WGSL XPBD stage: prepare deterministic CSR endpoint
@@ -1169,10 +1233,47 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
     wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
     wgslOffload.state.lastMode = 'cpu-prepared';
 
-    // Concrete WGSL soft-spring stage: compute per-spring XPBD lambda proposal
-    // on color-ordered batches. CPU remains authoritative for node updates while
-    // we validate deterministic GPU deltas before reduction offload lands.
-    if (canUseWgslOffload(wgslOffload)) {
+    const proposalSignature = computeSoftSpringVelocityProposalSignature({
+      soft,
+      layout,
+      lambdaCache,
+      dtPos,
+      alpha,
+    });
+    wgslOffload.state.lastPreparedProposalSignature = proposalSignature;
+
+    // Concrete WGSL soft-spring stage: consume prior deterministic WGSL velocity
+    // reduction as authoritative node/lambda update when the current frame input
+    // signature matches and parity remains within tolerance.
+    const cachedProposalReady = wgslOffload.state.enableAuthoritativeVelocityDelta === true
+      && wgslOffload.state.lastVelocityDeltaProposalSignature === proposalSignature
+      && wgslOffload.state.lastVelocityDeltaProposalSource === 'wgsl-node-reduction'
+      && wgslOffload.state.lastVelocityDeltaParity?.maxAbs <= 1e-5
+      && wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor instanceof Float32Array
+      && wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor instanceof Float32Array
+      && wgslOffload.state.lastProposalLambdaNextBySpring instanceof Float32Array
+      && wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor.length === soft.nodes.length
+      && wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor.length === soft.nodes.length
+      && wgslOffload.state.lastProposalLambdaNextBySpring.length === soft.springs.length;
+
+    if (cachedProposalReady) {
+      applySoftSpringWgslAuthoritativeProposal({
+        soft,
+        lambdaCache,
+        nodeDeltaVx: wgslOffload.state.lastVelocityDeltaProposalNodeVxByColor,
+        nodeDeltaVy: wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor,
+        lambdaNextBySpring: wgslOffload.state.lastProposalLambdaNextBySpring,
+      });
+      xpbdIterStart = 1;
+      wgslOffload.state.lastAuthoritativeProposalSignature = proposalSignature;
+      wgslOffload.state.lastAuthoritativeProposalSource = 'wgsl-node-reduction';
+      wgslOffload.state.lastMode = 'wgsl-velocity-authoritative';
+      wgslOffload.state.lastError = null;
+    }
+
+    // Continue probing/proposal dispatch while CPU remains authoritative so the
+    // next matching frame can promote deterministic WGSL deltas safely.
+    if (!cachedProposalReady && canUseWgslOffload(wgslOffload)) {
       if (wgslOffload.state.wgslInFlight) {
         wgslOffload.state.wgslSkippedWhileBusy = (wgslOffload.state.wgslSkippedWhileBusy || 0) + 1;
       } else {
@@ -1238,6 +1339,7 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
                 meanAbs: (vxParity.absMean + vyParity.absMean) * 0.5,
                 source: wgslOffload.state.lastVelocityDeltaProposalSource,
               };
+              wgslOffload.state.lastVelocityDeltaProposalSignature = proposalSignature;
             }
             if (probeRan || proposalRan) {
               wgslOffload.state.lastError = null;
@@ -1258,7 +1360,7 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
     }
   }
 
-  for (let iter = 0; iter < softXpbdIters; iter++) {
+  for (let iter = xpbdIterStart; iter < softXpbdIters; iter++) {
     for (let si = 0; si < soft.springs.length; si++) {
       const [i, j, rest] = soft.springs[si];
       const a = soft.nodes[i];

@@ -35,7 +35,7 @@ test('soft spring gpu-only WGSL layout publishes color-batched endpoint ownershi
 test('soft spring gpu-only path dispatches real WGSL probe + lambda proposal stages when offload device is available', () => {
   assert.match(
     source,
-    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*Promise\.all\(\[[\s\S]*dispatchSoftSpringWgslProbe\(\{ soft, offload: wgslOffload, layout \}\)[\s\S]*dispatchSoftSpringWgslLambdaProposal\([\s\S]*lastMode = proposalRan \? 'wgsl-velocity-proposal' : 'wgsl-probe'/,
+    /canUseWgslOffload\(wgslOffload\)[\s\S]*Promise\.all\(\[[\s\S]*dispatchSoftSpringWgslProbe\(\{ soft, offload: wgslOffload, layout \}\)[\s\S]*dispatchSoftSpringWgslLambdaProposal\([\s\S]*lastMode = proposalRan \? 'wgsl-velocity-proposal' : 'wgsl-probe'/,
     'expected gpu-only soft spring branch to execute WGSL probe + lambda proposal dispatches (with cpu fallback semantics preserved)',
   );
 });
@@ -43,7 +43,7 @@ test('soft spring gpu-only path dispatches real WGSL probe + lambda proposal sta
 test('soft spring gpu-only WGSL dispatch path guards against overlapping map/readback passes', () => {
   assert.match(
     source,
-    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*if \(wgslOffload\.state\.wgslInFlight\) \{[\s\S]*wgslSkippedWhileBusy[\s\S]*\} else \{[\s\S]*wgslInFlight = true;[\s\S]*Promise\.all\([\s\S]*\.finally\(\(\) => \{[\s\S]*wgslInFlight = false;[\s\S]*lastCompletedWgslRunId/,
+    /canUseWgslOffload\(wgslOffload\)[\s\S]*if \(wgslOffload\.state\.wgslInFlight\) \{[\s\S]*wgslSkippedWhileBusy[\s\S]*\} else \{[\s\S]*wgslInFlight = true;[\s\S]*Promise\.all\([\s\S]*\.finally\(\(\) => \{[\s\S]*wgslInFlight = false;[\s\S]*lastCompletedWgslRunId/,
     'expected gpu-only soft spring branch to serialize WGSL readback passes so overlapping mapAsync work does not race the next frame',
   );
 });
@@ -70,6 +70,14 @@ test('soft spring gpu-only WGSL proposal branch dispatches velocity-delta propos
     source,
     /proposalRan\) \{[\s\S]*dispatchSoftSpringWgslVelocityDeltaProposal\([\s\S]*lastVelocityDeltaProposalEndpointVxByColor[\s\S]*lastVelocityDeltaProposalEndpointVyByColor[\s\S]*lastVelocityDeltaProposalNodeVxByColor[\s\S]*lastVelocityDeltaProposalNodeVyByColor/,
     'expected WGSL proposal branch to dispatch deterministic velocity-delta WGSL stage and publish endpoint/node buffers',
+  );
+});
+
+test('soft spring gpu-only path can promote cached WGSL velocity proposal to authoritative node/lambda apply when signature matches', () => {
+  assert.match(
+    source,
+    /computeSoftSpringVelocityProposalSignature\([\s\S]*lastPreparedProposalSignature = proposalSignature[\s\S]*enableAuthoritativeVelocityDelta === true[\s\S]*lastVelocityDeltaProposalSignature === proposalSignature[\s\S]*applySoftSpringWgslAuthoritativeProposal\([\s\S]*lastMode = 'wgsl-velocity-authoritative'/,
+    'expected soft spring gpu-only branch to gate authoritative WGSL node/lambda replay on deterministic input signature parity',
   );
 });
 

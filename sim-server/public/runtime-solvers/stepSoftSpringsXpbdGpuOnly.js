@@ -1367,9 +1367,12 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
         nodeDeltaVy: wgslOffload.state.lastVelocityDeltaProposalNodeVyByColor,
         lambdaNextBySpring: wgslOffload.state.lastProposalLambdaNextBySpring,
       });
-      xpbdIterStart = 1;
+      const authoritativeCpuIterStart = fastMode ? softXpbdIters : 1;
+      xpbdIterStart = authoritativeCpuIterStart;
       wgslOffload.state.lastAuthoritativeProposalSignature = proposalSignature;
-      wgslOffload.state.lastAuthoritativeProposalSource = 'wgsl-node-reduction';
+      wgslOffload.state.lastAuthoritativeProposalSource = wgslOffload.state.lastVelocityDeltaProposalSource || (fastMode ? 'wgsl-node-reduction-fast' : 'wgsl-node-reduction');
+      wgslOffload.state.lastAuthoritativeCpuIterStart = authoritativeCpuIterStart;
+      wgslOffload.state.lastAuthoritativeResidualCpuIters = Math.max(0, (Number(softXpbdIters) || 0) - authoritativeCpuIterStart);
       wgslOffload.state.lastMode = 'wgsl-velocity-authoritative';
       wgslOffload.state.lastError = null;
     }

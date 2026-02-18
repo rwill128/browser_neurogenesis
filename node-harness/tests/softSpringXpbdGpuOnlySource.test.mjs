@@ -106,3 +106,12 @@ test('soft spring gpu-only fast mode skips endpoint readback + cpu parity while 
     'expected fast mode branch to reduce readback/parity overhead while retaining finite checks and explicit source-route telemetry',
   );
 });
+
+
+test('soft spring gpu-only fast mode authoritative replay skips residual cpu XPBD iterations after finite-checked WGSL node reduction', () => {
+  assert.match(
+    source,
+    /cachedProposalReady[\s\S]*const authoritativeCpuIterStart = fastMode \? softXpbdIters : 1;[\s\S]*xpbdIterStart = authoritativeCpuIterStart;[\s\S]*lastAuthoritativeProposalSource = wgslOffload\.state\.lastVelocityDeltaProposalSource \|\| \(fastMode \? 'wgsl-node-reduction-fast' : 'wgsl-node-reduction'\)[\s\S]*lastAuthoritativeResidualCpuIters/,
+    'expected fast-mode authoritative replay to cut shadow CPU spring iterations while preserving explicit source-route and residual-iteration telemetry',
+  );
+});

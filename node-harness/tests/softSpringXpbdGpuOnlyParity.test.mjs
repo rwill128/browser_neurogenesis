@@ -693,6 +693,82 @@ test('soft spring XPBD WGSL authoritative replay applies cached node/lambda prop
 });
 
 
+test('soft spring XPBD gpu-only fast authoritative replay skips residual cpu XPBD iterations after finite-checked WGSL proposal', async () => {
+  globalThis.GPUBufferUsage = {
+    STORAGE: 1 << 0,
+    COPY_DST: 1 << 1,
+    COPY_SRC: 1 << 2,
+    MAP_READ: 1 << 3,
+    UNIFORM: 1 << 4,
+  };
+  globalThis.GPUMapMode = { READ: 1 };
+
+  const dtPos = 0.18;
+  const stiffnessScale = 3.0;
+  const seed = {
+    nodes: [
+      { x: 20, y: 25, vx: 0.2, vy: -0.1, mass: 1.1, clusterId: 1 },
+      { x: 30, y: 21, vx: -0.3, vy: 0.4, mass: 0.8, clusterId: 1 },
+      { x: 39, y: 28, vx: 0.5, vy: 0.2, mass: 1.4, clusterId: 2 },
+    ],
+    springs: [
+      [0, 1, 11.2],
+      [1, 2, 10.8],
+    ],
+  };
+
+  const wgslState = {};
+  const offload = {
+    enabled: true,
+    modeProfile: 'gpu-only-fast',
+    device: createSoftSpringMockWgslDevice(),
+    state: wgslState,
+  };
+
+  applySoftSpringsXPBDVelocityGpuOnly({
+    soft: structuredClone(seed),
+    dtPos,
+    stiffnessScale,
+    lambdaCache: new Float32Array(seed.springs.length),
+    softXpbdIters: SOFT_XPBD_ITERS,
+    softXpbdBaseCompliance: SOFT_XPBD_BASE_COMPLIANCE,
+    clamp,
+    wgslOffload: offload,
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const replaySoft = structuredClone(seed);
+  const replayLambda = new Float32Array(seed.springs.length);
+  const expectedNodeDeltaVx = new Float32Array(wgslState.lastVelocityDeltaProposalNodeVxByColor || []);
+  const expectedNodeDeltaVy = new Float32Array(wgslState.lastVelocityDeltaProposalNodeVyByColor || []);
+  const expectedLambda = new Float32Array(wgslState.lastProposalLambdaNextBySpring || []);
+  wgslState.enableAuthoritativeVelocityDelta = true;
+
+  applySoftSpringsXPBDVelocityGpuOnly({
+    soft: replaySoft,
+    dtPos,
+    stiffnessScale,
+    lambdaCache: replayLambda,
+    softXpbdIters: SOFT_XPBD_ITERS,
+    softXpbdBaseCompliance: SOFT_XPBD_BASE_COMPLIANCE,
+    clamp,
+    wgslOffload: offload,
+  });
+
+  assert.equal(wgslState.lastMode, 'wgsl-velocity-authoritative');
+  assert.equal(wgslState.lastAuthoritativeProposalSource, 'wgsl-node-reduction-fast');
+  assert.equal(wgslState.lastAuthoritativeCpuIterStart, SOFT_XPBD_ITERS);
+  assert.equal(wgslState.lastAuthoritativeResidualCpuIters, 0);
+
+  for (let i = 0; i < replaySoft.nodes.length; i++) {
+    assert.ok(Math.abs(replaySoft.nodes[i].vx - (seed.nodes[i].vx + (expectedNodeDeltaVx[i] || 0))) < 1e-9);
+    assert.ok(Math.abs(replaySoft.nodes[i].vy - (seed.nodes[i].vy + (expectedNodeDeltaVy[i] || 0))) < 1e-9);
+  }
+  assert.deepEqual(Array.from(replayLambda), Array.from(expectedLambda));
+});
+
+
 test('soft spring XPBD WGSL proposal skips overlapping dispatch while prior readback is in flight', async () => {
   globalThis.GPUBufferUsage = {
     STORAGE: 1 << 0,

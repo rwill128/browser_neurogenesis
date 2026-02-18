@@ -1,3 +1,55 @@
+const bodyFluidInjectionGatherProposalWgsl = /* wgsl */`
+struct Params {
+  cell_count: u32,
+  _pad0: u32,
+  _pad1: u32,
+  _pad2: u32,
+  coupling_limit: f32,
+  _pad3: vec3<f32>,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> point_rel_x: array<f32>;
+@group(0) @binding(2) var<storage, read> point_rel_y: array<f32>;
+@group(0) @binding(3) var<storage, read> point_scale: array<f32>;
+@group(0) @binding(4) var<storage, read> cell_offsets: array<u32>;
+@group(0) @binding(5) var<storage, read> contrib_point_index: array<u32>;
+@group(0) @binding(6) var<storage, read> contrib_weight: array<f32>;
+@group(0) @binding(7) var<storage, read_write> cell_delta_vx: array<f32>;
+@group(0) @binding(8) var<storage, read_write> cell_delta_vy: array<f32>;
+
+fn clamp_component(v: f32, limit: f32) -> f32 {
+  return clamp(v, -limit, limit);
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let cell = gid.x;
+  if (cell >= params.cell_count) {
+    return;
+  }
+
+  let coupling_limit = max(0.001, params.coupling_limit);
+  let start = cell_offsets[cell];
+  let stop = cell_offsets[cell + 1u];
+
+  var sum_x = 0.0;
+  var sum_y = 0.0;
+  for (var i = start; i < stop; i = i + 1u) {
+    let pi = contrib_point_index[i];
+    let w = contrib_weight[i];
+    let scale = point_scale[pi];
+    let jx = clamp_component(point_rel_x[pi] * scale * w, coupling_limit);
+    let jy = clamp_component(point_rel_y[pi] * scale * w, coupling_limit);
+    sum_x = sum_x + jx;
+    sum_y = sum_y + jy;
+  }
+
+  cell_delta_vx[cell] = clamp_component(sum_x, coupling_limit);
+  cell_delta_vy[cell] = clamp_component(sum_y, coupling_limit);
+}
+`;
+
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
@@ -5,6 +57,17 @@ function clamp(v, lo, hi) {
 function clampComponent(v, limit) {
   if (!Number.isFinite(v)) return 0;
   return clamp(v, -limit, limit);
+}
+
+function canUseWgslOffload(offload) {
+  return Boolean(
+    offload
+      && offload.enabled === true
+      && offload.device
+      && typeof offload.device.createBuffer === 'function'
+      && typeof offload.device.createCommandEncoder === 'function'
+      && offload.state,
+  );
 }
 
 function buildBodyFluidInjectionWgslPrep({
@@ -222,6 +285,124 @@ function buildBodyFluidInjectionGatherLayout({
   };
 }
 
+function ensureWgslGatherState({ offload, gatherLayout }) {
+  const device = offload.device;
+  const state = offload.state;
+  const pointCapacity = Math.max(1, Number(gatherLayout?.pointRelX?.length) || 0);
+  const cellCapacity = Math.max(1, (Number(gatherLayout?.cellOffsets?.length) || 1) - 1);
+  const contribCapacity = Math.max(1, Number(gatherLayout?.contribWeight?.length) || 0);
+
+  if (!state.gatherProposalParams) {
+    state.gatherProposalParams = device.createBuffer({
+      size: 32,
+      usage: globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST,
+    });
+    state.gatherProposalBindGroup = null;
+  }
+
+  const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
+  if ((state.gatherProposalPointCapacity || 0) < pointCapacity) {
+    const bytes = pointCapacity * 4;
+    state.gatherProposalPointRelX?.destroy?.();
+    state.gatherProposalPointRelY?.destroy?.();
+    state.gatherProposalPointScale?.destroy?.();
+    state.gatherProposalPointRelX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.gatherProposalPointRelY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.gatherProposalPointScale = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.gatherProposalPointCapacity = pointCapacity;
+    state.gatherProposalBindGroup = null;
+  }
+
+  if ((state.gatherProposalCellCapacity || 0) < cellCapacity) {
+    const cellBytes = cellCapacity * 4;
+    const offsetBytes = (cellCapacity + 1) * 4;
+    state.gatherProposalCellOffsets?.destroy?.();
+    state.gatherProposalDeltaVx?.destroy?.();
+    state.gatherProposalDeltaVy?.destroy?.();
+    state.gatherProposalCellOffsets = device.createBuffer({ size: offsetBytes, usage: storageUsage });
+    state.gatherProposalDeltaVx = device.createBuffer({ size: cellBytes, usage: storageUsage });
+    state.gatherProposalDeltaVy = device.createBuffer({ size: cellBytes, usage: storageUsage });
+    state.gatherProposalCellCapacity = cellCapacity;
+    state.gatherProposalBindGroup = null;
+  }
+
+  if ((state.gatherProposalContributionCapacity || 0) < contribCapacity) {
+    const bytes = contribCapacity * 4;
+    state.gatherProposalContribPointIndex?.destroy?.();
+    state.gatherProposalContribWeight?.destroy?.();
+    state.gatherProposalContribPointIndex = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.gatherProposalContribWeight = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.gatherProposalContributionCapacity = contribCapacity;
+    state.gatherProposalBindGroup = null;
+  }
+
+  if (!state.gatherProposalPipeline) {
+    const module = device.createShaderModule({ code: bodyFluidInjectionGatherProposalWgsl });
+    state.gatherProposalPipeline = device.createComputePipeline({
+      layout: 'auto',
+      compute: { module, entryPoint: 'main' },
+    });
+    state.gatherProposalBindGroup = null;
+  }
+
+  if (!state.gatherProposalBindGroup) {
+    state.gatherProposalBindGroup = device.createBindGroup({
+      layout: state.gatherProposalPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.gatherProposalParams } },
+        { binding: 1, resource: { buffer: state.gatherProposalPointRelX } },
+        { binding: 2, resource: { buffer: state.gatherProposalPointRelY } },
+        { binding: 3, resource: { buffer: state.gatherProposalPointScale } },
+        { binding: 4, resource: { buffer: state.gatherProposalCellOffsets } },
+        { binding: 5, resource: { buffer: state.gatherProposalContribPointIndex } },
+        { binding: 6, resource: { buffer: state.gatherProposalContribWeight } },
+        { binding: 7, resource: { buffer: state.gatherProposalDeltaVx } },
+        { binding: 8, resource: { buffer: state.gatherProposalDeltaVy } },
+      ],
+    });
+  }
+
+  return state;
+}
+
+function dispatchBodyFluidInjectionGatherProposal({ offload, gatherLayout, couplingLimit, n }) {
+  if (!canUseWgslOffload(offload)) return false;
+
+  const state = ensureWgslGatherState({ offload, gatherLayout });
+  const device = offload.device;
+  const cellCount = Math.max(0, Number(n) || 0) * Math.max(0, Number(n) || 0);
+  if (cellCount <= 0) return false;
+
+  const paramsBytes = new ArrayBuffer(32);
+  const paramsU32 = new Uint32Array(paramsBytes);
+  const paramsF32 = new Float32Array(paramsBytes);
+  paramsU32[0] = cellCount >>> 0;
+  paramsF32[4] = Math.max(0.001, Number(couplingLimit) || 0.001);
+
+  device.queue.writeBuffer(state.gatherProposalParams, 0, paramsBytes);
+  device.queue.writeBuffer(state.gatherProposalPointRelX, 0, gatherLayout.pointRelX);
+  device.queue.writeBuffer(state.gatherProposalPointRelY, 0, gatherLayout.pointRelY);
+  device.queue.writeBuffer(state.gatherProposalPointScale, 0, gatherLayout.pointScale);
+  device.queue.writeBuffer(state.gatherProposalCellOffsets, 0, gatherLayout.cellOffsets);
+  if (gatherLayout.contribPointIndex.length > 0) {
+    device.queue.writeBuffer(state.gatherProposalContribPointIndex, 0, gatherLayout.contribPointIndex);
+    device.queue.writeBuffer(state.gatherProposalContribWeight, 0, gatherLayout.contribWeight);
+  }
+
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(state.gatherProposalPipeline);
+  pass.setBindGroup(0, state.gatherProposalBindGroup);
+  pass.dispatchWorkgroups(Math.max(1, Math.ceil(cellCount / 64)));
+  pass.end();
+  device.queue.submit([encoder.finish()]);
+
+  state.lastGatherProposalCellCount = cellCount;
+  state.lastGatherProposalContributionCount = gatherLayout.contributionCount;
+  state.lastGatherProposalDispatchCount = Math.max(1, Math.ceil(cellCount / 64));
+  return true;
+}
+
 export function applyBodyFluidInjectionGpuOnly({
   sim,
   bodies,
@@ -329,10 +510,24 @@ export function applyBodyFluidInjectionGpuOnly({
     wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
     wgslOffload.state.lastPreparedGatherBytes = gatherLayout.byteLength;
     wgslOffload.state.lastPreparedGatherContributionCount = gatherLayout.contributionCount;
-    // Blocker for immediate WGSL dispatch: this stage writes overlapping splat
-    // circles into shared float fields. Gather layout now exists for a deterministic
-    // per-cell reduction pass, but the reduction shader itself is still pending.
-    wgslOffload.state.lastMode = 'cpu-prepared';
+
+    let wgslGatherRan = false;
+    try {
+      wgslGatherRan = dispatchBodyFluidInjectionGatherProposal({
+        offload: wgslOffload,
+        gatherLayout,
+        couplingLimit,
+        n,
+      });
+      wgslOffload.state.lastError = null;
+    } catch (err) {
+      wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
+      wgslGatherRan = false;
+    }
+
+    // CPU splat path remains authoritative until WGSL gather outputs are
+    // consumed directly by field update/reduction path.
+    wgslOffload.state.lastMode = wgslGatherRan ? 'wgsl-gather-proposal' : 'cpu-prepared';
   }
 
   const count = plan.pointCount;

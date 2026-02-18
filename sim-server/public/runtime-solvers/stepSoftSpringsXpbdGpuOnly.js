@@ -11,6 +11,8 @@ export function buildSoftSpringXpbdWgslPlan({
   const springs = Array.isArray(soft?.springs) ? soft.springs : [];
 
   const activeSpringIndices = [];
+  const activeNodeAIndices = [];
+  const activeNodeBIndices = [];
   const endpointNodeIndicesRaw = [];
   const endpointSpringIndicesRaw = [];
   const endpointSignsRaw = [];
@@ -31,6 +33,8 @@ export function buildSoftSpringXpbdWgslPlan({
 
     const activeIndex = activeSpringIndices.length;
     activeSpringIndices.push(si);
+    activeNodeAIndices.push(i);
+    activeNodeBIndices.push(j);
 
     endpointNodeIndicesRaw.push(i, j);
     endpointSpringIndicesRaw.push(activeIndex, activeIndex);
@@ -61,6 +65,35 @@ export function buildSoftSpringXpbdWgslPlan({
     endpointSigns[dst] = endpointSignsRaw[ei];
   }
 
+  // Deterministic conflict-free spring coloring (no shared nodes per color).
+  // This is a direct unblocker for WGSL spring solves: each color can dispatch
+  // in parallel without atomics while preserving Gauss-Seidel ownership order.
+  const nodeUsedColors = Array.from({ length: nodes.length }, () => new Set());
+  const springColors = new Uint32Array(activeSpringIndices.length);
+  let colorCount = 0;
+  for (let ai = 0; ai < activeSpringIndices.length; ai++) {
+    const i = activeNodeAIndices[ai];
+    const j = activeNodeBIndices[ai];
+    let color = 0;
+    while (nodeUsedColors[i].has(color) || nodeUsedColors[j].has(color)) color++;
+    nodeUsedColors[i].add(color);
+    nodeUsedColors[j].add(color);
+    springColors[ai] = color;
+    if (color + 1 > colorCount) colorCount = color + 1;
+  }
+
+  const springColorCounts = new Uint32Array(colorCount);
+  for (let ai = 0; ai < springColors.length; ai++) springColorCounts[springColors[ai]] += 1;
+  const springColorOffsets = new Uint32Array(colorCount + 1);
+  for (let ci = 0; ci < colorCount; ci++) springColorOffsets[ci + 1] = springColorOffsets[ci] + springColorCounts[ci];
+  const springColorOrderedIndices = new Uint32Array(activeSpringIndices.length);
+  const springColorCursor = springColorOffsets.slice(0, colorCount);
+  for (let ai = 0; ai < springColors.length; ai++) {
+    const ci = springColors[ai];
+    const dst = springColorCursor[ci]++;
+    springColorOrderedIndices[dst] = ai;
+  }
+
   return {
     nodeCount: nodes.length,
     springCount: springs.length,
@@ -71,6 +104,9 @@ export function buildSoftSpringXpbdWgslPlan({
     endpointSpringIndices,
     endpointSigns,
     nodeEndpointOffsets,
+    springColors,
+    springColorOffsets,
+    springColorOrderedIndices,
   };
 }
 
@@ -82,6 +118,9 @@ export function buildSoftSpringXpbdWgslLayout({
   const activeSpringCount = Number(plan?.activeSpringCount) || 0;
   const activeSpringIndices = plan?.activeSpringIndices instanceof Uint32Array
     ? plan.activeSpringIndices
+    : new Uint32Array(0);
+  const springColorOrderedIndices = plan?.springColorOrderedIndices instanceof Uint32Array
+    ? plan.springColorOrderedIndices
     : new Uint32Array(0);
 
   const springNodeA = new Uint32Array(activeSpringCount);
@@ -106,6 +145,20 @@ export function buildSoftSpringXpbdWgslLayout({
     springInvMassB[ai] = 1 / Math.max(0.02, Number(b?.mass) || 1);
   }
 
+  const springNodeAByColor = new Uint32Array(springColorOrderedIndices.length);
+  const springNodeBByColor = new Uint32Array(springColorOrderedIndices.length);
+  const springRestByColor = new Float32Array(springColorOrderedIndices.length);
+  const springInvMassAByColor = new Float32Array(springColorOrderedIndices.length);
+  const springInvMassBByColor = new Float32Array(springColorOrderedIndices.length);
+  for (let oi = 0; oi < springColorOrderedIndices.length; oi++) {
+    const ai = springColorOrderedIndices[oi];
+    springNodeAByColor[oi] = springNodeA[ai];
+    springNodeBByColor[oi] = springNodeB[ai];
+    springRestByColor[oi] = springRest[ai];
+    springInvMassAByColor[oi] = springInvMassA[ai];
+    springInvMassBByColor[oi] = springInvMassB[ai];
+  }
+
   // WebGPU storage buffers are naturally 4-byte addressed; widen signs now so
   // upcoming WGSL reduction kernels can consume endpoint direction directly.
   const endpointSignsI32 = new Int32Array(plan?.endpointCount || 0);
@@ -122,6 +175,13 @@ export function buildSoftSpringXpbdWgslLayout({
     springRest,
     springInvMassA,
     springInvMassB,
+    springColorOffsets: plan?.springColorOffsets || new Uint32Array(0),
+    springColorOrderedIndices,
+    springNodeAByColor,
+    springNodeBByColor,
+    springRestByColor,
+    springInvMassAByColor,
+    springInvMassBByColor,
     byteLength:
       (plan?.nodeEndpointOffsets?.byteLength || 0)
       + (plan?.endpointSpringIndices?.byteLength || 0)
@@ -130,7 +190,14 @@ export function buildSoftSpringXpbdWgslLayout({
       + springNodeB.byteLength
       + springRest.byteLength
       + springInvMassA.byteLength
-      + springInvMassB.byteLength,
+      + springInvMassB.byteLength
+      + (plan?.springColorOffsets?.byteLength || 0)
+      + springColorOrderedIndices.byteLength
+      + springNodeAByColor.byteLength
+      + springNodeBByColor.byteLength
+      + springRestByColor.byteLength
+      + springInvMassAByColor.byteLength
+      + springInvMassBByColor.byteLength,
   };
 }
 

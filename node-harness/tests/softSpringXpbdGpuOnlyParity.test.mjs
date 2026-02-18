@@ -162,6 +162,42 @@ test('soft spring XPBD WGSL plan builder emits deterministic CSR endpoint owners
   );
 });
 
+
+
+test('soft spring XPBD WGSL plan builder emits deterministic conflict-free spring color batches', () => {
+  const soft = {
+    nodes: [{}, {}, {}, {}],
+    springs: [
+      [0, 1, 1],
+      [1, 2, 1],
+      [2, 3, 1],
+      [0, 3, 1],
+      [0, 2, 1],
+    ],
+  };
+
+  const plan = buildSoftSpringXpbdWgslPlan({ soft });
+
+  assert.deepEqual(Array.from(plan.springColors), [0, 1, 0, 1, 2]);
+  assert.deepEqual(Array.from(plan.springColorOffsets), [0, 2, 4, 5]);
+  assert.deepEqual(Array.from(plan.springColorOrderedIndices), [0, 2, 1, 3, 4]);
+
+  for (let ci = 0; ci < plan.springColorOffsets.length - 1; ci++) {
+    const usedNodes = new Set();
+    const start = plan.springColorOffsets[ci];
+    const end = plan.springColorOffsets[ci + 1];
+    for (let oi = start; oi < end; oi++) {
+      const ai = plan.springColorOrderedIndices[oi];
+      const si = plan.activeSpringIndices[ai];
+      const [a, b] = soft.springs[si];
+      assert.equal(usedNodes.has(a), false, `color ${ci} reuses node ${a}`);
+      assert.equal(usedNodes.has(b), false, `color ${ci} reuses node ${b}`);
+      usedNodes.add(a);
+      usedNodes.add(b);
+    }
+  }
+});
+
 test('soft spring XPBD WGSL layout builder emits deterministic spring SoA + endpoint sign buffers', () => {
   const soft = {
     nodes: [
@@ -195,6 +231,10 @@ test('soft spring XPBD WGSL layout builder emits deterministic spring SoA + endp
     [2, 0.5],
   );
   assert.deepEqual(Array.from(layout.endpointSignsI32), [-1, 1, -1, 1]);
+  assert.deepEqual(Array.from(layout.springColorOffsets), [0, 1, 2]);
+  assert.deepEqual(Array.from(layout.springColorOrderedIndices), [0, 1]);
+  assert.deepEqual(Array.from(layout.springNodeAByColor), [0, 1]);
+  assert.deepEqual(Array.from(layout.springNodeBByColor), [1, 2]);
   assert.equal(layout.byteLength > 0, true);
 });
 
@@ -251,5 +291,7 @@ test('soft spring XPBD stores WGSL-prep state while preserving cpu parity output
   assert.equal(wgslState.preparedPlan?.nodeEndpointOffsets?.length, seed.nodes.length + 1);
   assert.equal(wgslState.preparedLayout?.springNodeA?.length, 2);
   assert.equal(wgslState.preparedLayout?.endpointSignsI32?.length, 4);
+  assert.equal(wgslState.preparedPlan?.springColorOffsets?.length, 3);
+  assert.equal(wgslState.preparedLayout?.springNodeAByColor?.length, 2);
   assert.equal(wgslState.lastPreparedLayoutBytes, wgslState.preparedLayout?.byteLength);
 });

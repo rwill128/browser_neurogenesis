@@ -13,3 +13,12 @@ test('soft spring gpu-only module wires WGSL prep layout alongside plan in offlo
     'expected WGSL prep branch to build/store deterministic layout buffers for next XPBD offload stage',
   );
 });
+
+
+test('soft spring gpu-only WGSL prep branch stores deterministic spring color batches for conflict-free dispatch planning', () => {
+  assert.match(
+    source,
+    /buildSoftSpringXpbdWgslPlan\([\s\S]*springColorOffsets[\s\S]*springColorOrderedIndices[\s\S]*wgslOffload\.state\.preparedPlan = plan/,
+    'expected WGSL prep branch to retain spring color batches for no-atomic per-color dispatch staging',
+  );
+});

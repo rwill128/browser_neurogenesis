@@ -106,8 +106,8 @@ const SOFT_XPBD_BASE_COMPLIANCE = 0.0012;
 const SOFT_AREA_XPBD_ITERS = 6;
 const SOFT_AREA_BASE_COMPLIANCE = 0.0009;
 const SOFT_INTEGRATION_SCALE = 24;
-const DEFAULT_FLUID_VELOCITY_CAP = 6.0;
-const DEFAULT_FLUID_COUPLING_COMPONENT_LIMIT = 12;
+const DEFAULT_FLUID_VELOCITY_CAP = 24.0;
+const DEFAULT_FLUID_COUPLING_COMPONENT_LIMIT = 24;
 const ENABLE_HYBRID_BODY_LINKS = false;
 
 // Soft deformation color-state thresholds:
@@ -143,13 +143,13 @@ function clamp(v, lo, hi) {
 function normalizeFluidVelocityCap(raw) {
   const v = Number(raw);
   if (!Number.isFinite(v)) return DEFAULT_FLUID_VELOCITY_CAP;
-  return clamp(v, 0.1, 24);
+  return clamp(v, 0.1, 96);
 }
 
 function normalizeFluidCouplingComponentLimit(raw) {
   const v = Number(raw);
   if (!Number.isFinite(v)) return DEFAULT_FLUID_COUPLING_COMPONENT_LIMIT;
-  return clamp(v, 0.25, 48);
+  return clamp(v, 0.25, 128);
 }
 
 function clampFluidComponent(v, limitRaw) {

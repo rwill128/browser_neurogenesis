@@ -240,6 +240,20 @@ test('gpu-lab routes soft fluid-coupling stepping through isolated gpu-only runt
   );
 });
 
+test('gpu-lab routes body-fluid momentum injection through isolated gpu-only runtime solver module', () => {
+  assert.match(
+    source,
+    /import \{ applyBodyFluidInjectionGpuOnly \} from '\/runtime-solvers\/stepBodyFluidInjectionGpuOnly\.js';/,
+    'expected isolated gpu-only body-fluid injection module import',
+  );
+
+  assert.match(
+    source,
+    /let injectedMomentum = 0;[\s\S]*if \(solverPath === 'gpu-only'\) \{[\s\S]*applyBodyFluidInjectionGpuOnly\(\{[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*const injectPoint = \(px, py, pvx, pvy/,
+    'expected explicit gpu-only body-fluid injection dispatch with baseline fallback branch',
+  );
+});
+
 test('gpu-lab routes soft integration stepping through isolated gpu-only runtime solver module', () => {
   assert.match(
     source,

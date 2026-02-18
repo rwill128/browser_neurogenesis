@@ -74,9 +74,10 @@ function assertBoundaryStateApprox(actual, expected, eps = 1e-5) {
   compareList(actual.soft.nodes, expected.soft.nodes);
 }
 
-function createMockWgslDevice() {
+function createMockWgslDevice({ mapAsyncDelayMs = 0, enforceSinglePendingMap = false } = {}) {
   const storage = new WeakMap();
   const usage = globalThis.GPUBufferUsage;
+  const stats = { mapCalls: 0, mapRejects: 0 };
 
   function ensure(buffer, size) {
     const current = storage.get(buffer);
@@ -103,12 +104,26 @@ function createMockWgslDevice() {
       };
     },
     createBuffer({ size }) {
+      let mapPending = false;
       const buf = {
         size,
         destroy() {},
-        mapAsync: async () => {},
+        async mapAsync() {
+          stats.mapCalls += 1;
+          if (enforceSinglePendingMap && mapPending) {
+            stats.mapRejects += 1;
+            throw new Error('Buffer already has an outstanding map pending.');
+          }
+          mapPending = true;
+          if (mapAsyncDelayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, mapAsyncDelayMs));
+          }
+          mapPending = false;
+        },
         getMappedRange: (offset = 0, len = size) => ensure(buf, size).slice(offset, offset + len),
-        unmap() {},
+        unmap() {
+          mapPending = false;
+        },
       };
       ensure(buf, size);
       return buf;
@@ -206,6 +221,7 @@ function createMockWgslDevice() {
         }
       },
     },
+    __stats: stats,
   };
 }
 
@@ -302,4 +318,55 @@ test('collision boundary WGSL offload keeps non-finite entries on CPU while runn
   assert.equal(wgslOffload.state.lastFiniteEntryCount, 4);
   assert.equal(wgslOffload.state.lastNonFiniteEntryCount, 1);
   assertBoundaryStateApprox(gpuOnly, baseline);
+});
+
+test('collision boundary WGSL offload serializes readback lifecycle so concurrent frames do not trigger outstanding map fallbacks', async () => {
+  globalThis.GPUBufferUsage = {
+    STORAGE: 1 << 0,
+    COPY_DST: 1 << 1,
+    COPY_SRC: 1 << 2,
+    MAP_READ: 1 << 3,
+    UNIFORM: 1 << 4,
+  };
+  globalThis.GPUMapMode = { READ: 1 };
+
+  const device = createMockWgslDevice({
+    mapAsyncDelayMs: 6,
+    enforceSinglePendingMap: true,
+  });
+
+  const stateA = makeState();
+  const stateB = makeState();
+  const wgslOffload = {
+    enabled: true,
+    device,
+    state: {},
+  };
+
+  const [runtimeA, runtimeB] = await Promise.all([
+    applyCollisionBoundaryPassGpuOnly({
+      rigidBodies: stateA.bodies.rigid,
+      soft: stateA.soft,
+      n: stateA.n,
+      rigidBounce: 0.84,
+      softBounce: 0.78,
+      applyBounceBoundary: bounceStub,
+      wgslOffload,
+    }),
+    applyCollisionBoundaryPassGpuOnly({
+      rigidBodies: stateB.bodies.rigid,
+      soft: stateB.soft,
+      n: stateB.n,
+      rigidBounce: 0.84,
+      softBounce: 0.78,
+      applyBounceBoundary: bounceStub,
+      wgslOffload,
+    }),
+  ]);
+
+  assert.equal(runtimeA.mode, 'wgsl');
+  assert.equal(runtimeB.mode, 'wgsl');
+  assert.equal(wgslOffload.state.lastMode, 'wgsl');
+  assert.equal(wgslOffload.state.lastError, null);
+  assert.equal(device.__stats.mapRejects, 0, 'expected serialized boundary readbacks to avoid outstanding map rejections');
 });

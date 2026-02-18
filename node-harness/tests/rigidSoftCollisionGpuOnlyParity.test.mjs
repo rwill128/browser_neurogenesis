@@ -358,3 +358,90 @@ test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when dev
   assert.ok(dispatches[1] >= 1);
   assert.ok(writes.length >= 16);
 });
+
+test('gpu-only rigid-soft broadphase serializes WGSL readback buffers so concurrent passes avoid map-pending fallback routes', async () => {
+  globalThis.GPUBufferUsage ??= {
+    STORAGE: 1 << 0,
+    COPY_DST: 1 << 1,
+    UNIFORM: 1 << 2,
+    COPY_SRC: 1 << 3,
+    MAP_READ: 1 << 4,
+  };
+  globalThis.GPUMapMode ??= {
+    READ: 1,
+  };
+
+  const mockPipeline = { getBindGroupLayout: () => ({}) };
+  const stats = { mapRejects: 0 };
+  const makeReadableBuffer = () => {
+    const data = new Uint32Array(1024);
+    data.fill(1);
+    let mapPending = false;
+    return {
+      destroy() {},
+      async mapAsync() {
+        if (mapPending) {
+          stats.mapRejects += 1;
+          throw new Error('Buffer already has an outstanding map pending.');
+        }
+        mapPending = true;
+        await new Promise((resolve) => setTimeout(resolve, 6));
+        mapPending = false;
+      },
+      getMappedRange(_offset = 0, size = data.byteLength) { return data.buffer.slice(0, size); },
+      unmap() {
+        mapPending = false;
+      },
+    };
+  };
+
+  const mockDevice = {
+    createBuffer: () => makeReadableBuffer(),
+    createShaderModule: ({ code }) => ({ code }),
+    createComputePipelineAsync: () => Promise.resolve(mockPipeline),
+    createBindGroup: () => ({}),
+    createCommandEncoder: () => ({
+      beginComputePass: () => ({
+        setPipeline() {},
+        setBindGroup() {},
+        dispatchWorkgroups() {},
+        end() {},
+      }),
+      copyBufferToBuffer() {},
+      finish: () => ({}),
+    }),
+    queue: {
+      writeBuffer() {},
+      submit() {},
+    },
+  };
+
+  const stateA = makeState();
+  const stateB = makeState();
+  const wgslState = {
+    rigidSoftNodeBroadphasePipeline: mockPipeline,
+    rigidSoftEdgeBroadphasePipeline: mockPipeline,
+  };
+  const offload = { enabled: true, device: mockDevice, state: wgslState };
+
+  await Promise.all([
+    resolveRigidSoftCollisionPassGpuOnly({
+      rigidBodies: stateA.rigid,
+      soft: stateA.soft,
+      hybridAttachedByRigid: stateA.hybridAttachedByRigid,
+      edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
+      wgslOffload: offload,
+    }),
+    resolveRigidSoftCollisionPassGpuOnly({
+      rigidBodies: stateB.rigid,
+      soft: stateB.soft,
+      hybridAttachedByRigid: stateB.hybridAttachedByRigid,
+      edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
+      wgslOffload: offload,
+    }),
+  ]);
+
+  assert.equal(wgslState.lastNodeBroadphaseReadbackSourceRoute, 'wgsl-rigid-soft-node-broadphase-readback');
+  assert.equal(wgslState.lastEdgeBroadphaseReadbackSourceRoute, 'wgsl-rigid-soft-edge-broadphase-readback');
+  assert.equal(stats.mapRejects, 0, 'expected rigid-soft broadphase readback queue to avoid outstanding map rejections');
+});

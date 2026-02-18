@@ -326,6 +326,12 @@ test('gpu-lab routes rigid-soft and soft-soft collision stepping through isolate
     /if \(solverPath === 'gpu-only'\) \{[\s\S]*await runCollisionIterationsGpuOnly\(\{[\s\S]*resolveRigidSoftCollisionPassGpuOnly,[\s\S]*resolveSoftSoftCollisionPassGpuOnly,[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*state: \(sim\.collisionBoundaryWgslState \|\|= \{\}\),[\s\S]*\}\);[\s\S]*\} else \{[\s\S]*for \(let rbi = 0; rbi < bodies\.rigid\.length; rbi\+\+\)[\s\S]*for \(let i = 0; i < s\.nodes\.length; i\+\+\)[\s\S]*resolveSoftNodeVsSoftEdgeCollision\(node, a, b, 0\.12\);/,
     'expected gpu-only collision iteration orchestration with WGSL collision-boundary offload wiring and baseline inline fallback loops preserved',
   );
+
+  assert.match(
+    source,
+    /wgslOffload:[\s\S]*rigidSoft:[\s\S]*state: \(sim\.rigidSoftCollisionWgslState \|\|= \{\}\),[\s\S]*softSoft:[\s\S]*state: \(sim\.softCollisionWgslState \|\|= \{\}\),[\s\S]*boundary:[\s\S]*state: \(sim\.collisionBoundaryWgslState \|\|= \{\}\),/,
+    'expected gpu-only collision iteration wiring to isolate rigid-soft, soft-soft, and boundary WGSL state ownership',
+  );
 });
 
 test('gpu-lab routes soft spring XPBD stepping through isolated gpu-only runtime solver module', () => {

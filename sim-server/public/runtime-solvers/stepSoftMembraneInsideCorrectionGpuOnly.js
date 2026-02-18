@@ -9,6 +9,30 @@
 import { pointInPolygonInclusive } from '../rigid-collision.js';
 
 const EPS = 1e-8;
+const WGSL_LAYOUT_SIG_SEED = 0x811c9dc5;
+
+function getGpuOnlyPipelineModeProfile(offload) {
+  const modeProfile = String(offload?.pipelineMode || '').toLowerCase();
+  if (modeProfile === 'gpu-only-fast') return 'gpu-only-fast';
+  if (modeProfile === 'gpu-only-validated') return 'gpu-only-validated';
+  return 'standard';
+}
+
+function hashUint(value, hash) {
+  let h = hash >>> 0;
+  h ^= (Number(value) >>> 0);
+  h = Math.imul(h, 0x01000193) >>> 0;
+  return h >>> 0;
+}
+
+function hashFloat(value, hash) {
+  if (!Number.isFinite(value)) return hashUint(0x7fc00000, hash);
+  const buf = new ArrayBuffer(4);
+  const f = new Float32Array(buf);
+  const u = new Uint32Array(buf);
+  f[0] = value;
+  return hashUint(u[0], hash);
+}
 
 function closestPointOnSegment(px, py, ax, ay, bx, by) {
   const ex = bx - ax;
@@ -72,12 +96,97 @@ function buildMembraneInsideCandidates({ soft, loops, clusterMap } = {}) {
   return candidates;
 }
 
+function buildSoftMembraneInsideCorrectionWgslLayout({ soft, candidates, correctionSlop = 0.04 } = {}) {
+  if (!soft || !Array.isArray(soft.nodes) || !Array.isArray(candidates) || candidates.length === 0) return null;
+
+  const nodeCount = soft.nodes.length;
+  const loopCount = candidates.length;
+
+  const nodeData = new Float32Array(nodeCount * 4);
+  const nodeClusterId = new Int32Array(nodeCount);
+  const loopBounds = new Float32Array(loopCount * 4);
+  const loopMeta = new Float32Array(loopCount * 3);
+  const loopClusterId = new Int32Array(loopCount);
+  const loopPointOffsets = new Uint32Array(loopCount + 1);
+
+  const flatPoints = [];
+  for (let i = 0; i < nodeCount; i++) {
+    const n = soft.nodes[i];
+    nodeData[i * 4] = Number(n?.x) || 0;
+    nodeData[i * 4 + 1] = Number(n?.y) || 0;
+    nodeData[i * 4 + 2] = Number(n?.r) || 0;
+    nodeData[i * 4 + 3] = Math.max(0.2, Number(n?.r) || 1) + Math.max(0, Number(correctionSlop) || 0.04);
+    nodeClusterId[i] = Number.isFinite(Number(n?.clusterId)) ? (Number(n.clusterId) | 0) : -1;
+  }
+
+  let pointOffset = 0;
+  for (let li = 0; li < loopCount; li++) {
+    const c = candidates[li];
+    loopPointOffsets[li] = pointOffset >>> 0;
+    loopBounds[li * 4] = Number(c.minX) || 0;
+    loopBounds[li * 4 + 1] = Number(c.minY) || 0;
+    loopBounds[li * 4 + 2] = Number(c.maxX) || 0;
+    loopBounds[li * 4 + 3] = Number(c.maxY) || 0;
+    loopMeta[li * 3] = Number(c.areaSign) || 1;
+    loopMeta[li * 3 + 1] = Number(c.cid) || 0;
+    loopMeta[li * 3 + 2] = Number(c.ids?.length || 0);
+    loopClusterId[li] = Number(c.cid) | 0;
+
+    const poly = Array.isArray(c.poly) ? c.poly : [];
+    for (let pi = 0; pi < poly.length; pi++) {
+      const p = poly[pi];
+      flatPoints.push(Number(p?.x) || 0, Number(p?.y) || 0);
+    }
+    pointOffset += poly.length;
+  }
+  loopPointOffsets[loopCount] = pointOffset >>> 0;
+
+  return {
+    nodeCount,
+    loopCount,
+    flatPointCount: pointOffset,
+    nodeData,
+    nodeClusterId,
+    loopBounds,
+    loopMeta,
+    loopClusterId,
+    loopPointOffsets,
+    flatPoints: Float32Array.from(flatPoints),
+  };
+}
+
+function computeSoftMembraneInsideLayoutSignature(layout) {
+  if (!layout) return 0;
+  let hash = WGSL_LAYOUT_SIG_SEED;
+  hash = hashUint(layout.nodeCount || 0, hash);
+  hash = hashUint(layout.loopCount || 0, hash);
+  hash = hashUint(layout.flatPointCount || 0, hash);
+
+  const hashArray = (arr, isFloat = false) => {
+    if (!arr) return;
+    const limit = Math.min(arr.length, 4096);
+    for (let i = 0; i < limit; i++) {
+      hash = isFloat ? hashFloat(Number(arr[i]), hash) : hashUint(Number(arr[i]), hash);
+    }
+  };
+
+  hashArray(layout.nodeData, true);
+  hashArray(layout.nodeClusterId, false);
+  hashArray(layout.loopBounds, true);
+  hashArray(layout.loopMeta, true);
+  hashArray(layout.loopClusterId, false);
+  hashArray(layout.loopPointOffsets, false);
+  hashArray(layout.flatPoints, true);
+  return hash >>> 0;
+}
+
 export function applySoftMembraneInsideCorrectionPassGpuOnly({
   sim,
   soft,
   loops,
   correctionIters = 2,
   correctionSlop = 0.04,
+  wgslOffload = null,
 } = {}) {
   if (!soft?.nodes?.length || !Array.isArray(loops) || loops.length === 0) return 0;
   const clusterMap = sim?.softMembraneClusterMap;
@@ -85,6 +194,39 @@ export function applySoftMembraneInsideCorrectionPassGpuOnly({
 
   const candidates = buildMembraneInsideCandidates({ soft, loops, clusterMap });
   if (candidates.length === 0) return 0;
+
+  const pipelineMode = getGpuOnlyPipelineModeProfile(wgslOffload);
+  const standardMode = pipelineMode === 'standard';
+  const stagedWgslLayout = !standardMode
+    ? buildSoftMembraneInsideCorrectionWgslLayout({ soft, candidates, correctionSlop })
+    : null;
+  const stagedWgslLayoutSignature = stagedWgslLayout
+    ? computeSoftMembraneInsideLayoutSignature(stagedWgslLayout)
+    : 0;
+
+  if (wgslOffload?.state) {
+    wgslOffload.state.lastPreparedMembraneInsideLayout = stagedWgslLayout;
+    wgslOffload.state.lastPreparedMembraneInsideLayoutSignature = stagedWgslLayoutSignature >>> 0;
+    wgslOffload.state.lastPreparedMembraneInsideLayoutBytes = stagedWgslLayout
+      ? (
+          stagedWgslLayout.nodeData.byteLength
+          + stagedWgslLayout.nodeClusterId.byteLength
+          + stagedWgslLayout.loopBounds.byteLength
+          + stagedWgslLayout.loopMeta.byteLength
+          + stagedWgslLayout.loopClusterId.byteLength
+          + stagedWgslLayout.loopPointOffsets.byteLength
+          + stagedWgslLayout.flatPoints.byteLength
+        )
+      : 0;
+    wgslOffload.state.lastPreparedMembraneInsideLayoutNodeCount = stagedWgslLayout?.nodeCount || 0;
+    wgslOffload.state.lastPreparedMembraneInsideLayoutLoopCount = stagedWgslLayout?.loopCount || 0;
+    wgslOffload.state.lastPreparedMembraneInsideLayoutPointCount = stagedWgslLayout?.flatPointCount || 0;
+    wgslOffload.state.lastMembraneInsideModeProfile = pipelineMode;
+    if (!standardMode) {
+      wgslOffload.state.lastMembraneInsideSourceRoute = 'cpu-membrane-inside-prepared-layout';
+      wgslOffload.state.lastSourceRoute = 'cpu-membrane-inside-prepared-layout';
+    }
+  }
 
   let corrected = 0;
 
@@ -158,6 +300,13 @@ export function applySoftMembraneInsideCorrectionPassGpuOnly({
         corrected += 1;
         break;
       }
+    }
+  }
+
+  if (wgslOffload?.state) {
+    wgslOffload.state.lastMembraneInsideAuthoritativeSource = 'cpu-membrane-inside-authoritative';
+    if (!wgslOffload.state.lastMembraneInsideSourceRoute) {
+      wgslOffload.state.lastMembraneInsideSourceRoute = 'cpu-membrane-inside-authoritative';
     }
   }
 

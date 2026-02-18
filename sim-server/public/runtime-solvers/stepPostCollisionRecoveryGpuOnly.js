@@ -541,6 +541,7 @@ export async function applyPostCollisionRecoveryGpuOnly(args = {}) {
         sim: args.sim,
         soft,
         loops: softClusterLoops,
+        wgslOffload,
       });
 
   let boundaryRuntime = { mode: 'cpu-inline', reason: 'bounce-callback' };

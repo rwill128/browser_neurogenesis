@@ -388,6 +388,10 @@ test('soft spring XPBD WGSL layout builder emits deterministic spring SoA + endp
   assert.deepEqual(Array.from(layout.springColorOrderedIndices), [0, 1]);
   assert.deepEqual(Array.from(layout.springNodeAByColor), [0, 1]);
   assert.deepEqual(Array.from(layout.springNodeBByColor), [1, 2]);
+  assert.deepEqual(Array.from(layout.colorEndpointOffsets), [0, 2, 4]);
+  assert.deepEqual(Array.from(layout.endpointNodeIndicesByColor), [0, 1, 1, 2]);
+  assert.deepEqual(Array.from(layout.endpointSpringIndicesByColor), [0, 0, 1, 1]);
+  assert.deepEqual(Array.from(layout.endpointSignsI32ByColor), [-1, 1, -1, 1]);
   assert.equal(layout.byteLength > 0, true);
 });
 
@@ -441,11 +445,15 @@ test('soft spring XPBD stores WGSL-prep state while preserving cpu parity output
   assert.equal(wgslState.lastMode, 'cpu-prepared');
   assert.equal(wgslState.lastPreparedSpringCount, 2);
   assert.equal(wgslState.lastPreparedEndpointCount, 4);
+  assert.equal(wgslState.lastPreparedColorCount, 2);
+  assert.equal(wgslState.lastPreparedColorEndpointCount, 4);
   assert.equal(wgslState.preparedPlan?.nodeEndpointOffsets?.length, seed.nodes.length + 1);
   assert.equal(wgslState.preparedLayout?.springNodeA?.length, 2);
   assert.equal(wgslState.preparedLayout?.endpointSignsI32?.length, 4);
   assert.equal(wgslState.preparedPlan?.springColorOffsets?.length, 3);
   assert.equal(wgslState.preparedLayout?.springNodeAByColor?.length, 2);
+  assert.equal(wgslState.preparedLayout?.colorEndpointOffsets?.length, 3);
+  assert.equal(wgslState.preparedLayout?.endpointSpringIndicesByColor?.length, 4);
   assert.equal(wgslState.lastPreparedLayoutBytes, wgslState.preparedLayout?.byteLength);
 });
 

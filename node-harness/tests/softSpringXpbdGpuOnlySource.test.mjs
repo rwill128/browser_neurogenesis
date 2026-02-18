@@ -23,6 +23,15 @@ test('soft spring gpu-only WGSL prep branch stores deterministic spring color ba
   );
 });
 
+
+test('soft spring gpu-only WGSL layout publishes color-batched endpoint ownership buffers for upcoming node-delta reduction stage', () => {
+  assert.match(
+    source,
+    /buildSoftSpringXpbdWgslLayout\([\s\S]*colorEndpointOffsets[\s\S]*endpointNodeIndicesByColor[\s\S]*endpointSpringIndicesByColor[\s\S]*endpointSignsI32ByColor/,
+    'expected WGSL layout builder to publish deterministic per-color endpoint ownership buffers for the next reduction offload stage',
+  );
+});
+
 test('soft spring gpu-only path dispatches real WGSL probe + lambda proposal stages when offload device is available', () => {
   assert.match(
     source,

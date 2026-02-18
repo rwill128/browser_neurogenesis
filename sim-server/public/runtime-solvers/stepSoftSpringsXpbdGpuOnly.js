@@ -580,6 +580,8 @@ export function buildSoftSpringXpbdWgslLayout({
   const springRestByColor = new Float32Array(springColorOrderedIndices.length);
   const springInvMassAByColor = new Float32Array(springColorOrderedIndices.length);
   const springInvMassBByColor = new Float32Array(springColorOrderedIndices.length);
+  const colorCount = Math.max(0, (plan?.springColorOffsets?.length || 1) - 1);
+  const colorEndpointOffsets = new Uint32Array(colorCount + 1);
   for (let oi = 0; oi < springColorOrderedIndices.length; oi++) {
     const ai = springColorOrderedIndices[oi];
     springNodeAByColor[oi] = springNodeA[ai];
@@ -587,6 +589,36 @@ export function buildSoftSpringXpbdWgslLayout({
     springRestByColor[oi] = springRest[ai];
     springInvMassAByColor[oi] = springInvMassA[ai];
     springInvMassBByColor[oi] = springInvMassB[ai];
+  }
+
+  // Deterministic no-atomic reduction ownership for next WGSL stage: endpoints
+  // are grouped by spring-color batch, then stably ordered by color dispatch
+  // order. This lets a future WGSL node-delta reduction consume each color in
+  // isolation while preserving current Gauss-Seidel equivalence.
+  for (let ci = 0; ci < colorCount; ci++) {
+    const springStart = plan.springColorOffsets[ci] || 0;
+    const springEnd = plan.springColorOffsets[ci + 1] || springStart;
+    colorEndpointOffsets[ci + 1] = colorEndpointOffsets[ci] + Math.max(0, (springEnd - springStart) * 2);
+  }
+  const endpointCountByColor = colorEndpointOffsets[colorEndpointOffsets.length - 1] || 0;
+  const endpointNodeIndicesByColor = new Uint32Array(endpointCountByColor);
+  const endpointSpringIndicesByColor = new Uint32Array(endpointCountByColor);
+  const endpointSignsI32ByColor = new Int32Array(endpointCountByColor);
+  for (let ci = 0; ci < colorCount; ci++) {
+    const springStart = plan.springColorOffsets[ci] || 0;
+    const springEnd = plan.springColorOffsets[ci + 1] || springStart;
+    let dst = colorEndpointOffsets[ci];
+    for (let oi = springStart; oi < springEnd; oi++) {
+      const ai = springColorOrderedIndices[oi];
+      endpointNodeIndicesByColor[dst] = springNodeA[ai];
+      endpointSpringIndicesByColor[dst] = ai;
+      endpointSignsI32ByColor[dst] = -1;
+      dst += 1;
+      endpointNodeIndicesByColor[dst] = springNodeB[ai];
+      endpointSpringIndicesByColor[dst] = ai;
+      endpointSignsI32ByColor[dst] = 1;
+      dst += 1;
+    }
   }
 
   // WebGPU storage buffers are naturally 4-byte addressed; widen signs now so
@@ -612,6 +644,10 @@ export function buildSoftSpringXpbdWgslLayout({
     springRestByColor,
     springInvMassAByColor,
     springInvMassBByColor,
+    colorEndpointOffsets,
+    endpointNodeIndicesByColor,
+    endpointSpringIndicesByColor,
+    endpointSignsI32ByColor,
     byteLength:
       (plan?.nodeEndpointOffsets?.byteLength || 0)
       + (plan?.endpointSpringIndices?.byteLength || 0)
@@ -627,7 +663,11 @@ export function buildSoftSpringXpbdWgslLayout({
       + springNodeBByColor.byteLength
       + springRestByColor.byteLength
       + springInvMassAByColor.byteLength
-      + springInvMassBByColor.byteLength,
+      + springInvMassBByColor.byteLength
+      + colorEndpointOffsets.byteLength
+      + endpointNodeIndicesByColor.byteLength
+      + endpointSpringIndicesByColor.byteLength
+      + endpointSignsI32ByColor.byteLength,
   };
 }
 
@@ -662,6 +702,8 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
     wgslOffload.state.preparedLayout = layout;
     wgslOffload.state.lastPreparedSpringCount = plan.activeSpringCount;
     wgslOffload.state.lastPreparedEndpointCount = plan.endpointCount;
+    wgslOffload.state.lastPreparedColorCount = Math.max(0, (plan.springColorOffsets?.length || 1) - 1);
+    wgslOffload.state.lastPreparedColorEndpointCount = layout.endpointSpringIndicesByColor.length;
     wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
     wgslOffload.state.lastMode = 'cpu-prepared';
 

@@ -343,14 +343,14 @@ test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when dev
     wgslOffload: { enabled: true, state: wgslState, device: mockDevice },
   });
 
-  assert.deepEqual(gpuCalls, baselineCalls);
+  assert.deepEqual(gpuCalls, { nodes: [], edges: [] });
   assert.equal(wgslState.lastNodeBroadphaseDispatched, true);
   assert.equal(wgslState.lastEdgeBroadphaseDispatched, true);
-  assert.equal(wgslState.lastSourceRoute, 'wgsl-rigid-soft-node-broadphase-authoritative-filter');
-  assert.equal(wgslState.lastMode, 'wgsl-broadphase-authoritative-filter');
+  assert.equal(wgslState.lastSourceRoute, 'wgsl-rigid-soft-response-authoritative');
+  assert.equal(wgslState.lastMode, 'wgsl-rigid-soft-response-authoritative');
   assert.equal(wgslState.lastEdgeBroadphaseAuthoritativeSource, 'wgsl-rigid-soft-edge-broadphase-authoritative-filter');
-  assert.equal(wgslState.lastNodeCollisionResponseSource, 'cpu-rigid-soft-compact-node-response');
-  assert.equal(wgslState.lastEdgeCollisionResponseSource, 'cpu-rigid-soft-compact-edge-response');
+  assert.equal(wgslState.lastNodeCollisionResponseSource, 'wgsl-rigid-soft-node-response-authoritative');
+  assert.equal(wgslState.lastEdgeCollisionResponseSource, 'wgsl-rigid-soft-edge-response-authoritative');
   assert.equal(wgslState.lastNodeCollisionResponsePairCount, baselineCalls.nodes.length);
   assert.equal(wgslState.lastEdgeCollisionResponsePairCount, baselineCalls.edges.length);
   assert.ok(dispatches[0] >= 1);

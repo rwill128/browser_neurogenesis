@@ -1764,6 +1764,458 @@ export function buildRigidSoftNarrowphaseImpulseSeedLayout({
   };
 }
 
+const rigidSoftNodeResponseWgsl = /* wgsl */`
+struct Params {
+  pairCount: u32,
+  restitution: f32,
+  contactSlop: f32,
+  _pad0: f32,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> pairRigidIndex: array<u32>;
+@group(0) @binding(2) var<storage, read> pairNodeIndex: array<u32>;
+@group(0) @binding(3) var<storage, read> rigidX: array<f32>;
+@group(0) @binding(4) var<storage, read> rigidY: array<f32>;
+@group(0) @binding(5) var<storage, read> rigidVx: array<f32>;
+@group(0) @binding(6) var<storage, read> rigidVy: array<f32>;
+@group(0) @binding(7) var<storage, read> rigidOmega: array<f32>;
+@group(0) @binding(8) var<storage, read> rigidInvMass: array<f32>;
+@group(0) @binding(9) var<storage, read> rigidInvInertia: array<f32>;
+@group(0) @binding(10) var<storage, read> nodeX: array<f32>;
+@group(0) @binding(11) var<storage, read> nodeY: array<f32>;
+@group(0) @binding(12) var<storage, read> nodeVx: array<f32>;
+@group(0) @binding(13) var<storage, read> nodeVy: array<f32>;
+@group(0) @binding(14) var<storage, read> nodeR: array<f32>;
+@group(0) @binding(15) var<storage, read> nodeInvMass: array<f32>;
+@group(0) @binding(16) var<storage, read> rigidVertexStart: array<u32>;
+@group(0) @binding(17) var<storage, read> rigidVertexX: array<f32>;
+@group(0) @binding(18) var<storage, read> rigidVertexY: array<f32>;
+@group(0) @binding(19) var<storage, read_write> outNodeDx: array<f32>;
+@group(0) @binding(20) var<storage, read_write> outNodeDy: array<f32>;
+@group(0) @binding(21) var<storage, read_write> outNodeDVx: array<f32>;
+@group(0) @binding(22) var<storage, read_write> outNodeDVy: array<f32>;
+@group(0) @binding(23) var<storage, read_write> outRigidDx: array<f32>;
+@group(0) @binding(24) var<storage, read_write> outRigidDy: array<f32>;
+@group(0) @binding(25) var<storage, read_write> outRigidDVx: array<f32>;
+@group(0) @binding(26) var<storage, read_write> outRigidDVy: array<f32>;
+@group(0) @binding(27) var<storage, read_write> outRigidDOmega: array<f32>;
+@group(0) @binding(28) var<storage, read_write> outContactMask: array<u32>;
+
+fn finiteOr(v: f32, fallback: f32) -> f32 {
+  return select(fallback, v, v == v && abs(v) < 1e20);
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x;
+  if (i >= params.pairCount) { return; }
+
+  outNodeDx[i] = 0.0; outNodeDy[i] = 0.0; outNodeDVx[i] = 0.0; outNodeDVy[i] = 0.0;
+  outRigidDx[i] = 0.0; outRigidDy[i] = 0.0; outRigidDVx[i] = 0.0; outRigidDVy[i] = 0.0; outRigidDOmega[i] = 0.0;
+  outContactMask[i] = 0u;
+
+  let rbi = pairRigidIndex[i];
+  let ni = pairNodeIndex[i];
+  let x = finiteOr(nodeX[ni], 0.0);
+  let y = finiteOr(nodeY[ni], 0.0);
+  let r = max(0.4, finiteOr(nodeR[ni], 1.0));
+
+  let start = rigidVertexStart[rbi];
+  let endv = rigidVertexStart[rbi + 1u];
+  if (endv <= start + 1u) { return; }
+
+  var bestD2 = 1e30;
+  var cpX = 0.0;
+  var cpY = 0.0;
+  var nx = 0.0;
+  var ny = 1.0;
+
+  var vi = start;
+  loop {
+    if (vi >= endv) { break; }
+    let vj = select(start, vi + 1u, vi + 1u < endv);
+    let ax = rigidVertexX[vi];
+    let ay = rigidVertexY[vi];
+    let bx = rigidVertexX[vj];
+    let by = rigidVertexY[vj];
+    let abx = bx - ax;
+    let aby = by - ay;
+    let ab2 = max(1e-6, abx * abx + aby * aby);
+    let t = clamp(((x - ax) * abx + (y - ay) * aby) / ab2, 0.0, 1.0);
+    let cpx = ax + abx * t;
+    let cpy = ay + aby * t;
+    let dx = x - cpx;
+    let dy = y - cpy;
+    let d2 = dx * dx + dy * dy;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      cpX = cpx;
+      cpY = cpy;
+      let el = max(1e-6, sqrt(ab2));
+      nx = -aby / el;
+      ny = abx / el;
+    }
+    vi = vi + 1u;
+  }
+
+  let dist = max(1e-6, sqrt(bestD2));
+  let penetration = r - dist;
+  if (penetration <= params.contactSlop) { return; }
+
+  let tx = x - cpX;
+  let ty = y - cpY;
+  if (tx * nx + ty * ny < 0.0) { nx = -nx; ny = -ny; }
+
+  let invNode = max(1e-4, finiteOr(nodeInvMass[ni], 1.0));
+  let invRigid = max(1e-4, finiteOr(rigidInvMass[rbi], 1.0));
+  let invSum = invNode + invRigid;
+  let corr = (penetration / max(1e-6, invSum)) * 0.68;
+  outNodeDx[i] = nx * corr * invNode;
+  outNodeDy[i] = ny * corr * invNode;
+  outRigidDx[i] = -nx * corr * invRigid;
+  outRigidDy[i] = -ny * corr * invRigid;
+
+  let rx = cpX - finiteOr(rigidX[rbi], 0.0);
+  let ry = cpY - finiteOr(rigidY[rbi], 0.0);
+  let omega = finiteOr(rigidOmega[rbi], 0.0);
+  let rpvx = finiteOr(rigidVx[rbi], 0.0) - omega * ry;
+  let rpvy = finiteOr(rigidVy[rbi], 0.0) + omega * rx;
+  let rvx = finiteOr(nodeVx[ni], 0.0) - rpvx;
+  let rvy = finiteOr(nodeVy[ni], 0.0) - rpvy;
+  let vn = rvx * nx + rvy * ny;
+  if (vn >= -0.02) {
+    outContactMask[i] = 1u;
+    return;
+  }
+
+  let invInertia = max(1e-4, finiteOr(rigidInvInertia[rbi], 1.0));
+  let rn = rx * ny - ry * nx;
+  let denom = max(1e-6, invNode + invRigid + (rn * rn) * invInertia);
+  let rawJ = (-(1.0 + params.restitution) * vn) / denom;
+  let maxImpactSpeed = 24.0;
+  let maxJ = ((1.0 + params.restitution) * min(maxImpactSpeed, abs(vn))) / denom;
+  let j = clamp(rawJ, -maxJ, maxJ);
+  let jx = j * nx;
+  let jy = j * ny;
+  outNodeDVx[i] = jx * invNode;
+  outNodeDVy[i] = jy * invNode;
+  outRigidDVx[i] = -jx * invRigid;
+  outRigidDVy[i] = -jy * invRigid;
+  outRigidDOmega[i] = -(rx * jy - ry * jx) * invInertia;
+  outContactMask[i] = 1u;
+}
+`;
+
+const rigidSoftEdgeResponseWgsl = /* wgsl */`
+struct Params {
+  pairCount: u32,
+  restitution: f32,
+  edgeSlop: f32,
+  _pad0: f32,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> pairRigidIndex: array<u32>;
+@group(0) @binding(2) var<storage, read> pairNodeAIndex: array<u32>;
+@group(0) @binding(3) var<storage, read> pairNodeBIndex: array<u32>;
+@group(0) @binding(4) var<storage, read> rigidX: array<f32>;
+@group(0) @binding(5) var<storage, read> rigidY: array<f32>;
+@group(0) @binding(6) var<storage, read> rigidVx: array<f32>;
+@group(0) @binding(7) var<storage, read> rigidVy: array<f32>;
+@group(0) @binding(8) var<storage, read> nodeX: array<f32>;
+@group(0) @binding(9) var<storage, read> nodeY: array<f32>;
+@group(0) @binding(10) var<storage, read> nodeVx: array<f32>;
+@group(0) @binding(11) var<storage, read> nodeVy: array<f32>;
+@group(0) @binding(12) var<storage, read_write> outRigidDx: array<f32>;
+@group(0) @binding(13) var<storage, read_write> outRigidDy: array<f32>;
+@group(0) @binding(14) var<storage, read_write> outRigidDVx: array<f32>;
+@group(0) @binding(15) var<storage, read_write> outRigidDVy: array<f32>;
+@group(0) @binding(16) var<storage, read_write> outContactMask: array<u32>;
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x;
+  if (i >= params.pairCount) { return; }
+
+  outRigidDx[i] = 0.0; outRigidDy[i] = 0.0; outRigidDVx[i] = 0.0; outRigidDVy[i] = 0.0; outContactMask[i] = 0u;
+
+  let rbi = pairRigidIndex[i];
+  let ai = pairNodeAIndex[i];
+  let bi = pairNodeBIndex[i];
+
+  let rx = rigidX[rbi];
+  let ry = rigidY[rbi];
+  let ax = nodeX[ai];
+  let ay = nodeY[ai];
+  let bx = nodeX[bi];
+  let by = nodeY[bi];
+
+  let abx = bx - ax;
+  let aby = by - ay;
+  let ab2 = max(1e-6, abx * abx + aby * aby);
+  let t = clamp(((rx - ax) * abx + (ry - ay) * aby) / ab2, 0.0, 1.0);
+  let cpx = ax + abx * t;
+  let cpy = ay + aby * t;
+
+  var nx = rx - cpx;
+  var ny = ry - cpy;
+  var dist = sqrt(nx * nx + ny * ny);
+  let minDist = max(0.8, params.edgeSlop);
+  if (dist >= minDist) { return; }
+  if (dist < 1e-6) {
+    let invLen = 1.0 / max(1e-6, sqrt((-aby) * (-aby) + abx * abx));
+    nx = -aby * invLen;
+    ny = abx * invLen;
+    dist = 1e-6;
+  } else {
+    nx = nx / dist;
+    ny = ny / dist;
+  }
+
+  let penetration = minDist - dist;
+  outRigidDx[i] = nx * penetration * 0.92;
+  outRigidDy[i] = ny * penetration * 0.92;
+
+  let edgeVx = (nodeVx[ai] + nodeVx[bi]) * 0.5;
+  let edgeVy = (nodeVy[ai] + nodeVy[bi]) * 0.5;
+  let rvx = rigidVx[rbi] - edgeVx;
+  let rvy = rigidVy[rbi] - edgeVy;
+  let vn = rvx * nx + rvy * ny;
+  if (vn < 0.0) {
+    let j = -(1.0 + params.restitution) * vn;
+    outRigidDVx[i] = nx * j;
+    outRigidDVy[i] = ny * j;
+  }
+  outContactMask[i] = 1u;
+}
+`;
+
+async function dispatchRigidSoftResponseWgsl({
+  offload,
+  impulseSeed,
+  edgeSlop,
+}) {
+  if (!canUseWgslOffload(offload)) return null;
+  const state = offload.state || (offload.state = {});
+  const device = offload.device;
+  const nodePairCount = Number(impulseSeed?.nodePairCount) || 0;
+  const edgePairCount = Number(impulseSeed?.edgePairCount) || 0;
+  if (nodePairCount <= 0 && edgePairCount <= 0) return null;
+
+  const mkReadF32 = async (buf, bytes) => {
+    safeUnmapBuffer(buf);
+    await buf.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
+    const out = new Float32Array(buf.getMappedRange(0, bytes).slice(0));
+    safeUnmapBuffer(buf);
+    return out;
+  };
+  const mkReadU32 = async (buf, bytes) => {
+    safeUnmapBuffer(buf);
+    await buf.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
+    const out = new Uint32Array(buf.getMappedRange(0, bytes).slice(0));
+    safeUnmapBuffer(buf);
+    return out;
+  };
+
+  const storage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
+  const mkStorage = (arr) => {
+    const b = device.createBuffer({ size: Math.max(4, arr.byteLength), usage: storage });
+    if (arr.byteLength > 0) device.queue.writeBuffer(b, 0, arr);
+    return b;
+  };
+
+  const mkOut = (count, isU32 = false) => {
+    const bytes = Math.max(4, count * 4);
+    return {
+      gpu: device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC }),
+      read: device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ }),
+      bytes,
+      isU32,
+    };
+  };
+
+  const resources = [];
+  const keep = (b) => (resources.push(b), b);
+
+  try {
+    if (!state.rigidSoftNodeResponsePipelinePromise) {
+      const module = device.createShaderModule({ code: rigidSoftNodeResponseWgsl });
+      state.rigidSoftNodeResponsePipelinePromise = device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint: 'main' } })
+        .then((p) => { state.rigidSoftNodeResponsePipeline = p; return p; });
+    }
+    if (!state.rigidSoftEdgeResponsePipelinePromise) {
+      const module = device.createShaderModule({ code: rigidSoftEdgeResponseWgsl });
+      state.rigidSoftEdgeResponsePipelinePromise = device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint: 'main' } })
+        .then((p) => { state.rigidSoftEdgeResponsePipeline = p; return p; });
+    }
+
+    const nodePipeline = state.rigidSoftNodeResponsePipeline || await state.rigidSoftNodeResponsePipelinePromise;
+    const edgePipeline = state.rigidSoftEdgeResponsePipeline || await state.rigidSoftEdgeResponsePipelinePromise;
+    if ((nodePairCount > 0 && !nodePipeline) || (edgePairCount > 0 && !edgePipeline)) return null;
+
+    const proposal = { nodePairCount, edgePairCount };
+
+    if (nodePairCount > 0) {
+      const pairBytes = nodePairCount * 4;
+      const params = keep(device.createBuffer({ size: 16, usage: globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST }));
+      const paramFloats = new Float32Array(4);
+      new Uint32Array(paramFloats.buffer)[0] = nodePairCount >>> 0;
+      paramFloats[1] = 0.28;
+      paramFloats[2] = Math.max(0.015, Number(edgeSlop) || 0.16);
+      device.queue.writeBuffer(params, 0, paramFloats);
+
+      const inBuffers = [
+        params,
+        keep(mkStorage(impulseSeed.nodePairRigidIndex)), keep(mkStorage(impulseSeed.nodePairNodeIndex)),
+        keep(mkStorage(impulseSeed.rigidX)), keep(mkStorage(impulseSeed.rigidY)), keep(mkStorage(impulseSeed.rigidVx)),
+        keep(mkStorage(impulseSeed.rigidVy)), keep(mkStorage(impulseSeed.rigidOmega)), keep(mkStorage(impulseSeed.rigidInvMass)),
+        keep(mkStorage(impulseSeed.rigidInvInertia)), keep(mkStorage(impulseSeed.nodeX)), keep(mkStorage(impulseSeed.nodeY)),
+        keep(mkStorage(impulseSeed.nodeVx)), keep(mkStorage(impulseSeed.nodeVy)), keep(mkStorage(impulseSeed.nodeR)),
+        keep(mkStorage(impulseSeed.nodeInvMass)), keep(mkStorage(impulseSeed.rigidVertexStart)), keep(mkStorage(impulseSeed.rigidVertexX)),
+        keep(mkStorage(impulseSeed.rigidVertexY)),
+      ];
+      const outs = {
+        nodeDx: mkOut(nodePairCount), nodeDy: mkOut(nodePairCount), nodeDVx: mkOut(nodePairCount), nodeDVy: mkOut(nodePairCount),
+        rigidDx: mkOut(nodePairCount), rigidDy: mkOut(nodePairCount), rigidDVx: mkOut(nodePairCount), rigidDVy: mkOut(nodePairCount),
+        rigidDOmega: mkOut(nodePairCount), contactMask: mkOut(nodePairCount, true),
+      };
+      Object.values(outs).forEach((o) => { keep(o.gpu); keep(o.read); });
+
+      const bindGroup = device.createBindGroup({
+        layout: nodePipeline.getBindGroupLayout(0),
+        entries: [...inBuffers, outs.nodeDx.gpu, outs.nodeDy.gpu, outs.nodeDVx.gpu, outs.nodeDVy.gpu,
+          outs.rigidDx.gpu, outs.rigidDy.gpu, outs.rigidDVx.gpu, outs.rigidDVy.gpu, outs.rigidDOmega.gpu, outs.contactMask.gpu]
+          .map((buffer, binding) => ({ binding, resource: { buffer } })),
+      });
+
+      const encoder = device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(nodePipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(Math.max(1, Math.ceil(nodePairCount / WGSL_WORKGROUP_SIZE)));
+      pass.end();
+      Object.values(outs).forEach((o) => encoder.copyBufferToBuffer(o.gpu, 0, o.read, 0, o.bytes));
+      device.queue.submit([encoder.finish()]);
+
+      proposal.nodeDx = await mkReadF32(outs.nodeDx.read, outs.nodeDx.bytes);
+      proposal.nodeDy = await mkReadF32(outs.nodeDy.read, outs.nodeDy.bytes);
+      proposal.nodeDVx = await mkReadF32(outs.nodeDVx.read, outs.nodeDVx.bytes);
+      proposal.nodeDVy = await mkReadF32(outs.nodeDVy.read, outs.nodeDVy.bytes);
+      proposal.nodeRigidDx = await mkReadF32(outs.rigidDx.read, outs.rigidDx.bytes);
+      proposal.nodeRigidDy = await mkReadF32(outs.rigidDy.read, outs.rigidDy.bytes);
+      proposal.nodeRigidDVx = await mkReadF32(outs.rigidDVx.read, outs.rigidDVx.bytes);
+      proposal.nodeRigidDVy = await mkReadF32(outs.rigidDVy.read, outs.rigidDVy.bytes);
+      proposal.nodeRigidDOmega = await mkReadF32(outs.rigidDOmega.read, outs.rigidDOmega.bytes);
+      proposal.nodeContactMask = await mkReadU32(outs.contactMask.read, outs.contactMask.bytes);
+    }
+
+    if (edgePairCount > 0) {
+      const params = keep(device.createBuffer({ size: 16, usage: globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST }));
+      const paramFloats = new Float32Array(4);
+      new Uint32Array(paramFloats.buffer)[0] = edgePairCount >>> 0;
+      paramFloats[1] = 0.28;
+      paramFloats[2] = Math.max(0.8, Number(edgeSlop) || 1.0);
+      device.queue.writeBuffer(params, 0, paramFloats);
+
+      const inBuffers = [
+        params,
+        keep(mkStorage(impulseSeed.edgePairRigidIndex)), keep(mkStorage(impulseSeed.edgePairNodeAIndex)), keep(mkStorage(impulseSeed.edgePairNodeBIndex)),
+        keep(mkStorage(impulseSeed.rigidX)), keep(mkStorage(impulseSeed.rigidY)), keep(mkStorage(impulseSeed.rigidVx)), keep(mkStorage(impulseSeed.rigidVy)),
+        keep(mkStorage(impulseSeed.nodeX)), keep(mkStorage(impulseSeed.nodeY)), keep(mkStorage(impulseSeed.nodeVx)), keep(mkStorage(impulseSeed.nodeVy)),
+      ];
+      const outs = {
+        rigidDx: mkOut(edgePairCount), rigidDy: mkOut(edgePairCount), rigidDVx: mkOut(edgePairCount), rigidDVy: mkOut(edgePairCount), contactMask: mkOut(edgePairCount, true),
+      };
+      Object.values(outs).forEach((o) => { keep(o.gpu); keep(o.read); });
+
+      const bindGroup = device.createBindGroup({
+        layout: edgePipeline.getBindGroupLayout(0),
+        entries: [...inBuffers, outs.rigidDx.gpu, outs.rigidDy.gpu, outs.rigidDVx.gpu, outs.rigidDVy.gpu, outs.contactMask.gpu]
+          .map((buffer, binding) => ({ binding, resource: { buffer } })),
+      });
+      const encoder = device.createCommandEncoder();
+      const pass = encoder.beginComputePass();
+      pass.setPipeline(edgePipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.dispatchWorkgroups(Math.max(1, Math.ceil(edgePairCount / WGSL_WORKGROUP_SIZE)));
+      pass.end();
+      Object.values(outs).forEach((o) => encoder.copyBufferToBuffer(o.gpu, 0, o.read, 0, o.bytes));
+      device.queue.submit([encoder.finish()]);
+
+      proposal.edgeRigidDx = await mkReadF32(outs.rigidDx.read, outs.rigidDx.bytes);
+      proposal.edgeRigidDy = await mkReadF32(outs.rigidDy.read, outs.rigidDy.bytes);
+      proposal.edgeRigidDVx = await mkReadF32(outs.rigidDVx.read, outs.rigidDVx.bytes);
+      proposal.edgeRigidDVy = await mkReadF32(outs.rigidDVy.read, outs.rigidDVy.bytes);
+      proposal.edgeContactMask = await mkReadU32(outs.contactMask.read, outs.contactMask.bytes);
+    }
+
+    return proposal;
+  } finally {
+    resources.forEach((b) => b?.destroy?.());
+  }
+}
+
+function isFiniteArray(arr, expectedLength) {
+  if (!(arr instanceof Float32Array) || arr.length !== expectedLength) return false;
+  for (let i = 0; i < arr.length; i++) if (!Number.isFinite(arr[i])) return false;
+  return true;
+}
+
+function canApplyRigidSoftAuthoritativeProposal({ proposal, impulseSeed, signature }) {
+  if (!proposal || !impulseSeed) return false;
+  if ((signature >>> 0) !== ((impulseSeed.signature || 0) >>> 0)) return false;
+  const np = Number(impulseSeed.nodePairCount) || 0;
+  const ep = Number(impulseSeed.edgePairCount) || 0;
+  if (!isFiniteArray(proposal.nodeDx || new Float32Array(0), np)) return false;
+  if (!isFiniteArray(proposal.nodeDy || new Float32Array(0), np)) return false;
+  if (!isFiniteArray(proposal.nodeDVx || new Float32Array(0), np)) return false;
+  if (!isFiniteArray(proposal.nodeDVy || new Float32Array(0), np)) return false;
+  if (!isFiniteArray(proposal.nodeRigidDx || new Float32Array(0), np)) return false;
+  if (!isFiniteArray(proposal.nodeRigidDy || new Float32Array(0), np)) return false;
+  if (!isFiniteArray(proposal.nodeRigidDVx || new Float32Array(0), np)) return false;
+  if (!isFiniteArray(proposal.nodeRigidDVy || new Float32Array(0), np)) return false;
+  if (!isFiniteArray(proposal.nodeRigidDOmega || new Float32Array(0), np)) return false;
+  if (!(proposal.nodeContactMask instanceof Uint32Array) || proposal.nodeContactMask.length !== np) return false;
+  if (!isFiniteArray(proposal.edgeRigidDx || new Float32Array(0), ep)) return false;
+  if (!isFiniteArray(proposal.edgeRigidDy || new Float32Array(0), ep)) return false;
+  if (!isFiniteArray(proposal.edgeRigidDVx || new Float32Array(0), ep)) return false;
+  if (!isFiniteArray(proposal.edgeRigidDVy || new Float32Array(0), ep)) return false;
+  if (!(proposal.edgeContactMask instanceof Uint32Array) || proposal.edgeContactMask.length !== ep) return false;
+  return true;
+}
+
+function applyRigidSoftAuthoritativeProposal({ rigidBodies, soft, impulseSeed, proposal }) {
+  for (let i = 0; i < impulseSeed.nodePairCount; i++) {
+    if ((proposal.nodeContactMask[i] >>> 0) === 0) continue;
+    const rbi = impulseSeed.nodePairRigidIndex[i] >>> 0;
+    const ni = impulseSeed.nodePairNodeIndex[i] >>> 0;
+    const rb = rigidBodies[rbi];
+    const sn = soft.nodes[ni];
+    if (!rb || !sn) continue;
+    sn.x += proposal.nodeDx[i];
+    sn.y += proposal.nodeDy[i];
+    sn.vx += proposal.nodeDVx[i];
+    sn.vy += proposal.nodeDVy[i];
+    rb.x += proposal.nodeRigidDx[i];
+    rb.y += proposal.nodeRigidDy[i];
+    rb.vx += proposal.nodeRigidDVx[i];
+    rb.vy += proposal.nodeRigidDVy[i];
+    rb.omega = (rb.omega || 0) + proposal.nodeRigidDOmega[i];
+  }
+
+  for (let i = 0; i < impulseSeed.edgePairCount; i++) {
+    if ((proposal.edgeContactMask[i] >>> 0) === 0) continue;
+    const rbi = impulseSeed.edgePairRigidIndex[i] >>> 0;
+    const rb = rigidBodies[rbi];
+    if (!rb) continue;
+    rb.x += proposal.edgeRigidDx[i];
+    rb.y += proposal.edgeRigidDy[i];
+    rb.vx += proposal.edgeRigidDVx[i];
+    rb.vy += proposal.edgeRigidDVy[i];
+  }
+}
+
 export async function resolveRigidSoftCollisionPassGpuOnly({
   rigidBodies,
   soft,
@@ -1997,12 +2449,75 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     }
   }
 
+  const impulseSeed = wgslOffload?.state
+    ? {
+      nodePairRigidIndex: wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodePairRigidIndex || new Uint32Array(0),
+      nodePairNodeIndex: wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodePairNodeIndex || new Uint32Array(0),
+      edgePairRigidIndex: wgslOffload.state.lastPreparedNarrowphaseImpulseSeedEdgePairRigidIndex || new Uint32Array(0),
+      edgePairNodeAIndex: wgslOffload.state.lastPreparedNarrowphaseImpulseSeedEdgePairNodeAIndex || new Uint32Array(0),
+      edgePairNodeBIndex: wgslOffload.state.lastPreparedNarrowphaseImpulseSeedEdgePairNodeBIndex || new Uint32Array(0),
+      rigidX: wgslOffload.state.lastPreparedNarrowphaseSceneRigidX || new Float32Array(0),
+      rigidY: wgslOffload.state.lastPreparedNarrowphaseSceneRigidY || new Float32Array(0),
+      rigidVx: wgslOffload.state.lastPreparedNarrowphaseSceneRigidVx || new Float32Array(0),
+      rigidVy: wgslOffload.state.lastPreparedNarrowphaseSceneRigidVy || new Float32Array(0),
+      rigidOmega: wgslOffload.state.lastPreparedNarrowphaseSceneRigidOmega || new Float32Array(0),
+      rigidInvMass: wgslOffload.state.lastPreparedNarrowphaseImpulseSeedRigidInvMass || new Float32Array(0),
+      rigidInvInertia: wgslOffload.state.lastPreparedNarrowphaseImpulseSeedRigidInvInertia || new Float32Array(0),
+      rigidVertexStart: wgslOffload.state.lastPreparedNarrowphaseSceneRigidVertexStart || new Uint32Array(0),
+      rigidVertexX: wgslOffload.state.lastPreparedNarrowphaseSceneRigidVertexX || new Float32Array(0),
+      rigidVertexY: wgslOffload.state.lastPreparedNarrowphaseSceneRigidVertexY || new Float32Array(0),
+      nodeX: wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodeX || new Float32Array(0),
+      nodeY: wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodeY || new Float32Array(0),
+      nodeVx: wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodeVx || new Float32Array(0),
+      nodeVy: wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodeVy || new Float32Array(0),
+      nodeR: wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodeR || new Float32Array(0),
+      nodeInvMass: wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodeInvMass || new Float32Array(0),
+      nodePairCount: Number(wgslOffload.state.lastPreparedNarrowphaseImpulseSeedNodePairCount) || 0,
+      edgePairCount: Number(wgslOffload.state.lastPreparedNarrowphaseImpulseSeedEdgePairCount) || 0,
+      signature: Number(wgslOffload.state.lastPreparedNarrowphaseImpulseSeedSignature) || 0,
+    }
+    : null;
+
+  let usedWgslAuthoritativeResponse = false;
+  if (wgslOffload?.state && impulseSeed && canUseWgslOffload(wgslOffload)) {
+    try {
+      const proposal = await dispatchRigidSoftResponseWgsl({
+        offload: wgslOffload,
+        impulseSeed,
+        edgeSlop,
+      });
+      const signature = Number(wgslOffload.state.lastPreparedNarrowphaseImpulseSeedSignature) || 0;
+      if (canApplyRigidSoftAuthoritativeProposal({ proposal, impulseSeed, signature })) {
+        applyRigidSoftAuthoritativeProposal({ rigidBodies, soft, impulseSeed, proposal });
+        wgslOffload.state.lastNodeCollisionResponseSource = 'wgsl-rigid-soft-node-response-authoritative';
+        wgslOffload.state.lastEdgeCollisionResponseSource = 'wgsl-rigid-soft-edge-response-authoritative';
+        wgslOffload.state.lastNodeCollisionResponsePairCount = impulseSeed.nodePairCount;
+        wgslOffload.state.lastEdgeCollisionResponsePairCount = impulseSeed.edgePairCount;
+        wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'wgsl-rigid-soft-response-authoritative';
+        wgslOffload.state.lastSourceRoute = 'wgsl-rigid-soft-response-authoritative';
+        wgslOffload.state.lastMode = 'wgsl-rigid-soft-response-authoritative';
+        usedWgslAuthoritativeResponse = true;
+      } else {
+        wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-nonfinite';
+      }
+    } catch (err) {
+      wgslOffload.state.lastError = String(err?.message || err || 'rigid-soft-response-wgsl-error');
+      wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-error';
+    }
+  }
+
+  if (usedWgslAuthoritativeResponse) return;
+
   const compactNodeRigidIndex = compactNodePairs?.compactRigidIndex;
   const compactNodeNodeIndex = compactNodePairs?.compactNodeIndex;
   if (compactNodeRigidIndex instanceof Uint32Array && compactNodeNodeIndex instanceof Uint32Array) {
     if (wgslOffload?.state) {
-      wgslOffload.state.lastNodeCollisionResponseSource = 'cpu-rigid-soft-compact-node-response';
+      wgslOffload.state.lastNodeCollisionResponseSource = 'cpu-rigid-soft-compact-node-fallback-response';
       wgslOffload.state.lastNodeCollisionResponsePairCount = compactNodePairs.pairCount | 0;
+      if (canUseWgslOffload(wgslOffload)) {
+        wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-response-fallback';
+        wgslOffload.state.lastMode = 'cpu-rigid-soft-response-fallback';
+      }
     }
     for (let pi = 0; pi < compactNodePairs.pairCount; pi++) {
       const rbi = compactNodeRigidIndex[pi] | 0;
@@ -2014,7 +2529,11 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     }
   } else {
     if (wgslOffload?.state) {
-      wgslOffload.state.lastNodeCollisionResponseSource = 'cpu-rigid-soft-full-scan-node-response';
+      wgslOffload.state.lastNodeCollisionResponseSource = 'cpu-rigid-soft-full-scan-fallback-response';
+      if (canUseWgslOffload(wgslOffload)) {
+        wgslOffload.state.lastSourceRoute = 'cpu-rigid-soft-response-fallback';
+        wgslOffload.state.lastMode = 'cpu-rigid-soft-response-fallback';
+      }
     }
     let nodePairCursor = 0;
     for (let rbi = 0; rbi < rigidBodies.length; rbi++) {
@@ -2040,7 +2559,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     && compactEdgeNodeBIndex instanceof Uint32Array
   ) {
     if (wgslOffload?.state) {
-      wgslOffload.state.lastEdgeCollisionResponseSource = 'cpu-rigid-soft-compact-edge-response';
+      wgslOffload.state.lastEdgeCollisionResponseSource = 'cpu-rigid-soft-compact-edge-fallback-response';
       wgslOffload.state.lastEdgeCollisionResponsePairCount = compactEdgePairs.pairCount | 0;
     }
     for (let pi = 0; pi < compactEdgePairs.pairCount; pi++) {
@@ -2055,7 +2574,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     }
   } else {
     if (wgslOffload?.state) {
-      wgslOffload.state.lastEdgeCollisionResponseSource = 'cpu-rigid-soft-full-scan-edge-response';
+      wgslOffload.state.lastEdgeCollisionResponseSource = 'cpu-rigid-soft-full-scan-edge-fallback-response';
     }
     let edgePairCursor = 0;
     for (let rbi = 0; rbi < rigidBodies.length; rbi++) {

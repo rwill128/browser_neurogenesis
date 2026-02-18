@@ -133,16 +133,16 @@ test('rigid-soft gpu-only module prepares deterministic narrowphase impulse-seed
 });
 
 
-test('rigid-soft gpu-only collision response consumes compact WGSL-filtered pairs when available', () => {
+test('rigid-soft gpu-only collision response promotes WGSL authoritative apply with explicit CPU fallback', () => {
   assert.match(
     source,
-    /if \(compactNodeRigidIndex instanceof Uint32Array && compactNodeNodeIndex instanceof Uint32Array\) \{[\s\S]*lastNodeCollisionResponseSource = 'cpu-rigid-soft-compact-node-response';[\s\S]*resolveRigidVsSoftNodeCollision\(/,
-    'expected rigid-soft response stage to iterate compact node pairs directly when WGSL-filtered ownership buffers are present',
+    /dispatchRigidSoftResponseWgsl\([\s\S]*canApplyRigidSoftAuthoritativeProposal[\s\S]*applyRigidSoftAuthoritativeProposal[\s\S]*lastNodeCollisionResponseSource = 'wgsl-rigid-soft-node-response-authoritative';[\s\S]*lastEdgeCollisionResponseSource = 'wgsl-rigid-soft-edge-response-authoritative';/,
+    'expected rigid-soft response stage to promote WGSL proposal/apply ownership when finite signature-checked data is available',
   );
 
   assert.match(
     source,
-    /if \([\s\S]*compactEdgeRigidIndex instanceof Uint32Array[\s\S]*compactEdgeNodeAIndex instanceof Uint32Array[\s\S]*compactEdgeNodeBIndex instanceof Uint32Array[\s\S]*lastEdgeCollisionResponseSource = 'cpu-rigid-soft-compact-edge-response';[\s\S]*resolveRigidVsSoftEdgeCollision\(/,
-    'expected rigid-soft response stage to iterate compact edge pairs directly when WGSL-filtered ownership buffers are present',
+    /lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-nonfinite'|lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-error'/,
+    'expected rigid-soft response stage to expose explicit hard CPU fallback source telemetry for nonfinite/error proposal paths',
   );
 });

@@ -53,6 +53,7 @@ test('gpu-only soft collision pass matches baseline soft-soft collision visitati
   runBaseline(baselineSoft, baselineCalls);
 
   const gpuCalls = { nodeNode: [], nodeEdge: [] };
+  const wgslOffload = { state: {}, modeProfile: 'gpu-only-validated' };
   await resolveSoftSoftCollisionPassGpuOnly({
     soft: gpuSoft,
     resolveCircleCollision: (a, b) => {
@@ -64,7 +65,12 @@ test('gpu-only soft collision pass matches baseline soft-soft collision visitati
     edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
     nodeNodeSlop: 0.22,
     nodeEdgeSlop: 0.12,
+    wgslOffload,
   });
 
   assert.deepEqual(gpuCalls, baselineCalls);
+  assert.equal(wgslOffload.state.lastSoftNodeEdgeCandidateLayoutSource, 'cpu-soft-node-edge-candidate-layout');
+  assert.equal(wgslOffload.state.lastSoftNodeEdgeCandidatePairCount, baselineCalls.nodeEdge.length);
+  assert.ok(wgslOffload.state.lastSoftNodeEdgeCandidateLayoutSignature > 0);
+  assert.equal(wgslOffload.state.lastSoftNodeEdgeNextStage, 'wgsl-soft-node-edge-collision-pending');
 });

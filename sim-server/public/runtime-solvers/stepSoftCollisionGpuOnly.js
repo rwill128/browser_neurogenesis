@@ -188,6 +188,37 @@ function allFinite(arr) {
   return true;
 }
 
+function hashSoftNodeEdgeCandidateTriples(triples) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < triples.length; i++) {
+    hash ^= (triples[i] >>> 0);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function buildSoftNodeEdgeCandidateLayout({ nodes, springs, edgeBodyModeBlock }) {
+  const triples = [];
+  for (let ni = 0; ni < nodes.length; ni++) {
+    const node = nodes[ni];
+    for (const [i, j, _rest, edgeBodyMode] of springs) {
+      if (edgeBodyMode !== edgeBodyModeBlock) continue;
+      if (i === ni || j === ni) continue;
+      const a = nodes[i];
+      const b = nodes[j];
+      if (!a || !b) continue;
+      if (a.clusterId === node.clusterId && b.clusterId === node.clusterId) continue;
+      triples.push(ni >>> 0, i >>> 0, j >>> 0);
+    }
+  }
+  const packed = Uint32Array.from(triples);
+  return {
+    packed,
+    pairCount: Math.floor(packed.length / 3),
+    signature: hashSoftNodeEdgeCandidateTriples(packed),
+  };
+}
+
 async function runNodeNodeCollisionWgsl(nodes, restitution, wgslOffload) {
   const count = nodes.length;
   if (count < 2) return { ok: true, reason: 'insufficient-node-count' };
@@ -317,22 +348,38 @@ export async function resolveSoftSoftCollisionPassGpuOnly({
     }
   }
 
-  for (let ni = 0; ni < nodes.length; ni++) {
+  const nodeEdgeLayout = buildSoftNodeEdgeCandidateLayout({
+    nodes,
+    springs,
+    edgeBodyModeBlock,
+  });
+  const nodeEdgePacked = nodeEdgeLayout.packed;
+  for (let k = 0; k < nodeEdgePacked.length; k += 3) {
+    const ni = nodeEdgePacked[k] | 0;
+    const i = nodeEdgePacked[k + 1] | 0;
+    const j = nodeEdgePacked[k + 2] | 0;
     const node = nodes[ni];
-    for (const [i, j, _rest, edgeBodyMode] of springs) {
-      if (edgeBodyMode !== edgeBodyModeBlock) continue;
-      if (i === ni || j === ni) continue;
-      const a = nodes[i];
-      const b = nodes[j];
-      if (a.clusterId === node.clusterId && b.clusterId === node.clusterId) continue;
-      resolveSoftNodeVsSoftEdgeCollision(node, a, b, nodeEdgeSlop);
-    }
+    const a = nodes[i];
+    const b = nodes[j];
+    if (!node || !a || !b) continue;
+    resolveSoftNodeVsSoftEdgeCollision(node, a, b, nodeEdgeSlop);
   }
 
   if (wgslOffload?.state) {
-    wgslOffload.state.lastSoftNodeNodeCollisionSource = nodeNodeSource;
-    wgslOffload.state.lastSourceRoute = nodeNodeSource;
-    wgslOffload.state.lastMode = nodeNodeSource.startsWith('wgsl-')
+    const state = wgslOffload.state;
+    const modeProfile = String(wgslOffload?.modeProfile || '').toLowerCase();
+    const nonStandardMode = modeProfile === 'gpu-only-fast' || modeProfile === 'gpu-only-validated';
+    state.lastSoftNodeNodeCollisionSource = nodeNodeSource;
+    state.lastSoftNodeEdgeCandidateLayoutSource = 'cpu-soft-node-edge-candidate-layout';
+    state.lastSoftNodeEdgeCandidatePairCount = nodeEdgeLayout.pairCount;
+    state.lastSoftNodeEdgeCandidateLayoutSignature = nodeEdgeLayout.signature >>> 0;
+    state.lastSoftNodeEdgeCandidatePacked = nodeEdgePacked;
+    state.lastSoftNodeEdgeCollisionSource = 'cpu-soft-node-edge-authoritative';
+    state.lastSoftNodeEdgeNextStage = nonStandardMode
+      ? 'wgsl-soft-node-edge-collision-pending'
+      : 'cpu-soft-node-edge-authoritative';
+    state.lastSourceRoute = nodeNodeSource;
+    state.lastMode = nodeNodeSource.startsWith('wgsl-')
       ? 'wgsl-soft-node-node-authoritative'
       : 'cpu-soft-node-node-authoritative';
   }

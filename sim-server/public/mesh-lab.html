@@ -41,9 +41,12 @@
     input, select, button { background:#222; color:#eee; border:1px solid #444; border-radius:6px; padding:4px 8px; }
     pre { background:#1b1b1b; padding:10px; border-radius:8px; }
     #segmentStatsList { width:420px; max-height:220px; overflow:auto; border:1px solid #2f2f2f; border-radius:8px; padding:6px; background:#101010; margin-bottom:8px; }
-    .segment-row { display:flex; gap:6px; align-items:center; margin-bottom:4px; }
+    .segment-row { display:flex; gap:6px; align-items:center; margin-bottom:4px; flex-wrap:wrap; }
     .segment-id-btn { min-width:72px; font-family: ui-monospace, Menlo, monospace; }
     .segment-id-btn.active { border-color:#5de2ff; box-shadow:0 0 0 1px rgba(93,226,255,0.35) inset; }
+    .segment-edit-controls { display:inline-flex; gap:4px; align-items:center; flex-wrap:wrap; }
+    .segment-edit-label { font-size:11px; color:#9fb2c7; font-weight:600; }
+    .segment-edit-select { font-size:11px; padding:2px 6px; min-width:64px; }
     .segment-meta { font-size:12px; color:#cfcfcf; opacity:0.9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .panel-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:6px; }
     .copy-btn { font-size:12px; padding:3px 8px; }
@@ -365,7 +368,7 @@
         <div>Segment stats (ID aligns with wind tunnel labels)</div>
         <button id="copySegmentStatsBtn" class="copy-btn">Copy JSON</button>
       </div>
-      <div class="ctrl-note">Click a segment ID to highlight it in the wind tunnel.</div>
+      <div class="ctrl-note">Click a segment ID to highlight it in the wind tunnel. Edit V/R/G/B here to apply provisional per-segment policy overrides (persist until next compile).</div>
       <div id="segmentStatsList">ready</div>
       <pre id="segmentStatsOut">ready</pre>
     </div>

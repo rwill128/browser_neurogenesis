@@ -312,6 +312,63 @@ function velocityModeNameFromCode(mode) {
   return Number(mode) === 0 ? 'PASS' : 'BLOCK';
 }
 
+function normalizeVelocityModeCode(mode, fallback = 1) {
+  const m = Number(mode);
+  if (m === 0) return 0;
+  if (m === 1) return 1;
+  return Number(fallback) === 0 ? 0 : 1;
+}
+
+function normalizeDyeModeCode(mode, fallback = 1) {
+  const m = Number(mode);
+  if (m === 2) return 2; // EAT
+  if (m === 1) return 1; // NO-OP
+  return Number(fallback) === 2 ? 2 : 1;
+}
+
+function applySegmentPolicyOverride(seg, { velocityCode, dyeCodes } = {}) {
+  if (!lastCompiledSpec || !seg) return false;
+
+  if (seg.type === 'rigid') {
+    const rb = lastCompiledSpec.rigidBodies?.[seg.bodyIndex];
+    const edgeIndex = Number(seg.segmentIndex) | 0;
+    if (!rb || edgeIndex < 0) return false;
+
+    rb.edgeVelocityMode = Array.isArray(rb.edgeVelocityMode) ? rb.edgeVelocityMode : [];
+    const prevVel = rb.edgeVelocityMode[edgeIndex];
+    rb.edgeVelocityMode[edgeIndex] = normalizeVelocityModeCode(velocityCode, prevVel);
+
+    rb.edgeDyeMode = Array.isArray(rb.edgeDyeMode) ? rb.edgeDyeMode : [];
+    const prevDye = Array.isArray(rb.edgeDyeMode[edgeIndex]) ? rb.edgeDyeMode[edgeIndex] : [1, 1, 1];
+    const nextDye = Array.isArray(dyeCodes) ? dyeCodes : prevDye;
+    rb.edgeDyeMode[edgeIndex] = [
+      normalizeDyeModeCode(nextDye[0], prevDye[0]),
+      normalizeDyeModeCode(nextDye[1], prevDye[1]),
+      normalizeDyeModeCode(nextDye[2], prevDye[2]),
+    ];
+  } else if (seg.type === 'soft') {
+    const sb = lastCompiledSpec.softBodies?.[seg.softBodyIndex];
+    const springIndex = Number(seg.springIndex) | 0;
+    const spring = sb?.springs?.[springIndex];
+    if (!sb || !Array.isArray(spring) || springIndex < 0) return false;
+
+    spring[5] = normalizeVelocityModeCode(velocityCode, spring[5]);
+    const prevDye = Array.isArray(spring[4]) ? spring[4] : [1, 1, 1];
+    const nextDye = Array.isArray(dyeCodes) ? dyeCodes : prevDye;
+    spring[4] = [
+      normalizeDyeModeCode(nextDye[0], prevDye[0]),
+      normalizeDyeModeCode(nextDye[1], prevDye[1]),
+      normalizeDyeModeCode(nextDye[2], prevDye[2]),
+    ];
+  } else {
+    return false;
+  }
+
+  updateSegmentStatsPreview(lastCompiledSpec);
+  pushSpecToWindTunnel(lastCompiledSpec);
+  return true;
+}
+
 function computeChannelEatStats(ax, ay, bx, by, eatMap, eatThreshold = 0.5) {
   const eatAvg = sampleSegmentAverageMap(eatMap, ax, ay, bx, by, 0);
   return {
@@ -1109,11 +1166,64 @@ function renderSegmentStatsList(segments = []) {
       sendSegmentHighlight(seg.id, 2600);
     });
 
+    const controls = document.createElement('div');
+    controls.className = 'segment-edit-controls';
+
+    const makeModeLabel = (text) => {
+      const el = document.createElement('span');
+      el.className = 'segment-edit-label';
+      el.textContent = text;
+      return el;
+    };
+
+    const velSelect = document.createElement('select');
+    velSelect.className = 'segment-edit-select';
+    velSelect.title = 'Velocity mode for this segment';
+    velSelect.innerHTML = '<option value="1">BLOCK</option><option value="0">PASS</option>';
+    velSelect.value = String(seg.velocityMode === 'PASS' ? 0 : 1);
+
+    const makeDyeSelect = (channelName) => {
+      const sel = document.createElement('select');
+      sel.className = 'segment-edit-select';
+      sel.title = `${channelName} dye mode for this segment`;
+      sel.innerHTML = '<option value="1">NO-OP</option><option value="2">EAT</option>';
+      return sel;
+    };
+
+    const dyeR = makeDyeSelect('Red');
+    const dyeG = makeDyeSelect('Green');
+    const dyeB = makeDyeSelect('Blue');
+    dyeR.value = String(seg.dyeMode?.r === 'EAT' ? 2 : 1);
+    dyeG.value = String(seg.dyeMode?.g === 'EAT' ? 2 : 1);
+    dyeB.value = String(seg.dyeMode?.b === 'EAT' ? 2 : 1);
+
+    const commitEdit = () => {
+      applySegmentPolicyOverride(seg, {
+        velocityCode: Number(velSelect.value),
+        dyeCodes: [Number(dyeR.value), Number(dyeG.value), Number(dyeB.value)],
+      });
+    };
+
+    velSelect.addEventListener('change', commitEdit);
+    dyeR.addEventListener('change', commitEdit);
+    dyeG.addEventListener('change', commitEdit);
+    dyeB.addEventListener('change', commitEdit);
+
+    controls.appendChild(makeModeLabel('V'));
+    controls.appendChild(velSelect);
+    controls.appendChild(makeModeLabel('R'));
+    controls.appendChild(dyeR);
+    controls.appendChild(makeModeLabel('G'));
+    controls.appendChild(dyeG);
+    controls.appendChild(makeModeLabel('B'));
+    controls.appendChild(dyeB);
+
     const meta = document.createElement('div');
     meta.className = 'segment-meta';
-    meta.textContent = `${seg.type} | vel=${seg.velocityMode} | dye RGB=${seg.dyeMode?.r || '-'} / ${seg.dyeMode?.g || '-'} / ${seg.dyeMode?.b || '-'}`;
+    meta.textContent = `${seg.type} | len=${seg.length?.toFixed ? seg.length.toFixed(2) : seg.length}`;
 
     row.appendChild(btn);
+    row.appendChild(controls);
     row.appendChild(meta);
     frag.appendChild(row);
   }

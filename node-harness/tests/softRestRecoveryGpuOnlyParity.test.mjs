@@ -92,4 +92,29 @@ test('soft rest-recovery gpu-only keeps CPU-authoritative options/behavior contr
   assert.equal(gotSprings, springs, 'springs ref should pass through unchanged');
   assert.equal(gotBaseline, restBaseline, 'rest baseline ref should pass through unchanged');
   assert.deepEqual(gotOptions, expected, 'gpu-only options must match baseline-compatible profile output');
+  assert.equal(
+    gotOptions && expected && gotOptions.recoverRate,
+    expected.recoverRate,
+    'cpu-authoritative rest-recovery tuning contract should remain unchanged while WGSL stages run as telemetry/proposal only',
+  );
+});
+
+test('soft rest-recovery gpu-only defaults proposal source-route telemetry to cpu when wgsl is unavailable', () => {
+  const wgslOffload = { enabled: true, state: {} };
+  applySoftRestRecoveryGpuOnly({
+    springs: [[0, 1, 1.2]],
+    softNodes: [{ x: 0, y: 0 }, { x: 1, y: 0 }],
+    restBaseline: [1.1],
+    severeInterventionsOn: false,
+    warningInterventionsOn: false,
+    deform: { severeCollapseCount: 0, warningCount: 0 },
+    recoverSoftSpringRests: () => {},
+    wgslOffload,
+  });
+
+  assert.equal(
+    wgslOffload.state.lastProposalSource,
+    'cpu-rest-recovery-authoritative',
+    'expected explicit proposal source-route fallback when wgsl offload cannot run',
+  );
 });

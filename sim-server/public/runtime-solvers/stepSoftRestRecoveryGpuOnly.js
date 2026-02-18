@@ -43,6 +43,33 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const softRestRecoveryProposalWgsl = /* wgsl */`
+struct Params {
+  springCount: u32,
+  recoverRate: f32,
+  hardMinFactor: f32,
+  hardMaxFactor: f32,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> springRestCurrent: array<f32>;
+@group(0) @binding(2) var<storage, read> springRestBaseline: array<f32>;
+@group(0) @binding(3) var<storage, read_write> springRestProposalOut: array<f32>;
+
+@compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let si = gid.x;
+  if (si >= params.springCount) { return; }
+
+  let base = max(abs(springRestBaseline[si]), 1e-6);
+  let cur = springRestCurrent[si];
+  let next = cur + (base - cur) * clamp(params.recoverRate, 0.0, 1.0);
+  let minRest = base * max(0.05, params.hardMinFactor);
+  let maxRest = max(minRest + 1e-6, base * max(params.hardMinFactor, params.hardMaxFactor));
+  springRestProposalOut[si] = clamp(next, minRest, maxRest);
+}
+`;
+
 function pickProfile(profile, baseline, warning, severe) {
   return profile === 'baseline' ? baseline : (profile === 'warning' ? warning : severe);
 }
@@ -91,11 +118,13 @@ function buildSoftRestRecoveryWgslLayout({ plan, restBaseline } = {}) {
   }
 
   return {
+    activeSpringIndices: activeIndices,
     springNodeA: plan?.springNodeA instanceof Uint32Array ? plan.springNodeA : new Uint32Array(0),
     springNodeB: plan?.springNodeB instanceof Uint32Array ? plan.springNodeB : new Uint32Array(0),
     restByActiveSpring,
     byteLength:
-      (plan?.springNodeA?.byteLength || 0)
+      (plan?.activeSpringIndices?.byteLength || 0)
+      + (plan?.springNodeA?.byteLength || 0)
       + (plan?.springNodeB?.byteLength || 0)
       + restByActiveSpring.byteLength,
   };
@@ -143,6 +172,58 @@ function ensureProbeBuffers(offload, nodeCount, springCount) {
   }
 
   return state;
+}
+
+function ensureProposalBuffers(offload, springCount) {
+  const state = offload.state || (offload.state = {});
+  const device = offload.device;
+  const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
+  const uniformUsage = globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST;
+
+  const springCapacity = Math.max(1, springCount);
+  if ((state.proposalSpringCapacity || 0) < springCapacity) {
+    const cap = Math.max(springCapacity, state.proposalSpringCapacity ? state.proposalSpringCapacity * 2 : 256);
+    const bytes = cap * 4;
+    state.proposalSpringRestCurrent?.destroy?.();
+    state.proposalSpringRestBaseline?.destroy?.();
+    state.proposalRestOut?.destroy?.();
+    state.proposalRestReadback?.destroy?.();
+    state.proposalSpringRestCurrent = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.proposalSpringRestBaseline = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.proposalRestOut = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.proposalRestReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.proposalSpringCapacity = cap;
+    state.proposalBindGroup = null;
+  }
+
+  if (!state.proposalParams) {
+    state.proposalParams = device.createBuffer({ size: 16, usage: uniformUsage });
+    state.proposalBindGroup = null;
+  }
+
+  return state;
+}
+
+function computeRestProposalParity({ proposalBySpring, cpuBySpring, activeSpringIndices }) {
+  const active = activeSpringIndices instanceof Uint32Array ? activeSpringIndices : new Uint32Array(0);
+  let maxAbs = 0;
+  let absSum = 0;
+  let comparedCount = 0;
+  for (let i = 0; i < active.length; i++) {
+    const si = active[i] >>> 0;
+    const proposal = Number(proposalBySpring?.[si]);
+    const cpu = Number(cpuBySpring?.[si]);
+    if (!Number.isFinite(proposal) || !Number.isFinite(cpu)) continue;
+    const err = Math.abs(proposal - cpu);
+    if (err > maxAbs) maxAbs = err;
+    absSum += err;
+    comparedCount += 1;
+  }
+  return {
+    maxAbs,
+    meanAbs: comparedCount > 0 ? absSum / comparedCount : 0,
+    comparedCount,
+  };
 }
 
 async function dispatchSoftRestRecoveryWgslProbe({ softNodes, layout, offload }) {
@@ -230,6 +311,99 @@ async function dispatchSoftRestRecoveryWgslProbe({ softNodes, layout, offload })
   return true;
 }
 
+async function dispatchSoftRestRecoveryWgslProposal({ springs, restBaseline, layout, options, offload }) {
+  if (!canUseWgslOffload(offload)) return false;
+  const springCount = Number(layout?.restByActiveSpring?.length) || 0;
+  if (springCount <= 0) return false;
+
+  const state = ensureProposalBuffers(offload, springCount);
+  const device = offload.device;
+
+  if (!state.proposalPipeline) {
+    const module = device.createShaderModule({ code: softRestRecoveryProposalWgsl });
+    state.proposalPipeline = await device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: { module, entryPoint: 'main' },
+    });
+    state.proposalBindGroup = null;
+  }
+
+  if (!state.proposalBindGroup) {
+    state.proposalBindGroup = device.createBindGroup({
+      layout: state.proposalPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.proposalParams } },
+        { binding: 1, resource: { buffer: state.proposalSpringRestCurrent } },
+        { binding: 2, resource: { buffer: state.proposalSpringRestBaseline } },
+        { binding: 3, resource: { buffer: state.proposalRestOut } },
+      ],
+    });
+  }
+
+  const currentByActiveSpring = new Float32Array(springCount);
+  for (let i = 0; i < springCount; i++) {
+    const si = layout.activeSpringIndices[i] >>> 0;
+    const springRest = Number(springs?.[si]?.[2]);
+    const baselineRest = Number(restBaseline?.[si]);
+    currentByActiveSpring[i] = Number.isFinite(springRest) ? springRest : (Number.isFinite(baselineRest) ? baselineRest : 0);
+  }
+
+  const recoverRate = Math.max(0, Math.min(1, Number(options?.recoverRate) || 0));
+  const hardMinFactor = Math.max(0.05, Number(options?.hardMinFactor) || 0.7);
+  const hardMaxFactor = Math.max(hardMinFactor + 1e-6, Number(options?.hardMaxFactor) || 1.45);
+  const paramsBuffer = new ArrayBuffer(16);
+  const paramsView = new DataView(paramsBuffer);
+  paramsView.setUint32(0, springCount >>> 0, true);
+  paramsView.setFloat32(4, recoverRate, true);
+  paramsView.setFloat32(8, hardMinFactor, true);
+  paramsView.setFloat32(12, hardMaxFactor, true);
+
+  device.queue.writeBuffer(state.proposalParams, 0, paramsBuffer);
+  device.queue.writeBuffer(state.proposalSpringRestCurrent, 0, currentByActiveSpring);
+  device.queue.writeBuffer(state.proposalSpringRestBaseline, 0, layout.restByActiveSpring);
+
+  const dispatchCount = Math.ceil(springCount / WGSL_WORKGROUP_SIZE);
+  const bytes = springCount * 4;
+
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(state.proposalPipeline);
+  pass.setBindGroup(0, state.proposalBindGroup);
+  pass.dispatchWorkgroups(dispatchCount);
+  pass.end();
+  encoder.copyBufferToBuffer(state.proposalRestOut, 0, state.proposalRestReadback, 0, bytes);
+  device.queue.submit([encoder.finish()]);
+
+  await state.proposalRestReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
+  const mapped = state.proposalRestReadback.getMappedRange(0, bytes);
+  const proposalByActiveSpring = new Float32Array(mapped.slice(0));
+  state.proposalRestReadback.unmap();
+
+  const proposalBySpring = new Float32Array(restBaseline.length || 0);
+  for (let i = 0; i < proposalBySpring.length; i++) proposalBySpring[i] = Number(restBaseline[i]) || 0;
+  for (let i = 0; i < springCount; i++) {
+    const si = layout.activeSpringIndices[i] >>> 0;
+    if (si < proposalBySpring.length) proposalBySpring[si] = proposalByActiveSpring[i];
+  }
+
+  const parity = computeRestProposalParity({
+    proposalBySpring,
+    cpuBySpring: restBaseline,
+    activeSpringIndices: layout.activeSpringIndices,
+  });
+
+  state.lastProposalDispatch = dispatchCount;
+  state.lastProposalSpringCount = springCount;
+  state.lastProposalByActiveSpring = proposalByActiveSpring;
+  state.lastProposalBySpring = proposalBySpring;
+  state.lastProposalParity = {
+    ...parity,
+    source: 'wgsl-rest-recovery-proposal',
+  };
+  state.lastProposalSource = 'wgsl-rest-recovery-proposal';
+  return true;
+}
+
 export function buildSoftRestRecoveryOptionsGpuOnly({
   severeInterventionsOn,
   warningInterventionsOn,
@@ -281,6 +455,12 @@ export function applySoftRestRecoveryGpuOnly({
     throw new Error('gpu-only soft rest-recovery pass requires recoverSoftSpringRests callback');
   }
 
+  const options = buildSoftRestRecoveryOptionsGpuOnly({
+    severeInterventionsOn,
+    warningInterventionsOn,
+    deform,
+  });
+
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     const plan = buildSoftRestRecoveryWgslPlan({ springs, softNodes });
     const layout = buildSoftRestRecoveryWgslLayout({ plan, restBaseline });
@@ -293,29 +473,38 @@ export function applySoftRestRecoveryGpuOnly({
       const serializedProbe = (wgslOffload.state.pendingWgslRestRecoveryProbePromise || Promise.resolve())
         .then(async () => {
           const probeRan = await dispatchSoftRestRecoveryWgslProbe({ softNodes, layout, offload: wgslOffload });
+          const proposalRan = probeRan
+            ? await dispatchSoftRestRecoveryWgslProposal({
+              springs,
+              restBaseline,
+              layout,
+              options,
+              offload: wgslOffload,
+            })
+            : false;
           wgslOffload.state.lastError = null;
-          wgslOffload.state.lastMode = probeRan ? 'wgsl-rest-recovery-probe' : 'cpu-rest-recovery-authoritative';
+          wgslOffload.state.lastMode = proposalRan
+            ? 'wgsl-rest-recovery-proposal'
+            : (probeRan ? 'wgsl-rest-recovery-probe' : 'cpu-rest-recovery-authoritative');
           if (!probeRan) wgslOffload.state.lastProbeSource = 'cpu-rest-recovery-authoritative';
+          if (!proposalRan) wgslOffload.state.lastProposalSource = 'cpu-rest-recovery-authoritative';
         })
         .catch((err) => {
           wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
           wgslOffload.state.lastMode = 'cpu-rest-recovery-authoritative';
           wgslOffload.state.lastProbeSource = 'cpu-rest-recovery-authoritative';
+          wgslOffload.state.lastProposalSource = 'cpu-rest-recovery-authoritative';
         });
       wgslOffload.state.pendingWgslRestRecoveryProbePromise = serializedProbe;
     }
   }
 
-  const options = buildSoftRestRecoveryOptionsGpuOnly({
-    severeInterventionsOn,
-    warningInterventionsOn,
-    deform,
-  });
   recoverSoftSpringRests(springs, restBaseline, options);
 
   if (wgslOffload?.state) {
     wgslOffload.state.lastAuthoritativeSource = 'cpu-rest-recovery-authoritative';
     if (!wgslOffload.state.lastMode) wgslOffload.state.lastMode = 'cpu-rest-recovery-authoritative';
     if (!wgslOffload.state.lastProbeSource) wgslOffload.state.lastProbeSource = 'cpu-rest-recovery-authoritative';
+    if (!wgslOffload.state.lastProposalSource) wgslOffload.state.lastProposalSource = 'cpu-rest-recovery-authoritative';
   }
 }

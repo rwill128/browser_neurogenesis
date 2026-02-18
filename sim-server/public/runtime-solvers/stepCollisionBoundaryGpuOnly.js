@@ -76,6 +76,15 @@ function createBuffer(device, size, usage) {
   return device.createBuffer({ size, usage });
 }
 
+function safeUnmapBuffer(buffer) {
+  if (!buffer || typeof buffer.unmap !== 'function') return;
+  try {
+    buffer.unmap();
+  } catch {
+    // ignore invalid-state unmap attempts while recovering readback lifecycle
+  }
+}
+
 function isFiniteBoundaryEntry(entry) {
   if (!entry) return false;
   if (!Number.isFinite(Number(entry.x)) || !Number.isFinite(Number(entry.y))) return false;
@@ -222,33 +231,45 @@ async function runBoundaryWgsl(entries, { n, damping, hasOmega, offload }) {
   encoder.copyBufferToBuffer(state.omega, 0, state.readOmega, 0, bytes);
   device.queue.submit([encoder.finish()]);
 
-  await Promise.all([
-    state.readPosX.mapAsync(globalThis.GPUMapMode.READ, 0, bytes),
-    state.readPosY.mapAsync(globalThis.GPUMapMode.READ, 0, bytes),
-    state.readVelX.mapAsync(globalThis.GPUMapMode.READ, 0, bytes),
-    state.readVelY.mapAsync(globalThis.GPUMapMode.READ, 0, bytes),
-    state.readOmega.mapAsync(globalThis.GPUMapMode.READ, 0, bytes),
-  ]);
+  safeUnmapBuffer(state.readPosX);
+  safeUnmapBuffer(state.readPosY);
+  safeUnmapBuffer(state.readVelX);
+  safeUnmapBuffer(state.readVelY);
+  safeUnmapBuffer(state.readOmega);
 
-  const outX = new Float32Array(state.readPosX.getMappedRange(0, bytes).slice(0));
-  const outY = new Float32Array(state.readPosY.getMappedRange(0, bytes).slice(0));
-  const outVx = new Float32Array(state.readVelX.getMappedRange(0, bytes).slice(0));
-  const outVy = new Float32Array(state.readVelY.getMappedRange(0, bytes).slice(0));
-  const outOmega = new Float32Array(state.readOmega.getMappedRange(0, bytes).slice(0));
+  try {
+    const mapResults = await Promise.allSettled([
+      state.readPosX.mapAsync(globalThis.GPUMapMode.READ, 0, bytes),
+      state.readPosY.mapAsync(globalThis.GPUMapMode.READ, 0, bytes),
+      state.readVelX.mapAsync(globalThis.GPUMapMode.READ, 0, bytes),
+      state.readVelY.mapAsync(globalThis.GPUMapMode.READ, 0, bytes),
+      state.readOmega.mapAsync(globalThis.GPUMapMode.READ, 0, bytes),
+    ]);
+    const failedMap = mapResults.find((result) => result.status === 'rejected');
+    if (failedMap) {
+      throw failedMap.reason || new Error('boundary-readback-map-failed');
+    }
 
-  state.readPosX.unmap();
-  state.readPosY.unmap();
-  state.readVelX.unmap();
-  state.readVelY.unmap();
-  state.readOmega.unmap();
+    const outX = new Float32Array(state.readPosX.getMappedRange(0, bytes).slice(0));
+    const outY = new Float32Array(state.readPosY.getMappedRange(0, bytes).slice(0));
+    const outVx = new Float32Array(state.readVelX.getMappedRange(0, bytes).slice(0));
+    const outVy = new Float32Array(state.readVelY.getMappedRange(0, bytes).slice(0));
+    const outOmega = new Float32Array(state.readOmega.getMappedRange(0, bytes).slice(0));
 
-  for (let i = 0; i < count; i++) {
-    const b = entries[i];
-    b.x = outX[i];
-    b.y = outY[i];
-    b.vx = outVx[i];
-    b.vy = outVy[i];
-    if (hasOmega && typeof b.omega === 'number') b.omega = outOmega[i];
+    for (let i = 0; i < count; i++) {
+      const b = entries[i];
+      b.x = outX[i];
+      b.y = outY[i];
+      b.vx = outVx[i];
+      b.vy = outVy[i];
+      if (hasOmega && typeof b.omega === 'number') b.omega = outOmega[i];
+    }
+  } finally {
+    safeUnmapBuffer(state.readPosX);
+    safeUnmapBuffer(state.readPosY);
+    safeUnmapBuffer(state.readVelX);
+    safeUnmapBuffer(state.readVelY);
+    safeUnmapBuffer(state.readOmega);
   }
 }
 
@@ -257,6 +278,23 @@ function applyBoundaryCpu(entries, n, damping, applyBounceBoundary) {
     if (!b) continue;
     applyBounceBoundary(b, n, damping);
   }
+}
+
+function scheduleSerializedBoundaryDispatch(wgslOffload, task) {
+  const state = wgslOffload?.state;
+  if (!state || typeof task !== 'function') return task();
+
+  const chainedTask = (state.pendingCollisionBoundaryDispatchPromise || Promise.resolve())
+    .catch(() => {})
+    .then(task);
+
+  state.pendingCollisionBoundaryDispatchPromise = chainedTask.finally(() => {
+    if (state.pendingCollisionBoundaryDispatchPromise === chainedTask) {
+      state.pendingCollisionBoundaryDispatchPromise = null;
+    }
+  });
+
+  return state.pendingCollisionBoundaryDispatchPromise;
 }
 
 export async function applyCollisionBoundaryPassGpuOnly({
@@ -291,44 +329,46 @@ export async function applyCollisionBoundaryPassGpuOnly({
     };
   }
 
-  try {
-    await runBoundaryWgsl(finiteRigid, {
-      n,
-      damping: rigidBounce,
-      hasOmega: true,
-      offload: wgslOffload,
-    });
-    await runBoundaryWgsl(finiteSoft, {
-      n,
-      damping: softBounce,
-      hasOmega: false,
-      offload: wgslOffload,
-    });
+  return scheduleSerializedBoundaryDispatch(wgslOffload, async () => {
+    try {
+      await runBoundaryWgsl(finiteRigid, {
+        n,
+        damping: rigidBounce,
+        hasOmega: true,
+        offload: wgslOffload,
+      });
+      await runBoundaryWgsl(finiteSoft, {
+        n,
+        damping: softBounce,
+        hasOmega: false,
+        offload: wgslOffload,
+      });
 
-    if (nonFiniteEntryCount > 0) {
-      applyBoundaryCpu(nonFiniteRigid, n, rigidBounce, applyBounceBoundary);
-      applyBoundaryCpu(nonFiniteSoft, n, softBounce, applyBounceBoundary);
-    }
+      if (nonFiniteEntryCount > 0) {
+        applyBoundaryCpu(nonFiniteRigid, n, rigidBounce, applyBounceBoundary);
+        applyBoundaryCpu(nonFiniteSoft, n, softBounce, applyBounceBoundary);
+      }
 
-    if (wgslOffload?.state) {
-      wgslOffload.state.lastError = null;
-      wgslOffload.state.lastMode = nonFiniteEntryCount > 0 ? 'wgsl-partial' : 'wgsl';
-      wgslOffload.state.lastFiniteEntryCount = finiteEntryCount;
-      wgslOffload.state.lastNonFiniteEntryCount = nonFiniteEntryCount;
+      if (wgslOffload?.state) {
+        wgslOffload.state.lastError = null;
+        wgslOffload.state.lastMode = nonFiniteEntryCount > 0 ? 'wgsl-partial' : 'wgsl';
+        wgslOffload.state.lastFiniteEntryCount = finiteEntryCount;
+        wgslOffload.state.lastNonFiniteEntryCount = nonFiniteEntryCount;
+      }
+      return {
+        mode: nonFiniteEntryCount > 0 ? 'wgsl-partial' : 'wgsl',
+        reason: nonFiniteEntryCount > 0 ? 'ok-with-cpu-nonfinite' : 'ok',
+      };
+    } catch (err) {
+      applyBoundaryCpu(rigidList, n, rigidBounce, applyBounceBoundary);
+      applyBoundaryCpu(softNodes, n, softBounce, applyBounceBoundary);
+      if (wgslOffload?.state) {
+        wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
+        wgslOffload.state.lastMode = 'cpu-fallback';
+        wgslOffload.state.lastFiniteEntryCount = finiteEntryCount;
+        wgslOffload.state.lastNonFiniteEntryCount = nonFiniteEntryCount;
+      }
+      return { mode: 'cpu-fallback', reason: String(err?.message || err || 'unknown-error') };
     }
-    return {
-      mode: nonFiniteEntryCount > 0 ? 'wgsl-partial' : 'wgsl',
-      reason: nonFiniteEntryCount > 0 ? 'ok-with-cpu-nonfinite' : 'ok',
-    };
-  } catch (err) {
-    applyBoundaryCpu(rigidList, n, rigidBounce, applyBounceBoundary);
-    applyBoundaryCpu(softNodes, n, softBounce, applyBounceBoundary);
-    if (wgslOffload?.state) {
-      wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
-      wgslOffload.state.lastMode = 'cpu-fallback';
-      wgslOffload.state.lastFiniteEntryCount = finiteEntryCount;
-      wgslOffload.state.lastNonFiniteEntryCount = nonFiniteEntryCount;
-    }
-    return { mode: 'cpu-fallback', reason: String(err?.message || err || 'unknown-error') };
-  }
+  });
 }

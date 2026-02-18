@@ -382,6 +382,8 @@ const GPU_FALLBACK_STAGE_LABELS = Object.freeze({
   hybridConstraintsWgslState: 'Hybrid constraints',
   softIntegrateWgslState: 'Soft integrate',
   rigidPostIntegrateWgslState: 'Rigid post-integrate',
+  rigidSoftCollisionWgslState: 'Rigid-soft collision',
+  softCollisionWgslState: 'Soft-soft collision',
   collisionBoundaryWgslState: 'Collision boundary',
   postCollisionBoundaryWgslState: 'Post-collision recovery',
   softRestRecoveryWgslState: 'Soft rest recovery',
@@ -423,7 +425,7 @@ function collectGpuFallbackSignals(sim) {
       if (!k.startsWith('last') || typeof v !== 'string') continue;
       const route = String(v);
       const low = route.toLowerCase();
-      if (!(low.includes('fallback') || low.includes('nonfinite') || low.includes('error'))) continue;
+      if (!(low.includes('fallback') || low.includes('nonfinite') || low.includes('non-finite') || low.includes('error'))) continue;
       add(stage, route, k);
     }
   }
@@ -4668,6 +4670,21 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         enabled: true,
         device: sim?.device,
         state: (sim.collisionBoundaryWgslState ||= {}),
+        rigidSoft: {
+          enabled: true,
+          device: sim?.device,
+          state: (sim.rigidSoftCollisionWgslState ||= {}),
+        },
+        softSoft: {
+          enabled: true,
+          device: sim?.device,
+          state: (sim.softCollisionWgslState ||= {}),
+        },
+        boundary: {
+          enabled: true,
+          device: sim?.device,
+          state: (sim.collisionBoundaryWgslState ||= {}),
+        },
       },
     });
     hybridAttachedByRigid = collisionResult.hybridAttachedByRigid;

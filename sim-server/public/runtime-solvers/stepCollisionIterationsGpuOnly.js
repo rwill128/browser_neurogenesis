@@ -57,6 +57,10 @@ export async function runCollisionIterationsGpuOnly({
 
   let boundaryRuntime = { mode: 'cpu', reason: 'not-run' };
 
+  const rigidSoftWgslOffload = wgslOffload?.rigidSoft || wgslOffload;
+  const softSoftWgslOffload = wgslOffload?.softSoft || wgslOffload;
+  const collisionBoundaryWgslOffload = wgslOffload?.boundary || wgslOffload;
+
   for (let iter = 0; iter < collisionIterations; iter++) {
     resolveRigidRigidCollisionPassGpuOnly({
       rigidBodies: rigid,
@@ -74,7 +78,7 @@ export async function runCollisionIterationsGpuOnly({
       edgeBodyModeBlock,
       nodeSlop: rigidSoftNodeSlop,
       edgeSlop: rigidSoftEdgeSlop,
-      wgslOffload,
+      wgslOffload: rigidSoftWgslOffload,
     });
 
     await resolveSoftSoftCollisionPassGpuOnly({
@@ -84,7 +88,7 @@ export async function runCollisionIterationsGpuOnly({
       edgeBodyModeBlock,
       nodeNodeSlop: softNodeNodeSlop,
       nodeEdgeSlop: softNodeEdgeSlop,
-      wgslOffload,
+      wgslOffload: softSoftWgslOffload,
     });
 
     resolveRigidRigidCollisionPassGpuOnly({
@@ -103,7 +107,7 @@ export async function runCollisionIterationsGpuOnly({
       rigidBounce,
       softBounce,
       applyBounceBoundary,
-      wgslOffload,
+      wgslOffload: collisionBoundaryWgslOffload,
     })) || { mode: 'cpu-fallback', reason: 'unknown' };
   }
 

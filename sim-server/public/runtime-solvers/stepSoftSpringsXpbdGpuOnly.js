@@ -405,6 +405,15 @@ async function dispatchSoftSpringWgslLambdaProposal({ soft, offload, layout, dtP
   const lambdaNextByColor = new Float32Array(mappedNext.slice(0));
   state.lambdaNextReadback.unmap();
 
+  const deltaBySpring = new Float32Array(springCount);
+  const lambdaNextBySpring = new Float32Array(springCount);
+  for (let oi = 0; oi < springCount; oi++) {
+    const ai = invSpringOrder[oi];
+    if (!Number.isInteger(ai) || ai < 0 || ai >= springCount) continue;
+    deltaBySpring[ai] = deltaByColor[oi];
+    lambdaNextBySpring[ai] = lambdaNextByColor[oi];
+  }
+
   let maxAbsDelta = 0;
   let sumAbsDelta = 0;
   for (let i = 0; i < deltaByColor.length; i++) {
@@ -419,6 +428,8 @@ async function dispatchSoftSpringWgslLambdaProposal({ soft, offload, layout, dtP
   state.lastProposalAbsDeltaMax = maxAbsDelta;
   state.lastProposalDeltaLambdaByColor = deltaByColor;
   state.lastProposalLambdaNextByColor = lambdaNextByColor;
+  state.lastProposalDeltaLambdaBySpring = deltaBySpring;
+  state.lastProposalLambdaNextBySpring = lambdaNextBySpring;
   return true;
 }
 

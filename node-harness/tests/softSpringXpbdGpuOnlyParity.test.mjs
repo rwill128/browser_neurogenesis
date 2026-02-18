@@ -504,7 +504,29 @@ test('soft spring XPBD WGSL proposal stage runs on gpu-only path while CPU remai
   assert.equal(wgslState.lastProposalSpringCount, 2);
   assert.equal(wgslState.lastProposalDeltaLambdaByColor instanceof Float32Array, true);
   assert.equal(wgslState.lastProposalLambdaNextByColor instanceof Float32Array, true);
+  assert.equal(wgslState.lastProposalDeltaLambdaBySpring instanceof Float32Array, true);
+  assert.equal(wgslState.lastProposalLambdaNextBySpring instanceof Float32Array, true);
   assert.equal(wgslState.lastProposalDeltaLambdaByColor.length, 2);
   assert.equal(wgslState.lastProposalLambdaNextByColor.length, 2);
+  assert.equal(wgslState.lastProposalDeltaLambdaBySpring.length, 2);
+  assert.equal(wgslState.lastProposalLambdaNextBySpring.length, 2);
+
+  const invOrder = wgslState.preparedPlan.springColorOrderedIndices;
+  const remappedDelta = new Float32Array(invOrder.length);
+  const remappedNext = new Float32Array(invOrder.length);
+  for (let oi = 0; oi < invOrder.length; oi++) {
+    remappedDelta[invOrder[oi]] = wgslState.lastProposalDeltaLambdaByColor[oi];
+    remappedNext[invOrder[oi]] = wgslState.lastProposalLambdaNextByColor[oi];
+  }
+  assert.deepEqual(
+    Array.from(wgslState.lastProposalDeltaLambdaBySpring),
+    Array.from(remappedDelta),
+    'expected proposal telemetry remapped back to original spring ownership order',
+  );
+  assert.deepEqual(
+    Array.from(wgslState.lastProposalLambdaNextBySpring),
+    Array.from(remappedNext),
+    'expected lambda-next telemetry remapped back to original spring ownership order',
+  );
   assert.equal(wgslState.lastProbeSpringCount, 2);
 });

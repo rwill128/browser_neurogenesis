@@ -42,7 +42,7 @@ test('soft spring gpu-only WGSL probe copies stretch output into readback buffer
 test('soft spring gpu-only WGSL lambda proposal stage reads back per-spring delta telemetry for next reduction offload', () => {
   assert.match(
     source,
-    /copyBufferToBuffer\(state\.deltaLambdaOut, 0, state\.deltaLambdaReadback, 0, bytes\)[\s\S]*copyBufferToBuffer\(state\.lambdaNextOut, 0, state\.lambdaNextReadback, 0, bytes\)[\s\S]*lastProposalAbsDeltaMean[\s\S]*lastProposalAbsDeltaMax[\s\S]*lastProposalDeltaLambdaByColor[\s\S]*lastProposalLambdaNextByColor/,
-    'expected WGSL lambda proposal stage to read back deterministic per-spring lambda telemetry',
+    /copyBufferToBuffer\(state\.deltaLambdaOut, 0, state\.deltaLambdaReadback, 0, bytes\)[\s\S]*copyBufferToBuffer\(state\.lambdaNextOut, 0, state\.lambdaNextReadback, 0, bytes\)[\s\S]*lastProposalAbsDeltaMean[\s\S]*lastProposalAbsDeltaMax[\s\S]*lastProposalDeltaLambdaByColor[\s\S]*lastProposalLambdaNextByColor[\s\S]*lastProposalDeltaLambdaBySpring[\s\S]*lastProposalLambdaNextBySpring/,
+    'expected WGSL lambda proposal stage to read back deterministic per-spring lambda telemetry in both color and original spring order',
   );
 });

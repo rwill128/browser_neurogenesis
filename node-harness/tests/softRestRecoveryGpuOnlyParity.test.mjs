@@ -1,9 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  applySoftRestRecoveryGpuOnly,
-  buildSoftRestRecoveryOptionsGpuOnly,
-} from '../../sim-server/public/runtime-solvers/stepSoftRestRecoveryGpuOnly.js';
+import { applySoftRestRecoveryGpuOnly, buildSoftRestRecoveryOptionsGpuOnly } from '../../sim-server/public/runtime-solvers/stepSoftRestRecoveryGpuOnly.js';
 
 function buildBaselineOptions({ severeInterventionsOn, warningInterventionsOn, deform }) {
   const severeProfile = severeInterventionsOn && deform.severeCollapseCount > 0;
@@ -49,33 +46,50 @@ for (const sample of [
   });
 }
 
-test('soft rest-recovery gpu-only pass invokes recovery callback with parity options', () => {
-  const springs = [[0, 1, 8], [1, 2, 9]];
-  const restBaseline = new Float32Array([8, 9]);
+test('soft rest-recovery gpu-only keeps CPU-authoritative options/behavior contract', () => {
+  const springs = [
+    [0, 1, 2.0],
+    [1, 2, 1.8],
+  ];
+  const restBaseline = [2.1, 1.75];
   const deform = { severeCollapseCount: 0, warningCount: 3 };
-  const expected = buildBaselineOptions({ severeInterventionsOn: true, warningInterventionsOn: true, deform });
+  const expected = buildSoftRestRecoveryOptionsGpuOnly({
+    severeInterventionsOn: true,
+    warningInterventionsOn: true,
+    deform,
+  });
 
   let called = 0;
-  let capturedSprings = null;
-  let capturedBaseline = null;
-  let capturedOptions = null;
+  let gotSprings = null;
+  let gotBaseline = null;
+  let gotOptions = null;
 
   applySoftRestRecoveryGpuOnly({
     springs,
+    softNodes: [
+      { x: 0, y: 0 },
+      { x: 1, y: 0 },
+      { x: 2, y: 0 },
+    ],
     restBaseline,
     severeInterventionsOn: true,
     warningInterventionsOn: true,
     deform,
-    recoverSoftSpringRests: (inSprings, inBaseline, opts) => {
+    recoverSoftSpringRests: (s, b, o) => {
       called += 1;
-      capturedSprings = inSprings;
-      capturedBaseline = inBaseline;
-      capturedOptions = opts;
+      gotSprings = s;
+      gotBaseline = b;
+      gotOptions = o;
+    },
+    wgslOffload: {
+      enabled: true,
+      // intentionally missing device so WGSL path is unavailable
+      state: {},
     },
   });
 
-  assert.equal(called, 1, 'expected gpu-only rest-recovery to invoke callback once');
-  assert.equal(capturedSprings, springs, 'expected same springs reference');
-  assert.equal(capturedBaseline, restBaseline, 'expected same rest baseline reference');
-  assert.deepEqual(capturedOptions, expected, 'expected callback options to match baseline profile picks');
+  assert.equal(called, 1, 'recoverSoftSpringRests should remain authoritative and run exactly once');
+  assert.equal(gotSprings, springs, 'springs ref should pass through unchanged');
+  assert.equal(gotBaseline, restBaseline, 'rest baseline ref should pass through unchanged');
+  assert.deepEqual(gotOptions, expected, 'gpu-only options must match baseline-compatible profile output');
 });

@@ -4503,11 +4503,17 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     if (solverPath === 'gpu-only') {
       applySoftRestRecoveryGpuOnly({
         springs: s.springs,
+        softNodes: s.nodes,
         restBaseline: sim.softSpringRestBaseline,
         severeInterventionsOn,
         warningInterventionsOn,
         deform,
         recoverSoftSpringRests,
+        wgslOffload: {
+          enabled: true,
+          device: sim?.device,
+          state: (sim.softRestRecoveryWgslState ||= {}),
+        },
       });
     } else {
       const severeProfile = severeInterventionsOn && deform.severeCollapseCount > 0;

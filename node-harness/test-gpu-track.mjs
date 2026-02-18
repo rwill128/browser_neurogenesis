@@ -19,6 +19,8 @@ const tests = [
   'node-harness/tests/softMembranePressureGpuOnlyParity.test.mjs',
   'node-harness/tests/softSpringXpbdGpuOnlyParity.test.mjs',
   'node-harness/tests/softSpringXpbdGpuOnlySource.test.mjs',
+  'node-harness/tests/softRestRecoveryGpuOnlyParity.test.mjs',
+  'node-harness/tests/softRestRecoveryGpuOnlySource.test.mjs',
   'node-harness/tests/softAreaXpbdGpuOnlyParity.test.mjs',
   'node-harness/tests/softAreaXpbdGpuOnlySource.test.mjs',
   'node-harness/tests/bodyFluidInjectionGpuOnlySource.test.mjs',

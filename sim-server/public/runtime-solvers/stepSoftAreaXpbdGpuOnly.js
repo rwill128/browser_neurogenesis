@@ -253,8 +253,15 @@ function canUseWgslOffload(offload) {
   return true;
 }
 
+function getGpuOnlyPipelineModeProfile(wgslOffload) {
+  const modeProfile = String(wgslOffload?.modeProfile || '').trim().toLowerCase();
+  if (modeProfile === 'gpu-only-fast') return 'gpu-only-fast';
+  if (modeProfile === 'gpu-only-validated') return 'gpu-only-validated';
+  return 'standard';
+}
+
 function isGpuOnlyFastMode(wgslOffload) {
-  return String(wgslOffload?.modeProfile || '').trim().toLowerCase() === 'gpu-only-fast';
+  return getGpuOnlyPipelineModeProfile(wgslOffload) === 'gpu-only-fast';
 }
 
 function checkFiniteFloat32Array(values) {
@@ -1204,6 +1211,7 @@ export function applySoftAreaXPBDVelocityGpuOnly({
     wgslOffload.state.lastPreparedClusterCount = plan.clusterCount;
     wgslOffload.state.lastPreparedEndpointCount = plan.endpointCount;
     wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
+    wgslOffload.state.lastPipelineModeProfile = getGpuOnlyPipelineModeProfile(wgslOffload);
     wgslOffload.state.lastMode = 'cpu-prepared';
 
     const proposalSignature = computeSoftAreaProposalSignature({
@@ -1236,11 +1244,16 @@ export function applySoftAreaXPBDVelocityGpuOnly({
     // consume a deterministic signature-matched WGSL proposal on the next frame.
     if (canUseWgslOffload(wgslOffload)) {
       void (async () => {
-        const fastMode = isGpuOnlyFastMode(wgslOffload);
-        const [probeRan, proposalRan] = await Promise.all([
-          dispatchSoftAreaWgslProbe({ sim, soft, offload: wgslOffload, plan, dtPos }),
-          dispatchSoftAreaWgslLambdaProposal({ soft, offload: wgslOffload, plan, dtPos, alpha }),
-        ]);
+        const modeProfile = getGpuOnlyPipelineModeProfile(wgslOffload);
+        const fastMode = modeProfile === 'gpu-only-fast';
+        wgslOffload.state.lastPipelineModeProfile = modeProfile;
+
+        const probeRan = fastMode
+          ? false
+          : await dispatchSoftAreaWgslProbe({ sim, soft, offload: wgslOffload, plan, dtPos });
+        wgslOffload.state.lastAreaProbeSource = fastMode ? 'skipped-fast-mode' : 'wgsl-probe';
+
+        const proposalRan = await dispatchSoftAreaWgslLambdaProposal({ soft, offload: wgslOffload, plan, dtPos, alpha });
 
         let velocityProposalRan = false;
         if (proposalRan) {

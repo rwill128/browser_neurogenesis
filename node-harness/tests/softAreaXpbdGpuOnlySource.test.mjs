@@ -36,8 +36,8 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
 
   assert.match(
     areaSource,
-    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*Promise\.all\(\[[\s\S]*dispatchSoftAreaWgslProbe\(\{ sim, soft, offload: wgslOffload, plan, dtPos \}\)[\s\S]*dispatchSoftAreaWgslLambdaProposal\(\{ soft, offload: wgslOffload, plan, dtPos, alpha \}\)[\s\S]*lastMode = velocityProposalRan[\s\S]*'wgsl-velocity-proposal'[\s\S]*'wgsl-proposal'[\s\S]*'wgsl-probe'/,
-    'expected gpu-only soft area pass to dispatch WGSL probe + lambda proposal stages while retaining CPU-authoritative fallback',
+    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*const modeProfile = getGpuOnlyPipelineModeProfile\(wgslOffload\);[\s\S]*const fastMode = modeProfile === 'gpu-only-fast';[\s\S]*const probeRan = fastMode[\s\S]*\? false[\s\S]*: await dispatchSoftAreaWgslProbe\(\{ sim, soft, offload: wgslOffload, plan, dtPos \}\);[\s\S]*dispatchSoftAreaWgslLambdaProposal\(\{ soft, offload: wgslOffload, plan, dtPos, alpha \}\)[\s\S]*lastMode = velocityProposalRan[\s\S]*'wgsl-velocity-proposal'[\s\S]*'wgsl-proposal'[\s\S]*'wgsl-probe'/,
+    'expected gpu-only soft area pass to keep probe+lambda WGSL stages in validated mode while fast mode can skip probe overhead',
   );
 
   assert.match(
@@ -98,6 +98,12 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
     areaSource,
     /state\.lastAreaVelocityProposalNodeParityMaxError = maxNodeDeltaError;[\s\S]*state\.lastAreaVelocityProposalNodeParityMeanError = actualVx\.length > 0 \? \(sumNodeDeltaError \/ actualVx\.length\) : 0;[\s\S]*state\.lastAreaVelocityProposalNodeContributionParityMaxError = maxContributionError;/,
     'expected WGSL area node-reduction parity helper to publish deterministic per-node delta/count error telemetry against CPU reference',
+  );
+
+  assert.match(
+    areaSource,
+    /function getGpuOnlyPipelineModeProfile\(wgslOffload\) \{[\s\S]*modeProfile === 'gpu-only-fast'[\s\S]*modeProfile === 'gpu-only-validated'[\s\S]*return 'standard';[\s\S]*\}/,
+    'expected area gpu-only solver to expose explicit standard vs validated vs fast runtime mode profile',
   );
 
   assert.match(

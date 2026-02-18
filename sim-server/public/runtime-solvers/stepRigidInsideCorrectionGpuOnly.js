@@ -284,6 +284,21 @@ function canUseWgslOffload(offload) {
   );
 }
 
+function getGpuOnlyPipelineModeProfile(offload) {
+  const modeProfile = String(offload?.modeProfile || '').toLowerCase();
+  if (modeProfile === 'gpu-only-fast') return 'gpu-only-fast';
+  if (modeProfile === 'gpu-only-validated') return 'gpu-only-validated';
+  return 'standard';
+}
+
+function isGpuOnlyFastMode(offload) {
+  return getGpuOnlyPipelineModeProfile(offload) === 'gpu-only-fast';
+}
+
+function isGpuOnlyValidatedMode(offload) {
+  return getGpuOnlyPipelineModeProfile(offload) === 'gpu-only-validated';
+}
+
 function ensureRigidInsidePolyBoundsProbeState({ offload, prep }) {
   const state = offload.state;
   const device = offload.device;
@@ -444,7 +459,7 @@ function dispatchRigidInsidePolyBoundsProbe({ offload, prep, proposalSignature }
 
 
 
-function dispatchRigidInsideNodeCandidateProposal({ offload, prep, proposalSignature }) {
+function dispatchRigidInsideNodeCandidateProposal({ offload, prep, proposalSignature, includeReadbackTelemetry = true }) {
   if (!canUseWgslOffload(offload)) return false;
   if ((Number(prep?.polyCount) || 0) <= 0) return false;
   if ((Number(prep?.nodeCount) || 0) <= 0) return false;
@@ -466,36 +481,51 @@ function dispatchRigidInsideNodeCandidateProposal({ offload, prep, proposalSigna
   pass.setBindGroup(0, state.insideNodeCandidateBindGroup);
   pass.dispatchWorkgroups(dispatchCount);
   pass.end();
-  encoder.copyBufferToBuffer(
-    state.insideNodeCandidateCountOut,
-    0,
-    state.insideNodeCandidateCountReadback,
-    0,
-    nodeBytes,
-  );
+  if (includeReadbackTelemetry) {
+    encoder.copyBufferToBuffer(
+      state.insideNodeCandidateCountOut,
+      0,
+      state.insideNodeCandidateCountReadback,
+      0,
+      nodeBytes,
+    );
+  }
   device.queue.submit([encoder.finish()]);
 
-  const readbackPromise = state.insideNodeCandidateCountReadback
-    .mapAsync(globalThis.GPUMapMode.READ)
-    .then(() => {
-      const mapped = state.insideNodeCandidateCountReadback.getMappedRange(0, nodeBytes);
-      const nodeCandidateCount = new Uint32Array(mapped.slice(0));
-      state.insideNodeCandidateCountReadback.unmap();
-      state.lastInsideNodeCandidateCountByNode = nodeCandidateCount;
-      state.lastInsideNodeCandidateCountSource = 'wgsl-rigid-inside-node-candidate-proposal';
-      state.lastInsideNodeCandidateProposalSignature = proposalSignature >>> 0;
-      state.lastInsideNodeCandidateDispatchCount = dispatchCount;
-      state.lastInsideNodeCandidateComparedNodeCount = nodeCount;
-      state.lastInsideNodeCandidateTotal = nodeCandidateCount.reduce((sum, value) => sum + (Number(value) || 0), 0);
-      state.lastInsideNodeCandidateMax = nodeCandidateCount.reduce((max, value) => Math.max(max, Number(value) || 0), 0);
-      state.lastInsideNodeCandidateError = null;
-    })
-    .catch((err) => {
-      state.lastInsideNodeCandidateError = String(err?.message || err || 'unknown-error');
-    });
+  if (includeReadbackTelemetry) {
+    const readbackPromise = state.insideNodeCandidateCountReadback
+      .mapAsync(globalThis.GPUMapMode.READ)
+      .then(() => {
+        const mapped = state.insideNodeCandidateCountReadback.getMappedRange(0, nodeBytes);
+        const nodeCandidateCount = new Uint32Array(mapped.slice(0));
+        state.insideNodeCandidateCountReadback.unmap();
+        state.lastInsideNodeCandidateCountByNode = nodeCandidateCount;
+        state.lastInsideNodeCandidateCountSource = 'wgsl-rigid-inside-node-candidate-proposal';
+        state.lastInsideNodeCandidateProposalSignature = proposalSignature >>> 0;
+        state.lastInsideNodeCandidateDispatchCount = dispatchCount;
+        state.lastInsideNodeCandidateComparedNodeCount = nodeCount;
+        state.lastInsideNodeCandidateTotal = nodeCandidateCount.reduce((sum, value) => sum + (Number(value) || 0), 0);
+        state.lastInsideNodeCandidateMax = nodeCandidateCount.reduce((max, value) => Math.max(max, Number(value) || 0), 0);
+        state.lastInsideNodeCandidateError = null;
+      })
+      .catch((err) => {
+        state.lastInsideNodeCandidateError = String(err?.message || err || 'unknown-error');
+      });
 
-  state.pendingInsideNodeCandidatePromise = readbackPromise;
-  state.lastInsideNodeCandidateSourceRoute = 'wgsl-rigid-inside-node-candidate-proposal';
+    state.pendingInsideNodeCandidatePromise = readbackPromise;
+    state.lastInsideNodeCandidateSourceRoute = 'wgsl-rigid-inside-node-candidate-proposal';
+  } else {
+    state.pendingInsideNodeCandidatePromise = null;
+    state.lastInsideNodeCandidateCountByNode = null;
+    state.lastInsideNodeCandidateCountSource = 'wgsl-rigid-inside-node-candidate-proposal-fast';
+    state.lastInsideNodeCandidateComparedNodeCount = nodeCount;
+    state.lastInsideNodeCandidateTotal = null;
+    state.lastInsideNodeCandidateMax = null;
+    state.lastInsideNodeCandidateError = null;
+    state.lastInsideNodeCandidateSourceRoute = 'wgsl-rigid-inside-node-candidate-proposal-fast';
+    state.lastInsideNodeCandidateValidation = 'skipped-readback-telemetry';
+  }
+
   state.lastInsideNodeCandidateDispatchCount = dispatchCount;
   state.lastInsideNodeCandidateProposalSignature = proposalSignature >>> 0;
   return true;
@@ -612,6 +642,11 @@ export function applyRigidInsideCorrectionPassGpuOnly({
   }
 
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
+    const pipelineMode = getGpuOnlyPipelineModeProfile(wgslOffload);
+    const fastMode = isGpuOnlyFastMode(wgslOffload);
+    const validatedMode = isGpuOnlyValidatedMode(wgslOffload);
+    const standardMode = pipelineMode === 'standard';
+
     const prep = buildRigidInsideCorrectionWgslLayout({
       rigidBodies,
       soft,
@@ -639,27 +674,40 @@ export function applyRigidInsideCorrectionPassGpuOnly({
     wgslOffload.state.lastPreparedInsideLayoutBytes = prep.byteLength;
     wgslOffload.state.lastPreparedInsideLayoutSignature = preparedLayoutSignature;
     wgslOffload.state.lastPreparedInsideProposalSignature = proposalSignature;
+    wgslOffload.state.lastPipelineModeProfile = pipelineMode;
     wgslOffload.state.lastSourceRoute = 'cpu-rigid-inside-prepared-layout';
     wgslOffload.state.lastMode = 'cpu-rigid-inside-authoritative';
     wgslOffload.state.lastError = null;
 
     try {
-      const probeRan = dispatchRigidInsidePolyBoundsProbe({
-        offload: wgslOffload,
-        prep,
-        proposalSignature,
-      });
-      if (probeRan) {
-        wgslOffload.state.lastSourceRoute = 'wgsl-rigid-inside-poly-bounds-probe';
-        wgslOffload.state.lastMode = 'cpu-rigid-inside-authoritative-wgsl-probe';
-        const candidateRan = dispatchRigidInsideNodeCandidateProposal({
+      if (!standardMode) {
+        const probeRan = dispatchRigidInsidePolyBoundsProbe({
           offload: wgslOffload,
           prep,
           proposalSignature,
         });
-        if (candidateRan) {
-          wgslOffload.state.lastSourceRoute = 'wgsl-rigid-inside-node-candidate-proposal';
-          wgslOffload.state.lastMode = 'cpu-rigid-inside-authoritative-wgsl-candidate-proposal';
+        if (probeRan) {
+          wgslOffload.state.lastSourceRoute = 'wgsl-rigid-inside-poly-bounds-probe';
+          wgslOffload.state.lastMode = fastMode
+            ? 'cpu-rigid-inside-authoritative-wgsl-probe-fast'
+            : 'cpu-rigid-inside-authoritative-wgsl-probe';
+          const candidateRan = dispatchRigidInsideNodeCandidateProposal({
+            offload: wgslOffload,
+            prep,
+            proposalSignature,
+            includeReadbackTelemetry: !fastMode,
+          });
+          if (candidateRan) {
+            wgslOffload.state.lastSourceRoute = fastMode
+              ? 'wgsl-rigid-inside-node-candidate-proposal-fast'
+              : 'wgsl-rigid-inside-node-candidate-proposal';
+            wgslOffload.state.lastMode = fastMode
+              ? 'cpu-rigid-inside-authoritative-wgsl-candidate-proposal-fast'
+              : 'cpu-rigid-inside-authoritative-wgsl-candidate-proposal';
+            wgslOffload.state.lastInsideNodeCandidateValidation = fastMode
+              ? 'skipped-readback-telemetry'
+              : (validatedMode ? 'readback-telemetry-validated' : 'readback-telemetry');
+          }
         }
       }
     } catch (err) {
@@ -692,49 +740,70 @@ export function applyRigidInsideCorrectionPassGpuOnly({
   }
 
   if (wgslOffload?.state) {
-    const outputNodeX = new Float32Array(nodeCount);
-    const outputNodeY = new Float32Array(nodeCount);
-    const outputNodeVx = new Float32Array(nodeCount);
-    const outputNodeVy = new Float32Array(nodeCount);
-    const outputRigidX = new Float32Array(rigidCount);
-    const outputRigidY = new Float32Array(rigidCount);
+    const fastMode = isGpuOnlyFastMode(wgslOffload);
 
-    for (let i = 0; i < nodeCount; i++) {
-      const node = soft.nodes[i] || {};
-      outputNodeX[i] = Number(node.x) || 0;
-      outputNodeY[i] = Number(node.y) || 0;
-      outputNodeVx[i] = Number(node.vx) || 0;
-      outputNodeVy[i] = Number(node.vy) || 0;
-    }
-    for (let i = 0; i < rigidCount; i++) {
-      const rb = rigidBodies[i] || {};
-      outputRigidX[i] = Number(rb.x) || 0;
-      outputRigidY[i] = Number(rb.y) || 0;
+    if (!fastMode) {
+      const outputNodeX = new Float32Array(nodeCount);
+      const outputNodeY = new Float32Array(nodeCount);
+      const outputNodeVx = new Float32Array(nodeCount);
+      const outputNodeVy = new Float32Array(nodeCount);
+      const outputRigidX = new Float32Array(rigidCount);
+      const outputRigidY = new Float32Array(rigidCount);
+
+      for (let i = 0; i < nodeCount; i++) {
+        const node = soft.nodes[i] || {};
+        outputNodeX[i] = Number(node.x) || 0;
+        outputNodeY[i] = Number(node.y) || 0;
+        outputNodeVx[i] = Number(node.vx) || 0;
+        outputNodeVy[i] = Number(node.vy) || 0;
+      }
+      for (let i = 0; i < rigidCount; i++) {
+        const rb = rigidBodies[i] || {};
+        outputRigidX[i] = Number(rb.x) || 0;
+        outputRigidY[i] = Number(rb.y) || 0;
+      }
+
+      wgslOffload.state.lastInsideCpuReference = {
+        nodeX: outputNodeX,
+        nodeY: outputNodeY,
+        nodeVx: outputNodeVx,
+        nodeVy: outputNodeVy,
+        rigidX: outputRigidX,
+        rigidY: outputRigidY,
+        correctedCount: corrected,
+        source: 'cpu-rigid-inside-authoritative-reference',
+      };
+      wgslOffload.state.lastInsideParity = {
+        maxAbs: 0,
+        meanAbs: 0,
+        comparedCount: nodeCount * 4 + rigidCount * 2,
+        mismatchCount: 0,
+        source: 'cpu-rigid-inside-authoritative-reference',
+        proposalSignature: proposalSignature >>> 0,
+        preparedLayoutSignature: preparedLayoutSignature >>> 0,
+      };
+      wgslOffload.state.lastInsideValidation = 'cpu-reference';
+    } else {
+      wgslOffload.state.lastInsideCpuReference = null;
+      wgslOffload.state.lastInsideParity = {
+        maxAbs: null,
+        meanAbs: null,
+        comparedCount: 0,
+        mismatchCount: 0,
+        source: 'cpu-rigid-inside-authoritative-fast',
+        proposalSignature: proposalSignature >>> 0,
+        preparedLayoutSignature: preparedLayoutSignature >>> 0,
+        validation: 'skipped-cpu-reference',
+      };
+      wgslOffload.state.lastInsideValidation = 'skipped-cpu-reference';
     }
 
-    wgslOffload.state.lastInsideCpuReference = {
-      nodeX: outputNodeX,
-      nodeY: outputNodeY,
-      nodeVx: outputNodeVx,
-      nodeVy: outputNodeVy,
-      rigidX: outputRigidX,
-      rigidY: outputRigidY,
-      correctedCount: corrected,
-      source: 'cpu-rigid-inside-authoritative-reference',
-    };
-    wgslOffload.state.lastInsideParity = {
-      maxAbs: 0,
-      meanAbs: 0,
-      comparedCount: nodeCount * 4 + rigidCount * 2,
-      mismatchCount: 0,
-      source: 'cpu-rigid-inside-authoritative-reference',
-      proposalSignature: proposalSignature >>> 0,
-      preparedLayoutSignature: preparedLayoutSignature >>> 0,
-    };
     wgslOffload.state.lastInsideCorrectionCount = corrected;
     wgslOffload.state.lastAuthoritativeInsideSource = 'cpu-rigid-inside-authoritative';
     wgslOffload.state.lastSourceRoute = 'cpu-rigid-inside-authoritative';
-    wgslOffload.state.lastMode = 'cpu-rigid-inside-authoritative';
+    wgslOffload.state.lastMode = fastMode
+      ? 'cpu-rigid-inside-authoritative-fast'
+      : 'cpu-rigid-inside-authoritative';
   }
 
   return corrected;

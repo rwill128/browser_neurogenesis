@@ -27,8 +27,8 @@ test('rigid-inside gpu-only path publishes deterministic WGSL prep layout + sour
 
   assert.match(
     source,
-    /const rigidInsideNodePolyCandidateWgsl = \/\* wgsl \*\/[\s\S]*node_candidate_count_out\[node_index\] = candidate_count;[\s\S]*dispatchRigidInsideNodeCandidateProposal\([\s\S]*copyBufferToBuffer\([\s\S]*insideNodeCandidateCountOut[\s\S]*insideNodeCandidateCountReadback[\s\S]*lastInsideNodeCandidateCountSource = 'wgsl-rigid-inside-node-candidate-proposal';[\s\S]*lastSourceRoute = 'wgsl-rigid-inside-node-candidate-proposal';/,
-    'expected gpu-only inside-correction path to run a concrete WGSL node/poly candidate proposal stage with readback telemetry and source-route ownership',
+    /const rigidInsideNodePolyCandidateWgsl = \/\* wgsl \*\/[\s\S]*node_candidate_count_out\[node_index\] = candidate_count;[\s\S]*dispatchRigidInsideNodeCandidateProposal\([\s\S]*if \(includeReadbackTelemetry\) \{[\s\S]*copyBufferToBuffer\([\s\S]*insideNodeCandidateCountOut[\s\S]*insideNodeCandidateCountReadback[\s\S]*lastInsideNodeCandidateCountSource = 'wgsl-rigid-inside-node-candidate-proposal';[\s\S]*lastInsideNodeCandidateCountSource = 'wgsl-rigid-inside-node-candidate-proposal-fast';/,
+    'expected gpu-only inside-correction path to run a concrete WGSL node/poly candidate proposal stage with validated readback telemetry and explicit fast-mode no-readback route',
   );
 
   assert.match(
@@ -41,5 +41,33 @@ test('rigid-inside gpu-only path publishes deterministic WGSL prep layout + sour
     source,
     /wgslOffload\.state\.lastInsideCorrectionCount = corrected;[\s\S]*lastAuthoritativeInsideSource = 'cpu-rigid-inside-authoritative';[\s\S]*lastSourceRoute = 'cpu-rigid-inside-authoritative';/,
     'expected explicit authoritative source route to remain CPU while WGSL prep ownership becomes available',
+  );
+});
+
+test('rigid-inside gpu-only pipeline mode exposes explicit standard vs validated vs fast runtime behavior', () => {
+  assert.match(
+    source,
+    /function getGpuOnlyPipelineModeProfile\(offload\) \{[\s\S]*modeProfile === 'gpu-only-fast'[\s\S]*modeProfile === 'gpu-only-validated'[\s\S]*return 'standard';[\s\S]*\}/,
+    'expected rigid-inside path to normalize explicit standard/validated/fast mode profiles',
+  );
+
+  assert.match(
+    source,
+    /const pipelineMode = getGpuOnlyPipelineModeProfile\(wgslOffload\);[\s\S]*const fastMode = isGpuOnlyFastMode\(wgslOffload\);[\s\S]*const validatedMode = isGpuOnlyValidatedMode\(wgslOffload\);[\s\S]*const standardMode = pipelineMode === 'standard';[\s\S]*if \(!standardMode\) \{[\s\S]*dispatchRigidInsidePolyBoundsProbe\(/,
+    'expected standard mode to retain CPU-authoritative baseline reference behavior while validated/fast modes keep WGSL staging dispatches enabled',
+  );
+});
+
+test('rigid-inside gpu-only fast mode skips node-candidate readback and cpu parity snapshots while preserving source-route visibility', () => {
+  assert.match(
+    source,
+    /dispatchRigidInsideNodeCandidateProposal\(\{ offload, prep, proposalSignature, includeReadbackTelemetry = true \}\)[\s\S]*if \(includeReadbackTelemetry\) \{[\s\S]*copyBufferToBuffer\([\s\S]*\}[\s\S]*else \{[\s\S]*lastInsideNodeCandidateCountSource = 'wgsl-rigid-inside-node-candidate-proposal-fast';[\s\S]*lastInsideNodeCandidateValidation = 'skipped-readback-telemetry';/,
+    'expected fast mode candidate branch to skip readback copy/map overhead while keeping explicit fast source-route telemetry',
+  );
+
+  assert.match(
+    source,
+    /if \(!fastMode\) \{[\s\S]*lastInsideCpuReference = \{[\s\S]*source: 'cpu-rigid-inside-authoritative-reference'[\s\S]*\}[\s\S]*\} else \{[\s\S]*lastInsideCpuReference = null;[\s\S]*validation: 'skipped-cpu-reference'[\s\S]*lastInsideValidation = 'skipped-cpu-reference';/,
+    'expected fast mode to bypass CPU reference/parity snapshots while preserving explicit validation + fallback source ownership',
   );
 });

@@ -4,6 +4,34 @@ import { resolveRigidSoftCollisionPassGpuOnly } from '../sim-server/public/runti
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
+function parseNumberList(value, fallback) {
+  const raw = String(value || '').trim();
+  if (!raw) return [...fallback];
+  return raw
+    .split(',')
+    .map((v) => Number(v.trim()))
+    .filter((v) => Number.isFinite(v) && v > 0);
+}
+
+function parseFloatList(value, fallback) {
+  const raw = String(value || '').trim();
+  if (!raw) return [...fallback];
+  return raw
+    .split(',')
+    .map((v) => Number(v.trim()))
+    .filter((v) => Number.isFinite(v) && v >= 0);
+}
+
+function parseSweepList(value) {
+  const allowed = new Set(['scale', 'rigid', 'soft', 'contact']);
+  const raw = String(value || 'scale,rigid,soft,contact').trim();
+  const sweeps = raw
+    .split(',')
+    .map((v) => v.trim().toLowerCase())
+    .filter((v) => allowed.has(v));
+  return sweeps.length > 0 ? sweeps : ['scale'];
+}
+
 function mulberry32(seed) {
   let t = seed >>> 0;
   return () => {
@@ -14,17 +42,46 @@ function mulberry32(seed) {
   };
 }
 
-function makeFixture(scale) {
-  const rand = mulberry32(0xC0FFEE ^ scale);
-  const n = 256;
+function scenarioSeed({ rigidCount, softNodeCount, contactDensity, scenarioKey }) {
+  let hash = 2166136261;
+  const mix = (n) => {
+    hash ^= n >>> 0;
+    hash = Math.imul(hash, 16777619);
+  };
+  mix(rigidCount * 97);
+  mix(softNodeCount * 193);
+  mix(Math.round(contactDensity * 1000) * 389);
+  for (let i = 0; i < scenarioKey.length; i++) mix(scenarioKey.charCodeAt(i) * (i + 17));
+  return hash >>> 0;
+}
+
+function makeFixture({
+  rigidCount,
+  softNodeCount,
+  contactDensity,
+  scenarioKey,
+  gridSize = 256,
+}) {
+  const seed = scenarioSeed({ rigidCount, softNodeCount, contactDensity, scenarioKey });
+  const rand = mulberry32(seed);
+  const n = gridSize;
   const cells = n * n;
+  const center = n * 0.5;
+
+  const contact = clamp(Number(contactDensity) || 0, 0.05, 1.0);
+  const spreadNorm = clamp(1.0 - contact * 0.8, 0.15, 1.0);
+  const rigidSpread = (n - 28) * spreadNorm;
+  const softSpread = (n - 28) * clamp(spreadNorm + 0.1, 0.18, 1.0);
+
   const rigid = [];
-  for (let i = 0; i < scale; i++) {
+  for (let i = 0; i < rigidCount; i++) {
     const mass = 1 + rand() * 4;
-    const r = 1.5 + rand() * 2;
+    const r = 1.4 + rand() * 2.4;
+    const x = clamp(center + (rand() - 0.5) * rigidSpread, 12, n - 12);
+    const y = clamp(center + (rand() - 0.5) * rigidSpread, 12, n - 12);
     rigid.push({
-      x: 12 + rand() * (n - 24),
-      y: 12 + rand() * (n - 24),
+      x,
+      y,
       vx: -0.8 + rand() * 1.6,
       vy: -0.8 + rand() * 1.6,
       omega: -0.08 + rand() * 0.16,
@@ -43,25 +100,43 @@ function makeFixture(scale) {
   }
 
   const soft = {
-    nodes: Array.from({ length: Math.max(24, Math.floor(scale * 0.35)) }, (_, i) => ({
-      id: i,
-      x: 10 + (i % 32) * 6.2,
-      y: 16 + Math.floor(i / 32) * 6.1,
-      vx: 0,
-      vy: 0,
-      r: 1.2,
-      clusterId: i % 8,
-    })),
+    nodes: [],
     springs: [],
   };
-  for (let i = 0; i < soft.nodes.length - 1; i++) {
-    soft.springs.push([i, i + 1, 1, (i % 3 === 0 ? 1 : 0)]);
-  }
 
-  const hybridAttachedByRigid = new Map();
-  for (let i = 0; i < rigid.length; i += 7) {
-    const ni = i % soft.nodes.length;
-    hybridAttachedByRigid.set(i, new Set([ni]));
+  if (softNodeCount > 0) {
+    const side = Math.max(2, Math.ceil(Math.sqrt(softNodeCount)));
+    const spacing = clamp(softSpread / Math.max(2, side - 1), 2.4, 10.0);
+    const startX = center - ((side - 1) * spacing) * 0.5;
+    const startY = center - ((side - 1) * spacing) * 0.5;
+
+    for (let i = 0; i < softNodeCount; i++) {
+      const gx = i % side;
+      const gy = Math.floor(i / side);
+      const jitter = (1.0 - contact) * 2.1;
+      const x = clamp(startX + gx * spacing + (rand() - 0.5) * jitter, 8, n - 8);
+      const y = clamp(startY + gy * spacing + (rand() - 0.5) * jitter, 8, n - 8);
+      soft.nodes.push({
+        id: i,
+        x,
+        y,
+        vx: 0,
+        vy: 0,
+        r: 1.2,
+        clusterId: i % 8,
+      });
+    }
+
+    const blockProb = clamp(0.18 + contact * 0.72, 0.1, 0.95);
+    for (let i = 0; i < soft.nodes.length - 1; i++) {
+      soft.springs.push([i, i + 1, 1, rand() < blockProb ? 1 : 0]);
+      if (i + side < soft.nodes.length) {
+        soft.springs.push([i, i + side, 1, rand() < blockProb ? 1 : 0]);
+      }
+      if (i + side + 1 < soft.nodes.length && (i % side) !== (side - 1) && rand() < 0.5 * contact) {
+        soft.springs.push([i, i + side + 1, 1, rand() < blockProb ? 1 : 0]);
+      }
+    }
   }
 
   const vxField = new Float32Array(cells);
@@ -77,12 +152,19 @@ function makeFixture(scale) {
     n,
     sim: { frame: 17 },
     bodies: { rigid, soft },
-    hybridAttachedByRigid,
     vxField,
     vyField,
     obstacleMask: new Float32Array(cells),
     bodyFeedbackPrevVx: new Float32Array(cells),
     bodyFeedbackPrevVy: new Float32Array(cells),
+    fixtureMeta: {
+      rigidCount,
+      softNodeCount,
+      softSpringCount: soft.springs.length,
+      contactDensity: contact,
+      seed,
+      scenarioKey,
+    },
   };
 }
 
@@ -225,104 +307,308 @@ function baselineRigidRigidPass(rigidBodies) {
   }
 }
 
-function baselineRigidSoftPass(rigidBodies, soft, hybridAttachedByRigid) {
+function baselineRigidSoftPass(rigidBodies, soft) {
   for (let rbi = 0; rbi < rigidBodies.length; rbi++) {
     const rb = rigidBodies[rbi];
-    const attachedNodeSet = hybridAttachedByRigid.get(rbi) || null;
     for (let ni = 0; ni < soft.nodes.length; ni++) {
-      if (attachedNodeSet && attachedNodeSet.has(ni)) continue;
       resolveRigidVsSoftNodeCollision(rb, soft.nodes[ni], null, 0.18);
     }
     for (const [i, j, _rest, edgeBodyMode] of soft.springs) {
       if (edgeBodyMode !== 1) continue;
-      if (attachedNodeSet && (attachedNodeSet.has(i) || attachedNodeSet.has(j))) continue;
       resolveRigidVsSoftEdgeCollision(rb, soft.nodes[i], soft.nodes[j], 0.16);
     }
   }
 }
 
-function runScenario(path, fixture, steps) {
-  const state = structuredClone(fixture);
-  const t0 = performance.now();
-  for (let step = 0; step < steps; step++) {
-    const args = {
-      sim: state.sim,
-      bodies: state.bodies,
-      vxField: state.vxField,
-      vyField: state.vyField,
-      n: state.n,
-      dt: 0.012,
-      dtNorm: 0.82,
-      dragK: 1.1,
-      swimGain: 0.55,
-      localHoneyDrag: (x, y) => 1 + ((Math.sin(x * 0.014) + Math.cos(y * 0.017)) * 0.5 + 0.5) * 2.2,
-      viscosityMotionResponse: (honey, vmaxBase) => ({ damp: Math.max(0.72, 1 - 0.018 * honey), vmax: Math.max(0.4, vmaxBase / (1 + 0.28 * honey)) }),
-      obstacleMask: state.obstacleMask,
-      bodyFeedbackPrevVx: state.bodyFeedbackPrevVx,
-      bodyFeedbackPrevVy: state.bodyFeedbackPrevVy,
-      selfFeedbackSuppression: 0.82,
-      rigidVerticesWorld,
-      sampleFluidForBodyCoupling,
-      applyBounceBoundary,
+const STAGE_KEYS = ['rigidIntegrate', 'rigidRigidCollision', 'rigidSoftCollision'];
+
+function createStageStats() {
+  const stats = {};
+  for (const key of STAGE_KEYS) {
+    stats[key] = {
+      calls: 0,
+      wallMs: 0,
+      cpuMs: 0,
+      gpuWaitMsEstimate: 0,
     };
-
-    if (path === 'gpu-only') {
-      stepRigidBodiesGpuOnly(args);
-      resolveRigidRigidCollisionPassGpuOnly({
-        rigidBodies: state.bodies.rigid,
-        slop: 0.32,
-        contacts: null,
-        iter: 0,
-        phase: 'bench',
-        resolveRigidVsRigidPolygonCollision,
-      });
-      resolveRigidSoftCollisionPassGpuOnly({
-        rigidBodies: state.bodies.rigid,
-        soft: state.bodies.soft,
-        hybridAttachedByRigid: state.hybridAttachedByRigid,
-        resolveRigidVsSoftNodeCollision,
-        resolveRigidVsSoftEdgeCollision,
-        edgeBodyModeBlock: 1,
-        nodeSlop: 0.18,
-        edgeSlop: 0.16,
-      });
-    } else {
-      baselineStepRigid(args);
-      baselineRigidRigidPass(state.bodies.rigid);
-      baselineRigidSoftPass(state.bodies.rigid, state.bodies.soft, state.hybridAttachedByRigid);
-    }
-
-    state.sim.frame += 1;
   }
+  return stats;
+}
+
+function runTimedStage(stageStats, stageKey, fn) {
+  if (!stageStats) return fn();
+  const entry = stageStats[stageKey];
+  const usageStart = process.cpuUsage();
+  const t0 = performance.now();
+  const result = fn();
+  const wallMs = performance.now() - t0;
+  const usage = process.cpuUsage(usageStart);
+  const cpuMs = (usage.user + usage.system) / 1000;
+  entry.calls += 1;
+  entry.wallMs += wallMs;
+  entry.cpuMs += cpuMs;
+  entry.gpuWaitMsEstimate += Math.max(0, wallMs - cpuMs);
+  return result;
+}
+
+function finalizeStageStats(stageStats, steps) {
+  const out = {};
+  for (const key of STAGE_KEYS) {
+    const s = stageStats[key];
+    out[key] = {
+      calls: s.calls,
+      wallMs: s.wallMs,
+      wallMsPerStep: s.wallMs / Math.max(1, steps),
+      cpuMs: s.cpuMs,
+      cpuMsPerStep: s.cpuMs / Math.max(1, steps),
+      gpuWaitMsEstimate: s.gpuWaitMsEstimate,
+      gpuWaitMsEstimatePerStep: s.gpuWaitMsEstimate / Math.max(1, steps),
+    };
+  }
+  return out;
+}
+
+function buildStepArgs(state) {
+  return {
+    sim: state.sim,
+    bodies: state.bodies,
+    vxField: state.vxField,
+    vyField: state.vyField,
+    n: state.n,
+    dt: 0.012,
+    dtNorm: 0.82,
+    dragK: 1.1,
+    swimGain: 0.55,
+    localHoneyDrag: (x, y) => 1 + ((Math.sin(x * 0.014) + Math.cos(y * 0.017)) * 0.5 + 0.5) * 2.2,
+    viscosityMotionResponse: (honey, vmaxBase) => ({
+      damp: Math.max(0.72, 1 - 0.018 * honey),
+      vmax: Math.max(0.4, vmaxBase / (1 + 0.28 * honey)),
+    }),
+    obstacleMask: state.obstacleMask,
+    bodyFeedbackPrevVx: state.bodyFeedbackPrevVx,
+    bodyFeedbackPrevVy: state.bodyFeedbackPrevVy,
+    selfFeedbackSuppression: 0.82,
+    rigidVerticesWorld,
+    sampleFluidForBodyCoupling,
+    applyBounceBoundary,
+  };
+}
+
+function runStep(path, state, args, stageStats = null) {
+  if (path === 'gpu-only') {
+    runTimedStage(stageStats, 'rigidIntegrate', () => stepRigidBodiesGpuOnly(args));
+    runTimedStage(stageStats, 'rigidRigidCollision', () => resolveRigidRigidCollisionPassGpuOnly({
+      rigidBodies: state.bodies.rigid,
+      slop: 0.32,
+      contacts: null,
+      iter: 0,
+      phase: 'bench',
+      resolveRigidVsRigidPolygonCollision,
+    }));
+    runTimedStage(stageStats, 'rigidSoftCollision', () => resolveRigidSoftCollisionPassGpuOnly({
+      rigidBodies: state.bodies.rigid,
+      soft: state.bodies.soft,
+      resolveRigidVsSoftNodeCollision,
+      resolveRigidVsSoftEdgeCollision,
+      edgeBodyModeBlock: 1,
+      nodeSlop: 0.18,
+      edgeSlop: 0.16,
+    }));
+  } else {
+    runTimedStage(stageStats, 'rigidIntegrate', () => baselineStepRigid(args));
+    runTimedStage(stageStats, 'rigidRigidCollision', () => baselineRigidRigidPass(state.bodies.rigid));
+    runTimedStage(stageStats, 'rigidSoftCollision', () => baselineRigidSoftPass(state.bodies.rigid, state.bodies.soft));
+  }
+  state.sim.frame += 1;
+}
+
+function runScenario(path, fixture, { steps, warmupSteps }) {
+  const warmupState = structuredClone(fixture);
+  const warmupArgs = buildStepArgs(warmupState);
+  for (let i = 0; i < warmupSteps; i++) runStep(path, warmupState, warmupArgs, null);
+
+  const state = structuredClone(fixture);
+  const args = buildStepArgs(state);
+  const stageStats = createStageStats();
+
+  const t0 = performance.now();
+  for (let i = 0; i < steps; i++) runStep(path, state, args, stageStats);
   const elapsedMs = performance.now() - t0;
+
+  const stageTimings = finalizeStageStats(stageStats, steps);
+  const stageWallSum = STAGE_KEYS.reduce((sum, key) => sum + stageTimings[key].wallMs, 0);
+  const stageCpuSum = STAGE_KEYS.reduce((sum, key) => sum + stageTimings[key].cpuMs, 0);
+  const stageGpuWaitSum = STAGE_KEYS.reduce((sum, key) => sum + stageTimings[key].gpuWaitMsEstimate, 0);
+
   return {
     elapsedMs,
     msPerStep: elapsedMs / steps,
     stepsPerSec: (steps / elapsedMs) * 1000,
     fpsEquivalent: (steps / elapsedMs) * 1000,
+    steps,
+    warmupSteps,
+    stageTimings,
+    stageTotals: {
+      wallMs: stageWallSum,
+      cpuMs: stageCpuSum,
+      gpuWaitMsEstimate: stageGpuWaitSum,
+      nonStageWallMs: Math.max(0, elapsedMs - stageWallSum),
+    },
   };
 }
 
-const scales = (process.env.SCALES || '25,50,100,200,400').split(',').map((v) => Number(v.trim())).filter((v) => Number.isFinite(v) && v > 0);
+function buildExperiments({
+  scales,
+  rigidSweep,
+  softSweep,
+  contactSweep,
+  baseRigidCount,
+  baseSoftCount,
+  sweeps,
+}) {
+  const experiments = [];
+
+  if (sweeps.includes('scale')) {
+    for (const scale of scales) {
+      experiments.push({
+        sweep: 'scale',
+        id: `scale:${scale}`,
+        rigidCount: scale,
+        softNodeCount: Math.max(24, Math.floor(scale * 0.35)),
+        contactDensity: 0.55,
+      });
+    }
+  }
+
+  if (sweeps.includes('rigid')) {
+    for (const rigidCount of rigidSweep) {
+      experiments.push({
+        sweep: 'rigid',
+        id: `rigid:${rigidCount}`,
+        rigidCount,
+        softNodeCount: baseSoftCount,
+        contactDensity: 0.55,
+      });
+    }
+  }
+
+  if (sweeps.includes('soft')) {
+    for (const softNodeCount of softSweep) {
+      experiments.push({
+        sweep: 'soft',
+        id: `soft:${softNodeCount}`,
+        rigidCount: baseRigidCount,
+        softNodeCount,
+        contactDensity: 0.55,
+      });
+    }
+  }
+
+  if (sweeps.includes('contact')) {
+    for (const density of contactSweep) {
+      const d = clamp(density, 0.05, 1.0);
+      experiments.push({
+        sweep: 'contact',
+        id: `contact:${d.toFixed(2)}`,
+        rigidCount: baseRigidCount,
+        softNodeCount: baseSoftCount,
+        contactDensity: d,
+      });
+    }
+  }
+
+  return experiments;
+}
+
+function stageDeltaSummary(baseline, gpuOnly) {
+  const delta = {};
+  for (const key of STAGE_KEYS) {
+    const b = baseline.stageTimings[key];
+    const g = gpuOnly.stageTimings[key];
+    delta[key] = {
+      wallMsPerStepDelta: g.wallMsPerStep - b.wallMsPerStep,
+      wallMsPerStepDeltaPct: b.wallMsPerStep > 0 ? ((g.wallMsPerStep - b.wallMsPerStep) / b.wallMsPerStep) * 100 : null,
+      cpuMsPerStepDelta: g.cpuMsPerStep - b.cpuMsPerStep,
+      gpuWaitMsEstimatePerStepDelta: g.gpuWaitMsEstimatePerStep - b.gpuWaitMsEstimatePerStep,
+    };
+  }
+  return delta;
+}
+
+const scales = parseNumberList(process.env.SCALES, [25, 50, 100, 200, 400]);
+const rigidSweep = parseNumberList(process.env.RIGID_SWEEP, scales);
+const softSweep = parseNumberList(process.env.SOFT_SWEEP, [24, 48, 96, 192, 384]);
+const contactSweep = parseFloatList(process.env.CONTACT_SWEEP, [0.15, 0.35, 0.55, 0.75, 0.92]);
+const sweeps = parseSweepList(process.env.SWEEPS);
+const fixedSteps = Math.max(4, Number(process.env.FIXED_STEPS || 64) || 64);
+const warmupSteps = Math.max(0, Number(process.env.WARMUP_STEPS || 8) || 8);
+const baseRigidCount = Math.max(1, Number(process.env.BASE_RIGID_COUNT || 100) || 100);
+const baseSoftCount = Math.max(0, Number(process.env.BASE_SOFT_COUNT || 64) || 64);
+
+const experiments = buildExperiments({
+  scales,
+  rigidSweep,
+  softSweep,
+  contactSweep,
+  baseRigidCount,
+  baseSoftCount,
+  sweeps,
+});
+
 const rows = [];
+for (const exp of experiments) {
+  const fixture = makeFixture({
+    rigidCount: exp.rigidCount,
+    softNodeCount: exp.softNodeCount,
+    contactDensity: exp.contactDensity,
+    scenarioKey: exp.id,
+  });
 
-for (const scale of scales) {
-  const fixture = makeFixture(scale);
-  const steps = Math.max(8, Math.round(2200 / scale));
+  const baseline = runScenario('baseline', fixture, { steps: fixedSteps, warmupSteps });
+  const gpuOnly = runScenario('gpu-only', fixture, { steps: fixedSteps, warmupSteps });
 
-  runScenario('baseline', fixture, Math.min(5, steps));
-  runScenario('gpu-only', fixture, Math.min(5, steps));
-
-  const baseline = runScenario('baseline', fixture, steps);
-  const gpuOnly = runScenario('gpu-only', fixture, steps);
   rows.push({
-    scale,
-    steps,
+    ...exp,
+    steps: fixedSteps,
+    warmupSteps,
+    fixture: fixture.fixtureMeta,
     baseline,
     gpuOnly,
     deltaMsPerStepPct: ((gpuOnly.msPerStep - baseline.msPerStep) / baseline.msPerStep) * 100,
     deltaStepsPerSecPct: ((gpuOnly.stepsPerSec - baseline.stepsPerSec) / baseline.stepsPerSec) * 100,
+    stageDelta: stageDeltaSummary(baseline, gpuOnly),
   });
 }
 
-console.log(JSON.stringify({ scales: rows }, null, 2));
+const scaleRows = rows
+  .filter((r) => r.sweep === 'scale')
+  .map((r) => ({
+    scale: r.rigidCount,
+    steps: r.steps,
+    baseline: r.baseline,
+    gpuOnly: r.gpuOnly,
+    deltaMsPerStepPct: r.deltaMsPerStepPct,
+    deltaStepsPerSecPct: r.deltaStepsPerSecPct,
+    stageDelta: r.stageDelta,
+  }));
+
+const output = {
+  meta: {
+    mode: 'scenario-sweep-with-fixed-steps',
+    timing: {
+      perStageCpu: true,
+      perStageGpuWaitEstimate: true,
+      method: 'process.cpuUsage + wall-clock split',
+      note: 'gpuWaitMsEstimate approximates non-CPU stage wall time; this harness does not use WebGPU timestamp queries yet.',
+    },
+    steps: {
+      fixedSteps,
+      warmupSteps,
+    },
+    sweeps,
+  },
+  scales: scaleRows,
+  experiments: rows,
+};
+
+console.log(JSON.stringify(output, null, 2));

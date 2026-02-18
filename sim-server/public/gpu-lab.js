@@ -86,7 +86,15 @@ const GENERATED_MINI_SCENARIOS_URL = '/generated-mini-scenarios.json';
 let generatedMiniScenarios = new Map();
 
 const urlParams = new URLSearchParams(window.location.search || '');
-const EMBED_MODE = urlParams.get('embed') === '1' || urlParams.get('embedded') === '1';
+const EMBED_MODE = (
+  urlParams.get('embed') === '1'
+  || urlParams.get('embedded') === '1'
+  || (
+    window.self !== window.top
+    && urlParams.get('embed') !== '0'
+    && urlParams.get('embedded') !== '0'
+  )
+);
 setRuntimeSolverPath(urlParams.get('solverPath'), { syncUrl: false });
 setRuntimePipelineMode(urlParams.get('pipelineMode'), { syncUrl: false });
 if (EMBED_MODE) {

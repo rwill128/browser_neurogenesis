@@ -163,6 +163,9 @@
     <label style="display:inline-flex;align-items:center;gap:6px" title="Enable/disable severe-collapse (red) stabilization interventions.">
       <input id="enableSevereDeformInterventions" type="checkbox" checked /> Severe interventions (red)
     </label>
+    <label style="display:inline-flex;align-items:center;gap:6px" title="Enable/disable post-collision recovery pass (cluster projection + inside correction + final bounce re-apply) for both baseline and gpu-only solver paths.">
+      <input id="enablePostCollisionRecovery" type="checkbox" checked /> Post-collision recovery
+    </label>
   </div>
 
   <div class="pane-row">
@@ -182,6 +185,6 @@
   </div>
 
   <pre id="out">idle</pre>
-  <script type="module" src="/gpu-lab.js?v=20260217h"></script>
+  <script type="module" src="/gpu-lab.js?v=20260217i"></script>
 </body>
 </html>

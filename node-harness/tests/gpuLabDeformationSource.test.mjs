@@ -337,3 +337,23 @@ test('gpu-lab routes post-collision soft-cluster projection and inside-correctio
     'expected explicit gpu-only post-collision recovery dispatch with baseline fallback branch',
   );
 });
+
+test('gpu-lab gates post-collision recovery pass with shared toggle across baseline and gpu-only paths', () => {
+  assert.match(
+    source,
+    /const enablePostCollisionRecoveryEl = document\.getElementById\('enablePostCollisionRecovery'\);/,
+    'expected post-collision recovery checkbox binding in gpu-lab controls',
+  );
+
+  assert.match(
+    source,
+    /enablePostCollisionRecovery: \(enablePostCollisionRecoveryEl\?\.checked !== false\),/,
+    'expected readControls to publish post-collision recovery toggle',
+  );
+
+  assert.match(
+    source,
+    /const postCollisionRecoveryOn = sim\.controls\?\.enablePostCollisionRecovery !== false;[\s\S]*if \(postCollisionRecoveryOn\) \{[\s\S]*if \(solverPath === 'gpu-only'\) \{/,
+    'expected post-collision recovery execution to be gated for both solver paths',
+  );
+});

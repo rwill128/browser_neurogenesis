@@ -55,6 +55,7 @@ const seedSpringSoftBodiesEl = document.getElementById('seedSpringSoftBodies');
 const spawnMembraneCellsEl = document.getElementById('spawnMembraneCells');
 const enableWarningDeformInterventionsEl = document.getElementById('enableWarningDeformInterventions');
 const enableSevereDeformInterventionsEl = document.getElementById('enableSevereDeformInterventions');
+const enablePostCollisionRecoveryEl = document.getElementById('enablePostCollisionRecovery');
 const runtimeSolverPathEls = Array.from(document.querySelectorAll('input[name="runtimeSolverPath"]'));
 
 const GENERATED_MINI_SCENARIOS_URL = '/generated-mini-scenarios.json';
@@ -177,6 +178,7 @@ function readControls() {
     spawnMembraneCells: !!spawnMembraneCellsEl?.checked,
     enableWarningDeformInterventions: (enableWarningDeformInterventionsEl?.checked !== false),
     enableSevereDeformInterventions: (enableSevereDeformInterventionsEl?.checked !== false),
+    enablePostCollisionRecovery: (enablePostCollisionRecoveryEl?.checked !== false),
     runtimeSolverPath: getRuntimeSolverPath(),
   };
 }
@@ -4167,44 +4169,47 @@ function stepBodiesAndInject(sim, vxField, vyField) {
     for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
   }
 
-  // After collision impulses, redistribute linear/angular momentum across each
-  // soft cluster using explicit COM/inertia-derived rigid projection.
+  // After collision impulses, optionally redistribute linear/angular momentum
+  // across each soft cluster and run inside-correction recovery passes.
   let rigidInsideCorrections = 0;
   let membraneInsideCorrections = 0;
-  if (solverPath === 'gpu-only') {
-    const postCollisionRecovery = applyPostCollisionRecoveryGpuOnly({
-      sim,
-      bodies,
-      soft: s,
-      dtNorm,
-      softMembraneClusterSet,
-      softClusterCollisionLinearProjection: SOFT_CLUSTER_COLLISION_LINEAR_PROJECTION,
-      softClusterCollisionAngularProjection,
-      membraneGainScale: 0.72,
-      computeSoftClusterKinematics,
-      projectNodesTowardClusterRigidMotion,
-      applyRigidInsideCorrectionPass,
-      applyMembraneInsideCorrectionPass,
-      applyBounceBoundary,
-      n,
-      softClusterLoops,
-      hybridAttachedByRigid,
-    });
-    rigidInsideCorrections = postCollisionRecovery.rigidInsideCorrections;
-    membraneInsideCorrections = postCollisionRecovery.membraneInsideCorrections;
-  } else {
-    const postCollisionClusterKinematics = computeSoftClusterKinematics(s.nodes);
-    projectNodesTowardClusterRigidMotion(s.nodes, postCollisionClusterKinematics, {
-      linearGain: SOFT_CLUSTER_COLLISION_LINEAR_PROJECTION * dtNorm,
-      angularGain: softClusterCollisionAngularProjection * dtNorm,
-      membraneClusterSet: softMembraneClusterSet,
-      membraneGainScale: 0.72,
-    });
+  const postCollisionRecoveryOn = sim.controls?.enablePostCollisionRecovery !== false;
+  if (postCollisionRecoveryOn) {
+    if (solverPath === 'gpu-only') {
+      const postCollisionRecovery = applyPostCollisionRecoveryGpuOnly({
+        sim,
+        bodies,
+        soft: s,
+        dtNorm,
+        softMembraneClusterSet,
+        softClusterCollisionLinearProjection: SOFT_CLUSTER_COLLISION_LINEAR_PROJECTION,
+        softClusterCollisionAngularProjection,
+        membraneGainScale: 0.72,
+        computeSoftClusterKinematics,
+        projectNodesTowardClusterRigidMotion,
+        applyRigidInsideCorrectionPass,
+        applyMembraneInsideCorrectionPass,
+        applyBounceBoundary,
+        n,
+        softClusterLoops,
+        hybridAttachedByRigid,
+      });
+      rigidInsideCorrections = postCollisionRecovery.rigidInsideCorrections;
+      membraneInsideCorrections = postCollisionRecovery.membraneInsideCorrections;
+    } else {
+      const postCollisionClusterKinematics = computeSoftClusterKinematics(s.nodes);
+      projectNodesTowardClusterRigidMotion(s.nodes, postCollisionClusterKinematics, {
+        linearGain: SOFT_CLUSTER_COLLISION_LINEAR_PROJECTION * dtNorm,
+        angularGain: softClusterCollisionAngularProjection * dtNorm,
+        membraneClusterSet: softMembraneClusterSet,
+        membraneGainScale: 0.72,
+      });
 
-    rigidInsideCorrections = applyRigidInsideCorrectionPass(bodies, s, hybridAttachedByRigid);
-    membraneInsideCorrections = applyMembraneInsideCorrectionPass(sim, s, softClusterLoops);
-    for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
-    for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
+      rigidInsideCorrections = applyRigidInsideCorrectionPass(bodies, s, hybridAttachedByRigid);
+      membraneInsideCorrections = applyMembraneInsideCorrectionPass(sim, s, softClusterLoops);
+      for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
+      for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
+    }
   }
 
   sim.lastRigidContacts = rigidContactDebug.length > 64 ? rigidContactDebug.slice(0, 64) : rigidContactDebug;
@@ -5722,6 +5727,7 @@ async function stepAndRender() {
         spawnMembraneCells: !!s.controls.spawnMembraneCells,
         warningInterventions: s.controls.enableWarningDeformInterventions !== false,
         severeInterventions: s.controls.enableSevereDeformInterventions !== false,
+        postCollisionRecovery: s.controls.enablePostCollisionRecovery !== false,
         membraneClusters: Array.isArray(s.bodies?.softMembraneClusters) ? s.bodies.softMembraneClusters.length : 0,
         fluidObstacleEdgesNow: obstacleEdgesNow,
         fluidObstacleCellsNow: Number(s?.lastFluidObstacleStats?.blockedCells) || 0,

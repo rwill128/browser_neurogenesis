@@ -4234,6 +4234,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         membraneShapeMemoryIters: MEMBRANE_SHAPE_MEMORY_ITERS,
         membraneShapeMemoryGain: MEMBRANE_SHAPE_MEMORY_GAIN,
         membraneShapeMemoryMaxShiftFrac: MEMBRANE_SHAPE_MEMORY_MAX_SHIFT_FRAC,
+        wgslOffload: {
+          enabled: true,
+          device: sim?.device,
+          state: (sim.softMembraneShapeMemoryWgslState ||= {}),
+        },
       })
       : applySoftMembraneShapeMemoryVelocity(sim, s, softClusterLoops, dtPos))
     : 0;

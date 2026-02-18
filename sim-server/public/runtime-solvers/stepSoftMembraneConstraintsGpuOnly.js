@@ -1,3 +1,171 @@
+const WGSL_WORKGROUP_SIZE = 64;
+const SHAPE_LAYOUT_STRIDE_FLOATS = 11;
+
+const softMembraneShapeMemoryProposalWgsl = /* wgsl */ `
+struct Params {
+  count : f32,
+  dtPos : f32,
+  _pad0 : f32,
+  _pad1 : f32,
+};
+
+@group(0) @binding(0) var<storage, read> layout : array<f32>;
+@group(0) @binding(1) var<storage, read_write> deltaVxOut : array<f32>;
+@group(0) @binding(2) var<storage, read_write> deltaVyOut : array<f32>;
+@group(0) @binding(3) var<uniform> params : Params;
+
+fn finiteOrZero(v : f32) -> f32 {
+  if (v == v && abs(v) < 1e20) {
+    return v;
+  }
+  return 0.0;
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
+  let i = gid.x;
+  if (f32(i) >= params.count) {
+    return;
+  }
+  let base = i * ${SHAPE_LAYOUT_STRIDE_FLOATS}u;
+  let px = finiteOrZero(layout[base + 1u]);
+  let py = finiteOrZero(layout[base + 2u]);
+  let tx = finiteOrZero(layout[base + 3u]);
+  let ty = finiteOrZero(layout[base + 4u]);
+  let corrPos = max(0.0, finiteOrZero(layout[base + 5u]));
+  let maxShift = max(0.0, finiteOrZero(layout[base + 6u]));
+
+  var ex = tx - px;
+  var ey = ty - py;
+  let eLen = sqrt(ex * ex + ey * ey);
+  if (!(eLen == eLen) || eLen <= 1e-7) {
+    deltaVxOut[i] = 0.0;
+    deltaVyOut[i] = 0.0;
+    return;
+  }
+  if (maxShift > 0.0 && eLen > maxShift) {
+    let k = maxShift / max(eLen, 1e-9);
+    ex = ex * k;
+    ey = ey * k;
+  }
+
+  let invDt = 1.0 / max(params.dtPos, 1e-8);
+  deltaVxOut[i] = ex * corrPos * invDt;
+  deltaVyOut[i] = ey * corrPos * invDt;
+}
+`;
+
+function checkFiniteFloat32Array(values) {
+  if (!(values instanceof Float32Array)) {
+    return { allFinite: false, firstBadIndex: -1, length: 0 };
+  }
+  for (let i = 0; i < values.length; i++) {
+    if (!Number.isFinite(values[i])) {
+      return { allFinite: false, firstBadIndex: i, length: values.length };
+    }
+  }
+  return { allFinite: true, firstBadIndex: -1, length: values.length };
+}
+
+function computeShapeMemoryProposalSignature(layout, dtPos) {
+  if (!(layout instanceof Float32Array)) return '';
+  let sum = 0;
+  for (let i = 0; i < layout.length; i += SHAPE_LAYOUT_STRIDE_FLOATS) {
+    sum += Math.fround(layout[i + 3] || 0) * 0.37;
+    sum += Math.fround(layout[i + 4] || 0) * 0.17;
+    sum += Math.fround(layout[i + 5] || 0) * 0.11;
+  }
+  return `${layout.length}|${Math.fround(dtPos)}|${Math.fround(sum)}`;
+}
+
+function ensureSoftMembraneShapeMemoryPipeline(offload) {
+  const state = offload?.state;
+  const device = offload?.device;
+  if (!state || !device) return null;
+  if (!state.shapeMemoryProposalPipelinePromise) {
+    state.shapeMemoryProposalPipelinePromise = device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: {
+        module: device.createShaderModule({ code: softMembraneShapeMemoryProposalWgsl }),
+        entryPoint: 'main',
+      },
+    }).catch((err) => {
+      state.shapeMemoryProposalPipelinePromise = null;
+      throw err;
+    });
+  }
+  return state.shapeMemoryProposalPipelinePromise;
+}
+
+async function dispatchSoftMembraneShapeMemoryProposal(offload, layout, dtPos, signature) {
+  const state = offload?.state;
+  const device = offload?.device;
+  if (!state || !device || !(layout instanceof Float32Array) || layout.length === 0) return false;
+  const count = Math.floor(layout.length / SHAPE_LAYOUT_STRIDE_FLOATS);
+  if (count <= 0) return false;
+
+  const pipeline = await ensureSoftMembraneShapeMemoryPipeline(offload);
+  if (!pipeline) return false;
+
+  const layoutBuffer = device.createBuffer({ size: layout.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  const outBytes = count * Float32Array.BYTES_PER_ELEMENT;
+  const deltaVxBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const deltaVyBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const readVxBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const readVyBuffer = device.createBuffer({ size: outBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const params = new Float32Array([count, dtPos, 0, 0]);
+  const paramBuffer = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
+  device.queue.writeBuffer(layoutBuffer, 0, layout);
+  device.queue.writeBuffer(paramBuffer, 0, params);
+
+  const bindGroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: layoutBuffer } },
+      { binding: 1, resource: { buffer: deltaVxBuffer } },
+      { binding: 2, resource: { buffer: deltaVyBuffer } },
+      { binding: 3, resource: { buffer: paramBuffer } },
+    ],
+  });
+
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(Math.max(1, Math.ceil(count / WGSL_WORKGROUP_SIZE)));
+  pass.end();
+  encoder.copyBufferToBuffer(deltaVxBuffer, 0, readVxBuffer, 0, outBytes);
+  encoder.copyBufferToBuffer(deltaVyBuffer, 0, readVyBuffer, 0, outBytes);
+  device.queue.submit([encoder.finish()]);
+
+  await Promise.all([readVxBuffer.mapAsync(GPUMapMode.READ), readVyBuffer.mapAsync(GPUMapMode.READ)]);
+  const deltaVx = new Float32Array(readVxBuffer.getMappedRange().slice(0));
+  const deltaVy = new Float32Array(readVyBuffer.getMappedRange().slice(0));
+  readVxBuffer.unmap();
+  readVyBuffer.unmap();
+
+  const finiteVx = checkFiniteFloat32Array(deltaVx);
+  const finiteVy = checkFiniteFloat32Array(deltaVy);
+  const finite = { allFinite: finiteVx.allFinite && finiteVy.allFinite, vx: finiteVx, vy: finiteVy };
+  state.lastShapeMemoryProposalFinite = finite;
+  state.lastShapeMemoryProposalSignature = String(signature || '');
+  state.lastShapeMemoryProposalDeltaVx = finite.allFinite ? deltaVx : null;
+  state.lastShapeMemoryProposalDeltaVy = finite.allFinite ? deltaVy : null;
+  state.lastShapeMemoryProposalSource = finite.allFinite ? 'wgsl-shape-memory-proposal' : 'cpu-shape-memory-authoritative-nonfinite';
+  state.lastMode = finite.allFinite ? 'wgsl-shape-memory-proposal' : 'cpu-shape-memory-authoritative';
+  state.lastShapeMemoryProposalDispatchCount = Math.max(1, Math.ceil(count / WGSL_WORKGROUP_SIZE));
+  state.lastShapeMemoryProposalCount = count;
+
+  layoutBuffer.destroy();
+  deltaVxBuffer.destroy();
+  deltaVyBuffer.destroy();
+  readVxBuffer.destroy();
+  readVyBuffer.destroy();
+  paramBuffer.destroy();
+  return finite.allFinite;
+}
+
 function ensureSoftMembraneLoopStateGpuOnly(sim, soft, loops, membraneSet) {
   sim.softMembraneLoopState = sim.softMembraneLoopState || new Map();
   const live = new Set();
@@ -195,9 +363,11 @@ export function applySoftMembraneShapeMemoryVelocityGpuOnly({
   membraneShapeMemoryIters = 2,
   membraneShapeMemoryGain = 0.045,
   membraneShapeMemoryMaxShiftFrac = 0.08,
+  wgslOffload,
 }) {
   if (!(membraneClusterMap instanceof Map) || membraneClusterMap.size === 0) return 0;
 
+  const shapeMemoryLayout = [];
   let touched = 0;
   for (let iter = 0; iter < membraneShapeMemoryIters; iter++) {
     for (const loop of loops || []) {
@@ -261,6 +431,26 @@ export function applySoftMembraneShapeMemoryVelocityGpuOnly({
         const tx = cx + rx * c - ry * sn;
         const ty = cy + rx * sn + ry * c;
 
+        const localWeight = clamp(Number.isFinite(Number(node.shapeMemoryWeight)) ? Number(node.shapeMemoryWeight) : 1, 0, 1);
+        if (localWeight <= 1e-6) continue;
+        const invMass = 1 / Math.max(0.02, Number(node.mass) || 1);
+        const corrPos = shapeMemoryGainApplied * localWeight * invMass;
+
+        const nodeIndex = Number(ids[i]);
+        shapeMemoryLayout.push(
+          Number.isFinite(nodeIndex) ? nodeIndex : -1,
+          px,
+          py,
+          tx,
+          ty,
+          corrPos,
+          maxShift,
+          rx,
+          ry,
+          c,
+          sn,
+        );
+
         let ex = tx - px;
         let ey = ty - py;
         const eLen = Math.hypot(ex, ey);
@@ -271,15 +461,33 @@ export function applySoftMembraneShapeMemoryVelocityGpuOnly({
           ey *= k;
         }
 
-        const localWeight = clamp(Number.isFinite(Number(node.shapeMemoryWeight)) ? Number(node.shapeMemoryWeight) : 1, 0, 1);
-        if (localWeight <= 1e-6) continue;
-        const invMass = 1 / Math.max(0.02, Number(node.mass) || 1);
-        const corrPos = shapeMemoryGainApplied * localWeight * invMass;
         node.vx += (ex * corrPos) / dtPos;
         node.vy += (ey * corrPos) / dtPos;
       }
 
       touched += 1;
+    }
+  }
+
+  if (wgslOffload?.enabled === true && wgslOffload?.state && wgslOffload?.device && shapeMemoryLayout.length > 0) {
+    const layout = Float32Array.from(shapeMemoryLayout);
+    const signature = computeShapeMemoryProposalSignature(layout, dtPos);
+    wgslOffload.state.lastShapeMemoryProposalLayoutBytes = layout.byteLength;
+    wgslOffload.state.lastShapeMemoryProposalSignaturePrepared = signature;
+    const serializedDispatch = (wgslOffload.state.pendingWgslShapeMemoryProposalPromise || Promise.resolve())
+      .catch(() => {})
+      .then(() => dispatchSoftMembraneShapeMemoryProposal(wgslOffload, layout, dtPos, signature))
+      .catch((err) => {
+        wgslOffload.state.lastShapeMemoryProposalError = String(err?.message || err || 'unknown-error');
+        wgslOffload.state.lastShapeMemoryProposalSource = 'cpu-shape-memory-authoritative';
+        wgslOffload.state.lastMode = 'cpu-shape-memory-authoritative';
+      });
+    wgslOffload.state.pendingWgslShapeMemoryProposalPromise = serializedDispatch;
+    if (!wgslOffload.state.lastShapeMemoryProposalSource) {
+      wgslOffload.state.lastShapeMemoryProposalSource = 'cpu-shape-memory-authoritative';
+    }
+    if (!wgslOffload.state.lastMode) {
+      wgslOffload.state.lastMode = 'cpu-shape-memory-authoritative';
     }
   }
 

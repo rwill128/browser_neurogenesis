@@ -1243,8 +1243,19 @@ function computeSoftSpringVelocityProposalSignature({ soft, layout, lambdaCache,
   return `spr-v1-${hash.toString(16)}-${nodeCount}-${springCount}`;
 }
 
+function getGpuOnlyPipelineModeProfile(offload) {
+  const modeProfile = String(offload?.modeProfile || '').trim().toLowerCase();
+  if (modeProfile === 'gpu-only-fast') return 'gpu-only-fast';
+  if (modeProfile === 'gpu-only-validated') return 'gpu-only-validated';
+  return 'standard';
+}
+
 function isGpuOnlyFastMode(wgslOffload) {
-  return String(wgslOffload?.modeProfile || '').trim().toLowerCase() === 'gpu-only-fast';
+  return getGpuOnlyPipelineModeProfile(wgslOffload) === 'gpu-only-fast';
+}
+
+function isGpuOnlyValidatedMode(wgslOffload) {
+  return getGpuOnlyPipelineModeProfile(wgslOffload) === 'gpu-only-validated';
 }
 
 function checkFiniteFloat32Array(values) {
@@ -1305,34 +1316,43 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
   let xpbdIterStart = 0;
 
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
-    // Unblocker for upcoming WGSL XPBD stage: prepare deterministic CSR endpoint
-    // ownership and spring SoA buffers now so the compute stage can run spring
-    // solve + node reduction without atomics changing ownership semantics.
-    const plan = buildSoftSpringXpbdWgslPlan({ soft, skipClusterSet });
-    const layout = buildSoftSpringXpbdWgslLayout({ soft, plan });
-    wgslOffload.state.preparedPlan = plan;
-    wgslOffload.state.preparedLayout = layout;
-    wgslOffload.state.lastPreparedSpringCount = plan.activeSpringCount;
-    wgslOffload.state.lastPreparedEndpointCount = plan.endpointCount;
-    wgslOffload.state.lastPreparedColorCount = Math.max(0, (plan.springColorOffsets?.length || 1) - 1);
-    wgslOffload.state.lastPreparedColorEndpointCount = layout.endpointSpringIndicesByColor.length;
-    wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
-    wgslOffload.state.lastMode = 'cpu-prepared';
-
-    const proposalSignature = computeSoftSpringVelocityProposalSignature({
-      soft,
-      layout,
-      lambdaCache,
-      dtPos,
-      alpha,
-    });
-    wgslOffload.state.lastPreparedProposalSignature = proposalSignature;
-
-    // Concrete WGSL soft-spring stage: consume prior deterministic WGSL velocity
-    // reduction as authoritative node/lambda update when the current frame input
-    // signature matches and parity remains within tolerance.
+    const pipelineMode = getGpuOnlyPipelineModeProfile(wgslOffload);
+    const standardMode = pipelineMode === 'standard';
     const fastMode = isGpuOnlyFastMode(wgslOffload);
-    const cachedProposalReady = wgslOffload.state.enableAuthoritativeVelocityDelta === true
+    const validatedMode = isGpuOnlyValidatedMode(wgslOffload);
+    wgslOffload.state.lastPipelineModeProfile = pipelineMode;
+
+    if (standardMode) {
+      wgslOffload.state.lastMode = 'cpu-standard';
+      wgslOffload.state.lastSourceRoute = 'cpu-standard-authoritative';
+    } else {
+      // Unblocker for upcoming WGSL XPBD stage: prepare deterministic CSR endpoint
+      // ownership and spring SoA buffers now so the compute stage can run spring
+      // solve + node reduction without atomics changing ownership semantics.
+      const plan = buildSoftSpringXpbdWgslPlan({ soft, skipClusterSet });
+      const layout = buildSoftSpringXpbdWgslLayout({ soft, plan });
+      wgslOffload.state.preparedPlan = plan;
+      wgslOffload.state.preparedLayout = layout;
+      wgslOffload.state.lastPreparedSpringCount = plan.activeSpringCount;
+      wgslOffload.state.lastPreparedEndpointCount = plan.endpointCount;
+      wgslOffload.state.lastPreparedColorCount = Math.max(0, (plan.springColorOffsets?.length || 1) - 1);
+      wgslOffload.state.lastPreparedColorEndpointCount = layout.endpointSpringIndicesByColor.length;
+      wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
+      wgslOffload.state.lastMode = 'cpu-prepared';
+
+      const proposalSignature = computeSoftSpringVelocityProposalSignature({
+        soft,
+        layout,
+        lambdaCache,
+        dtPos,
+        alpha,
+      });
+      wgslOffload.state.lastPreparedProposalSignature = proposalSignature;
+
+      // Concrete WGSL soft-spring stage: consume prior deterministic WGSL velocity
+      // reduction as authoritative node/lambda update when the current frame input
+      // signature matches and parity remains within tolerance.
+      const cachedProposalReady = wgslOffload.state.enableAuthoritativeVelocityDelta === true
       && wgslOffload.state.lastVelocityDeltaProposalSignature === proposalSignature
       && (
         wgslOffload.state.lastVelocityDeltaProposalSource === 'wgsl-node-reduction'
@@ -1373,7 +1393,10 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
       wgslOffload.state.lastAuthoritativeProposalSource = wgslOffload.state.lastVelocityDeltaProposalSource || (fastMode ? 'wgsl-node-reduction-fast' : 'wgsl-node-reduction');
       wgslOffload.state.lastAuthoritativeCpuIterStart = authoritativeCpuIterStart;
       wgslOffload.state.lastAuthoritativeResidualCpuIters = Math.max(0, (Number(softXpbdIters) || 0) - authoritativeCpuIterStart);
-      wgslOffload.state.lastMode = 'wgsl-velocity-authoritative';
+      wgslOffload.state.lastMode = fastMode ? 'wgsl-velocity-authoritative-fast' : 'wgsl-velocity-authoritative-validated';
+      wgslOffload.state.lastSourceRoute = fastMode
+        ? 'wgsl-velocity-authoritative-fast'
+        : 'wgsl-velocity-authoritative-validated';
       wgslOffload.state.lastError = null;
     }
 
@@ -1502,12 +1525,18 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
                 wgslOffload.state.lastProbeMode = 'wgsl-probe';
               }
               wgslOffload.state.lastError = null;
-              wgslOffload.state.lastMode = proposalRan ? 'wgsl-velocity-proposal' : 'wgsl-probe';
+              wgslOffload.state.lastMode = proposalRan
+                ? (fastMode ? 'wgsl-velocity-proposal-fast' : (validatedMode ? 'wgsl-velocity-proposal-validated' : 'wgsl-velocity-proposal'))
+                : (fastMode ? 'wgsl-probe-skipped-fast' : 'wgsl-probe');
+              wgslOffload.state.lastSourceRoute = proposalRan
+                ? (fastMode ? 'wgsl-node-reduction-fast' : 'wgsl-node-reduction')
+                : (fastMode ? 'wgsl-probe-skipped-fast' : 'wgsl-probe');
             }
           })
           .catch((err) => {
             wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
             wgslOffload.state.lastMode = 'cpu-fallback';
+            wgslOffload.state.lastSourceRoute = 'cpu-fallback-authoritative';
           })
           .finally(() => {
             if (wgslOffload.state.wgslRunId === runId) {
@@ -1516,6 +1545,7 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
             }
           });
       }
+    }
     }
   }
 

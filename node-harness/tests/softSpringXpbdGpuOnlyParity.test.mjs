@@ -504,6 +504,7 @@ test('soft spring XPBD stores WGSL-prep state while preserving cpu parity output
     clamp,
     wgslOffload: {
       enabled: true,
+      modeProfile: 'gpu-only-validated',
       state: wgslState,
     },
   });
@@ -566,6 +567,7 @@ test('soft spring XPBD WGSL proposal stage runs on gpu-only path while CPU remai
     clamp,
     wgslOffload: {
       enabled: true,
+      modeProfile: 'gpu-only-validated',
       device: createSoftSpringMockWgslDevice(),
       state: wgslState,
     },
@@ -575,7 +577,7 @@ test('soft spring XPBD WGSL proposal stage runs on gpu-only path while CPU remai
 
   assert.deepEqual(Array.from(gpuLambda), Array.from(baselineLambda));
   assert.deepEqual(gpuOnly.nodes, baseline.nodes);
-  assert.equal(wgslState.lastMode, 'wgsl-velocity-proposal');
+  assert.equal(wgslState.lastMode, 'wgsl-velocity-proposal-validated');
   assert.equal(wgslState.lastError, null);
   assert.equal(wgslState.lastProposalSpringCount, 2);
   assert.equal(wgslState.lastProposalDeltaLambdaByColor instanceof Float32Array, true);
@@ -652,6 +654,7 @@ test('soft spring XPBD WGSL authoritative replay applies cached node/lambda prop
   const wgslState = {};
   const offload = {
     enabled: true,
+    modeProfile: 'gpu-only-validated',
     device: createSoftSpringMockWgslDevice(),
     state: wgslState,
   };
@@ -686,7 +689,7 @@ test('soft spring XPBD WGSL authoritative replay applies cached node/lambda prop
 
   assert.equal(replayLambda.some((v) => Math.abs(v || 0) > 1e-8), true);
   assert.equal(replaySoft.nodes.some((n) => Math.abs(n?.vx || 0) > 1e-8 || Math.abs(n?.vy || 0) > 1e-8), true);
-  assert.equal(wgslState.lastMode, 'wgsl-velocity-authoritative');
+  assert.equal(wgslState.lastMode, 'wgsl-velocity-authoritative-validated');
   assert.equal(wgslState.lastAuthoritativeProposalSource, 'wgsl-node-reduction');
   assert.equal(wgslState.lastContributionCountParity?.comparedCount, seed.nodes.length);
   assert.equal(typeof wgslState.lastAuthoritativeProposalSignature, 'string');
@@ -756,7 +759,7 @@ test('soft spring XPBD gpu-only fast authoritative replay skips residual cpu XPB
     wgslOffload: offload,
   });
 
-  assert.equal(wgslState.lastMode, 'wgsl-velocity-authoritative');
+  assert.equal(wgslState.lastMode, 'wgsl-velocity-authoritative-fast');
   assert.equal(wgslState.lastAuthoritativeProposalSource, 'wgsl-node-reduction-fast');
   assert.equal(wgslState.lastAuthoritativeCpuIterStart, SOFT_XPBD_ITERS);
   assert.equal(wgslState.lastAuthoritativeResidualCpuIters, 0);
@@ -796,6 +799,7 @@ test('soft spring XPBD WGSL proposal skips overlapping dispatch while prior read
   const wgslState = {};
   const sharedOffload = {
     enabled: true,
+    modeProfile: 'gpu-only-validated',
     device: createSoftSpringMockWgslDevice({ mapDelayMs: 5 }),
     state: wgslState,
   };
@@ -827,7 +831,7 @@ test('soft spring XPBD WGSL proposal skips overlapping dispatch while prior read
   assert.equal(wgslState.wgslSkippedWhileBusy, 1);
   assert.equal(wgslState.wgslInFlight, false);
   assert.equal(wgslState.lastCompletedWgslRunId, 1);
-  assert.equal(wgslState.lastMode, 'wgsl-velocity-proposal');
+  assert.equal(wgslState.lastMode, 'wgsl-velocity-proposal-validated');
   assert.equal(wgslState.lastError, null);
 });
 

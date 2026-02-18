@@ -269,6 +269,38 @@ function makeDefaultMembraneState() {
   };
 }
 
+test('post-collision recovery parity: records deterministic soft-cluster WGSL source-route fallback when device is unavailable', async () => {
+  const state = makeState();
+  const wgslOffload = { enabled: true, state: {} };
+
+  await applyPostCollisionRecoveryGpuOnly({
+    sim: state.sim,
+    bodies: state.bodies,
+    soft: state.soft,
+    dtNorm: state.dtNorm,
+    softMembraneClusterSet: state.softMembraneClusterSet,
+    softClusterCollisionLinearProjection: state.softClusterCollisionLinearProjection,
+    softClusterCollisionAngularProjection: state.softClusterCollisionAngularProjection,
+    membraneGainScale: 0.72,
+    applyRigidInsideCorrectionPass() {
+      return 0;
+    },
+    applyMembraneInsideCorrectionPass() {
+      return 0;
+    },
+    applyBounceBoundary() {},
+    wgslOffload,
+    n: state.n,
+    softClusterLoops: state.softClusterLoops,
+    hybridAttachedByRigid: state.hybridAttachedByRigid,
+  });
+
+  assert.equal(wgslOffload.state.lastMode, 'cpu-prepared-soft-cluster-kinematics');
+  assert.equal(wgslOffload.state.lastSoftClusterProbeSource, 'cpu-prepared-soft-cluster-kinematics');
+  assert.ok((wgslOffload.state.lastPreparedSoftClusterCount || 0) > 0);
+  assert.ok((wgslOffload.state.lastPreparedSoftClusterLayoutBytes || 0) > 0);
+});
+
 test('post-collision recovery parity: delegates boundary pass to gpu-only collision boundary module when provided', async () => {
   const state = makeState();
   const calls = [];

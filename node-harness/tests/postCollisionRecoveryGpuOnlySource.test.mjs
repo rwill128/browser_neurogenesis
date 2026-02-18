@@ -33,3 +33,23 @@ test('post-collision recovery gpu-only source publishes deterministic soft-clust
     'expected gpu-only post-collision recovery path to persist deterministic soft-cluster prep ownership for next WGSL reduction stage',
   );
 });
+
+test('post-collision recovery gpu-only source dispatches concrete WGSL soft-cluster kinematics probe with source-route telemetry', () => {
+  assert.match(
+    source,
+    /const SOFT_CLUSTER_KINEMATICS_PROBE_WGSL = \/\* wgsl \*\/[\s\S]*@compute @workgroup_size\(\$\{WGSL_WORKGROUP_SIZE\}\)[\s\S]*out_vx_mass\[ci\] = sum_vx_mass;[\s\S]*out_vy_mass\[ci\] = sum_vy_mass;/,
+    'expected concrete WGSL soft-cluster kinematics probe shader for per-cluster mass-weighted sums',
+  );
+
+  assert.match(
+    source,
+    /if \(canUseWgslOffload\(wgslOffload\) && prep\.plan\.clusterCount > 0\) \{[\s\S]*dispatchSoftClusterKinematicsProbe\(wgslOffload, prep\)[\s\S]*lastMode = 'wgsl-soft-cluster-kinematics-probe';[\s\S]*lastSoftClusterProbeSource = 'wgsl-soft-cluster-kinematics-probe';/,
+    'expected gpu-only post-collision recovery to run serialized WGSL soft-cluster probe dispatch and publish source-route ownership',
+  );
+
+  assert.match(
+    source,
+    /state\.lastSoftClusterProbeParity = computeSoftClusterMassParity\(prep\.layout, probe\);/,
+    'expected WGSL soft-cluster probe to persist deterministic CPU-vs-WGSL parity telemetry',
+  );
+});

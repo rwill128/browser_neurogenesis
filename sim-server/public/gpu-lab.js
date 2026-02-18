@@ -4709,13 +4709,18 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
 
   let deform;
   if (solverPath === 'gpu-only') {
-    deform = applySoftDeformationInterventionsGpuOnly({
+    deform = await applySoftDeformationInterventionsGpuOnly({
       sim,
       soft: s,
       softClusterLoops,
       severeInterventionsOn,
       buildSoftDeformationState,
       stabilizeSeverelyDeformedSoftClusters,
+      wgslOffload: {
+        enabled: true,
+        device: sim?.device,
+        state: (sim.softDeformationWgslState ||= {}),
+      },
     });
   } else {
     deform = buildSoftDeformationState(sim, s, softClusterLoops);

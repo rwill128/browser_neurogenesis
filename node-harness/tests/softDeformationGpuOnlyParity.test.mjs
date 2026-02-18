@@ -15,7 +15,7 @@ function runBaseline({ sim, soft, softClusterLoops, severeInterventionsOn, build
   return deform;
 }
 
-test('soft deformation intervention parity: gpu-only orchestration matches baseline severe-collapse restabilization flow', () => {
+test('soft deformation intervention parity: gpu-only orchestration matches baseline severe-collapse restabilization flow', async () => {
   const makeHarness = () => {
     const sim = { frame: 12 };
     const soft = { nodes: [{ x: 1, y: 2 }, { x: 5, y: 6 }] };
@@ -66,7 +66,7 @@ test('soft deformation intervention parity: gpu-only orchestration matches basel
   });
 
   const gpuHarness = makeHarness();
-  const gpuOnly = applySoftDeformationInterventionsGpuOnly({
+  const gpuOnly = await applySoftDeformationInterventionsGpuOnly({
     ...gpuHarness,
     severeInterventionsOn: true,
   });
@@ -75,7 +75,7 @@ test('soft deformation intervention parity: gpu-only orchestration matches basel
   assert.deepEqual(gpuHarness.callLog, baselineHarness.callLog);
 });
 
-test('soft deformation intervention parity: gpu-only path skips severe stabilization when toggle is off', () => {
+test('soft deformation intervention parity: gpu-only path skips severe stabilization when toggle is off', async () => {
   const sim = { frame: 33 };
   const soft = { nodes: [{ x: 0, y: 0 }] };
   const softClusterLoops = [];
@@ -95,7 +95,7 @@ test('soft deformation intervention parity: gpu-only path skips severe stabiliza
     callLog.push('stabilize');
   };
 
-  const result = applySoftDeformationInterventionsGpuOnly({
+  const result = await applySoftDeformationInterventionsGpuOnly({
     sim,
     soft,
     softClusterLoops,
@@ -108,7 +108,7 @@ test('soft deformation intervention parity: gpu-only path skips severe stabiliza
   assert.deepEqual(callLog, ['build']);
 });
 
-test('soft deformation wgsl prep unblocker: deterministic layout/signature and gpu-only state visibility', () => {
+test('soft deformation wgsl prep + authoritative source routing visibility', async () => {
   const sim = { frame: 91 };
   const soft = {
     nodes: [
@@ -136,9 +136,11 @@ test('soft deformation wgsl prep unblocker: deterministic layout/signature and g
   assert.deepEqual(Array.from(prepA.layout.springNodeB), [1, 2]);
   assert.deepEqual(Array.from(prepA.layout.springRest).map((v) => Number(v.toFixed(6))), [1.75, 2.5]);
   assert.deepEqual(Array.from(prepA.layout.springClusterId), [7, 7]);
+  assert.deepEqual(Array.from(prepA.layout.clusterIds), [7, 9]);
+  assert.deepEqual(Array.from(prepA.layout.springClusterIndex), [0, 0]);
 
   const wgslOffload = { enabled: true, state: {} };
-  applySoftDeformationInterventionsGpuOnly({
+  await applySoftDeformationInterventionsGpuOnly({
     sim,
     soft,
     softClusterLoops,
@@ -151,6 +153,7 @@ test('soft deformation wgsl prep unblocker: deterministic layout/signature and g
   assert.equal(wgslOffload.state.lastPreparedSoftDeformationNodeCount, 3);
   assert.equal(wgslOffload.state.lastPreparedSoftDeformationLoopCount, 2);
   assert.equal(wgslOffload.state.lastPreparedSoftDeformationSpringCount, 2);
+  assert.equal(wgslOffload.state.lastPreparedSoftDeformationClusterCount, 2);
   assert.equal(wgslOffload.state.lastPreparedSoftDeformationFrame, 91);
   assert.equal(wgslOffload.state.lastSourceRoute, 'cpu-soft-deformation-authoritative');
   assert.equal(wgslOffload.state.lastMode, 'cpu-soft-deformation-authoritative');

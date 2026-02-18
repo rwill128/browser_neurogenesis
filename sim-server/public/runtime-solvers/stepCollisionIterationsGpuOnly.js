@@ -21,7 +21,7 @@ function buildHybridAttachedByRigidMap(hybrid, rigidCount, softNodeCount) {
   return attachedByRigid;
 }
 
-export function runCollisionIterationsGpuOnly({
+export async function runCollisionIterationsGpuOnly({
   rigidBodies,
   soft,
   hybrid,
@@ -44,6 +44,7 @@ export function runCollisionIterationsGpuOnly({
   resolveCircleCollision,
   resolveSoftNodeVsSoftEdgeCollision,
   applyBounceBoundary,
+  wgslOffload,
 }) {
   const rigid = Array.isArray(rigidBodies) ? rigidBodies : [];
   const softBody = soft || { nodes: [], springs: [] };
@@ -53,6 +54,8 @@ export function runCollisionIterationsGpuOnly({
     rigid.length,
     Array.isArray(softBody.nodes) ? softBody.nodes.length : 0,
   );
+
+  let boundaryRuntime = { mode: 'cpu', reason: 'not-run' };
 
   for (let iter = 0; iter < collisionIterations; iter++) {
     resolveRigidRigidCollisionPassGpuOnly({
@@ -91,15 +94,16 @@ export function runCollisionIterationsGpuOnly({
       resolveRigidVsRigidPolygonCollision,
     });
 
-    applyCollisionBoundaryPassGpuOnly({
+    boundaryRuntime = (await applyCollisionBoundaryPassGpuOnly({
       rigidBodies: rigid,
       soft: softBody,
       n,
       rigidBounce,
       softBounce,
       applyBounceBoundary,
-    });
+      wgslOffload,
+    })) || { mode: 'cpu-fallback', reason: 'unknown' };
   }
 
-  return { hybridAttachedByRigid };
+  return { hybridAttachedByRigid, boundaryRuntime };
 }

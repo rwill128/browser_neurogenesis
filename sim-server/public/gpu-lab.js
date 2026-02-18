@@ -4303,7 +4303,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   let hybridAttachedByRigid;
 
   if (solverPath === 'gpu-only') {
-    const collisionResult = runCollisionIterationsGpuOnly({
+    const collisionResult = await runCollisionIterationsGpuOnly({
       rigidBodies: bodies.rigid,
       soft: s,
       hybrid: bodies.hybrid || [],
@@ -4326,9 +4326,16 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       resolveCircleCollision,
       resolveSoftNodeVsSoftEdgeCollision,
       applyBounceBoundary,
+      wgslOffload: {
+        enabled: true,
+        device: sim?.device,
+        state: (sim.collisionBoundaryWgslState ||= {}),
+      },
     });
     hybridAttachedByRigid = collisionResult.hybridAttachedByRigid;
+    sim.collisionBoundaryRuntime = collisionResult.boundaryRuntime || { mode: 'cpu-fallback', reason: 'unknown' };
   } else {
+    sim.collisionBoundaryRuntime = { mode: 'cpu-baseline', reason: 'baseline-path' };
     hybridAttachedByRigid = new Map();
     for (const h of (bodies.hybrid || [])) {
       const ri = Number(h?.rigidIndex) | 0;

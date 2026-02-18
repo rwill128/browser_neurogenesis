@@ -90,7 +90,7 @@ function applyBounceBoundaryStub(body, n, bounce) {
   }
 }
 
-function runPreviousInlineGpuOnlyOrchestration(state) {
+async function runPreviousInlineGpuOnlyOrchestration(state) {
   const hybridAttachedByRigid = new Map();
   for (const h of state.hybrid || []) {
     const ri = Number(h?.rigidIndex) | 0;
@@ -139,7 +139,7 @@ function runPreviousInlineGpuOnlyOrchestration(state) {
       resolveRigidVsRigidPolygonCollision: resolveRigidVsRigidPolygonCollisionStub,
     });
 
-    applyCollisionBoundaryPassGpuOnly({
+    await applyCollisionBoundaryPassGpuOnly({
       rigidBodies: state.rigidBodies,
       soft: state.soft,
       n: state.n,
@@ -158,15 +158,15 @@ function serializeHybridMap(map) {
     .sort((a, b) => a[0] - b[0]);
 }
 
-test('collision iteration parity: gpu-only orchestrator matches prior inline collision stepping schedule', () => {
+test('collision iteration parity: gpu-only orchestrator matches prior inline collision stepping schedule', async () => {
   const fixture = makeFixture();
   const baseline = cloneFixture(fixture);
   const gpuOnly = cloneFixture(fixture);
 
-  const baselineResult = runPreviousInlineGpuOnlyOrchestration(baseline);
+  const baselineResult = await runPreviousInlineGpuOnlyOrchestration(baseline);
 
   const rigidContactDebug = [];
-  const gpuOnlyResult = runCollisionIterationsGpuOnly({
+  const gpuOnlyResult = await runCollisionIterationsGpuOnly({
     rigidBodies: gpuOnly.rigidBodies,
     soft: gpuOnly.soft,
     hybrid: gpuOnly.hybrid,

@@ -21,6 +21,7 @@ const tests = [
   'node-harness/tests/softSpringXpbdGpuOnlySource.test.mjs',
   'node-harness/tests/softAreaXpbdGpuOnlyParity.test.mjs',
   'node-harness/tests/softAreaXpbdGpuOnlySource.test.mjs',
+  'node-harness/tests/bodyFluidInjectionGpuOnlySource.test.mjs',
   'node-harness/tests/gpuLabDeformationSource.test.mjs',
   'node-harness/tests/miniScenarioWatchdogSource.test.mjs',
 ];

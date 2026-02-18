@@ -124,6 +124,104 @@ function buildBodyFluidInjectionWgslPrep({
   };
 }
 
+function buildBodyFluidInjectionGatherLayout({
+  n,
+  layout,
+  feedbackK,
+  fluidCouplingComponentLimit,
+}) {
+  const pointCount = Number(layout?.pointX?.length) || 0;
+  const cellCount = Math.max(0, (Number(n) || 0) * (Number(n) || 0));
+  const couplingLimitRaw = Number(fluidCouplingComponentLimit);
+  const couplingLimit = Number.isFinite(couplingLimitRaw)
+    ? clamp(couplingLimitRaw, 0.25, 48)
+    : 12;
+
+  const pointRelX = new Float32Array(pointCount);
+  const pointRelY = new Float32Array(pointCount);
+  const pointScale = new Float32Array(pointCount);
+  const pointRadius = new Float32Array(pointCount);
+
+  const perCell = Array.from({ length: cellCount }, () => []);
+
+  for (let i = 0; i < pointCount; i++) {
+    const px = Number(layout.pointX[i]) || 0;
+    const py = Number(layout.pointY[i]) || 0;
+    const pvx = Number(layout.pointVx[i]) || 0;
+    const pvy = Number(layout.pointVy[i]) || 0;
+    const localFluidX = Number(layout.localFluidX[i]) || 0;
+    const localFluidY = Number(layout.localFluidY[i]) || 0;
+    const swimInjectX = Number(layout.swimInjectX[i]) || 0;
+    const swimInjectY = Number(layout.swimInjectY[i]) || 0;
+    const mass = Number(layout.pointMass[i]) || 0;
+    const momentumScale = clamp(Number(layout.pointMomentumScale[i]), 0, 1);
+    const radius = Math.max(0.4, Number(layout.pointRadius[i]) || 0.4);
+
+    const relX = clampComponent(pvx - localFluidX + swimInjectX, couplingLimit);
+    const relY = clampComponent(pvy - localFluidY + swimInjectY, couplingLimit);
+    const scaleRaw = feedbackK * Math.max(0.1, mass) * momentumScale;
+    const scale = Number.isFinite(scaleRaw) ? clamp(scaleRaw, 0, couplingLimit) : 0;
+
+    pointRelX[i] = relX;
+    pointRelY[i] = relY;
+    pointScale[i] = scale;
+    pointRadius[i] = radius;
+
+    if (scale <= 0 || !Number.isFinite(px) || !Number.isFinite(py)) continue;
+
+    const minX = Math.max(0, Math.floor(px - radius));
+    const maxX = Math.min(n - 1, Math.ceil(px + radius));
+    const minY = Math.max(0, Math.floor(py - radius));
+    const maxY = Math.min(n - 1, Math.ceil(py + radius));
+
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        const dx = x - px;
+        const dy = y - py;
+        const d = Math.hypot(dx, dy);
+        if (d > radius) continue;
+        const w = 1 - d / radius;
+        const idx = y * n + x;
+        perCell[idx].push({ pointIndex: i, weight: w });
+      }
+    }
+  }
+
+  const cellOffsets = new Uint32Array(cellCount + 1);
+  let totalContrib = 0;
+  for (let i = 0; i < cellCount; i++) {
+    cellOffsets[i] = totalContrib;
+    totalContrib += perCell[i].length;
+  }
+  cellOffsets[cellCount] = totalContrib;
+
+  const contribPointIndex = new Uint32Array(totalContrib);
+  const contribWeight = new Float32Array(totalContrib);
+  let write = 0;
+  for (let cell = 0; cell < cellCount; cell++) {
+    const bucket = perCell[cell];
+    for (let j = 0; j < bucket.length; j++) {
+      contribPointIndex[write] = bucket[j].pointIndex;
+      contribWeight[write] = bucket[j].weight;
+      write += 1;
+    }
+  }
+
+  return {
+    pointRelX,
+    pointRelY,
+    pointScale,
+    pointRadius,
+    cellOffsets,
+    contribPointIndex,
+    contribWeight,
+    contributionCount: totalContrib,
+    byteLength:
+      pointRelX.byteLength + pointRelY.byteLength + pointScale.byteLength + pointRadius.byteLength
+      + cellOffsets.byteLength + contribPointIndex.byteLength + contribWeight.byteLength,
+  };
+}
+
 export function applyBodyFluidInjectionGpuOnly({
   sim,
   bodies,
@@ -215,15 +313,25 @@ export function applyBodyFluidInjectionGpuOnly({
   });
 
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
+    const gatherLayout = buildBodyFluidInjectionGatherLayout({
+      n,
+      layout,
+      feedbackK,
+      fluidCouplingComponentLimit: couplingLimit,
+    });
+
     wgslOffload.state.preparedPlan = plan;
     wgslOffload.state.preparedLayout = layout;
+    wgslOffload.state.preparedGatherLayout = gatherLayout;
     wgslOffload.state.lastPreparedRigidCount = plan.rigidCount;
     wgslOffload.state.lastPreparedSoftCount = plan.softNodeCount;
     wgslOffload.state.lastPreparedPointCount = plan.pointCount;
     wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
+    wgslOffload.state.lastPreparedGatherBytes = gatherLayout.byteLength;
+    wgslOffload.state.lastPreparedGatherContributionCount = gatherLayout.contributionCount;
     // Blocker for immediate WGSL dispatch: this stage writes overlapping splat
-    // circles into shared float fields, which needs two-pass gather/reduction to
-    // avoid atomics-on-float races. Keep cpu application deterministic for now.
+    // circles into shared float fields. Gather layout now exists for a deterministic
+    // per-cell reduction pass, but the reduction shader itself is still pending.
     wgslOffload.state.lastMode = 'cpu-prepared';
   }
 

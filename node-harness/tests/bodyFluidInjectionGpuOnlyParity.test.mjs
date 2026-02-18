@@ -118,7 +118,18 @@ test('body fluid injection gpu-only keeps cpu outputs stable while publishing wg
   assert.equal(state.lastPreparedSoftCount, soft.nodes.length);
   assert.equal(state.lastPreparedPointCount, bodies.rigid.length + soft.nodes.length);
   assert.ok((state.lastPreparedLayoutBytes || 0) > 0, 'expected prepared layout byte footprint to be tracked');
+  assert.ok((state.lastPreparedGatherBytes || 0) > 0, 'expected prepared gather-layout footprint to be tracked');
+  assert.ok((state.lastPreparedGatherContributionCount || 0) > 0, 'expected gather layout to include at least one contribution');
   assert.equal(state.preparedLayout?.pointX instanceof Float32Array, true);
   assert.equal(state.preparedLayout?.pointVx instanceof Float32Array, true);
   assert.equal(state.preparedLayout?.pointX?.length, bodies.rigid.length + soft.nodes.length);
+  assert.equal(state.preparedGatherLayout?.cellOffsets instanceof Uint32Array, true);
+  assert.equal(state.preparedGatherLayout?.contribPointIndex instanceof Uint32Array, true);
+  assert.equal(state.preparedGatherLayout?.contribWeight instanceof Float32Array, true);
+  assert.equal(state.preparedGatherLayout?.cellOffsets?.length, (n * n) + 1);
+  assert.equal(
+    state.preparedGatherLayout?.contribPointIndex?.length,
+    state.preparedGatherLayout?.contribWeight?.length,
+    'expected gather index/weight streams to stay aligned',
+  );
 });

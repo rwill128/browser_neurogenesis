@@ -312,8 +312,9 @@ function hashSoftNodeEdgeCandidateTriples(triples) {
 }
 
 function buildSoftNodeEdgeCandidateLayout({ nodes, springs, edgeBodyModeBlock }) {
-  const triples = [];
-  for (let ni = 0; ni < nodes.length; ni++) {
+  const nodeCount = Number(nodes?.length) || 0;
+  const perNodePairs = Array.from({ length: nodeCount }, () => []);
+  for (let ni = 0; ni < nodeCount; ni++) {
     const node = nodes[ni];
     for (const [i, j, _rest, edgeBodyMode] of springs) {
       if (edgeBodyMode !== edgeBodyModeBlock) continue;
@@ -322,14 +323,50 @@ function buildSoftNodeEdgeCandidateLayout({ nodes, springs, edgeBodyModeBlock })
       const b = nodes[j];
       if (!a || !b) continue;
       if (a.clusterId === node.clusterId && b.clusterId === node.clusterId) continue;
-      triples.push(ni >>> 0, i >>> 0, j >>> 0);
+      perNodePairs[ni].push([i >>> 0, j >>> 0]);
     }
   }
-  const packed = Uint32Array.from(triples);
+
+  const nodeOffsets = new Uint32Array(nodeCount + 1);
+  let pairCount = 0;
+  for (let ni = 0; ni < nodeCount; ni++) {
+    nodeOffsets[ni] = pairCount;
+    pairCount += perNodePairs[ni].length;
+  }
+  nodeOffsets[nodeCount] = pairCount;
+
+  const edgeNodeA = new Uint32Array(pairCount);
+  const edgeNodeB = new Uint32Array(pairCount);
+  const triples = new Uint32Array(pairCount * 3);
+  let write = 0;
+  for (let ni = 0; ni < nodeCount; ni++) {
+    const bucket = perNodePairs[ni];
+    for (let k = 0; k < bucket.length; k++) {
+      const [i, j] = bucket[k];
+      edgeNodeA[write] = i;
+      edgeNodeB[write] = j;
+      const base = write * 3;
+      triples[base + 0] = ni >>> 0;
+      triples[base + 1] = i;
+      triples[base + 2] = j;
+      write += 1;
+    }
+  }
+
+  let signature = hashSoftNodeEdgeCandidateTriples(triples);
+  signature ^= hashSoftNodeEdgeCandidateTriples(nodeOffsets);
+  signature = Math.imul(signature, 0x01000193) >>> 0;
+  signature ^= hashSoftNodeEdgeCandidateTriples(edgeNodeA);
+  signature = Math.imul(signature, 0x01000193) >>> 0;
+  signature ^= hashSoftNodeEdgeCandidateTriples(edgeNodeB);
+
   return {
-    packed,
-    pairCount: Math.floor(packed.length / 3),
-    signature: hashSoftNodeEdgeCandidateTriples(packed),
+    packed: triples,
+    pairCount,
+    nodeOffsets,
+    edgeNodeA,
+    edgeNodeB,
+    signature: signature >>> 0,
   };
 }
 
@@ -686,6 +723,9 @@ export async function resolveSoftSoftCollisionPassGpuOnly({
     state.lastSoftNodeEdgeCandidatePairCount = nodeEdgeLayout.pairCount;
     state.lastSoftNodeEdgeCandidateLayoutSignature = nodeEdgeLayout.signature >>> 0;
     state.lastSoftNodeEdgeCandidatePacked = nodeEdgePacked;
+    state.lastSoftNodeEdgeCandidateNodeOffsets = nodeEdgeLayout.nodeOffsets;
+    state.lastSoftNodeEdgeCandidateEdgeNodeA = nodeEdgeLayout.edgeNodeA;
+    state.lastSoftNodeEdgeCandidateEdgeNodeB = nodeEdgeLayout.edgeNodeB;
     state.lastSoftNodeEdgeCollisionSource = nodeEdgeSource;
     state.lastSoftNodeEdgeNextStage = nodeEdgeSource.startsWith('wgsl-')
       ? nodeEdgeSource

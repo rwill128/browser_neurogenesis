@@ -72,5 +72,11 @@ test('gpu-only soft collision pass matches baseline soft-soft collision visitati
   assert.equal(wgslOffload.state.lastSoftNodeEdgeCandidateLayoutSource, 'cpu-soft-node-edge-candidate-layout');
   assert.equal(wgslOffload.state.lastSoftNodeEdgeCandidatePairCount, baselineCalls.nodeEdge.length);
   assert.ok(wgslOffload.state.lastSoftNodeEdgeCandidateLayoutSignature > 0);
+  assert.ok(wgslOffload.state.lastSoftNodeEdgeCandidateNodeOffsets instanceof Uint32Array);
+  assert.equal(wgslOffload.state.lastSoftNodeEdgeCandidateNodeOffsets.length, gpuSoft.nodes.length + 1);
+  assert.ok(wgslOffload.state.lastSoftNodeEdgeCandidateEdgeNodeA instanceof Uint32Array);
+  assert.ok(wgslOffload.state.lastSoftNodeEdgeCandidateEdgeNodeB instanceof Uint32Array);
+  assert.equal(wgslOffload.state.lastSoftNodeEdgeCandidateEdgeNodeA.length, baselineCalls.nodeEdge.length);
+  assert.equal(wgslOffload.state.lastSoftNodeEdgeCandidateEdgeNodeB.length, baselineCalls.nodeEdge.length);
   assert.equal(wgslOffload.state.lastSoftNodeEdgeNextStage, 'wgsl-soft-node-edge-collision-pending');
 });

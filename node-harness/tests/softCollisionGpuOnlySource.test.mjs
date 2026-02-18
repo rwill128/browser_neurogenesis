@@ -21,4 +21,7 @@ test('soft collision gpu-only source builds deterministic soft node-edge candida
   assert.match(src, /cpu-soft-node-edge-fallback-nonfinite/);
   assert.match(src, /cpu-soft-node-edge-fallback-error/);
   assert.match(src, /lastSoftNodeEdgeCandidateLayoutSignature/);
+  assert.match(src, /lastSoftNodeEdgeCandidateNodeOffsets/);
+  assert.match(src, /lastSoftNodeEdgeCandidateEdgeNodeA/);
+  assert.match(src, /lastSoftNodeEdgeCandidateEdgeNodeB/);
 });

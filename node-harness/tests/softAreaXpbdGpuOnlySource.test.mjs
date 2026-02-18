@@ -36,7 +36,13 @@ test('soft area XPBD gpu-only module publishes deterministic WGSL-prepared layou
 
   assert.match(
     areaSource,
-    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*dispatchSoftAreaWgslProbe\(\{ sim, soft, offload: wgslOffload, plan, dtPos \}\)[\s\S]*lastMode = 'wgsl-probe'/,
-    'expected gpu-only soft area pass to dispatch a concrete WGSL probe stage while retaining CPU-authoritative fallback',
+    /if \(canUseWgslOffload\(wgslOffload\)\) \{[\s\S]*Promise\.all\(\[[\s\S]*dispatchSoftAreaWgslProbe\(\{ sim, soft, offload: wgslOffload, plan, dtPos \}\)[\s\S]*dispatchSoftAreaWgslLambdaProposal\(\{ soft, offload: wgslOffload, plan, dtPos, alpha \}\)[\s\S]*lastMode = proposalRan \? 'wgsl-proposal' : 'wgsl-probe'/,
+    'expected gpu-only soft area pass to dispatch WGSL probe + lambda proposal stages while retaining CPU-authoritative fallback',
+  );
+
+  assert.match(
+    areaSource,
+    /copyBufferToBuffer\(state\.areaLambdaDeltaOut, 0, state\.areaLambdaDeltaReadback, 0, bytes\)[\s\S]*copyBufferToBuffer\(state\.areaLambdaNextOut, 0, state\.areaLambdaNextReadback, 0, bytes\)[\s\S]*lastAreaProposalDeltaLambdaByCluster[\s\S]*lastAreaProposalLambdaNextByCluster[\s\S]*lastAreaProposalAbsDeltaMean[\s\S]*lastAreaProposalAbsDeltaMax/,
+    'expected WGSL area lambda proposal stage to read back deterministic per-cluster lambda telemetry for upcoming reduction offload',
   );
 });

@@ -75,6 +75,182 @@ function applySoftAreaXPBDVelocityBaseline(sim, soft, loops, dtPos, stiffnessSca
   }
 }
 
+function createSoftAreaMockWgslDevice() {
+  const storage = new WeakMap();
+
+  function ensure(buffer, size) {
+    const current = storage.get(buffer);
+    if (!current || current.byteLength < size) storage.set(buffer, new ArrayBuffer(size));
+    return storage.get(buffer);
+  }
+
+  function readU32(buffer, count) {
+    return new Uint32Array(ensure(buffer, count * 4).slice(0, count * 4));
+  }
+
+  function readF32(buffer, count) {
+    return new Float32Array(ensure(buffer, count * 4).slice(0, count * 4));
+  }
+
+  function writeF32(buffer, values) {
+    const data = ensure(buffer, values.byteLength);
+    new Uint8Array(data).set(new Uint8Array(values.buffer, values.byteOffset, values.byteLength));
+  }
+
+  return {
+    createShaderModule() { return {}; },
+    async createComputePipelineAsync() {
+      return { getBindGroupLayout() { return {}; } };
+    },
+    createBuffer({ size }) {
+      const buf = {
+        size,
+        destroy() {},
+        mapAsync: async () => {},
+        getMappedRange: (offset = 0, len = size) => ensure(buf, size).slice(offset, offset + len),
+        unmap() {},
+      };
+      ensure(buf, size);
+      return buf;
+    },
+    createBindGroup({ entries }) {
+      const map = new Map(entries.map((entry) => [entry.binding, entry.resource.buffer]));
+      return { __buffers: map };
+    },
+    createCommandEncoder() {
+      const ops = [];
+      return {
+        beginComputePass() {
+          const pass = { bindGroup: null };
+          return {
+            setPipeline() {},
+            setBindGroup(_index, bindGroup) { pass.bindGroup = bindGroup; },
+            dispatchWorkgroups() {},
+            end() { ops.push({ type: 'compute', pass }); },
+          };
+        },
+        copyBufferToBuffer(src, srcOffset, dst, dstOffset, size) {
+          ops.push({ type: 'copy', src, srcOffset, dst, dstOffset, size });
+        },
+        finish() { return ops; },
+      };
+    },
+    queue: {
+      writeBuffer(buffer, offset, data) {
+        const bytes = data instanceof ArrayBuffer
+          ? new Uint8Array(data)
+          : new Uint8Array(data.buffer, data.byteOffset || 0, data.byteLength || data.length);
+        const target = ensure(buffer, offset + bytes.byteLength);
+        new Uint8Array(target).set(bytes, offset);
+      },
+      submit(commandsList) {
+        for (const commands of commandsList) {
+          for (const cmd of commands) {
+            if (cmd.type === 'compute') {
+              const buffers = cmd.pass.bindGroup.__buffers;
+              const paramsBuf = ensure(buffers.get(0), 16);
+              const paramsU32 = new Uint32Array(paramsBuf);
+              const paramsF32 = new Float32Array(paramsBuf);
+              const nodeCount = paramsU32[0] || 0;
+              const clusterCount = paramsU32[1] || 0;
+              const dtPos = paramsF32[2] || 0;
+
+              const nodeX = readF32(buffers.get(1), nodeCount);
+              const nodeY = readF32(buffers.get(2), nodeCount);
+              const nodeVX = readF32(buffers.get(3), nodeCount);
+              const nodeVY = readF32(buffers.get(4), nodeCount);
+              const offsets = readU32(buffers.get(5), clusterCount + 1);
+              const endpointCount = offsets[clusterCount] || 0;
+              const nodeIdx = readU32(buffers.get(6), endpointCount);
+
+              if (buffers.has(11)) {
+                const invMass = readF32(buffers.get(7), endpointCount);
+                const restArea = readF32(buffers.get(8), clusterCount);
+                const lambdaPrev = readF32(buffers.get(9), clusterCount);
+                const alpha = paramsF32[3] || 0;
+                const deltaOut = new Float32Array(clusterCount);
+                const nextOut = new Float32Array(clusterCount);
+
+                for (let ci = 0; ci < clusterCount; ci++) {
+                  const start = offsets[ci];
+                  const end = offsets[ci + 1];
+                  if (end <= start + 1) {
+                    nextOut[ci] = lambdaPrev[ci];
+                    continue;
+                  }
+                  let twiceArea = 0;
+                  let sumWGrad2 = 0;
+                  for (let ei = start; ei < end; ei++) {
+                    const ni = nodeIdx[ei];
+                    const nj = nodeIdx[(ei + 1) < end ? (ei + 1) : start];
+                    if (ni >= nodeCount || nj >= nodeCount) continue;
+                    const ax = nodeX[ni] + nodeVX[ni] * dtPos;
+                    const ay = nodeY[ni] + nodeVY[ni] * dtPos;
+                    const bx = nodeX[nj] + nodeVX[nj] * dtPos;
+                    const by = nodeY[nj] + nodeVY[nj] * dtPos;
+                    twiceArea += ax * by - bx * ay;
+
+                    const pi = nodeIdx[ei > start ? (ei - 1) : (end - 1)];
+                    if (pi >= nodeCount) continue;
+                    const px = nodeX[pi] + nodeVX[pi] * dtPos;
+                    const py = nodeY[pi] + nodeVY[pi] * dtPos;
+                    const nx = bx;
+                    const ny = by;
+                    const gx = 0.5 * (ny - py);
+                    const gy = 0.5 * (px - nx);
+                    sumWGrad2 += invMass[ei] * (gx * gx + gy * gy);
+                  }
+
+                  if (sumWGrad2 <= 1e-10) {
+                    nextOut[ci] = lambdaPrev[ci];
+                    continue;
+                  }
+
+                  const area = 0.5 * twiceArea;
+                  const C = area - restArea[ci];
+                  const prev = lambdaPrev[ci];
+                  let dl = (-C - alpha * prev) / (sumWGrad2 + alpha);
+                  dl = Math.max(-2.0, Math.min(2.0, dl));
+                  const next = Math.max(-20, Math.min(20, prev + dl));
+                  deltaOut[ci] = next - prev;
+                  nextOut[ci] = next;
+                }
+
+                writeF32(buffers.get(10), deltaOut);
+                writeF32(buffers.get(11), nextOut);
+              } else {
+                const out = new Float32Array(clusterCount);
+                for (let ci = 0; ci < clusterCount; ci++) {
+                  const start = offsets[ci];
+                  const end = offsets[ci + 1];
+                  if (end <= start + 1) continue;
+                  let twiceArea = 0;
+                  for (let ei = start; ei < end; ei++) {
+                    const ni = nodeIdx[ei];
+                    const nj = nodeIdx[(ei + 1) < end ? (ei + 1) : start];
+                    if (ni >= nodeCount || nj >= nodeCount) continue;
+                    const ax = nodeX[ni] + nodeVX[ni] * dtPos;
+                    const ay = nodeY[ni] + nodeVY[ni] * dtPos;
+                    const bx = nodeX[nj] + nodeVX[nj] * dtPos;
+                    const by = nodeY[nj] + nodeVY[nj] * dtPos;
+                    twiceArea += ax * by - bx * ay;
+                  }
+                  out[ci] = 0.5 * twiceArea;
+                }
+                writeF32(buffers.get(7), out);
+              }
+            } else if (cmd.type === 'copy') {
+              const src = ensure(cmd.src, cmd.srcOffset + cmd.size);
+              const dst = ensure(cmd.dst, cmd.dstOffset + cmd.size);
+              new Uint8Array(dst).set(new Uint8Array(src, cmd.srcOffset, cmd.size), cmd.dstOffset);
+            }
+          }
+        }
+      },
+    },
+  };
+}
+
 test('soft area XPBD parity: baseline stepping and gpu-only module produce matching soft states', () => {
   const dtPos = 0.16;
   const stiffnessScale = 3.4;
@@ -140,4 +316,68 @@ test('soft area XPBD parity: baseline stepping and gpu-only module produce match
     assert.ok(Math.abs(g.x - b.x) < 1e-12, `node ${i} x mismatch: ${g.x} vs ${b.x}`);
     assert.ok(Math.abs(g.y - b.y) < 1e-12, `node ${i} y mismatch: ${g.y} vs ${b.y}`);
   }
+});
+
+test('soft area XPBD WGSL proposal stage runs on gpu-only path while CPU remains authoritative', async () => {
+  globalThis.GPUBufferUsage = {
+    STORAGE: 1 << 0,
+    COPY_DST: 1 << 1,
+    COPY_SRC: 1 << 2,
+    MAP_READ: 1 << 3,
+    UNIFORM: 1 << 4,
+  };
+  globalThis.GPUMapMode = { READ: 1 };
+
+  const dtPos = 0.16;
+  const stiffnessScale = 3.4;
+  const softSeed = {
+    nodes: [
+      { x: 14, y: 18, vx: 0.3, vy: -0.2, mass: 1.0, clusterId: 7 },
+      { x: 22, y: 17, vx: -0.2, vy: 0.1, mass: 0.9, clusterId: 7 },
+      { x: 26, y: 24, vx: 0.4, vy: 0.3, mass: 1.2, clusterId: 7 },
+      { x: 19, y: 29, vx: -0.3, vy: -0.1, mass: 1.4, clusterId: 7 },
+    ],
+  };
+  const loops = [{ clusterId: 7, indices: [0, 1, 2, 3] }];
+
+  const baselineSoft = structuredClone(softSeed);
+  const gpuOnlySoft = structuredClone(softSeed);
+  const baselineSim = {
+    softAreaRest: new Map([[7, 44.2]]),
+    softAreaLambda: new Map([[7, 0.07]]),
+  };
+  const gpuOnlySim = {
+    softAreaRest: new Map([[7, 44.2]]),
+    softAreaLambda: new Map([[7, 0.07]]),
+  };
+  const wgslState = {};
+
+  applySoftAreaXPBDVelocityBaseline(baselineSim, baselineSoft, loops, dtPos, stiffnessScale);
+  applySoftAreaXPBDVelocityGpuOnly({
+    sim: gpuOnlySim,
+    soft: gpuOnlySoft,
+    loops,
+    dtPos,
+    stiffnessScale,
+    softAreaXpbdIters: SOFT_AREA_XPBD_ITERS,
+    softAreaBaseCompliance: SOFT_AREA_BASE_COMPLIANCE,
+    wgslOffload: {
+      enabled: true,
+      device: createSoftAreaMockWgslDevice(),
+      state: wgslState,
+    },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(Array.from(gpuOnlySim.softAreaLambda.entries()), Array.from(baselineSim.softAreaLambda.entries()));
+  assert.deepEqual(gpuOnlySoft.nodes, baselineSoft.nodes);
+  assert.equal(wgslState.lastMode, 'wgsl-proposal');
+  assert.equal(wgslState.lastError, null);
+  assert.equal(wgslState.lastAreaProbeClusterCount, 1);
+  assert.equal(wgslState.lastAreaProposalClusterCount, 1);
+  assert.equal(wgslState.lastAreaProposalDeltaLambdaByCluster instanceof Float32Array, true);
+  assert.equal(wgslState.lastAreaProposalLambdaNextByCluster instanceof Float32Array, true);
+  assert.equal(wgslState.lastAreaProposalDeltaLambdaByCluster.length, 1);
+  assert.equal(wgslState.lastAreaProposalLambdaNextByCluster.length, 1);
 });

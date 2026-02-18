@@ -51,6 +51,87 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const softAreaLambdaProposalWgsl = /* wgsl */`
+struct Params {
+  nodeCount: u32,
+  clusterCount: u32,
+  dtPos: f32,
+  alpha: f32,
+};
+
+@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(1) var<storage, read> nodeX: array<f32>;
+@group(0) @binding(2) var<storage, read> nodeY: array<f32>;
+@group(0) @binding(3) var<storage, read> nodeVX: array<f32>;
+@group(0) @binding(4) var<storage, read> nodeVY: array<f32>;
+@group(0) @binding(5) var<storage, read> clusterOffsets: array<u32>;
+@group(0) @binding(6) var<storage, read> clusterNodeIndices: array<u32>;
+@group(0) @binding(7) var<storage, read> clusterNodeInvMass: array<f32>;
+@group(0) @binding(8) var<storage, read> clusterRestArea: array<f32>;
+@group(0) @binding(9) var<storage, read> clusterLambdaPrev: array<f32>;
+@group(0) @binding(10) var<storage, read_write> deltaLambdaOut: array<f32>;
+@group(0) @binding(11) var<storage, read_write> lambdaNextOut: array<f32>;
+
+@compute @workgroup_size(${WGSL_WORKGROUP_SIZE})
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let ci = gid.x;
+  if (ci >= params.clusterCount) { return; }
+
+  let start = clusterOffsets[ci];
+  let end = clusterOffsets[ci + 1u];
+  if (end <= start + 1u) {
+    deltaLambdaOut[ci] = 0.0;
+    lambdaNextOut[ci] = clusterLambdaPrev[ci];
+    return;
+  }
+
+  var twiceSignedArea = 0.0;
+  var sumWGrad2 = 0.0;
+  for (var ei = start; ei < end; ei = ei + 1u) {
+    let ni = clusterNodeIndices[ei];
+    let nj = clusterNodeIndices[select(start, ei + 1u, (ei + 1u) < end)];
+    if (ni >= params.nodeCount || nj >= params.nodeCount) { continue; }
+
+    let ax = nodeX[ni] + nodeVX[ni] * params.dtPos;
+    let ay = nodeY[ni] + nodeVY[ni] * params.dtPos;
+    let bx = nodeX[nj] + nodeVX[nj] * params.dtPos;
+    let by = nodeY[nj] + nodeVY[nj] * params.dtPos;
+    twiceSignedArea += ax * by - bx * ay;
+
+    let prevEi = select(end - 1u, ei - 1u, ei > start);
+    let pi = clusterNodeIndices[prevEi];
+    let ni2 = clusterNodeIndices[select(start, ei + 1u, (ei + 1u) < end)];
+    if (pi >= params.nodeCount || ni2 >= params.nodeCount) { continue; }
+
+    let px = nodeX[pi] + nodeVX[pi] * params.dtPos;
+    let py = nodeY[pi] + nodeVY[pi] * params.dtPos;
+    let nx = nodeX[ni2] + nodeVX[ni2] * params.dtPos;
+    let ny = nodeY[ni2] + nodeVY[ni2] * params.dtPos;
+    let gx = 0.5 * (ny - py);
+    let gy = 0.5 * (px - nx);
+    let w = clusterNodeInvMass[ei];
+    sumWGrad2 += w * (gx * gx + gy * gy);
+  }
+
+  if (sumWGrad2 <= 1e-10) {
+    deltaLambdaOut[ci] = 0.0;
+    lambdaNextOut[ci] = clusterLambdaPrev[ci];
+    return;
+  }
+
+  let area = 0.5 * twiceSignedArea;
+  let c = area - clusterRestArea[ci];
+  let lambdaPrev = clusterLambdaPrev[ci];
+  let dlRaw = (-c - params.alpha * lambdaPrev) / (sumWGrad2 + params.alpha);
+  let dlClamped = clamp(dlRaw, -2.0, 2.0);
+  let lambdaNext = clamp(lambdaPrev + dlClamped, -20.0, 20.0);
+  let dl = lambdaNext - lambdaPrev;
+
+  deltaLambdaOut[ci] = dl;
+  lambdaNextOut[ci] = lambdaNext;
+}
+`;
+
 function canUseWgslOffload(offload) {
   if (!offload || offload.enabled !== true) return false;
   if (!offload.device || typeof offload.device.createComputePipelineAsync !== 'function') return false;
@@ -117,6 +198,180 @@ function ensureSoftAreaProbeBuffers(offload, nodeCount, endpointCount, clusterCo
   }
 
   return state;
+}
+
+
+function ensureSoftAreaLambdaProposalBuffers(offload, nodeCount, endpointCount, clusterCount) {
+  const state = offload.state || (offload.state = {});
+  const device = offload.device;
+  const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
+  const uniformUsage = globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST;
+
+  const requiredNodeCapacity = Math.max(1, nodeCount);
+  if ((state.areaLambdaNodeCapacity || 0) < requiredNodeCapacity) {
+    const capacity = Math.max(requiredNodeCapacity, state.areaLambdaNodeCapacity ? state.areaLambdaNodeCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.areaLambdaNodeX?.destroy?.();
+    state.areaLambdaNodeY?.destroy?.();
+    state.areaLambdaNodeVX?.destroy?.();
+    state.areaLambdaNodeVY?.destroy?.();
+    state.areaLambdaNodeX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaLambdaNodeY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaLambdaNodeVX = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaLambdaNodeVY = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaLambdaNodeCapacity = capacity;
+    state.areaLambdaBindGroup = null;
+  }
+
+  const requiredEndpointCapacity = Math.max(1, endpointCount);
+  if ((state.areaLambdaEndpointCapacity || 0) < requiredEndpointCapacity) {
+    const capacity = Math.max(requiredEndpointCapacity, state.areaLambdaEndpointCapacity ? state.areaLambdaEndpointCapacity * 2 : 256);
+    const bytes = capacity * 4;
+    state.areaLambdaClusterNodeIndices?.destroy?.();
+    state.areaLambdaClusterNodeInvMass?.destroy?.();
+    state.areaLambdaClusterNodeIndices = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaLambdaClusterNodeInvMass = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaLambdaEndpointCapacity = capacity;
+    state.areaLambdaBindGroup = null;
+  }
+
+  const requiredClusterCapacity = Math.max(1, clusterCount);
+  if ((state.areaLambdaClusterCapacity || 0) < requiredClusterCapacity) {
+    const capacity = Math.max(requiredClusterCapacity, state.areaLambdaClusterCapacity ? state.areaLambdaClusterCapacity * 2 : 64);
+    const bytes = capacity * 4;
+    state.areaLambdaClusterOffsets?.destroy?.();
+    state.areaLambdaClusterRestArea?.destroy?.();
+    state.areaLambdaClusterPrev?.destroy?.();
+    state.areaLambdaDeltaOut?.destroy?.();
+    state.areaLambdaNextOut?.destroy?.();
+    state.areaLambdaDeltaReadback?.destroy?.();
+    state.areaLambdaNextReadback?.destroy?.();
+    state.areaLambdaClusterOffsets = device.createBuffer({ size: (capacity + 1) * 4, usage: storageUsage });
+    state.areaLambdaClusterRestArea = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaLambdaClusterPrev = device.createBuffer({ size: bytes, usage: storageUsage });
+    state.areaLambdaDeltaOut = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.areaLambdaNextOut = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC });
+    state.areaLambdaDeltaReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.areaLambdaNextReadback = device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ });
+    state.areaLambdaClusterCapacity = capacity;
+    state.areaLambdaBindGroup = null;
+  }
+
+  if (!state.areaLambdaParams) {
+    state.areaLambdaParams = device.createBuffer({ size: 16, usage: uniformUsage });
+    state.areaLambdaBindGroup = null;
+  }
+
+  return state;
+}
+
+async function dispatchSoftAreaWgslLambdaProposal({ soft, offload, plan, dtPos, alpha }) {
+  if (!canUseWgslOffload(offload)) return false;
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const clusterCount = Number(plan?.clusterCount) || 0;
+  const endpointCount = Number(plan?.endpointCount) || 0;
+  if (nodes.length <= 0 || clusterCount <= 0 || endpointCount <= 0) return false;
+
+  const state = ensureSoftAreaLambdaProposalBuffers(offload, nodes.length, endpointCount, clusterCount);
+  const device = offload.device;
+
+  if (!state.areaLambdaPipeline) {
+    const module = device.createShaderModule({ code: softAreaLambdaProposalWgsl });
+    state.areaLambdaPipeline = await device.createComputePipelineAsync({
+      layout: 'auto',
+      compute: { module, entryPoint: 'main' },
+    });
+    state.areaLambdaBindGroup = null;
+  }
+
+  if (!state.areaLambdaBindGroup) {
+    state.areaLambdaBindGroup = device.createBindGroup({
+      layout: state.areaLambdaPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: state.areaLambdaParams } },
+        { binding: 1, resource: { buffer: state.areaLambdaNodeX } },
+        { binding: 2, resource: { buffer: state.areaLambdaNodeY } },
+        { binding: 3, resource: { buffer: state.areaLambdaNodeVX } },
+        { binding: 4, resource: { buffer: state.areaLambdaNodeVY } },
+        { binding: 5, resource: { buffer: state.areaLambdaClusterOffsets } },
+        { binding: 6, resource: { buffer: state.areaLambdaClusterNodeIndices } },
+        { binding: 7, resource: { buffer: state.areaLambdaClusterNodeInvMass } },
+        { binding: 8, resource: { buffer: state.areaLambdaClusterRestArea } },
+        { binding: 9, resource: { buffer: state.areaLambdaClusterPrev } },
+        { binding: 10, resource: { buffer: state.areaLambdaDeltaOut } },
+        { binding: 11, resource: { buffer: state.areaLambdaNextOut } },
+      ],
+    });
+  }
+
+  const nodeX = new Float32Array(nodes.length);
+  const nodeY = new Float32Array(nodes.length);
+  const nodeVX = new Float32Array(nodes.length);
+  const nodeVY = new Float32Array(nodes.length);
+  for (let ni = 0; ni < nodes.length; ni++) {
+    const node = nodes[ni] || {};
+    nodeX[ni] = Number(node.x) || 0;
+    nodeY[ni] = Number(node.y) || 0;
+    nodeVX[ni] = Number(node.vx) || 0;
+    nodeVY[ni] = Number(node.vy) || 0;
+  }
+
+  const paramsBytes = new ArrayBuffer(16);
+  const paramsU32 = new Uint32Array(paramsBytes);
+  const paramsF32 = new Float32Array(paramsBytes);
+  paramsU32[0] = nodes.length >>> 0;
+  paramsU32[1] = clusterCount >>> 0;
+  paramsF32[2] = Number.isFinite(dtPos) ? dtPos : 0;
+  paramsF32[3] = Number.isFinite(alpha) ? alpha : 0;
+
+  device.queue.writeBuffer(state.areaLambdaParams, 0, paramsBytes);
+  device.queue.writeBuffer(state.areaLambdaNodeX, 0, nodeX);
+  device.queue.writeBuffer(state.areaLambdaNodeY, 0, nodeY);
+  device.queue.writeBuffer(state.areaLambdaNodeVX, 0, nodeVX);
+  device.queue.writeBuffer(state.areaLambdaNodeVY, 0, nodeVY);
+  device.queue.writeBuffer(state.areaLambdaClusterOffsets, 0, plan.clusterOffsets);
+  device.queue.writeBuffer(state.areaLambdaClusterNodeIndices, 0, plan.clusterNodeIndices);
+  device.queue.writeBuffer(state.areaLambdaClusterNodeInvMass, 0, plan.clusterNodeInvMass);
+  device.queue.writeBuffer(state.areaLambdaClusterRestArea, 0, plan.clusterRestArea);
+  device.queue.writeBuffer(state.areaLambdaClusterPrev, 0, plan.clusterLambda);
+
+  const dispatchCount = Math.ceil(clusterCount / WGSL_WORKGROUP_SIZE);
+  const bytes = clusterCount * 4;
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginComputePass();
+  pass.setPipeline(state.areaLambdaPipeline);
+  pass.setBindGroup(0, state.areaLambdaBindGroup);
+  pass.dispatchWorkgroups(dispatchCount);
+  pass.end();
+  encoder.copyBufferToBuffer(state.areaLambdaDeltaOut, 0, state.areaLambdaDeltaReadback, 0, bytes);
+  encoder.copyBufferToBuffer(state.areaLambdaNextOut, 0, state.areaLambdaNextReadback, 0, bytes);
+  device.queue.submit([encoder.finish()]);
+
+  await state.areaLambdaDeltaReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
+  const mappedDelta = state.areaLambdaDeltaReadback.getMappedRange(0, bytes);
+  const deltaByCluster = new Float32Array(mappedDelta.slice(0));
+  state.areaLambdaDeltaReadback.unmap();
+
+  await state.areaLambdaNextReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
+  const mappedNext = state.areaLambdaNextReadback.getMappedRange(0, bytes);
+  const nextByCluster = new Float32Array(mappedNext.slice(0));
+  state.areaLambdaNextReadback.unmap();
+
+  let maxAbsDelta = 0;
+  let sumAbsDelta = 0;
+  for (let ci = 0; ci < clusterCount; ci++) {
+    const abs = Math.abs(deltaByCluster[ci]);
+    if (abs > maxAbsDelta) maxAbsDelta = abs;
+    sumAbsDelta += abs;
+  }
+
+  state.lastAreaProposalClusterCount = clusterCount;
+  state.lastAreaProposalDispatch = dispatchCount;
+  state.lastAreaProposalDeltaLambdaByCluster = deltaByCluster;
+  state.lastAreaProposalLambdaNextByCluster = nextByCluster;
+  state.lastAreaProposalAbsDeltaMean = clusterCount > 0 ? sumAbsDelta / clusterCount : 0;
+  state.lastAreaProposalAbsDeltaMax = maxAbsDelta;
+  return true;
 }
 
 async function dispatchSoftAreaWgslProbe({ sim, soft, offload, plan, dtPos }) {
@@ -322,15 +577,18 @@ export function applySoftAreaXPBDVelocityGpuOnly({
     wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
     wgslOffload.state.lastMode = 'cpu-prepared';
 
-    // Concrete WGSL area stage: per-cluster predicted signed-area probe.
-    // CPU remains authoritative for lambda + velocity updates until reduction
-    // kernels are landed; this probe validates deterministic geometry telemetry.
+    // Concrete WGSL area stages: per-cluster area probe + lambda proposal.
+    // CPU remains authoritative for velocity updates until reduction kernels
+    // land; these kernels validate deterministic area/lambda parity telemetry.
     if (canUseWgslOffload(wgslOffload)) {
-      void dispatchSoftAreaWgslProbe({ sim, soft, offload: wgslOffload, plan, dtPos })
-        .then((ran) => {
-          if (ran) {
+      void Promise.all([
+        dispatchSoftAreaWgslProbe({ sim, soft, offload: wgslOffload, plan, dtPos }),
+        dispatchSoftAreaWgslLambdaProposal({ soft, offload: wgslOffload, plan, dtPos, alpha }),
+      ])
+        .then(([probeRan, proposalRan]) => {
+          if (probeRan || proposalRan) {
             wgslOffload.state.lastError = null;
-            wgslOffload.state.lastMode = 'wgsl-probe';
+            wgslOffload.state.lastMode = proposalRan ? 'wgsl-proposal' : 'wgsl-probe';
           }
         })
         .catch((err) => {

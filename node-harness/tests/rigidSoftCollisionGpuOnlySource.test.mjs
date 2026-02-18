@@ -60,3 +60,11 @@ test('rigid-soft gpu-only module builds combined deterministic narrowphase layou
     'expected rigid-soft gpu-only module to assemble node+edge compact pairs into one deterministic layout/signature for next-stage WGSL narrowphase authority',
   );
 });
+
+test('rigid-soft gpu-only module emits deterministic narrowphase scene state layout needed for next WGSL narrowphase math stage', () => {
+  assert.match(
+    source,
+    /export function buildRigidSoftNarrowphaseSceneWgslLayout\([\s\S]*rigidX[\s\S]*rigidTheta[\s\S]*nodeInvMass[\s\S]*springRestLen[\s\S]*signature[\s\S]*lastPreparedNarrowphaseSceneSignature/,
+    'expected rigid-soft gpu-only path to publish deterministic rigid/node/spring scene arrays that directly unblock WGSL narrowphase math dispatch',
+  );
+});

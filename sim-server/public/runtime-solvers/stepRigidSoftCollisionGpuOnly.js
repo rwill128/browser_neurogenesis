@@ -469,6 +469,119 @@ export function buildRigidSoftNarrowphaseWgslLayout({
   };
 }
 
+export function buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft }) {
+  if (!Array.isArray(rigidBodies) || !soft || !Array.isArray(soft.nodes) || !Array.isArray(soft.springs)) {
+    return null;
+  }
+
+  const rigidCount = rigidBodies.length;
+  const nodeCount = soft.nodes.length;
+  const springCount = soft.springs.length;
+
+  const rigidX = new Float32Array(rigidCount);
+  const rigidY = new Float32Array(rigidCount);
+  const rigidTheta = new Float32Array(rigidCount);
+  const rigidMinX = new Float32Array(rigidCount);
+  const rigidMinY = new Float32Array(rigidCount);
+  const rigidMaxX = new Float32Array(rigidCount);
+  const rigidMaxY = new Float32Array(rigidCount);
+
+  const nodeX = new Float32Array(nodeCount);
+  const nodeY = new Float32Array(nodeCount);
+  const nodeR = new Float32Array(nodeCount);
+  const nodeInvMass = new Float32Array(nodeCount);
+
+  const springNodeA = new Uint32Array(springCount);
+  const springNodeB = new Uint32Array(springCount);
+  const springRestLen = new Float32Array(springCount);
+
+  let signature = 0x811c9dc5;
+  signature = fnv1aMix(signature, rigidCount >>> 0);
+  signature = fnv1aMix(signature, nodeCount >>> 0);
+  signature = fnv1aMix(signature, springCount >>> 0);
+
+  for (let i = 0; i < rigidCount; i++) {
+    const rb = rigidBodies[i] || {};
+    const x = Number(rb.x) || 0;
+    const y = Number(rb.y) || 0;
+    const theta = Number(rb.theta) || 0;
+    const minX = Number(rb._aabb?.minX) || 0;
+    const minY = Number(rb._aabb?.minY) || 0;
+    const maxX = Number(rb._aabb?.maxX) || 0;
+    const maxY = Number(rb._aabb?.maxY) || 0;
+    rigidX[i] = x;
+    rigidY[i] = y;
+    rigidTheta[i] = theta;
+    rigidMinX[i] = minX;
+    rigidMinY[i] = minY;
+    rigidMaxX[i] = maxX;
+    rigidMaxY[i] = maxY;
+    signature = fnv1aMix(signature, Math.fround(x));
+    signature = fnv1aMix(signature, Math.fround(y));
+    signature = fnv1aMix(signature, Math.fround(theta));
+  }
+
+  for (let i = 0; i < nodeCount; i++) {
+    const node = soft.nodes[i] || {};
+    const x = Number(node.x) || 0;
+    const y = Number(node.y) || 0;
+    const r = Math.max(0, Number(node.r) || 0);
+    const invMass = 1 / Math.max(0.02, Number(node.mass) || 0.02);
+    nodeX[i] = x;
+    nodeY[i] = y;
+    nodeR[i] = r;
+    nodeInvMass[i] = invMass;
+    signature = fnv1aMix(signature, Math.fround(x));
+    signature = fnv1aMix(signature, Math.fround(y));
+    signature = fnv1aMix(signature, Math.fround(r));
+  }
+
+  for (let i = 0; i < springCount; i++) {
+    const spring = soft.springs[i];
+    const a = Number(spring?.[0]) | 0;
+    const b = Number(spring?.[1]) | 0;
+    const rest = Math.max(0, Number(spring?.[2]) || 0);
+    springNodeA[i] = (a >>> 0);
+    springNodeB[i] = (b >>> 0);
+    springRestLen[i] = rest;
+    signature = fnv1aMix(signature, a >>> 0);
+    signature = fnv1aMix(signature, b >>> 0);
+    signature = fnv1aMix(signature, Math.fround(rest));
+  }
+
+  return {
+    rigidX,
+    rigidY,
+    rigidTheta,
+    rigidMinX,
+    rigidMinY,
+    rigidMaxX,
+    rigidMaxY,
+    nodeX,
+    nodeY,
+    nodeR,
+    nodeInvMass,
+    springNodeA,
+    springNodeB,
+    springRestLen,
+    byteLength: rigidX.byteLength
+      + rigidY.byteLength
+      + rigidTheta.byteLength
+      + rigidMinX.byteLength
+      + rigidMinY.byteLength
+      + rigidMaxX.byteLength
+      + rigidMaxY.byteLength
+      + nodeX.byteLength
+      + nodeY.byteLength
+      + nodeR.byteLength
+      + nodeInvMass.byteLength
+      + springNodeA.byteLength
+      + springNodeB.byteLength
+      + springRestLen.byteLength,
+    signature: signature >>> 0,
+  };
+}
+
 const WGSL_WORKGROUP_SIZE = 64;
 
 const rigidSoftNodeBroadphaseWgsl = /* wgsl */`
@@ -1200,6 +1313,27 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         (Number(narrowphaseLayout.nodePairCount) || 0) + (Number(narrowphaseLayout.edgePairCount) || 0);
       wgslOffload.state.lastPreparedNarrowphaseLayoutBytes = narrowphaseLayout.byteLength;
       wgslOffload.state.lastPreparedNarrowphaseCombinedSignature = narrowphaseLayout.signature;
+    }
+
+    const narrowphaseSceneLayout = buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft });
+    if (narrowphaseSceneLayout) {
+      wgslOffload.state.lastPreparedNarrowphaseSceneLayoutBytes = narrowphaseSceneLayout.byteLength;
+      wgslOffload.state.lastPreparedNarrowphaseSceneSignature = narrowphaseSceneLayout.signature;
+      wgslOffload.state.lastPreparedNarrowphaseSceneRigidX = narrowphaseSceneLayout.rigidX;
+      wgslOffload.state.lastPreparedNarrowphaseSceneRigidY = narrowphaseSceneLayout.rigidY;
+      wgslOffload.state.lastPreparedNarrowphaseSceneRigidTheta = narrowphaseSceneLayout.rigidTheta;
+      wgslOffload.state.lastPreparedNarrowphaseSceneRigidMinX = narrowphaseSceneLayout.rigidMinX;
+      wgslOffload.state.lastPreparedNarrowphaseSceneRigidMinY = narrowphaseSceneLayout.rigidMinY;
+      wgslOffload.state.lastPreparedNarrowphaseSceneRigidMaxX = narrowphaseSceneLayout.rigidMaxX;
+      wgslOffload.state.lastPreparedNarrowphaseSceneRigidMaxY = narrowphaseSceneLayout.rigidMaxY;
+      wgslOffload.state.lastPreparedNarrowphaseSceneNodeX = narrowphaseSceneLayout.nodeX;
+      wgslOffload.state.lastPreparedNarrowphaseSceneNodeY = narrowphaseSceneLayout.nodeY;
+      wgslOffload.state.lastPreparedNarrowphaseSceneNodeR = narrowphaseSceneLayout.nodeR;
+      wgslOffload.state.lastPreparedNarrowphaseSceneNodeInvMass = narrowphaseSceneLayout.nodeInvMass;
+      wgslOffload.state.lastPreparedNarrowphaseSceneSpringNodeA = narrowphaseSceneLayout.springNodeA;
+      wgslOffload.state.lastPreparedNarrowphaseSceneSpringNodeB = narrowphaseSceneLayout.springNodeB;
+      wgslOffload.state.lastPreparedNarrowphaseSceneSpringRestLen = narrowphaseSceneLayout.springRestLen;
+      wgslOffload.state.lastPreparedNarrowphaseSceneSource = 'cpu-rigid-soft-narrowphase-scene-layout';
     }
   }
 

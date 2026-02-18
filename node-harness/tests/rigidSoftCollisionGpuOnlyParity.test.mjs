@@ -54,6 +54,36 @@ function runBaseline(state, calls) {
   }
 }
 
+function collectCallsFromLayout(state, layout) {
+  const calls = { nodes: [], edges: [] };
+  const nodeRigid = layout?.nodePairRigidIndex;
+  const nodeIndex = layout?.nodePairNodeIndex;
+  const edgeRigid = layout?.edgePairRigidIndex;
+  const edgeNodeA = layout?.edgePairNodeAIndex;
+  const edgeNodeB = layout?.edgePairNodeBIndex;
+
+  if (nodeRigid instanceof Uint32Array && nodeIndex instanceof Uint32Array) {
+    for (let i = 0; i < nodeRigid.length; i++) {
+      const rb = state.rigid[nodeRigid[i]];
+      const sn = state.soft.nodes[nodeIndex[i]];
+      if (!rb || !sn) continue;
+      calls.nodes.push(`${rb.id}->${sn.id}`);
+    }
+  }
+
+  if (edgeRigid instanceof Uint32Array && edgeNodeA instanceof Uint32Array && edgeNodeB instanceof Uint32Array) {
+    for (let i = 0; i < edgeRigid.length; i++) {
+      const rb = state.rigid[edgeRigid[i]];
+      const a = state.soft.nodes[edgeNodeA[i]];
+      const b = state.soft.nodes[edgeNodeB[i]];
+      if (!rb || !a || !b) continue;
+      calls.edges.push(`${rb.id}->${a.id}-${b.id}`);
+    }
+  }
+
+  return calls;
+}
+
 test('gpu-only rigid-soft collision pass matches baseline contact visitation and filtering', async () => {
   const baselineState = makeState();
   const gpuState = makeState();
@@ -61,21 +91,17 @@ test('gpu-only rigid-soft collision pass matches baseline contact visitation and
   const baselineCalls = { nodes: [], edges: [] };
   runBaseline(baselineState, baselineCalls);
 
-  const gpuCalls = { nodes: [], edges: [] };
+  const wgslState = {};
   await resolveRigidSoftCollisionPassGpuOnly({
     rigidBodies: gpuState.rigid,
     soft: gpuState.soft,
-    resolveRigidVsSoftNodeCollision: (rb, sn) => {
-      gpuCalls.nodes.push(`${rb.id}->${sn.id}`);
-    },
-    resolveRigidVsSoftEdgeCollision: (rb, a, b) => {
-      gpuCalls.edges.push(`${rb.id}->${a.id}-${b.id}`);
-    },
     edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
     nodeSlop: 0.18,
     edgeSlop: 0.16,
+    wgslOffload: { enabled: true, state: wgslState },
   });
 
+  const gpuCalls = collectCallsFromLayout(gpuState, wgslState.preparedLayout);
   assert.deepEqual(gpuCalls, baselineCalls);
 });
 
@@ -169,19 +195,30 @@ function snapshotRuntimeState(state) {
   };
 }
 
+function applyBaselineRigidSoftCollision(state, nodeSlop, edgeSlop) {
+  for (let rbi = 0; rbi < state.rigidBodies.length; rbi++) {
+    const rb = state.rigidBodies[rbi];
+    for (let ni = 0; ni < state.soft.nodes.length; ni++) {
+      resolveRigidVsSoftNodeCollision(rb, state.soft.nodes[ni], null, nodeSlop);
+    }
+    for (let si = 0; si < state.soft.springs.length; si++) {
+      const spring = state.soft.springs[si];
+      if (!Array.isArray(spring) || spring.length < 4) continue;
+      const [i, j, _rest, mode] = spring;
+      if (mode !== EDGE_BODY_MODE.BLOCK) continue;
+      const a = state.soft.nodes[i];
+      const b = state.soft.nodes[j];
+      if (!a || !b) continue;
+      baselineEdgeCollision(rb, a, b, edgeSlop);
+    }
+  }
+}
+
 test('gpu-only rigid-soft pass default runtime collision solver matches baseline physics outcomes', async () => {
   const baseline = makeRuntimeState();
   const gpuOnly = deepClone(baseline);
 
-  await resolveRigidSoftCollisionPassGpuOnly({
-    rigidBodies: baseline.rigidBodies,
-    soft: baseline.soft,
-    resolveRigidVsSoftNodeCollision,
-    resolveRigidVsSoftEdgeCollision: baselineEdgeCollision,
-    edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
-    nodeSlop: 0.18,
-    edgeSlop: 0.16,
-  });
+  applyBaselineRigidSoftCollision(baseline, 0.18, 0.16);
 
   await resolveRigidSoftCollisionPassGpuOnly({
     rigidBodies: gpuOnly.rigidBodies,
@@ -240,20 +277,14 @@ test('gpu-only rigid-soft pass publishes deterministic WGSL candidate layout sou
   const baselineCalls = { nodes: [], edges: [] };
   runBaseline(baselineState, baselineCalls);
 
-  const gpuCalls = { nodes: [], edges: [] };
   await resolveRigidSoftCollisionPassGpuOnly({
     rigidBodies: gpuState.rigid,
     soft: gpuState.soft,
-    resolveRigidVsSoftNodeCollision: (rb, sn) => {
-      gpuCalls.nodes.push(`${rb.id}->${sn.id}`);
-    },
-    resolveRigidVsSoftEdgeCollision: (rb, a, b) => {
-      gpuCalls.edges.push(`${rb.id}->${a.id}-${b.id}`);
-    },
     edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
     wgslOffload: { enabled: true, state: wgslState },
   });
 
+  const gpuCalls = collectCallsFromLayout(gpuState, wgslState.preparedLayout);
   assert.deepEqual(gpuCalls, baselineCalls);
   assert.equal(wgslState.lastMode, 'cpu-prepared');
   assert.equal(wgslState.lastSourceRoute, 'cpu-rigid-soft-candidate-layout');
@@ -288,7 +319,6 @@ test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when dev
   const baselineState = makeState();
   const gpuState = makeState();
   const baselineCalls = { nodes: [], edges: [] };
-  const gpuCalls = { nodes: [], edges: [] };
   runBaseline(baselineState, baselineCalls);
 
   const writes = [];
@@ -333,17 +363,9 @@ test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when dev
   await resolveRigidSoftCollisionPassGpuOnly({
     rigidBodies: gpuState.rigid,
     soft: gpuState.soft,
-    resolveRigidVsSoftNodeCollision: (rb, sn) => {
-      gpuCalls.nodes.push(`${rb.id}->${sn.id}`);
-    },
-    resolveRigidVsSoftEdgeCollision: (rb, a, b) => {
-      gpuCalls.edges.push(`${rb.id}->${a.id}-${b.id}`);
-    },
     edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
     wgslOffload: { enabled: true, state: wgslState, device: mockDevice },
   });
-
-  assert.deepEqual(gpuCalls, { nodes: [], edges: [] });
   assert.equal(wgslState.lastNodeBroadphaseDispatched, true);
   assert.equal(wgslState.lastEdgeBroadphaseDispatched, true);
   assert.equal(wgslState.lastSourceRoute, 'wgsl-rigid-soft-response-authoritative');

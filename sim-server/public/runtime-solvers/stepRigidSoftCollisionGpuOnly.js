@@ -2278,29 +2278,10 @@ function applyCpuRigidSoftResponseFallback({
   nodeSlop,
   edgeSlop,
   wgslOffload,
-  cpuNodeObserver,
-  cpuEdgeObserver,
   profile,
 }) {
-  const preferInternalHardFallback = canUseWgslOffload(wgslOffload);
-  const solveNodeCollision = (rb, sn) => {
-    if (!preferInternalHardFallback && typeof cpuNodeObserver === 'function') {
-      return cpuNodeObserver(rb, sn, null, nodeSlop);
-    }
-    if (typeof cpuNodeObserver === 'function') {
-      try { cpuNodeObserver(rb, sn, null, nodeSlop); } catch {}
-    }
-    return resolveRigidSoftNodeCollisionCpuFallback(rb, sn, null, nodeSlop);
-  };
-  const solveEdgeCollision = (rb, a, b) => {
-    if (!preferInternalHardFallback && typeof cpuEdgeObserver === 'function') {
-      return cpuEdgeObserver(rb, a, b, edgeSlop);
-    }
-    if (typeof cpuEdgeObserver === 'function') {
-      try { cpuEdgeObserver(rb, a, b, edgeSlop); } catch {}
-    }
-    return resolveRigidSoftEdgeCollisionCpuFallback(rb, a, b, edgeSlop);
-  };
+  const solveNodeCollision = (rb, sn) => resolveRigidSoftNodeCollisionCpuFallback(rb, sn, null, nodeSlop);
+  const solveEdgeCollision = (rb, a, b) => resolveRigidSoftEdgeCollisionCpuFallback(rb, a, b, edgeSlop);
 
   const nodeStartMs = profile ? performance.now() : 0;
   const compactNodeRigidIndex = compactNodePairs?.compactRigidIndex;
@@ -2417,8 +2398,6 @@ function applyCpuRigidSoftResponseFallback({
 export async function resolveRigidSoftCollisionPassGpuOnly({
   rigidBodies,
   soft,
-  resolveRigidVsSoftNodeCollision,
-  resolveRigidVsSoftEdgeCollision,
   edgeBodyModeBlock,
   nodeSlop = 0.18,
   edgeSlop = 0.16,
@@ -2779,8 +2758,6 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     nodeSlop,
     edgeSlop,
     wgslOffload,
-    cpuNodeObserver: resolveRigidVsSoftNodeCollision,
-    cpuEdgeObserver: resolveRigidVsSoftEdgeCollision,
     profile,
   });
 }

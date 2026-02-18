@@ -4555,21 +4555,21 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       resolveSoftNodeVsSoftEdgeCollision,
       applyBounceBoundary,
       wgslOffload: {
-        enabled: true,
+        enabled: Boolean(sim?.device),
         device: sim?.device,
         state: (sim.collisionBoundaryWgslState ||= {}),
         rigidSoft: {
-          enabled: true,
+          enabled: Boolean(sim?.device),
           device: sim?.device,
           state: (sim.rigidSoftCollisionWgslState ||= {}),
         },
         softSoft: {
-          enabled: true,
+          enabled: Boolean(sim?.device),
           device: sim?.device,
           state: (sim.softCollisionWgslState ||= {}),
         },
         boundary: {
-          enabled: true,
+          enabled: Boolean(sim?.device),
           device: sim?.device,
           state: (sim.collisionBoundaryWgslState ||= {}),
         },

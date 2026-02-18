@@ -868,8 +868,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 
 function getWgslOffloadUnavailableReason(offload) {
-  if (!offload || offload.enabled !== true) return 'wgsl-offload-disabled';
+  if (!offload) return 'wgsl-offload-missing';
   if (!offload.device) return 'wgsl-device-missing';
+  if (offload.enabled !== true) return 'wgsl-offload-disabled';
   if (typeof offload.device.createComputePipelineAsync !== 'function') {
     return 'wgsl-device-missing-createComputePipelineAsync';
   }
@@ -2405,8 +2406,6 @@ function applyCpuRigidSoftResponseFallback({
 export async function resolveRigidSoftCollisionPassGpuOnly({
   rigidBodies,
   soft,
-  resolveRigidVsSoftNodeCollision,
-  resolveRigidVsSoftEdgeCollision,
   edgeBodyModeBlock,
   nodeSlop = 0.18,
   edgeSlop = 0.16,

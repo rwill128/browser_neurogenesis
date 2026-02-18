@@ -74,6 +74,66 @@ export function buildSoftSpringXpbdWgslPlan({
   };
 }
 
+export function buildSoftSpringXpbdWgslLayout({
+  soft,
+  plan,
+} = {}) {
+  const nodes = Array.isArray(soft?.nodes) ? soft.nodes : [];
+  const activeSpringCount = Number(plan?.activeSpringCount) || 0;
+  const activeSpringIndices = plan?.activeSpringIndices instanceof Uint32Array
+    ? plan.activeSpringIndices
+    : new Uint32Array(0);
+
+  const springNodeA = new Uint32Array(activeSpringCount);
+  const springNodeB = new Uint32Array(activeSpringCount);
+  const springRest = new Float32Array(activeSpringCount);
+  const springInvMassA = new Float32Array(activeSpringCount);
+  const springInvMassB = new Float32Array(activeSpringCount);
+
+  for (let ai = 0; ai < activeSpringCount; ai++) {
+    const si = activeSpringIndices[ai];
+    const spring = soft?.springs?.[si];
+    const i = Number(spring?.[0]);
+    const j = Number(spring?.[1]);
+    const rest = Number(spring?.[2]);
+    const a = nodes[i];
+    const b = nodes[j];
+
+    springNodeA[ai] = Number.isInteger(i) && i >= 0 ? i : 0;
+    springNodeB[ai] = Number.isInteger(j) && j >= 0 ? j : 0;
+    springRest[ai] = Number.isFinite(rest) ? rest : 0;
+    springInvMassA[ai] = 1 / Math.max(0.02, Number(a?.mass) || 1);
+    springInvMassB[ai] = 1 / Math.max(0.02, Number(b?.mass) || 1);
+  }
+
+  // WebGPU storage buffers are naturally 4-byte addressed; widen signs now so
+  // upcoming WGSL reduction kernels can consume endpoint direction directly.
+  const endpointSignsI32 = new Int32Array(plan?.endpointCount || 0);
+  for (let ei = 0; ei < endpointSignsI32.length; ei++) {
+    endpointSignsI32[ei] = Number(plan?.endpointSigns?.[ei]) < 0 ? -1 : 1;
+  }
+
+  return {
+    nodeEndpointOffsets: plan?.nodeEndpointOffsets || new Uint32Array(0),
+    endpointSpringIndices: plan?.endpointSpringIndices || new Uint32Array(0),
+    endpointSignsI32,
+    springNodeA,
+    springNodeB,
+    springRest,
+    springInvMassA,
+    springInvMassB,
+    byteLength:
+      (plan?.nodeEndpointOffsets?.byteLength || 0)
+      + (plan?.endpointSpringIndices?.byteLength || 0)
+      + endpointSignsI32.byteLength
+      + springNodeA.byteLength
+      + springNodeB.byteLength
+      + springRest.byteLength
+      + springInvMassA.byteLength
+      + springInvMassB.byteLength,
+  };
+}
+
 export function applySoftSpringsXPBDVelocityGpuOnly({
   soft,
   dtPos,
@@ -95,12 +155,15 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
 
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     // Unblocker for upcoming WGSL XPBD stage: prepare deterministic CSR endpoint
-    // ownership now so the compute stage can run spring solve + node reduction
-    // without atomics changing integration ownership semantics.
+    // ownership and spring SoA buffers now so the compute stage can run spring
+    // solve + node reduction without atomics changing ownership semantics.
     const plan = buildSoftSpringXpbdWgslPlan({ soft, skipClusterSet });
+    const layout = buildSoftSpringXpbdWgslLayout({ soft, plan });
     wgslOffload.state.preparedPlan = plan;
+    wgslOffload.state.preparedLayout = layout;
     wgslOffload.state.lastPreparedSpringCount = plan.activeSpringCount;
     wgslOffload.state.lastPreparedEndpointCount = plan.endpointCount;
+    wgslOffload.state.lastPreparedLayoutBytes = layout.byteLength;
     wgslOffload.state.lastMode = 'cpu-prepared';
   }
 

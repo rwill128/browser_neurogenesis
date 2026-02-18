@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   applySoftSpringsXPBDVelocityGpuOnly,
   buildSoftSpringXpbdWgslPlan,
+  buildSoftSpringXpbdWgslLayout,
 } from '../../sim-server/public/runtime-solvers/stepSoftSpringsXpbdGpuOnly.js';
 
 const SOFT_XPBD_ITERS = 10;
@@ -161,6 +162,42 @@ test('soft spring XPBD WGSL plan builder emits deterministic CSR endpoint owners
   );
 });
 
+test('soft spring XPBD WGSL layout builder emits deterministic spring SoA + endpoint sign buffers', () => {
+  const soft = {
+    nodes: [
+      { mass: 1.25, clusterId: 0 },
+      { mass: 0.5, clusterId: 1 },
+      { mass: 2.0, clusterId: 2 },
+      { mass: 1.0, clusterId: 3 },
+    ],
+    springs: [
+      [0, 1, 4.5],
+      [1, 2, 3.25],
+      [2, 3, 5.75],
+    ],
+  };
+
+  const plan = buildSoftSpringXpbdWgslPlan({
+    soft,
+    skipClusterSet: new Set([3]),
+  });
+  const layout = buildSoftSpringXpbdWgslLayout({ soft, plan });
+
+  assert.deepEqual(Array.from(layout.springNodeA), [0, 1]);
+  assert.deepEqual(Array.from(layout.springNodeB), [1, 2]);
+  assert.deepEqual(Array.from(layout.springRest), [4.5, 3.25]);
+  assert.deepEqual(
+    Array.from(layout.springInvMassA).map((v) => Number(v.toFixed(6))),
+    [0.8, 2],
+  );
+  assert.deepEqual(
+    Array.from(layout.springInvMassB).map((v) => Number(v.toFixed(6))),
+    [2, 0.5],
+  );
+  assert.deepEqual(Array.from(layout.endpointSignsI32), [-1, 1, -1, 1]);
+  assert.equal(layout.byteLength > 0, true);
+});
+
 test('soft spring XPBD stores WGSL-prep state while preserving cpu parity outputs', () => {
   const dtPos = 0.18;
   const stiffnessScale = 3.0;
@@ -212,4 +249,7 @@ test('soft spring XPBD stores WGSL-prep state while preserving cpu parity output
   assert.equal(wgslState.lastPreparedSpringCount, 2);
   assert.equal(wgslState.lastPreparedEndpointCount, 4);
   assert.equal(wgslState.preparedPlan?.nodeEndpointOffsets?.length, seed.nodes.length + 1);
+  assert.equal(wgslState.preparedLayout?.springNodeA?.length, 2);
+  assert.equal(wgslState.preparedLayout?.endpointSignsI32?.length, 4);
+  assert.equal(wgslState.lastPreparedLayoutBytes, wgslState.preparedLayout?.byteLength);
 });

@@ -4214,6 +4214,12 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         membraneEdgeBaseCompliance,
         membraneBendXpbdIters: MEMBRANE_BEND_XPBD_ITERS,
         membraneBendBaseCompliance,
+        wgslOffload: {
+          enabled: true,
+          device: sim?.device,
+          modeProfile: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
+          state: (sim.softMembraneBoundaryWgslState ||= {}),
+        },
       })
       : applySoftMembraneBoundaryXPBDVelocity(sim, s, softClusterLoops, dtPos, {
         membraneEdgeBaseCompliance,

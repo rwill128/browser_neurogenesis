@@ -7,11 +7,45 @@ const ROOT = resolve(import.meta.dirname, '../..');
 const gpuLabSource = readFileSync(resolve(ROOT, 'sim-server/public/gpu-lab.js'), 'utf8');
 const moduleSource = readFileSync(resolve(ROOT, 'sim-server/public/runtime-solvers/stepSoftMembraneConstraintsGpuOnly.js'), 'utf8');
 
+test('gpu-lab wires membrane boundary xpbd gpu-only pass with WGSL offload state bag', () => {
+  assert.match(
+    gpuLabSource,
+    /applySoftMembraneBoundaryXPBDVelocityGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*modeProfile: normalizeRuntimePipelineMode\(sim\?\.controls\?\.runtimePipelineMode, sim\?\.controls\?\.runtimeSolverPath\),[\s\S]*state: \(sim\.softMembraneBoundaryWgslState \|\|= \{\}\),[\s\S]*\}\)/,
+    'expected gpu-lab membrane boundary gpu-only branch to wire isolated WGSL offload state bag while baseline path stays untouched',
+  );
+});
+
 test('gpu-lab wires membrane shape-memory gpu-only pass with WGSL offload state bag', () => {
   assert.match(
     gpuLabSource,
     /applySoftMembraneShapeMemoryVelocityGpuOnly\(\{[\s\S]*wgslOffload:[\s\S]*enabled: true,[\s\S]*device: sim\?\.device,[\s\S]*state: \(sim\.softMembraneShapeMemoryWgslState \|\|= \{\}\),[\s\S]*\}\)/,
     'expected gpu-lab membrane shape-memory gpu-only branch to wire isolated WGSL offload context while baseline path stays untouched',
+  );
+});
+
+test('membrane constraints gpu-only module defines concrete WGSL membrane-boundary edge proposal kernel with source-route telemetry', () => {
+  assert.match(
+    moduleSource,
+    /const softMembraneBoundaryEdgeProposalWgsl = \/\* wgsl \*\/[\s\S]*let C = clamp\(d - rest, -cLimit, cLimit\);[\s\S]*deltaVxAOut\[i\] = \(-wA \* dl \* nx\) \* invDt;[\s\S]*lambdaNextOut\[i\] = lambdaNext;/,
+    'expected concrete WGSL kernel math for membrane boundary edge XPBD velocity/lambda proposal deltas',
+  );
+
+  assert.match(
+    moduleSource,
+    /getGpuOnlyPipelineModeProfile\(offload\)[\s\S]*modeProfile === 'gpu-only-fast'[\s\S]*modeProfile === 'gpu-only-validated'[\s\S]*return 'standard';/,
+    'expected membrane boundary gpu-only path to normalize explicit standard/validated/fast pipeline mode routing',
+  );
+
+  assert.match(
+    moduleSource,
+    /dispatchSoftMembraneBoundaryEdgeProposal\([\s\S]*lastMembraneBoundaryEdgeProposalSignature[\s\S]*lastMembraneBoundaryEdgeProposalSource = finite\.allFinite\s*\?[\s\S]*'wgsl-membrane-boundary-edge-proposal'[\s\S]*'cpu-membrane-boundary-edge-authoritative-nonfinite'/,
+    'expected membrane boundary proposal dispatch to preserve explicit source-route and hard non-finite fallback telemetry',
+  );
+
+  assert.match(
+    moduleSource,
+    /pendingWgslMembraneBoundaryEdgeProposalPromise[\s\S]*dispatchSoftMembraneBoundaryEdgeProposal\([\s\S]*lastMembraneBoundaryEdgeProposalSource = 'cpu-membrane-boundary-edge-authoritative'[\s\S]*lastMode = 'cpu-membrane-boundary-edge-authoritative'/,
+    'expected serialized membrane boundary WGSL proposal dispatch with hard CPU fallback source-route when dispatch fails',
   );
 });
 

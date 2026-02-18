@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const source = readFileSync(resolve(ROOT, 'sim-server/public/runtime-solvers/stepPostCollisionRecoveryGpuOnly.js'), 'utf8');
+const gpuLabSource = readFileSync(resolve(ROOT, 'sim-server/public/gpu-lab.js'), 'utf8');
 
 test('post-collision recovery WGSL source-route supports authoritative soft-cluster mass replay with parity telemetry', () => {
   assert.match(
@@ -17,5 +18,11 @@ test('post-collision recovery WGSL source-route supports authoritative soft-clus
     source,
     /computeSoftClusterKinematicsFromMassMomentsGpuOnly\([\s\S]*lastSoftClusterAuthoritativeParity = computeSoftClusterKinematicsParity\([\s\S]*lastAuthoritativeSoftClusterSource = hasAuthoritativeProbe[\s\S]*'wgsl-soft-cluster-mass-moments-authoritative'[\s\S]*'cpu-soft-cluster-kinematics-authoritative'[\s\S]*lastSourceRoute = wgslOffload\.state\.lastAuthoritativeSoftClusterSource/,
     'expected authoritative WGSL mass replay path to publish parity and source-route ownership',
+  );
+
+  assert.match(
+    gpuLabSource,
+    /postCollisionBoundaryWgslState \|\|= \{\}[\s\S]*enableAuthoritativeSoftClusterProjection !== false[\s\S]*enableAuthoritativeSoftClusterProjection = true;[\s\S]*enableAuthoritativeMembraneInsideCorrection !== false[\s\S]*enableAuthoritativeMembraneInsideCorrection = true;/,
+    'expected gpu-only post-collision state bootstrap to enable authoritative membrane inside-correction WGSL replay by default (while preserving explicit opt-out)',
   );
 });

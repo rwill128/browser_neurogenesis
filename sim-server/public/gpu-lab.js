@@ -4668,6 +4668,9 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
             if (st.enableAuthoritativeSoftClusterProjection !== false) {
               st.enableAuthoritativeSoftClusterProjection = true;
             }
+            if (st.enableAuthoritativeMembraneInsideCorrection !== false) {
+              st.enableAuthoritativeMembraneInsideCorrection = true;
+            }
             return st;
           })(),
         },

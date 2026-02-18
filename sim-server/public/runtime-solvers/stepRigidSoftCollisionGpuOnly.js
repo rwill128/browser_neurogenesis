@@ -133,15 +133,30 @@ function edgeOutwardNormal(ax, ay, bx, by, cx, cy) {
 }
 
 export function resolveRigidVsSoftNodeCollisionGpuOnly(rigid, node, vertsInput, restitution = 0.28) {
-  const verts = Array.isArray(vertsInput) && vertsInput.length >= 3
-    ? vertsInput
-    : rigidVerticesWorld(rigid);
-  if (!verts.length) return false;
+  let finiteVerts = null;
+  let centroid = null;
 
-  const finiteVerts = sanitizeFinitePolygonVerts(verts);
-  if (finiteVerts.length < 3) return false;
-
-  const centroid = polygonCentroid(finiteVerts);
+  if (Array.isArray(vertsInput) && vertsInput.length >= 3) {
+    finiteVerts = sanitizeFinitePolygonVerts(vertsInput);
+    if (finiteVerts.length < 3) return false;
+    centroid = polygonCentroid(finiteVerts);
+  } else if (
+    vertsInput
+    && Array.isArray(vertsInput.finiteVerts)
+    && vertsInput.finiteVerts.length >= 3
+    && vertsInput.centroid
+    && Number.isFinite(vertsInput.centroid.x)
+    && Number.isFinite(vertsInput.centroid.y)
+  ) {
+    finiteVerts = vertsInput.finiteVerts;
+    centroid = vertsInput.centroid;
+  } else {
+    const verts = rigidVerticesWorld(rigid);
+    if (!verts.length) return false;
+    finiteVerts = sanitizeFinitePolygonVerts(verts);
+    if (finiteVerts.length < 3) return false;
+    centroid = polygonCentroid(finiteVerts);
+  }
 
   let best = null;
   for (let i = 0; i < finiteVerts.length; i++) {
@@ -2244,8 +2259,8 @@ function applyRigidSoftAuthoritativeProposal({ rigidBodies, soft, impulseSeed, p
   }
 }
 
-function resolveRigidSoftNodeCollisionCpuFallback(rb, sn, nodeSlop) {
-  return resolveRigidVsSoftNodeCollisionGpuOnly(rb, sn, null, nodeSlop);
+function resolveRigidSoftNodeCollisionCpuFallback(rb, sn, nodeSolverInput, nodeSlop) {
+  return resolveRigidVsSoftNodeCollisionGpuOnly(rb, sn, nodeSolverInput, nodeSlop);
 }
 
 function resolveRigidSoftEdgeCollisionCpuFallback(rb, a, b, edgeSlop) {
@@ -2275,7 +2290,7 @@ function applyCpuRigidSoftResponseFallback({
     if (typeof cpuNodeObserver === 'function') {
       try { cpuNodeObserver(rb, sn, null, nodeSlop); } catch {}
     }
-    return resolveRigidSoftNodeCollisionCpuFallback(rb, sn, nodeSlop);
+    return resolveRigidSoftNodeCollisionCpuFallback(rb, sn, null, nodeSlop);
   };
   const solveEdgeCollision = (rb, a, b) => {
     if (!preferInternalHardFallback && typeof cpuEdgeObserver === 'function') {

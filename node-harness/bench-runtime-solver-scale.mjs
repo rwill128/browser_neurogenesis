@@ -307,20 +307,33 @@ function baselineRigidRigidPass(rigidBodies) {
   }
 }
 
-function baselineRigidSoftPass(rigidBodies, soft) {
+function baselineRigidSoftPass(rigidBodies, soft, {
+  nodeObserver = resolveRigidVsSoftNodeCollision,
+  edgeObserver = resolveRigidVsSoftEdgeCollision,
+} = {}) {
   for (let rbi = 0; rbi < rigidBodies.length; rbi++) {
     const rb = rigidBodies[rbi];
     for (let ni = 0; ni < soft.nodes.length; ni++) {
-      resolveRigidVsSoftNodeCollision(rb, soft.nodes[ni], null, 0.18);
+      nodeObserver(rb, soft.nodes[ni], null, 0.18);
     }
     for (const [i, j, _rest, edgeBodyMode] of soft.springs) {
       if (edgeBodyMode !== 1) continue;
-      resolveRigidVsSoftEdgeCollision(rb, soft.nodes[i], soft.nodes[j], 0.16);
+      edgeObserver(rb, soft.nodes[i], soft.nodes[j], 0.16);
     }
   }
 }
 
 const STAGE_KEYS = ['rigidIntegrate', 'rigidRigidCollision', 'rigidSoftCollision'];
+
+function parseBooleanEnv(name, fallback = false) {
+  const raw = String(process.env[name] || '').trim().toLowerCase();
+  if (!raw) return fallback;
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+const detailedRigidSoft = parseBooleanEnv('RIGID_SOFT_DETAILED', false);
+const useRigidSoftOffloadStub = parseBooleanEnv('RIGID_SOFT_USE_OFFLOAD_STUB', false);
+const rigidSoftCpuSolverMode = String(process.env.RIGID_SOFT_CPU_SOLVER || 'benchmark').trim().toLowerCase();
 
 function createStageStats() {
   const stats = {};
@@ -330,6 +343,22 @@ function createStageStats() {
       wallMs: 0,
       cpuMs: 0,
       gpuWaitMsEstimate: 0,
+    };
+  }
+  if (detailedRigidSoft) {
+    stats.rigidSoftDetail = {
+      nodeCalls: 0,
+      edgeCalls: 0,
+      cpuFallbackNodeWallMs: 0,
+      cpuFallbackEdgeWallMs: 0,
+      cpuFallbackNodePairCount: 0,
+      cpuFallbackEdgePairCount: 0,
+      cpuFallbackUsedCompactNodePairsCount: 0,
+      cpuFallbackUsedCompactEdgePairsCount: 0,
+      routeCounts: {},
+      fallbackReasonCounts: {},
+      mode: rigidSoftCpuSolverMode,
+      useOffloadStub: useRigidSoftOffloadStub,
     };
   }
   return stats;
@@ -351,6 +380,16 @@ function runTimedStage(stageStats, stageKey, fn) {
   return result;
 }
 
+function withRigidSoftObserver(detail, kind, fn) {
+  if (!detail || typeof fn !== 'function') return fn;
+  if (kind !== 'node' && kind !== 'edge') return fn;
+  return (...args) => {
+    if (kind === 'node') detail.nodeCalls += 1;
+    else detail.edgeCalls += 1;
+    return fn(...args);
+  };
+}
+
 function finalizeStageStats(stageStats, steps) {
   const out = {};
   for (const key of STAGE_KEYS) {
@@ -365,6 +404,32 @@ function finalizeStageStats(stageStats, steps) {
       gpuWaitMsEstimatePerStep: s.gpuWaitMsEstimate / Math.max(1, steps),
     };
   }
+
+  if (stageStats.rigidSoftDetail) {
+    const detail = stageStats.rigidSoftDetail;
+    const totalFallbackWallMs = detail.cpuFallbackNodeWallMs + detail.cpuFallbackEdgeWallMs;
+    const stageWallMs = out.rigidSoftCollision.wallMs;
+    const nonFallbackWallMs = Math.max(0, stageWallMs - totalFallbackWallMs);
+    out.rigidSoftCollision.breakdown = {
+      mode: detail.mode,
+      useOffloadStub: detail.useOffloadStub,
+      nodeCalls: detail.nodeCalls,
+      edgeCalls: detail.edgeCalls,
+      cpuFallbackNodeWallMs: detail.cpuFallbackNodeWallMs,
+      cpuFallbackEdgeWallMs: detail.cpuFallbackEdgeWallMs,
+      cpuFallbackNodeWallMsPerStep: detail.cpuFallbackNodeWallMs / Math.max(1, steps),
+      cpuFallbackEdgeWallMsPerStep: detail.cpuFallbackEdgeWallMs / Math.max(1, steps),
+      cpuFallbackNodePairCount: detail.cpuFallbackNodePairCount,
+      cpuFallbackEdgePairCount: detail.cpuFallbackEdgePairCount,
+      cpuFallbackUsedCompactNodePairsCount: detail.cpuFallbackUsedCompactNodePairsCount,
+      cpuFallbackUsedCompactEdgePairsCount: detail.cpuFallbackUsedCompactEdgePairsCount,
+      nonFallbackWallMs,
+      nonFallbackWallMsPerStep: nonFallbackWallMs / Math.max(1, steps),
+      routeCounts: detail.routeCounts,
+      fallbackReasonCounts: detail.fallbackReasonCounts,
+    };
+  }
+
   return out;
 }
 
@@ -395,6 +460,10 @@ function buildStepArgs(state) {
 }
 
 function runStep(path, state, args, stageStats = null) {
+  const rigidSoftDetail = stageStats?.rigidSoftDetail || null;
+  const nodeObserver = withRigidSoftObserver(rigidSoftDetail, 'node', resolveRigidVsSoftNodeCollision);
+  const edgeObserver = withRigidSoftObserver(rigidSoftDetail, 'edge', resolveRigidVsSoftEdgeCollision);
+
   if (path === 'gpu-only') {
     runTimedStage(stageStats, 'rigidIntegrate', () => stepRigidBodiesGpuOnly(args));
     runTimedStage(stageStats, 'rigidRigidCollision', () => resolveRigidRigidCollisionPassGpuOnly({
@@ -405,19 +474,49 @@ function runStep(path, state, args, stageStats = null) {
       phase: 'bench',
       resolveRigidVsRigidPolygonCollision,
     }));
-    runTimedStage(stageStats, 'rigidSoftCollision', () => resolveRigidSoftCollisionPassGpuOnly({
+
+    const passArgs = {
       rigidBodies: state.bodies.rigid,
       soft: state.bodies.soft,
-      resolveRigidVsSoftNodeCollision,
-      resolveRigidVsSoftEdgeCollision,
       edgeBodyModeBlock: 1,
       nodeSlop: 0.18,
       edgeSlop: 0.16,
-    }));
+    };
+
+    if (rigidSoftCpuSolverMode !== 'internal') {
+      passArgs.resolveRigidVsSoftNodeCollision = nodeObserver;
+      passArgs.resolveRigidVsSoftEdgeCollision = edgeObserver;
+    }
+
+    if (useRigidSoftOffloadStub) {
+      const offloadState = stageStats ? (stageStats.rigidSoftOffloadState ||= {}) : {};
+      passArgs.wgslOffload = { enabled: true, state: offloadState };
+    }
+
+    const rigidSoftProfile = rigidSoftDetail ? {} : null;
+    if (rigidSoftProfile) passArgs.profile = rigidSoftProfile;
+
+    runTimedStage(stageStats, 'rigidSoftCollision', () => resolveRigidSoftCollisionPassGpuOnly(passArgs));
+
+    if (rigidSoftProfile) {
+      rigidSoftDetail.cpuFallbackNodeWallMs += Number(rigidSoftProfile.cpuFallbackNodeWallMs) || 0;
+      rigidSoftDetail.cpuFallbackEdgeWallMs += Number(rigidSoftProfile.cpuFallbackEdgeWallMs) || 0;
+      rigidSoftDetail.cpuFallbackNodePairCount += Number(rigidSoftProfile.cpuFallbackNodePairCount) || 0;
+      rigidSoftDetail.cpuFallbackEdgePairCount += Number(rigidSoftProfile.cpuFallbackEdgePairCount) || 0;
+      if (rigidSoftProfile.cpuFallbackUsedCompactNodePairs) rigidSoftDetail.cpuFallbackUsedCompactNodePairsCount += 1;
+      if (rigidSoftProfile.cpuFallbackUsedCompactEdgePairs) rigidSoftDetail.cpuFallbackUsedCompactEdgePairsCount += 1;
+      const routeKey = String(rigidSoftProfile.route || 'unknown');
+      rigidSoftDetail.routeCounts[routeKey] = (rigidSoftDetail.routeCounts[routeKey] || 0) + 1;
+      const reasonKey = String(rigidSoftProfile.fallbackReason || 'none');
+      rigidSoftDetail.fallbackReasonCounts[reasonKey] = (rigidSoftDetail.fallbackReasonCounts[reasonKey] || 0) + 1;
+    }
   } else {
     runTimedStage(stageStats, 'rigidIntegrate', () => baselineStepRigid(args));
     runTimedStage(stageStats, 'rigidRigidCollision', () => baselineRigidRigidPass(state.bodies.rigid));
-    runTimedStage(stageStats, 'rigidSoftCollision', () => baselineRigidSoftPass(state.bodies.rigid, state.bodies.soft));
+    runTimedStage(stageStats, 'rigidSoftCollision', () => baselineRigidSoftPass(state.bodies.rigid, state.bodies.soft, {
+      nodeObserver,
+      edgeObserver,
+    }));
   }
   state.sim.frame += 1;
 }
@@ -440,7 +539,7 @@ function runScenario(path, fixture, { steps, warmupSteps }) {
   const stageCpuSum = STAGE_KEYS.reduce((sum, key) => sum + stageTimings[key].cpuMs, 0);
   const stageGpuWaitSum = STAGE_KEYS.reduce((sum, key) => sum + stageTimings[key].gpuWaitMsEstimate, 0);
 
-  return {
+  const result = {
     elapsedMs,
     msPerStep: elapsedMs / steps,
     stepsPerSec: (steps / elapsedMs) * 1000,
@@ -455,6 +554,25 @@ function runScenario(path, fixture, { steps, warmupSteps }) {
       nonStageWallMs: Math.max(0, elapsedMs - stageWallSum),
     },
   };
+
+  if (stageStats.rigidSoftOffloadState) {
+    const st = stageStats.rigidSoftOffloadState;
+    result.rigidSoftRuntime = {
+      lastSourceRoute: st.lastSourceRoute || null,
+      lastMode: st.lastMode || null,
+      lastRigidSoftResponseOwnership: st.lastRigidSoftResponseOwnership || null,
+      lastRigidSoftResponseRoute: st.lastRigidSoftResponseRoute || null,
+      lastRigidSoftResponseFallbackReason: st.lastRigidSoftResponseFallbackReason || null,
+      lastNodeCollisionResponseSource: st.lastNodeCollisionResponseSource || null,
+      lastEdgeCollisionResponseSource: st.lastEdgeCollisionResponseSource || null,
+      lastPreparedNodePairCount: Number(st.lastPreparedNodePairCount) || 0,
+      lastPreparedEdgePairCount: Number(st.lastPreparedEdgePairCount) || 0,
+      lastPreparedNodeNarrowphasePairCount: Number(st.lastPreparedNodeNarrowphasePairCount) || 0,
+      lastPreparedEdgeNarrowphasePairCount: Number(st.lastPreparedEdgeNarrowphasePairCount) || 0,
+    };
+  }
+
+  return result;
 }
 
 function buildExperiments({

@@ -622,22 +622,30 @@ function packSpatialCellKey(cx, cy) {
   return (cx + SPATIAL_KEY_BIAS) * SPATIAL_KEY_STRIDE + (cy + SPATIAL_KEY_BIAS);
 }
 
-export function buildRigidRigidSpatialHashCandidates(rigidBodies, options = {}) {
+function buildRigidSpatialHashState(rigidBodies, cellSize) {
   const bodies = Array.isArray(rigidBodies) ? rigidBodies : [];
   const bodyCount = bodies.length;
   const bruteForcePairs = bodyCount > 1 ? (bodyCount * (bodyCount - 1)) / 2 : 0;
-  const rawCellSize = Number(options.cellSize);
-  const cellSize = Number.isFinite(rawCellSize) ? Math.max(0.25, rawCellSize) : 12;
 
   const cells = new Map();
+  const rigidMeta = new Array(bodyCount);
   let occupiedBodyWrites = 0;
 
   for (let i = 0; i < bodyCount; i++) {
     const rb = bodies[i];
-    if (!rb) continue;
+    if (!rb) {
+      rigidMeta[i] = {
+        bx: 0,
+        by: 0,
+        radius: 0.5,
+      };
+      continue;
+    }
     const bx = finiteOr(rb.x, 0);
     const by = finiteOr(rb.y, 0);
     const radius = Math.max(0.5, getRigidBroadphaseRadius(rb));
+    rigidMeta[i] = { bx, by, radius };
+
     const minCx = Math.floor((bx - radius) / cellSize);
     const maxCx = Math.floor((bx + radius) / cellSize);
     const minCy = Math.floor((by - radius) / cellSize);
@@ -659,13 +667,31 @@ export function buildRigidRigidSpatialHashCandidates(rigidBodies, options = {}) 
   }
 
   const sortedKeys = Array.from(cells.keys()).sort((a, b) => a - b);
-  const candidatePairs = [];
-  const seenPairs = new Set();
   let maxBodiesPerCell = 0;
-
   for (const key of sortedKeys) {
     const ids = cells.get(key) || [];
     if (ids.length > maxBodiesPerCell) maxBodiesPerCell = ids.length;
+  }
+
+  return {
+    bodies,
+    bodyCount,
+    bruteForcePairs,
+    cellSize,
+    cells,
+    sortedKeys,
+    rigidMeta,
+    occupiedBodyWrites,
+    maxBodiesPerCell,
+  };
+}
+
+function deriveRigidRigidCandidatesFromState(state) {
+  const candidatePairs = [];
+  const seenPairs = new Set();
+
+  for (const key of state.sortedKeys) {
+    const ids = state.cells.get(key) || [];
     if (ids.length < 2) continue;
     for (let a = 0; a < ids.length; a++) {
       const i = ids[a];
@@ -674,7 +700,7 @@ export function buildRigidRigidSpatialHashCandidates(rigidBodies, options = {}) 
         if (i === j) continue;
         const lo = i < j ? i : j;
         const hi = i < j ? j : i;
-        const pairKey = lo * bodyCount + hi;
+        const pairKey = lo * state.bodyCount + hi;
         if (seenPairs.has(pairKey)) continue;
         seenPairs.add(pairKey);
         candidatePairs.push([lo, hi]);
@@ -685,42 +711,32 @@ export function buildRigidRigidSpatialHashCandidates(rigidBodies, options = {}) 
   candidatePairs.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
 
   const checkedPairs = candidatePairs.length;
-  const prunedPairs = Math.max(0, bruteForcePairs - checkedPairs);
-  const reductionPct = bruteForcePairs > 0
-    ? (prunedPairs / bruteForcePairs) * 100
+  const prunedPairs = Math.max(0, state.bruteForcePairs - checkedPairs);
+  const reductionPct = state.bruteForcePairs > 0
+    ? (prunedPairs / state.bruteForcePairs) * 100
     : 0;
 
   return {
     pairs: candidatePairs,
     stats: {
-      bodyCount,
-      bruteForcePairs,
+      bodyCount: state.bodyCount,
+      bruteForcePairs: state.bruteForcePairs,
       checkedPairs,
       prunedPairs,
       reductionPct,
-      cellSize,
-      occupiedCells: sortedKeys.length,
-      occupiedBodyWrites,
-      maxBodiesPerCell,
-      avgBodiesPerCell: sortedKeys.length > 0 ? (occupiedBodyWrites / sortedKeys.length) : 0,
+      cellSize: state.cellSize,
+      occupiedCells: state.sortedKeys.length,
+      occupiedBodyWrites: state.occupiedBodyWrites,
+      maxBodiesPerCell: state.maxBodiesPerCell,
+      avgBodiesPerCell: state.sortedKeys.length > 0 ? (state.occupiedBodyWrites / state.sortedKeys.length) : 0,
     },
   };
 }
 
-export function buildRigidSoftSpatialHashCandidates(rigidBodies, softNodes, softSprings, options = {}) {
-  const bodies = Array.isArray(rigidBodies) ? rigidBodies : [];
+function buildSoftFeatureSpatialState(softNodes, softSprings, cellSize, edgeBodyModeBlock) {
   const nodes = Array.isArray(softNodes) ? softNodes : [];
   const springs = Array.isArray(softSprings) ? softSprings : [];
-  const rigidCount = bodies.length;
   const nodeCount = nodes.length;
-
-  const rawCellSize = Number(options.cellSize);
-  const cellSize = Number.isFinite(rawCellSize) ? Math.max(0.25, rawCellSize) : 12;
-  const edgeBodyModeBlock = Number.isFinite(Number(options.edgeBodyModeBlock))
-    ? Number(options.edgeBodyModeBlock)
-    : 1;
-  const nodePad = Number.isFinite(Number(options.nodePad)) ? Math.max(0, Number(options.nodePad)) : 0.8;
-  const edgePad = Number.isFinite(Number(options.edgePad)) ? Math.max(0, Number(options.edgePad)) : 0.8;
 
   const nodeCells = new Map();
   let nodeWrites = 0;
@@ -752,6 +768,7 @@ export function buildRigidSoftSpatialHashCandidates(rigidBodies, softNodes, soft
   let edgeWrites = 0;
   let maxEdgesPerCell = 0;
   let blockedEdgeCount = 0;
+
   for (let si = 0; si < springs.length; si++) {
     const sp = springs[si];
     if (!Array.isArray(sp)) continue;
@@ -793,6 +810,27 @@ export function buildRigidSoftSpatialHashCandidates(rigidBodies, softNodes, soft
     }
   }
 
+  return {
+    nodes,
+    springs,
+    nodeCount,
+    blockedEdgeCount,
+    nodeCells,
+    edgeCells,
+    nodeWrites,
+    edgeWrites,
+    maxNodesPerCell,
+    maxEdgesPerCell,
+    maxSoftNodeRadius,
+  };
+}
+
+function deriveRigidSoftCandidatesFromState(state, softState, options = {}) {
+  const rigidCount = state.bodyCount;
+  const nodeCount = softState.nodeCount;
+  const nodePad = Number.isFinite(Number(options.nodePad)) ? Math.max(0, Number(options.nodePad)) : 0.8;
+  const edgePad = Number.isFinite(Number(options.edgePad)) ? Math.max(0, Number(options.edgePad)) : 0.8;
+
   const nodeCandidatesByRigid = new Array(rigidCount);
   const edgeCandidatesByRigid = new Array(rigidCount);
   let candidateNodeChecks = 0;
@@ -800,29 +838,23 @@ export function buildRigidSoftSpatialHashCandidates(rigidBodies, softNodes, soft
   let maxRigidRadius = 0;
 
   for (let rbi = 0; rbi < rigidCount; rbi++) {
-    const rb = bodies[rbi];
-    if (!rb) {
-      nodeCandidatesByRigid[rbi] = [];
-      edgeCandidatesByRigid[rbi] = [];
-      continue;
-    }
-
-    const bx = finiteOr(rb.x, 0);
-    const by = finiteOr(rb.y, 0);
-    const rigidRadius = Math.max(0.5, getRigidBroadphaseRadius(rb));
+    const meta = state.rigidMeta[rbi] || { bx: 0, by: 0, radius: 0.5 };
+    const bx = Number(meta.bx) || 0;
+    const by = Number(meta.by) || 0;
+    const rigidRadius = Math.max(0.5, Number(meta.radius) || 0.5);
     if (rigidRadius > maxRigidRadius) maxRigidRadius = rigidRadius;
 
-    const nodeReach = rigidRadius + maxSoftNodeRadius + nodePad;
+    const nodeReach = rigidRadius + softState.maxSoftNodeRadius + nodePad;
     const nodeSet = new Set();
-    const nodeMinCx = Math.floor((bx - nodeReach) / cellSize);
-    const nodeMaxCx = Math.floor((bx + nodeReach) / cellSize);
-    const nodeMinCy = Math.floor((by - nodeReach) / cellSize);
-    const nodeMaxCy = Math.floor((by + nodeReach) / cellSize);
+    const nodeMinCx = Math.floor((bx - nodeReach) / state.cellSize);
+    const nodeMaxCx = Math.floor((bx + nodeReach) / state.cellSize);
+    const nodeMinCy = Math.floor((by - nodeReach) / state.cellSize);
+    const nodeMaxCy = Math.floor((by + nodeReach) / state.cellSize);
     for (let cy = nodeMinCy; cy <= nodeMaxCy; cy++) {
       for (let cx = nodeMinCx; cx <= nodeMaxCx; cx++) {
         const key = packSpatialCellKey(cx, cy);
         if (key == null) continue;
-        const bucket = nodeCells.get(key);
+        const bucket = softState.nodeCells.get(key);
         if (!bucket) continue;
         for (const ni of bucket) nodeSet.add(ni);
       }
@@ -833,15 +865,15 @@ export function buildRigidSoftSpatialHashCandidates(rigidBodies, softNodes, soft
 
     const edgeReach = rigidRadius + edgePad;
     const edgeSet = new Set();
-    const edgeMinCx = Math.floor((bx - edgeReach) / cellSize);
-    const edgeMaxCx = Math.floor((bx + edgeReach) / cellSize);
-    const edgeMinCy = Math.floor((by - edgeReach) / cellSize);
-    const edgeMaxCy = Math.floor((by + edgeReach) / cellSize);
+    const edgeMinCx = Math.floor((bx - edgeReach) / state.cellSize);
+    const edgeMaxCx = Math.floor((bx + edgeReach) / state.cellSize);
+    const edgeMinCy = Math.floor((by - edgeReach) / state.cellSize);
+    const edgeMaxCy = Math.floor((by + edgeReach) / state.cellSize);
     for (let cy = edgeMinCy; cy <= edgeMaxCy; cy++) {
       for (let cx = edgeMinCx; cx <= edgeMaxCx; cx++) {
         const key = packSpatialCellKey(cx, cy);
         if (key == null) continue;
-        const bucket = edgeCells.get(key);
+        const bucket = softState.edgeCells.get(key);
         if (!bucket) continue;
         for (const si of bucket) edgeSet.add(si);
       }
@@ -852,7 +884,7 @@ export function buildRigidSoftSpatialHashCandidates(rigidBodies, softNodes, soft
   }
 
   const rawNodeChecks = rigidCount * nodeCount;
-  const rawEdgeChecks = rigidCount * blockedEdgeCount;
+  const rawEdgeChecks = rigidCount * softState.blockedEdgeCount;
   const prunedNodeChecks = Math.max(0, rawNodeChecks - candidateNodeChecks);
   const prunedEdgeChecks = Math.max(0, rawEdgeChecks - candidateEdgeChecks);
 
@@ -862,7 +894,7 @@ export function buildRigidSoftSpatialHashCandidates(rigidBodies, softNodes, soft
     stats: {
       rigidCount,
       nodeCount,
-      blockedEdgeCount,
+      blockedEdgeCount: softState.blockedEdgeCount,
       rawNodeChecks,
       candidateNodeChecks,
       prunedNodeChecks,
@@ -871,19 +903,109 @@ export function buildRigidSoftSpatialHashCandidates(rigidBodies, softNodes, soft
       candidateEdgeChecks,
       prunedEdgeChecks,
       edgeReductionPct: rawEdgeChecks > 0 ? (prunedEdgeChecks / rawEdgeChecks) * 100 : 0,
-      cellSize,
-      nodeOccupiedCells: nodeCells.size,
-      edgeOccupiedCells: edgeCells.size,
-      nodeWrites,
-      edgeWrites,
-      maxNodesPerCell,
-      maxEdgesPerCell,
+      cellSize: state.cellSize,
+      nodeOccupiedCells: softState.nodeCells.size,
+      edgeOccupiedCells: softState.edgeCells.size,
+      nodeWrites: softState.nodeWrites,
+      edgeWrites: softState.edgeWrites,
+      maxNodesPerCell: softState.maxNodesPerCell,
+      maxEdgesPerCell: softState.maxEdgesPerCell,
       maxRigidRadius,
-      maxSoftNodeRadius,
+      maxSoftNodeRadius: softState.maxSoftNodeRadius,
       nodePad,
       edgePad,
     },
   };
+}
+
+export function buildCollisionPhaseSceneCache(rigidBodies, softNodes, softSprings, options = {}) {
+  const rawCellSize = Number(options.cellSize);
+  const cellSize = Number.isFinite(rawCellSize) ? Math.max(0.25, rawCellSize) : 12;
+  const includeRigidRigid = options.includeRigidRigid !== false;
+  const includeRigidSoft = options.includeRigidSoft !== false;
+  const edgeBodyModeBlock = Number.isFinite(Number(options.edgeBodyModeBlock))
+    ? Number(options.edgeBodyModeBlock)
+    : 1;
+
+  const rigidState = buildRigidSpatialHashState(rigidBodies, cellSize);
+
+  const rigidRigid = includeRigidRigid
+    ? deriveRigidRigidCandidatesFromState(rigidState)
+    : {
+      pairs: [],
+      stats: {
+        bodyCount: rigidState.bodyCount,
+        bruteForcePairs: rigidState.bruteForcePairs,
+        checkedPairs: 0,
+        prunedPairs: rigidState.bruteForcePairs,
+        reductionPct: rigidState.bruteForcePairs > 0 ? 100 : 0,
+        cellSize,
+        occupiedCells: rigidState.sortedKeys.length,
+        occupiedBodyWrites: rigidState.occupiedBodyWrites,
+        maxBodiesPerCell: rigidState.maxBodiesPerCell,
+        avgBodiesPerCell: rigidState.sortedKeys.length > 0
+          ? (rigidState.occupiedBodyWrites / rigidState.sortedKeys.length)
+          : 0,
+      },
+    };
+
+  let rigidSoft = {
+    nodeCandidatesByRigid: new Array(rigidState.bodyCount).fill(null).map(() => []),
+    edgeCandidatesByRigid: new Array(rigidState.bodyCount).fill(null).map(() => []),
+    stats: {
+      rigidCount: rigidState.bodyCount,
+      nodeCount: Array.isArray(softNodes) ? softNodes.length : 0,
+      blockedEdgeCount: 0,
+      rawNodeChecks: 0,
+      candidateNodeChecks: 0,
+      prunedNodeChecks: 0,
+      nodeReductionPct: 0,
+      rawEdgeChecks: 0,
+      candidateEdgeChecks: 0,
+      prunedEdgeChecks: 0,
+      edgeReductionPct: 0,
+      cellSize,
+      nodeOccupiedCells: 0,
+      edgeOccupiedCells: 0,
+      nodeWrites: 0,
+      edgeWrites: 0,
+      maxNodesPerCell: 0,
+      maxEdgesPerCell: 0,
+      maxRigidRadius: 0,
+      maxSoftNodeRadius: 0,
+      nodePad: Number.isFinite(Number(options.nodePad)) ? Math.max(0, Number(options.nodePad)) : 0.8,
+      edgePad: Number.isFinite(Number(options.edgePad)) ? Math.max(0, Number(options.edgePad)) : 0.8,
+    },
+  };
+
+  if (includeRigidSoft) {
+    const softState = buildSoftFeatureSpatialState(softNodes, softSprings, cellSize, edgeBodyModeBlock);
+    rigidSoft = deriveRigidSoftCandidatesFromState(rigidState, softState, options);
+  }
+
+  return {
+    cellSize,
+    rigidRigid,
+    rigidSoft,
+  };
+}
+
+export function buildRigidRigidSpatialHashCandidates(rigidBodies, options = {}) {
+  const scene = buildCollisionPhaseSceneCache(rigidBodies, [], [], {
+    ...options,
+    includeRigidRigid: true,
+    includeRigidSoft: false,
+  });
+  return scene.rigidRigid;
+}
+
+export function buildRigidSoftSpatialHashCandidates(rigidBodies, softNodes, softSprings, options = {}) {
+  const scene = buildCollisionPhaseSceneCache(rigidBodies, softNodes, softSprings, {
+    ...options,
+    includeRigidRigid: false,
+    includeRigidSoft: true,
+  });
+  return scene.rigidSoft;
 }
 
 function polygonCenter(poly) {

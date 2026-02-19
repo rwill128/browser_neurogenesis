@@ -8,6 +8,7 @@ import {
   buildRigidRigidSpatialHashCandidates,
   buildRigidSoftNodeCollisionCache,
   buildRigidSoftSpatialHashCandidates,
+  buildCollisionPhaseSceneCache,
 } from '../../sim-server/public/rigid-collision.js';
 
 function makeConcaveL(x, y) {
@@ -297,6 +298,36 @@ test('rigid-rigid spatial hash broadphase candidate order is deterministic', () 
   assert.deepEqual(a.pairs, b.pairs, 'candidate pair ordering should be stable across identical runs');
   assert.deepEqual(a.stats.checkedPairs, b.stats.checkedPairs);
   assert.deepEqual(a.stats.prunedPairs, b.stats.prunedPairs);
+});
+
+test('phase scene cache reuses shared rigid broadphase state for rigid-rigid and rigid-soft candidate sets', () => {
+  const rigids = [
+    makeBox(20, 20, 3),
+    makeBox(24.5, 20, 3),
+    makeBox(120, 120, 3),
+  ];
+  const nodes = [
+    { x: 22, y: 20, r: 1.2 },
+    { x: 19, y: 21, r: 1.2 },
+    { x: 118, y: 120, r: 1.2 },
+  ];
+  const springs = [
+    [0, 1, 1, 1],
+    [1, 2, 1, 1],
+  ];
+
+  const scene = buildCollisionPhaseSceneCache(rigids, nodes, springs, {
+    cellSize: 12,
+    edgeBodyModeBlock: 1,
+    includeRigidRigid: true,
+    includeRigidSoft: true,
+  });
+  const rr = buildRigidRigidSpatialHashCandidates(rigids, { cellSize: 12 });
+  const rs = buildRigidSoftSpatialHashCandidates(rigids, nodes, springs, { cellSize: 12, edgeBodyModeBlock: 1 });
+
+  assert.deepEqual(scene.rigidRigid.pairs, rr.pairs, 'scene cache rigid-rigid pairs should match standalone broadphase');
+  assert.deepEqual(scene.rigidSoft.nodeCandidatesByRigid, rs.nodeCandidatesByRigid, 'scene cache rigid-soft node candidates should match standalone broadphase');
+  assert.deepEqual(scene.rigidSoft.edgeCandidatesByRigid, rs.edgeCandidatesByRigid, 'scene cache rigid-soft edge candidates should match standalone broadphase');
 });
 
 test('rigid-rigid SAT prefilter rejects far proxy pairs before SAT dispatch', () => {

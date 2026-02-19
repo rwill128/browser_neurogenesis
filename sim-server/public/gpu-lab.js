@@ -5,9 +5,8 @@ import {
   resolveRigidVsRigidPolygonCollision,
   getRigidCollisionPolysWorld,
   pointInPolygonInclusive,
-  buildRigidRigidSpatialHashCandidates,
   buildRigidSoftNodeCollisionCache,
-  buildRigidSoftSpatialHashCandidates,
+  buildCollisionPhaseSceneCache,
 } from '/rigid-collision.js';
 import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops, recoverSoftSpringRests } from '/soft-xpbd.js';
 import { computeVectorRms, computeRigidAlignedPoseResidual } from '/soft-deformation-metrics.js';
@@ -5061,9 +5060,21 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     // Body-body collisions: rigid↔rigid, rigid↔soft, soft↔soft
     for (let iter = 0; iter < 2; iter++) {
       const rigidRigidPreStartMs = performance.now();
-      const preBroadphase = buildRigidRigidSpatialHashCandidates(bodies.rigid, {
-        cellSize: RIGID_RIGID_SPATIAL_HASH_CELL_SIZE,
-      });
+      const phaseScene = buildCollisionPhaseSceneCache(
+        bodies.rigid,
+        s.nodes,
+        s.springs,
+        {
+          cellSize: RIGID_RIGID_SPATIAL_HASH_CELL_SIZE,
+          edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
+          nodePad: 0.8,
+          edgePad: 0.8,
+          includeRigidRigid: true,
+          includeRigidSoft: true,
+        },
+      );
+
+      const preBroadphase = phaseScene.rigidRigid;
       rigidRigidBroadphaseRuntime.phases.push({
         phase: 'pre-soft',
         iter,
@@ -5095,17 +5106,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       collisionCpuRuntime.stageMs.rigidRigidPre += performance.now() - rigidRigidPreStartMs;
 
       const rigidSoftStartMs = performance.now();
-      const rigidSoftBroadphase = buildRigidSoftSpatialHashCandidates(
-        bodies.rigid,
-        s.nodes,
-        s.springs,
-        {
-          cellSize: RIGID_SOFT_SPATIAL_HASH_CELL_SIZE,
-          edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
-          nodePad: 0.8,
-          edgePad: 0.8,
-        },
-      );
+      const rigidSoftBroadphase = phaseScene.rigidSoft;
       rigidSoftBroadphaseRuntime.phases.push({
         iter,
         ...rigidSoftBroadphase.stats,
@@ -5185,9 +5186,18 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
 
       // Re-run rigid-rigid contacts after rigid-soft pushes to avoid late interpenetration.
       const rigidRigidPostStartMs = performance.now();
-      const postBroadphase = buildRigidRigidSpatialHashCandidates(bodies.rigid, {
-        cellSize: RIGID_RIGID_SPATIAL_HASH_CELL_SIZE,
-      });
+      const postScene = buildCollisionPhaseSceneCache(
+        bodies.rigid,
+        s.nodes,
+        s.springs,
+        {
+          cellSize: RIGID_RIGID_SPATIAL_HASH_CELL_SIZE,
+          edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
+          includeRigidRigid: true,
+          includeRigidSoft: false,
+        },
+      );
+      const postBroadphase = postScene.rigidRigid;
       rigidRigidBroadphaseRuntime.phases.push({
         phase: 'post-soft',
         iter,

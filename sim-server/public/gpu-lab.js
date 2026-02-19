@@ -1258,6 +1258,17 @@ function uploadViscMap() {
   sim.device.queue.writeBuffer(sim.viscMapGpu, 0, sim.viscMapCpu);
 }
 
+function drawGridTextureToView(tmp, n, view, worldScale) {
+  const scale = Math.max(1e-6, Number(worldScale) || 1);
+  const srcX = Number(view?.x) / scale;
+  const srcY = Number(view?.y) / scale;
+  const srcW = Number(view?.w) / scale;
+  const srcH = Number(view?.h) / scale;
+  if (!Number.isFinite(srcX) || !Number.isFinite(srcY) || !Number.isFinite(srcW) || !Number.isFinite(srcH)) return;
+  if (srcW <= 0 || srcH <= 0) return;
+  ctx.drawImage(tmp, srcX, srcY, srcW, srcH, 0, 0, canvas.width, canvas.height);
+}
+
 function drawViscosityOverlay() {
   if (!sim) return;
   const n = sim.controls.n;
@@ -1289,7 +1300,7 @@ function drawViscosityOverlay() {
   tmp.width = n; tmp.height = n;
   tmp.getContext('2d').putImageData(img, 0, 0);
   const view = getCameraView(sim);
-  ctx.drawImage(tmp, view.x, view.y, view.w, view.h, 0, 0, canvas.width, canvas.height);
+  drawGridTextureToView(tmp, n, view, getWorldScale(sim.controls));
 }
 
 function resetViscMap() {
@@ -7383,7 +7394,7 @@ async function stepAndRender() {
     tmp.getContext('2d').putImageData(img, 0, 0);
     const view = getCameraView(s);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(tmp, view.x, view.y, view.w, view.h, 0, 0, canvas.width, canvas.height);
+    drawGridTextureToView(tmp, n, view, getWorldScale(s.controls));
     if (!showViscEl || showViscEl.checked) drawViscosityOverlay();
     drawBodiesOverlay(s);
     recordPipelineTiming(s, 'frame.renderCompose', performance.now() - renderStageStartMs);

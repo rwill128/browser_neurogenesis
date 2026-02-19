@@ -13,7 +13,7 @@ struct Params {
   boundaryN : f32,
 };
 
-@group(0) @binding(0) var<storage, read> layout : array<f32>;
+@group(0) @binding(0) var<storage, read> layoutIn : array<f32>;
 @group(0) @binding(1) var<storage, read_write> vxOut : array<f32>;
 @group(0) @binding(2) var<storage, read_write> vyOut : array<f32>;
 @group(0) @binding(3) var<storage, read_write> omegaOut : array<f32>;
@@ -38,20 +38,20 @@ fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
   }
 
   let base = i * ${RIGID_LAYOUT_STRIDE_FLOATS}u;
-  var vx = finiteOrZero(layout[base + 0u]);
-  var vy = finiteOrZero(layout[base + 1u]);
-  var omega = finiteOrZero(layout[base + 2u]);
-  var x = finiteOrZero(layout[base + 3u]);
-  var y = finiteOrZero(layout[base + 4u]);
-  var theta = finiteOrZero(layout[base + 5u]);
-  let ax = finiteOrZero(layout[base + 6u]);
-  let ay = finiteOrZero(layout[base + 7u]);
-  let alpha = finiteOrZero(layout[base + 8u]);
-  let swimX = finiteOrZero(layout[base + 9u]);
-  let swimY = finiteOrZero(layout[base + 10u]);
-  let swimTorque = finiteOrZero(layout[base + 11u]);
-  let damp = max(0.0, finiteOrZero(layout[base + 12u]));
-  let vmax = max(0.0, finiteOrZero(layout[base + 13u]));
+  var vx = finiteOrZero(layoutIn[base + 0u]);
+  var vy = finiteOrZero(layoutIn[base + 1u]);
+  var omega = finiteOrZero(layoutIn[base + 2u]);
+  var x = finiteOrZero(layoutIn[base + 3u]);
+  var y = finiteOrZero(layoutIn[base + 4u]);
+  var theta = finiteOrZero(layoutIn[base + 5u]);
+  let ax = finiteOrZero(layoutIn[base + 6u]);
+  let ay = finiteOrZero(layoutIn[base + 7u]);
+  let alpha = finiteOrZero(layoutIn[base + 8u]);
+  let swimX = finiteOrZero(layoutIn[base + 9u]);
+  let swimY = finiteOrZero(layoutIn[base + 10u]);
+  let swimTorque = finiteOrZero(layoutIn[base + 11u]);
+  let damp = max(0.0, finiteOrZero(layoutIn[base + 12u]));
+  let vmax = max(0.0, finiteOrZero(layoutIn[base + 13u]));
 
   vx = vx + ax * params.dt * 60.0 + swimX * params.dtNorm;
   vy = vy + ay * params.dt * 60.0 + swimY * params.dtNorm;

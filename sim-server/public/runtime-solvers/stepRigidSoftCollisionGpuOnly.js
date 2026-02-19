@@ -2526,6 +2526,9 @@ function isFiniteArray(arr, expectedLength) {
 }
 
 function isBinaryMask(arr, expectedLength) {
+  if ((expectedLength | 0) === 0) {
+    return arr == null || (arr instanceof Uint32Array && arr.length === 0);
+  }
   if (!(arr instanceof Uint32Array) || arr.length !== expectedLength) return false;
   for (let i = 0; i < arr.length; i++) {
     const bit = arr[i] >>> 0;

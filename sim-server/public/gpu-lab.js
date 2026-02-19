@@ -328,6 +328,52 @@ function readFastReadbackIntervalFromUrl() {
   return normalizeFastReadbackInterval(raw);
 }
 
+function detectRendererFingerprintSync() {
+  const base = {
+    userAgent: (typeof navigator !== 'undefined' && navigator?.userAgent) ? navigator.userAgent : null,
+    webglVendor: null,
+    webglRenderer: null,
+    isSwiftShader: false,
+  };
+
+  try {
+    const canvasEl = document.createElement('canvas');
+    const gl = canvasEl.getContext('webgl') || canvasEl.getContext('experimental-webgl');
+    if (!gl) return base;
+
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const vendor = ext
+      ? String(gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) || '')
+      : String(gl.getParameter(gl.VENDOR) || '');
+    const renderer = ext
+      ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '')
+      : String(gl.getParameter(gl.RENDERER) || '');
+
+    base.webglVendor = vendor || null;
+    base.webglRenderer = renderer || null;
+    const low = `${vendor} ${renderer}`.toLowerCase();
+    base.isSwiftShader = low.includes('swiftshader');
+    return base;
+  } catch {
+    return base;
+  }
+}
+
+async function readWebGpuAdapterFingerprint(adapter) {
+  if (!adapter || typeof adapter.requestAdapterInfo !== 'function') return null;
+  try {
+    const info = await adapter.requestAdapterInfo();
+    return {
+      vendor: info?.vendor || null,
+      architecture: info?.architecture || null,
+      device: info?.device || null,
+      description: info?.description || null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function readControls() {
   return {
     n: Math.max(32, Number(gridEl.value) || 256),
@@ -6220,6 +6266,9 @@ async function initSim() {
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) throw new Error('No WebGPU adapter');
 
+  const rendererFingerprint = detectRendererFingerprintSync();
+  rendererFingerprint.webgpuAdapter = await readWebGpuAdapterFingerprint(adapter);
+
   // Some browsers/hardware only expose higher storage-buffer stage limits when
   // explicitly requested at device creation time. Advect-dye now needs 10.
   // Be robust even if adapter.limits is absent/stale by optimistic fallback tries.
@@ -6302,6 +6351,7 @@ async function initSim() {
   return {
     controls, cells, bytes,
     device, uniform,
+    rendererFingerprint,
     inject, advVel, divPipe, jacobiP, project, advDye,
     vx0: vxA, vx1: vxB, vy0: vyA, vy1: vyB,
     pr0: pA, pr1: pB,
@@ -7130,6 +7180,28 @@ window.__gpuLabApi = {
       runtimePipelineMode: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
       allowPassEdgeFlowPush: sim?.controls?.allowPassEdgeFlowPush === true,
       enableCouplingLagFrame: sim?.controls?.enableCouplingLagFrame === true,
+      rendererFingerprint: sim?.rendererFingerprint
+        ? {
+          userAgent: sim.rendererFingerprint.userAgent || null,
+          webglVendor: sim.rendererFingerprint.webglVendor || null,
+          webglRenderer: sim.rendererFingerprint.webglRenderer || null,
+          isSwiftShader: sim.rendererFingerprint.isSwiftShader === true,
+          webgpuAdapter: sim.rendererFingerprint.webgpuAdapter
+            ? {
+              vendor: sim.rendererFingerprint.webgpuAdapter.vendor || null,
+              architecture: sim.rendererFingerprint.webgpuAdapter.architecture || null,
+              device: sim.rendererFingerprint.webgpuAdapter.device || null,
+              description: sim.rendererFingerprint.webgpuAdapter.description || null,
+            }
+            : null,
+        }
+        : {
+          userAgent: null,
+          webglVendor: null,
+          webglRenderer: null,
+          isSwiftShader: false,
+          webgpuAdapter: null,
+        },
       fastReadbackRuntime: {
         enabled: !!sim?.fastReadbackPolicy?.enabled,
         intervalFrames: Number(sim?.fastReadbackPolicy?.intervalFrames) || FAST_MODE_FULL_READBACK_INTERVAL,

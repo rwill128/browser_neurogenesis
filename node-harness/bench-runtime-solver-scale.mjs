@@ -355,6 +355,14 @@ function createStageStats() {
       cpuFallbackEdgePairCount: 0,
       cpuFallbackUsedCompactNodePairsCount: 0,
       cpuFallbackUsedCompactEdgePairsCount: 0,
+      impulseNodePairCount: 0,
+      impulseEdgePairCount: 0,
+      totalImpulsePairCount: 0,
+      nodeBroadphaseCandidatePairs: 0,
+      nodeBroadphaseActivePairs: 0,
+      edgeBroadphaseCandidatePairs: 0,
+      edgeBroadphaseActivePairs: 0,
+      substageMs: {},
       routeCounts: {},
       fallbackReasonCounts: {},
       mode: rigidSoftCpuSolverMode,
@@ -423,8 +431,22 @@ function finalizeStageStats(stageStats, steps) {
       cpuFallbackEdgePairCount: detail.cpuFallbackEdgePairCount,
       cpuFallbackUsedCompactNodePairsCount: detail.cpuFallbackUsedCompactNodePairsCount,
       cpuFallbackUsedCompactEdgePairsCount: detail.cpuFallbackUsedCompactEdgePairsCount,
+      impulseNodePairCount: detail.impulseNodePairCount,
+      impulseEdgePairCount: detail.impulseEdgePairCount,
+      totalImpulsePairCount: detail.totalImpulsePairCount,
+      impulseNodePairCountPerStep: detail.impulseNodePairCount / Math.max(1, steps),
+      impulseEdgePairCountPerStep: detail.impulseEdgePairCount / Math.max(1, steps),
+      totalImpulsePairCountPerStep: detail.totalImpulsePairCount / Math.max(1, steps),
+      nodeBroadphaseCandidatePairsPerStep: detail.nodeBroadphaseCandidatePairs / Math.max(1, steps),
+      nodeBroadphaseActivePairsPerStep: detail.nodeBroadphaseActivePairs / Math.max(1, steps),
+      edgeBroadphaseCandidatePairsPerStep: detail.edgeBroadphaseCandidatePairs / Math.max(1, steps),
+      edgeBroadphaseActivePairsPerStep: detail.edgeBroadphaseActivePairs / Math.max(1, steps),
       nonFallbackWallMs,
       nonFallbackWallMsPerStep: nonFallbackWallMs / Math.max(1, steps),
+      substageMs: detail.substageMs,
+      substageMsPerStep: Object.fromEntries(
+        Object.entries(detail.substageMs || {}).map(([k, v]) => [k, (Number(v) || 0) / Math.max(1, steps)]),
+      ),
       routeCounts: detail.routeCounts,
       fallbackReasonCounts: detail.fallbackReasonCounts,
     };
@@ -503,6 +525,19 @@ function runStep(path, state, args, stageStats = null) {
       rigidSoftDetail.cpuFallbackEdgeWallMs += Number(rigidSoftProfile.cpuFallbackEdgeWallMs) || 0;
       rigidSoftDetail.cpuFallbackNodePairCount += Number(rigidSoftProfile.cpuFallbackNodePairCount) || 0;
       rigidSoftDetail.cpuFallbackEdgePairCount += Number(rigidSoftProfile.cpuFallbackEdgePairCount) || 0;
+      rigidSoftDetail.impulseNodePairCount += Number(rigidSoftProfile.impulseNodePairCount) || 0;
+      rigidSoftDetail.impulseEdgePairCount += Number(rigidSoftProfile.impulseEdgePairCount) || 0;
+      rigidSoftDetail.totalImpulsePairCount += Number(rigidSoftProfile.totalImpulsePairCount) || 0;
+      rigidSoftDetail.nodeBroadphaseCandidatePairs += Number(rigidSoftProfile.nodeBroadphaseCandidatePairs) || 0;
+      rigidSoftDetail.nodeBroadphaseActivePairs += Number(rigidSoftProfile.nodeBroadphaseActivePairs) || 0;
+      rigidSoftDetail.edgeBroadphaseCandidatePairs += Number(rigidSoftProfile.edgeBroadphaseCandidatePairs) || 0;
+      rigidSoftDetail.edgeBroadphaseActivePairs += Number(rigidSoftProfile.edgeBroadphaseActivePairs) || 0;
+      if (rigidSoftProfile.substageMs && typeof rigidSoftProfile.substageMs === 'object') {
+        for (const [k, v] of Object.entries(rigidSoftProfile.substageMs)) {
+          const ms = Number(v) || 0;
+          rigidSoftDetail.substageMs[k] = (Number(rigidSoftDetail.substageMs[k]) || 0) + ms;
+        }
+      }
       if (rigidSoftProfile.cpuFallbackUsedCompactNodePairs) rigidSoftDetail.cpuFallbackUsedCompactNodePairsCount += 1;
       if (rigidSoftProfile.cpuFallbackUsedCompactEdgePairs) rigidSoftDetail.cpuFallbackUsedCompactEdgePairsCount += 1;
       const routeKey = String(rigidSoftProfile.route || 'unknown');

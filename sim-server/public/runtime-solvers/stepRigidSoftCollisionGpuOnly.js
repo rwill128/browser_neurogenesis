@@ -2636,6 +2636,16 @@ function resolveRigidSoftEdgeCollisionCpuFallback(rb, a, b, edgeSlop) {
   return resolveRigidVsSoftEdgeCollisionGpuOnly(rb, a, b, edgeSlop);
 }
 
+function addRigidSoftProfileMs(profile, key, deltaMs) {
+  if (!profile || !key) return;
+  const ms = Number(deltaMs);
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  if (!profile.substageMs || typeof profile.substageMs !== 'object') {
+    profile.substageMs = {};
+  }
+  profile.substageMs[key] = (Number(profile.substageMs[key]) || 0) + ms;
+}
+
 function applyCpuRigidSoftResponseFallback({
   rigidBodies,
   soft,
@@ -2700,7 +2710,9 @@ function applyCpuRigidSoftResponseFallback({
     profile.cpuFallbackNodePairCount = profile.cpuFallbackUsedCompactNodePairs
       ? (compactNodePairs?.pairCount | 0)
       : ((rigidBodies.length | 0) * (soft.nodes.length | 0));
-    profile.cpuFallbackNodeWallMs = (profile.cpuFallbackNodeWallMs || 0) + Math.max(0, performance.now() - nodeStartMs);
+    const nodeWallMs = Math.max(0, performance.now() - nodeStartMs);
+    profile.cpuFallbackNodeWallMs = (profile.cpuFallbackNodeWallMs || 0) + nodeWallMs;
+    addRigidSoftProfileMs(profile, 'cpuFallbackNodeApplyMs', nodeWallMs);
   }
 
   const edgeStartMs = profile ? performance.now() : 0;
@@ -2760,7 +2772,9 @@ function applyCpuRigidSoftResponseFallback({
     profile.cpuFallbackEdgePairCount = profile.cpuFallbackUsedCompactEdgePairs
       ? (compactEdgePairs?.pairCount | 0)
       : ((rigidBodies.length | 0) * Math.max(0, Array.isArray(soft.springs) ? soft.springs.length : 0));
-    profile.cpuFallbackEdgeWallMs = (profile.cpuFallbackEdgeWallMs || 0) + Math.max(0, performance.now() - edgeStartMs);
+    const edgeWallMs = Math.max(0, performance.now() - edgeStartMs);
+    profile.cpuFallbackEdgeWallMs = (profile.cpuFallbackEdgeWallMs || 0) + edgeWallMs;
+    addRigidSoftProfileMs(profile, 'cpuFallbackEdgeApplyMs', edgeWallMs);
   }
 }
 
@@ -2785,6 +2799,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     profile.cpuFallbackEdgeWallMs = 0;
     profile.cpuFallbackNodePairCount = 0;
     profile.cpuFallbackEdgePairCount = 0;
+    profile.substageMs = {};
   }
 
   if (soft.nodes.length === 0) {
@@ -2812,11 +2827,13 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
   const wgslOffloadAvailable = wgslUnavailableReason === null;
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     if (!wgslOffloadAvailable) {
+      const layoutStartMs = profile ? performance.now() : 0;
       wgslPrep = buildRigidSoftCollisionWgslLayout({
         rigidBodies,
         soft,
         edgeBodyModeBlock,
       });
+      if (profile) addRigidSoftProfileMs(profile, 'candidateLayoutBuildMs', performance.now() - layoutStartMs);
       const hasAnyCandidatePairs = (wgslPrep.nodePairCount | 0) > 0 || (wgslPrep.edgePairCount | 0) > 0;
       wgslOffload.state.preparedLayout = wgslPrep.layout;
       wgslOffload.state.lastPreparedNodePairCount = wgslPrep.nodePairCount;
@@ -2834,7 +2851,9 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       wgslOffload.state.lastRigidSoftResponseRoute = 'cpu-fallback';
       wgslOffload.state.lastRigidSoftResponseFallbackReason = wgslUnavailableReason;
 
+      const geometryStartMs = profile ? performance.now() : 0;
       const wgslNarrowphaseGeometry = buildRigidSoftNarrowphaseGeometryLayout(rigidBodies);
+      if (profile) addRigidSoftProfileMs(profile, 'narrowphaseGeometryLayoutBuildMs', performance.now() - geometryStartMs);
       wgslOffload.state.lastPreparedNarrowphaseGeometry = wgslNarrowphaseGeometry.layout;
       wgslOffload.state.lastPreparedNarrowphaseRigidCount = wgslNarrowphaseGeometry.rigidCount;
       wgslOffload.state.lastPreparedNarrowphaseEdgeCount = wgslNarrowphaseGeometry.edgeCount;
@@ -2842,11 +2861,13 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       wgslOffload.state.lastPreparedNarrowphaseSignature = wgslNarrowphaseGeometry.signature;
       if (!hasAnyCandidatePairs) return;
     } else {
+      const layoutStartMs = profile ? performance.now() : 0;
       wgslPrep = buildRigidSoftCollisionWgslLayout({
         rigidBodies,
         soft,
         edgeBodyModeBlock,
       });
+      if (profile) addRigidSoftProfileMs(profile, 'candidateLayoutBuildMs', performance.now() - layoutStartMs);
     const hasAnyCandidatePairs = (wgslPrep.nodePairCount | 0) > 0 || (wgslPrep.edgePairCount | 0) > 0;
     wgslOffload.state.preparedLayout = wgslPrep.layout;
     wgslOffload.state.lastPreparedNodePairCount = wgslPrep.nodePairCount;
@@ -2863,14 +2884,18 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       return;
     }
 
+    const geometryStartMs = profile ? performance.now() : 0;
     const wgslNarrowphaseGeometry = buildRigidSoftNarrowphaseGeometryLayout(rigidBodies);
+    if (profile) addRigidSoftProfileMs(profile, 'narrowphaseGeometryLayoutBuildMs', performance.now() - geometryStartMs);
     wgslOffload.state.lastPreparedNarrowphaseGeometry = wgslNarrowphaseGeometry.layout;
     wgslOffload.state.lastPreparedNarrowphaseRigidCount = wgslNarrowphaseGeometry.rigidCount;
     wgslOffload.state.lastPreparedNarrowphaseEdgeCount = wgslNarrowphaseGeometry.edgeCount;
     wgslOffload.state.lastPreparedNarrowphaseBytes = wgslNarrowphaseGeometry.byteLength;
     wgslOffload.state.lastPreparedNarrowphaseSignature = wgslNarrowphaseGeometry.signature;
 
+    const rigidAabbStartMs = profile ? performance.now() : 0;
     const rigidAabb = computeRigidBodyAabbs(rigidBodies);
+    if (profile) addRigidSoftProfileMs(profile, 'rigidAabbBuildMs', performance.now() - rigidAabbStartMs);
     const fastBroadphaseMode = isGpuOnlyFastMode(wgslOffload);
     const broadphaseEpoch = (Number(wgslOffload.state.lastRigidSoftBroadphaseEpoch) || 0) + 1;
     wgslOffload.state.lastRigidSoftBroadphaseEpoch = broadphaseEpoch;
@@ -2906,6 +2931,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       wgslOffload.state.lastNodeBroadphaseReplayEpochDelta = nodeReplayEpochDelta;
       wgslOffload.state.lastNodeBroadphaseReplayHitCount = (Number(wgslOffload.state.lastNodeBroadphaseReplayHitCount) || 0) + 1;
     } else {
+      const nodeBroadphaseStartMs = profile ? performance.now() : 0;
       wgslNodeBroadphase = await dispatchRigidSoftNodeBroadphaseWgsl({
         rigidBodies,
         soft,
@@ -2913,6 +2939,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         layout: wgslPrep,
         rigidAabb,
       });
+      if (profile) addRigidSoftProfileMs(profile, 'nodeBroadphaseDispatchReadbackMs', performance.now() - nodeBroadphaseStartMs);
       if (wgslNodeBroadphase?.compactPairs) {
         wgslOffload.state.lastSourceRoute = 'wgsl-rigid-soft-node-broadphase-authoritative-filter';
         wgslOffload.state.lastMode = 'wgsl-broadphase-authoritative-filter';
@@ -2933,8 +2960,14 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       }
     }
 
+    if (profile) {
+      profile.nodeBroadphaseCandidatePairs = Number(wgslOffload.state.lastNodeBroadphaseCandidatePairCount) || 0;
+      profile.nodeBroadphaseActivePairs = Number(wgslOffload.state.lastNodeBroadphaseActivePairCount) || 0;
+    }
+
     if (compactNodePairs && compactNodePairs.pairCount > 0) {
       const nodeProbeInputCount = compactNodePairs.pairCount | 0;
+      const nodeProbeStartMs = profile ? performance.now() : 0;
       const nodeProbeFinite = await dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl({
         rigidBodies,
         soft,
@@ -2942,7 +2975,9 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         nodePairs: compactNodePairs,
         rigidAabb,
       });
+      if (profile) addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeDispatchReadbackMs', performance.now() - nodeProbeStartMs);
 
+      const nodeProbeFilterStartMs = profile ? performance.now() : 0;
       const nodeProbeFilteredPairs = nodeProbeFinite
         ? buildAuthoritativeRigidSoftNodePairsFromAabbProbe({
           nodePairs: compactNodePairs,
@@ -2951,6 +2986,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
           nodeSlop,
         })
         : null;
+      if (profile) addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeFilterMs', performance.now() - nodeProbeFilterStartMs);
 
       if (nodeProbeFilteredPairs) {
         compactNodePairs = nodeProbeFilteredPairs;
@@ -2999,6 +3035,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       wgslOffload.state.lastEdgeBroadphaseReplayEpochDelta = edgeReplayEpochDelta;
       wgslOffload.state.lastEdgeBroadphaseReplayHitCount = (Number(wgslOffload.state.lastEdgeBroadphaseReplayHitCount) || 0) + 1;
     } else {
+      const edgeBroadphaseStartMs = profile ? performance.now() : 0;
       wgslEdgeBroadphase = await dispatchRigidSoftEdgeBroadphaseWgsl({
         rigidBodies,
         soft,
@@ -3007,6 +3044,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         edgeSlop,
         rigidAabb,
       });
+      if (profile) addRigidSoftProfileMs(profile, 'edgeBroadphaseDispatchReadbackMs', performance.now() - edgeBroadphaseStartMs);
       if (wgslEdgeBroadphase?.compactPairs) {
         wgslOffload.state.lastEdgeBroadphaseAuthoritativeSource = 'wgsl-rigid-soft-edge-broadphase-authoritative-filter';
         wgslOffload.state.lastEdgeBroadphaseReadbackCount = Number(wgslEdgeBroadphase.activePairCount) || 0;
@@ -3027,7 +3065,13 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       }
     }
 
+    if (profile) {
+      profile.edgeBroadphaseCandidatePairs = Number(wgslOffload.state.lastEdgeBroadphaseCandidatePairCount) || 0;
+      profile.edgeBroadphaseActivePairs = Number(wgslOffload.state.lastEdgeBroadphaseActivePairCount) || 0;
+    }
+
     if (compactEdgePairs && compactEdgePairs.pairCount > 0) {
+      const edgeProbeStartMs = profile ? performance.now() : 0;
       await dispatchRigidSoftEdgeNarrowphaseAabbProbeWgsl({
         rigidBodies,
         soft,
@@ -3036,10 +3080,12 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         edgeSlop,
         rigidAabb,
       });
+      if (profile) addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeDispatchReadbackMs', performance.now() - edgeProbeStartMs);
     } else if (compactEdgePairs) {
       wgslOffload.state.lastEdgeNarrowphaseAabbProbeSource = 'wgsl-rigid-soft-edge-broadphase-zero-active';
     }
 
+    const narrowphaseLayoutStartMs = profile ? performance.now() : 0;
     const narrowphaseLayout = buildRigidSoftNarrowphaseWgslLayout({
       nodePairs: compactNodePairs || {
         compactRigidIndex: new Uint32Array(0),
@@ -3052,6 +3098,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         compactNodeBIndex: new Uint32Array(0),
       },
     });
+    if (profile) addRigidSoftProfileMs(profile, 'narrowphasePairLayoutBuildMs', performance.now() - narrowphaseLayoutStartMs);
     if (narrowphaseLayout) {
       wgslOffload.state.lastPreparedNarrowphasePairCount =
         (Number(narrowphaseLayout.nodePairCount) || 0) + (Number(narrowphaseLayout.edgePairCount) || 0);
@@ -3059,7 +3106,9 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       wgslOffload.state.lastPreparedNarrowphaseCombinedSignature = narrowphaseLayout.signature;
     }
 
+    const narrowphaseSceneStartMs = profile ? performance.now() : 0;
     const narrowphaseSceneLayout = buildRigidSoftNarrowphaseSceneWgslLayout({ rigidBodies, soft });
+    if (profile) addRigidSoftProfileMs(profile, 'narrowphaseSceneLayoutBuildMs', performance.now() - narrowphaseSceneStartMs);
     if (narrowphaseSceneLayout) {
       wgslOffload.state.lastPreparedNarrowphaseSceneLayoutBytes = narrowphaseSceneLayout.byteLength;
       wgslOffload.state.lastPreparedNarrowphaseSceneSignature = narrowphaseSceneLayout.signature;
@@ -3090,10 +3139,12 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
       wgslOffload.state.lastPreparedNarrowphaseSceneSource = 'cpu-rigid-soft-narrowphase-scene-layout';
     }
 
+    const impulseSeedLayoutStartMs = profile ? performance.now() : 0;
     const narrowphaseImpulseSeedLayout = buildRigidSoftNarrowphaseImpulseSeedLayout({
       narrowphaseLayout,
       narrowphaseSceneLayout,
     });
+    if (profile) addRigidSoftProfileMs(profile, 'impulseSeedLayoutBuildMs', performance.now() - impulseSeedLayoutStartMs);
     if (narrowphaseImpulseSeedLayout) {
       wgslOffload.state.lastPreparedNarrowphaseImpulseSeedLayoutBytes = narrowphaseImpulseSeedLayout.byteLength;
       wgslOffload.state.lastPreparedNarrowphaseImpulseSeedSignature = narrowphaseImpulseSeedLayout.signature;
@@ -3148,6 +3199,17 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     : null;
 
   const totalImpulsePairCount = (Number(impulseSeed?.nodePairCount) || 0) + (Number(impulseSeed?.edgePairCount) || 0);
+  if (profile) {
+    profile.impulseNodePairCount = Number(impulseSeed?.nodePairCount) || 0;
+    profile.impulseEdgePairCount = Number(impulseSeed?.edgePairCount) || 0;
+    profile.totalImpulsePairCount = totalImpulsePairCount;
+    if (wgslOffload?.state) {
+      profile.lastNodeBroadphaseReadbackSourceRoute = wgslOffload.state.lastNodeBroadphaseReadbackSourceRoute || null;
+      profile.lastEdgeBroadphaseReadbackSourceRoute = wgslOffload.state.lastEdgeBroadphaseReadbackSourceRoute || null;
+      profile.lastRigidSoftResponseRoute = wgslOffload.state.lastRigidSoftResponseRoute || null;
+      profile.lastRigidSoftResponseFallbackReason = wgslOffload.state.lastRigidSoftResponseFallbackReason || null;
+    }
+  }
   if (wgslOffload?.state && wgslOffloadAvailable && totalImpulsePairCount === 0) {
     wgslOffload.state.lastNodeCollisionResponseSource = 'wgsl-rigid-soft-node-response-authoritative-noop';
     wgslOffload.state.lastEdgeCollisionResponseSource = 'wgsl-rigid-soft-edge-response-authoritative-noop';
@@ -3201,11 +3263,14 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
   if (wgslOffload?.state && impulseSeed && wgslOffloadAvailable) {
     const signature = Number(wgslOffload.state.lastPreparedNarrowphaseImpulseSeedSignature) || 0;
     try {
+      const responseDispatchStartMs = profile ? performance.now() : 0;
       const proposal = await dispatchRigidSoftResponseWgsl({
         offload: wgslOffload,
         impulseSeed,
         edgeSlop,
       });
+      if (profile) addRigidSoftProfileMs(profile, 'responseDispatchReadbackMs', performance.now() - responseDispatchStartMs);
+      const validationStartMs = profile ? performance.now() : 0;
       const validationOut = { reason: null };
       if (canApplyRigidSoftAuthoritativeProposal({ proposal, impulseSeed, signature, out: validationOut })) {
         applyAuthoritativeResponseProposal({
@@ -3251,6 +3316,7 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
           }
         }
       }
+      if (profile) addRigidSoftProfileMs(profile, 'responseValidationApplyMs', performance.now() - validationStartMs);
     } catch (err) {
       wgslOffload.state.lastError = String(err?.message || err || 'rigid-soft-response-wgsl-error');
       wgslOffload.state.lastRigidSoftResponseAuthoritativeSource = 'cpu-rigid-soft-response-fallback-error';

@@ -320,12 +320,145 @@ The biggest practical differences are in **readback cadence, replay acceptance, 
 
 ---
 
-## 4) Suggested next expansion (for even deeper analysis)
+## 4) Forensic expansion: CPU + GPU + sync traces for all three flows
 
-If we want the next version to be fully forensic, we can add one appendix per stage with:
-- exact buffer schema (field names + strides),
-- full equation derivation line-by-line,
-- all fallback route names and their trigger conditions,
-- readback/sync points by stage (`copyBufferToBuffer`, `mapAsync`) with timing buckets.
+This section is the deeper version you requested: not just buffer/readback notes, but explicit **main CPU flow** and execution order in all 3 modes.
 
-That would make this doc significantly longer, but it would support direct bottleneck attribution stage-by-stage.
+### 4.1 Frame-level execution ledger (ordered, all three flows)
+
+| Order | Baseline (main CPU flow) | GPU-validated (main CPU flow + GPU path) | GPU-fast (main CPU flow + GPU path) | Inputs → Outputs | Where |
+|---|---|---|---|---|---|
+| F1 | Read controls, enforce reinit guards (grid/seed/body-count changes). | Same. | Same. | UI/URL controls → `sim.controls` | `gpu-lab.js` L6233-L6284 |
+| F2 | CPU stamps obstacle mask and dye mode masks from body edges, writes masks to GPU buffers. | Same. | Same. | body geometry + edge policy → `obstacleMaskGpu`, `dyeModeMaskGpu` | `gpu-lab.js` L6289-L6299 |
+| F3 | CPU encodes fluid compute passes (`inject`, `advectVel`, `divergence`, `jacobi`, `project`, `advectDye`). | Same. | Same. | previous fluid state + uniforms → next fluid state | `gpu-lab.js` L6301-L6333 |
+| F4 | Always enqueue full-fluid readback copies (5 channels). | Same (always full readback in validated). | Run health compute + health readback first; decide whether to enqueue full readback by cadence/anomaly/bootstrap rules. | GPU buffers → pending readback buffers / health stats | `gpu-lab.js` L6350-L6415 |
+| F5 | Map full readback buffers every frame. | Same. | Map full readback only when `doReadback=true`; else use shadow fields from prior full readback. | read buffers/shadow → `r,g,b,vx,vy` CPU arrays | `gpu-lab.js` L6417-L6423, L6194-L6215 |
+| F6 | Call `stepBodiesAndInject` on CPU arrays (baseline branch inside function). | Call `stepBodiesAndInject` gpu-only branch (runtime modules + CPU orchestration). | Same function path, but module-level fast gates/replay/skip logic active. | CPU fluid arrays + body state → updated body state + fluid deltas + telemetry | `gpu-lab.js` L6459-L6460, L3972-L5248 |
+| F7 | Apply emitters, digestive capture, swept dye transport (CPU). | Same. | Same (using current readback/shadow arrays). | post-coupling fields → modified dye/velocity arrays | `gpu-lab.js` L6461-L6465 |
+| F8 | Enforce velocity finite/clamp guardrails in CPU arrays. | Same. | Same. | raw `vx,vy` → bounded finite `vx,vy` | `gpu-lab.js` L6467-L6477 |
+| F9 | Write modified arrays back to GPU every frame. | Same. | Write-back only on full-readback frames (`doReadback` true). | CPU arrays → GPU state buffers | `gpu-lab.js` L6479-L6486 |
+| F10 | Build render image, draw overlays (CPU canvas). | Same. | Same. | dye fields + overlays → frame render | `gpu-lab.js` L6488-L6518 |
+| F11 | Update HUD/status/fallback telemetry logs (CPU). | Same + richer WGSL source-route signals. | Same + fast policy decisions/reasons/health fields. | sim state → HUD/log payload | `gpu-lab.js` L6520-L6622 |
+| F12 | Increment frame and schedule next RAF. | Same. | Same. | frame counter update | `gpu-lab.js` L6624-L6625 |
+
+---
+
+### 4.2 `stepBodiesAndInject` call graph (all three flows)
+
+| Stage | Baseline CPU flow | GPU-validated flow | GPU-fast flow | Where |
+|---|---|---|---|---|
+| S0: preamble | Clamp dt, set masses/inertia, prepare feedback maps, optional scripted body motion. | Same CPU preamble. | Same CPU preamble. | `gpu-lab.js` L3972-L4072 |
+| S1: rigid step | Inline rigid CPU loop. | `stepRigidBodiesGpuOnly` called; CPU computes proposal inputs and may consume WGSL authoritative proposal. | Same module; fast requests authoritative replay path more aggressively (`wgsl-rigid-step-authoritative-fast`). | `gpu-lab.js` L4073-L4196; `stepRigidGpuOnly.js` L270-L485 |
+| S2: soft fluid coupling | Inline CPU loop for node carry + cluster redistribution + projection. | `applySoftFluidCouplingGpuOnly`; CPU reference maintained with WGSL proposal parity checks. | Same module; fast can use authoritative carry shortcut and reduced parity strictness. | `gpu-lab.js` L4200-L4433; `stepSoftFluidCouplingGpuOnly.js` L808-L1333 |
+| S3: spring XPBD | `applySoftSpringsXPBDVelocity` CPU. | `applySoftSpringsXPBDVelocityGpuOnly` (WGSL proposal + deterministic reduction + CPU authority/replay). | Same module; fast can skip probe telemetry and use epoch-fresh proposal replay. | `gpu-lab.js` L4435-L4456; `stepSoftSpringsXpbdGpuOnly.js` L1341-L1650 |
+| S4: membrane boundary/shape | CPU membrane boundary XPBD + shape memory. | GPU-only membrane modules with optional authoritative proposal apply. | Same modules; mostly same math with fast route labels. | `gpu-lab.js` L4464-L4524; `stepSoftMembraneConstraintsGpuOnly.js` L775-L1315 |
+| S5: area XPBD + membrane pressure | CPU area XPBD + CPU membrane pressure. | GPU-only area/pressure modules with proposal parity checks. | Fast skips some probe/parity telemetry, permits epoch replay/fast authoritative routes when finite. | `gpu-lab.js` L4526-L4565; `stepSoftAreaXpbdGpuOnly.js` L1193-L1399; `stepSoftMembranePressureGpuOnly.js` L615-L790 |
+| S6: integrate/clamp | CPU soft integrate + CPU rigid post-integrate clamp. | `integrateSoftBodiesGpuOnly` + `stabilizeRigidPostIntegrateGpuOnly`. | Same modules; fast mainly changes validation policy/route tags, not equations. | `gpu-lab.js` L4569-L4623 |
+| S7: collision iterations | Inline CPU collision loops. | `runCollisionIterationsGpuOnly` delegates rigid-rigid, rigid-soft, soft-soft, boundary passes. | Same orchestrator; rigid-soft internals include fast cadence/replay/probe skips. | `gpu-lab.js` L4625-L4741; `stepCollisionIterationsGpuOnly.js` L8-L95 |
+| S8: post-collision recovery | CPU cluster projection + CPU rigid/membrane inside correction + bounce. | `applyPostCollisionRecoveryGpuOnly` with optional WGSL authoritative cluster kinematics and GPU-assisted inside correction. | Same module; fast inside-correction relaxes some readback telemetry checks. | `gpu-lab.js` L4744-L4800; `stepPostCollisionRecoveryGpuOnly.js` L669-L870 |
+| S9: deformation intervention | Build deformation state + optional severe stabilization CPU. | `applySoftDeformationInterventionsGpuOnly` with optional WGSL spring metric authority. | Same module; fast mostly route/policy difference. | `gpu-lab.js` L4802-L4836; `stepSoftDeformationGpuOnly.js` L435-L524 |
+| S10: rest recovery | CPU `recoverSoftSpringRests` with profile tuning. | `applySoftRestRecoveryGpuOnly` with optional authoritative proposal. | Same module; fast proposal routing has lower parity burden. | `gpu-lab.js` L4842-L4889; `stepSoftRestRecoveryGpuOnly.js` L568-L663 |
+| S11: body→fluid injection | CPU `injectPoint` loops for rigid and soft contributors. | `applyBodyFluidInjectionGpuOnly` gather/apply path with WGSL proposal parity checks. | Same module; fast accepts finite same-frame WGSL gather proposal and skips CPU parity diff. | `gpu-lab.js` L4921-L5036; `stepBodyFluidInjectionGpuOnly.js` L568-L760 |
+
+---
+
+## 5) Deep-dive stage dossiers (row-level substeps, all 3 flows)
+
+## 5.1 Rigid step dossier
+
+| Substep | Baseline CPU | GPU-validated | GPU-fast | Inputs/Outputs | Citations |
+|---|---|---|---|---|---|
+| R1 sample vertices | Sample fluid at rigid sample points; compute relative fluid-vs-local rigid velocity. | Same CPU sampling prepares WGSL layout too. | Same. | in: rigid verts + `(vx,vy)` field; out: rel velocities | `gpu-lab.js` L4106-L4149; `stepRigidGpuOnly.js` L321-L347 |
+| R2 accumulate forces | `forceX/forceY += rel*drag*honey*momentumScale`, `torque += r x force`. | Same equations. | Same equations. | out: `(ax,ay,alpha)` | `gpu-lab.js` L4151-L4167; `stepRigidGpuOnly.js` L347-L357 |
+| R3 integrate motion | Update `(vx,vy,omega)` with accel + swim; apply damping/caps; update `(x,y,theta)`; boundary bounce. | CPU performs same; WGSL proposal mirrors this transform. | Same; fast prefers authoritative WGSL application when proposal is fresh/finite. | out: new rigid state | `gpu-lab.js` L4169-L4196; `stepRigidGpuOnly.js` L1-L97, L128-L237, L431-L485 |
+| R4 authority decision | CPU authoritative by definition. | If WGSL proposal signature/finite checks pass, apply proposal; else CPU fallback route. | Same decision with fast-tagged authoritative/fallback route labels. | out: route telemetry | `stepRigidGpuOnly.js` L431-L485 |
+
+## 5.2 Soft fluid coupling dossier
+
+| Substep | Baseline CPU | GPU-validated | GPU-fast | Inputs/Outputs | Citations |
+|---|---|---|---|---|---|
+| SF1 per-node sample | For each node: sample fluid at node, compute cluster-local velocity and deltas. | Same CPU sample layout built for WGSL proposal parity. | Same sample layout; can consume authoritative WGSL carry arrays. | out: sample deltas per node | `gpu-lab.js` L4256-L4316; `stepSoftFluidCouplingGpuOnly.js` L185-L248 |
+| SF2 carry/local response | Compute force/carry/localCarry, apply local carry + swim + damping/caps. | Same CPU reference. | Fast can bypass CPU proposal accumulation and directly use finite WGSL carry proposal (`useFastAuthoritativeCarryShortcut`). | out: node `vx,vy` updates | `gpu-lab.js` L4319-L4375; `stepSoftFluidCouplingGpuOnly.js` L925-L1127 |
+| SF3 cluster load | Accumulate per-cluster force/torque/count then derive cluster accel `(ax,ay,alpha)`. | Same, plus parity against WGSL cluster-load proposal in validated mode. | Fast can trust finite authoritative WGSL cluster-load proposal without mismatch parity requirement. | out: `clusterAccelMap` | `gpu-lab.js` L4378-L4411; `stepSoftFluidCouplingGpuOnly.js` L954-L1183 |
+| SF4 redistribution/project | Apply cluster accel to nodes, tug redistribution, relative drift damping, rigid-motion projection. | Same math. | Same math. | out: coherent cluster motion | `gpu-lab.js` L4413-L4433; `stepSoftFluidCouplingGpuOnly.js` L1185-L1267 |
+
+## 5.3 Spring XPBD dossier
+
+| Substep | Baseline CPU | GPU-validated | GPU-fast | Inputs/Outputs | Citations |
+|---|---|---|---|---|---|
+| SX1 prediction | Build predicted endpoint positions from current velocity (`x+vx*dtPos`). | Same inputs prepared into WGSL layout. | Same. | node predicted positions | `gpu-lab.js` L3066-L3073; `stepSoftSpringsXpbdGpuOnly.js` L864-L971 |
+| SX2 constraint solve | Compute stretch `C`, inverse masses, XPBD delta lambda `dl`, clamp lambda. | WGSL lambda proposal computes same formula; validated compares against deterministic CPU reduction. | Fast can reuse fresh proposal by epoch and skip probe telemetry. | out: lambda next | `gpu-lab.js` L3074-L3100; `stepSoftSpringsXpbdGpuOnly.js` L95-L101, L1400-L1479 |
+| SX3 velocity correction | Apply endpoint velocity deltas from `dl/dtPos`. | Same corrections from proposal/reduction path or CPU fallback. | Same equations, fast lowers parity overhead. | out: endpoint `vx,vy` | `gpu-lab.js` L3102-L3107; `stepSoftSpringsXpbdGpuOnly.js` L1103-L1139, L1645-L1650 |
+
+## 5.4 Area XPBD dossier
+
+| Substep | Baseline CPU | GPU-validated | GPU-fast | Inputs/Outputs | Citations |
+|---|---|---|---|---|---|
+| AX1 area & gradients | Compute predicted signed area and per-node gradients for each loop. | WGSL area probe/lambda uses same geometric primitives. | Fast often skips explicit area probe telemetry stage (`skipped-fast-mode`). | out: `C`, gradients, `sumWGrad2` | `gpu-lab.js` L3156-L3206; `stepSoftAreaXpbdGpuOnly.js` L119-L125, L1273-L1278 |
+| AX2 lambda solve | Compute `dl` and clamp cluster lambda. | WGSL lambda proposal + CPU parity in validated. | Fast accepts replay by signature/epoch delta (`<=2`) when finite. | out: cluster lambda update | `gpu-lab.js` L3208-L3217; `stepSoftAreaXpbdGpuOnly.js` L1230-L1260 |
+| AX3 apply deltas | Apply velocity corrections by gradient weights. | Node-reduction proposal checked against CPU node reference in validated mode. | Fast may skip endpoint/node parity telemetry but still finite-checks proposal. | out: node `vx,vy` | `gpu-lab.js` L3212-L3217; `stepSoftAreaXpbdGpuOnly.js` L1293-L1369 |
+
+## 5.5 Rigid-soft collision dossier
+
+| Substep | Baseline CPU | GPU-validated | GPU-fast | Inputs/Outputs | Citations |
+|---|---|---|---|---|---|
+| RS1 candidate generation | Direct nested loops over rigid-soft node and rigid-soft edge candidates each iter. | Build candidate layouts and run WGSL node/edge broadphase masks + compact active pairs. | Same plus broadphase replay between cadence frames when replay criteria met. | out: compact node/edge pair sets | `gpu-lab.js` L4648-L4661; `stepRigidSoftCollisionGpuOnly.js` L3025-L3239 |
+| RS2 narrowphase AABB filter | CPU contact test effectively done inline via resolvers. | Optional WGSL node/edge AABB probe + filtered pair compaction. | **Fast skips node+edge AABB probe readback paths** and marks skipped-fast sources. | out: filtered active pairs | `stepRigidSoftCollisionGpuOnly.js` L3107-L3174, L3249-L3278 |
+| RS3 response apply | CPU resolves node/edge contacts directly. | WGSL response proposal (node+edge impulses), validate finite/signature, apply authoritative proposal or CPU fallback. | Same with replay-on-failure path and explicit fallback reasons/routes. | out: rigid+soft state updates, route ownership | `stepRigidSoftCollisionGpuOnly.js` L3414-L3574 |
+
+## 5.6 Post-collision recovery dossier
+
+| Substep | Baseline CPU | GPU-validated | GPU-fast | Inputs/Outputs | Citations |
+|---|---|---|---|---|---|
+| PR1 cluster kinematics | Compute cluster kinematics from soft nodes directly on CPU. | Prefer authoritative WGSL derived/probe kinematics when available; else CPU fallback. | Same flow. | out: post-collision kinematics map | `gpu-lab.js` L4786-L4791; `stepPostCollisionRecoveryGpuOnly.js` L760-L823 |
+| PR2 projection | Project nodes toward cluster rigid motion field. | Same (possibly using WGSL-derived kinematics). | Same. | out: projected soft velocities | `gpu-lab.js` L4786-L4791; `stepPostCollisionRecoveryGpuOnly.js` L831-L838 |
+| PR3 inside correction | CPU rigid-inside + membrane-inside correction passes. | Delegates to GPU-assisted inside correction module where available; CPU callbacks still supported. | Fast inside-correction path can skip some readback telemetry and still apply finite proposal routes. | out: inside correction counts | `gpu-lab.js` L4793-L4794; `stepPostCollisionRecoveryGpuOnly.js` L831-L848; `stepRigidInsideCorrectionGpuOnly.js` L691-L774, L954-L1198 |
+| PR4 boundary cleanup | CPU bounce for rigid+soft. | Calls collision boundary pass (WGSL finite entries + CPU non-finite fallback). | Same. | out: boundary-consistent state | `gpu-lab.js` L4795-L4796; `stepPostCollisionRecoveryGpuOnly.js` L850-L867 |
+
+## 5.7 Body-fluid injection dossier
+
+| Substep | Baseline CPU | GPU-validated | GPU-fast | Inputs/Outputs | Citations |
+|---|---|---|---|---|---|
+| BI1 gather proposal | CPU `injectPoint` loops compute per-cell momentum deltas from rigid and soft contributors. | Build gather layout; CPU deterministic gather deltas retained for parity reference. | Build same gather layout; may avoid CPU parity work when fast authoritative gather exists. | out: `cellDeltaVx/cellDeltaVy` | `gpu-lab.js` L4947-L5036; `stepBodyFluidInjectionGpuOnly.js` L568-L639 |
+| BI2 authority choice | CPU-only authoritative by default. | WGSL gather proposal accepted only when signature/finite checks match; otherwise CPU gather authoritative. | Fast accepts finite same-frame WGSL gather proposal (`wgsl-gather-authoritative-fast`) with parity skipped; explicit CPU-fast fallback otherwise. | out: chosen gather source route | `stepBodyFluidInjectionGpuOnly.js` L675-L730 |
+| BI3 apply cell deltas | Apply bounded cell deltas to `(vx,vy)` + feedback maps; sum injected momentum. | Same apply path. | Same apply path. | out: field updates + `injectedMomentum` | `stepBodyFluidInjectionGpuOnly.js` L741-L760 |
+
+---
+
+## 6) Buffer + sync appendix (still important, but now contextualized)
+
+You were right to call this out: readback/sync is only part of the story. Still, for perf attribution we need this list tied to CPU flow decisions.
+
+### 6.1 Frame-level fluid sync points
+- Full fluid readback copies (`copyBufferToBuffer` for `r,g,b,vx,vy`) and maps in `mapFullFluidReadback`.
+- Fast health readback map for anomaly checks.
+- Conditional full readback/writeback in fast mode.
+
+**Citations:** `gpu-lab.js` L6186-L6231, L6356-L6423, L6479-L6486.
+
+### 6.2 Stage-level major sync hotspots (gpu-only modules)
+- Rigid step proposal readback arrays (vx/vy/omega/x/y/theta/carry) in `dispatchRigidStepProposal`.
+- Soft-fluid coupling carry and cluster load proposals with readback-based proposal caches.
+- Spring/area/membrane proposal readbacks for deterministic parity or finite validation.
+- Rigid-soft broadphase/probe/response readbacks; fast mode now skips node+edge AABB probe readback paths.
+- Boundary pass finite-entry WGSL with CPU non-finite fallbacks.
+
+**Citations:**
+- `stepRigidGpuOnly.js` L128-L237.
+- `stepSoftFluidCouplingGpuOnly.js` L579-L633, L925-L1183.
+- `stepSoftSpringsXpbdGpuOnly.js` L804-L834, L1490-L1590.
+- `stepSoftAreaXpbdGpuOnly.js` L673-L692, L929-L935, L1273-L1369.
+- `stepRigidSoftCollisionGpuOnly.js` L3025-L3278, L3414-L3574.
+- `stepCollisionBoundaryGpuOnly.js` L316-L371.
+
+---
+
+## 7) What to expand next (if you want the “several more pages” version)
+
+If you want, next pass I can add per-stage appendices with:
+1. **Exact buffer schemas** (field order, stride, units) for each WGSL prep layout.
+2. **Equation cards** with symbol glossary (`C`, `dl`, `alpha`, `wSum`, etc.) and how each maps to code variables.
+3. **Fallback trigger matrix** (condition → route tag → ownership semantics) for every gpu-only module.
+4. **Call-stack timing budget template** (CPU wall, GPU dispatch, readback map, decode/apply) so perf traces are one-to-one with this doc.
+
+That version will be long, but it will support hard attribution work without ambiguity.

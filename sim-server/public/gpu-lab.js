@@ -1069,6 +1069,59 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const FAST_MODE_FULL_READBACK_INTERVAL = 6;
+const FAST_MODE_DYE_ABS_LIMIT = 2048;
+const FAST_MODE_HEALTH_CLEAR = new Uint32Array([0, 0, 0, 0]);
+
+const fastFluidHealthWgsl = `
+struct HealthParams {
+  cellCount: u32,
+  velocityLimit: f32,
+  dyeLimit: f32,
+  _pad: f32,
+};
+
+@group(0) @binding(0) var<uniform> p: HealthParams;
+@group(0) @binding(1) var<storage, read> r: array<f32>;
+@group(0) @binding(2) var<storage, read> g: array<f32>;
+@group(0) @binding(3) var<storage, read> b: array<f32>;
+@group(0) @binding(4) var<storage, read> vx: array<f32>;
+@group(0) @binding(5) var<storage, read> vy: array<f32>;
+@group(0) @binding(6) var<storage, read_write> stats: array<atomic<u32>>;
+
+fn finite(v: f32) -> bool {
+  return !isNan(v) && !isInf(v);
+}
+
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x;
+  if (i >= p.cellCount) { return; }
+
+  let rv = r[i];
+  let gv = g[i];
+  let bv = b[i];
+  let vvx = vx[i];
+  let vvy = vy[i];
+
+  if (!(finite(rv) && finite(gv) && finite(bv) && finite(vvx) && finite(vvy))) {
+    atomicAdd(&stats[0], 1u);
+    return;
+  }
+
+  let vLimit = max(1.0, p.velocityLimit);
+  let speed2 = vvx * vvx + vvy * vvy;
+  if (speed2 > vLimit * vLimit) {
+    atomicAdd(&stats[1], 1u);
+  }
+
+  let dLimit = max(255.0, p.dyeLimit);
+  if (abs(rv) > dLimit || abs(gv) > dLimit || abs(bv) > dLimit) {
+    atomicAdd(&stats[2], 1u);
+  }
+}
+`;
+
 async function createPipeline(device, code) {
   const module = device.createShaderModule({ code });
   const pipeline = await device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint: 'main' } });
@@ -6051,6 +6104,19 @@ async function initSim() {
   const jacobiP = await createPipeline(device, jacobiPressureWgsl);
   const project = await createPipeline(device, projectWgsl);
   const advDye = await createPipeline(device, advectDyeWgsl);
+  const fastFluidHealthPipeline = await createPipeline(device, fastFluidHealthWgsl);
+  const fastFluidHealthParams = device.createBuffer({
+    size: 16,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+  const fastFluidHealthStats = device.createBuffer({
+    size: 16,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+  });
+  const fastFluidHealthReadback = device.createBuffer({
+    size: 16,
+    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+  });
 
   return {
     controls, cells, bytes,
@@ -6063,6 +6129,20 @@ async function initSim() {
     obstacleMaskCpu, obstacleMaskGpu,
     dyeModeMaskCpu, dyeModeMaskGpu,
     div, readR, readG, readB, readVx, readVy,
+    fastFluidHealthPipeline,
+    fastFluidHealthParams,
+    fastFluidHealthStats,
+    fastFluidHealthReadback,
+    fastReadbackPolicy: {
+      enabled: true,
+      intervalFrames: FAST_MODE_FULL_READBACK_INTERVAL,
+      skippedFramesSinceFull: 0,
+      lastFullReadbackFrame: -1,
+      lastDecision: 'full-readback',
+      lastReason: 'init',
+      lastHealth: { nonFiniteCount: 0, velocitySpikeCount: 0, dyeSpikeCount: 0 },
+    },
+    fastShadowFields: null,
     bodies: initBodies(controls.n, controls),
     emitters: initEmitters(controls.n),
     disableDefaultInject: false,
@@ -6081,6 +6161,53 @@ async function initSim() {
 }
 
 function workgroups(n) { return Math.ceil(n / WORKGROUP); }
+
+function enqueueFullFluidReadbackCopies(sim, enc) {
+  enc.copyBufferToBuffer(sim.rr0, 0, sim.readR, 0, sim.bytes);
+  enc.copyBufferToBuffer(sim.gg0, 0, sim.readG, 0, sim.bytes);
+  enc.copyBufferToBuffer(sim.bb0, 0, sim.readB, 0, sim.bytes);
+  enc.copyBufferToBuffer(sim.vx0, 0, sim.readVx, 0, sim.bytes);
+  enc.copyBufferToBuffer(sim.vy0, 0, sim.readVy, 0, sim.bytes);
+}
+
+async function mapFullFluidReadback(sim) {
+  await Promise.all([
+    sim.readR.mapAsync(GPUMapMode.READ),
+    sim.readG.mapAsync(GPUMapMode.READ),
+    sim.readB.mapAsync(GPUMapMode.READ),
+    sim.readVx.mapAsync(GPUMapMode.READ),
+    sim.readVy.mapAsync(GPUMapMode.READ),
+  ]);
+
+  const r = new Float32Array(sim.readR.getMappedRange().slice(0));
+  const g = new Float32Array(sim.readG.getMappedRange().slice(0));
+  const b = new Float32Array(sim.readB.getMappedRange().slice(0));
+  const vx = new Float32Array(sim.readVx.getMappedRange().slice(0));
+  const vy = new Float32Array(sim.readVy.getMappedRange().slice(0));
+  sim.readR.unmap();
+  sim.readG.unmap();
+  sim.readB.unmap();
+  sim.readVx.unmap();
+  sim.readVy.unmap();
+
+  return { r, g, b, vx, vy };
+}
+
+async function readFastFluidHealthStats(sim) {
+  if (!sim?.fastFluidHealthReadback) {
+    return { nonFiniteCount: 0, velocitySpikeCount: 0, dyeSpikeCount: 0 };
+  }
+
+  await sim.fastFluidHealthReadback.mapAsync(GPUMapMode.READ);
+  const arr = new Uint32Array(sim.fastFluidHealthReadback.getMappedRange().slice(0));
+  sim.fastFluidHealthReadback.unmap();
+
+  return {
+    nonFiniteCount: Number(arr[0]) || 0,
+    velocitySpikeCount: Number(arr[1]) || 0,
+    dyeSpikeCount: Number(arr[2]) || 0,
+  };
+}
 
 async function stepAndRender() {
   if (!running || !sim) return;
@@ -6184,36 +6311,118 @@ async function stepAndRender() {
   [s.gg0, s.gg1] = [s.gg1, s.gg0];
   [s.bb0, s.bb1] = [s.bb1, s.bb0];
 
-  // Read back every frame so body integration/render cadence stays coherent (avoids apparent doubling/jitter).
-  const doReadback = true;
-  if (doReadback) {
-    enc.copyBufferToBuffer(s.rr0, 0, s.readR, 0, s.bytes);
-    enc.copyBufferToBuffer(s.gg0, 0, s.readG, 0, s.bytes);
-    enc.copyBufferToBuffer(s.bb0, 0, s.readB, 0, s.bytes);
-    enc.copyBufferToBuffer(s.vx0, 0, s.readVx, 0, s.bytes);
-    enc.copyBufferToBuffer(s.vy0, 0, s.readVy, 0, s.bytes);
+  const solverPathNow = normalizeRuntimeSolverPath(s?.controls?.runtimeSolverPath);
+  const pipelineModeNow = normalizeRuntimePipelineMode(s?.controls?.runtimePipelineMode, solverPathNow);
+  const fastMode = solverPathNow === 'gpu-only' && pipelineModeNow === 'gpu-only-fast';
+
+  const fallbackSignalsNow = fastMode ? collectGpuFallbackSignals(s) : [];
+  const fallbackAnomaly = fastMode && fallbackSignalsNow.length > 0;
+  const hasFastShadow = Boolean(
+    s?.fastShadowFields
+      && s.fastShadowFields.r
+      && s.fastShadowFields.g
+      && s.fastShadowFields.b
+      && s.fastShadowFields.vx
+      && s.fastShadowFields.vy,
+  );
+
+  const fastReadbackInterval = Math.max(1, Number(s?.fastReadbackPolicy?.intervalFrames) || FAST_MODE_FULL_READBACK_INTERVAL);
+  const cadenceDue = fastMode ? (((Number(s.frame) || 0) % fastReadbackInterval) === 0) : true;
+
+  if (!fastMode) {
+    enqueueFullFluidReadbackCopies(s, enc);
+  } else if (s.fastFluidHealthPipeline && s.fastFluidHealthParams && s.fastFluidHealthStats && s.fastFluidHealthReadback) {
+    const healthUniform = new ArrayBuffer(16);
+    const healthU32 = new Uint32Array(healthUniform);
+    const healthF32 = new Float32Array(healthUniform);
+    healthU32[0] = s.cells;
+    healthF32[1] = normalizeFluidCouplingComponentLimit(s.controls?.fluidCouplingComponentLimit);
+    healthF32[2] = FAST_MODE_DYE_ABS_LIMIT;
+    healthF32[3] = 0;
+    s.device.queue.writeBuffer(s.fastFluidHealthParams, 0, healthUniform);
+    s.device.queue.writeBuffer(s.fastFluidHealthStats, 0, FAST_MODE_HEALTH_CLEAR);
+
+    pass = enc.beginComputePass();
+    pass.setPipeline(s.fastFluidHealthPipeline.pipeline);
+    pass.setBindGroup(0, s.fastFluidHealthPipeline.bg([
+      s.fastFluidHealthParams,
+      s.rr0,
+      s.gg0,
+      s.bb0,
+      s.vx0,
+      s.vy0,
+      s.fastFluidHealthStats,
+    ]));
+    pass.dispatchWorkgroups(Math.ceil(s.cells / 64));
+    pass.end();
+
+    enc.copyBufferToBuffer(s.fastFluidHealthStats, 0, s.fastFluidHealthReadback, 0, 16);
   }
 
   s.device.queue.submit([enc.finish()]);
 
+  let healthStats = { nonFiniteCount: 0, velocitySpikeCount: 0, dyeSpikeCount: 0 };
+  if (fastMode) {
+    healthStats = await readFastFluidHealthStats(s);
+  }
+
+  const healthAnomaly = fastMode
+    && ((healthStats.nonFiniteCount > 0) || (healthStats.velocitySpikeCount > 0) || (healthStats.dyeSpikeCount > 0));
+
+  let doReadback = !fastMode || cadenceDue || fallbackAnomaly || healthAnomaly || !hasFastShadow;
+  let readbackReason = !fastMode
+    ? 'non-fast-mode'
+    : (!hasFastShadow
+      ? 'fast-bootstrap'
+      : (fallbackAnomaly
+        ? 'fast-fallback-anomaly'
+        : (healthAnomaly
+          ? 'fast-health-anomaly'
+          : (cadenceDue ? 'fast-cadence' : 'fast-resident-skip'))));
+
+  if (fastMode && doReadback) {
+    const copyEnc = s.device.createCommandEncoder();
+    enqueueFullFluidReadbackCopies(s, copyEnc);
+    s.device.queue.submit([copyEnc.finish()]);
+  }
+
+  let fields = null;
   if (doReadback) {
-    await Promise.all([
-      s.readR.mapAsync(GPUMapMode.READ),
-      s.readG.mapAsync(GPUMapMode.READ),
-      s.readB.mapAsync(GPUMapMode.READ),
-      s.readVx.mapAsync(GPUMapMode.READ),
-      s.readVy.mapAsync(GPUMapMode.READ),
-    ]);
+    fields = await mapFullFluidReadback(s);
+    s.fastShadowFields = fields;
+  } else {
+    fields = s.fastShadowFields;
+  }
 
-    const r = new Float32Array(s.readR.getMappedRange().slice(0));
-    const g = new Float32Array(s.readG.getMappedRange().slice(0));
-    const b = new Float32Array(s.readB.getMappedRange().slice(0));
-    const vx = new Float32Array(s.readVx.getMappedRange().slice(0));
-    const vy = new Float32Array(s.readVy.getMappedRange().slice(0));
-    s.readR.unmap(); s.readG.unmap(); s.readB.unmap(); s.readVx.unmap(); s.readVy.unmap();
+  if (!fields) {
+    s.frame += 1;
+    if (running) requestAnimationFrame(() => stepAndRender());
+    return;
+  }
 
-    // Rigid + soft coupling: carry/drag from flow + two-way pushback/swim impulses.
-    const couplingInstant = await stepBodiesAndInject(s, vx, vy);
+  if (!s.fastReadbackPolicy || typeof s.fastReadbackPolicy !== 'object') {
+    s.fastReadbackPolicy = {};
+  }
+  s.fastReadbackPolicy.enabled = true;
+  s.fastReadbackPolicy.intervalFrames = fastReadbackInterval;
+  s.fastReadbackPolicy.lastHealth = healthStats;
+  s.fastReadbackPolicy.lastDecision = doReadback ? 'full-readback' : 'gpu-resident-skip';
+  s.fastReadbackPolicy.lastReason = readbackReason;
+  if (doReadback) {
+    s.fastReadbackPolicy.lastFullReadbackFrame = Number(s.frame) || 0;
+    s.fastReadbackPolicy.skippedFramesSinceFull = 0;
+  } else {
+    s.fastReadbackPolicy.skippedFramesSinceFull = (Number(s.fastReadbackPolicy.skippedFramesSinceFull) || 0) + 1;
+  }
+
+  const r = fields.r;
+  const g = fields.g;
+  const b = fields.b;
+  const vx = fields.vx;
+  const vy = fields.vy;
+
+  // Rigid + soft coupling: carry/drag from flow + two-way pushback/swim impulses.
+  const couplingInstant = await stepBodiesAndInject(s, vx, vy);
     applyEmitters(s, r, g, b, vx, vy);
     const obstacleEdgesNow = Number(s?.lastFluidObstacleStats?.blockedEdgeCount) || 0;
     applyDigestiveCapture(s, r, g, b);
@@ -6231,11 +6440,13 @@ async function stepAndRender() {
       vy[i] = clampFluidComponent(vyi, couplingLimit);
     }
 
-    s.device.queue.writeBuffer(s.vx0, 0, vx);
-    s.device.queue.writeBuffer(s.vy0, 0, vy);
-    s.device.queue.writeBuffer(s.rr0, 0, r);
-    s.device.queue.writeBuffer(s.gg0, 0, g);
-    s.device.queue.writeBuffer(s.bb0, 0, b);
+    if (doReadback) {
+      s.device.queue.writeBuffer(s.vx0, 0, vx);
+      s.device.queue.writeBuffer(s.vy0, 0, vy);
+      s.device.queue.writeBuffer(s.rr0, 0, r);
+      s.device.queue.writeBuffer(s.gg0, 0, g);
+      s.device.queue.writeBuffer(s.bb0, 0, b);
+    }
 
     const n = s.controls.n;
     const img = ctx.createImageData(n, n);
@@ -6293,6 +6504,12 @@ async function stepAndRender() {
         grid: n,
         frames: s.frame,
         fps: fpsNow,
+        fastGpuResidentMode: fastMode,
+        fastGpuResidentSkippedFrames: Number(s?.fastReadbackPolicy?.skippedFramesSinceFull) || 0,
+        fastGpuResidentLastDecision: s?.fastReadbackPolicy?.lastDecision || null,
+        fastGpuResidentLastReason: s?.fastReadbackPolicy?.lastReason || null,
+        fastGpuResidentReadbackThisFrame: doReadback,
+        fastGpuResidentHealth: healthStats,
         softIntegrateMode: s.softIntegrateRuntime?.mode || 'unknown',
         softIntegrateReason: s.softIntegrateRuntime?.reason || 'n/a',
         dyeEnergy: +sum.toFixed(1),
@@ -6352,7 +6569,6 @@ async function stepAndRender() {
         },
       });
     }
-  }
 
   s.frame += 1;
   if (running) requestAnimationFrame(() => stepAndRender());
@@ -6623,6 +6839,15 @@ window.__gpuLabApi = {
       runtimeSolverPath: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath),
       runtimePipelineMode: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
       allowPassEdgeFlowPush: sim?.controls?.allowPassEdgeFlowPush === true,
+      fastReadbackRuntime: {
+        enabled: !!sim?.fastReadbackPolicy?.enabled,
+        intervalFrames: Number(sim?.fastReadbackPolicy?.intervalFrames) || FAST_MODE_FULL_READBACK_INTERVAL,
+        skippedFramesSinceFull: Number(sim?.fastReadbackPolicy?.skippedFramesSinceFull) || 0,
+        lastFullReadbackFrame: Number(sim?.fastReadbackPolicy?.lastFullReadbackFrame ?? -1),
+        lastDecision: sim?.fastReadbackPolicy?.lastDecision || null,
+        lastReason: sim?.fastReadbackPolicy?.lastReason || null,
+        lastHealth: sim?.fastReadbackPolicy?.lastHealth || null,
+      },
       fallbackHud: sim?.fallbackHudSummary || {
         active: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath) === 'gpu-only',
         currentCount: 0,

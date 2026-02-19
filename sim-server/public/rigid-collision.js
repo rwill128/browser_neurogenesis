@@ -1121,6 +1121,7 @@ export function buildCollisionPhaseSceneCache(rigidBodies, softNodes, softSpring
 
   return {
     cellSize,
+    rigidMeta: rigidState.rigidMeta,
     rigidRigid,
     rigidSoft,
   };

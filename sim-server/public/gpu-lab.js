@@ -193,21 +193,40 @@ function normalizeCompliance(raw, fallback) {
   return clamp(v, 1e-6, 0.05);
 }
 
-function rigidEdgeMomentumScale(rb) {
+function resolveRigidEdgeVelocityMode(rb, edgeIndex) {
+  const velocityModeRaw = Array.isArray(rb?.edgeVelocityMode)
+    ? Number(rb.edgeVelocityMode[edgeIndex])
+    : Number.NaN;
+  if (velocityModeRaw === EDGE_BODY_MODE.PASS) return EDGE_BODY_MODE.PASS;
+  const bodyModeRaw = Array.isArray(rb?.edgeBodyMode)
+    ? Number(rb.edgeBodyMode[edgeIndex])
+    : Number.NaN;
+  return bodyModeRaw === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK;
+}
+
+function rigidEdgeMomentumScale(rb, allowPassEdgeFlowPush = false) {
   const arr = Array.isArray(rb?.edgeMomentumCoupling)
     ? rb.edgeMomentumCoupling
     : (Array.isArray(rb?.edgeMomentumTransfer) ? rb.edgeMomentumTransfer : null);
-  if (!arr || arr.length === 0) return 1;
+  const edgeCount = Math.max(
+    Number(arr?.length) || 0,
+    Array.isArray(rb?.edgeVelocityMode) ? rb.edgeVelocityMode.length : 0,
+    Array.isArray(rb?.edgeBodyMode) ? rb.edgeBodyMode.length : 0,
+    Array.isArray(rb?.verticesLocal) ? rb.verticesLocal.length : 0,
+    Math.max(0, Number(rb?.sides) || 0),
+  );
+  if (edgeCount <= 0) return 1;
+
   let sum = 0;
-  let c = 0;
-  for (const v of arr) {
-    const n = Number(v);
-    if (Number.isFinite(n)) {
-      sum += clamp(n, 0, 1);
-      c += 1;
+  for (let ei = 0; ei < edgeCount; ei++) {
+    const raw = Array.isArray(arr) ? Number(arr[ei]) : Number.NaN;
+    let momentum = Number.isFinite(raw) ? clamp(raw, 0, 1) : 1;
+    if (!allowPassEdgeFlowPush && resolveRigidEdgeVelocityMode(rb, ei) === EDGE_BODY_MODE.PASS) {
+      momentum = 0;
     }
+    sum += momentum;
   }
-  return c > 0 ? (sum / c) : 1;
+  return clamp(sum / Math.max(1, edgeCount), 0, 1);
 }
 
 function normalizeRuntimeSolverPath(raw) {
@@ -280,6 +299,14 @@ const EDGE_BODY_MODE = {
   BLOCK: 1,
 };
 
+function readPassEdgeFlowPushToggleFromUrl() {
+  if (typeof window === 'undefined') return false;
+  const raw = new URLSearchParams(window.location.search || '').get('passEdgeFlowPush');
+  if (raw == null || raw === '') return false;
+  const v = String(raw).trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
 function readControls() {
   return {
     n: Math.max(32, Number(gridEl.value) || 256),
@@ -316,6 +343,7 @@ function readControls() {
     enableMembraneBoundaryXpbd: (enableMembraneBoundaryXpbdEl?.checked !== false),
     enableMembraneShapeMemory: (enableMembraneShapeMemoryEl?.checked !== false),
     enableMembranePressure: (enableMembranePressureEl?.checked !== false),
+    allowPassEdgeFlowPush: readPassEdgeFlowPushToggleFromUrl(),
     runtimeSolverPath: getRuntimeSolverPath(),
     runtimePipelineMode: getRuntimePipelineMode(),
   };
@@ -3951,6 +3979,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   applyInteractionLabBodyMotion(sim);
 
   const solverPath = normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath);
+  const allowPassEdgeFlowPush = sim?.controls?.allowPassEdgeFlowPush === true;
   const softNodeMomentumScale = (() => {
     const sums = new Float32Array(s.nodes.length);
     const counts = new Uint16Array(s.nodes.length);
@@ -3958,8 +3987,14 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       const a = Number(sp?.[0])|0;
       const b = Number(sp?.[1])|0;
       if (a < 0 || b < 0 || a >= s.nodes.length || b >= s.nodes.length) continue;
+      const edgeVelocityMode = Number(sp?.[5]) === EDGE_BODY_MODE.PASS
+        ? EDGE_BODY_MODE.PASS
+        : (Number(sp?.[3]) === EDGE_BODY_MODE.PASS ? EDGE_BODY_MODE.PASS : EDGE_BODY_MODE.BLOCK);
       const m = Number(sp?.[6]);
-      const mm = Number.isFinite(m) ? clamp(m,0,1) : 1;
+      let mm = Number.isFinite(m) ? clamp(m,0,1) : 1;
+      if (!allowPassEdgeFlowPush && edgeVelocityMode === EDGE_BODY_MODE.PASS) {
+        mm = 0;
+      }
       sums[a] += mm; sums[b] += mm; counts[a] += 1; counts[b] += 1;
     }
     return (idx) => counts[idx] > 0 ? (sums[idx] / counts[idx]) : 1;
@@ -3988,6 +4023,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       rigidVerticesWorld,
       sampleFluidForBodyCoupling,
       applyBounceBoundary,
+      allowPassEdgeFlowPush,
       wgslOffload: {
         enabled: true,
         device: sim?.device,
@@ -4005,19 +4041,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   } else {
     for (let bi = 0; bi < bodies.rigid.length; bi++) {
       const b = bodies.rigid[bi];
-      const arr = Array.isArray(b?.edgeMomentumCoupling) ? b.edgeMomentumCoupling : (Array.isArray(b?.edgeMomentumTransfer) ? b.edgeMomentumTransfer : null);
-      const edgeMomentumScale = (() => {
-        if (!arr || arr.length === 0) return 1;
-        let sum = 0; let c = 0;
-        for (const v of arr) {
-          const value = Number(v);
-          if (Number.isFinite(value)) {
-            sum += clamp(value, 0, 1);
-            c += 1;
-          }
-        }
-        return c > 0 ? (sum / c) : 1;
-      })();
+      const edgeMomentumScale = rigidEdgeMomentumScale(b, allowPassEdgeFlowPush);
 
       const invMass = 1 / Math.max(0.05, b.mass);
       const invInertia = 1 / Math.max(0.05, b.inertia || 1);
@@ -4904,7 +4928,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         b.r * 0.8,
         swimGain * Math.cos(swimPhase) * 0.015,
         swimGain * Math.sin(swimPhase) * 0.012,
-        rigidEdgeMomentumScale(b),
+        rigidEdgeMomentumScale(b, allowPassEdgeFlowPush),
       );
     }
     softClusterForInjection = computeSoftClusterKinematics(s.nodes);
@@ -5582,6 +5606,9 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
   sim.disableDefaultInject = true;
   sim.controls.runtimeSolverPath = selectedSolverPath;
   sim.controls.runtimePipelineMode = selectedPipelineMode;
+  if (typeof options?.allowPassEdgeFlowPush === 'boolean') {
+    sim.controls.allowPassEdgeFlowPush = options.allowPassEdgeFlowPush;
+  }
 
   sim.bodies = {
     rigid: [],
@@ -6595,6 +6622,7 @@ window.__gpuLabApi = {
       grid: Number(sim?.controls?.n) || null,
       runtimeSolverPath: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath),
       runtimePipelineMode: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
+      allowPassEdgeFlowPush: sim?.controls?.allowPassEdgeFlowPush === true,
       fallbackHud: sim?.fallbackHudSummary || {
         active: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath) === 'gpu-only',
         currentCount: 0,

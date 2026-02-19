@@ -226,21 +226,40 @@ async function dispatchRigidStepProposal(offload, layout, dt, dtNorm, boundaryN,
   return allFinite;
 }
 
-function rigidEdgeMomentumScale(rb) {
+function resolveRigidEdgeVelocityMode(rb, edgeIndex) {
+  const velocityModeRaw = Array.isArray(rb?.edgeVelocityMode)
+    ? Number(rb.edgeVelocityMode[edgeIndex])
+    : Number.NaN;
+  if (velocityModeRaw === 0) return 0;
+  const bodyModeRaw = Array.isArray(rb?.edgeBodyMode)
+    ? Number(rb.edgeBodyMode[edgeIndex])
+    : Number.NaN;
+  return bodyModeRaw === 0 ? 0 : 1;
+}
+
+function rigidEdgeMomentumScale(rb, allowPassEdgeFlowPush = false) {
   const arr = Array.isArray(rb?.edgeMomentumCoupling)
     ? rb.edgeMomentumCoupling
     : (Array.isArray(rb?.edgeMomentumTransfer) ? rb.edgeMomentumTransfer : null);
-  if (!arr || arr.length === 0) return 1;
+  const edgeCount = Math.max(
+    Number(arr?.length) || 0,
+    Array.isArray(rb?.edgeVelocityMode) ? rb.edgeVelocityMode.length : 0,
+    Array.isArray(rb?.edgeBodyMode) ? rb.edgeBodyMode.length : 0,
+    Array.isArray(rb?.verticesLocal) ? rb.verticesLocal.length : 0,
+    Math.max(0, Number(rb?.sides) || 0),
+  );
+  if (edgeCount <= 0) return 1;
+
   let sum = 0;
-  let c = 0;
-  for (const v of arr) {
-    const n = Number(v);
-    if (Number.isFinite(n)) {
-      sum += clamp(n, 0, 1);
-      c += 1;
+  for (let ei = 0; ei < edgeCount; ei++) {
+    const raw = Array.isArray(arr) ? Number(arr[ei]) : Number.NaN;
+    let momentum = Number.isFinite(raw) ? clamp(raw, 0, 1) : 1;
+    if (!allowPassEdgeFlowPush && resolveRigidEdgeVelocityMode(rb, ei) === 0) {
+      momentum = 0;
     }
+    sum += momentum;
   }
-  return c > 0 ? (sum / c) : 1;
+  return clamp(sum / Math.max(1, edgeCount), 0, 1);
 }
 
 /**
@@ -268,6 +287,7 @@ export async function stepRigidBodiesGpuOnly({
   sampleFluidForBodyCoupling,
   applyBounceBoundary,
   wgslOffload,
+  allowPassEdgeFlowPush = false,
 }) {
   let rigidCarryTransfer = 0;
   const runWgslProbe = wgslOffload?.enabled === true
@@ -279,7 +299,7 @@ export async function stepRigidBodiesGpuOnly({
 
   for (let bi = 0; bi < bodies.rigid.length; bi++) {
     const b = bodies.rigid[bi];
-    const edgeMomentumScale = rigidEdgeMomentumScale(b);
+    const edgeMomentumScale = rigidEdgeMomentumScale(b, allowPassEdgeFlowPush);
     const invMass = 1 / Math.max(0.05, b.mass);
     const invInertia = 1 / Math.max(0.05, b.inertia || 1);
     const sampleVerts = rigidVerticesWorld(b);

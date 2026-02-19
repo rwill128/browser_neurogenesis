@@ -4952,6 +4952,16 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     totalCheckedPairs: 0,
     totalPrunedPairs: 0,
     reductionPct: 0,
+    reuseAttempts: 0,
+    reuseHits: 0,
+    reuseMisses: 0,
+    reuseHitRatePct: 0,
+    dedupeMs: 0,
+    sortMs: 0,
+    totalBuildMs: 0,
+    emitAttempts: 0,
+    duplicatesRejected: 0,
+    pairsOut: 0,
   };
   const rigidSoftBroadphaseRuntime = {
     enabled: solverPath !== 'gpu-only',
@@ -5059,6 +5069,13 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     collisionCpuRuntime.reason = 'gpu-only-collision-path';
   } else {
     sim.collisionBoundaryRuntime = { mode: 'cpu-baseline', reason: 'baseline-path' };
+    const rigidRigidReuseCache = (sim.rigidRigidBroadphaseReuseCache ||= {
+      lastBodyCount: -1,
+      lastCellSize: 0,
+      lastCellSpans: null,
+      lastPairs: null,
+      lastStats: null,
+    });
 
     // Body-body collisions: rigid↔rigid, rigid↔soft, soft↔soft
     for (let iter = 0; iter < 2; iter++) {
@@ -5074,6 +5091,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           edgePad: 0.8,
           includeRigidRigid: true,
           includeRigidSoft: true,
+          rigidRigidReuseCache,
         },
       );
 
@@ -5086,6 +5104,15 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       rigidRigidBroadphaseRuntime.totalBruteForcePairs += Number(preBroadphase.stats?.bruteForcePairs) || 0;
       rigidRigidBroadphaseRuntime.totalCheckedPairs += Number(preBroadphase.stats?.checkedPairs) || 0;
       rigidRigidBroadphaseRuntime.totalPrunedPairs += Number(preBroadphase.stats?.prunedPairs) || 0;
+      rigidRigidBroadphaseRuntime.reuseAttempts += 1;
+      rigidRigidBroadphaseRuntime.reuseHits += preBroadphase.stats?.reuseHit === true ? 1 : 0;
+      rigidRigidBroadphaseRuntime.reuseMisses += preBroadphase.stats?.reuseHit === true ? 0 : 1;
+      rigidRigidBroadphaseRuntime.dedupeMs += Number(preBroadphase.stats?.dedupeMs) || 0;
+      rigidRigidBroadphaseRuntime.sortMs += Number(preBroadphase.stats?.sortMs) || 0;
+      rigidRigidBroadphaseRuntime.totalBuildMs += Number(preBroadphase.stats?.totalBuildMs) || 0;
+      rigidRigidBroadphaseRuntime.emitAttempts += Number(preBroadphase.stats?.emitAttempts) || 0;
+      rigidRigidBroadphaseRuntime.duplicatesRejected += Number(preBroadphase.stats?.duplicatesRejected) || 0;
+      rigidRigidBroadphaseRuntime.pairsOut += Number(preBroadphase.stats?.pairsOut) || 0;
       const getPreRigidWorldPolys = createRigidWorldPolyPhaseCache(bodies.rigid, collisionCpuRuntime);
       for (const [i, j] of preBroadphase.pairs) {
         collisionCpuRuntime.rigidRigidPairChecks += 1;
@@ -5198,6 +5225,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
           includeRigidRigid: true,
           includeRigidSoft: false,
+          rigidRigidReuseCache,
         },
       );
       const postBroadphase = postScene.rigidRigid;
@@ -5209,6 +5237,15 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       rigidRigidBroadphaseRuntime.totalBruteForcePairs += Number(postBroadphase.stats?.bruteForcePairs) || 0;
       rigidRigidBroadphaseRuntime.totalCheckedPairs += Number(postBroadphase.stats?.checkedPairs) || 0;
       rigidRigidBroadphaseRuntime.totalPrunedPairs += Number(postBroadphase.stats?.prunedPairs) || 0;
+      rigidRigidBroadphaseRuntime.reuseAttempts += 1;
+      rigidRigidBroadphaseRuntime.reuseHits += postBroadphase.stats?.reuseHit === true ? 1 : 0;
+      rigidRigidBroadphaseRuntime.reuseMisses += postBroadphase.stats?.reuseHit === true ? 0 : 1;
+      rigidRigidBroadphaseRuntime.dedupeMs += Number(postBroadphase.stats?.dedupeMs) || 0;
+      rigidRigidBroadphaseRuntime.sortMs += Number(postBroadphase.stats?.sortMs) || 0;
+      rigidRigidBroadphaseRuntime.totalBuildMs += Number(postBroadphase.stats?.totalBuildMs) || 0;
+      rigidRigidBroadphaseRuntime.emitAttempts += Number(postBroadphase.stats?.emitAttempts) || 0;
+      rigidRigidBroadphaseRuntime.duplicatesRejected += Number(postBroadphase.stats?.duplicatesRejected) || 0;
+      rigidRigidBroadphaseRuntime.pairsOut += Number(postBroadphase.stats?.pairsOut) || 0;
       const getPostRigidWorldPolys = createRigidWorldPolyPhaseCache(bodies.rigid, collisionCpuRuntime);
       for (const [i, j] of postBroadphase.pairs) {
         collisionCpuRuntime.rigidRigidPairChecks += 1;
@@ -5237,6 +5274,9 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   }
   rigidRigidBroadphaseRuntime.reductionPct = rigidRigidBroadphaseRuntime.totalBruteForcePairs > 0
     ? (rigidRigidBroadphaseRuntime.totalPrunedPairs / rigidRigidBroadphaseRuntime.totalBruteForcePairs) * 100
+    : 0;
+  rigidRigidBroadphaseRuntime.reuseHitRatePct = rigidRigidBroadphaseRuntime.reuseAttempts > 0
+    ? (rigidRigidBroadphaseRuntime.reuseHits / rigidRigidBroadphaseRuntime.reuseAttempts) * 100
     : 0;
   rigidSoftBroadphaseRuntime.nodeReductionPct = rigidSoftBroadphaseRuntime.totalRawNodeChecks > 0
     ? (rigidSoftBroadphaseRuntime.totalPrunedNodeChecks / rigidSoftBroadphaseRuntime.totalRawNodeChecks) * 100
@@ -7682,6 +7722,16 @@ window.__gpuLabApi = {
           totalCheckedPairs: Number(sim.rigidRigidBroadphaseRuntime.totalCheckedPairs) || 0,
           totalPrunedPairs: Number(sim.rigidRigidBroadphaseRuntime.totalPrunedPairs) || 0,
           reductionPct: Number(sim.rigidRigidBroadphaseRuntime.reductionPct) || 0,
+          reuseAttempts: Number(sim.rigidRigidBroadphaseRuntime.reuseAttempts) || 0,
+          reuseHits: Number(sim.rigidRigidBroadphaseRuntime.reuseHits) || 0,
+          reuseMisses: Number(sim.rigidRigidBroadphaseRuntime.reuseMisses) || 0,
+          reuseHitRatePct: Number(sim.rigidRigidBroadphaseRuntime.reuseHitRatePct) || 0,
+          dedupeMs: Number(sim.rigidRigidBroadphaseRuntime.dedupeMs) || 0,
+          sortMs: Number(sim.rigidRigidBroadphaseRuntime.sortMs) || 0,
+          totalBuildMs: Number(sim.rigidRigidBroadphaseRuntime.totalBuildMs) || 0,
+          emitAttempts: Number(sim.rigidRigidBroadphaseRuntime.emitAttempts) || 0,
+          duplicatesRejected: Number(sim.rigidRigidBroadphaseRuntime.duplicatesRejected) || 0,
+          pairsOut: Number(sim.rigidRigidBroadphaseRuntime.pairsOut) || 0,
           phases: Array.isArray(sim?.rigidRigidBroadphaseRuntime?.phases)
             ? sim.rigidRigidBroadphaseRuntime.phases.slice(-8).map((entry) => ({
               phase: entry?.phase || 'unknown',
@@ -7694,6 +7744,14 @@ window.__gpuLabApi = {
               occupiedCells: Number(entry?.occupiedCells) || 0,
               maxBodiesPerCell: Number(entry?.maxBodiesPerCell) || 0,
               avgBodiesPerCell: Number(entry?.avgBodiesPerCell) || 0,
+              emitAttempts: Number(entry?.emitAttempts) || 0,
+              duplicatesRejected: Number(entry?.duplicatesRejected) || 0,
+              pairsOut: Number(entry?.pairsOut) || 0,
+              dedupeMs: Number(entry?.dedupeMs) || 0,
+              sortMs: Number(entry?.sortMs) || 0,
+              totalBuildMs: Number(entry?.totalBuildMs) || 0,
+              reuseHit: entry?.reuseHit === true,
+              reuseMiss: entry?.reuseMiss === true,
             }))
             : [],
         }
@@ -7705,6 +7763,16 @@ window.__gpuLabApi = {
           totalCheckedPairs: 0,
           totalPrunedPairs: 0,
           reductionPct: 0,
+          reuseAttempts: 0,
+          reuseHits: 0,
+          reuseMisses: 0,
+          reuseHitRatePct: 0,
+          dedupeMs: 0,
+          sortMs: 0,
+          totalBuildMs: 0,
+          emitAttempts: 0,
+          duplicatesRejected: 0,
+          pairsOut: 0,
           phases: [],
         },
       rigidSoftBroadphaseRuntime: sim?.rigidSoftBroadphaseRuntime

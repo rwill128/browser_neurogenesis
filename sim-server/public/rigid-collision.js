@@ -629,41 +629,64 @@ function buildRigidSpatialHashState(rigidBodies, cellSize) {
 
   const cells = new Map();
   const rigidMeta = new Array(bodyCount);
+  const cellSpans = new Int32Array(Math.max(0, bodyCount * 4));
+  let cellSpanSignature = 2166136261 >>> 0;
+  const mixCellSpanSignature = (value) => {
+    const v = (Number(value) | 0) >>> 0;
+    cellSpanSignature ^= v;
+    cellSpanSignature = Math.imul(cellSpanSignature, 16777619) >>> 0;
+  };
+
   let occupiedBodyWrites = 0;
 
   for (let i = 0; i < bodyCount; i++) {
     const rb = bodies[i];
+    let minCx = 0;
+    let maxCx = -1;
+    let minCy = 0;
+    let maxCy = -1;
+
     if (!rb) {
       rigidMeta[i] = {
         bx: 0,
         by: 0,
         radius: 0.5,
       };
-      continue;
-    }
-    const bx = finiteOr(rb.x, 0);
-    const by = finiteOr(rb.y, 0);
-    const radius = Math.max(0.5, getRigidBroadphaseRadius(rb));
-    rigidMeta[i] = { bx, by, radius };
+    } else {
+      const bx = finiteOr(rb.x, 0);
+      const by = finiteOr(rb.y, 0);
+      const radius = Math.max(0.5, getRigidBroadphaseRadius(rb));
+      rigidMeta[i] = { bx, by, radius };
 
-    const minCx = Math.floor((bx - radius) / cellSize);
-    const maxCx = Math.floor((bx + radius) / cellSize);
-    const minCy = Math.floor((by - radius) / cellSize);
-    const maxCy = Math.floor((by + radius) / cellSize);
+      minCx = Math.floor((bx - radius) / cellSize);
+      maxCx = Math.floor((bx + radius) / cellSize);
+      minCy = Math.floor((by - radius) / cellSize);
+      maxCy = Math.floor((by + radius) / cellSize);
 
-    for (let cy = minCy; cy <= maxCy; cy++) {
-      for (let cx = minCx; cx <= maxCx; cx++) {
-        const key = packSpatialCellKey(cx, cy);
-        if (key == null) continue;
-        let bucket = cells.get(key);
-        if (!bucket) {
-          bucket = [];
-          cells.set(key, bucket);
+      for (let cy = minCy; cy <= maxCy; cy++) {
+        for (let cx = minCx; cx <= maxCx; cx++) {
+          const key = packSpatialCellKey(cx, cy);
+          if (key == null) continue;
+          let bucket = cells.get(key);
+          if (!bucket) {
+            bucket = [];
+            cells.set(key, bucket);
+          }
+          bucket.push(i);
+          occupiedBodyWrites += 1;
         }
-        bucket.push(i);
-        occupiedBodyWrites += 1;
       }
     }
+
+    const spanOffset = i * 4;
+    cellSpans[spanOffset] = minCx;
+    cellSpans[spanOffset + 1] = maxCx;
+    cellSpans[spanOffset + 2] = minCy;
+    cellSpans[spanOffset + 3] = maxCy;
+    mixCellSpanSignature(minCx);
+    mixCellSpanSignature(maxCx);
+    mixCellSpanSignature(minCy);
+    mixCellSpanSignature(maxCy);
   }
 
   const sortedKeys = Array.from(cells.keys()).sort((a, b) => a - b);
@@ -683,32 +706,62 @@ function buildRigidSpatialHashState(rigidBodies, cellSize) {
     rigidMeta,
     occupiedBodyWrites,
     maxBodiesPerCell,
+    cellSpans,
+    cellSpanSignature,
   };
+}
+
+function nowMs() {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+}
+
+function rigidCellSpansEqual(a, b) {
+  if (!(a instanceof Int32Array) || !(b instanceof Int32Array)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
 
 function deriveRigidRigidCandidatesFromState(state) {
   const candidatePairs = [];
   const seenPairs = new Set();
+  let emitAttempts = 0;
+  let duplicatesRejected = 0;
 
+  const dedupeStartMs = nowMs();
   for (const key of state.sortedKeys) {
     const ids = state.cells.get(key) || [];
     if (ids.length < 2) continue;
     for (let a = 0; a < ids.length; a++) {
       const i = ids[a];
       for (let b = a + 1; b < ids.length; b++) {
+        emitAttempts += 1;
         const j = ids[b];
-        if (i === j) continue;
+        if (i === j) {
+          duplicatesRejected += 1;
+          continue;
+        }
         const lo = i < j ? i : j;
         const hi = i < j ? j : i;
         const pairKey = lo * state.bodyCount + hi;
-        if (seenPairs.has(pairKey)) continue;
+        if (seenPairs.has(pairKey)) {
+          duplicatesRejected += 1;
+          continue;
+        }
         seenPairs.add(pairKey);
         candidatePairs.push([lo, hi]);
       }
     }
   }
+  const dedupeMs = nowMs() - dedupeStartMs;
 
+  const sortStartMs = nowMs();
   candidatePairs.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+  const sortMs = nowMs() - sortStartMs;
 
   const checkedPairs = candidatePairs.length;
   const prunedPairs = Math.max(0, state.bruteForcePairs - checkedPairs);
@@ -729,6 +782,15 @@ function deriveRigidRigidCandidatesFromState(state) {
       occupiedBodyWrites: state.occupiedBodyWrites,
       maxBodiesPerCell: state.maxBodiesPerCell,
       avgBodiesPerCell: state.sortedKeys.length > 0 ? (state.occupiedBodyWrites / state.sortedKeys.length) : 0,
+      emitAttempts,
+      duplicatesRejected,
+      pairsOut: checkedPairs,
+      dedupeMs,
+      sortMs,
+      totalBuildMs: dedupeMs + sortMs,
+      cellSpanSignature: state.cellSpanSignature,
+      reuseHit: false,
+      reuseMiss: false,
     },
   };
 }
@@ -928,26 +990,80 @@ export function buildCollisionPhaseSceneCache(rigidBodies, softNodes, softSpring
     : 1;
 
   const rigidState = buildRigidSpatialHashState(rigidBodies, cellSize);
+  const rigidRigidReuseCache = options?.rigidRigidReuseCache && typeof options.rigidRigidReuseCache === 'object'
+    ? options.rigidRigidReuseCache
+    : null;
 
-  const rigidRigid = includeRigidRigid
-    ? deriveRigidRigidCandidatesFromState(rigidState)
-    : {
-      pairs: [],
-      stats: {
-        bodyCount: rigidState.bodyCount,
-        bruteForcePairs: rigidState.bruteForcePairs,
-        checkedPairs: 0,
-        prunedPairs: rigidState.bruteForcePairs,
-        reductionPct: rigidState.bruteForcePairs > 0 ? 100 : 0,
-        cellSize,
-        occupiedCells: rigidState.sortedKeys.length,
-        occupiedBodyWrites: rigidState.occupiedBodyWrites,
-        maxBodiesPerCell: rigidState.maxBodiesPerCell,
-        avgBodiesPerCell: rigidState.sortedKeys.length > 0
-          ? (rigidState.occupiedBodyWrites / rigidState.sortedKeys.length)
-          : 0,
-      },
-    };
+  let rigidRigid = {
+    pairs: [],
+    stats: {
+      bodyCount: rigidState.bodyCount,
+      bruteForcePairs: rigidState.bruteForcePairs,
+      checkedPairs: 0,
+      prunedPairs: rigidState.bruteForcePairs,
+      reductionPct: rigidState.bruteForcePairs > 0 ? 100 : 0,
+      cellSize,
+      occupiedCells: rigidState.sortedKeys.length,
+      occupiedBodyWrites: rigidState.occupiedBodyWrites,
+      maxBodiesPerCell: rigidState.maxBodiesPerCell,
+      avgBodiesPerCell: rigidState.sortedKeys.length > 0
+        ? (rigidState.occupiedBodyWrites / rigidState.sortedKeys.length)
+        : 0,
+      emitAttempts: 0,
+      duplicatesRejected: 0,
+      pairsOut: 0,
+      dedupeMs: 0,
+      sortMs: 0,
+      totalBuildMs: 0,
+      cellSpanSignature: rigidState.cellSpanSignature,
+      reuseHit: false,
+      reuseMiss: false,
+    },
+  };
+
+  if (includeRigidRigid) {
+    const canReuseRigidRigid = Boolean(
+      rigidRigidReuseCache
+      && rigidRigidReuseCache.lastBodyCount === rigidState.bodyCount
+      && Number(rigidRigidReuseCache.lastCellSize) === Number(cellSize)
+      && rigidCellSpansEqual(rigidRigidReuseCache.lastCellSpans, rigidState.cellSpans)
+      && Array.isArray(rigidRigidReuseCache.lastPairs)
+      && rigidRigidReuseCache.lastStats,
+    );
+
+    if (canReuseRigidRigid) {
+      const cachedStats = rigidRigidReuseCache.lastStats;
+      rigidRigid = {
+        pairs: rigidRigidReuseCache.lastPairs,
+        stats: {
+          ...cachedStats,
+          dedupeMs: 0,
+          sortMs: 0,
+          totalBuildMs: 0,
+          emitAttempts: 0,
+          duplicatesRejected: 0,
+          pairsOut: Number(cachedStats.checkedPairs) || 0,
+          cellSpanSignature: rigidState.cellSpanSignature,
+          reuseHit: true,
+          reuseMiss: false,
+        },
+      };
+    } else {
+      rigidRigid = deriveRigidRigidCandidatesFromState(rigidState);
+      if (rigidRigidReuseCache) {
+        rigidRigid.stats.reuseMiss = true;
+        rigidRigidReuseCache.lastBodyCount = rigidState.bodyCount;
+        rigidRigidReuseCache.lastCellSize = cellSize;
+        rigidRigidReuseCache.lastCellSpans = rigidState.cellSpans.slice();
+        rigidRigidReuseCache.lastPairs = rigidRigid.pairs;
+        rigidRigidReuseCache.lastStats = {
+          ...rigidRigid.stats,
+          reuseHit: false,
+          reuseMiss: false,
+        };
+      }
+    }
+  }
 
   let rigidSoft = {
     nodeCandidatesByRigid: new Array(rigidState.bodyCount).fill(null).map(() => []),

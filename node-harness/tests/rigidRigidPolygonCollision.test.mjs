@@ -281,6 +281,13 @@ test('rigid-rigid spatial hash broadphase prunes pair checks while keeping overl
   assert.ok(result.stats.checkedPairs < result.stats.bruteForcePairs, 'broadphase should prune candidates');
   assert.ok(result.stats.prunedPairs > 0, 'expected some pair pruning');
   assert.ok(pairSet.has('0,1'), 'known overlapping pair must survive broadphase');
+  assert.ok(Number(result.stats.emitAttempts) >= Number(result.stats.checkedPairs), 'emit attempts should cover output pairs');
+  assert.ok(Number(result.stats.duplicatesRejected) >= 0, 'duplicates should be non-negative');
+  assert.equal(Number(result.stats.pairsOut) || 0, Number(result.stats.checkedPairs) || 0, 'pairsOut should mirror checked pairs');
+  assert.ok(Number(result.stats.dedupeMs) >= 0, 'dedupe timing should be non-negative');
+  assert.ok(Number(result.stats.sortMs) >= 0, 'sort timing should be non-negative');
+  assert.ok(Number(result.stats.totalBuildMs) >= Number(result.stats.dedupeMs), 'total build timing should include dedupe stage');
+  assert.equal(result.stats.reuseHit, false, 'standalone broadphase should not report reuse hit by default');
 });
 
 test('rigid-rigid spatial hash broadphase candidate order is deterministic', () => {
@@ -328,6 +335,45 @@ test('phase scene cache reuses shared rigid broadphase state for rigid-rigid and
   assert.deepEqual(scene.rigidRigid.pairs, rr.pairs, 'scene cache rigid-rigid pairs should match standalone broadphase');
   assert.deepEqual(scene.rigidSoft.nodeCandidatesByRigid, rs.nodeCandidatesByRigid, 'scene cache rigid-soft node candidates should match standalone broadphase');
   assert.deepEqual(scene.rigidSoft.edgeCandidatesByRigid, rs.edgeCandidatesByRigid, 'scene cache rigid-soft edge candidates should match standalone broadphase');
+});
+
+test('phase scene cache reuses rigid-rigid candidates when rigid cell spans are unchanged', () => {
+  const rigids = [
+    makeBox(20, 20, 3),
+    makeBox(24.5, 20, 3),
+    makeBox(120, 120, 3),
+  ];
+  const reuseCache = {};
+
+  const first = buildCollisionPhaseSceneCache(rigids, [], [], {
+    cellSize: 12,
+    includeRigidRigid: true,
+    includeRigidSoft: false,
+    rigidRigidReuseCache: reuseCache,
+  });
+  const second = buildCollisionPhaseSceneCache(rigids, [], [], {
+    cellSize: 12,
+    includeRigidRigid: true,
+    includeRigidSoft: false,
+    rigidRigidReuseCache: reuseCache,
+  });
+
+  assert.equal(first.rigidRigid.stats.reuseHit, false, 'first call should build candidates');
+  assert.equal(second.rigidRigid.stats.reuseHit, true, 'second call should reuse candidates when spans are unchanged');
+  assert.equal(second.rigidRigid.stats.reuseMiss, false);
+  assert.equal(Number(second.rigidRigid.stats.dedupeMs) || 0, 0, 'reused call should not spend dedupe time');
+  assert.equal(Number(second.rigidRigid.stats.sortMs) || 0, 0, 'reused call should not spend sort time');
+  assert.deepEqual(first.rigidRigid.pairs, second.rigidRigid.pairs, 'reused pair list should match built list');
+
+  rigids[2].x += 30;
+  const third = buildCollisionPhaseSceneCache(rigids, [], [], {
+    cellSize: 12,
+    includeRigidRigid: true,
+    includeRigidSoft: false,
+    rigidRigidReuseCache: reuseCache,
+  });
+  assert.equal(third.rigidRigid.stats.reuseHit, false, 'changed cell spans should invalidate reuse');
+  assert.equal(third.rigidRigid.stats.reuseMiss, true);
 });
 
 test('rigid-rigid SAT prefilter rejects far proxy pairs before SAT dispatch', () => {

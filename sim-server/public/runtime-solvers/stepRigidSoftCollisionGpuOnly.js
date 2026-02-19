@@ -1349,6 +1349,17 @@ async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload,
   }
 
   return scheduleSerializedDispatch(state, 'pendingRigidSoftNodeBroadphaseDispatchPromise', async () => {
+    const timing = {
+      uploadMs: 0,
+      dispatchSubmitMs: 0,
+      countReadbackMs: 0,
+      indexReadbackMs: 0,
+      compactBuildMs: 0,
+      totalMs: 0,
+    };
+    const totalStartMs = performance.now();
+    state.lastNodeBroadphaseTiming = timing;
+
     const nodeX = new Float32Array(nodes.length);
     const nodeY = new Float32Array(nodes.length);
     const nodeR = new Float32Array(nodes.length);
@@ -1361,6 +1372,7 @@ async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload,
     const computedRigidAabb = rigidAabb || computeRigidBodyAabbs(rigidBodies);
 
     const paramsBytes = new Uint32Array([pairCount >>> 0, 0, 0, 0]);
+    const uploadStartMs = performance.now();
     device.queue.writeBuffer(state.rigidSoftNodeBroadphaseParams, 0, paramsBytes);
     device.queue.writeBuffer(state.rigidSoftNodeBroadphasePairRigidIndex, 0, layout.layout.nodePairRigidIndex);
     device.queue.writeBuffer(state.rigidSoftNodeBroadphasePairNodeIndex, 0, layout.layout.nodePairNodeIndex);
@@ -1372,8 +1384,10 @@ async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload,
     device.queue.writeBuffer(state.rigidSoftNodeBroadphaseMaxX, 0, computedRigidAabb.maxX);
     device.queue.writeBuffer(state.rigidSoftNodeBroadphaseMaxY, 0, computedRigidAabb.maxY);
     device.queue.writeBuffer(state.rigidSoftNodeBroadphaseActiveMaskOut, 0, new Uint32Array([0]));
+    timing.uploadMs += Math.max(0, performance.now() - uploadStartMs);
 
     const dispatchCount = Math.ceil(pairCount / WGSL_WORKGROUP_SIZE);
+    const dispatchSubmitStartMs = performance.now();
     const countEncoder = device.createCommandEncoder();
     const pass = countEncoder.beginComputePass();
     pass.setPipeline(pipeline);
@@ -1388,6 +1402,7 @@ async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload,
       4,
     );
     device.queue.submit([countEncoder.finish()]);
+    timing.dispatchSubmitMs += Math.max(0, performance.now() - dispatchSubmitStartMs);
 
     state.lastNodeBroadphaseDispatched = true;
     state.lastNodeBroadphaseReason = null;
@@ -1399,8 +1414,10 @@ async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload,
     safeUnmapBuffer(state.rigidSoftNodeBroadphaseActiveMaskReadback);
 
     try {
+      const countReadbackStartMs = performance.now();
       await state.rigidSoftNodeBroadphaseActiveMaskReadback.mapAsync(globalThis.GPUMapMode.READ, 0, 4);
       const mappedCount = state.rigidSoftNodeBroadphaseActiveMaskReadback.getMappedRange(0, 4);
+      timing.countReadbackMs += Math.max(0, performance.now() - countReadbackStartMs);
       const activeCountRaw = new Uint32Array(mappedCount.slice(0))[0] >>> 0;
       safeUnmapBuffer(state.rigidSoftNodeBroadphaseActiveMaskReadback);
 
@@ -1410,6 +1427,7 @@ async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload,
       state.lastNodeBroadphaseReadbackSourceRoute = 'wgsl-rigid-soft-node-broadphase-readback';
 
       if (activeCount === 0) {
+        timing.totalMs = Math.max(0, performance.now() - totalStartMs);
         return {
           candidatePairCount: pairCount,
           activePairCount: 0,
@@ -1424,6 +1442,7 @@ async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload,
       }
 
       const indexReadbackBytes = activeCount * 4;
+      const indexReadbackStartMs = performance.now();
       const indexEncoder = device.createCommandEncoder();
       indexEncoder.copyBufferToBuffer(
         state.rigidSoftNodeBroadphaseActiveMaskOut,
@@ -1439,12 +1458,19 @@ async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload,
       const mappedIndices = state.rigidSoftNodeBroadphaseActiveMaskReadback.getMappedRange(0, indexReadbackBytes);
       const activePairIndices = new Uint32Array(mappedIndices.slice(0));
       safeUnmapBuffer(state.rigidSoftNodeBroadphaseActiveMaskReadback);
+      timing.indexReadbackMs += Math.max(0, performance.now() - indexReadbackStartMs);
 
+      const compactStartMs = performance.now();
       const compactPairs = buildCompactRigidSoftNodePairsFromActiveIndices({
         prep: layout,
         activePairIndices,
       });
-      if (!compactPairs) return null;
+      timing.compactBuildMs += Math.max(0, performance.now() - compactStartMs);
+      if (!compactPairs) {
+        timing.totalMs = Math.max(0, performance.now() - totalStartMs);
+        return null;
+      }
+      timing.totalMs = Math.max(0, performance.now() - totalStartMs);
       return {
         candidatePairCount: pairCount,
         activePairCount: compactPairs.pairCount | 0,
@@ -1453,6 +1479,7 @@ async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload,
     } catch (err) {
       state.lastNodeBroadphaseReason = String(err?.message || err || 'readback-failed');
       state.lastNodeBroadphaseReadbackSourceRoute = 'cpu-rigid-soft-node-broadphase-readback-fallback';
+      timing.totalMs = Math.max(0, performance.now() - totalStartMs);
       return null;
     } finally {
       safeUnmapBuffer(state.rigidSoftNodeBroadphaseActiveMaskReadback);
@@ -1522,6 +1549,17 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
   }
 
   return scheduleSerializedDispatch(state, 'pendingRigidSoftEdgeBroadphaseDispatchPromise', async () => {
+    const timing = {
+      uploadMs: 0,
+      dispatchSubmitMs: 0,
+      countReadbackMs: 0,
+      indexReadbackMs: 0,
+      compactBuildMs: 0,
+      totalMs: 0,
+    };
+    const totalStartMs = performance.now();
+    state.lastEdgeBroadphaseTiming = timing;
+
     const nodeX = new Float32Array(nodes.length);
     const nodeY = new Float32Array(nodes.length);
     for (let i = 0; i < nodes.length; i++) {
@@ -1535,6 +1573,7 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
     const params = new Float32Array(4);
     new Uint32Array(params.buffer)[0] = pairCount >>> 0;
     params[3] = safeEdgeSlop;
+    const uploadStartMs = performance.now();
     device.queue.writeBuffer(state.rigidSoftEdgeBroadphaseParams, 0, params);
     device.queue.writeBuffer(state.rigidSoftEdgeBroadphasePairRigidIndex, 0, layout.layout.edgePairRigidIndex);
     device.queue.writeBuffer(state.rigidSoftEdgeBroadphasePairNodeAIndex, 0, layout.layout.edgePairNodeAIndex);
@@ -1546,8 +1585,10 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
     device.queue.writeBuffer(state.rigidSoftEdgeBroadphaseMaxX, 0, computedRigidAabb.maxX);
     device.queue.writeBuffer(state.rigidSoftEdgeBroadphaseMaxY, 0, computedRigidAabb.maxY);
     device.queue.writeBuffer(state.rigidSoftEdgeBroadphaseActiveMaskOut, 0, new Uint32Array([0]));
+    timing.uploadMs += Math.max(0, performance.now() - uploadStartMs);
 
     const dispatchCount = Math.ceil(pairCount / WGSL_WORKGROUP_SIZE);
+    const dispatchSubmitStartMs = performance.now();
     const countEncoder = device.createCommandEncoder();
     const pass = countEncoder.beginComputePass();
     pass.setPipeline(pipeline);
@@ -1562,6 +1603,7 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
       4,
     );
     device.queue.submit([countEncoder.finish()]);
+    timing.dispatchSubmitMs += Math.max(0, performance.now() - dispatchSubmitStartMs);
 
     state.lastEdgeBroadphaseDispatched = true;
     state.lastEdgeBroadphaseReason = null;
@@ -1573,8 +1615,10 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
     safeUnmapBuffer(state.rigidSoftEdgeBroadphaseActiveMaskReadback);
 
     try {
+      const countReadbackStartMs = performance.now();
       await state.rigidSoftEdgeBroadphaseActiveMaskReadback.mapAsync(globalThis.GPUMapMode.READ, 0, 4);
       const mappedCount = state.rigidSoftEdgeBroadphaseActiveMaskReadback.getMappedRange(0, 4);
+      timing.countReadbackMs += Math.max(0, performance.now() - countReadbackStartMs);
       const activeCountRaw = new Uint32Array(mappedCount.slice(0))[0] >>> 0;
       safeUnmapBuffer(state.rigidSoftEdgeBroadphaseActiveMaskReadback);
 
@@ -1584,6 +1628,7 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
       state.lastEdgeBroadphaseReadbackSourceRoute = 'wgsl-rigid-soft-edge-broadphase-readback';
 
       if (activeCount === 0) {
+        timing.totalMs = Math.max(0, performance.now() - totalStartMs);
         return {
           candidatePairCount: pairCount,
           activePairCount: 0,
@@ -1600,6 +1645,7 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
       }
 
       const indexReadbackBytes = activeCount * 4;
+      const indexReadbackStartMs = performance.now();
       const indexEncoder = device.createCommandEncoder();
       indexEncoder.copyBufferToBuffer(
         state.rigidSoftEdgeBroadphaseActiveMaskOut,
@@ -1615,12 +1661,19 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
       const mappedIndices = state.rigidSoftEdgeBroadphaseActiveMaskReadback.getMappedRange(0, indexReadbackBytes);
       const activePairIndices = new Uint32Array(mappedIndices.slice(0));
       safeUnmapBuffer(state.rigidSoftEdgeBroadphaseActiveMaskReadback);
+      timing.indexReadbackMs += Math.max(0, performance.now() - indexReadbackStartMs);
 
+      const compactStartMs = performance.now();
       const compactPairs = buildCompactRigidSoftEdgePairsFromActiveIndices({
         prep: layout,
         activePairIndices,
       });
-      if (!compactPairs) return null;
+      timing.compactBuildMs += Math.max(0, performance.now() - compactStartMs);
+      if (!compactPairs) {
+        timing.totalMs = Math.max(0, performance.now() - totalStartMs);
+        return null;
+      }
+      timing.totalMs = Math.max(0, performance.now() - totalStartMs);
       return {
         candidatePairCount: pairCount,
         activePairCount: compactPairs.pairCount | 0,
@@ -1629,6 +1682,7 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
     } catch (err) {
       state.lastEdgeBroadphaseReason = String(err?.message || err || 'readback-failed');
       state.lastEdgeBroadphaseReadbackSourceRoute = 'cpu-rigid-soft-edge-broadphase-readback-fallback';
+      timing.totalMs = Math.max(0, performance.now() - totalStartMs);
       return null;
     } finally {
       safeUnmapBuffer(state.rigidSoftEdgeBroadphaseActiveMaskReadback);
@@ -1645,6 +1699,16 @@ async function dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
   if (pairCount <= 0 || nodes.length <= 0 || rigidCount <= 0) return false;
   const state = offload.state || (offload.state = {});
   const device = offload.device;
+  const timing = {
+    inputBuildMs: 0,
+    uploadMs: 0,
+    dispatchSubmitMs: 0,
+    readbackMapMs: 0,
+    decodeMs: 0,
+    totalMs: 0,
+  };
+  const totalStartMs = performance.now();
+  state.lastNodeNarrowphaseAabbProbeTiming = timing;
 
   if (!state.rigidSoftNodeNarrowphaseAabbProbePipelinePromise) {
     const module = device.createShaderModule({ code: rigidSoftNodeNarrowphaseAabbProbeWgsl });
@@ -1665,11 +1729,16 @@ async function dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
       state.lastNodeNarrowphaseAabbProbeSource = `cpu-rigid-soft-node-aabb-probe-pipeline-error:${String(err?.message || err || 'unknown')}`;
       state.lastError = state.lastNodeNarrowphaseAabbProbeSource;
       state.rigidSoftNodeNarrowphaseAabbProbePipelinePromise = null;
+      timing.totalMs = Math.max(0, performance.now() - totalStartMs);
       return false;
     }
   }
-  if (!pipeline) return false;
+  if (!pipeline) {
+    timing.totalMs = Math.max(0, performance.now() - totalStartMs);
+    return false;
+  }
 
+  const inputBuildStartMs = performance.now();
   const nodeX = new Float32Array(nodes.length);
   const nodeY = new Float32Array(nodes.length);
   const nodeR = new Float32Array(nodes.length);
@@ -1680,6 +1749,7 @@ async function dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
     nodeR[i] = Math.max(0, Number(n.r) || 0);
   }
   const computedRigidAabb = rigidAabb || computeRigidBodyAabbs(rigidBodies);
+  timing.inputBuildMs += Math.max(0, performance.now() - inputBuildStartMs);
   const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
   const pairBytes = pairCount * 4;
   const pairVec2Bytes = pairCount * 8;
@@ -1716,6 +1786,7 @@ async function dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
 
   const paramBytes = new ArrayBuffer(16);
   new Uint32Array(paramBytes)[0] = pairCount >>> 0;
+  const uploadStartMs = performance.now();
   device.queue.writeBuffer(params, 0, paramBytes);
   device.queue.writeBuffer(pairRigidIndex, 0, nodePairs.compactRigidIndex);
   device.queue.writeBuffer(pairNodeIndex, 0, nodePairs.compactNodeIndex);
@@ -1726,7 +1797,9 @@ async function dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
   device.queue.writeBuffer(minYBuf, 0, computedRigidAabb.minY);
   device.queue.writeBuffer(maxXBuf, 0, computedRigidAabb.maxX);
   device.queue.writeBuffer(maxYBuf, 0, computedRigidAabb.maxY);
+  timing.uploadMs += Math.max(0, performance.now() - uploadStartMs);
 
+  const dispatchSubmitStartMs = performance.now();
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   pass.setPipeline(pipeline);
@@ -1735,11 +1808,15 @@ async function dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
   pass.end();
   encoder.copyBufferToBuffer(outBuf, 0, readback, 0, pairVec2Bytes);
   device.queue.submit([encoder.finish()]);
+  timing.dispatchSubmitMs += Math.max(0, performance.now() - dispatchSubmitStartMs);
 
+  const readbackStartMs = performance.now();
   await readback.mapAsync(globalThis.GPUMapMode.READ, 0, pairVec2Bytes);
   const packed = new Float32Array(readback.getMappedRange(0, pairVec2Bytes).slice(0));
+  timing.readbackMapMs += Math.max(0, performance.now() - readbackStartMs);
   readback.unmap();
 
+  const decodeStartMs = performance.now();
   const separation = new Float32Array(pairCount);
   const insideMask = new Uint32Array(pairCount);
   let finite = true;
@@ -1758,6 +1835,8 @@ async function dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
   state.lastNodeNarrowphaseAabbProbeSource = finite
     ? 'wgsl-rigid-soft-node-aabb-probe'
     : 'cpu-rigid-soft-node-aabb-probe-fallback-nonfinite';
+  timing.decodeMs += Math.max(0, performance.now() - decodeStartMs);
+  timing.totalMs = Math.max(0, performance.now() - totalStartMs);
 
   [params, pairRigidIndex, pairNodeIndex, nodeXBuf, nodeYBuf, nodeRBuf, minXBuf, minYBuf, maxXBuf, maxYBuf, outBuf, readback].forEach((b) => b?.destroy?.());
   return finite;
@@ -1771,6 +1850,16 @@ async function dispatchRigidSoftEdgeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
   if (pairCount <= 0 || nodes.length <= 0 || rigidCount <= 0) return false;
   const state = offload.state || (offload.state = {});
   const device = offload.device;
+  const timing = {
+    inputBuildMs: 0,
+    uploadMs: 0,
+    dispatchSubmitMs: 0,
+    readbackMapMs: 0,
+    decodeMs: 0,
+    totalMs: 0,
+  };
+  const totalStartMs = performance.now();
+  state.lastEdgeNarrowphaseAabbProbeTiming = timing;
 
   if (!state.rigidSoftEdgeNarrowphaseAabbProbePipelinePromise) {
     const module = device.createShaderModule({ code: rigidSoftEdgeNarrowphaseAabbProbeWgsl });
@@ -1791,11 +1880,16 @@ async function dispatchRigidSoftEdgeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
       state.lastEdgeNarrowphaseAabbProbeSource = `cpu-rigid-soft-edge-aabb-probe-pipeline-error:${String(err?.message || err || 'unknown')}`;
       state.lastError = state.lastEdgeNarrowphaseAabbProbeSource;
       state.rigidSoftEdgeNarrowphaseAabbProbePipelinePromise = null;
+      timing.totalMs = Math.max(0, performance.now() - totalStartMs);
       return false;
     }
   }
-  if (!pipeline) return false;
+  if (!pipeline) {
+    timing.totalMs = Math.max(0, performance.now() - totalStartMs);
+    return false;
+  }
 
+  const inputBuildStartMs = performance.now();
   const nodeX = new Float32Array(nodes.length);
   const nodeY = new Float32Array(nodes.length);
   for (let i = 0; i < nodes.length; i++) {
@@ -1805,6 +1899,7 @@ async function dispatchRigidSoftEdgeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
   }
 
   const computedRigidAabb = rigidAabb || computeRigidBodyAabbs(rigidBodies);
+  timing.inputBuildMs += Math.max(0, performance.now() - inputBuildStartMs);
   const storageUsage = globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_DST;
   const pairBytes = pairCount * 4;
   const pairVec2Bytes = pairCount * 8;
@@ -1842,6 +1937,7 @@ async function dispatchRigidSoftEdgeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
   const paramFloats = new Float32Array(4);
   new Uint32Array(paramFloats.buffer)[0] = pairCount >>> 0;
   paramFloats[1] = Number.isFinite(Number(edgeSlop)) ? Math.max(0, Number(edgeSlop)) : 0;
+  const uploadStartMs = performance.now();
   device.queue.writeBuffer(params, 0, paramFloats);
   device.queue.writeBuffer(pairRigidIndex, 0, edgePairs.compactRigidIndex);
   device.queue.writeBuffer(pairNodeAIndex, 0, edgePairs.compactNodeAIndex);
@@ -1852,7 +1948,9 @@ async function dispatchRigidSoftEdgeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
   device.queue.writeBuffer(minYBuf, 0, computedRigidAabb.minY);
   device.queue.writeBuffer(maxXBuf, 0, computedRigidAabb.maxX);
   device.queue.writeBuffer(maxYBuf, 0, computedRigidAabb.maxY);
+  timing.uploadMs += Math.max(0, performance.now() - uploadStartMs);
 
+  const dispatchSubmitStartMs = performance.now();
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   pass.setPipeline(pipeline);
@@ -1861,11 +1959,15 @@ async function dispatchRigidSoftEdgeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
   pass.end();
   encoder.copyBufferToBuffer(outBuf, 0, readback, 0, pairVec2Bytes);
   device.queue.submit([encoder.finish()]);
+  timing.dispatchSubmitMs += Math.max(0, performance.now() - dispatchSubmitStartMs);
 
+  const readbackStartMs = performance.now();
   await readback.mapAsync(globalThis.GPUMapMode.READ, 0, pairVec2Bytes);
   const packed = new Float32Array(readback.getMappedRange(0, pairVec2Bytes).slice(0));
+  timing.readbackMapMs += Math.max(0, performance.now() - readbackStartMs);
   readback.unmap();
 
+  const decodeStartMs = performance.now();
   const separation = new Float32Array(pairCount);
   const insideMask = new Uint32Array(pairCount);
   let finite = true;
@@ -1884,6 +1986,8 @@ async function dispatchRigidSoftEdgeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
   state.lastEdgeNarrowphaseAabbProbeSource = finite
     ? 'wgsl-rigid-soft-edge-aabb-probe'
     : 'cpu-rigid-soft-edge-aabb-probe-fallback-nonfinite';
+  timing.decodeMs += Math.max(0, performance.now() - decodeStartMs);
+  timing.totalMs = Math.max(0, performance.now() - totalStartMs);
 
   [params, pairRigidIndex, pairNodeAIndex, pairNodeBIndex, nodeXBuf, nodeYBuf, minXBuf, minYBuf, maxXBuf, maxYBuf, outBuf, readback].forEach((b) => b?.destroy?.());
   return finite;
@@ -2262,7 +2366,23 @@ async function dispatchRigidSoftResponseWgsl({
   const device = offload.device;
   const nodePairCount = Number(impulseSeed?.nodePairCount) || 0;
   const edgePairCount = Number(impulseSeed?.edgePairCount) || 0;
-  if (nodePairCount <= 0 && edgePairCount <= 0) return null;
+  const timing = {
+    nodeBuildMs: 0,
+    nodeDispatchSubmitMs: 0,
+    nodeReadbackMs: 0,
+    nodeDecodeMs: 0,
+    edgeBuildMs: 0,
+    edgeDispatchSubmitMs: 0,
+    edgeReadbackMs: 0,
+    edgeDecodeMs: 0,
+    totalMs: 0,
+  };
+  const totalStartMs = performance.now();
+  state.lastRigidSoftResponseTiming = timing;
+  if (nodePairCount <= 0 && edgePairCount <= 0) {
+    timing.totalMs = Math.max(0, performance.now() - totalStartMs);
+    return null;
+  }
 
   const mkReadF32 = async (buf, bytes) => {
     safeUnmapBuffer(buf);
@@ -2318,6 +2438,7 @@ async function dispatchRigidSoftResponseWgsl({
     const proposal = { nodePairCount, edgePairCount };
 
     if (nodePairCount > 0) {
+      const nodeBuildStartMs = performance.now();
       const params = keep(device.createBuffer({ size: 16, usage: globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST }));
       const paramFloats = new Float32Array(4);
       new Uint32Array(paramFloats.buffer)[0] = nodePairCount >>> 0;
@@ -2408,7 +2529,9 @@ async function dispatchRigidSoftResponseWgsl({
         entries: [...inBuffers, outs.nodeDelta.gpu, outs.rigidDeltaA.gpu, outs.rigidDeltaB.gpu]
           .map((buffer, binding) => ({ binding, resource: { buffer } })),
       });
+      timing.nodeBuildMs += Math.max(0, performance.now() - nodeBuildStartMs);
 
+      const nodeDispatchSubmitStartMs = performance.now();
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginComputePass();
       pass.setPipeline(nodePipeline);
@@ -2417,11 +2540,15 @@ async function dispatchRigidSoftResponseWgsl({
       pass.end();
       Object.values(outs).forEach((o) => encoder.copyBufferToBuffer(o.gpu, 0, o.read, 0, o.bytes));
       device.queue.submit([encoder.finish()]);
+      timing.nodeDispatchSubmitMs += Math.max(0, performance.now() - nodeDispatchSubmitStartMs);
 
+      const nodeReadbackStartMs = performance.now();
       const nodeDelta = await mkReadF32(outs.nodeDelta.read, outs.nodeDelta.bytes);
       const rigidDeltaA = await mkReadF32(outs.rigidDeltaA.read, outs.rigidDeltaA.bytes);
       const rigidDeltaB = await mkReadF32(outs.rigidDeltaB.read, outs.rigidDeltaB.bytes);
+      timing.nodeReadbackMs += Math.max(0, performance.now() - nodeReadbackStartMs);
 
+      const nodeDecodeStartMs = performance.now();
       proposal.nodeDx = new Float32Array(nodePairCount);
       proposal.nodeDy = new Float32Array(nodePairCount);
       proposal.nodeDVx = new Float32Array(nodePairCount);
@@ -2447,9 +2574,11 @@ async function dispatchRigidSoftResponseWgsl({
         proposal.nodeRigidDOmega[i] = rigidDeltaB[b2] || 0;
         proposal.nodeContactMask[i] = (rigidDeltaB[b2 + 1] || 0) > 0.5 ? 1 : 0;
       }
+      timing.nodeDecodeMs += Math.max(0, performance.now() - nodeDecodeStartMs);
     }
 
     if (edgePairCount > 0) {
+      const edgeBuildStartMs = performance.now();
       const params = keep(device.createBuffer({ size: 16, usage: globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST }));
       const paramFloats = new Float32Array(4);
       new Uint32Array(paramFloats.buffer)[0] = edgePairCount >>> 0;
@@ -2502,6 +2631,8 @@ async function dispatchRigidSoftResponseWgsl({
         entries: [...inBuffers, outs.rigidDeltaA.gpu, outs.rigidDeltaB.gpu]
           .map((buffer, binding) => ({ binding, resource: { buffer } })),
       });
+      timing.edgeBuildMs += Math.max(0, performance.now() - edgeBuildStartMs);
+      const edgeDispatchSubmitStartMs = performance.now();
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginComputePass();
       pass.setPipeline(edgePipeline);
@@ -2510,10 +2641,14 @@ async function dispatchRigidSoftResponseWgsl({
       pass.end();
       Object.values(outs).forEach((o) => encoder.copyBufferToBuffer(o.gpu, 0, o.read, 0, o.bytes));
       device.queue.submit([encoder.finish()]);
+      timing.edgeDispatchSubmitMs += Math.max(0, performance.now() - edgeDispatchSubmitStartMs);
 
+      const edgeReadbackStartMs = performance.now();
       const rigidDeltaA = await mkReadF32(outs.rigidDeltaA.read, outs.rigidDeltaA.bytes);
       const rigidDeltaB = await mkReadF32(outs.rigidDeltaB.read, outs.rigidDeltaB.bytes);
+      timing.edgeReadbackMs += Math.max(0, performance.now() - edgeReadbackStartMs);
 
+      const edgeDecodeStartMs = performance.now();
       proposal.edgeRigidDx = new Float32Array(edgePairCount);
       proposal.edgeRigidDy = new Float32Array(edgePairCount);
       proposal.edgeRigidDVx = new Float32Array(edgePairCount);
@@ -2529,10 +2664,13 @@ async function dispatchRigidSoftResponseWgsl({
         proposal.edgeRigidDVy[i] = rigidDeltaA[b4 + 3] || 0;
         proposal.edgeContactMask[i] = (rigidDeltaB[b2 + 1] || 0) > 0.5 ? 1 : 0;
       }
+      timing.edgeDecodeMs += Math.max(0, performance.now() - edgeDecodeStartMs);
     }
 
+    timing.totalMs = Math.max(0, performance.now() - totalStartMs);
     return proposal;
   } finally {
+    if (!(Number(timing.totalMs) > 0)) timing.totalMs = Math.max(0, performance.now() - totalStartMs);
     resources.forEach((b) => b?.destroy?.());
   }
 }
@@ -2939,7 +3077,18 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         layout: wgslPrep,
         rigidAabb,
       });
-      if (profile) addRigidSoftProfileMs(profile, 'nodeBroadphaseDispatchReadbackMs', performance.now() - nodeBroadphaseStartMs);
+      if (profile) {
+        addRigidSoftProfileMs(profile, 'nodeBroadphaseDispatchReadbackMs', performance.now() - nodeBroadphaseStartMs);
+        const t = wgslOffload?.state?.lastNodeBroadphaseTiming;
+        if (t && typeof t === 'object') {
+          addRigidSoftProfileMs(profile, 'nodeBroadphaseUploadMs', t.uploadMs);
+          addRigidSoftProfileMs(profile, 'nodeBroadphaseDispatchSubmitMs', t.dispatchSubmitMs);
+          addRigidSoftProfileMs(profile, 'nodeBroadphaseCountReadbackMs', t.countReadbackMs);
+          addRigidSoftProfileMs(profile, 'nodeBroadphaseIndexReadbackMs', t.indexReadbackMs);
+          addRigidSoftProfileMs(profile, 'nodeBroadphaseCompactBuildMs', t.compactBuildMs);
+          addRigidSoftProfileMs(profile, 'nodeBroadphaseDetailedTotalMs', t.totalMs);
+        }
+      }
       if (wgslNodeBroadphase?.compactPairs) {
         wgslOffload.state.lastSourceRoute = 'wgsl-rigid-soft-node-broadphase-authoritative-filter';
         wgslOffload.state.lastMode = 'wgsl-broadphase-authoritative-filter';
@@ -2975,7 +3124,18 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         nodePairs: compactNodePairs,
         rigidAabb,
       });
-      if (profile) addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeDispatchReadbackMs', performance.now() - nodeProbeStartMs);
+      if (profile) {
+        addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeDispatchReadbackMs', performance.now() - nodeProbeStartMs);
+        const t = wgslOffload?.state?.lastNodeNarrowphaseAabbProbeTiming;
+        if (t && typeof t === 'object') {
+          addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeInputBuildMs', t.inputBuildMs);
+          addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeUploadMs', t.uploadMs);
+          addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeDispatchSubmitMs', t.dispatchSubmitMs);
+          addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeReadbackMapMs', t.readbackMapMs);
+          addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeDecodeMs', t.decodeMs);
+          addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeDetailedTotalMs', t.totalMs);
+        }
+      }
 
       const nodeProbeFilterStartMs = profile ? performance.now() : 0;
       const nodeProbeFilteredPairs = nodeProbeFinite
@@ -3044,7 +3204,18 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         edgeSlop,
         rigidAabb,
       });
-      if (profile) addRigidSoftProfileMs(profile, 'edgeBroadphaseDispatchReadbackMs', performance.now() - edgeBroadphaseStartMs);
+      if (profile) {
+        addRigidSoftProfileMs(profile, 'edgeBroadphaseDispatchReadbackMs', performance.now() - edgeBroadphaseStartMs);
+        const t = wgslOffload?.state?.lastEdgeBroadphaseTiming;
+        if (t && typeof t === 'object') {
+          addRigidSoftProfileMs(profile, 'edgeBroadphaseUploadMs', t.uploadMs);
+          addRigidSoftProfileMs(profile, 'edgeBroadphaseDispatchSubmitMs', t.dispatchSubmitMs);
+          addRigidSoftProfileMs(profile, 'edgeBroadphaseCountReadbackMs', t.countReadbackMs);
+          addRigidSoftProfileMs(profile, 'edgeBroadphaseIndexReadbackMs', t.indexReadbackMs);
+          addRigidSoftProfileMs(profile, 'edgeBroadphaseCompactBuildMs', t.compactBuildMs);
+          addRigidSoftProfileMs(profile, 'edgeBroadphaseDetailedTotalMs', t.totalMs);
+        }
+      }
       if (wgslEdgeBroadphase?.compactPairs) {
         wgslOffload.state.lastEdgeBroadphaseAuthoritativeSource = 'wgsl-rigid-soft-edge-broadphase-authoritative-filter';
         wgslOffload.state.lastEdgeBroadphaseReadbackCount = Number(wgslEdgeBroadphase.activePairCount) || 0;
@@ -3080,7 +3251,18 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         edgeSlop,
         rigidAabb,
       });
-      if (profile) addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeDispatchReadbackMs', performance.now() - edgeProbeStartMs);
+      if (profile) {
+        addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeDispatchReadbackMs', performance.now() - edgeProbeStartMs);
+        const t = wgslOffload?.state?.lastEdgeNarrowphaseAabbProbeTiming;
+        if (t && typeof t === 'object') {
+          addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeInputBuildMs', t.inputBuildMs);
+          addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeUploadMs', t.uploadMs);
+          addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeDispatchSubmitMs', t.dispatchSubmitMs);
+          addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeReadbackMapMs', t.readbackMapMs);
+          addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeDecodeMs', t.decodeMs);
+          addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeDetailedTotalMs', t.totalMs);
+        }
+      }
     } else if (compactEdgePairs) {
       wgslOffload.state.lastEdgeNarrowphaseAabbProbeSource = 'wgsl-rigid-soft-edge-broadphase-zero-active';
     }
@@ -3269,7 +3451,21 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
         impulseSeed,
         edgeSlop,
       });
-      if (profile) addRigidSoftProfileMs(profile, 'responseDispatchReadbackMs', performance.now() - responseDispatchStartMs);
+      if (profile) {
+        addRigidSoftProfileMs(profile, 'responseDispatchReadbackMs', performance.now() - responseDispatchStartMs);
+        const t = wgslOffload?.state?.lastRigidSoftResponseTiming;
+        if (t && typeof t === 'object') {
+          addRigidSoftProfileMs(profile, 'responseNodeBuildMs', t.nodeBuildMs);
+          addRigidSoftProfileMs(profile, 'responseNodeDispatchSubmitMs', t.nodeDispatchSubmitMs);
+          addRigidSoftProfileMs(profile, 'responseNodeReadbackMs', t.nodeReadbackMs);
+          addRigidSoftProfileMs(profile, 'responseNodeDecodeMs', t.nodeDecodeMs);
+          addRigidSoftProfileMs(profile, 'responseEdgeBuildMs', t.edgeBuildMs);
+          addRigidSoftProfileMs(profile, 'responseEdgeDispatchSubmitMs', t.edgeDispatchSubmitMs);
+          addRigidSoftProfileMs(profile, 'responseEdgeReadbackMs', t.edgeReadbackMs);
+          addRigidSoftProfileMs(profile, 'responseEdgeDecodeMs', t.edgeDecodeMs);
+          addRigidSoftProfileMs(profile, 'responseDetailedTotalMs', t.totalMs);
+        }
+      }
       const validationStartMs = profile ? performance.now() : 0;
       const validationOut = { reason: null };
       if (canApplyRigidSoftAuthoritativeProposal({ proposal, impulseSeed, signature, out: validationOut })) {

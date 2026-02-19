@@ -307,6 +307,19 @@ function readPassEdgeFlowPushToggleFromUrl() {
   return v === '1' || v === 'true' || v === 'yes' || v === 'on';
 }
 
+function normalizeFastReadbackInterval(raw) {
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n)) return FAST_MODE_FULL_READBACK_INTERVAL;
+  return Math.max(1, Math.min(240, n));
+}
+
+function readFastReadbackIntervalFromUrl() {
+  if (typeof window === 'undefined') return FAST_MODE_FULL_READBACK_INTERVAL;
+  const raw = new URLSearchParams(window.location.search || '').get('fastReadbackInterval');
+  if (raw == null || raw === '') return FAST_MODE_FULL_READBACK_INTERVAL;
+  return normalizeFastReadbackInterval(raw);
+}
+
 function readControls() {
   return {
     n: Math.max(32, Number(gridEl.value) || 256),
@@ -344,6 +357,7 @@ function readControls() {
     enableMembraneShapeMemory: (enableMembraneShapeMemoryEl?.checked !== false),
     enableMembranePressure: (enableMembranePressureEl?.checked !== false),
     allowPassEdgeFlowPush: readPassEdgeFlowPushToggleFromUrl(),
+    fastReadbackInterval: readFastReadbackIntervalFromUrl(),
     runtimeSolverPath: getRuntimeSolverPath(),
     runtimePipelineMode: getRuntimePipelineMode(),
   };
@@ -5659,6 +5673,9 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
   sim.disableDefaultInject = true;
   sim.controls.runtimeSolverPath = selectedSolverPath;
   sim.controls.runtimePipelineMode = selectedPipelineMode;
+  sim.controls.fastReadbackInterval = normalizeFastReadbackInterval(
+    options?.fastReadbackInterval ?? sim.controls.fastReadbackInterval,
+  );
   if (typeof options?.allowPassEdgeFlowPush === 'boolean') {
     sim.controls.allowPassEdgeFlowPush = options.allowPassEdgeFlowPush;
   }
@@ -6326,7 +6343,9 @@ async function stepAndRender() {
       && s.fastShadowFields.vy,
   );
 
-  const fastReadbackInterval = Math.max(1, Number(s?.fastReadbackPolicy?.intervalFrames) || FAST_MODE_FULL_READBACK_INTERVAL);
+  const fastReadbackInterval = normalizeFastReadbackInterval(
+    s?.controls?.fastReadbackInterval ?? s?.fastReadbackPolicy?.intervalFrames ?? FAST_MODE_FULL_READBACK_INTERVAL,
+  );
   const cadenceDue = fastMode ? (((Number(s.frame) || 0) % fastReadbackInterval) === 0) : true;
 
   if (!fastMode) {
@@ -6505,6 +6524,7 @@ async function stepAndRender() {
         frames: s.frame,
         fps: fpsNow,
         fastGpuResidentMode: fastMode,
+        fastGpuResidentIntervalFrames: fastReadbackInterval,
         fastGpuResidentSkippedFrames: Number(s?.fastReadbackPolicy?.skippedFramesSinceFull) || 0,
         fastGpuResidentLastDecision: s?.fastReadbackPolicy?.lastDecision || null,
         fastGpuResidentLastReason: s?.fastReadbackPolicy?.lastReason || null,
@@ -6842,6 +6862,7 @@ window.__gpuLabApi = {
       fastReadbackRuntime: {
         enabled: !!sim?.fastReadbackPolicy?.enabled,
         intervalFrames: Number(sim?.fastReadbackPolicy?.intervalFrames) || FAST_MODE_FULL_READBACK_INTERVAL,
+        configuredIntervalFrames: normalizeFastReadbackInterval(sim?.controls?.fastReadbackInterval),
         skippedFramesSinceFull: Number(sim?.fastReadbackPolicy?.skippedFramesSinceFull) || 0,
         lastFullReadbackFrame: Number(sim?.fastReadbackPolicy?.lastFullReadbackFrame ?? -1),
         lastDecision: sim?.fastReadbackPolicy?.lastDecision || null,

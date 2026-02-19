@@ -2473,12 +2473,57 @@ function resolveSoftNodeVsSoftEdgeCollision(node, a, b, restitution = 0.12) {
   return true;
 }
 
+function buildRigidCollisionPolyMeta(polys) {
+  if (!Array.isArray(polys)) return [];
+  return polys.map((poly) => {
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    let sx = 0;
+    let sy = 0;
+    let count = 0;
+
+    for (const p of poly || []) {
+      const x = Number(p?.x);
+      const y = Number(p?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      sx += x;
+      sy += y;
+      count += 1;
+    }
+
+    if (count <= 0) {
+      return { minX: 0, maxX: 0, minY: 0, maxY: 0, cx: 0, cy: 0, radius: 0 };
+    }
+
+    const cx = sx / count;
+    const cy = sy / count;
+    let radius = 0;
+    for (const p of poly || []) {
+      const x = Number(p?.x);
+      const y = Number(p?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const d = Math.hypot(x - cx, y - cy);
+      if (d > radius) radius = d;
+    }
+
+    return { minX, maxX, minY, maxY, cx, cy, radius };
+  });
+}
+
 function createRigidWorldPolyPhaseCache(rigidBodies, stats = null) {
   const cache = new Array(Array.isArray(rigidBodies) ? rigidBodies.length : 0);
   return (index) => {
-    if (!Array.isArray(rigidBodies) || index < 0 || index >= rigidBodies.length) return [];
+    if (!Array.isArray(rigidBodies) || index < 0 || index >= rigidBodies.length) {
+      return { polys: [], meta: [] };
+    }
     const rb = rigidBodies[index];
-    if (!rb) return [];
+    if (!rb) return { polys: [], meta: [] };
     if (stats) stats.polyCacheLookups = (Number(stats.polyCacheLookups) || 0) + 1;
 
     const x = Number(rb.x) || 0;
@@ -2488,7 +2533,7 @@ function createRigidWorldPolyPhaseCache(rigidBodies, stats = null) {
     const prev = cache[index];
     if (prev && prev.rb === rb && prev.x === x && prev.y === y && prev.theta === theta) {
       if (stats) stats.polyCacheHits = (Number(stats.polyCacheHits) || 0) + 1;
-      return prev.polys;
+      return prev;
     }
 
     if (stats) {
@@ -2496,8 +2541,10 @@ function createRigidWorldPolyPhaseCache(rigidBodies, stats = null) {
       stats.polyCacheRebuilds = (Number(stats.polyCacheRebuilds) || 0) + 1;
     }
     const polys = getRigidCollisionPolysWorld(rb);
-    cache[index] = { rb, x, y, theta, polys };
-    return polys;
+    const meta = buildRigidCollisionPolyMeta(polys);
+    const next = { rb, x, y, theta, polys, meta };
+    cache[index] = next;
+    return next;
   };
 }
 
@@ -4931,6 +4978,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     },
     rigidRigidPairChecks: 0,
     rigidRigidPairHits: 0,
+    rigidRigidProxyPairChecks: 0,
+    rigidRigidAabbRejected: 0,
+    rigidRigidRadiusRejected: 0,
+    rigidRigidSatCalls: 0,
+    rigidRigidSatHits: 0,
     rigidSoftNodeRawChecks: 0,
     rigidSoftNodeChecks: 0,
     rigidSoftNodeCandidateChecks: 0,
@@ -5023,6 +5075,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       const getPreRigidWorldPolys = createRigidWorldPolyPhaseCache(bodies.rigid, collisionCpuRuntime);
       for (const [i, j] of preBroadphase.pairs) {
         collisionCpuRuntime.rigidRigidPairChecks += 1;
+        const cacheA = getPreRigidWorldPolys(i);
+        const cacheB = getPreRigidWorldPolys(j);
         const hit = resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
           contacts: rigidContactDebug,
           aIndex: i,
@@ -5030,8 +5084,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           iter,
           phase: 'pre-soft',
         }, {
-          polysA: getPreRigidWorldPolys(i),
-          polysB: getPreRigidWorldPolys(j),
+          polysA: cacheA.polys,
+          polysB: cacheB.polys,
+          metaA: cacheA.meta,
+          metaB: cacheB.meta,
+          stats: collisionCpuRuntime,
         });
         if (hit) collisionCpuRuntime.rigidRigidPairHits += 1;
       }
@@ -5142,6 +5199,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       const getPostRigidWorldPolys = createRigidWorldPolyPhaseCache(bodies.rigid, collisionCpuRuntime);
       for (const [i, j] of postBroadphase.pairs) {
         collisionCpuRuntime.rigidRigidPairChecks += 1;
+        const cacheA = getPostRigidWorldPolys(i);
+        const cacheB = getPostRigidWorldPolys(j);
         const hit = resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
           contacts: rigidContactDebug,
           aIndex: i,
@@ -5149,8 +5208,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           iter,
           phase: 'post-soft',
         }, {
-          polysA: getPostRigidWorldPolys(i),
-          polysB: getPostRigidWorldPolys(j),
+          polysA: cacheA.polys,
+          polysB: cacheB.polys,
+          metaA: cacheA.meta,
+          metaB: cacheB.meta,
+          stats: collisionCpuRuntime,
         });
         if (hit) collisionCpuRuntime.rigidRigidPairHits += 1;
       }
@@ -5172,6 +5234,15 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
 
   collisionCpuRuntime.rigidRigidPairHitRatePct = collisionCpuRuntime.rigidRigidPairChecks > 0
     ? (collisionCpuRuntime.rigidRigidPairHits / collisionCpuRuntime.rigidRigidPairChecks) * 100
+    : 0;
+  collisionCpuRuntime.rigidRigidPrefilterRejected =
+    (Number(collisionCpuRuntime.rigidRigidAabbRejected) || 0)
+    + (Number(collisionCpuRuntime.rigidRigidRadiusRejected) || 0);
+  collisionCpuRuntime.rigidRigidSatCallRatePct = collisionCpuRuntime.rigidRigidProxyPairChecks > 0
+    ? (collisionCpuRuntime.rigidRigidSatCalls / collisionCpuRuntime.rigidRigidProxyPairChecks) * 100
+    : 0;
+  collisionCpuRuntime.rigidRigidSatHitRatePct = collisionCpuRuntime.rigidRigidSatCalls > 0
+    ? (collisionCpuRuntime.rigidRigidSatHits / collisionCpuRuntime.rigidRigidSatCalls) * 100
     : 0;
   collisionCpuRuntime.rigidSoftNodeHitRatePct = collisionCpuRuntime.rigidSoftNodeChecks > 0
     ? (collisionCpuRuntime.rigidSoftNodeHits / collisionCpuRuntime.rigidSoftNodeChecks) * 100
@@ -7682,6 +7753,8 @@ window.__gpuLabApi = {
           },
           checks: {
             rigidRigidPairs: Number(sim.collisionCpuRuntime.rigidRigidPairChecks) || 0,
+            rigidRigidProxyPairs: Number(sim.collisionCpuRuntime.rigidRigidProxyPairChecks) || 0,
+            rigidRigidSatCalls: Number(sim.collisionCpuRuntime.rigidRigidSatCalls) || 0,
             rigidSoftNodeRaw: Number(sim.collisionCpuRuntime.rigidSoftNodeRawChecks) || 0,
             rigidSoftNode: Number(sim.collisionCpuRuntime.rigidSoftNodeChecks) || 0,
             rigidSoftNodeCandidate: Number(sim.collisionCpuRuntime.rigidSoftNodeCandidateChecks) || 0,
@@ -7693,6 +7766,7 @@ window.__gpuLabApi = {
           },
           hits: {
             rigidRigidPairs: Number(sim.collisionCpuRuntime.rigidRigidPairHits) || 0,
+            rigidRigidSat: Number(sim.collisionCpuRuntime.rigidRigidSatHits) || 0,
             rigidSoftNode: Number(sim.collisionCpuRuntime.rigidSoftNodeHits) || 0,
             rigidSoftEdge: Number(sim.collisionCpuRuntime.rigidSoftEdgeHits) || 0,
             softSoftNode: Number(sim.collisionCpuRuntime.softSoftNodeHits) || 0,
@@ -7700,12 +7774,19 @@ window.__gpuLabApi = {
           },
           hitRatesPct: {
             rigidRigidPairs: Number(sim.collisionCpuRuntime.rigidRigidPairHitRatePct) || 0,
+            rigidRigidSatCalls: Number(sim.collisionCpuRuntime.rigidRigidSatCallRatePct) || 0,
+            rigidRigidSatHits: Number(sim.collisionCpuRuntime.rigidRigidSatHitRatePct) || 0,
             rigidSoftNode: Number(sim.collisionCpuRuntime.rigidSoftNodeHitRatePct) || 0,
             rigidSoftEdge: Number(sim.collisionCpuRuntime.rigidSoftEdgeHitRatePct) || 0,
             rigidSoftNodeCandidate: Number(sim.collisionCpuRuntime.rigidSoftNodeCandidateHitRatePct) || 0,
             rigidSoftEdgeCandidate: Number(sim.collisionCpuRuntime.rigidSoftEdgeCandidateHitRatePct) || 0,
             softSoftNode: Number(sim.collisionCpuRuntime.softSoftNodeHitRatePct) || 0,
             softSoftEdge: Number(sim.collisionCpuRuntime.softSoftEdgeHitRatePct) || 0,
+          },
+          prefilter: {
+            rigidRigidAabbRejected: Number(sim.collisionCpuRuntime.rigidRigidAabbRejected) || 0,
+            rigidRigidRadiusRejected: Number(sim.collisionCpuRuntime.rigidRigidRadiusRejected) || 0,
+            rigidRigidTotalRejected: Number(sim.collisionCpuRuntime.rigidRigidPrefilterRejected) || 0,
           },
           polyCache: {
             lookups: Number(sim.collisionCpuRuntime.polyCacheLookups) || 0,
@@ -7721,6 +7802,8 @@ window.__gpuLabApi = {
           stageMs: { rigidRigidPre: 0, rigidSoft: 0, softSoftNode: 0, softSoftEdge: 0, rigidRigidPost: 0, total: 0 },
           checks: {
             rigidRigidPairs: 0,
+            rigidRigidProxyPairs: 0,
+            rigidRigidSatCalls: 0,
             rigidSoftNodeRaw: 0,
             rigidSoftNode: 0,
             rigidSoftNodeCandidate: 0,
@@ -7730,15 +7813,29 @@ window.__gpuLabApi = {
             softSoftNode: 0,
             softSoftEdge: 0,
           },
-          hits: { rigidRigidPairs: 0, rigidSoftNode: 0, rigidSoftEdge: 0, softSoftNode: 0, softSoftEdge: 0 },
+          hits: {
+            rigidRigidPairs: 0,
+            rigidRigidSat: 0,
+            rigidSoftNode: 0,
+            rigidSoftEdge: 0,
+            softSoftNode: 0,
+            softSoftEdge: 0,
+          },
           hitRatesPct: {
             rigidRigidPairs: 0,
+            rigidRigidSatCalls: 0,
+            rigidRigidSatHits: 0,
             rigidSoftNode: 0,
             rigidSoftEdge: 0,
             rigidSoftNodeCandidate: 0,
             rigidSoftEdgeCandidate: 0,
             softSoftNode: 0,
             softSoftEdge: 0,
+          },
+          prefilter: {
+            rigidRigidAabbRejected: 0,
+            rigidRigidRadiusRejected: 0,
+            rigidRigidTotalRejected: 0,
           },
           polyCache: { lookups: 0, hits: 0, misses: 0, rebuilds: 0 },
         },

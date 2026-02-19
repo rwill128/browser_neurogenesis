@@ -966,18 +966,115 @@ function supportPoint(poly, nx, ny) {
   return best;
 }
 
+function buildCollisionPolyMeta(poly) {
+  if (!Array.isArray(poly) || poly.length === 0) {
+    return {
+      minX: 0,
+      maxX: 0,
+      minY: 0,
+      maxY: 0,
+      cx: 0,
+      cy: 0,
+      radius: 0,
+    };
+  }
+
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let sx = 0;
+  let sy = 0;
+  let count = 0;
+
+  for (const p of poly) {
+    const x = Number(p?.x);
+    const y = Number(p?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    sx += x;
+    sy += y;
+    count += 1;
+  }
+
+  if (count <= 0) {
+    return {
+      minX: 0,
+      maxX: 0,
+      minY: 0,
+      maxY: 0,
+      cx: 0,
+      cy: 0,
+      radius: 0,
+    };
+  }
+
+  const cx = sx / count;
+  const cy = sy / count;
+  let radius = 0;
+  for (const p of poly) {
+    const x = Number(p?.x);
+    const y = Number(p?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    const d = Math.hypot(x - cx, y - cy);
+    if (d > radius) radius = d;
+  }
+
+  return { minX, maxX, minY, maxY, cx, cy, radius };
+}
+
+function overlapAabb(metaA, metaB) {
+  if (!metaA || !metaB) return true;
+  return !(
+    metaA.maxX < metaB.minX
+    || metaB.maxX < metaA.minX
+    || metaA.maxY < metaB.minY
+    || metaB.maxY < metaA.minY
+  );
+}
+
 export function resolveRigidVsRigidPolygonCollision(a, b, restitution = 0.3, debugInfo = null, cached = null) {
   const polysA = Array.isArray(cached?.polysA) ? cached.polysA : getRigidCollisionPolysWorld(a);
   const polysB = Array.isArray(cached?.polysB) ? cached.polysB : getRigidCollisionPolysWorld(b);
   if (!polysA.length || !polysB.length) return false;
 
+  const metaA = (Array.isArray(cached?.metaA) && cached.metaA.length === polysA.length)
+    ? cached.metaA
+    : polysA.map((poly) => buildCollisionPolyMeta(poly));
+  const metaB = (Array.isArray(cached?.metaB) && cached.metaB.length === polysB.length)
+    ? cached.metaB
+    : polysB.map((poly) => buildCollisionPolyMeta(poly));
+  const stats = cached?.stats && typeof cached.stats === 'object' ? cached.stats : null;
+
   let best = null;
   for (let ai = 0; ai < polysA.length; ai++) {
     const pa = polysA[ai];
+    const ma = metaA[ai];
     for (let bi = 0; bi < polysB.length; bi++) {
       const pb = polysB[bi];
+      const mb = metaB[bi];
+      if (stats) stats.rigidRigidProxyPairChecks = (Number(stats.rigidRigidProxyPairChecks) || 0) + 1;
+
+      if (!overlapAabb(ma, mb)) {
+        if (stats) stats.rigidRigidAabbRejected = (Number(stats.rigidRigidAabbRejected) || 0) + 1;
+        continue;
+      }
+
+      const dx = (Number(ma?.cx) || 0) - (Number(mb?.cx) || 0);
+      const dy = (Number(ma?.cy) || 0) - (Number(mb?.cy) || 0);
+      const rr = (Number(ma?.radius) || 0) + (Number(mb?.radius) || 0);
+      if ((dx * dx + dy * dy) > (rr * rr)) {
+        if (stats) stats.rigidRigidRadiusRejected = (Number(stats.rigidRigidRadiusRejected) || 0) + 1;
+        continue;
+      }
+
+      if (stats) stats.rigidRigidSatCalls = (Number(stats.rigidRigidSatCalls) || 0) + 1;
       const sat = satConvexCollision(pa, pb);
       if (!sat) continue;
+      if (stats) stats.rigidRigidSatHits = (Number(stats.rigidRigidSatHits) || 0) + 1;
       if (!best || sat.overlap < best.overlap) {
         best = { ...sat, pa, pb, ai, bi };
       }

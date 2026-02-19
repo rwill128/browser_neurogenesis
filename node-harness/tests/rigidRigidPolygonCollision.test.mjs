@@ -299,6 +299,18 @@ test('rigid-rigid spatial hash broadphase candidate order is deterministic', () 
   assert.deepEqual(a.stats.prunedPairs, b.stats.prunedPairs);
 });
 
+test('rigid-rigid SAT prefilter rejects far proxy pairs before SAT dispatch', () => {
+  const a = makeBox(20, 20, 2);
+  const b = makeBox(120, 120, 2);
+  const stats = {};
+
+  const hit = resolveRigidVsRigidPolygonCollision(a, b, 0.3, null, { stats });
+  assert.equal(hit, false, 'far-separated boxes should not collide');
+  assert.ok((Number(stats.rigidRigidProxyPairChecks) || 0) >= 1, 'expected proxy prefilter checks');
+  assert.ok((Number(stats.rigidRigidAabbRejected) || 0) >= 1, 'expected AABB prefilter rejection');
+  assert.equal(Number(stats.rigidRigidSatCalls) || 0, 0, 'SAT should be skipped for far-separated proxy pair');
+});
+
 test('rigid-soft spatial hash broadphase prunes rigid-soft checks while preserving near candidates', () => {
   const rigids = [
     makeBox(20, 20, 3),

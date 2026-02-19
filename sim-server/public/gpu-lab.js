@@ -69,6 +69,7 @@ const bodyDragEl = document.getElementById('bodyDrag');
 const bodyFeedbackEl = document.getElementById('bodyFeedback');
 const fluidVelocityCapEl = document.getElementById('fluidVelocityCap');
 const fluidCouplingComponentLimitEl = document.getElementById('fluidCouplingComponentLimit');
+const enableCouplingLagFrameEl = document.getElementById('enableCouplingLagFrame');
 const softSpringStiffnessEl = document.getElementById('softSpringStiffness');
 const softSpringBaseComplianceEl = document.getElementById('softSpringBaseCompliance');
 const softAreaBaseComplianceEl = document.getElementById('softAreaBaseCompliance');
@@ -343,6 +344,7 @@ function readControls() {
     bodyDrag: Math.max(0, Number(bodyDragEl.value) || 0.55),
     bodyFeedback: Math.max(0, Number(bodyFeedbackEl.value) || 0.012),
     fluidCouplingComponentLimit: normalizeFluidCouplingComponentLimit(fluidCouplingComponentLimitEl?.value),
+    enableCouplingLagFrame: !!enableCouplingLagFrameEl?.checked,
     softSpringStiffness: normalizeSoftSpringStiffness(softSpringStiffnessEl?.value),
     softSpringBaseCompliance: normalizeCompliance(softSpringBaseComplianceEl?.value, SOFT_XPBD_BASE_COMPLIANCE),
     softAreaBaseCompliance: normalizeCompliance(softAreaBaseComplianceEl?.value, SOFT_AREA_BASE_COMPLIANCE),
@@ -6322,6 +6324,16 @@ async function initSim() {
       lastHealth: { nonFiniteCount: 0, velocitySpikeCount: 0, dyeSpikeCount: 0 },
     },
     fastShadowFields: null,
+    laggedCouplingFields: null,
+    couplingLagRuntime: {
+      enabled: false,
+      active: false,
+      lagFrames: 0,
+      bootstrapFrames: 0,
+      reusedFrames: 0,
+      lastMode: 'disabled',
+      lastReadbackWaitMs: 0,
+    },
     bodies: initBodies(controls.n, controls),
     emitters: initEmitters(controls.n),
     disableDefaultInject: false,
@@ -6575,6 +6587,31 @@ async function stepAndRender() {
           ? 'fast-health-anomaly'
           : (cadenceDue ? 'fast-cadence' : 'fast-resident-skip'))));
 
+  const pipelineCouplingLagEnabled = (
+    solverPathNow === 'baseline'
+    && s?.controls?.enableCouplingLagFrame === true
+    && doReadback
+  );
+
+  if (!s.couplingLagRuntime || typeof s.couplingLagRuntime !== 'object') {
+    s.couplingLagRuntime = {
+      enabled: false,
+      active: false,
+      lagFrames: 0,
+      bootstrapFrames: 0,
+      reusedFrames: 0,
+      lastMode: 'disabled',
+      lastReadbackWaitMs: 0,
+    };
+  }
+  s.couplingLagRuntime.enabled = pipelineCouplingLagEnabled;
+  s.couplingLagRuntime.active = false;
+  s.couplingLagRuntime.lastMode = pipelineCouplingLagEnabled ? 'pending' : 'disabled';
+  if (!pipelineCouplingLagEnabled) {
+    s.couplingLagRuntime.lagFrames = 0;
+    s.laggedCouplingFields = null;
+  }
+
   const readbackStageStartMs = performance.now();
   if (fastMode && doReadback) {
     const copyEnc = s.device.createCommandEncoder();
@@ -6583,7 +6620,26 @@ async function stepAndRender() {
   }
 
   let fields = null;
-  if (doReadback) {
+  let lagReadbackPromise = null;
+  if (pipelineCouplingLagEnabled) {
+    lagReadbackPromise = mapFullFluidReadback(s);
+    if (s.laggedCouplingFields) {
+      fields = s.laggedCouplingFields;
+      readbackReason = 'baseline-coupling-lag-reuse';
+      s.couplingLagRuntime.active = true;
+      s.couplingLagRuntime.reusedFrames = (Number(s.couplingLagRuntime.reusedFrames) || 0) + 1;
+      s.couplingLagRuntime.lastMode = 'reused-prev-frame';
+      s.couplingLagRuntime.lagFrames = 1;
+    } else {
+      fields = await lagReadbackPromise;
+      s.laggedCouplingFields = fields;
+      lagReadbackPromise = null;
+      readbackReason = 'baseline-coupling-lag-bootstrap';
+      s.couplingLagRuntime.bootstrapFrames = (Number(s.couplingLagRuntime.bootstrapFrames) || 0) + 1;
+      s.couplingLagRuntime.lastMode = 'bootstrap-await';
+      s.couplingLagRuntime.lagFrames = 1;
+    }
+  } else if (doReadback) {
     fields = await mapFullFluidReadback(s);
     s.fastShadowFields = fields;
   } else {
@@ -6663,6 +6719,18 @@ async function stepAndRender() {
     }
 
     recordPipelineTiming(s, doReadback ? 'frame.gpuWriteback.updatedFields' : 'frame.gpuWriteback.skipped', performance.now() - writebackStartMs);
+
+    if (lagReadbackPromise) {
+      const lagRefreshWaitStartMs = performance.now();
+      const nextLagFields = await lagReadbackPromise;
+      const lagRefreshWaitMs = performance.now() - lagRefreshWaitStartMs;
+      s.laggedCouplingFields = nextLagFields;
+      s.couplingLagRuntime.lastReadbackWaitMs = lagRefreshWaitMs;
+      s.couplingLagRuntime.lagFrames = 1;
+      recordPipelineTiming(s, 'fluid.readback.pipelineLag.refreshWait', lagRefreshWaitMs, {
+        reason: 'baseline-coupling-lag-refresh',
+      });
+    }
 
     const renderStageStartMs = performance.now();
     const n = s.controls.n;
@@ -7061,6 +7129,7 @@ window.__gpuLabApi = {
       runtimeSolverPath: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath),
       runtimePipelineMode: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
       allowPassEdgeFlowPush: sim?.controls?.allowPassEdgeFlowPush === true,
+      enableCouplingLagFrame: sim?.controls?.enableCouplingLagFrame === true,
       fastReadbackRuntime: {
         enabled: !!sim?.fastReadbackPolicy?.enabled,
         intervalFrames: Number(sim?.fastReadbackPolicy?.intervalFrames) || FAST_MODE_FULL_READBACK_INTERVAL,
@@ -7072,6 +7141,25 @@ window.__gpuLabApi = {
         lastHealth: sim?.fastReadbackPolicy?.lastHealth || null,
         lastHealthAnomaly: sim?.fastReadbackPolicy?.lastHealthAnomaly || null,
       },
+      couplingLagRuntime: sim?.couplingLagRuntime
+        ? {
+          enabled: sim.couplingLagRuntime.enabled === true,
+          active: sim.couplingLagRuntime.active === true,
+          lagFrames: Number(sim.couplingLagRuntime.lagFrames) || 0,
+          bootstrapFrames: Number(sim.couplingLagRuntime.bootstrapFrames) || 0,
+          reusedFrames: Number(sim.couplingLagRuntime.reusedFrames) || 0,
+          lastMode: sim.couplingLagRuntime.lastMode || 'unknown',
+          lastReadbackWaitMs: Number(sim.couplingLagRuntime.lastReadbackWaitMs) || 0,
+        }
+        : {
+          enabled: false,
+          active: false,
+          lagFrames: 0,
+          bootstrapFrames: 0,
+          reusedFrames: 0,
+          lastMode: 'uninitialized',
+          lastReadbackWaitMs: 0,
+        },
       pipelineTiming: {
         last: sim?.pipelineTimingLast
           ? {

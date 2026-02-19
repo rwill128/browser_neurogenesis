@@ -3230,25 +3230,39 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
     }
 
     if (compactEdgePairs && compactEdgePairs.pairCount > 0) {
-      const edgeProbeStartMs = profile ? performance.now() : 0;
-      await dispatchRigidSoftEdgeNarrowphaseAabbProbeWgsl({
-        rigidBodies,
-        soft,
-        offload: wgslOffload,
-        edgePairs: compactEdgePairs,
-        edgeSlop,
-        rigidAabb,
-      });
-      if (profile) {
-        addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeDispatchReadbackMs', performance.now() - edgeProbeStartMs);
-        const t = wgslOffload?.state?.lastEdgeNarrowphaseAabbProbeTiming;
-        if (t && typeof t === 'object') {
-          addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeInputBuildMs', t.inputBuildMs);
-          addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeUploadMs', t.uploadMs);
-          addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeDispatchSubmitMs', t.dispatchSubmitMs);
-          addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeReadbackMapMs', t.readbackMapMs);
-          addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeDecodeMs', t.decodeMs);
-          addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeDetailedTotalMs', t.totalMs);
+      if (fastBroadphaseMode) {
+        wgslOffload.state.lastEdgeNarrowphaseAabbProbeSource = 'wgsl-rigid-soft-edge-aabb-probe-skipped-fast';
+        wgslOffload.state.lastEdgeNarrowphaseAabbProbeTiming = {
+          inputBuildMs: 0,
+          uploadMs: 0,
+          dispatchSubmitMs: 0,
+          readbackMapMs: 0,
+          decodeMs: 0,
+          totalMs: 0,
+          skippedFast: 1,
+        };
+        if (profile) addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeSkippedFast', 1);
+      } else {
+        const edgeProbeStartMs = profile ? performance.now() : 0;
+        await dispatchRigidSoftEdgeNarrowphaseAabbProbeWgsl({
+          rigidBodies,
+          soft,
+          offload: wgslOffload,
+          edgePairs: compactEdgePairs,
+          edgeSlop,
+          rigidAabb,
+        });
+        if (profile) {
+          addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeDispatchReadbackMs', performance.now() - edgeProbeStartMs);
+          const t = wgslOffload?.state?.lastEdgeNarrowphaseAabbProbeTiming;
+          if (t && typeof t === 'object') {
+            addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeInputBuildMs', t.inputBuildMs);
+            addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeUploadMs', t.uploadMs);
+            addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeDispatchSubmitMs', t.dispatchSubmitMs);
+            addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeReadbackMapMs', t.readbackMapMs);
+            addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeDecodeMs', t.decodeMs);
+            addRigidSoftProfileMs(profile, 'edgeNarrowphaseAabbProbeDetailedTotalMs', t.totalMs);
+          }
         }
       }
     } else if (compactEdgePairs) {

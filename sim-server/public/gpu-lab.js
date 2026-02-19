@@ -386,7 +386,7 @@ function readControls() {
     massLight: Math.max(0.05, Number(massLightEl.value) || 1.2),
     massHeavy: Math.max(0.05, Number(massHeavyEl.value) || 5.0),
     massSoft: Math.max(0.02, Number(massSoftEl.value) || 0.6),
-    rigidBodyCount: Math.max(1, Math.min(1000, Math.round(Number(rigidBodyCountEl?.value) || 10))),
+    rigidBodyCount: Math.max(1, Math.min(2000, Math.round(Number(rigidBodyCountEl?.value) || 10))),
     bodyDrag: Math.max(0, Number(bodyDragEl.value) || 0.55),
     bodyFeedback: Math.max(0, Number(bodyFeedbackEl.value) || 0.012),
     fluidCouplingComponentLimit: normalizeFluidCouplingComponentLimit(fluidCouplingComponentLimitEl?.value),
@@ -1578,7 +1578,7 @@ function initBodies(n, controls) {
   // deformation differences are easier to attribute to fluid resolution.
   const rigidCount = (controls?.seedRigidBodies === false)
     ? 0
-    : Math.max(1, Math.min(1000, Math.round(Number(controls?.rigidBodyCount) || 10)));
+    : Math.max(1, Math.min(2000, Math.round(Number(controls?.rigidBodyCount) || 10)));
   const softClusterCount = (controls?.seedSpringSoftBodies === false) ? 0 : 10;
 
   const rigidShapeCycle = [3, 4, 5, 6];

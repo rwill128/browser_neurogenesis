@@ -58,6 +58,7 @@ const radiusEl = document.getElementById('radius');
 const brushSizeEl = document.getElementById('brushSize');
 const paintValueEl = document.getElementById('paintValue');
 const showViscEl = document.getElementById('showVisc');
+const showObstacleMaskOverlayEl = document.getElementById('showObstacleMaskOverlay');
 const showCollisionHullEl = document.getElementById('showCollisionHull');
 const showSegmentIdsEl = document.getElementById('showSegmentIds');
 const showExtraVisualsEl = document.getElementById('showExtraVisuals');
@@ -431,6 +432,7 @@ function readControls() {
     bodyFeedback: Math.max(0, Number(bodyFeedbackEl.value) || 0.012),
     fluidCouplingComponentLimit: normalizeFluidCouplingComponentLimit(fluidCouplingComponentLimitEl?.value),
     enableCouplingLagFrame: !!enableCouplingLagFrameEl?.checked,
+    showObstacleMaskOverlay: (showObstacleMaskOverlayEl?.checked !== false),
     softSpringStiffness: normalizeSoftSpringStiffness(softSpringStiffnessEl?.value),
     softSpringBaseCompliance: normalizeCompliance(softSpringBaseComplianceEl?.value, SOFT_XPBD_BASE_COMPLIANCE),
     softAreaBaseCompliance: normalizeCompliance(softAreaBaseComplianceEl?.value, SOFT_AREA_BASE_COMPLIANCE),
@@ -6832,7 +6834,10 @@ function drawBodiesOverlay(sim) {
     const collisionDebugSuffix = collisionDebug
       ? ` | solver hull debug ON (concave ${concaveCount}/${sim.bodies.rigid.length}, contacts ${(sim.lastRigidContacts || []).length})`
       : '';
-    ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, REMOVE=amber, MIXED=violet | obstacle mask overlay=red | zoom ${sim.camera.zoom.toFixed(2)}x${collisionDebugSuffix}`, 10, canvas.height - 28);
+    const obstacleOverlayLabel = sim?.controls?.showObstacleMaskOverlay === false
+      ? 'obstacle mask overlay=off'
+      : 'obstacle mask overlay=red';
+    ctx.fillText(`Dye edges: PASS=blue, DEFLECT=white/cyan, REMOVE=amber, MIXED=violet | ${obstacleOverlayLabel} | zoom ${sim.camera.zoom.toFixed(2)}x${collisionDebugSuffix}`, 10, canvas.height - 28);
     ctx.fillStyle = 'rgba(0,255,208,0.95)';
     const line2 = collisionDebug
       ? 'Body edges: BLOCK solid vs PASS dashed | segment IDs: R<body>:<edge>, S<soft-spring> | soft momentum: thin→thick (0→1) | dashed green/cyan=solver hull, dashed amber=rigid-rigid convex proxies | soft deform warn=orange, severe=red'
@@ -7369,13 +7374,14 @@ async function stepAndRender() {
     const img = ctx.createImageData(n, n);
     const px = img.data;
     let sum = 0;
+    const showObstacleMaskOverlay = s.controls?.showObstacleMaskOverlay !== false;
     for (let i = 0; i < s.cells; i++) {
       const ri = Math.max(0, Math.min(255, r[i]));
       const gi = Math.max(0, Math.min(255, g[i]));
       const bi = Math.max(0, Math.min(255, b[i]));
       const obstacle = Number(s?.obstacleMaskCpu?.[i]) > 0.5;
       const o = i * 4;
-      if (obstacle) {
+      if (showObstacleMaskOverlay && obstacle) {
         // Obstacle-mask visualization overlay (BLOCK velocity edges influence region).
         px[o] = Math.max(ri, 220);
         px[o + 1] = Math.min(gi, 70);

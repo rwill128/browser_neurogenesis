@@ -3104,51 +3104,67 @@ export async function resolveRigidSoftCollisionPassGpuOnly({
 
     if (compactNodePairs && compactNodePairs.pairCount > 0) {
       const nodeProbeInputCount = compactNodePairs.pairCount | 0;
-      const nodeProbeStartMs = profile ? performance.now() : 0;
-      const nodeProbeFinite = await dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl({
-        rigidBodies,
-        soft,
-        offload: wgslOffload,
-        nodePairs: compactNodePairs,
-        rigidAabb,
-      });
-      if (profile) {
-        addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeDispatchReadbackMs', performance.now() - nodeProbeStartMs);
-        const t = wgslOffload?.state?.lastNodeNarrowphaseAabbProbeTiming;
-        if (t && typeof t === 'object') {
-          addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeInputBuildMs', t.inputBuildMs);
-          addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeUploadMs', t.uploadMs);
-          addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeDispatchSubmitMs', t.dispatchSubmitMs);
-          addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeReadbackMapMs', t.readbackMapMs);
-          addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeDecodeMs', t.decodeMs);
-          addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeDetailedTotalMs', t.totalMs);
-        }
-      }
-
-      const nodeProbeFilterStartMs = profile ? performance.now() : 0;
-      const nodeProbeFilteredPairs = nodeProbeFinite
-        ? buildAuthoritativeRigidSoftNodePairsFromAabbProbe({
-          nodePairs: compactNodePairs,
-          separation: wgslOffload.state.lastNodeNarrowphaseAabbProbeSeparation,
-          insideMask: wgslOffload.state.lastNodeNarrowphaseAabbProbeInsideMask,
-          nodeSlop,
-        })
-        : null;
-      if (profile) addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeFilterMs', performance.now() - nodeProbeFilterStartMs);
-
-      if (nodeProbeFilteredPairs) {
-        compactNodePairs = nodeProbeFilteredPairs;
-        wgslOffload.state.lastNodeNarrowphaseDroppedPairCount = Math.max(0, nodeProbeInputCount - (compactNodePairs.pairCount | 0));
-        wgslOffload.state.lastNodeNarrowphaseAuthoritativeSource = 'wgsl-rigid-soft-node-aabb-probe-authoritative-filter';
-        wgslOffload.state.lastPreparedNodeNarrowphasePairRigidIndex = compactNodePairs.compactRigidIndex;
-        wgslOffload.state.lastPreparedNodeNarrowphasePairNodeIndex = compactNodePairs.compactNodeIndex;
-        wgslOffload.state.lastPreparedNodeNarrowphasePairCount = compactNodePairs.pairCount;
-        wgslOffload.state.lastPreparedNodeNarrowphaseBytes = compactNodePairs.byteLength;
-        wgslOffload.state.lastPreparedNodeNarrowphaseSignature = compactNodePairs.signature;
+      if (fastBroadphaseMode) {
+        wgslOffload.state.lastNodeNarrowphaseAabbProbeSource = 'wgsl-rigid-soft-node-aabb-probe-skipped-fast';
+        wgslOffload.state.lastNodeNarrowphaseAabbProbeTiming = {
+          inputBuildMs: 0,
+          uploadMs: 0,
+          dispatchSubmitMs: 0,
+          readbackMapMs: 0,
+          decodeMs: 0,
+          totalMs: 0,
+          skippedFast: 1,
+        };
+        wgslOffload.state.lastNodeNarrowphaseDroppedPairCount = 0;
+        wgslOffload.state.lastNodeNarrowphaseAuthoritativeSource = 'wgsl-rigid-soft-node-aabb-probe-skipped-fast';
+        if (profile) addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeSkippedFast', 1);
       } else {
-        wgslOffload.state.lastNodeNarrowphaseAuthoritativeSource = nodeProbeFinite
-          ? 'cpu-rigid-soft-node-aabb-probe-filter-fallback'
-          : 'cpu-rigid-soft-node-aabb-probe-nonfinite-fallback';
+        const nodeProbeStartMs = profile ? performance.now() : 0;
+        const nodeProbeFinite = await dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl({
+          rigidBodies,
+          soft,
+          offload: wgslOffload,
+          nodePairs: compactNodePairs,
+          rigidAabb,
+        });
+        if (profile) {
+          addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeDispatchReadbackMs', performance.now() - nodeProbeStartMs);
+          const t = wgslOffload?.state?.lastNodeNarrowphaseAabbProbeTiming;
+          if (t && typeof t === 'object') {
+            addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeInputBuildMs', t.inputBuildMs);
+            addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeUploadMs', t.uploadMs);
+            addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeDispatchSubmitMs', t.dispatchSubmitMs);
+            addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeReadbackMapMs', t.readbackMapMs);
+            addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeDecodeMs', t.decodeMs);
+            addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeDetailedTotalMs', t.totalMs);
+          }
+        }
+
+        const nodeProbeFilterStartMs = profile ? performance.now() : 0;
+        const nodeProbeFilteredPairs = nodeProbeFinite
+          ? buildAuthoritativeRigidSoftNodePairsFromAabbProbe({
+            nodePairs: compactNodePairs,
+            separation: wgslOffload.state.lastNodeNarrowphaseAabbProbeSeparation,
+            insideMask: wgslOffload.state.lastNodeNarrowphaseAabbProbeInsideMask,
+            nodeSlop,
+          })
+          : null;
+        if (profile) addRigidSoftProfileMs(profile, 'nodeNarrowphaseAabbProbeFilterMs', performance.now() - nodeProbeFilterStartMs);
+
+        if (nodeProbeFilteredPairs) {
+          compactNodePairs = nodeProbeFilteredPairs;
+          wgslOffload.state.lastNodeNarrowphaseDroppedPairCount = Math.max(0, nodeProbeInputCount - (compactNodePairs.pairCount | 0));
+          wgslOffload.state.lastNodeNarrowphaseAuthoritativeSource = 'wgsl-rigid-soft-node-aabb-probe-authoritative-filter';
+          wgslOffload.state.lastPreparedNodeNarrowphasePairRigidIndex = compactNodePairs.compactRigidIndex;
+          wgslOffload.state.lastPreparedNodeNarrowphasePairNodeIndex = compactNodePairs.compactNodeIndex;
+          wgslOffload.state.lastPreparedNodeNarrowphasePairCount = compactNodePairs.pairCount;
+          wgslOffload.state.lastPreparedNodeNarrowphaseBytes = compactNodePairs.byteLength;
+          wgslOffload.state.lastPreparedNodeNarrowphaseSignature = compactNodePairs.signature;
+        } else {
+          wgslOffload.state.lastNodeNarrowphaseAuthoritativeSource = nodeProbeFinite
+            ? 'cpu-rigid-soft-node-aabb-probe-filter-fallback'
+            : 'cpu-rigid-soft-node-aabb-probe-nonfinite-fallback';
+        }
       }
     } else if (compactNodePairs) {
       wgslOffload.state.lastNodeNarrowphaseAuthoritativeSource = 'wgsl-rigid-soft-node-broadphase-zero-active';

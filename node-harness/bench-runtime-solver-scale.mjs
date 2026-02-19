@@ -569,6 +569,11 @@ function runScenario(path, fixture, { steps, warmupSteps }) {
       lastPreparedEdgePairCount: Number(st.lastPreparedEdgePairCount) || 0,
       lastPreparedNodeNarrowphasePairCount: Number(st.lastPreparedNodeNarrowphasePairCount) || 0,
       lastPreparedEdgeNarrowphasePairCount: Number(st.lastPreparedEdgeNarrowphasePairCount) || 0,
+      lastNodeBroadphaseCandidatePairCount: Number(st.lastNodeBroadphaseCandidatePairCount) || 0,
+      lastEdgeBroadphaseCandidatePairCount: Number(st.lastEdgeBroadphaseCandidatePairCount) || 0,
+      lastNodeBroadphaseActivePairCount: Number(st.lastNodeBroadphaseActivePairCount) || 0,
+      lastEdgeBroadphaseActivePairCount: Number(st.lastEdgeBroadphaseActivePairCount) || 0,
+      lastNodeNarrowphaseDroppedPairCount: Number(st.lastNodeNarrowphaseDroppedPairCount) || 0,
     };
   }
 

@@ -30,11 +30,11 @@ test('rigid-soft gpu-only pass exits early for empty soft scenes to avoid no-op 
   );
 });
 
-test('rigid-soft gpu-only module dispatches WGSL broadphase with active-mask readback and can promote it to authoritative collision filtering', () => {
+test('rigid-soft gpu-only module dispatches WGSL broadphase with GPU-side compaction readback and promotes authoritative node filtering', () => {
   assert.match(
     source,
-    /encoder\.copyBufferToBuffer\([\s\S]*rigidSoftNodeBroadphaseActiveMaskReadback[\s\S]*mapAsync\(globalThis\.GPUMapMode\.READ[\s\S]*lastSourceRoute = 'wgsl-rigid-soft-node-broadphase-authoritative-filter';[\s\S]*lastMode = 'wgsl-broadphase-authoritative-filter';/,
-    'expected rigid-soft gpu-only module to read back concrete WGSL broadphase masks and apply them as authoritative node-collision filtering when valid',
+    /countEncoder\.copyBufferToBuffer\([\s\S]*rigidSoftNodeBroadphaseActiveMaskReadback[\s\S]*activeCountRaw[\s\S]*indexEncoder\.copyBufferToBuffer\([\s\S]*buildCompactRigidSoftNodePairsFromActiveIndices[\s\S]*lastSourceRoute = 'wgsl-rigid-soft-node-broadphase-authoritative-filter';[\s\S]*lastMode = 'wgsl-broadphase-authoritative-filter';/,
+    'expected rigid-soft gpu-only module to compact WGSL node broadphase pairs on GPU-readback path and apply them as authoritative node-collision filtering when valid',
   );
 });
 

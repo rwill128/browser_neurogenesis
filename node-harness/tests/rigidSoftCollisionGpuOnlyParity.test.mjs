@@ -326,7 +326,8 @@ test('gpu-only rigid-soft pass dispatches WGSL node broadphase proposal when dev
   const mockPipeline = { getBindGroupLayout: () => ({}) };
   const makeReadableBuffer = () => {
     const data = new Uint32Array(1024);
-    data.fill(1);
+    for (let i = 0; i < data.length; i++) data[i] = i >>> 0;
+    data[0] = 8;
     return {
       destroy() {},
       async mapAsync() {},
@@ -544,7 +545,8 @@ test('gpu-only rigid-soft pass stores compact node broadphase ownership metadata
   const mockPipeline = { getBindGroupLayout: () => ({}) };
   const makeReadableBuffer = () => {
     const data = new Uint32Array(1024);
-    data.fill(1);
+    for (let i = 0; i < data.length; i++) data[i] = i >>> 0;
+    data[0] = 8;
     return {
       destroy() {},
       async mapAsync() {},

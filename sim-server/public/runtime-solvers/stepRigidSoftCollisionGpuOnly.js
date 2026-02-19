@@ -1844,34 +1844,16 @@ struct Params {
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var<storage, read> pairRigidIndex: array<u32>;
-@group(0) @binding(2) var<storage, read> pairNodeIndex: array<u32>;
-@group(0) @binding(3) var<storage, read> rigidX: array<f32>;
-@group(0) @binding(4) var<storage, read> rigidY: array<f32>;
-@group(0) @binding(5) var<storage, read> rigidVx: array<f32>;
-@group(0) @binding(6) var<storage, read> rigidVy: array<f32>;
-@group(0) @binding(7) var<storage, read> rigidOmega: array<f32>;
-@group(0) @binding(8) var<storage, read> rigidInvMass: array<f32>;
-@group(0) @binding(9) var<storage, read> rigidInvInertia: array<f32>;
-@group(0) @binding(10) var<storage, read> nodeX: array<f32>;
-@group(0) @binding(11) var<storage, read> nodeY: array<f32>;
-@group(0) @binding(12) var<storage, read> nodeVx: array<f32>;
-@group(0) @binding(13) var<storage, read> nodeVy: array<f32>;
-@group(0) @binding(14) var<storage, read> nodeR: array<f32>;
-@group(0) @binding(15) var<storage, read> nodeInvMass: array<f32>;
-@group(0) @binding(16) var<storage, read> rigidVertexStart: array<u32>;
-@group(0) @binding(17) var<storage, read> rigidVertexX: array<f32>;
-@group(0) @binding(18) var<storage, read> rigidVertexY: array<f32>;
-@group(0) @binding(19) var<storage, read_write> outNodeDx: array<f32>;
-@group(0) @binding(20) var<storage, read_write> outNodeDy: array<f32>;
-@group(0) @binding(21) var<storage, read_write> outNodeDVx: array<f32>;
-@group(0) @binding(22) var<storage, read_write> outNodeDVy: array<f32>;
-@group(0) @binding(23) var<storage, read_write> outRigidDx: array<f32>;
-@group(0) @binding(24) var<storage, read_write> outRigidDy: array<f32>;
-@group(0) @binding(25) var<storage, read_write> outRigidDVx: array<f32>;
-@group(0) @binding(26) var<storage, read_write> outRigidDVy: array<f32>;
-@group(0) @binding(27) var<storage, read_write> outRigidDOmega: array<f32>;
-@group(0) @binding(28) var<storage, read_write> outContactMask: array<u32>;
+@group(0) @binding(1) var<storage, read> pairIndex: array<vec2<u32>>;
+@group(0) @binding(2) var<storage, read> rigidStateA: array<vec4<f32>>;
+@group(0) @binding(3) var<storage, read> rigidStateB: array<vec4<f32>>;
+@group(0) @binding(4) var<storage, read> nodeStateA: array<vec4<f32>>;
+@group(0) @binding(5) var<storage, read> nodeStateB: array<vec4<f32>>;
+@group(0) @binding(6) var<storage, read> rigidVertexRange: array<vec2<u32>>;
+@group(0) @binding(7) var<storage, read> rigidVertices: array<vec2<f32>>;
+@group(0) @binding(8) var<storage, read_write> outNodeDelta: array<vec4<f32>>;
+@group(0) @binding(9) var<storage, read_write> outRigidDeltaA: array<vec4<f32>>;
+@group(0) @binding(10) var<storage, read_write> outRigidDeltaB: array<vec2<f32>>;
 
 fn finiteOr(v: f32, fallback: f32) -> f32 {
   return select(fallback, v, v == v && abs(v) < 1e20);
@@ -1882,18 +1864,23 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= params.pairCount) { return; }
 
-  outNodeDx[i] = 0.0; outNodeDy[i] = 0.0; outNodeDVx[i] = 0.0; outNodeDVy[i] = 0.0;
-  outRigidDx[i] = 0.0; outRigidDy[i] = 0.0; outRigidDVx[i] = 0.0; outRigidDVy[i] = 0.0; outRigidDOmega[i] = 0.0;
-  outContactMask[i] = 0u;
+  outNodeDelta[i] = vec4<f32>(0.0);
+  outRigidDeltaA[i] = vec4<f32>(0.0);
+  outRigidDeltaB[i] = vec2<f32>(0.0);
 
-  let rbi = pairRigidIndex[i];
-  let ni = pairNodeIndex[i];
-  let x = finiteOr(nodeX[ni], 0.0);
-  let y = finiteOr(nodeY[ni], 0.0);
-  let r = max(0.4, finiteOr(nodeR[ni], 1.0));
+  let pair = pairIndex[i];
+  let rbi = pair.x;
+  let ni = pair.y;
 
-  let start = rigidVertexStart[rbi];
-  let endv = rigidVertexStart[rbi + 1u];
+  let nA = nodeStateA[ni];
+  let nB = nodeStateB[ni];
+  let x = finiteOr(nA.x, 0.0);
+  let y = finiteOr(nA.y, 0.0);
+  let r = max(0.4, finiteOr(nB.x, 1.0));
+
+  let vr = rigidVertexRange[rbi];
+  let start = vr.x;
+  let endv = vr.y;
   if (endv <= start + 1u) { return; }
 
   var bestD2 = 1e30;
@@ -1906,16 +1893,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   loop {
     if (vi >= endv) { break; }
     let vj = select(start, vi + 1u, vi + 1u < endv);
-    let ax = rigidVertexX[vi];
-    let ay = rigidVertexY[vi];
-    let bx = rigidVertexX[vj];
-    let by = rigidVertexY[vj];
-    let abx = bx - ax;
-    let aby = by - ay;
+    let a = rigidVertices[vi];
+    let b = rigidVertices[vj];
+    let abx = b.x - a.x;
+    let aby = b.y - a.y;
     let ab2 = max(1e-6, abx * abx + aby * aby);
-    let t = clamp(((x - ax) * abx + (y - ay) * aby) / ab2, 0.0, 1.0);
-    let cpx = ax + abx * t;
-    let cpy = ay + aby * t;
+    let t = clamp(((x - a.x) * abx + (y - a.y) * aby) / ab2, 0.0, 1.0);
+    let cpx = a.x + abx * t;
+    let cpy = a.y + aby * t;
     let dx = x - cpx;
     let dy = y - cpy;
     let d2 = dx * dx + dy * dy;
@@ -1938,29 +1923,31 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let ty = y - cpY;
   if (tx * nx + ty * ny < 0.0) { nx = -nx; ny = -ny; }
 
-  let invNode = max(1e-4, finiteOr(nodeInvMass[ni], 1.0));
-  let invRigid = max(1e-4, finiteOr(rigidInvMass[rbi], 1.0));
+  let invNode = max(1e-4, finiteOr(nB.y, 1.0));
+  let rA = rigidStateA[rbi];
+  let rB = rigidStateB[rbi];
+  let invRigid = max(1e-4, finiteOr(rB.y, 1.0));
   let invSum = invNode + invRigid;
   let corr = (penetration / max(1e-6, invSum)) * 0.68;
-  outNodeDx[i] = nx * corr * invNode;
-  outNodeDy[i] = ny * corr * invNode;
-  outRigidDx[i] = -nx * corr * invRigid;
-  outRigidDy[i] = -ny * corr * invRigid;
+  outNodeDelta[i].x = nx * corr * invNode;
+  outNodeDelta[i].y = ny * corr * invNode;
+  outRigidDeltaA[i].x = -nx * corr * invRigid;
+  outRigidDeltaA[i].y = -ny * corr * invRigid;
 
-  let rx = cpX - finiteOr(rigidX[rbi], 0.0);
-  let ry = cpY - finiteOr(rigidY[rbi], 0.0);
-  let omega = finiteOr(rigidOmega[rbi], 0.0);
-  let rpvx = finiteOr(rigidVx[rbi], 0.0) - omega * ry;
-  let rpvy = finiteOr(rigidVy[rbi], 0.0) + omega * rx;
-  let rvx = finiteOr(nodeVx[ni], 0.0) - rpvx;
-  let rvy = finiteOr(nodeVy[ni], 0.0) - rpvy;
+  let rx = cpX - finiteOr(rA.x, 0.0);
+  let ry = cpY - finiteOr(rA.y, 0.0);
+  let omega = finiteOr(rB.x, 0.0);
+  let rpvx = finiteOr(rA.z, 0.0) - omega * ry;
+  let rpvy = finiteOr(rA.w, 0.0) + omega * rx;
+  let rvx = finiteOr(nA.z, 0.0) - rpvx;
+  let rvy = finiteOr(nA.w, 0.0) - rpvy;
   let vn = rvx * nx + rvy * ny;
   if (vn >= -0.02) {
-    outContactMask[i] = 1u;
+    outRigidDeltaB[i].y = 1.0;
     return;
   }
 
-  let invInertia = max(1e-4, finiteOr(rigidInvInertia[rbi], 1.0));
+  let invInertia = max(1e-4, finiteOr(rB.z, 1.0));
   let rn = rx * ny - ry * nx;
   let denom = max(1e-6, invNode + invRigid + (rn * rn) * invInertia);
   let rawJ = (-(1.0 + params.restitution) * vn) / denom;
@@ -1969,12 +1956,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let j = clamp(rawJ, -maxJ, maxJ);
   let jx = j * nx;
   let jy = j * ny;
-  outNodeDVx[i] = jx * invNode;
-  outNodeDVy[i] = jy * invNode;
-  outRigidDVx[i] = -jx * invRigid;
-  outRigidDVy[i] = -jy * invRigid;
-  outRigidDOmega[i] = -(rx * jy - ry * jx) * invInertia;
-  outContactMask[i] = 1u;
+  outNodeDelta[i].z = jx * invNode;
+  outNodeDelta[i].w = jy * invNode;
+  outRigidDeltaA[i].z = -jx * invRigid;
+  outRigidDeltaA[i].w = -jy * invRigid;
+  outRigidDeltaB[i].x = -(rx * jy - ry * jx) * invInertia;
+  outRigidDeltaB[i].y = 1.0;
 }
 `;
 
@@ -1987,40 +1974,35 @@ struct Params {
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var<storage, read> pairRigidIndex: array<u32>;
-@group(0) @binding(2) var<storage, read> pairNodeAIndex: array<u32>;
-@group(0) @binding(3) var<storage, read> pairNodeBIndex: array<u32>;
-@group(0) @binding(4) var<storage, read> rigidX: array<f32>;
-@group(0) @binding(5) var<storage, read> rigidY: array<f32>;
-@group(0) @binding(6) var<storage, read> rigidVx: array<f32>;
-@group(0) @binding(7) var<storage, read> rigidVy: array<f32>;
-@group(0) @binding(8) var<storage, read> nodeX: array<f32>;
-@group(0) @binding(9) var<storage, read> nodeY: array<f32>;
-@group(0) @binding(10) var<storage, read> nodeVx: array<f32>;
-@group(0) @binding(11) var<storage, read> nodeVy: array<f32>;
-@group(0) @binding(12) var<storage, read_write> outRigidDx: array<f32>;
-@group(0) @binding(13) var<storage, read_write> outRigidDy: array<f32>;
-@group(0) @binding(14) var<storage, read_write> outRigidDVx: array<f32>;
-@group(0) @binding(15) var<storage, read_write> outRigidDVy: array<f32>;
-@group(0) @binding(16) var<storage, read_write> outContactMask: array<u32>;
+@group(0) @binding(1) var<storage, read> pairIndex: array<vec4<u32>>;
+@group(0) @binding(2) var<storage, read> rigidStateA: array<vec4<f32>>;
+@group(0) @binding(3) var<storage, read> nodeStateA: array<vec4<f32>>;
+@group(0) @binding(4) var<storage, read_write> outRigidDeltaA: array<vec4<f32>>;
+@group(0) @binding(5) var<storage, read_write> outRigidDeltaB: array<vec2<f32>>;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= params.pairCount) { return; }
 
-  outRigidDx[i] = 0.0; outRigidDy[i] = 0.0; outRigidDVx[i] = 0.0; outRigidDVy[i] = 0.0; outContactMask[i] = 0u;
+  outRigidDeltaA[i] = vec4<f32>(0.0);
+  outRigidDeltaB[i] = vec2<f32>(0.0);
 
-  let rbi = pairRigidIndex[i];
-  let ai = pairNodeAIndex[i];
-  let bi = pairNodeBIndex[i];
+  let pair = pairIndex[i];
+  let rbi = pair.x;
+  let ai = pair.y;
+  let bi = pair.z;
 
-  let rx = rigidX[rbi];
-  let ry = rigidY[rbi];
-  let ax = nodeX[ai];
-  let ay = nodeY[ai];
-  let bx = nodeX[bi];
-  let by = nodeY[bi];
+  let rA = rigidStateA[rbi];
+  let nA = nodeStateA[ai];
+  let nB = nodeStateA[bi];
+
+  let rx = rA.x;
+  let ry = rA.y;
+  let ax = nA.x;
+  let ay = nA.y;
+  let bx = nB.x;
+  let by = nB.y;
 
   let abx = bx - ax;
   let aby = by - ay;
@@ -2045,20 +2027,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
 
   let penetration = minDist - dist;
-  outRigidDx[i] = nx * penetration * 0.92;
-  outRigidDy[i] = ny * penetration * 0.92;
+  outRigidDeltaA[i].x = nx * penetration * 0.92;
+  outRigidDeltaA[i].y = ny * penetration * 0.92;
 
-  let edgeVx = (nodeVx[ai] + nodeVx[bi]) * 0.5;
-  let edgeVy = (nodeVy[ai] + nodeVy[bi]) * 0.5;
-  let rvx = rigidVx[rbi] - edgeVx;
-  let rvy = rigidVy[rbi] - edgeVy;
+  let edgeVx = (nA.z + nB.z) * 0.5;
+  let edgeVy = (nA.w + nB.w) * 0.5;
+  let rvx = rA.z - edgeVx;
+  let rvy = rA.w - edgeVy;
   let vn = rvx * nx + rvy * ny;
   if (vn < 0.0) {
     let j = -(1.0 + params.restitution) * vn;
-    outRigidDVx[i] = nx * j;
-    outRigidDVy[i] = ny * j;
+    outRigidDeltaA[i].z = nx * j;
+    outRigidDeltaA[i].w = ny * j;
   }
-  outContactMask[i] = 1u;
+  outRigidDeltaB[i].y = 1.0;
 }
 `;
 
@@ -2128,7 +2110,6 @@ async function dispatchRigidSoftResponseWgsl({
     const proposal = { nodePairCount, edgePairCount };
 
     if (nodePairCount > 0) {
-      const pairBytes = nodePairCount * 4;
       const params = keep(device.createBuffer({ size: 16, usage: globalThis.GPUBufferUsage.UNIFORM | globalThis.GPUBufferUsage.COPY_DST }));
       const paramFloats = new Float32Array(4);
       new Uint32Array(paramFloats.buffer)[0] = nodePairCount >>> 0;
@@ -2136,27 +2117,87 @@ async function dispatchRigidSoftResponseWgsl({
       paramFloats[2] = Math.max(0.015, Number(edgeSlop) || 0.16);
       device.queue.writeBuffer(params, 0, paramFloats);
 
+      const rigidCount = Number(impulseSeed?.rigidX?.length) || 0;
+      const nodeCount = Number(impulseSeed?.nodeX?.length) || 0;
+      const pairPacked = new Uint32Array(nodePairCount * 2);
+      for (let i = 0; i < nodePairCount; i++) {
+        pairPacked[i * 2] = impulseSeed.nodePairRigidIndex[i] >>> 0;
+        pairPacked[i * 2 + 1] = impulseSeed.nodePairNodeIndex[i] >>> 0;
+      }
+
+      const rigidStateA = new Float32Array(rigidCount * 4);
+      const rigidStateB = new Float32Array(rigidCount * 4);
+      for (let i = 0; i < rigidCount; i++) {
+        const b4 = i * 4;
+        rigidStateA[b4] = impulseSeed.rigidX[i] || 0;
+        rigidStateA[b4 + 1] = impulseSeed.rigidY[i] || 0;
+        rigidStateA[b4 + 2] = impulseSeed.rigidVx[i] || 0;
+        rigidStateA[b4 + 3] = impulseSeed.rigidVy[i] || 0;
+        rigidStateB[b4] = impulseSeed.rigidOmega[i] || 0;
+        rigidStateB[b4 + 1] = impulseSeed.rigidInvMass[i] || 0;
+        rigidStateB[b4 + 2] = impulseSeed.rigidInvInertia[i] || 0;
+      }
+
+      const nodeStateA = new Float32Array(nodeCount * 4);
+      const nodeStateB = new Float32Array(nodeCount * 4);
+      for (let i = 0; i < nodeCount; i++) {
+        const b4 = i * 4;
+        nodeStateA[b4] = impulseSeed.nodeX[i] || 0;
+        nodeStateA[b4 + 1] = impulseSeed.nodeY[i] || 0;
+        nodeStateA[b4 + 2] = impulseSeed.nodeVx[i] || 0;
+        nodeStateA[b4 + 3] = impulseSeed.nodeVy[i] || 0;
+        nodeStateB[b4] = impulseSeed.nodeR[i] || 0;
+        nodeStateB[b4 + 1] = impulseSeed.nodeInvMass[i] || 0;
+      }
+
+      const rigidVertexStart = impulseSeed.rigidVertexStart instanceof Uint32Array
+        ? impulseSeed.rigidVertexStart
+        : new Uint32Array(0);
+      const rigidVertexRange = new Uint32Array(rigidCount * 2);
+      for (let rbi = 0; rbi < rigidCount; rbi++) {
+        const start = rigidVertexStart[rbi] >>> 0;
+        const end = (rbi + 1) < rigidVertexStart.length
+          ? (rigidVertexStart[rbi + 1] >>> 0)
+          : start;
+        const b2 = rbi * 2;
+        rigidVertexRange[b2] = start;
+        rigidVertexRange[b2 + 1] = end;
+      }
+
+      const rigidVertexX = impulseSeed.rigidVertexX instanceof Float32Array
+        ? impulseSeed.rigidVertexX
+        : new Float32Array(0);
+      const rigidVertexY = impulseSeed.rigidVertexY instanceof Float32Array
+        ? impulseSeed.rigidVertexY
+        : new Float32Array(0);
+      const vertexCount = Math.min(rigidVertexX.length, rigidVertexY.length);
+      const rigidVertices = new Float32Array(vertexCount * 2);
+      for (let vi = 0; vi < vertexCount; vi++) {
+        const b2 = vi * 2;
+        rigidVertices[b2] = rigidVertexX[vi] || 0;
+        rigidVertices[b2 + 1] = rigidVertexY[vi] || 0;
+      }
+
       const inBuffers = [
         params,
-        keep(mkStorage(impulseSeed.nodePairRigidIndex)), keep(mkStorage(impulseSeed.nodePairNodeIndex)),
-        keep(mkStorage(impulseSeed.rigidX)), keep(mkStorage(impulseSeed.rigidY)), keep(mkStorage(impulseSeed.rigidVx)),
-        keep(mkStorage(impulseSeed.rigidVy)), keep(mkStorage(impulseSeed.rigidOmega)), keep(mkStorage(impulseSeed.rigidInvMass)),
-        keep(mkStorage(impulseSeed.rigidInvInertia)), keep(mkStorage(impulseSeed.nodeX)), keep(mkStorage(impulseSeed.nodeY)),
-        keep(mkStorage(impulseSeed.nodeVx)), keep(mkStorage(impulseSeed.nodeVy)), keep(mkStorage(impulseSeed.nodeR)),
-        keep(mkStorage(impulseSeed.nodeInvMass)), keep(mkStorage(impulseSeed.rigidVertexStart)), keep(mkStorage(impulseSeed.rigidVertexX)),
-        keep(mkStorage(impulseSeed.rigidVertexY)),
+        keep(mkStorage(pairPacked)),
+        keep(mkStorage(rigidStateA)),
+        keep(mkStorage(rigidStateB)),
+        keep(mkStorage(nodeStateA)),
+        keep(mkStorage(nodeStateB)),
+        keep(mkStorage(rigidVertexRange)),
+        keep(mkStorage(rigidVertices)),
       ];
       const outs = {
-        nodeDx: mkOut(nodePairCount), nodeDy: mkOut(nodePairCount), nodeDVx: mkOut(nodePairCount), nodeDVy: mkOut(nodePairCount),
-        rigidDx: mkOut(nodePairCount), rigidDy: mkOut(nodePairCount), rigidDVx: mkOut(nodePairCount), rigidDVy: mkOut(nodePairCount),
-        rigidDOmega: mkOut(nodePairCount), contactMask: mkOut(nodePairCount, true),
+        nodeDelta: mkOut(nodePairCount * 4),
+        rigidDeltaA: mkOut(nodePairCount * 4),
+        rigidDeltaB: mkOut(nodePairCount * 2),
       };
       Object.values(outs).forEach((o) => { keep(o.gpu); keep(o.read); });
 
       const bindGroup = device.createBindGroup({
         layout: nodePipeline.getBindGroupLayout(0),
-        entries: [...inBuffers, outs.nodeDx.gpu, outs.nodeDy.gpu, outs.nodeDVx.gpu, outs.nodeDVy.gpu,
-          outs.rigidDx.gpu, outs.rigidDy.gpu, outs.rigidDVx.gpu, outs.rigidDVy.gpu, outs.rigidDOmega.gpu, outs.contactMask.gpu]
+        entries: [...inBuffers, outs.nodeDelta.gpu, outs.rigidDeltaA.gpu, outs.rigidDeltaB.gpu]
           .map((buffer, binding) => ({ binding, resource: { buffer } })),
       });
 
@@ -2169,16 +2210,35 @@ async function dispatchRigidSoftResponseWgsl({
       Object.values(outs).forEach((o) => encoder.copyBufferToBuffer(o.gpu, 0, o.read, 0, o.bytes));
       device.queue.submit([encoder.finish()]);
 
-      proposal.nodeDx = await mkReadF32(outs.nodeDx.read, outs.nodeDx.bytes);
-      proposal.nodeDy = await mkReadF32(outs.nodeDy.read, outs.nodeDy.bytes);
-      proposal.nodeDVx = await mkReadF32(outs.nodeDVx.read, outs.nodeDVx.bytes);
-      proposal.nodeDVy = await mkReadF32(outs.nodeDVy.read, outs.nodeDVy.bytes);
-      proposal.nodeRigidDx = await mkReadF32(outs.rigidDx.read, outs.rigidDx.bytes);
-      proposal.nodeRigidDy = await mkReadF32(outs.rigidDy.read, outs.rigidDy.bytes);
-      proposal.nodeRigidDVx = await mkReadF32(outs.rigidDVx.read, outs.rigidDVx.bytes);
-      proposal.nodeRigidDVy = await mkReadF32(outs.rigidDVy.read, outs.rigidDVy.bytes);
-      proposal.nodeRigidDOmega = await mkReadF32(outs.rigidDOmega.read, outs.rigidDOmega.bytes);
-      proposal.nodeContactMask = await mkReadU32(outs.contactMask.read, outs.contactMask.bytes);
+      const nodeDelta = await mkReadF32(outs.nodeDelta.read, outs.nodeDelta.bytes);
+      const rigidDeltaA = await mkReadF32(outs.rigidDeltaA.read, outs.rigidDeltaA.bytes);
+      const rigidDeltaB = await mkReadF32(outs.rigidDeltaB.read, outs.rigidDeltaB.bytes);
+
+      proposal.nodeDx = new Float32Array(nodePairCount);
+      proposal.nodeDy = new Float32Array(nodePairCount);
+      proposal.nodeDVx = new Float32Array(nodePairCount);
+      proposal.nodeDVy = new Float32Array(nodePairCount);
+      proposal.nodeRigidDx = new Float32Array(nodePairCount);
+      proposal.nodeRigidDy = new Float32Array(nodePairCount);
+      proposal.nodeRigidDVx = new Float32Array(nodePairCount);
+      proposal.nodeRigidDVy = new Float32Array(nodePairCount);
+      proposal.nodeRigidDOmega = new Float32Array(nodePairCount);
+      proposal.nodeContactMask = new Uint32Array(nodePairCount);
+
+      for (let i = 0; i < nodePairCount; i++) {
+        const b4 = i * 4;
+        const b2 = i * 2;
+        proposal.nodeDx[i] = nodeDelta[b4] || 0;
+        proposal.nodeDy[i] = nodeDelta[b4 + 1] || 0;
+        proposal.nodeDVx[i] = nodeDelta[b4 + 2] || 0;
+        proposal.nodeDVy[i] = nodeDelta[b4 + 3] || 0;
+        proposal.nodeRigidDx[i] = rigidDeltaA[b4] || 0;
+        proposal.nodeRigidDy[i] = rigidDeltaA[b4 + 1] || 0;
+        proposal.nodeRigidDVx[i] = rigidDeltaA[b4 + 2] || 0;
+        proposal.nodeRigidDVy[i] = rigidDeltaA[b4 + 3] || 0;
+        proposal.nodeRigidDOmega[i] = rigidDeltaB[b2] || 0;
+        proposal.nodeContactMask[i] = (rigidDeltaB[b2 + 1] || 0) > 0.5 ? 1 : 0;
+      }
     }
 
     if (edgePairCount > 0) {
@@ -2189,20 +2249,49 @@ async function dispatchRigidSoftResponseWgsl({
       paramFloats[2] = Math.max(0.8, Number(edgeSlop) || 1.0);
       device.queue.writeBuffer(params, 0, paramFloats);
 
+      const pairPacked = new Uint32Array(edgePairCount * 4);
+      for (let i = 0; i < edgePairCount; i++) {
+        const b4 = i * 4;
+        pairPacked[b4] = impulseSeed.edgePairRigidIndex[i] >>> 0;
+        pairPacked[b4 + 1] = impulseSeed.edgePairNodeAIndex[i] >>> 0;
+        pairPacked[b4 + 2] = impulseSeed.edgePairNodeBIndex[i] >>> 0;
+      }
+
+      const rigidCount = Number(impulseSeed?.rigidX?.length) || 0;
+      const rigidStateA = new Float32Array(rigidCount * 4);
+      for (let i = 0; i < rigidCount; i++) {
+        const b4 = i * 4;
+        rigidStateA[b4] = impulseSeed.rigidX[i] || 0;
+        rigidStateA[b4 + 1] = impulseSeed.rigidY[i] || 0;
+        rigidStateA[b4 + 2] = impulseSeed.rigidVx[i] || 0;
+        rigidStateA[b4 + 3] = impulseSeed.rigidVy[i] || 0;
+      }
+
+      const nodeCount = Number(impulseSeed?.nodeX?.length) || 0;
+      const nodeStateA = new Float32Array(nodeCount * 4);
+      for (let i = 0; i < nodeCount; i++) {
+        const b4 = i * 4;
+        nodeStateA[b4] = impulseSeed.nodeX[i] || 0;
+        nodeStateA[b4 + 1] = impulseSeed.nodeY[i] || 0;
+        nodeStateA[b4 + 2] = impulseSeed.nodeVx[i] || 0;
+        nodeStateA[b4 + 3] = impulseSeed.nodeVy[i] || 0;
+      }
+
       const inBuffers = [
         params,
-        keep(mkStorage(impulseSeed.edgePairRigidIndex)), keep(mkStorage(impulseSeed.edgePairNodeAIndex)), keep(mkStorage(impulseSeed.edgePairNodeBIndex)),
-        keep(mkStorage(impulseSeed.rigidX)), keep(mkStorage(impulseSeed.rigidY)), keep(mkStorage(impulseSeed.rigidVx)), keep(mkStorage(impulseSeed.rigidVy)),
-        keep(mkStorage(impulseSeed.nodeX)), keep(mkStorage(impulseSeed.nodeY)), keep(mkStorage(impulseSeed.nodeVx)), keep(mkStorage(impulseSeed.nodeVy)),
+        keep(mkStorage(pairPacked)),
+        keep(mkStorage(rigidStateA)),
+        keep(mkStorage(nodeStateA)),
       ];
       const outs = {
-        rigidDx: mkOut(edgePairCount), rigidDy: mkOut(edgePairCount), rigidDVx: mkOut(edgePairCount), rigidDVy: mkOut(edgePairCount), contactMask: mkOut(edgePairCount, true),
+        rigidDeltaA: mkOut(edgePairCount * 4),
+        rigidDeltaB: mkOut(edgePairCount * 2),
       };
       Object.values(outs).forEach((o) => { keep(o.gpu); keep(o.read); });
 
       const bindGroup = device.createBindGroup({
         layout: edgePipeline.getBindGroupLayout(0),
-        entries: [...inBuffers, outs.rigidDx.gpu, outs.rigidDy.gpu, outs.rigidDVx.gpu, outs.rigidDVy.gpu, outs.contactMask.gpu]
+        entries: [...inBuffers, outs.rigidDeltaA.gpu, outs.rigidDeltaB.gpu]
           .map((buffer, binding) => ({ binding, resource: { buffer } })),
       });
       const encoder = device.createCommandEncoder();
@@ -2214,11 +2303,24 @@ async function dispatchRigidSoftResponseWgsl({
       Object.values(outs).forEach((o) => encoder.copyBufferToBuffer(o.gpu, 0, o.read, 0, o.bytes));
       device.queue.submit([encoder.finish()]);
 
-      proposal.edgeRigidDx = await mkReadF32(outs.rigidDx.read, outs.rigidDx.bytes);
-      proposal.edgeRigidDy = await mkReadF32(outs.rigidDy.read, outs.rigidDy.bytes);
-      proposal.edgeRigidDVx = await mkReadF32(outs.rigidDVx.read, outs.rigidDVx.bytes);
-      proposal.edgeRigidDVy = await mkReadF32(outs.rigidDVy.read, outs.rigidDVy.bytes);
-      proposal.edgeContactMask = await mkReadU32(outs.contactMask.read, outs.contactMask.bytes);
+      const rigidDeltaA = await mkReadF32(outs.rigidDeltaA.read, outs.rigidDeltaA.bytes);
+      const rigidDeltaB = await mkReadF32(outs.rigidDeltaB.read, outs.rigidDeltaB.bytes);
+
+      proposal.edgeRigidDx = new Float32Array(edgePairCount);
+      proposal.edgeRigidDy = new Float32Array(edgePairCount);
+      proposal.edgeRigidDVx = new Float32Array(edgePairCount);
+      proposal.edgeRigidDVy = new Float32Array(edgePairCount);
+      proposal.edgeContactMask = new Uint32Array(edgePairCount);
+
+      for (let i = 0; i < edgePairCount; i++) {
+        const b4 = i * 4;
+        const b2 = i * 2;
+        proposal.edgeRigidDx[i] = rigidDeltaA[b4] || 0;
+        proposal.edgeRigidDy[i] = rigidDeltaA[b4 + 1] || 0;
+        proposal.edgeRigidDVx[i] = rigidDeltaA[b4 + 2] || 0;
+        proposal.edgeRigidDVy[i] = rigidDeltaA[b4 + 3] || 0;
+        proposal.edgeContactMask[i] = (rigidDeltaB[b2 + 1] || 0) > 0.5 ? 1 : 0;
+      }
     }
 
     return proposal;

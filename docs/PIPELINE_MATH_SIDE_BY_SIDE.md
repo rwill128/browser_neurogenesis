@@ -664,3 +664,206 @@ Use this per-stage template in benchmark notes so timing data lines up with this
 | Body-fluid injection |  |  |  |  | wgsl-gather/cpu-gather | include contribution count |
 
 This makes before/after optimization runs auditable without ambiguity.
+
+---
+
+## 12) Equation cards (term-by-term mapping to code)
+
+These cards are deliberately explicit so we can reason from algebra ↔ implementation without hand-waving.
+
+## 12.1 Equation card — rigid fluid coupling + rigid integration
+
+### Equation block
+1. Relative fluid velocity at sample point:
+   - `rel = u_fluid - u_rigid_local`
+2. Drag force contribution:
+   - `f = rel * dragK * honey * momentumScale`
+3. Rigid acceleration:
+   - `a = Σf / m`, `alpha = Σ(r × f) / I`
+4. Velocity + swim update:
+   - `v <- v + a*dt*60 + swim*dtNorm`
+   - `ω <- ω + alpha*dt*60 + swimTorque*dtNorm`
+5. Damping/cap:
+   - `v <- damp(v)`, `|v| <= vmax`, `ω` clamped
+6. Position integration:
+   - `x <- x + vx*dt*22`, `y <- y + vy*dt*28`, `θ <- θ + ω*dt*60`
+
+### Code mapping
+| Equation term | Baseline CPU vars | GPU-validated/GPU-fast vars |
+|---|---|---|
+| `rel` | `relX`, `relY` | `relX`, `relY` |
+| `f` | `fpx`, `fpy` | `fpx`, `fpy` |
+| `a, alpha` | `ax`, `ay`, `alpha` | same + WGSL proposal buffers |
+| integration | `b.vx`, `b.vy`, `b.omega`, `b.x`, `b.y`, `b.theta` | same, or WGSL authoritative arrays applied |
+
+### Mode behavior
+- **Baseline:** CPU authoritative always.
+- **GPU-validated:** CPU reference + optional WGSL authoritative apply when proposal signature/finite checks pass.
+- **GPU-fast:** same equations, but fast authoritative route is preferred when proposal is fresh/finite.
+
+**Citations:**
+- Baseline: `gpu-lab.js` L4150-L4153, L4164-L4175, L4192-L4194.
+- GPU path: `stepRigidGpuOnly.js` L128-L237, L431-L485.
+
+## 12.2 Equation card — soft fluid coupling (node + cluster)
+
+### Equation block
+1. Node fluid-vs-cluster relative term:
+   - `Δu_cluster = u_fluid - u_cluster_local`
+2. Force and carries:
+   - `F = Δu_cluster * dragK * honey * flowCoupling * mass`
+   - `carry = F / mass`
+   - `localCarry = (u_fluid - u_node) * dragK * honey * invMass * flowCoupling * localShare`
+3. Cluster load accumulation:
+   - `cluster.force += F`
+   - `cluster.torque += r × F`
+4. Cluster acceleration projection to nodes:
+   - `v_node += (a_cluster + alpha_cluster × r) * flowShare`
+5. Coherence controls:
+   - tug toward cluster pull, relative velocity damping, rigid-motion projection
+
+### Mode behavior
+- **Baseline:** all above computed in CPU loops.
+- **GPU-validated:** same CPU reference retained; WGSL proposals compared and optionally consumed.
+- **GPU-fast:** can shortcut to finite WGSL carry/cluster proposals and skip strict parity mismatch gating.
+
+**Citations:**
+- Baseline: `gpu-lab.js` L4303, L4309, L4316-L4318, L4369, L4404.
+- GPU path: `stepSoftFluidCouplingGpuOnly.js` L1088-L1094, L1115-L1117, L1209-L1211, L925-L933, L1162-L1183.
+
+## 12.3 Equation card — spring XPBD
+
+### Equation block
+1. Predicted endpoints:
+   - `pA = xA + vA*dtPos`, `pB = xB + vB*dtPos`
+2. Constraint residual:
+   - `C = clamp(|pB-pA| - rest, ±strainCap)`
+3. XPBD delta-lambda:
+   - `dl = (-C - alpha*lambdaPrev) / (wSum + alpha)`
+   - `lambdaNext = clamp(lambdaPrev + dl, [-20,20])`
+4. Velocity correction:
+   - `vA += (-wA*dl*n)/dtPos`
+   - `vB += ( wB*dl*n)/dtPos`
+
+### Mode behavior
+- **Baseline:** CPU Gauss-Seidel XPBD iterations.
+- **GPU-validated:** WGSL proposal + deterministic CPU parity reduction.
+- **GPU-fast:** can replay fresh proposal by epoch/signature and skip probe telemetry.
+
+**Citations:**
+- Baseline: `gpu-lab.js` L3080, L3088, L3090, L3099.
+- WGSL proposal formula: `stepSoftSpringsXpbdGpuOnly.js` L96-L98.
+- Fast/validated route handling: `stepSoftSpringsXpbdGpuOnly.js` L1459-L1462, L1597-L1606.
+
+## 12.4 Equation card — area XPBD
+
+### Equation block
+1. Predicted polygon area:
+   - `A = signedAreaPredicted(...)`
+2. Residual:
+   - `C = A - A_rest`
+3. Gradient and denominator:
+   - `sumWGrad2 = Σ w_i * |∇_i A|²`
+4. XPBD update:
+   - `dl = (-C - alpha*lambdaPrev)/(sumWGrad2 + alpha)`
+   - clamp `dl`, clamp `lambda`
+5. Velocity correction:
+   - `v_i += (w_i * ∇_i A * dl)/dtPos`
+
+### Mode behavior
+- **Baseline:** CPU reference solve.
+- **GPU-validated:** WGSL probe/lambda/velocity proposals with parity checks.
+- **GPU-fast:** probe may be skipped; replay may be accepted by epoch/signature when finite.
+
+**Citations:**
+- Baseline: `gpu-lab.js` L3162, L3182, L3188, L3198.
+- WGSL formula: `stepSoftAreaXpbdGpuOnly.js` L120-L124.
+- Fast replay/fallback: `stepSoftAreaXpbdGpuOnly.js` L1230-L1260, L1276, L1363-L1388.
+
+## 12.5 Equation card — membrane pressure
+
+### Equation block
+1. Normalized area error:
+   - `err = clamp((areaBase - areaNow)/areaBase, [-0.65, 0.65])`
+2. Gain scaling:
+   - `gain = pressureGain * (1 + min(1.4, abs(err)*2.2))`
+3. Impulse:
+   - `impulse = err * gain * dtPos * invMass`
+4. Apply along outward normal (+ optional radial damping)
+
+### Mode behavior
+- **Baseline:** CPU computes area + normal impulse directly.
+- **GPU-validated:** WGSL area probe + velocity proposal parity.
+- **GPU-fast:** finite WGSL proposal can be accepted with reduced parity burden.
+
+**Citations:**
+- Baseline: `gpu-lab.js` L3535, L3540, L3576.
+- WGSL formula: `stepSoftMembranePressureGpuOnly.js` L46, L111, L113.
+
+## 12.6 Equation card — collision impulses (CPU reference equations)
+
+### Circle/circle (soft-soft node-node)
+- penetration correction proportional to inverse masses
+- relative normal velocity `vn = (vb-va)·n`
+- impulse scalar `j = -(1+e)*vn/(invA+invB)` when `vn < 0`
+
+### Point/segment style (rigid-soft edge and soft-node-edge)
+- closest point on segment
+- penetration pushout along normal
+- scalar impulse `j = -(1+e)*vn` applied to node/rigid endpoint velocities
+
+### Mode behavior
+- **Baseline:** these CPU equations run inline.
+- **GPU-validated/fast:** WGSL proposals may be authoritative for some passes; hard CPU fallback still uses these equations/semantics.
+
+**Citations:** `gpu-lab.js` L2246, L2264-L2266, L2312-L2314, L2350-L2352, L4668-L4721.
+
+## 12.7 Equation card — boundary bounce
+
+### Equation block
+For each axis:
+- clamp position to `[r, n-r]`
+- if velocity points outward through boundary, reflect+damp:
+  - `v = -v * damping`
+- angular damping on impact:
+  - `omega *= 0.9`
+
+### Mode behavior
+- **Baseline:** CPU `applyBounceBoundary` for all entries.
+- **GPU-validated/fast:** boundary pass may be WGSL for finite entries, CPU for non-finite or fallback.
+
+**Citations:** `gpu-lab.js` L2204-L2228; `stepCollisionBoundaryGpuOnly.js` L300-L371.
+
+## 12.8 Equation card — body→fluid injection gather/apply
+
+### Equation block
+1. Relative injection velocity:
+   - `rel = clamp(p_body - u_localFluid + swimInject, couplingLimit)`
+2. Scale:
+   - `scale = clamp(feedbackK * max(0.1,mass) * momentumScale, couplingLimit)`
+3. Per-cell weighted impulse:
+   - `j = clamp(rel * scale * weight, couplingLimit)`
+4. Apply to fluid fields:
+   - `vx[cell] += jx`, `vy[cell] += jy` (clamped)
+
+### Mode behavior
+- **Baseline:** CPU `injectPoint` computes and applies directly.
+- **GPU-validated:** WGSL gather proposal compared with CPU parity before authority.
+- **GPU-fast:** finite same-frame WGSL gather can be authoritative; else explicit fast CPU fallback route.
+
+**Citations:**
+- Baseline: `gpu-lab.js` L4956, L4960, L4971.
+- GPU gather layout/apply: `stepBodyFluidInjectionGpuOnly.js` L289, L291, L375, L355-L393, L675-L723.
+
+## 12.9 Card-level quick mode map
+
+| Card | Baseline authority | GPU-validated authority policy | GPU-fast authority policy |
+|---|---|---|---|
+| Rigid step | CPU | WGSL if signature+finite, else CPU | same policy, faster acceptance path |
+| Soft fluid coupling | CPU | WGSL proposals parity-checked vs CPU | finite WGSL shortcut allowed |
+| Spring XPBD | CPU | WGSL proposal + deterministic parity | replay + reduced probe/parity overhead |
+| Area XPBD | CPU | probe/lambda/velocity proposals + parity | probe skips/replay windows in fast |
+| Membrane pressure | CPU | WGSL proposal with parity checks | finite proposal can bypass parity |
+| Collisions | CPU | mixed WGSL proposal + CPU fallback | same, plus rigid-soft fast skips/replay |
+| Boundary | CPU | WGSL finite + CPU non-finite | same |
+| Injection | CPU | WGSL gather vs CPU parity | finite WGSL gather fast-authoritative |

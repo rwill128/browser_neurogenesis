@@ -2515,8 +2515,28 @@ function buildRigidCollisionPolyMeta(polys) {
   });
 }
 
-function createRigidWorldPolyPhaseCache(rigidBodies, stats = null) {
-  const cache = new Array(Array.isArray(rigidBodies) ? rigidBodies.length : 0);
+function createRigidWorldPolyPhaseCache(rigidBodies, stats = null, reuseCache = null) {
+  const bodyCount = Array.isArray(rigidBodies) ? rigidBodies.length : 0;
+  const cache = new Array(bodyCount);
+
+  let sharedEntries = null;
+  if (reuseCache && typeof reuseCache === 'object') {
+    if (!Array.isArray(reuseCache.entries) || reuseCache.entries.length !== bodyCount) {
+      reuseCache.entries = new Array(bodyCount);
+    }
+    sharedEntries = reuseCache.entries;
+  }
+
+  const isEntryMatch = (entry, rb, x, y, theta, verticesLocal, verticesLocalLength) => (
+    entry
+    && entry.rb === rb
+    && entry.x === x
+    && entry.y === y
+    && entry.theta === theta
+    && entry.verticesLocal === verticesLocal
+    && entry.verticesLocalLength === verticesLocalLength
+  );
+
   return (index) => {
     if (!Array.isArray(rigidBodies) || index < 0 || index >= rigidBodies.length) {
       return { polys: [], meta: [] };
@@ -2528,21 +2548,55 @@ function createRigidWorldPolyPhaseCache(rigidBodies, stats = null) {
     const x = Number(rb.x) || 0;
     const y = Number(rb.y) || 0;
     const theta = Number(rb.theta) || 0;
+    const verticesLocal = Array.isArray(rb.verticesLocal) ? rb.verticesLocal : null;
+    const verticesLocalLength = verticesLocal ? verticesLocal.length : 0;
 
     const prev = cache[index];
-    if (prev && prev.rb === rb && prev.x === x && prev.y === y && prev.theta === theta) {
-      if (stats) stats.polyCacheHits = (Number(stats.polyCacheHits) || 0) + 1;
+    if (isEntryMatch(prev, rb, x, y, theta, verticesLocal, verticesLocalLength)) {
+      if (stats) {
+        stats.polyCacheHits = (Number(stats.polyCacheHits) || 0) + 1;
+        stats.polyCacheLocalHits = (Number(stats.polyCacheLocalHits) || 0) + 1;
+        stats.polyBodiesReused = (Number(stats.polyBodiesReused) || 0) + 1;
+      }
       return prev;
+    }
+
+    if (sharedEntries) {
+      const shared = sharedEntries[index];
+      if (isEntryMatch(shared, rb, x, y, theta, verticesLocal, verticesLocalLength)) {
+        cache[index] = shared;
+        if (stats) {
+          stats.polyCacheHits = (Number(stats.polyCacheHits) || 0) + 1;
+          stats.polyCacheSharedHits = (Number(stats.polyCacheSharedHits) || 0) + 1;
+          stats.polyBodiesReused = (Number(stats.polyBodiesReused) || 0) + 1;
+        }
+        return shared;
+      }
     }
 
     if (stats) {
       stats.polyCacheMisses = (Number(stats.polyCacheMisses) || 0) + 1;
       stats.polyCacheRebuilds = (Number(stats.polyCacheRebuilds) || 0) + 1;
+      stats.polyBodiesBuilt = (Number(stats.polyBodiesBuilt) || 0) + 1;
     }
+
+    const polyBuildStartMs = performance.now();
     const polys = getRigidCollisionPolysWorld(rb);
     const meta = buildRigidCollisionPolyMeta(polys);
-    const next = { rb, x, y, theta, polys, meta };
+    if (stats) stats.polyBuildMs = (Number(stats.polyBuildMs) || 0) + (performance.now() - polyBuildStartMs);
+
+    const next = {
+      rb,
+      x,
+      y,
+      theta,
+      verticesLocal,
+      verticesLocalLength,
+      polys,
+      meta,
+    };
     cache[index] = next;
+    if (sharedEntries) sharedEntries[index] = next;
     return next;
   };
 }
@@ -5027,8 +5081,14 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     softSoftEdgeHits: 0,
     polyCacheLookups: 0,
     polyCacheHits: 0,
+    polyCacheLocalHits: 0,
+    polyCacheSharedHits: 0,
     polyCacheMisses: 0,
     polyCacheRebuilds: 0,
+    polyBodiesBuilt: 0,
+    polyBodiesReused: 0,
+    polyBuildMs: 0,
+    polyCacheHitRatePct: 0,
   };
   if (solverPath === 'gpu-only') {
     const collisionResult = await runCollisionIterationsGpuOnly({
@@ -5094,6 +5154,9 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       lastPairs: null,
       lastStats: null,
     });
+    const rigidWorldPolyReuseCache = (sim.rigidWorldPolyReuseCache ||= {
+      entries: null,
+    });
 
     // Body-body collisions: rigid↔rigid, rigid↔soft, soft↔soft
     for (let iter = 0; iter < 2; iter++) {
@@ -5135,7 +5198,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       rigidRigidBroadphaseRuntime.pairsOut += Number(preBroadphase.stats?.pairsOut) || 0;
       const preRigidNarrowphaseStartMs = performance.now();
       const preRigidMeta = Array.isArray(phaseScene?.rigidMeta) ? phaseScene.rigidMeta : [];
-      const getPreRigidWorldPolys = createRigidWorldPolyPhaseCache(bodies.rigid, collisionCpuRuntime);
+      const getPreRigidWorldPolys = createRigidWorldPolyPhaseCache(bodies.rigid, collisionCpuRuntime, rigidWorldPolyReuseCache);
       for (const [i, j] of preBroadphase.pairs) {
         collisionCpuRuntime.rigidRigidPairChecks += 1;
 
@@ -5301,7 +5364,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
 
         const postRigidMeta = Array.isArray(postScene?.rigidMeta) ? postScene.rigidMeta : [];
         const postRigidNarrowphaseStartMs = performance.now();
-        const getPostRigidWorldPolys = createRigidWorldPolyPhaseCache(bodies.rigid, collisionCpuRuntime);
+        const getPostRigidWorldPolys = createRigidWorldPolyPhaseCache(bodies.rigid, collisionCpuRuntime, rigidWorldPolyReuseCache);
         for (const [i, j] of postBroadphase.pairs) {
           collisionCpuRuntime.rigidRigidPairChecks += 1;
 
@@ -5415,6 +5478,10 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     (collisionCpuRuntime.substageMs.candidateBuildTotal || 0)
     + (collisionCpuRuntime.substageMs.narrowphaseTotal || 0)
     + (collisionCpuRuntime.substageMs.applyTotal || 0);
+
+  collisionCpuRuntime.polyCacheHitRatePct = collisionCpuRuntime.polyCacheLookups > 0
+    ? (collisionCpuRuntime.polyCacheHits / collisionCpuRuntime.polyCacheLookups) * 100
+    : 0;
 
   sim.rigidRigidBroadphaseRuntime = rigidRigidBroadphaseRuntime;
   sim.rigidSoftBroadphaseRuntime = rigidSoftBroadphaseRuntime;
@@ -7987,8 +8054,14 @@ window.__gpuLabApi = {
           polyCache: {
             lookups: Number(sim.collisionCpuRuntime.polyCacheLookups) || 0,
             hits: Number(sim.collisionCpuRuntime.polyCacheHits) || 0,
+            localHits: Number(sim.collisionCpuRuntime.polyCacheLocalHits) || 0,
+            sharedHits: Number(sim.collisionCpuRuntime.polyCacheSharedHits) || 0,
             misses: Number(sim.collisionCpuRuntime.polyCacheMisses) || 0,
             rebuilds: Number(sim.collisionCpuRuntime.polyCacheRebuilds) || 0,
+            bodiesBuilt: Number(sim.collisionCpuRuntime.polyBodiesBuilt) || 0,
+            bodiesReused: Number(sim.collisionCpuRuntime.polyBodiesReused) || 0,
+            buildMs: Number(sim.collisionCpuRuntime.polyBuildMs) || 0,
+            hitRatePct: Number(sim.collisionCpuRuntime.polyCacheHitRatePct) || 0,
           },
         }
         : {
@@ -8050,7 +8123,18 @@ window.__gpuLabApi = {
             rigidRigidEarlyRadiusRejected: 0,
             rigidRigidTotalRejected: 0,
           },
-          polyCache: { lookups: 0, hits: 0, misses: 0, rebuilds: 0 },
+          polyCache: {
+            lookups: 0,
+            hits: 0,
+            localHits: 0,
+            sharedHits: 0,
+            misses: 0,
+            rebuilds: 0,
+            bodiesBuilt: 0,
+            bodiesReused: 0,
+            buildMs: 0,
+            hitRatePct: 0,
+          },
         },
       softFluidCouplingRuntime: {
         lastSourceRoute: sim?.softFluidCouplingWgslState?.lastSourceRoute || null,

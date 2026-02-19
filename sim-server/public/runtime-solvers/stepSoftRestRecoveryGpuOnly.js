@@ -7,6 +7,14 @@
 
 const WGSL_WORKGROUP_SIZE = 64;
 
+function addTimingSample(state, key, ms) {
+  if (!state || !key) return;
+  const timing = state.lastTiming && typeof state.lastTiming === 'object'
+    ? state.lastTiming
+    : (state.lastTiming = {});
+  timing[key] = (Number(timing[key]) || 0) + Math.max(0, Number(ms) || 0);
+}
+
 const softRestRecoveryProbeWgsl = /* wgsl */`
 struct Params {
   nodeCount: u32,
@@ -575,6 +583,9 @@ export function applySoftRestRecoveryGpuOnly({
   recoverSoftSpringRests,
   wgslOffload,
 }) {
+  const timingState = wgslOffload?.state || null;
+  if (timingState) timingState.lastTiming = {};
+  const stageStartMs = performance.now();
   if (!Array.isArray(springs) || !restBaseline || springs.length !== restBaseline.length) return;
   if (typeof recoverSoftSpringRests !== 'function') {
     throw new Error('gpu-only soft rest-recovery pass requires recoverSoftSpringRests callback');
@@ -588,6 +599,7 @@ export function applySoftRestRecoveryGpuOnly({
 
   let proposalSignature = 0;
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
+    const prepStartMs = performance.now();
     const plan = buildSoftRestRecoveryWgslPlan({ springs, softNodes });
     const layout = buildSoftRestRecoveryWgslLayout({ plan, restBaseline });
     wgslOffload.state.preparedPlan = plan;
@@ -602,8 +614,10 @@ export function applySoftRestRecoveryGpuOnly({
       options,
     });
     wgslOffload.state.lastPreparedProposalSignature = proposalSignature;
+    addTimingSample(timingState, 'prep.planLayoutSignatureMs', performance.now() - prepStartMs);
 
     if (canUseWgslOffload(wgslOffload) && plan.activeSpringCount > 0) {
+      const wgslDispatchScheduleStartMs = performance.now();
       const serializedProbe = (wgslOffload.state.pendingWgslRestRecoveryProbePromise || Promise.resolve())
         .then(async () => {
           const probeRan = await dispatchSoftRestRecoveryWgslProbe({ softNodes, layout, offload: wgslOffload });
@@ -632,6 +646,7 @@ export function applySoftRestRecoveryGpuOnly({
           wgslOffload.state.lastProposalSource = 'cpu-rest-recovery-authoritative';
         });
       wgslOffload.state.pendingWgslRestRecoveryProbePromise = serializedProbe;
+      addTimingSample(timingState, 'wgsl.dispatchScheduleMs', performance.now() - wgslDispatchScheduleStartMs);
     }
   }
 
@@ -641,6 +656,7 @@ export function applySoftRestRecoveryGpuOnly({
     springCount: springs.length,
   });
 
+  const applyStartMs = performance.now();
   if (useAuthoritativeProposal) {
     applyAuthoritativeRestRecoveryProposal({
       springs,
@@ -649,6 +665,8 @@ export function applySoftRestRecoveryGpuOnly({
   } else {
     recoverSoftSpringRests(springs, restBaseline, options);
   }
+  addTimingSample(timingState, useAuthoritativeProposal ? 'wgsl.authoritativeApplyMs' : 'cpu.recoveryApplyMs', performance.now() - applyStartMs);
+  addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
 
   if (wgslOffload?.state) {
     wgslOffload.state.lastAuthoritativeSource = useAuthoritativeProposal

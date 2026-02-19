@@ -5,6 +5,14 @@
  */
 const WGSL_WORKGROUP_SIZE = 64;
 
+function addTimingSample(state, key, ms) {
+  if (!state || !key) return;
+  const timing = state.lastTiming && typeof state.lastTiming === 'object'
+    ? state.lastTiming
+    : (state.lastTiming = {});
+  timing[key] = (Number(timing[key]) || 0) + Math.max(0, Number(ms) || 0);
+}
+
 const softSpringStretchProbeWgsl = /* wgsl */`
 struct Params {
   nodeCount: u32,
@@ -1349,6 +1357,9 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
   skipClusterSet = null,
   wgslOffload,
 }) {
+  const timingState = wgslOffload?.state || null;
+  if (timingState) timingState.lastTiming = {};
+  const stageStartMs = performance.now();
   if (!soft?.nodes?.length || !soft?.springs?.length) return;
   if (!Array.isArray(lambdaCache) && !(lambdaCache instanceof Float32Array)) {
     throw new Error('gpu-only soft spring XPBD pass requires lambdaCache array-like');
@@ -1374,8 +1385,10 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
       // Unblocker for upcoming WGSL XPBD stage: prepare deterministic CSR endpoint
       // ownership and spring SoA buffers now so the compute stage can run spring
       // solve + node reduction without atomics changing ownership semantics.
+      const prepLayoutStartMs = performance.now();
       const plan = buildSoftSpringXpbdWgslPlan({ soft, skipClusterSet });
       const layout = buildSoftSpringXpbdWgslLayout({ soft, plan });
+      addTimingSample(timingState, 'prep.planAndLayoutMs', performance.now() - prepLayoutStartMs);
       wgslOffload.state.preparedPlan = plan;
       wgslOffload.state.preparedLayout = layout;
       wgslOffload.state.lastPreparedSpringCount = plan.activeSpringCount;
@@ -1439,6 +1452,7 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
       && wgslOffload.state.lastProposalLambdaNextBySpring.length === soft.springs.length;
 
     if (cachedProposalReady) {
+      const authoritativeReplayApplyStartMs = performance.now();
       applySoftSpringWgslAuthoritativeProposal({
         soft,
         lambdaCache,
@@ -1461,11 +1475,13 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
         ? 'wgsl-velocity-authoritative-fast'
         : 'wgsl-velocity-authoritative-validated';
       wgslOffload.state.lastError = null;
+      addTimingSample(timingState, 'wgsl.authoritativeReplayApplyMs', performance.now() - authoritativeReplayApplyStartMs);
     }
 
     // Continue probing/proposal dispatch while CPU remains authoritative so the
     // next matching frame can promote deterministic WGSL deltas safely.
     if (!cachedProposalReady && canUseWgslOffload(wgslOffload)) {
+      const wgslDispatchScheduleStartMs = performance.now();
       if (wgslOffload.state.wgslInFlight) {
         wgslOffload.state.wgslSkippedWhileBusy = (wgslOffload.state.wgslSkippedWhileBusy || 0) + 1;
       } else {
@@ -1612,10 +1628,12 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
             }
           });
       }
+      addTimingSample(timingState, 'wgsl.dispatchScheduleMs', performance.now() - wgslDispatchScheduleStartMs);
     }
     }
   }
 
+  const cpuResidualSolveStartMs = performance.now();
   for (let iter = xpbdIterStart; iter < softXpbdIters; iter++) {
     for (let si = 0; si < soft.springs.length; si++) {
       const [i, j, rest] = soft.springs[si];
@@ -1660,4 +1678,6 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
       b.vy += corrBy / dtPos;
     }
   }
+  addTimingSample(timingState, 'cpu.residualSolveMs', performance.now() - cpuResidualSolveStartMs);
+  addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
 }

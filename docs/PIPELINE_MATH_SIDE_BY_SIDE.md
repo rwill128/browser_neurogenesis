@@ -905,7 +905,33 @@ All newly added per-frame timers are exported through:
 - `bodies.bodyFluidInjection.gpuOnly` / `bodies.bodyFluidInjection.baseline`
 - `bodies.metricsPack`
 
-### 13.3 Existing module-native substage timing still available
-The above keys are top-level orchestration timers. For substage internals, keep using existing module timing payloads (especially rigid-soft broadphase/probe/response timings) in `rigidSoftRuntime` status fields.
+### 13.3 Module-native atomic timing payloads (status export)
+Top-level orchestration timers above are now complemented by per-module atomic timing maps in `window.__gpuLabApi.getStatus()`:
 
-**Citations:** `sim-server/public/gpu-lab.js` (timing recorder helpers near `stepBodiesAndInject`, frame loop instrumentation in `stepAndRender`, and status export in `window.__gpuLabApi.getStatus`).
+- `rigidStepRuntime.lastTiming`
+  - e.g. `cpu.referenceSolveMs`, `cpu.perBodyTotalMs`, `wgsl.dispatchAndReadbackMs`, `wgsl.authoritativeApplyMs`, `totalMs`
+- `softFluidCouplingRuntime.lastTiming`
+  - e.g. `prep.topologyLayoutMs`, `prep.cpuSampleLayoutMs`, `cpu.nodeCarryApply.*`, `wgsl.clusterLoadDispatchScheduleMs`, `cpu.clusterPostProcessingMs`, `totalMs`
+- `softSpringRuntime.lastTiming`
+  - e.g. `prep.planAndLayoutMs`, `wgsl.dispatchScheduleMs`, `wgsl.authoritativeReplayApplyMs`, `cpu.residualSolveMs`, `totalMs`
+- `softAreaRuntime.lastTiming`
+  - e.g. `prep.planAndLayoutMs`, `wgsl.dispatchScheduleMs`, `wgsl.authoritativeReplayApplyMs`, `cpu.residualSolveMs`, `totalMs`
+- `membranePressureRuntime.lastTiming`
+  - e.g. `prep.layoutAndSignatureMs`, `wgsl.dispatchScheduleMs`, `cpu.applyPressureMs`, `totalMs`
+- `softIntegrateRuntime.lastTiming`
+  - e.g. `prep.inputArraysMs`, `wgsl.dispatchAndReadbackMs`, `cpu.applyOutputsMs`, `cpu.integrateMs`, `cpu.fallbackIntegrateMs`, `totalMs`
+- `rigidPostIntegrateRuntime.lastTiming`
+  - e.g. `prep.inputArraysMs`, `wgsl.dispatchAndReadbackMs`, `cpu.applyOutputsMs`, `cpu.clampMs`, `cpu.fallbackClampMs`, `totalMs`
+- `membraneBoundaryRuntime.lastTiming`
+  - e.g. `cpu.edgeSolveMs`, `cpu.bendSolveMs`, `wgsl.edgeDispatchScheduleMs`, `wgsl.bendDispatchScheduleMs`, `wgsl.edgeAuthoritativeApplyMs`, `wgsl.bendAuthoritativeApplyMs`, `totalMs`
+- `membraneShapeMemoryRuntime.lastTiming`
+  - e.g. `cpu.shapeMemorySolveMs`, `wgsl.shapeMemoryDispatchScheduleMs`, `wgsl.shapeMemoryAuthoritativeApplyMs`, `totalMs`
+- `softRestRecoveryRuntime.lastTiming`
+  - e.g. `prep.planLayoutSignatureMs`, `wgsl.dispatchScheduleMs`, `wgsl.authoritativeApplyMs`, `cpu.recoveryApplyMs`, `totalMs`
+- `softDeformationRuntime.lastTiming`
+  - e.g. `prep.layoutMs`, `cpu.buildDeformStateMs`, `wgsl.metricsDispatchMs`, `cpu.severeStabilizeMs`, `cpu.rebuildDeformStateMs`, `wgsl.postMetricsDispatchMs`, `totalMs`
+- `bodyFluidInjectionRuntime.lastTiming`
+  - e.g. `prep.pointAndGatherLayoutMs`, `cpu.gatherDeltaBuildMs`, `wgsl.dispatchAndReadbackMs`, `cpu.applyCellDeltasMs`, `totalMs`
+- `rigidSoftRuntime` keeps its existing detailed timing payloads (`lastNodeBroadphaseTiming`, `lastEdgeBroadphaseTiming`, `lastNodeNarrowphaseAabbProbeTiming`, `lastEdgeNarrowphaseAabbProbeTiming`, `lastRigidSoftResponseTiming`).
+
+**Citations:** `sim-server/public/gpu-lab.js` (timing recorder helpers near `stepBodiesAndInject`, frame loop instrumentation in `stepAndRender`, module status export in `window.__gpuLabApi.getStatus`) and `sim-server/public/runtime-solvers/*.js` (module-level `lastTiming` keys).

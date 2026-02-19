@@ -59,6 +59,14 @@ function clampComponent(v, limit) {
   return clamp(v, -limit, limit);
 }
 
+function addTimingSample(state, key, ms) {
+  if (!state || !key) return;
+  const timing = state.lastTiming && typeof state.lastTiming === 'object'
+    ? state.lastTiming
+    : (state.lastTiming = {});
+  timing[key] = (Number(timing[key]) || 0) + Math.max(0, Number(ms) || 0);
+}
+
 function canUseWgslOffload(offload) {
   return Boolean(
     offload
@@ -584,6 +592,9 @@ export async function applyBodyFluidInjectionGpuOnly({
   fluidCouplingComponentLimit,
   wgslOffload,
 }) {
+  const timingState = wgslOffload?.state || null;
+  if (timingState) timingState.lastTiming = {};
+  const stageStartMs = performance.now();
   const couplingLimitRaw = Number(fluidCouplingComponentLimit);
   const couplingLimit = Number.isFinite(couplingLimitRaw)
     ? clamp(couplingLimitRaw, 0.25, 48)
@@ -591,6 +602,7 @@ export async function applyBodyFluidInjectionGpuOnly({
 
   let injectedMomentum = 0;
 
+  const prepLayoutStartMs = performance.now();
   const { plan, layout, softClusterForInjection } = buildBodyFluidInjectionWgslPrep({
     sim,
     bodies,
@@ -612,6 +624,7 @@ export async function applyBodyFluidInjectionGpuOnly({
     feedbackK,
     fluidCouplingComponentLimit: couplingLimit,
   });
+  addTimingSample(timingState, 'prep.pointAndGatherLayoutMs', performance.now() - prepLayoutStartMs);
 
   const pipelineMode = getGpuOnlyPipelineModeProfile(wgslOffload);
   const fastMode = pipelineMode === 'gpu-only-fast';
@@ -620,11 +633,13 @@ export async function applyBodyFluidInjectionGpuOnly({
 
   let cpuGatherDelta = null;
   if (!fastMode) {
+    const cpuGatherBuildStartMs = performance.now();
     cpuGatherDelta = computeBodyFluidInjectionCellDeltasFromGatherLayout({
       gatherLayout,
       couplingLimit,
       n,
     });
+    addTimingSample(timingState, 'cpu.gatherDeltaBuildMs', performance.now() - cpuGatherBuildStartMs);
   }
   const gatherSignature = validatedMode ? buildBodyFluidInjectionGatherSignature(gatherLayout) : 0;
 
@@ -652,6 +667,7 @@ export async function applyBodyFluidInjectionGpuOnly({
     if (!standardMode && canUseWgslOffload(wgslOffload)) {
       const runId = (wgslOffload.state.lastWgslRunId || 0) + 1;
       wgslOffload.state.lastWgslRunId = runId;
+      const wgslDispatchStartMs = performance.now();
       try {
         const wgslGatherRan = await dispatchBodyFluidInjectionGatherProposal({
           offload: wgslOffload,
@@ -669,6 +685,7 @@ export async function applyBodyFluidInjectionGpuOnly({
         wgslOffload.state.lastMode = 'cpu-gather-authoritative';
       } finally {
         wgslOffload.state.lastCompletedWgslRunId = runId;
+        addTimingSample(timingState, 'wgsl.dispatchAndReadbackMs', performance.now() - wgslDispatchStartMs);
       }
     }
 
@@ -712,11 +729,13 @@ export async function applyBodyFluidInjectionGpuOnly({
   }
 
   if (!gatherDeltaToApply) {
+    const cpuFallbackGatherStartMs = performance.now();
     cpuGatherDelta = cpuGatherDelta || computeBodyFluidInjectionCellDeltasFromGatherLayout({
       gatherLayout,
       couplingLimit,
       n,
     });
+    addTimingSample(timingState, 'cpu.gatherFallbackBuildMs', performance.now() - cpuFallbackGatherStartMs);
     gatherDeltaToApply = cpuGatherDelta;
     gatherSource = fastMode
       ? 'cpu-gather-fallback-fast'
@@ -736,6 +755,7 @@ export async function applyBodyFluidInjectionGpuOnly({
     }
   }
 
+  const applyDeltasStartMs = performance.now();
   injectedMomentum = applyBodyFluidInjectionCellDeltas({
     n,
     cellDeltaVx: gatherDeltaToApply.cellDeltaVx,
@@ -746,6 +766,8 @@ export async function applyBodyFluidInjectionGpuOnly({
     bodyFeedbackCurrVx,
     bodyFeedbackCurrVy,
   });
+  addTimingSample(timingState, 'cpu.applyCellDeltasMs', performance.now() - applyDeltasStartMs);
+  addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
 
   return {
     injectedMomentum,

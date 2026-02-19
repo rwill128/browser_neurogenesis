@@ -22,6 +22,14 @@ function hashF32ArrayFnv1a(arr) {
   return hash >>> 0;
 }
 
+function addTimingSample(state, key, ms) {
+  if (!state || !key) return;
+  const timing = state.lastTiming && typeof state.lastTiming === 'object'
+    ? state.lastTiming
+    : (state.lastTiming = {});
+  timing[key] = (Number(timing[key]) || 0) + Math.max(0, Number(ms) || 0);
+}
+
 const SOFT_DEFORMATION_WGSL = /* wgsl */`
 struct Params {
   springCount:u32,
@@ -443,11 +451,16 @@ export async function applySoftDeformationInterventionsGpuOnly({
   deformationThresholds,
   wgslOffload,
 }) {
+  const timingState = wgslOffload?.state || null;
+  if (timingState) timingState.lastTiming = {};
+  const stageStartMs = performance.now();
   if (!sim || !soft || typeof buildSoftDeformationState !== 'function') {
     throw new Error('applySoftDeformationInterventionsGpuOnly requires sim, soft, and buildSoftDeformationState');
   }
 
+  const prepStartMs = performance.now();
   const prep = buildSoftDeformationInterventionsWgslPrep({ sim, soft, softClusterLoops });
+  addTimingSample(timingState, 'prep.layoutMs', performance.now() - prepStartMs);
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     wgslOffload.state.preparedSoftDeformationPlan = prep.plan;
     wgslOffload.state.preparedSoftDeformationLayout = prep.layout;
@@ -463,16 +476,20 @@ export async function applySoftDeformationInterventionsGpuOnly({
     wgslOffload.state.lastMode = 'cpu-soft-deformation-prepared';
   }
 
+  const cpuDeformBuildStartMs = performance.now();
   let deform = buildSoftDeformationState(sim, soft, softClusterLoops);
+  addTimingSample(timingState, 'cpu.buildDeformStateMs', performance.now() - cpuDeformBuildStartMs);
   let wgslApplied = false;
   if (wgslOffload?.enabled === true && wgslOffload?.device && wgslOffload?.state) {
     try {
+      const wgslMetricsStartMs = performance.now();
       const metrics = await runSoftDeformationSpringMetricsWgsl({
         device: wgslOffload.device,
         prep,
         state: wgslOffload.state,
       });
       wgslApplied = applyAuthoritativeWgslSpringMetrics(deform, prep, metrics);
+      addTimingSample(timingState, 'wgsl.metricsDispatchMs', performance.now() - wgslMetricsStartMs);
       if (wgslApplied) {
         refreshSoftDeformationClassificationFromMetrics({
           deform,
@@ -488,12 +505,17 @@ export async function applySoftDeformationInterventionsGpuOnly({
   }
 
   if (severeInterventionsOn && deform?.severeCollapseCount > 0) {
+    const severeStabilizeStartMs = performance.now();
     stabilizeSeverelyDeformedSoftClusters?.(sim, soft, softClusterLoops, deform);
+    addTimingSample(timingState, 'cpu.severeStabilizeMs', performance.now() - severeStabilizeStartMs);
+    const rebuildStartMs = performance.now();
     deform = buildSoftDeformationState(sim, soft, softClusterLoops);
+    addTimingSample(timingState, 'cpu.rebuildDeformStateMs', performance.now() - rebuildStartMs);
     if (wgslApplied) {
       // Keep the post-stabilization deformation state aligned with authoritative
       // WGSL spring metrics when they are available and finite.
       try {
+        const postMetricsStartMs = performance.now();
         const postPrep = buildSoftDeformationInterventionsWgslPrep({ sim, soft, softClusterLoops });
         const metrics = await runSoftDeformationSpringMetricsWgsl({
           device: wgslOffload.device,
@@ -501,6 +523,7 @@ export async function applySoftDeformationInterventionsGpuOnly({
           state: wgslOffload.state,
         });
         const postApplied = applyAuthoritativeWgslSpringMetrics(deform, postPrep, metrics);
+        addTimingSample(timingState, 'wgsl.postMetricsDispatchMs', performance.now() - postMetricsStartMs);
         if (postApplied) {
           refreshSoftDeformationClassificationFromMetrics({
             deform,
@@ -524,5 +547,6 @@ export async function applySoftDeformationInterventionsGpuOnly({
       : 'cpu-soft-deformation-authoritative';
   }
 
+  addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
   return deform;
 }

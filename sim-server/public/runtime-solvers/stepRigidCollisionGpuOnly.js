@@ -6,6 +6,14 @@
 
 const WGSL_WORKGROUP_SIZE = 64;
 
+function addTimingSample(state, key, ms) {
+  if (!state || !key) return;
+  const timing = state.lastTiming && typeof state.lastTiming === 'object'
+    ? state.lastTiming
+    : (state.lastTiming = {});
+  timing[key] = (Number(timing[key]) || 0) + Math.max(0, Number(ms) || 0);
+}
+
 const RIGID_COLLISION_WGSL = /* wgsl */`
 struct Params {
   pair_count: u32,
@@ -356,6 +364,9 @@ export async function resolveRigidRigidCollisionPassGpuOnly({
   resolveRigidVsRigidPolygonCollision,
   wgslOffload,
 }) {
+  const timingState = wgslOffload?.state || null;
+  if (timingState) timingState.lastTiming = {};
+  const stageStartMs = performance.now();
   if (!Array.isArray(rigidBodies) || rigidBodies.length < 2) return;
   if (typeof resolveRigidVsRigidPolygonCollision !== 'function') {
     throw new Error('gpu-only rigid collision pass requires resolveRigidVsRigidPolygonCollision callback');
@@ -363,12 +374,17 @@ export async function resolveRigidRigidCollisionPassGpuOnly({
 
   if (canUseWgslOffload(wgslOffload)) {
     try {
+      const wgslDispatchStartMs = performance.now();
       const proposal = await dispatchRigidCollisionWgsl(wgslOffload, rigidBodies, slop);
+      addTimingSample(timingState, 'wgsl.dispatchAndReadbackMs', performance.now() - wgslDispatchStartMs);
       if (proposal && canApplyAuthoritativeProposal(proposal)) {
+        const applyStartMs = performance.now();
         applyAuthoritativeProposal({ rigidBodies, proposal, contacts, iter, phase });
+        addTimingSample(timingState, 'wgsl.authoritativeApplyMs', performance.now() - applyStartMs);
         wgslOffload.state.lastRigidCollisionAuthoritativeSource = 'wgsl-rigid-collision-authoritative';
         wgslOffload.state.lastSourceRoute = 'wgsl-rigid-collision-authoritative';
         wgslOffload.state.lastMode = 'wgsl-rigid-collision-authoritative';
+        addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
         return;
       }
       wgslOffload.state.lastRigidCollisionAuthoritativeSource = 'cpu-rigid-collision-authoritative-nonfinite';
@@ -380,6 +396,7 @@ export async function resolveRigidRigidCollisionPassGpuOnly({
     wgslOffload.state.lastMode = 'cpu-rigid-collision-authoritative';
   }
 
+  const cpuFallbackStartMs = performance.now();
   for (let i = 0; i < rigidBodies.length; i++) {
     for (let j = i + 1; j < rigidBodies.length; j++) {
       resolveRigidVsRigidPolygonCollision(rigidBodies[i], rigidBodies[j], slop, {
@@ -391,4 +408,6 @@ export async function resolveRigidRigidCollisionPassGpuOnly({
       });
     }
   }
+  addTimingSample(timingState, 'cpu.fallbackSolveMs', performance.now() - cpuFallbackStartMs);
+  addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
 }

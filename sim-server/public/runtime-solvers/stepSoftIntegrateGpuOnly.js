@@ -10,6 +10,14 @@
 
 const WGSL_WORKGROUP_SIZE = 64;
 
+function addTimingSample(state, key, ms) {
+  if (!state || !key) return;
+  const timing = state.lastTiming && typeof state.lastTiming === 'object'
+    ? state.lastTiming
+    : (state.lastTiming = {});
+  timing[key] = (Number(timing[key]) || 0) + Math.max(0, Number(ms) || 0);
+}
+
 const integrateSoftNodesWgsl = /* wgsl */`
 struct Params {
   count: u32,
@@ -242,6 +250,7 @@ async function ensureWgslState(offload, count) {
 }
 
 async function integrateSoftBodiesWgsl({ soft, n, dt, softIntegrationScale, hybridNodeVCap, applyBounceBoundary, offload }) {
+  const timingState = offload?.state || null;
   const fastMode = isGpuOnlyFastMode(offload);
   const nodes = soft?.nodes || [];
   const count = nodes.length;
@@ -251,6 +260,7 @@ async function integrateSoftBodiesWgsl({ soft, n, dt, softIntegrationScale, hybr
   const device = offload.device;
   const bytes = count * 4;
 
+  const prepArrayStartMs = performance.now();
   const x = new Float32Array(count);
   const y = new Float32Array(count);
   const vx = new Float32Array(count);
@@ -263,6 +273,7 @@ async function integrateSoftBodiesWgsl({ soft, n, dt, softIntegrationScale, hybr
     vx[i] = Number(node.vx) || 0;
     vy[i] = Number(node.vy) || 0;
   }
+  addTimingSample(timingState, 'prep.inputArraysMs', performance.now() - prepArrayStartMs);
 
   const paramsBuffer = new ArrayBuffer(32);
   const paramsView = new DataView(paramsBuffer);
@@ -277,6 +288,7 @@ async function integrateSoftBodiesWgsl({ soft, n, dt, softIntegrationScale, hybr
   device.queue.writeBuffer(state.vx, 0, vx);
   device.queue.writeBuffer(state.vy, 0, vy);
 
+  const wgslDispatchStartMs = performance.now();
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   pass.setPipeline(state.pipeline);
@@ -312,6 +324,7 @@ async function integrateSoftBodiesWgsl({ soft, n, dt, softIntegrationScale, hybr
   state.readY.unmap();
   state.readVx.unmap();
   state.readVy.unmap();
+  addTimingSample(timingState, 'wgsl.dispatchAndReadbackMs', performance.now() - wgslDispatchStartMs);
 
   state.lastProposalSignature = proposalSignature >>> 0;
   state.lastFinite = { x: finiteX, y: finiteY, vx: finiteVx, vy: finiteVy };
@@ -343,6 +356,7 @@ async function integrateSoftBodiesWgsl({ soft, n, dt, softIntegrationScale, hybr
     });
   }
 
+  const applyOutputStartMs = performance.now();
   for (let i = 0; i < count; i++) {
     const node = nodes[i];
     node.x = outX[i];
@@ -351,6 +365,7 @@ async function integrateSoftBodiesWgsl({ soft, n, dt, softIntegrationScale, hybr
     node.vy = outVy[i];
     applyBounceBoundary(node, n, 0.78);
   }
+  addTimingSample(timingState, 'cpu.applyOutputsMs', performance.now() - applyOutputStartMs);
 
   if (fastMode) {
     state.lastParity = {
@@ -387,10 +402,16 @@ export async function integrateSoftBodiesGpuOnly({
   applyBounceBoundary,
   wgslOffload,
 }) {
+  const timingState = wgslOffload?.state || null;
+  if (timingState) timingState.lastTiming = {};
+  const stageStartMs = performance.now();
   const pipelineMode = normalizeGpuOnlyPipelineMode(wgslOffload);
 
   if (pipelineMode === 'standard') {
+    const cpuIntegrateStartMs = performance.now();
     integrateSoftBodiesCpu({ soft, n, dt, softIntegrationScale, hybridNodeVCap, applyBounceBoundary });
+    addTimingSample(timingState, 'cpu.integrateMs', performance.now() - cpuIntegrateStartMs);
+    addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
     if (wgslOffload?.state) {
       wgslOffload.state.lastError = null;
       wgslOffload.state.lastMode = 'cpu-standard';
@@ -404,7 +425,10 @@ export async function integrateSoftBodiesGpuOnly({
   }
 
   if (!canUseWgslOffload(wgslOffload)) {
+    const cpuIntegrateStartMs = performance.now();
     integrateSoftBodiesCpu({ soft, n, dt, softIntegrationScale, hybridNodeVCap, applyBounceBoundary });
+    addTimingSample(timingState, 'cpu.integrateMs', performance.now() - cpuIntegrateStartMs);
+    addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
     return { mode: 'cpu', reason: 'wgsl-unavailable' };
   }
 
@@ -425,10 +449,14 @@ export async function integrateSoftBodiesGpuOnly({
         ? 'wgsl-integrate-authoritative-fast'
         : 'wgsl-integrate-authoritative';
     }
+    addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
     return { mode: 'wgsl', reason: 'ok' };
   } catch (err) {
     // Keep runtime behavior stable if the optional WGSL path fails in-session.
+    const cpuFallbackStartMs = performance.now();
     integrateSoftBodiesCpu({ soft, n, dt, softIntegrationScale, hybridNodeVCap, applyBounceBoundary });
+    addTimingSample(timingState, 'cpu.fallbackIntegrateMs', performance.now() - cpuFallbackStartMs);
+    addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
     if (wgslOffload?.state) {
       wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
       wgslOffload.state.lastMode = 'cpu-fallback';

@@ -152,6 +152,14 @@ function checkFiniteFloat32Array(values) {
   };
 }
 
+function addTimingSample(state, key, ms) {
+  if (!state || !key) return;
+  const timing = state.lastTiming && typeof state.lastTiming === 'object'
+    ? state.lastTiming
+    : (state.lastTiming = {});
+  timing[key] = (Number(timing[key]) || 0) + Math.max(0, Number(ms) || 0);
+}
+
 function canUseWgslOffload(offload) {
   return Boolean(
     offload
@@ -623,6 +631,9 @@ export function applySoftMembraneCellPressureGpuOnly({
   membraneCellBaseRadialDamping = 0.06,
   wgslOffload,
 }) {
+  const timingState = wgslOffload?.state || null;
+  if (timingState) timingState.lastTiming = {};
+  const stageStartMs = performance.now();
   const membranes = sim?.bodies?.softMembraneClusters;
   if (!Array.isArray(membranes) || membranes.length === 0) return 0;
   if (!(sim.softMembraneAreaBaseline instanceof Map)) sim.softMembraneAreaBaseline = new Map();
@@ -638,6 +649,7 @@ export function applySoftMembraneCellPressureGpuOnly({
     const pipelineMode = getGpuOnlyPipelineModeProfile(wgslOffload);
     const fastMode = isGpuOnlyFastMode(wgslOffload);
     wgslOffload.state.lastPipelineModeProfile = pipelineMode;
+    const prepStartMs = performance.now();
     const prep = buildSoftMembranePressureWgslPrep({
       membranes,
       loopByCluster,
@@ -646,6 +658,7 @@ export function applySoftMembraneCellPressureGpuOnly({
       membraneCellBasePressureGain,
     });
     const proposalSignature = computeMembraneProposalSignature(prep, dtPos);
+    addTimingSample(timingState, 'prep.layoutAndSignatureMs', performance.now() - prepStartMs);
     wgslOffload.state.preparedPlan = prep.plan;
     wgslOffload.state.preparedLayout = prep.layout;
     wgslOffload.state.lastPreparedMembraneCount = prep.plan.membraneCount;
@@ -680,6 +693,7 @@ export function applySoftMembraneCellPressureGpuOnly({
     }
 
     if (canUseWgslOffload(wgslOffload) && prep.plan.membraneCount > 0) {
+      const wgslDispatchScheduleStartMs = performance.now();
       const serializedDispatch = (wgslOffload.state.pendingWgslAreaProbePromise || Promise.resolve())
         .catch(() => {})
         .then(async () => {
@@ -708,9 +722,11 @@ export function applySoftMembraneCellPressureGpuOnly({
           }
         });
       wgslOffload.state.pendingWgslAreaProbePromise = serializedDispatch;
+      addTimingSample(timingState, 'wgsl.dispatchScheduleMs', performance.now() - wgslDispatchScheduleStartMs);
     }
   }
 
+  const cpuApplyStageStartMs = performance.now();
   let touched = 0;
   for (const membrane of membranes) {
     const cid = Number(membrane?.clusterId);
@@ -802,5 +818,7 @@ export function applySoftMembraneCellPressureGpuOnly({
     touched += 1;
   }
 
+  addTimingSample(timingState, 'cpu.applyPressureMs', performance.now() - cpuApplyStageStartMs);
+  addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
   return touched;
 }

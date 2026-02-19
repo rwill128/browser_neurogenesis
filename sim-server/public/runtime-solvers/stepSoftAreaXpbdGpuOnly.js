@@ -254,6 +254,14 @@ function isGpuOnlyFastMode(wgslOffload) {
   return getGpuOnlyPipelineModeProfile(wgslOffload) === 'gpu-only-fast';
 }
 
+function addTimingSample(state, key, ms) {
+  if (!state || !key) return;
+  const timing = state.lastTiming && typeof state.lastTiming === 'object'
+    ? state.lastTiming
+    : (state.lastTiming = {});
+  timing[key] = (Number(timing[key]) || 0) + Math.max(0, Number(ms) || 0);
+}
+
 function checkFiniteFloat32Array(values) {
   if (!(values instanceof Float32Array)) return { allFinite: false, nonFiniteCount: 0, comparedCount: 0 };
   let nonFiniteCount = 0;
@@ -1200,14 +1208,19 @@ export function applySoftAreaXPBDVelocityGpuOnly({
   softAreaBaseCompliance,
   wgslOffload,
 }) {
+  const timingState = wgslOffload?.state || null;
+  if (timingState) timingState.lastTiming = {};
+  const stageStartMs = performance.now();
   if (!loops?.length) return;
   const alpha = (softAreaBaseCompliance / Math.max(0.2, stiffnessScale)) / Math.max(1e-8, dtPos * dtPos);
 
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     // WGSL prep ownership for area-XPBD offload: deterministic CSR loop layout
     // plus per-cluster rest/lambda seeds shared by probe + future solve kernels.
+    const prepLayoutStartMs = performance.now();
     const plan = buildSoftAreaXpbdWgslPlan({ sim, soft, loops });
     const layout = buildSoftAreaXpbdWgslLayout(plan);
+    addTimingSample(timingState, 'prep.planAndLayoutMs', performance.now() - prepLayoutStartMs);
     wgslOffload.state.preparedPlan = plan;
     wgslOffload.state.preparedLayout = layout;
     wgslOffload.state.lastPreparedClusterCount = plan.clusterCount;
@@ -1233,6 +1246,7 @@ export function applySoftAreaXPBDVelocityGpuOnly({
     const proposalEpochDelta = Math.max(0, proposalEpoch - (Number(wgslOffload.state.lastAreaVelocityProposalEpoch) || 0));
     const fastEpochReplayEligible = fastModeAuthoritative && proposalEpochDelta <= 2;
     const fastProposalMatch = fastModeAuthoritative ? (signatureMatched || fastEpochReplayEligible) : signatureMatched;
+    const authoritativeReplayStartMs = performance.now();
     if (
       canUseAuthoritativeReplay
       && fastProposalMatch
@@ -1253,6 +1267,7 @@ export function applySoftAreaXPBDVelocityGpuOnly({
         : 'wgsl-area-proposal-signature-replay';
       wgslOffload.state.lastAuthoritativeProposalEpochDelta = proposalEpochDelta;
       wgslOffload.state.lastAuthoritativeProposalFrame = Number(sim?.frame) || 0;
+      addTimingSample(timingState, 'wgsl.authoritativeReplayApplyMs', performance.now() - authoritativeReplayStartMs);
       return;
     }
     if (canUseAuthoritativeReplay && fastProposalMatch && wgslOffload.state.lastAreaVelocityProposalFinite?.allFinite === false) {
@@ -1380,6 +1395,7 @@ export function applySoftAreaXPBDVelocityGpuOnly({
         return probeRan || proposalRan || velocityProposalRan;
       };
 
+      const wgslDispatchScheduleStartMs = performance.now();
       const serializedDispatch = (state.pendingSoftAreaWgslDispatchPromise || Promise.resolve())
         .catch(() => {})
         .then(() => runWgslDispatch())
@@ -1389,9 +1405,11 @@ export function applySoftAreaXPBDVelocityGpuOnly({
           return false;
         });
       state.pendingSoftAreaWgslDispatchPromise = serializedDispatch;
+      addTimingSample(timingState, 'wgsl.dispatchScheduleMs', performance.now() - wgslDispatchScheduleStartMs);
     }
   }
 
+  const cpuResidualSolveStartMs = performance.now();
   for (let iter = 0; iter < softAreaXpbdIters; iter++) {
     for (const loop of loops) {
       const ids = loop.indices;
@@ -1442,4 +1460,6 @@ export function applySoftAreaXPBDVelocityGpuOnly({
       }
     }
   }
+  addTimingSample(timingState, 'cpu.residualSolveMs', performance.now() - cpuResidualSolveStartMs);
+  addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
 }

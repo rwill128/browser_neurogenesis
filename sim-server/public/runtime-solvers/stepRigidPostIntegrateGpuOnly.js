@@ -9,6 +9,14 @@
 
 const WGSL_WORKGROUP_SIZE = 64;
 
+function addTimingSample(state, key, ms) {
+  if (!state || !key) return;
+  const timing = state.lastTiming && typeof state.lastTiming === 'object'
+    ? state.lastTiming
+    : (state.lastTiming = {});
+  timing[key] = (Number(timing[key]) || 0) + Math.max(0, Number(ms) || 0);
+}
+
 const clampRigidVelocitiesWgsl = /* wgsl */`
 struct Params {
   count: u32,
@@ -137,6 +145,7 @@ async function ensureWgslState(offload, count) {
 }
 
 async function wgslClampRigidPostIntegrate({ rigidBodies, velocityCap, omegaCap, offload }) {
+  const timingState = offload?.state || null;
   const count = rigidBodies.length;
   if (count === 0) return;
 
@@ -144,6 +153,7 @@ async function wgslClampRigidPostIntegrate({ rigidBodies, velocityCap, omegaCap,
   const device = offload.device;
   const bytes = count * 4;
 
+  const prepInputStartMs = performance.now();
   const vx = new Float32Array(count);
   const vy = new Float32Array(count);
   const omega = new Float32Array(count);
@@ -154,6 +164,7 @@ async function wgslClampRigidPostIntegrate({ rigidBodies, velocityCap, omegaCap,
     vy[i] = Number(rb.vy);
     omega[i] = Number(rb.omega) || 0;
   }
+  addTimingSample(timingState, 'prep.inputArraysMs', performance.now() - prepInputStartMs);
 
   const paramsBuffer = new ArrayBuffer(32);
   const paramsView = new DataView(paramsBuffer);
@@ -166,6 +177,7 @@ async function wgslClampRigidPostIntegrate({ rigidBodies, velocityCap, omegaCap,
   device.queue.writeBuffer(state.vy, 0, vy);
   device.queue.writeBuffer(state.omega, 0, omega);
 
+  const wgslDispatchStartMs = performance.now();
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   pass.setPipeline(state.pipeline);
@@ -191,13 +203,16 @@ async function wgslClampRigidPostIntegrate({ rigidBodies, velocityCap, omegaCap,
   state.readVx.unmap();
   state.readVy.unmap();
   state.readOmega.unmap();
+  addTimingSample(timingState, 'wgsl.dispatchAndReadbackMs', performance.now() - wgslDispatchStartMs);
 
+  const applyOutputStartMs = performance.now();
   for (let i = 0; i < count; i++) {
     const rb = rigidBodies[i];
     rb.vx = outVx[i];
     rb.vy = outVy[i];
     rb.omega = outOmega[i];
   }
+  addTimingSample(timingState, 'cpu.applyOutputsMs', performance.now() - applyOutputStartMs);
 }
 
 export async function stabilizeRigidPostIntegrateGpuOnly({
@@ -206,12 +221,18 @@ export async function stabilizeRigidPostIntegrateGpuOnly({
   omegaCap = 0.22,
   wgslOffload,
 } = {}) {
+  const timingState = wgslOffload?.state || null;
+  if (timingState) timingState.lastTiming = {};
+  const stageStartMs = performance.now();
   if (!Array.isArray(rigidBodies) || rigidBodies.length === 0) {
     return { mode: 'cpu', reason: 'empty' };
   }
 
   if (!canUseWgslOffload(wgslOffload)) {
+    const cpuClampStartMs = performance.now();
     cpuClampRigidPostIntegrate({ rigidBodies, velocityCap, omegaCap });
+    addTimingSample(timingState, 'cpu.clampMs', performance.now() - cpuClampStartMs);
+    addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
     return { mode: 'cpu', reason: 'wgsl-unavailable' };
   }
 
@@ -221,9 +242,13 @@ export async function stabilizeRigidPostIntegrateGpuOnly({
       wgslOffload.state.lastError = null;
       wgslOffload.state.lastMode = 'wgsl';
     }
+    addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
     return { mode: 'wgsl', reason: 'ok' };
   } catch (err) {
+    const cpuClampStartMs = performance.now();
     cpuClampRigidPostIntegrate({ rigidBodies, velocityCap, omegaCap });
+    addTimingSample(timingState, 'cpu.fallbackClampMs', performance.now() - cpuClampStartMs);
+    addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
     if (wgslOffload?.state) {
       wgslOffload.state.lastError = String(err?.message || err || 'unknown-error');
       wgslOffload.state.lastMode = 'cpu-fallback';

@@ -275,6 +275,14 @@ function getGpuOnlyPipelineModeProfile(offload) {
   return 'standard';
 }
 
+function addTimingSample(state, key, ms) {
+  if (!state || !key) return;
+  const timing = state.lastTiming && typeof state.lastTiming === 'object'
+    ? state.lastTiming
+    : (state.lastTiming = {});
+  timing[key] = (Number(timing[key]) || 0) + Math.max(0, Number(ms) || 0);
+}
+
 function ensureSoftMembraneBoundaryEdgePipeline(offload) {
   const state = offload?.state;
   const device = offload?.device;
@@ -785,6 +793,9 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
   membraneBendBaseCompliance = 0.0022,
   wgslOffload,
 }) {
+  const timingState = wgslOffload?.state || null;
+  if (timingState) timingState.lastTiming = {};
+  const stageStartMs = performance.now();
   if (!(membraneClusterSet instanceof Set) || membraneClusterSet.size === 0) return 0;
 
   ensureSoftMembraneLoopStateGpuOnly(sim, soft, loops, membraneClusterSet);
@@ -819,6 +830,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
   let bendProposalSignatureAccumulator = 0;
   let touched = 0;
 
+  const edgeCpuSolveStartMs = performance.now();
   for (let iter = 0; iter < membraneEdgeXpbdIters; iter++) {
     for (const loop of loops || []) {
       const cid = loop.clusterId ?? 0;
@@ -897,6 +909,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
       }
     }
   }
+  addTimingSample(timingState, 'cpu.edgeSolveMs', performance.now() - edgeCpuSolveStartMs);
 
   const edgeLayout = edgeProposalLayout.length > 0 ? Float32Array.from(edgeProposalLayout) : null;
   const edgeSignature = edgeLayout
@@ -905,6 +918,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
 
   let authoritativeBoundaryFromWgsl = false;
 
+  const bendCpuSolveStartMs = performance.now();
   for (let iter = 0; iter < membraneBendXpbdIters; iter++) {
     for (const loop of loops || []) {
       const cid = loop.clusterId ?? 0;
@@ -982,7 +996,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
       }
     }
   }
-
+  addTimingSample(timingState, 'cpu.bendSolveMs', performance.now() - bendCpuSolveStartMs);
 
   const bendLayout = bendProposalLayout.length > 0 ? Float32Array.from(bendProposalLayout) : null;
   const bendSignature = bendLayout
@@ -1003,6 +1017,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
 
     let serializedDispatch = null;
     if (edgeLayout && edgeLayout.length > 0) {
+      const edgeDispatchScheduleStartMs = performance.now();
       serializedDispatch = (wgslOffload.state.pendingWgslMembraneBoundaryEdgeProposalPromise || Promise.resolve())
         .catch(() => {})
         .then(() => dispatchSoftMembraneBoundaryEdgeProposal(wgslOffload, edgeLayout, dtPos, edgeSignature))
@@ -1012,6 +1027,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
           wgslOffload.state.lastMode = 'cpu-membrane-boundary-edge-authoritative';
         });
       wgslOffload.state.pendingWgslMembraneBoundaryEdgeProposalPromise = serializedDispatch;
+      addTimingSample(timingState, 'wgsl.edgeDispatchScheduleMs', performance.now() - edgeDispatchScheduleStartMs);
     }
 
     wgslOffload.state.lastMembraneBendProposalSignaturePrepared = bendSignature;
@@ -1022,6 +1038,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
 
     let serializedBendDispatch = null;
     if (bendLayout && bendLayout.length > 0) {
+      const bendDispatchScheduleStartMs = performance.now();
       serializedBendDispatch = (wgslOffload.state.pendingWgslMembraneBendProposalPromise || Promise.resolve())
         .catch(() => {})
         .then(() => dispatchSoftMembraneBendProposal(wgslOffload, bendLayout, dtPos, bendSignature))
@@ -1031,6 +1048,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
           wgslOffload.state.lastMode = 'cpu-membrane-bend-authoritative';
         });
       wgslOffload.state.pendingWgslMembraneBendProposalPromise = serializedBendDispatch;
+      addTimingSample(timingState, 'wgsl.bendDispatchScheduleMs', performance.now() - bendDispatchScheduleStartMs);
     }
 
     await Promise.all([
@@ -1046,6 +1064,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
   });
 
   if (authoritativeBoundaryFromWgsl) {
+    const boundaryApplyStartMs = performance.now();
     applyMembraneBoundaryVelocityDeltasAuthoritative({
       sim,
       soft,
@@ -1063,6 +1082,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
       wgslDeltaVyB: wgslOffload?.state?.lastMembraneBoundaryEdgeProposalDeltaVyB,
       wgslLambdaNext: wgslOffload?.state?.lastMembraneBoundaryEdgeProposalLambdaNext,
     });
+    addTimingSample(timingState, 'wgsl.edgeAuthoritativeApplyMs', performance.now() - boundaryApplyStartMs);
   }
 
   authoritativeBendFromWgsl = canApplyAuthoritativeMembraneBendProposal({
@@ -1072,6 +1092,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
   });
 
   if (authoritativeBendFromWgsl) {
+    const bendApplyStartMs = performance.now();
     applyMembraneBoundaryVelocityDeltasAuthoritative({
       sim,
       soft,
@@ -1089,6 +1110,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
       wgslDeltaVyB: wgslOffload?.state?.lastMembraneBendProposalDeltaVyNext,
       wgslLambdaNext: wgslOffload?.state?.lastMembraneBendProposalLambdaNext,
     });
+    addTimingSample(timingState, 'wgsl.bendAuthoritativeApplyMs', performance.now() - bendApplyStartMs);
   }
 
   if (wgslOffload?.state) {
@@ -1103,6 +1125,7 @@ export async function applySoftMembraneBoundaryXPBDVelocityGpuOnly({
     wgslOffload.state.lastMembraneBendAuthoritativeSignature = bendSignature;
   }
 
+  addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
   return touched;
 }
 
@@ -1145,6 +1168,9 @@ export async function applySoftMembraneShapeMemoryVelocityGpuOnly({
   membraneShapeMemoryMaxShiftFrac = 0.08,
   wgslOffload,
 }) {
+  const timingState = wgslOffload?.state || null;
+  if (timingState) timingState.lastTiming = {};
+  const stageStartMs = performance.now();
   if (!(membraneClusterMap instanceof Map) || membraneClusterMap.size === 0) return 0;
 
   const shapeMemoryLayout = [];
@@ -1152,6 +1178,7 @@ export async function applySoftMembraneShapeMemoryVelocityGpuOnly({
   const cpuDeltaVx = [];
   const cpuDeltaVy = [];
   let touched = 0;
+  const shapeMemoryCpuSolveStartMs = performance.now();
   for (let iter = 0; iter < membraneShapeMemoryIters; iter++) {
     for (const loop of loops || []) {
       const cid = Number(loop?.clusterId);
@@ -1260,6 +1287,7 @@ export async function applySoftMembraneShapeMemoryVelocityGpuOnly({
       touched += 1;
     }
   }
+  addTimingSample(timingState, 'cpu.shapeMemorySolveMs', performance.now() - shapeMemoryCpuSolveStartMs);
 
   const layout = shapeMemoryLayout.length > 0 ? Float32Array.from(shapeMemoryLayout) : null;
   const signature = layout ? computeShapeMemoryProposalSignature(layout, dtPos) : '';
@@ -1267,6 +1295,7 @@ export async function applySoftMembraneShapeMemoryVelocityGpuOnly({
   if (wgslOffload?.enabled === true && wgslOffload?.state && wgslOffload?.device && layout && layout.length > 0) {
     wgslOffload.state.lastShapeMemoryProposalLayoutBytes = layout.byteLength;
     wgslOffload.state.lastShapeMemoryProposalSignaturePrepared = signature;
+    const shapeDispatchScheduleStartMs = performance.now();
     const serializedDispatch = (wgslOffload.state.pendingWgslShapeMemoryProposalPromise || Promise.resolve())
       .catch(() => {})
       .then(() => dispatchSoftMembraneShapeMemoryProposal(wgslOffload, layout, dtPos, signature))
@@ -1276,6 +1305,7 @@ export async function applySoftMembraneShapeMemoryVelocityGpuOnly({
         wgslOffload.state.lastMode = 'cpu-shape-memory-authoritative';
       });
     wgslOffload.state.pendingWgslShapeMemoryProposalPromise = serializedDispatch;
+    addTimingSample(timingState, 'wgsl.shapeMemoryDispatchScheduleMs', performance.now() - shapeDispatchScheduleStartMs);
     await serializedDispatch;
     if (!wgslOffload.state.lastShapeMemoryProposalSource) {
       wgslOffload.state.lastShapeMemoryProposalSource = 'cpu-shape-memory-authoritative';
@@ -1292,6 +1322,7 @@ export async function applySoftMembraneShapeMemoryVelocityGpuOnly({
   });
 
   if (authoritativeFromWgsl) {
+    const shapeApplyStartMs = performance.now();
     applyShapeMemoryVelocityDeltasAuthoritative({
       soft,
       nodeIndices,
@@ -1306,6 +1337,7 @@ export async function applySoftMembraneShapeMemoryVelocityGpuOnly({
       deltaVy: wgslOffload.state.lastShapeMemoryProposalDeltaVy,
       scale: 1,
     });
+    addTimingSample(timingState, 'wgsl.shapeMemoryAuthoritativeApplyMs', performance.now() - shapeApplyStartMs);
   }
 
   if (wgslOffload?.state) {
@@ -1315,5 +1347,6 @@ export async function applySoftMembraneShapeMemoryVelocityGpuOnly({
     wgslOffload.state.lastShapeMemoryAuthoritativeSignature = signature;
   }
 
+  addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
   return touched;
 }

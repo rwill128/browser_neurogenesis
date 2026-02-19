@@ -66,6 +66,14 @@ function checkFiniteUint32Array(values) {
   };
 }
 
+function addTimingSample(state, key, ms) {
+  if (!state || !key) return;
+  const timing = state.lastTiming && typeof state.lastTiming === 'object'
+    ? state.lastTiming
+    : (state.lastTiming = {});
+  timing[key] = (Number(timing[key]) || 0) + Math.max(0, Number(ms) || 0);
+}
+
 function buildSoftFluidCouplingWgslLayout({ nodes, softNodeMomentumScale, softMembraneClusterSet }) {
   const nodeCount = Number(nodes?.length) || 0;
   const nodeX = new Float32Array(nodeCount);
@@ -830,6 +838,9 @@ export function applySoftFluidCouplingGpuOnly({
   sampleFluidForBodyCoupling,
   wgslOffload,
 }) {
+  const timingState = wgslOffload?.state || null;
+  if (timingState) timingState.lastTiming = {};
+  const stageStartMs = performance.now();
   const {
     SOFT_NODE_FLOW_COUPLING,
     SOFT_NODE_LOCAL_FLOW_SHARE,
@@ -848,11 +859,14 @@ export function applySoftFluidCouplingGpuOnly({
 
   if (wgslOffload?.enabled === true && wgslOffload?.state) {
     wgslOffload.state.lastPipelineModeProfile = modeProfile;
+    const prepLayoutStartMs = performance.now();
     const prep = buildSoftFluidCouplingWgslLayout({
       nodes,
       softNodeMomentumScale,
       softMembraneClusterSet,
     });
+    addTimingSample(timingState, 'prep.topologyLayoutMs', performance.now() - prepLayoutStartMs);
+    const sampleLayoutStartMs = performance.now();
     const samplePrep = buildSoftFluidCouplingCpuSampleLayout({
       sim,
       nodes,
@@ -868,6 +882,7 @@ export function applySoftFluidCouplingGpuOnly({
       sampleFluidForBodyCoupling,
       localHoneyDrag,
     });
+    addTimingSample(timingState, 'prep.cpuSampleLayoutMs', performance.now() - sampleLayoutStartMs);
     wgslOffload.state.preparedLayout = prep.layout;
     wgslOffload.state.preparedSampleLayout = samplePrep.layout;
     wgslOffload.state.lastPreparedNodeCount = prep.nodeCount;
@@ -972,6 +987,7 @@ export function applySoftFluidCouplingGpuOnly({
   const cpuProposalLocalCarryX = useFastAuthoritativeCarryShortcut ? null : new Float32Array(nodes.length);
   const cpuProposalLocalCarryY = useFastAuthoritativeCarryShortcut ? null : new Float32Array(nodes.length);
 
+  const nodeCarryStageStartMs = performance.now();
   if (useFastAuthoritativeCarryShortcut) {
     for (let i = 0; i < nodes.length; i++) {
       const node = nodes[i];
@@ -1143,7 +1159,10 @@ export function applySoftFluidCouplingGpuOnly({
     }
   }
 
+  addTimingSample(timingState, useFastAuthoritativeCarryShortcut ? 'cpu.nodeCarryApply.fastAuthoritativeMs' : 'cpu.nodeCarryApply.referenceMs', performance.now() - nodeCarryStageStartMs);
+
   if (wgslOffload?.state && clusterLoadProposalSignature !== 0) {
+    const clusterLoadDispatchStartMs = performance.now();
     const clusterLoadForceX = useFastAuthoritativeCarryShortcut ? authoritativeCarryProposal?.forceX : cpuProposalForceX;
     const clusterLoadForceY = useFastAuthoritativeCarryShortcut ? authoritativeCarryProposal?.forceY : cpuProposalForceY;
     const wgslClusterLoadDispatched = dispatchSoftFluidClusterLoadReductionWgsl({
@@ -1153,6 +1172,7 @@ export function applySoftFluidCouplingGpuOnly({
       forceY: clusterLoadForceY,
     });
     wgslOffload.state.lastClusterLoadProposalDispatched = wgslClusterLoadDispatched;
+    addTimingSample(timingState, 'wgsl.clusterLoadDispatchScheduleMs', performance.now() - clusterLoadDispatchStartMs);
   }
 
   // Cluster-load proposal + finite checks were computed before the node loop so
@@ -1182,6 +1202,7 @@ export function applySoftFluidCouplingGpuOnly({
     ? 'wgsl-cluster-load-authoritative'
     : 'cpu-cluster-load-authoritative';
 
+  const clusterPostStageStartMs = performance.now();
   const clusterAccelMap = new Map();
   if (canUseAuthoritativeClusterLoad) {
     for (let i = 0; i < clusterIds.length; i++) {
@@ -1266,6 +1287,7 @@ export function applySoftFluidCouplingGpuOnly({
     membraneClusterSet: softMembraneClusterSet,
     membraneGainScale: 0.72,
   });
+  addTimingSample(timingState, 'cpu.clusterPostProcessingMs', performance.now() - clusterPostStageStartMs);
 
   if (wgslOffload?.state) {
     wgslOffload.state.lastPipelineModeProfile = modeProfile;
@@ -1328,6 +1350,7 @@ export function applySoftFluidCouplingGpuOnly({
       : (fastMode ? 'cpu-carry+cluster-authoritative-fast-fallback' : 'cpu-carry+cluster-authoritative');
   }
 
+  addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
   return {
     softCarryTransfer,
     softCentroid,

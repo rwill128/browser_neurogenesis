@@ -2,6 +2,14 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+function addTimingSample(state, key, ms) {
+  if (!state || !key) return;
+  const timing = state.lastTiming && typeof state.lastTiming === 'object'
+    ? state.lastTiming
+    : (state.lastTiming = {});
+  timing[key] = (Number(timing[key]) || 0) + Math.max(0, Number(ms) || 0);
+}
+
 const WGSL_WORKGROUP_SIZE = 64;
 const RIGID_LAYOUT_STRIDE_FLOATS = 14;
 
@@ -289,6 +297,9 @@ export async function stepRigidBodiesGpuOnly({
   wgslOffload,
   allowPassEdgeFlowPush = false,
 }) {
+  const timingState = wgslOffload?.state || null;
+  if (timingState) timingState.lastTiming = {};
+  const stageStartMs = performance.now();
   let rigidCarryTransfer = 0;
   const runWgslProbe = wgslOffload?.enabled === true
     && wgslOffload?.state
@@ -297,7 +308,9 @@ export async function stepRigidBodiesGpuOnly({
   const rigidProposalLayout = [];
   let rigidProposalSignatureAccumulator = 0;
 
+  const cpuReferenceStartMs = performance.now();
   for (let bi = 0; bi < bodies.rigid.length; bi++) {
+    const perBodyStartMs = performance.now();
     const b = bodies.rigid[bi];
     const edgeMomentumScale = rigidEdgeMomentumScale(b, allowPassEdgeFlowPush);
     const invMass = 1 / Math.max(0.05, b.mass);
@@ -404,7 +417,9 @@ export async function stepRigidBodiesGpuOnly({
     b.y = b.y + b.vy * dt * 28;
     b.theta = (b.theta || 0) + b.omega * dt * 60;
     applyBounceBoundary(b, n, 0.84);
+    addTimingSample(timingState, 'cpu.perBodyTotalMs', performance.now() - perBodyStartMs);
   }
+  addTimingSample(timingState, 'cpu.referenceSolveMs', performance.now() - cpuReferenceStartMs);
 
   if (runWgslProbe && rigidProposalLayout.length > 0) {
     const layout = Float32Array.from(rigidProposalLayout);
@@ -417,6 +432,7 @@ export async function stepRigidBodiesGpuOnly({
     if (!wgslOffload.state.lastMode) {
       wgslOffload.state.lastMode = 'cpu-rigid-step-authoritative';
     }
+    const wgslDispatchStartMs = performance.now();
     const serializedDispatch = (wgslOffload.state.pendingWgslRigidStepProposalPromise || Promise.resolve())
       .catch(() => {})
       .then(() => dispatchRigidStepProposal(wgslOffload, layout, dt, dtNorm, n, signature))
@@ -432,6 +448,7 @@ export async function stepRigidBodiesGpuOnly({
     const authoritativeEnabled = wgslOffload?.state?.enableAuthoritativeRigidStep === true;
     const authoritativeRequested = authoritativeEnabled || modeProfile === 'gpu-only-fast';
     const wgslApplied = await serializedDispatch;
+    addTimingSample(timingState, 'wgsl.dispatchAndReadbackMs', performance.now() - wgslDispatchStartMs);
     const proposalReady = authoritativeRequested
       && wgslApplied === true
       && String(wgslOffload?.state?.lastRigidStepProposalSignature || '') === signature
@@ -451,6 +468,7 @@ export async function stepRigidBodiesGpuOnly({
       && wgslOffload.state.lastRigidStepProposalCarry.length === bodies.rigid.length;
 
     if (proposalReady) {
+      const authoritativeApplyStartMs = performance.now();
       const vx = wgslOffload.state.lastRigidStepProposalVx;
       const vy = wgslOffload.state.lastRigidStepProposalVy;
       const omega = wgslOffload.state.lastRigidStepProposalOmega;
@@ -471,6 +489,7 @@ export async function stepRigidBodiesGpuOnly({
         carrySum += carry[i] || 0;
       }
       rigidCarryTransfer = carrySum;
+      addTimingSample(timingState, 'wgsl.authoritativeApplyMs', performance.now() - authoritativeApplyStartMs);
       wgslOffload.state.lastRigidStepAuthoritativeSource = modeProfile === 'gpu-only-fast'
         ? 'wgsl-rigid-step-authoritative-fast'
         : 'wgsl-rigid-step-authoritative';
@@ -487,5 +506,6 @@ export async function stepRigidBodiesGpuOnly({
     }
   }
 
+  addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
   return rigidCarryTransfer;
 }

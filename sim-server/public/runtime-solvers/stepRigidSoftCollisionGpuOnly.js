@@ -708,8 +708,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let maxX = rigidMaxX[rigidIndex] + r;
   let maxY = rigidMaxY[rigidIndex] + r;
 
-  let active = select(0u, 1u, x >= minX && x <= maxX && y >= minY && y <= maxY);
-  activeMaskOut[pairIndex] = active;
+  let activeFlag = select(0u, 1u, x >= minX && x <= maxX && y >= minY && y <= maxY);
+  activeMaskOut[pairIndex] = activeFlag;
 }
 `;
 
@@ -1197,7 +1197,20 @@ async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload,
     });
   }
 
-  const pipeline = state.rigidSoftNodeBroadphasePipeline;
+  let pipeline = state.rigidSoftNodeBroadphasePipeline;
+  if (!pipeline && state.rigidSoftNodeBroadphasePipelinePromise) {
+    try {
+      pipeline = await state.rigidSoftNodeBroadphasePipelinePromise;
+      state.rigidSoftNodeBroadphasePipeline = pipeline || null;
+    } catch (err) {
+      const reason = `pipeline-error:${String(err?.message || err || 'unknown')}`;
+      state.lastNodeBroadphaseDispatched = false;
+      state.lastNodeBroadphaseReason = reason;
+      state.lastError = reason;
+      state.rigidSoftNodeBroadphasePipelinePromise = null;
+      return null;
+    }
+  }
   if (!pipeline) {
     state.lastNodeBroadphaseDispatched = false;
     state.lastNodeBroadphaseReason = 'pipeline-pending';
@@ -1310,7 +1323,20 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
     });
   }
 
-  const pipeline = state.rigidSoftEdgeBroadphasePipeline;
+  let pipeline = state.rigidSoftEdgeBroadphasePipeline;
+  if (!pipeline && state.rigidSoftEdgeBroadphasePipelinePromise) {
+    try {
+      pipeline = await state.rigidSoftEdgeBroadphasePipelinePromise;
+      state.rigidSoftEdgeBroadphasePipeline = pipeline || null;
+    } catch (err) {
+      const reason = `pipeline-error:${String(err?.message || err || 'unknown')}`;
+      state.lastEdgeBroadphaseDispatched = false;
+      state.lastEdgeBroadphaseReason = reason;
+      state.lastError = reason;
+      state.rigidSoftEdgeBroadphasePipelinePromise = null;
+      return null;
+    }
+  }
   if (!pipeline) {
     state.lastEdgeBroadphaseDispatched = false;
     state.lastEdgeBroadphaseReason = 'pipeline-pending';
@@ -1422,7 +1448,18 @@ async function dispatchRigidSoftNodeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
       return pipeline;
     });
   }
-  const pipeline = state.rigidSoftNodeNarrowphaseAabbProbePipeline;
+  let pipeline = state.rigidSoftNodeNarrowphaseAabbProbePipeline;
+  if (!pipeline && state.rigidSoftNodeNarrowphaseAabbProbePipelinePromise) {
+    try {
+      pipeline = await state.rigidSoftNodeNarrowphaseAabbProbePipelinePromise;
+      state.rigidSoftNodeNarrowphaseAabbProbePipeline = pipeline || null;
+    } catch (err) {
+      state.lastNodeNarrowphaseAabbProbeSource = `cpu-rigid-soft-node-aabb-probe-pipeline-error:${String(err?.message || err || 'unknown')}`;
+      state.lastError = state.lastNodeNarrowphaseAabbProbeSource;
+      state.rigidSoftNodeNarrowphaseAabbProbePipelinePromise = null;
+      return false;
+    }
+  }
   if (!pipeline) return false;
 
   const nodeX = new Float32Array(nodes.length);
@@ -1537,7 +1574,18 @@ async function dispatchRigidSoftEdgeNarrowphaseAabbProbeWgsl({ rigidBodies, soft
       return pipeline;
     });
   }
-  const pipeline = state.rigidSoftEdgeNarrowphaseAabbProbePipeline;
+  let pipeline = state.rigidSoftEdgeNarrowphaseAabbProbePipeline;
+  if (!pipeline && state.rigidSoftEdgeNarrowphaseAabbProbePipelinePromise) {
+    try {
+      pipeline = await state.rigidSoftEdgeNarrowphaseAabbProbePipelinePromise;
+      state.rigidSoftEdgeNarrowphaseAabbProbePipeline = pipeline || null;
+    } catch (err) {
+      state.lastEdgeNarrowphaseAabbProbeSource = `cpu-rigid-soft-edge-aabb-probe-pipeline-error:${String(err?.message || err || 'unknown')}`;
+      state.lastError = state.lastEdgeNarrowphaseAabbProbeSource;
+      state.rigidSoftEdgeNarrowphaseAabbProbePipelinePromise = null;
+      return false;
+    }
+  }
   if (!pipeline) return false;
 
   const nodeX = new Float32Array(nodes.length);

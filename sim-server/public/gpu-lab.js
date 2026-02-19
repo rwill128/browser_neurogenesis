@@ -6,6 +6,7 @@ import {
   getRigidCollisionPolysWorld,
   pointInPolygonInclusive,
   buildRigidRigidSpatialHashCandidates,
+  buildRigidSoftNodeCollisionCache,
 } from '/rigid-collision.js';
 import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops, recoverSoftSpringRests } from '/soft-xpbd.js';
 import { computeVectorRms, computeRigidAlignedPoseResidual } from '/soft-deformation-metrics.js';
@@ -4861,11 +4862,12 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
 
       for (let rbi = 0; rbi < bodies.rigid.length; rbi++) {
         const rb = bodies.rigid[rbi];
+        // Build per-rigid cache once per collision iteration so node contacts
+        // don't repeatedly sanitize/recompute world polygon edge normals.
+        const rigidSoftNodeCache = buildRigidSoftNodeCollisionCache(rb, null);
         for (let ni = 0; ni < s.nodes.length; ni++) {
           const sn = s.nodes[ni];
-          // Recompute rigid polygon from latest body state per-contact;
-          // stale hull snapshots caused missed/odd contacts after position updates.
-          resolveRigidVsSoftNodeCollision(rb, sn, null, 0.18);
+          resolveRigidVsSoftNodeCollision(rb, sn, rigidSoftNodeCache, 0.18);
         }
         for (const [i, j, _rest, edgeBodyMode] of s.springs) {
           if (edgeBodyMode !== EDGE_BODY_MODE.BLOCK) continue;

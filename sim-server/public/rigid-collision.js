@@ -128,39 +128,75 @@ function edgeOutwardNormal(ax, ay, bx, by, cx, cy) {
   return { nx, ny };
 }
 
-// True polygonal rigid-vs-soft-node collision (concave-friendly).
-export function resolveRigidVsSoftNodeCollision(rigid, node, vertsInput, restitution = 0.28) {
+function isRigidSoftNodeCollisionCache(value) {
+  return Boolean(
+    value
+    && !Array.isArray(value)
+    && Array.isArray(value.verts)
+    && Array.isArray(value.edges),
+  );
+}
+
+export function buildRigidSoftNodeCollisionCache(rigid, vertsInput = null) {
   const verts = Array.isArray(vertsInput) && vertsInput.length >= 3
     ? vertsInput
     : rigidVerticesWorld(rigid);
-  if (!verts.length) return false;
+  if (!Array.isArray(verts) || verts.length < 3) return null;
 
   const finiteVerts = sanitizeFinitePolygonVerts(verts);
-  if (finiteVerts.length < 3) return false;
+  if (finiteVerts.length < 3) return null;
 
   const centroid = polygonCentroid(finiteVerts);
-
-  let best = null;
+  const edges = [];
   for (let i = 0; i < finiteVerts.length; i++) {
     const a = finiteVerts[i];
     const b = finiteVerts[(i + 1) % finiteVerts.length];
-    const cp = closestPointOnSegment(node.x, node.y, a.x, a.y, b.x, b.y);
+    const out = edgeOutwardNormal(a.x, a.y, b.x, b.y, centroid.x, centroid.y);
+    edges.push({
+      ax: a.x,
+      ay: a.y,
+      bx: b.x,
+      by: b.y,
+      nx: out.nx,
+      ny: out.ny,
+    });
+  }
+
+  return {
+    verts: finiteVerts,
+    edges,
+    centroid,
+  };
+}
+
+// True polygonal rigid-vs-soft-node collision (concave-friendly).
+export function resolveRigidVsSoftNodeCollision(rigid, node, vertsInput, restitution = 0.28) {
+  const cache = isRigidSoftNodeCollisionCache(vertsInput)
+    ? vertsInput
+    : buildRigidSoftNodeCollisionCache(rigid, vertsInput);
+  if (!cache) return false;
+
+  const finiteVerts = cache.verts;
+  const edges = cache.edges;
+
+  let best = null;
+  for (const edge of edges) {
+    const cp = closestPointOnSegment(node.x, node.y, edge.ax, edge.ay, edge.bx, edge.by);
     if (!Number.isFinite(cp.x) || !Number.isFinite(cp.y)) continue;
     const dx = node.x - cp.x;
     const dy = node.y - cp.y;
     const d2 = dx * dx + dy * dy;
     if (!best || d2 < best.d2) {
-      const out = edgeOutwardNormal(a.x, a.y, b.x, b.y, centroid.x, centroid.y);
       best = {
         d2,
         d: Math.sqrt(d2),
         cp,
-        ax: a.x,
-        ay: a.y,
-        bx: b.x,
-        by: b.y,
-        nx: out.nx,
-        ny: out.ny,
+        ax: edge.ax,
+        ay: edge.ay,
+        bx: edge.bx,
+        by: edge.by,
+        nx: edge.nx,
+        ny: edge.ny,
       };
     }
   }

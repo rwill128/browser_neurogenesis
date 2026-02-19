@@ -6,6 +6,7 @@ import {
   rigidVerticesWorld,
   pointInPolygonInclusive,
   buildRigidRigidSpatialHashCandidates,
+  buildRigidSoftNodeCollisionCache,
 } from '../../sim-server/public/rigid-collision.js';
 
 function makeConcaveL(x, y) {
@@ -295,4 +296,17 @@ test('rigid-rigid spatial hash broadphase candidate order is deterministic', () 
   assert.deepEqual(a.pairs, b.pairs, 'candidate pair ordering should be stable across identical runs');
   assert.deepEqual(a.stats.checkedPairs, b.stats.checkedPairs);
   assert.deepEqual(a.stats.prunedPairs, b.stats.prunedPairs);
+});
+
+test('rigid-soft node cache build returns stable finite edge metadata', () => {
+  const rigid = makeConcaveL(30, 30);
+  const cache = buildRigidSoftNodeCollisionCache(rigid);
+  assert.ok(cache, 'expected cache object');
+  assert.ok(Array.isArray(cache.verts) && cache.verts.length >= 3);
+  assert.ok(Array.isArray(cache.edges) && cache.edges.length === cache.verts.length);
+  for (const e of cache.edges) {
+    assert.ok(Number.isFinite(e.ax) && Number.isFinite(e.ay));
+    assert.ok(Number.isFinite(e.bx) && Number.isFinite(e.by));
+    assert.ok(Number.isFinite(e.nx) && Number.isFinite(e.ny));
+  }
 });

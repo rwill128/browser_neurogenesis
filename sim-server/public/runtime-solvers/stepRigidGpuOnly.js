@@ -281,6 +281,7 @@ export async function stepRigidBodiesGpuOnly({
   vxField,
   vyField,
   n,
+  worldSize,
   dt,
   dtNorm,
   dragK,
@@ -305,6 +306,7 @@ export async function stepRigidBodiesGpuOnly({
     && wgslOffload?.state
     && wgslOffload?.device
     && getGpuOnlyPipelineModeProfile(wgslOffload) !== 'standard';
+  const boundaryN = Number.isFinite(Number(worldSize)) ? Number(worldSize) : Number(n) || 0;
   const rigidProposalLayout = [];
   let rigidProposalSignatureAccumulator = 0;
 
@@ -416,14 +418,14 @@ export async function stepRigidBodiesGpuOnly({
     b.x = b.x + b.vx * dt * 22;
     b.y = b.y + b.vy * dt * 28;
     b.theta = (b.theta || 0) + b.omega * dt * 60;
-    applyBounceBoundary(b, n, 0.84);
+    applyBounceBoundary(b, boundaryN, 0.84);
     addTimingSample(timingState, 'cpu.perBodyTotalMs', performance.now() - perBodyStartMs);
   }
   addTimingSample(timingState, 'cpu.referenceSolveMs', performance.now() - cpuReferenceStartMs);
 
   if (runWgslProbe && rigidProposalLayout.length > 0) {
     const layout = Float32Array.from(rigidProposalLayout);
-    const signature = `${bodies.rigid.length}|${Math.fround(dt)}|${Math.fround(dtNorm)}|${Math.fround(rigidProposalSignatureAccumulator)}`;
+    const signature = `${bodies.rigid.length}|${Math.fround(dt)}|${Math.fround(dtNorm)}|${Math.fround(boundaryN)}|${Math.fround(rigidProposalSignatureAccumulator)}`;
     wgslOffload.state.lastRigidStepProposalLayoutBytes = layout.byteLength;
     wgslOffload.state.lastRigidStepProposalSignaturePrepared = signature;
     if (!wgslOffload.state.lastRigidStepProposalSource) {
@@ -435,7 +437,7 @@ export async function stepRigidBodiesGpuOnly({
     const wgslDispatchStartMs = performance.now();
     const serializedDispatch = (wgslOffload.state.pendingWgslRigidStepProposalPromise || Promise.resolve())
       .catch(() => {})
-      .then(() => dispatchRigidStepProposal(wgslOffload, layout, dt, dtNorm, n, signature))
+      .then(() => dispatchRigidStepProposal(wgslOffload, layout, dt, dtNorm, boundaryN, signature))
       .catch((err) => {
         wgslOffload.state.lastRigidStepProposalError = String(err?.message || err || 'unknown-error');
         wgslOffload.state.lastRigidStepProposalSource = 'cpu-rigid-step-authoritative';

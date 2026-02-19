@@ -396,6 +396,7 @@ async function integrateSoftBodiesWgsl({ soft, n, dt, softIntegrationScale, hybr
 export async function integrateSoftBodiesGpuOnly({
   soft,
   n,
+  worldSize,
   dt,
   softIntegrationScale,
   hybridNodeVCap,
@@ -406,10 +407,11 @@ export async function integrateSoftBodiesGpuOnly({
   if (timingState) timingState.lastTiming = {};
   const stageStartMs = performance.now();
   const pipelineMode = normalizeGpuOnlyPipelineMode(wgslOffload);
+  const boundaryN = Number.isFinite(Number(worldSize)) ? Number(worldSize) : Number(n) || 0;
 
   if (pipelineMode === 'standard') {
     const cpuIntegrateStartMs = performance.now();
-    integrateSoftBodiesCpu({ soft, n, dt, softIntegrationScale, hybridNodeVCap, applyBounceBoundary });
+    integrateSoftBodiesCpu({ soft, n: boundaryN, dt, softIntegrationScale, hybridNodeVCap, applyBounceBoundary });
     addTimingSample(timingState, 'cpu.integrateMs', performance.now() - cpuIntegrateStartMs);
     addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
     if (wgslOffload?.state) {
@@ -426,7 +428,7 @@ export async function integrateSoftBodiesGpuOnly({
 
   if (!canUseWgslOffload(wgslOffload)) {
     const cpuIntegrateStartMs = performance.now();
-    integrateSoftBodiesCpu({ soft, n, dt, softIntegrationScale, hybridNodeVCap, applyBounceBoundary });
+    integrateSoftBodiesCpu({ soft, n: boundaryN, dt, softIntegrationScale, hybridNodeVCap, applyBounceBoundary });
     addTimingSample(timingState, 'cpu.integrateMs', performance.now() - cpuIntegrateStartMs);
     addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
     return { mode: 'cpu', reason: 'wgsl-unavailable' };
@@ -435,7 +437,7 @@ export async function integrateSoftBodiesGpuOnly({
   try {
     await integrateSoftBodiesWgsl({
       soft,
-      n,
+      n: boundaryN,
       dt,
       softIntegrationScale,
       hybridNodeVCap,
@@ -454,7 +456,7 @@ export async function integrateSoftBodiesGpuOnly({
   } catch (err) {
     // Keep runtime behavior stable if the optional WGSL path fails in-session.
     const cpuFallbackStartMs = performance.now();
-    integrateSoftBodiesCpu({ soft, n, dt, softIntegrationScale, hybridNodeVCap, applyBounceBoundary });
+    integrateSoftBodiesCpu({ soft, n: boundaryN, dt, softIntegrationScale, hybridNodeVCap, applyBounceBoundary });
     addTimingSample(timingState, 'cpu.fallbackIntegrateMs', performance.now() - cpuFallbackStartMs);
     addTimingSample(timingState, 'totalMs', performance.now() - stageStartMs);
     if (wgslOffload?.state) {

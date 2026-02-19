@@ -167,8 +167,8 @@ const MEMBRANE_BEND_XPBD_ITERS = 4;
 const MEMBRANE_BEND_BASE_COMPLIANCE = 0.0022;
 const RIGID_INSIDE_CORRECTION_ITERS = 2;
 const RIGID_INSIDE_CORRECTION_SLOP = 0.04;
-const WORLD_SCALE_MIN = 1.0;
-const WORLD_SCALE_MAX = 2.0;
+const WORLD_SCALE_MIN = 2.0;
+const WORLD_SCALE_MAX = 8.0;
 const WORLD_SCALE_START_RIGID = 200;
 const WORLD_SCALE_FULL_RIGID = 2000;
 
@@ -2233,7 +2233,7 @@ function applyScenarioPreset(sim, preset) {
   applyPresetViscosityTerrain(sim, p);
   sim.camera.x = worldSize * 0.5;
   sim.camera.y = worldSize * 0.5;
-  sim.camera.zoom = worldSize >= 1024 ? 1.8 : 1.0;
+  sim.camera.zoom = 1.0;
 }
 
 function applyEmitters(sim, r, g, b, vx, vy) {
@@ -4266,6 +4266,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   const preambleStartMs = performance.now();
   const n = sim.controls.n;
   const worldScale = getWorldScale(sim.controls);
+  const worldSize = n * worldScale;
   const dtRaw = Number(sim.controls.dt) || 0.01;
   const dt = Math.max(0.001, Math.min(0.02, dtRaw));
   const dtNorm = Math.max(0.2, Math.min(1.5, (dt * 60) || 1));
@@ -4374,6 +4375,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       vxField,
       vyField,
       n,
+      worldSize,
       dt,
       dtNorm,
       dragK,
@@ -4489,7 +4491,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       b.x = b.x + b.vx * dt * 22;
       b.y = b.y + b.vy * dt * 28;
       b.theta = (b.theta || 0) + b.omega * dt * 60;
-      applyBounceBoundary(b, n, 0.84);
+      applyBounceBoundary(b, worldSize, 0.84);
     }
   }
   recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.rigid.gpuOnly' : 'bodies.rigid.baseline', performance.now() - rigidStageStartMs);
@@ -4883,6 +4885,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     const softIntegrateRuntime = await integrateSoftBodiesGpuOnly({
       soft: s,
       n,
+      worldSize,
       dt,
       softIntegrationScale: SOFT_INTEGRATION_SCALE,
       hybridNodeVCap,
@@ -4903,7 +4906,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       }
       node.x = node.x + node.vx * dt * SOFT_INTEGRATION_SCALE;
       node.y = node.y + node.vy * dt * SOFT_INTEGRATION_SCALE;
-      applyBounceBoundary(node, n, 0.78);
+      applyBounceBoundary(node, worldSize, 0.78);
     }
     sim.softIntegrateRuntime = { mode: 'cpu-baseline', reason: 'baseline-path' };
   }
@@ -5011,7 +5014,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       softNodeNodeSlop: 0.22,
       softNodeEdgeSlop: 0.12,
       edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
-      n,
+      n: worldSize,
       rigidBounce: 0.84,
       softBounce: 0.78,
       resolveRigidRigidCollisionPassGpuOnly,
@@ -5228,8 +5231,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       }
       collisionCpuRuntime.stageMs.rigidRigidPost += performance.now() - rigidRigidPostStartMs;
 
-      for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
-      for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
+      for (const rb of bodies.rigid) applyBounceBoundary(rb, worldSize, 0.84);
+      for (const sn of s.nodes) applyBounceBoundary(sn, worldSize, 0.78);
     }
   }
   rigidRigidBroadphaseRuntime.reductionPct = rigidRigidBroadphaseRuntime.totalBruteForcePairs > 0
@@ -5325,7 +5328,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
             return st;
           })(),
         },
-        n,
+        n: worldSize,
         softClusterLoops,
       });
       rigidInsideCorrections = postCollisionRecovery.rigidInsideCorrections;
@@ -5341,8 +5344,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
 
       rigidInsideCorrections = applyRigidInsideCorrectionPass(bodies, s);
       membraneInsideCorrections = applyMembraneInsideCorrectionPass(sim, s, softClusterLoops);
-      for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
-      for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
+      for (const rb of bodies.rigid) applyBounceBoundary(rb, worldSize, 0.84);
+      for (const sn of s.nodes) applyBounceBoundary(sn, worldSize, 0.78);
     }
   }
 
@@ -6754,7 +6757,7 @@ async function initSim() {
     bodies: initBodies(controls.n, controls, getWorldSize(controls)),
     emitters: initEmitters(getWorldSize(controls)),
     disableDefaultInject: false,
-    camera: { x: getWorldSize(controls) * 0.5, y: getWorldSize(controls) * 0.5, zoom: getWorldSize(controls) >= 1024 ? 1.8 : 1.0 },
+    camera: { x: getWorldSize(controls) * 0.5, y: getWorldSize(controls) * 0.5, zoom: 1.0 },
     couplingTelemetry: [],
     pipelineTimingFrame: null,
     pipelineTimingLast: null,
@@ -7543,6 +7546,8 @@ window.__gpuLabApi = {
       running: !!running,
       frame: Number(sim?.frame) || 0,
       grid: Number(sim?.controls?.n) || null,
+      worldScale: getWorldScale(sim?.controls),
+      worldSize: getWorldSize(sim?.controls),
       runtimeSolverPath: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath),
       runtimePipelineMode: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
       allowPassEdgeFlowPush: sim?.controls?.allowPassEdgeFlowPush === true,

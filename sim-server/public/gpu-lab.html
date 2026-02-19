@@ -17,10 +17,17 @@
     .slider-value { color: #9fe3ff; font-family: ui-monospace, Menlo, monospace; min-width: 52px; display: inline-block; text-align: right; }
     pre { background: #1b1b1b; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
     canvas { border: 1px solid #333; image-rendering: pixelated; image-rendering: crisp-edges; }
+    #view {
+      display: block;
+      width: min(calc(100vw - 40px), 1080px);
+      height: auto;
+      aspect-ratio: 1 / 1;
+      max-width: 100%;
+    }
     #viscMap { cursor: crosshair; }
     .deformation-legend {
       margin-top: 8px;
-      max-width: 512px;
+      max-width: min(calc(100vw - 40px), 1080px);
       padding: 10px;
       border: 1px solid #333;
       border-radius: 8px;
@@ -313,7 +320,7 @@
   <div class="pane-row">
     <div class="pane">
       <div class="pane-title">GPU fluid visualization + viscosity overlay</div>
-      <canvas id="view" width="512" height="512"></canvas>
+      <canvas id="view" width="1024" height="1024"></canvas>
       <details id="deformationLegend" class="deformation-legend">
         <summary><strong>Soft-body deformation color signals (yellow vs red)</strong></summary>
         <ul>
@@ -327,6 +334,6 @@
   </div>
 
   <pre id="out">idle</pre>
-  <script type="module" src="/gpu-lab.js?v=20260218e"></script>
+  <script type="module" src="/gpu-lab.js?v=20260219a"></script>
 </body>
 </html>

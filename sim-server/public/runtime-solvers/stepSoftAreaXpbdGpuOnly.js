@@ -550,17 +550,20 @@ async function dispatchSoftAreaWgslVelocityNodeReduction({ soft, offload, plan }
   encoder.copyBufferToBuffer(state.areaVelocityNodeReductionContributionOut, 0, state.areaVelocityNodeReductionContributionReadback, 0, nodeBytes);
   device.queue.submit([encoder.finish()]);
 
-  await state.areaVelocityNodeReductionDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
+  await Promise.all([
+    state.areaVelocityNodeReductionDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes),
+    state.areaVelocityNodeReductionDeltaVYReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes),
+    state.areaVelocityNodeReductionContributionReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes),
+  ]);
+
   const mappedVx = state.areaVelocityNodeReductionDeltaVXReadback.getMappedRange(0, nodeBytes);
   const deltaVxByNode = new Float32Array(mappedVx.slice(0));
   state.areaVelocityNodeReductionDeltaVXReadback.unmap();
 
-  await state.areaVelocityNodeReductionDeltaVYReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
   const mappedVy = state.areaVelocityNodeReductionDeltaVYReadback.getMappedRange(0, nodeBytes);
   const deltaVyByNode = new Float32Array(mappedVy.slice(0));
   state.areaVelocityNodeReductionDeltaVYReadback.unmap();
 
-  await state.areaVelocityNodeReductionContributionReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
   const mappedContribution = state.areaVelocityNodeReductionContributionReadback.getMappedRange(0, nodeBytes);
   const contributionCountByNode = new Uint32Array(mappedContribution.slice(0));
   state.areaVelocityNodeReductionContributionReadback.unmap();
@@ -1220,14 +1223,19 @@ export function applySoftAreaXPBDVelocityGpuOnly({
       alpha,
       softAreaXpbdIters,
     });
+    const proposalEpoch = (Number(wgslOffload.state.lastPreparedProposalEpoch) || 0) + 1;
+    wgslOffload.state.lastPreparedProposalEpoch = proposalEpoch;
     wgslOffload.state.lastPreparedProposalSignature = proposalSignature;
 
     const fastModeAuthoritative = isGpuOnlyFastMode(wgslOffload);
     const canUseAuthoritativeReplay = wgslOffload?.authoritativeAreaXpbd === true || fastModeAuthoritative;
     const signatureMatched = wgslOffload.state.lastAreaVelocityProposalSignature === proposalSignature;
+    const proposalEpochDelta = Math.max(0, proposalEpoch - (Number(wgslOffload.state.lastAreaVelocityProposalEpoch) || 0));
+    const fastEpochReplayEligible = fastModeAuthoritative && proposalEpochDelta <= 2;
+    const fastProposalMatch = fastModeAuthoritative ? (signatureMatched || fastEpochReplayEligible) : signatureMatched;
     if (
       canUseAuthoritativeReplay
-      && signatureMatched
+      && fastProposalMatch
       && applySoftAreaAuthoritativeCachedProposal({
         sim,
         soft,
@@ -1235,14 +1243,19 @@ export function applySoftAreaXPBDVelocityGpuOnly({
         state: wgslOffload.state,
       })
     ) {
+      const fastEpochReplayUsed = fastModeAuthoritative && !signatureMatched && fastEpochReplayEligible;
       wgslOffload.state.lastMode = fastModeAuthoritative
         ? 'wgsl-area-authoritative-fast'
         : 'wgsl-area-authoritative';
       wgslOffload.state.lastAuthoritativeProposalSignature = proposalSignature;
+      wgslOffload.state.lastAuthoritativeProposalSource = fastEpochReplayUsed
+        ? 'wgsl-area-proposal-fast-epoch-replay'
+        : 'wgsl-area-proposal-signature-replay';
+      wgslOffload.state.lastAuthoritativeProposalEpochDelta = proposalEpochDelta;
       wgslOffload.state.lastAuthoritativeProposalFrame = Number(sim?.frame) || 0;
       return;
     }
-    if (canUseAuthoritativeReplay && signatureMatched && wgslOffload.state.lastAreaVelocityProposalFinite?.allFinite === false) {
+    if (canUseAuthoritativeReplay && fastProposalMatch && wgslOffload.state.lastAreaVelocityProposalFinite?.allFinite === false) {
       wgslOffload.state.lastMode = 'cpu-fallback';
       wgslOffload.state.lastError = 'non-finite-area-authoritative-replay';
     }
@@ -1361,6 +1374,7 @@ export function applySoftAreaXPBDVelocityGpuOnly({
             : (proposalRan ? 'wgsl-proposal' : 'wgsl-probe');
           if (proposalRan && velocityProposalRan) {
             state.lastAreaVelocityProposalSignature = proposalSignature;
+            state.lastAreaVelocityProposalEpoch = proposalEpoch;
           }
         }
         return probeRan || proposalRan || velocityProposalRan;

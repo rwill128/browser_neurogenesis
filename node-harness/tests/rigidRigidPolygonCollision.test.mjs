@@ -305,6 +305,11 @@ test('rigid-rigid spatial hash broadphase candidate order is deterministic', () 
   assert.deepEqual(a.pairs, b.pairs, 'candidate pair ordering should be stable across identical runs');
   assert.deepEqual(a.stats.checkedPairs, b.stats.checkedPairs);
   assert.deepEqual(a.stats.prunedPairs, b.stats.prunedPairs);
+  for (let i = 1; i < a.pairs.length; i++) {
+    const prev = a.pairs[i - 1];
+    const next = a.pairs[i];
+    assert.ok((prev[0] < next[0]) || (prev[0] === next[0] && prev[1] <= next[1]), 'pairs should remain in deterministic i-then-j order');
+  }
 });
 
 test('phase scene cache reuses shared rigid broadphase state for rigid-rigid and rigid-soft candidate sets', () => {

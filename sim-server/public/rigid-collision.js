@@ -629,6 +629,7 @@ function buildRigidSpatialHashState(rigidBodies, cellSize) {
 
   const cells = new Map();
   const rigidMeta = new Array(bodyCount);
+  const bodyCellKeys = new Array(bodyCount);
   const cellSpans = new Int32Array(Math.max(0, bodyCount * 4));
   let cellSpanSignature = 2166136261 >>> 0;
   const mixCellSpanSignature = (value) => {
@@ -645,6 +646,9 @@ function buildRigidSpatialHashState(rigidBodies, cellSize) {
     let maxCx = -1;
     let minCy = 0;
     let maxCy = -1;
+
+    const cellKeys = [];
+    bodyCellKeys[i] = cellKeys;
 
     if (!rb) {
       rigidMeta[i] = {
@@ -673,6 +677,7 @@ function buildRigidSpatialHashState(rigidBodies, cellSize) {
             cells.set(key, bucket);
           }
           bucket.push(i);
+          cellKeys.push(key);
           occupiedBodyWrites += 1;
         }
       }
@@ -704,6 +709,7 @@ function buildRigidSpatialHashState(rigidBodies, cellSize) {
     cells,
     sortedKeys,
     rigidMeta,
+    bodyCellKeys,
     occupiedBodyWrites,
     maxBodiesPerCell,
     cellSpans,
@@ -728,40 +734,54 @@ function rigidCellSpansEqual(a, b) {
 
 function deriveRigidRigidCandidatesFromState(state) {
   const candidatePairs = [];
-  const seenPairs = new Set();
   let emitAttempts = 0;
   let duplicatesRejected = 0;
+  let dedupeMs = 0;
+  let sortMs = 0;
 
-  const dedupeStartMs = nowMs();
-  for (const key of state.sortedKeys) {
-    const ids = state.cells.get(key) || [];
-    if (ids.length < 2) continue;
-    for (let a = 0; a < ids.length; a++) {
-      const i = ids[a];
-      for (let b = a + 1; b < ids.length; b++) {
+  const bodyCount = Number(state?.bodyCount) | 0;
+  const cells = state?.cells;
+  const bodyCellKeys = Array.isArray(state?.bodyCellKeys) ? state.bodyCellKeys : [];
+  const seenStamp = new Int32Array(Math.max(0, bodyCount));
+  let stampToken = 1;
+
+  for (let i = 0; i < bodyCount; i++) {
+    const cellKeys = bodyCellKeys[i];
+    if (!Array.isArray(cellKeys) || cellKeys.length === 0) continue;
+    const bodyDedupeStartMs = nowMs();
+    const bodyStamp = stampToken++;
+    const neighbors = [];
+
+    for (const key of cellKeys) {
+      const ids = cells?.get(key) || [];
+      for (let idx = 0; idx < ids.length; idx++) {
         emitAttempts += 1;
-        const j = ids[b];
-        if (i === j) {
+        const j = Number(ids[idx]) | 0;
+        if (j <= i) {
           duplicatesRejected += 1;
           continue;
         }
-        const lo = i < j ? i : j;
-        const hi = i < j ? j : i;
-        const pairKey = lo * state.bodyCount + hi;
-        if (seenPairs.has(pairKey)) {
+        if (seenStamp[j] === bodyStamp) {
           duplicatesRejected += 1;
           continue;
         }
-        seenPairs.add(pairKey);
-        candidatePairs.push([lo, hi]);
+        seenStamp[j] = bodyStamp;
+        neighbors.push(j);
       }
     }
-  }
-  const dedupeMs = nowMs() - dedupeStartMs;
 
-  const sortStartMs = nowMs();
-  candidatePairs.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
-  const sortMs = nowMs() - sortStartMs;
+    dedupeMs += nowMs() - bodyDedupeStartMs;
+
+    if (neighbors.length > 1) {
+      const bodySortStartMs = nowMs();
+      neighbors.sort((a, b) => a - b);
+      sortMs += nowMs() - bodySortStartMs;
+    }
+
+    for (let k = 0; k < neighbors.length; k++) {
+      candidatePairs.push([i, neighbors[k]]);
+    }
+  }
 
   const checkedPairs = candidatePairs.length;
   const prunedPairs = Math.max(0, state.bruteForcePairs - checkedPairs);

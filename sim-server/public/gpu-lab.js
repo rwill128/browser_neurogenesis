@@ -1,6 +1,12 @@
 import { parseCreatureSpec, buildBodiesFromCreatureSpec } from '/creature-spec.js';
 import { EDGE_DYE_MODE, normalizeEdgeDyeModeRGB, normalizePermeabilityRGB } from '/dye-barrier.js';
-import { resolveRigidVsSoftNodeCollision, resolveRigidVsRigidPolygonCollision, getRigidCollisionPolysWorld, pointInPolygonInclusive } from '/rigid-collision.js';
+import {
+  resolveRigidVsSoftNodeCollision,
+  resolveRigidVsRigidPolygonCollision,
+  getRigidCollisionPolysWorld,
+  pointInPolygonInclusive,
+  buildRigidRigidSpatialHashCandidates,
+} from '/rigid-collision.js';
 import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops, recoverSoftSpringRests } from '/soft-xpbd.js';
 import { computeVectorRms, computeRigidAlignedPoseResidual } from '/soft-deformation-metrics.js';
 import { computeSoftClusterKinematics, projectNodesTowardClusterRigidMotion } from '/soft-cluster-kinematics.js';
@@ -125,6 +131,7 @@ const SOFT_CLUSTER_COLLISION_ANGULAR_PROJECTION = 0.22; // post-collision redist
 const SOFT_CLUSTER_FLUID_INJECT_BLEND = 0.55; // blend node velocity with cluster rigid-like velocity for fluid feedback
 const SOFT_XPBD_ITERS = 10;
 const SOFT_XPBD_BASE_COMPLIANCE = 0.0012;
+const RIGID_RIGID_SPATIAL_HASH_CELL_SIZE = 12;
 const SOFT_AREA_XPBD_ITERS = 6;
 const SOFT_AREA_BASE_COMPLIANCE = 0.0009;
 const SOFT_INTEGRATION_SCALE = 24;
@@ -4718,6 +4725,15 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   const rigidContactDebug = [];
 
   const collisionStageStartMs = performance.now();
+  const rigidRigidBroadphaseRuntime = {
+    enabled: solverPath !== 'gpu-only',
+    cellSize: RIGID_RIGID_SPATIAL_HASH_CELL_SIZE,
+    phases: [],
+    totalBruteForcePairs: 0,
+    totalCheckedPairs: 0,
+    totalPrunedPairs: 0,
+    reductionPct: 0,
+  };
   if (solverPath === 'gpu-only') {
     const collisionResult = await runCollisionIterationsGpuOnly({
       rigidBodies: bodies.rigid,
@@ -4767,21 +4783,32 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       },
     });
     sim.collisionBoundaryRuntime = collisionResult.boundaryRuntime || { mode: 'cpu-fallback', reason: 'unknown' };
+    rigidRigidBroadphaseRuntime.enabled = false;
+    rigidRigidBroadphaseRuntime.reason = 'gpu-only-collision-path';
   } else {
     sim.collisionBoundaryRuntime = { mode: 'cpu-baseline', reason: 'baseline-path' };
 
     // Body-body collisions: rigid↔rigid, rigid↔soft, soft↔soft
     for (let iter = 0; iter < 2; iter++) {
-      for (let i = 0; i < bodies.rigid.length; i++) {
-        for (let j = i + 1; j < bodies.rigid.length; j++) {
-          resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
-            contacts: rigidContactDebug,
-            aIndex: i,
-            bIndex: j,
-            iter,
-            phase: 'pre-soft',
-          });
-        }
+      const preBroadphase = buildRigidRigidSpatialHashCandidates(bodies.rigid, {
+        cellSize: RIGID_RIGID_SPATIAL_HASH_CELL_SIZE,
+      });
+      rigidRigidBroadphaseRuntime.phases.push({
+        phase: 'pre-soft',
+        iter,
+        ...preBroadphase.stats,
+      });
+      rigidRigidBroadphaseRuntime.totalBruteForcePairs += Number(preBroadphase.stats?.bruteForcePairs) || 0;
+      rigidRigidBroadphaseRuntime.totalCheckedPairs += Number(preBroadphase.stats?.checkedPairs) || 0;
+      rigidRigidBroadphaseRuntime.totalPrunedPairs += Number(preBroadphase.stats?.prunedPairs) || 0;
+      for (const [i, j] of preBroadphase.pairs) {
+        resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
+          contacts: rigidContactDebug,
+          aIndex: i,
+          bIndex: j,
+          iter,
+          phase: 'pre-soft',
+        });
       }
 
       for (let rbi = 0; rbi < bodies.rigid.length; rbi++) {
@@ -4816,22 +4843,35 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       }
 
       // Re-run rigid-rigid contacts after rigid-soft pushes to avoid late interpenetration.
-      for (let i = 0; i < bodies.rigid.length; i++) {
-        for (let j = i + 1; j < bodies.rigid.length; j++) {
-          resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
-            contacts: rigidContactDebug,
-            aIndex: i,
-            bIndex: j,
-            iter,
-            phase: 'post-soft',
-          });
-        }
+      const postBroadphase = buildRigidRigidSpatialHashCandidates(bodies.rigid, {
+        cellSize: RIGID_RIGID_SPATIAL_HASH_CELL_SIZE,
+      });
+      rigidRigidBroadphaseRuntime.phases.push({
+        phase: 'post-soft',
+        iter,
+        ...postBroadphase.stats,
+      });
+      rigidRigidBroadphaseRuntime.totalBruteForcePairs += Number(postBroadphase.stats?.bruteForcePairs) || 0;
+      rigidRigidBroadphaseRuntime.totalCheckedPairs += Number(postBroadphase.stats?.checkedPairs) || 0;
+      rigidRigidBroadphaseRuntime.totalPrunedPairs += Number(postBroadphase.stats?.prunedPairs) || 0;
+      for (const [i, j] of postBroadphase.pairs) {
+        resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
+          contacts: rigidContactDebug,
+          aIndex: i,
+          bIndex: j,
+          iter,
+          phase: 'post-soft',
+        });
       }
 
       for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
       for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
     }
   }
+  rigidRigidBroadphaseRuntime.reductionPct = rigidRigidBroadphaseRuntime.totalBruteForcePairs > 0
+    ? (rigidRigidBroadphaseRuntime.totalPrunedPairs / rigidRigidBroadphaseRuntime.totalBruteForcePairs) * 100
+    : 0;
+  sim.rigidRigidBroadphaseRuntime = rigidRigidBroadphaseRuntime;
 
   recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.collisions.gpuOnly' : 'bodies.collisions.baseline', performance.now() - collisionStageStartMs);
 
@@ -7101,6 +7141,40 @@ window.__gpuLabApi = {
         lastRigidStepProposalCarryLen: Number(sim?.rigidStepWgslState?.lastRigidStepProposalCarry?.length) || 0,
         lastTiming: sim?.rigidStepWgslState?.lastTiming ? { ...sim.rigidStepWgslState.lastTiming } : null,
       },
+      rigidRigidBroadphaseRuntime: sim?.rigidRigidBroadphaseRuntime
+        ? {
+          enabled: sim.rigidRigidBroadphaseRuntime.enabled !== false,
+          reason: sim.rigidRigidBroadphaseRuntime.reason || null,
+          cellSize: Number(sim.rigidRigidBroadphaseRuntime.cellSize) || RIGID_RIGID_SPATIAL_HASH_CELL_SIZE,
+          totalBruteForcePairs: Number(sim.rigidRigidBroadphaseRuntime.totalBruteForcePairs) || 0,
+          totalCheckedPairs: Number(sim.rigidRigidBroadphaseRuntime.totalCheckedPairs) || 0,
+          totalPrunedPairs: Number(sim.rigidRigidBroadphaseRuntime.totalPrunedPairs) || 0,
+          reductionPct: Number(sim.rigidRigidBroadphaseRuntime.reductionPct) || 0,
+          phases: Array.isArray(sim?.rigidRigidBroadphaseRuntime?.phases)
+            ? sim.rigidRigidBroadphaseRuntime.phases.slice(-8).map((entry) => ({
+              phase: entry?.phase || 'unknown',
+              iter: Number(entry?.iter) || 0,
+              bodyCount: Number(entry?.bodyCount) || 0,
+              bruteForcePairs: Number(entry?.bruteForcePairs) || 0,
+              checkedPairs: Number(entry?.checkedPairs) || 0,
+              prunedPairs: Number(entry?.prunedPairs) || 0,
+              reductionPct: Number(entry?.reductionPct) || 0,
+              occupiedCells: Number(entry?.occupiedCells) || 0,
+              maxBodiesPerCell: Number(entry?.maxBodiesPerCell) || 0,
+              avgBodiesPerCell: Number(entry?.avgBodiesPerCell) || 0,
+            }))
+            : [],
+        }
+        : {
+          enabled: false,
+          reason: 'uninitialized',
+          cellSize: RIGID_RIGID_SPATIAL_HASH_CELL_SIZE,
+          totalBruteForcePairs: 0,
+          totalCheckedPairs: 0,
+          totalPrunedPairs: 0,
+          reductionPct: 0,
+          phases: [],
+        },
       softFluidCouplingRuntime: {
         lastSourceRoute: sim?.softFluidCouplingWgslState?.lastSourceRoute || null,
         lastMode: sim?.softFluidCouplingWgslState?.lastMode || null,

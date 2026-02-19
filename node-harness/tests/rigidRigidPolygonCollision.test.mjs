@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveRigidVsRigidPolygonCollision, getRigidCollisionPolysWorld, rigidVerticesWorld, pointInPolygonInclusive } from '../../sim-server/public/rigid-collision.js';
+import {
+  resolveRigidVsRigidPolygonCollision,
+  getRigidCollisionPolysWorld,
+  rigidVerticesWorld,
+  pointInPolygonInclusive,
+  buildRigidRigidSpatialHashCandidates,
+} from '../../sim-server/public/rigid-collision.js';
 
 function makeConcaveL(x, y) {
   return {
@@ -253,4 +259,40 @@ test('rigid collision world polys stay finite when pose contains non-finite valu
     assert.ok(Number.isFinite(v.x), `x should be finite, got ${v.x}`);
     assert.ok(Number.isFinite(v.y), `y should be finite, got ${v.y}`);
   }
+});
+
+test('rigid-rigid spatial hash broadphase prunes pair checks while keeping overlap candidate', () => {
+  const collidingA = makeBox(20, 20, 3);
+  const collidingB = makeBox(24.5, 20, 3);
+  const farA = makeBox(120, 120, 3);
+  const farB = makeBox(180, 180, 3);
+  const farC = makeBox(220, 60, 3);
+  const farD = makeBox(40, 210, 3);
+  const bodies = [collidingA, collidingB, farA, farB, farC, farD];
+
+  const result = buildRigidRigidSpatialHashCandidates(bodies, { cellSize: 12 });
+  const pairSet = new Set(result.pairs.map(([i, j]) => `${i},${j}`));
+
+  assert.equal(result.stats.bodyCount, 6);
+  assert.equal(result.stats.bruteForcePairs, 15);
+  assert.ok(result.stats.checkedPairs < result.stats.bruteForcePairs, 'broadphase should prune candidates');
+  assert.ok(result.stats.prunedPairs > 0, 'expected some pair pruning');
+  assert.ok(pairSet.has('0,1'), 'known overlapping pair must survive broadphase');
+});
+
+test('rigid-rigid spatial hash broadphase candidate order is deterministic', () => {
+  const bodies = [
+    makeBox(12, 12, 2),
+    makeBox(14, 12, 2),
+    makeBox(60, 12, 2),
+    makeBox(62, 12, 2),
+    makeBox(100, 100, 2),
+  ];
+
+  const a = buildRigidRigidSpatialHashCandidates(bodies, { cellSize: 8 });
+  const b = buildRigidRigidSpatialHashCandidates(bodies, { cellSize: 8 });
+
+  assert.deepEqual(a.pairs, b.pairs, 'candidate pair ordering should be stable across identical runs');
+  assert.deepEqual(a.stats.checkedPairs, b.stats.checkedPairs);
+  assert.deepEqual(a.stats.prunedPairs, b.stats.prunedPairs);
 });

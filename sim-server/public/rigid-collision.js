@@ -534,6 +534,35 @@ function bodyCollisionPolysLocal(body) {
   return body._collisionPolysLocal;
 }
 
+function getRigidBroadphaseRadius(body) {
+  if (!body) return 0.5;
+  const polysLocal = bodyCollisionPolysLocal(body);
+  const cacheKey = body._collisionPolysLocalKey || 'none';
+  if (Number.isFinite(body._broadphaseRadiusLocal)
+    && body._broadphaseRadiusLocal > 0
+    && body._broadphaseRadiusLocalKey === cacheKey) {
+    return body._broadphaseRadiusLocal;
+  }
+
+  let maxR = 0;
+  for (const poly of polysLocal) {
+    if (!Array.isArray(poly)) continue;
+    for (const v of poly) {
+      const x = Number(v?.x);
+      const y = Number(v?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const d = Math.hypot(x, y);
+      if (d > maxR) maxR = d;
+    }
+  }
+  if (!(maxR > 0)) {
+    maxR = Math.max(0.5, finiteOr(body?.r, 0.5));
+  }
+  body._broadphaseRadiusLocal = maxR;
+  body._broadphaseRadiusLocalKey = cacheKey;
+  return maxR;
+}
+
 export function getRigidCollisionPolysWorld(body) {
   const polysLocal = bodyCollisionPolysLocal(body);
   const theta = finiteOr(body?.theta, 0);
@@ -545,6 +574,101 @@ export function getRigidCollisionPolysWorld(body) {
     x: bx + v.x * c - v.y * s,
     y: by + v.x * s + v.y * c,
   })));
+}
+
+const SPATIAL_KEY_BIAS = 1 << 20; // 1,048,576 cells each direction
+const SPATIAL_KEY_STRIDE = 1 << 21; // 2,097,152
+
+function packSpatialCellKey(cx, cy) {
+  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+  if (cx <= -SPATIAL_KEY_BIAS || cx >= SPATIAL_KEY_BIAS) return null;
+  if (cy <= -SPATIAL_KEY_BIAS || cy >= SPATIAL_KEY_BIAS) return null;
+  return (cx + SPATIAL_KEY_BIAS) * SPATIAL_KEY_STRIDE + (cy + SPATIAL_KEY_BIAS);
+}
+
+export function buildRigidRigidSpatialHashCandidates(rigidBodies, options = {}) {
+  const bodies = Array.isArray(rigidBodies) ? rigidBodies : [];
+  const bodyCount = bodies.length;
+  const bruteForcePairs = bodyCount > 1 ? (bodyCount * (bodyCount - 1)) / 2 : 0;
+  const rawCellSize = Number(options.cellSize);
+  const cellSize = Number.isFinite(rawCellSize) ? Math.max(0.25, rawCellSize) : 12;
+
+  const cells = new Map();
+  let occupiedBodyWrites = 0;
+
+  for (let i = 0; i < bodyCount; i++) {
+    const rb = bodies[i];
+    if (!rb) continue;
+    const bx = finiteOr(rb.x, 0);
+    const by = finiteOr(rb.y, 0);
+    const radius = Math.max(0.5, getRigidBroadphaseRadius(rb));
+    const minCx = Math.floor((bx - radius) / cellSize);
+    const maxCx = Math.floor((bx + radius) / cellSize);
+    const minCy = Math.floor((by - radius) / cellSize);
+    const maxCy = Math.floor((by + radius) / cellSize);
+
+    for (let cy = minCy; cy <= maxCy; cy++) {
+      for (let cx = minCx; cx <= maxCx; cx++) {
+        const key = packSpatialCellKey(cx, cy);
+        if (key == null) continue;
+        let bucket = cells.get(key);
+        if (!bucket) {
+          bucket = [];
+          cells.set(key, bucket);
+        }
+        bucket.push(i);
+        occupiedBodyWrites += 1;
+      }
+    }
+  }
+
+  const sortedKeys = Array.from(cells.keys()).sort((a, b) => a - b);
+  const candidatePairs = [];
+  const seenPairs = new Set();
+  let maxBodiesPerCell = 0;
+
+  for (const key of sortedKeys) {
+    const ids = cells.get(key) || [];
+    if (ids.length > maxBodiesPerCell) maxBodiesPerCell = ids.length;
+    if (ids.length < 2) continue;
+    for (let a = 0; a < ids.length; a++) {
+      const i = ids[a];
+      for (let b = a + 1; b < ids.length; b++) {
+        const j = ids[b];
+        if (i === j) continue;
+        const lo = i < j ? i : j;
+        const hi = i < j ? j : i;
+        const pairKey = lo * bodyCount + hi;
+        if (seenPairs.has(pairKey)) continue;
+        seenPairs.add(pairKey);
+        candidatePairs.push([lo, hi]);
+      }
+    }
+  }
+
+  candidatePairs.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+
+  const checkedPairs = candidatePairs.length;
+  const prunedPairs = Math.max(0, bruteForcePairs - checkedPairs);
+  const reductionPct = bruteForcePairs > 0
+    ? (prunedPairs / bruteForcePairs) * 100
+    : 0;
+
+  return {
+    pairs: candidatePairs,
+    stats: {
+      bodyCount,
+      bruteForcePairs,
+      checkedPairs,
+      prunedPairs,
+      reductionPct,
+      cellSize,
+      occupiedCells: sortedKeys.length,
+      occupiedBodyWrites,
+      maxBodiesPerCell,
+      avgBodiesPerCell: sortedKeys.length > 0 ? (occupiedBodyWrites / sortedKeys.length) : 0,
+    },
+  };
 }
 
 function polygonCenter(poly) {

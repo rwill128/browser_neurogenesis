@@ -453,12 +453,214 @@ You were right to call this out: readback/sync is only part of the story. Still,
 
 ---
 
-## 7) What to expand next (if you want the “several more pages” version)
+## 7) Delivered expansion: exact schemas + symbol glossary + fallback matrix
 
-If you want, next pass I can add per-stage appendices with:
-1. **Exact buffer schemas** (field order, stride, units) for each WGSL prep layout.
-2. **Equation cards** with symbol glossary (`C`, `dl`, `alpha`, `wSum`, etc.) and how each maps to code variables.
-3. **Fallback trigger matrix** (condition → route tag → ownership semantics) for every gpu-only module.
-4. **Call-stack timing budget template** (CPU wall, GPU dispatch, readback map, decode/apply) so perf traces are one-to-one with this doc.
+You asked for the deeper pass, including **main CPU flow and all three modes**, not just GPU buffers/sync. This section delivers that with concrete schemas and trigger matrices.
 
-That version will be long, but it will support hard attribution work without ambiguity.
+---
+
+## 8) Exact data schemas (CPU objects + GPU prep layouts)
+
+## 8.1 Baseline in-memory runtime schema (CPU authoritative objects)
+
+| Object | Shape / fields used in math | Where used in baseline math |
+|---|---|---|
+| `rigidBody` | `{ x,y,vx,vy,theta,omega,mass,inertia,r,edgeBodyMode[],edgeVelocityMode[],edgeMomentumCoupling[] }` | rigid fluid coupling/integration, rigid-soft/rigid-rigid collision, bounce, injection |
+| `softNode` | `{ x,y,vx,vy,mass,r,clusterId,shapeMemoryWeight }` | soft fluid coupling, XPBD constraints, collisions, projection, membrane/deformation/recovery |
+| `softSpring` tuple | `[nodeA,nodeB,restLen,edgeBodyMode,dyeModeRGB,edgeVelocityMode,momentum]` | spring XPBD, rigid-soft edge blocking, PASS/BLOCK behavior, momentum scaling |
+| `softClusterLoop` | `{ clusterId, indices[] }` | area XPBD, membrane boundary/bend, membrane pressure, deformation metrics |
+| `sim.softAreaRest / softAreaLambda` | `Map<clusterId, number>` | area XPBD rest-area and lambda state |
+| `sim.softMembraneLoopState` | per-cluster edge/bend/shape refs and lambdas | membrane boundary, bend, shape-memory constraints |
+
+**Citations:** `sim-server/public/gpu-lab.js` L4048-L4072, L4073-L4196, L4200-L4433, L4668-L4721, L3047-L3510.
+
+## 8.2 Frame-fluid GPU buffer schema (shared all modes)
+
+| Buffer group | Elements | Type | Role |
+|---|---|---|---|
+| Velocity ping-pong | `vx0,vx1,vy0,vy1` | `Float32Array` in storage buffers | advection/divergence/projection state |
+| Pressure ping-pong + divergence | `pr0,pr1,div` | `Float32Array` | pressure solve |
+| Dye ping-pong | `rr0,rr1,gg0,gg1,bb0,bb1` | `Float32Array` | RGB dye transport |
+| Static masks | `viscMapGpu, obstacleMaskGpu, dyeModeMaskGpu` | float/u32 storage | viscosity and boundary/pass/block/eat rules |
+| Readback buffers | `readR,readG,readB,readVx,readVy` | map-read buffers | CPU coupling/render source arrays |
+| Fast health | `fastFluidHealthStats`, `fastFluidHealthReadback` | u32 stats buffer + map-read | fast anomaly gate before skip/readback decision |
+
+**Citations:** `sim-server/public/gpu-lab.js` L6100-L6173, L6186-L6231, L6350-L6423.
+
+## 8.3 Rigid step WGSL prep schema (`stepRigidGpuOnly.js`)
+
+The proposal layout is a packed **14-float stride per rigid body** (`RIGID_LAYOUT_STRIDE_FLOATS = 14`).
+
+| Offset | Field | Meaning |
+|---|---|---|
+| 0..5 | `vx, vy, omega, x, y, theta` | current rigid kinematic state |
+| 6..8 | `ax, ay, alpha` | force/torque-derived accelerations |
+| 9..11 | `swimX, swimY, swimTorque` | active swim injection terms |
+| 12..13 | `damp, vmax` | viscosity response and speed cap |
+
+Output arrays read back: `vx, vy, omega, x, y, theta, carry`.
+
+**Citations:** `sim-server/public/runtime-solvers/stepRigidGpuOnly.js` L6-L44, L128-L237, L365-L389.
+
+## 8.4 Soft-fluid coupling prep schema (`stepSoftFluidCouplingGpuOnly.js`)
+
+Two aligned layouts are prepared:
+
+### A) Topology/state layout
+- `nodeX,nodeY,nodeVx,nodeVy,nodeMass,nodeMomentum`
+- `nodeClusterId,nodeClusterSlot,nodeIsMembraneCluster`
+- `clusterIds,clusterNodeOffsets,clusterNodeCount,clusterNodeIndices`
+
+### B) CPU-sampled flow layout
+- `fluidSampleVx,fluidSampleVy`
+- `clusterLocalVx,clusterLocalVy`
+- `sampleDeltaVx,sampleDeltaVy`
+- `clusterCenterX,clusterCenterY`
+- `localHoney`
+
+These power carry proposals and cluster-load reductions.
+
+**Citations:** `sim-server/public/runtime-solvers/stepSoftFluidCouplingGpuOnly.js` L68-L178, L185-L267, L844-L883.
+
+## 8.5 Soft spring XPBD prep schema (`stepSoftSpringsXpbdGpuOnly.js`)
+
+Plan/layout are deterministic and colorized for conflict-free reduction order.
+
+| Group | Arrays |
+|---|---|
+| Active spring indexing | `activeSpringIndices`, `springNodeA`, `springNodeB`, `springRest` |
+| Mass weights | `springInvMassA`, `springInvMassB` |
+| Node-endpoint ownership | `nodeEndpointOffsets`, `endpointSpringIndices`, `endpointSignsI32` |
+| Color scheduling | `springColors`, `springColorOffsets`, `springColorOrderedIndices` |
+| Color-ordered mirrors | `springNodeAByColor`, `springNodeBByColor`, `springRestByColor`, `springInvMassAByColor`, `springInvMassBByColor` |
+| Color endpoint ownership | `colorEndpointOffsets`, `endpointNodeIndicesByColor`, `endpointSpringIndicesByColor`, `endpointSignsI32ByColor` |
+
+**Citations:** `sim-server/public/runtime-solvers/stepSoftSpringsXpbdGpuOnly.js` L864-L969, L971-L1099.
+
+## 8.6 Soft area XPBD prep schema (`stepSoftAreaXpbdGpuOnly.js`)
+
+| Array | Meaning |
+|---|---|
+| `clusterOffsets` | CSR offsets into loop endpoints per cluster |
+| `clusterNodeIndices` | node index list for all loop endpoints |
+| `clusterNodeInvMass` | invMass for each endpoint node |
+| `endpointClusterIndex` | endpoint → owning cluster map |
+| `clusterRestArea` | rest area per cluster |
+| `clusterLambda` | previous lambda per cluster |
+
+**Citations:** `sim-server/public/runtime-solvers/stepSoftAreaXpbdGpuOnly.js` L1077-L1141.
+
+## 8.7 Membrane pressure prep schema (`stepSoftMembranePressureGpuOnly.js`)
+
+| Array | Meaning |
+|---|---|
+| `membraneOffsets` | CSR offsets per membrane loop |
+| `loopIndices` | flat node indices for membrane loops |
+| `loopMembraneIndex` | each loop index → membrane id |
+| `nodeX,nodeY,nodeMass` | node state snapshot |
+| `areaBase` | baseline area per membrane |
+| `pressureGain` | pressure gain per membrane |
+| `clusterId` | membrane cluster IDs |
+
+**Citations:** `sim-server/public/runtime-solvers/stepSoftMembranePressureGpuOnly.js` L167-L240.
+
+## 8.8 Body-fluid injection prep + gather schema (`stepBodyFluidInjectionGpuOnly.js`)
+
+### A) Point prep layout
+- `pointX,pointY,pointVx,pointVy`
+- `localFluidX,localFluidY`
+- `pointMass,pointRadius`
+- `swimInjectX,swimInjectY`
+- `pointMomentumScale`
+
+### B) Gather layout
+- `pointRelX,pointRelY,pointScale,pointRadius`
+- `cellOffsets` (CSR cells)
+- `contribPointIndex,contribWeight`
+- `contributionCount`
+
+These are reduced into per-cell `cellDeltaVx/cellDeltaVy` then applied to fluid fields.
+
+**Citations:** `sim-server/public/runtime-solvers/stepBodyFluidInjectionGpuOnly.js` L139-L250, L256-L352, L355-L393.
+
+## 8.9 Rigid-soft collision WGSL layout schema (`stepRigidSoftCollisionGpuOnly.js`)
+
+### Pair layout
+- `nodePairRigidIndex,nodePairNodeIndex`
+- `edgePairRigidIndex,edgePairSpringIndex,edgePairNodeAIndex,edgePairNodeBIndex`
+
+### Scene layout (narrowphase inputs)
+- rigid state arrays: `rigidX,Y,Theta,Vx,Vy,Omega,InvMass,InvInertia,min/max AABB`
+- rigid polygon geometry: `rigidVertexStart,rigidVertexX,rigidVertexY`
+- soft state arrays: `nodeX,Y,Vx,Vy,R,InvMass`
+- spring arrays: `springNodeA,springNodeB,springRestLen`
+
+**Citations:** `sim-server/public/runtime-solvers/stepRigidSoftCollisionGpuOnly.js` L531-L583, L586-L739.
+
+---
+
+## 9) Symbol glossary (equations ↔ code variables)
+
+| Symbol | Meaning | Code names (examples) | Units / domain | Main stages |
+|---|---|---|---|---|
+| `dt` | simulation time step | `dt`, `dtRaw` | seconds/frame | all integration/constraint passes |
+| `dtNorm` | normalized dt scale for heuristic terms | `dtNorm` | unitless | swim and stabilizer terms |
+| `C` | constraint residual | `C` in spring/area XPBD | geometry units | spring/area/membrane XPBD |
+| `alpha` | XPBD compliance scaling | `alpha` | unit-adjusted compliance | spring/area XPBD |
+| `lambdaPrev/lambdaNext` | accumulated XPBD multiplier | `lambdaPrev`, `lambdaNext` | impulse-like scalar | spring/area/membrane constraints |
+| `dl` | lambda increment for current solve step | `dl`, `dlRaw` | scalar | XPBD substeps |
+| `w` / `invMass` | inverse mass weighting | `wA,wB,invMass,nodeInvMass` | 1/mass | constraints/collisions |
+| `sumWGrad2` | denominator term for area XPBD solve | `sumWGrad2` | scalar | area XPBD |
+| `nx,ny` | contact/constraint normal direction | `nx`,`ny` | unit vector | collisions, membrane pressure |
+| `ax,ay,alpha` | linear/angular acceleration from fluid coupling | `ax`,`ay`,`alpha` | vel/frame, angVel/frame | rigid and cluster coupling |
+| `omega` | angular velocity | `omega`, `clusterOmega` | rad/frame (normalized) | rigid + cluster dynamics |
+| `carry` | fluid-driven velocity transfer metric | `carryX/carryY`, `softCarryTransfer`, `rigidCarryTransfer` | velocity-like | fluid coupling/injection telemetry |
+| `err` (pressure) | membrane area error ratio | `err` | normalized ratio [-0.65,0.65] | membrane pressure |
+| `gain` | pressure correction gain | `gain`, `pressureGain` | scalar | membrane pressure |
+
+**Citations:**
+- `gpu-lab.js` L3972-L4196, L3047-L3217, L3510-L3600.
+- `stepSoftSpringsXpbdGpuOnly.js` L95-L101, L1645-L1650.
+- `stepSoftAreaXpbdGpuOnly.js` L119-L125, L1077-L1141.
+- `stepSoftMembranePressureGpuOnly.js` L46-L49, L110-L113.
+
+---
+
+## 10) Fallback trigger matrix (all 3 flows, explicit route ownership)
+
+> Baseline is CPU-authoritative by design, so “fallback” there means not applicable. Matrix below focuses on gpu-only validated/fast route transitions.
+
+| Stage | Trigger condition | GPU-validated route | GPU-fast route | Ownership consequence | Citations |
+|---|---|---|---|---|---|
+| Rigid step | WGSL proposal unavailable, non-finite, or signature mismatch vs prepared frame | `cpu-rigid-step-authoritative` / `cpu-rigid-step-authoritative-fallback` | `cpu-rigid-step-authoritative-fast` or WGSL fast route if ready | CPU applies rigid state updates | `stepRigidGpuOnly.js` L431-L485 |
+| Soft fluid coupling | Carry proposal non-finite or cluster-load parity mismatch (validated) | keeps CPU carry/cluster authoritative | fast can still accept finite WGSL proposal; else `cpu-carry+cluster-authoritative-fast-fallback` | CPU stays authoritative unless finite fast proposal accepted | `stepSoftFluidCouplingGpuOnly.js` L925-L933, L1162-L1183, L1326-L1328 |
+| Soft spring XPBD | Proposal pipeline error or no authoritative replay match | `cpu-fallback-authoritative` path remains | same, but can use `wgsl-velocity-authoritative-fast` when fresh proposal passes | CPU iterations remain source of truth unless authoritative proposal accepted | `stepSoftSpringsXpbdGpuOnly.js` L1459-L1462, L1597-L1606 |
+| Soft area XPBD | Non-finite authoritative replay/proposal | `cpu-fallback` | `cpu-fallback` (fast also) | CPU area solve applies | `stepSoftAreaXpbdGpuOnly.js` L1259-L1260, L1363, L1388 |
+| Soft integrate | WGSL dispatch/readback error | `cpu-fallback-authoritative` | same | CPU integrates nodes | `stepSoftIntegrateGpuOnly.js` L423-L437 |
+| Rigid post-integrate | WGSL error/unavailable | `cpu-fallback` | `cpu-fallback` | CPU clamps rigid velocity/omega | `stepRigidPostIntegrateGpuOnly.js` L222-L231 |
+| Boundary pass | Non-finite subset exists but WGSL available | `wgsl-partial` + CPU only on non-finite entries | same | Mixed ownership (WGSL finite, CPU non-finite) | `stepCollisionBoundaryGpuOnly.js` L354-L360 |
+| Boundary pass | WGSL execution error/unavailable | `cpu-fallback` | `cpu-fallback` | CPU owns full boundary pass | `stepCollisionBoundaryGpuOnly.js` L367-L371 |
+| Rigid-soft narrowphase | Fast mode + cadence/replay path | validated runs probe path | `wgsl-rigid-soft-node-aabb-probe-skipped-fast` and edge equivalent | Fast skips probe readback telemetry stage | `stepRigidSoftCollisionGpuOnly.js` L3108-L3119, L3250-L3258 |
+| Rigid-soft response | Proposal invalid and replay invalid | CPU fallback route | CPU fallback route (fast too) | CPU hard fallback response ownership | `stepRigidSoftCollisionGpuOnly.js` L3522-L3529, L3558-L3566 |
+| Body-fluid injection | Gather proposal missing/non-finite | `cpu-gather-authoritative` | `cpu-gather-fallback-fast` | CPU gathers cell deltas | `stepBodyFluidInjectionGpuOnly.js` L702-L723 |
+| Body-fluid injection | Gather proposal finite and matching | `wgsl-gather-authoritative` | `wgsl-gather-authoritative-fast` | WGSL proposal becomes authoritative gather source | `stepBodyFluidInjectionGpuOnly.js` L675-L707 |
+| Soft rest recovery | Probe/proposal did not run or failed | `cpu-rest-recovery-authoritative` | same | CPU `recoverSoftSpringRests` remains authoritative | `stepSoftRestRecoveryGpuOnly.js` L622-L632, L655-L663 |
+
+---
+
+## 11) Timing-budget template (for direct attribution runs)
+
+Use this per-stage template in benchmark notes so timing data lines up with this doc:
+
+| Stage | CPU prep ms | GPU dispatch ms | Readback map ms | Decode/apply ms | Route | Notes |
+|---|---:|---:|---:|---:|---|---|
+| Fluid core |  |  |  |  | full-readback / resident-skip | include fast health stats |
+| Rigid step |  |  |  |  | wgsl / cpu-fallback | include signature match flag |
+| Soft fluid coupling |  |  |  |  | wgsl carry/cluster vs cpu | include mismatch counts |
+| Spring XPBD |  |  |  |  | authoritative/replay/fallback | include proposal epoch delta |
+| Area XPBD |  |  |  |  | probe/proposal/replay | include finite summary |
+| Rigid-soft collision |  |  |  |  | replay/probe-skipped/fallback | include pair counts |
+| Boundary |  |  |  |  | wgsl-partial/cpu-fallback | include non-finite entry count |
+| Body-fluid injection |  |  |  |  | wgsl-gather/cpu-gather | include contribution count |
+
+This makes before/after optimization runs auditable without ambiguity.

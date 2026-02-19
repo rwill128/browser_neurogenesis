@@ -10,4 +10,7 @@ Moved items:
 - `index.html`
 - `edit_creature.html`
 
-For compatibility, symlinks remain at original paths.
+Compatibility strategy (no symlinks):
+- `js/` now contains lightweight bridge modules that re-export from the external legacy directory.
+- `index.html` and `edit_creature.html` are lightweight pointer pages.
+- `css/style.css` is a lightweight pointer placeholder.

@@ -1104,7 +1104,7 @@ struct HealthParams {
 @group(0) @binding(6) var<storage, read_write> stats: array<atomic<u32>>;
 
 fn finite(v: f32) -> bool {
-  return !isNan(v) && !isInf(v);
+  return (v == v) && abs(v) <= 3.402823e38;
 }
 
 @compute @workgroup_size(64)

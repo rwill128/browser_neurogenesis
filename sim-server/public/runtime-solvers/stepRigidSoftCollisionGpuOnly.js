@@ -1387,6 +1387,7 @@ async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload,
     timing.uploadMs += Math.max(0, performance.now() - uploadStartMs);
 
     const dispatchCount = Math.ceil(pairCount / WGSL_WORKGROUP_SIZE);
+    const packedReadbackBytes = (pairCount + 1) * 4;
     const dispatchSubmitStartMs = performance.now();
     const countEncoder = device.createCommandEncoder();
     const pass = countEncoder.beginComputePass();
@@ -1399,7 +1400,7 @@ async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload,
       0,
       state.rigidSoftNodeBroadphaseActiveMaskReadback,
       0,
-      4,
+      packedReadbackBytes,
     );
     device.queue.submit([countEncoder.finish()]);
     timing.dispatchSubmitMs += Math.max(0, performance.now() - dispatchSubmitStartMs);
@@ -1414,13 +1415,13 @@ async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload,
     safeUnmapBuffer(state.rigidSoftNodeBroadphaseActiveMaskReadback);
 
     try {
-      const countReadbackStartMs = performance.now();
-      await state.rigidSoftNodeBroadphaseActiveMaskReadback.mapAsync(globalThis.GPUMapMode.READ, 0, 4);
-      const mappedCount = state.rigidSoftNodeBroadphaseActiveMaskReadback.getMappedRange(0, 4);
-      timing.countReadbackMs += Math.max(0, performance.now() - countReadbackStartMs);
-      const activeCountRaw = new Uint32Array(mappedCount.slice(0))[0] >>> 0;
-      safeUnmapBuffer(state.rigidSoftNodeBroadphaseActiveMaskReadback);
+      const readbackStartMs = performance.now();
+      await state.rigidSoftNodeBroadphaseActiveMaskReadback.mapAsync(globalThis.GPUMapMode.READ, 0, packedReadbackBytes);
+      const mappedPacked = state.rigidSoftNodeBroadphaseActiveMaskReadback.getMappedRange(0, packedReadbackBytes);
+      const packedU32 = new Uint32Array(mappedPacked.slice(0));
+      timing.countReadbackMs += Math.max(0, performance.now() - readbackStartMs);
 
+      const activeCountRaw = packedU32[0] >>> 0;
       const activeCount = Math.min(pairCount >>> 0, activeCountRaw >>> 0);
       state.lastNodeBroadphaseActivePairCount = activeCount;
       state.lastNodeBroadphaseReadbackCount = activeCount;
@@ -1441,24 +1442,9 @@ async function dispatchRigidSoftNodeBroadphaseWgsl({ rigidBodies, soft, offload,
         };
       }
 
-      const indexReadbackBytes = activeCount * 4;
-      const indexReadbackStartMs = performance.now();
-      const indexEncoder = device.createCommandEncoder();
-      indexEncoder.copyBufferToBuffer(
-        state.rigidSoftNodeBroadphaseActiveMaskOut,
-        4,
-        state.rigidSoftNodeBroadphaseActiveMaskReadback,
-        0,
-        indexReadbackBytes,
-      );
-      device.queue.submit([indexEncoder.finish()]);
-
-      safeUnmapBuffer(state.rigidSoftNodeBroadphaseActiveMaskReadback);
-      await state.rigidSoftNodeBroadphaseActiveMaskReadback.mapAsync(globalThis.GPUMapMode.READ, 0, indexReadbackBytes);
-      const mappedIndices = state.rigidSoftNodeBroadphaseActiveMaskReadback.getMappedRange(0, indexReadbackBytes);
-      const activePairIndices = new Uint32Array(mappedIndices.slice(0));
-      safeUnmapBuffer(state.rigidSoftNodeBroadphaseActiveMaskReadback);
-      timing.indexReadbackMs += Math.max(0, performance.now() - indexReadbackStartMs);
+      const indexExtractStartMs = performance.now();
+      const activePairIndices = packedU32.slice(1, 1 + activeCount);
+      timing.indexReadbackMs += Math.max(0, performance.now() - indexExtractStartMs);
 
       const compactStartMs = performance.now();
       const compactPairs = buildCompactRigidSoftNodePairsFromActiveIndices({
@@ -1588,6 +1574,7 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
     timing.uploadMs += Math.max(0, performance.now() - uploadStartMs);
 
     const dispatchCount = Math.ceil(pairCount / WGSL_WORKGROUP_SIZE);
+    const packedReadbackBytes = (pairCount + 1) * 4;
     const dispatchSubmitStartMs = performance.now();
     const countEncoder = device.createCommandEncoder();
     const pass = countEncoder.beginComputePass();
@@ -1600,7 +1587,7 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
       0,
       state.rigidSoftEdgeBroadphaseActiveMaskReadback,
       0,
-      4,
+      packedReadbackBytes,
     );
     device.queue.submit([countEncoder.finish()]);
     timing.dispatchSubmitMs += Math.max(0, performance.now() - dispatchSubmitStartMs);
@@ -1615,13 +1602,13 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
     safeUnmapBuffer(state.rigidSoftEdgeBroadphaseActiveMaskReadback);
 
     try {
-      const countReadbackStartMs = performance.now();
-      await state.rigidSoftEdgeBroadphaseActiveMaskReadback.mapAsync(globalThis.GPUMapMode.READ, 0, 4);
-      const mappedCount = state.rigidSoftEdgeBroadphaseActiveMaskReadback.getMappedRange(0, 4);
-      timing.countReadbackMs += Math.max(0, performance.now() - countReadbackStartMs);
-      const activeCountRaw = new Uint32Array(mappedCount.slice(0))[0] >>> 0;
-      safeUnmapBuffer(state.rigidSoftEdgeBroadphaseActiveMaskReadback);
+      const readbackStartMs = performance.now();
+      await state.rigidSoftEdgeBroadphaseActiveMaskReadback.mapAsync(globalThis.GPUMapMode.READ, 0, packedReadbackBytes);
+      const mappedPacked = state.rigidSoftEdgeBroadphaseActiveMaskReadback.getMappedRange(0, packedReadbackBytes);
+      const packedU32 = new Uint32Array(mappedPacked.slice(0));
+      timing.countReadbackMs += Math.max(0, performance.now() - readbackStartMs);
 
+      const activeCountRaw = packedU32[0] >>> 0;
       const activeCount = Math.min(pairCount >>> 0, activeCountRaw >>> 0);
       state.lastEdgeBroadphaseActivePairCount = activeCount;
       state.lastEdgeBroadphaseReadbackCount = activeCount;
@@ -1644,24 +1631,9 @@ async function dispatchRigidSoftEdgeBroadphaseWgsl({ rigidBodies, soft, offload,
         };
       }
 
-      const indexReadbackBytes = activeCount * 4;
-      const indexReadbackStartMs = performance.now();
-      const indexEncoder = device.createCommandEncoder();
-      indexEncoder.copyBufferToBuffer(
-        state.rigidSoftEdgeBroadphaseActiveMaskOut,
-        4,
-        state.rigidSoftEdgeBroadphaseActiveMaskReadback,
-        0,
-        indexReadbackBytes,
-      );
-      device.queue.submit([indexEncoder.finish()]);
-
-      safeUnmapBuffer(state.rigidSoftEdgeBroadphaseActiveMaskReadback);
-      await state.rigidSoftEdgeBroadphaseActiveMaskReadback.mapAsync(globalThis.GPUMapMode.READ, 0, indexReadbackBytes);
-      const mappedIndices = state.rigidSoftEdgeBroadphaseActiveMaskReadback.getMappedRange(0, indexReadbackBytes);
-      const activePairIndices = new Uint32Array(mappedIndices.slice(0));
-      safeUnmapBuffer(state.rigidSoftEdgeBroadphaseActiveMaskReadback);
-      timing.indexReadbackMs += Math.max(0, performance.now() - indexReadbackStartMs);
+      const indexExtractStartMs = performance.now();
+      const activePairIndices = packedU32.slice(1, 1 + activeCount);
+      timing.indexReadbackMs += Math.max(0, performance.now() - indexExtractStartMs);
 
       const compactStartMs = performance.now();
       const compactPairs = buildCompactRigidSoftEdgePairsFromActiveIndices({
@@ -2543,9 +2515,11 @@ async function dispatchRigidSoftResponseWgsl({
       timing.nodeDispatchSubmitMs += Math.max(0, performance.now() - nodeDispatchSubmitStartMs);
 
       const nodeReadbackStartMs = performance.now();
-      const nodeDelta = await mkReadF32(outs.nodeDelta.read, outs.nodeDelta.bytes);
-      const rigidDeltaA = await mkReadF32(outs.rigidDeltaA.read, outs.rigidDeltaA.bytes);
-      const rigidDeltaB = await mkReadF32(outs.rigidDeltaB.read, outs.rigidDeltaB.bytes);
+      const [nodeDelta, rigidDeltaA, rigidDeltaB] = await Promise.all([
+        mkReadF32(outs.nodeDelta.read, outs.nodeDelta.bytes),
+        mkReadF32(outs.rigidDeltaA.read, outs.rigidDeltaA.bytes),
+        mkReadF32(outs.rigidDeltaB.read, outs.rigidDeltaB.bytes),
+      ]);
       timing.nodeReadbackMs += Math.max(0, performance.now() - nodeReadbackStartMs);
 
       const nodeDecodeStartMs = performance.now();
@@ -2644,8 +2618,10 @@ async function dispatchRigidSoftResponseWgsl({
       timing.edgeDispatchSubmitMs += Math.max(0, performance.now() - edgeDispatchSubmitStartMs);
 
       const edgeReadbackStartMs = performance.now();
-      const rigidDeltaA = await mkReadF32(outs.rigidDeltaA.read, outs.rigidDeltaA.bytes);
-      const rigidDeltaB = await mkReadF32(outs.rigidDeltaB.read, outs.rigidDeltaB.bytes);
+      const [rigidDeltaA, rigidDeltaB] = await Promise.all([
+        mkReadF32(outs.rigidDeltaA.read, outs.rigidDeltaA.bytes),
+        mkReadF32(outs.rigidDeltaB.read, outs.rigidDeltaB.bytes),
+      ]);
       timing.edgeReadbackMs += Math.max(0, performance.now() - edgeReadbackStartMs);
 
       const edgeDecodeStartMs = performance.now();

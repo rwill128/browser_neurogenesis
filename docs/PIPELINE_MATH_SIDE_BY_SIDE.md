@@ -867,3 +867,45 @@ For each axis:
 | Collisions | CPU | mixed WGSL proposal + CPU fallback | same, plus rigid-soft fast skips/replay |
 | Boundary | CPU | WGSL finite + CPU non-finite | same |
 | Injection | CPU | WGSL gather vs CPU parity | finite WGSL gather fast-authoritative |
+
+---
+
+## 13) Instrumentation map (new timing keys + where to read them)
+
+All newly added per-frame timers are exported through:
+- `window.__gpuLabApi.getStatus().pipelineTiming.last`
+- `window.__gpuLabApi.getStatus().pipelineTiming.recentFrames`
+
+### 13.1 Frame-level keys
+- `frame.controlsAndMaskStamp`
+- `fluid.encodeDispatch`
+- `fluid.submitAndHealth`
+- `fluid.readback.fullMap` / `fluid.readback.shadowReuse`
+- `frame.stepBodiesAndInject.total`
+- `frame.postCouplingCpu`
+- `frame.gpuWriteback.updatedFields` / `frame.gpuWriteback.skipped`
+- `frame.renderCompose`
+- `frame.hudAndStatus`
+- `frame.abort.noFields` (guard/early-return case)
+
+### 13.2 `stepBodiesAndInject` stage keys (path-aware)
+- `bodies.preamble`
+- `bodies.rigid.gpuOnly` / `bodies.rigid.baseline`
+- `bodies.softFluidCoupling.gpuOnly` / `bodies.softFluidCoupling.baseline`
+- `bodies.softSpringXpbd.gpuOnly` / `bodies.softSpringXpbd.baseline`
+- `bodies.membraneConstraints.gpuOnly` / `bodies.membraneConstraints.baseline`
+- `bodies.softAreaXpbd.gpuOnly` / `bodies.softAreaXpbd.baseline`
+- `bodies.membranePressure.gpuOnly` / `bodies.membranePressure.baseline`
+- `bodies.softIntegrate.gpuOnly` / `bodies.softIntegrate.baseline`
+- `bodies.rigidPostIntegrate.gpuOnly` / `bodies.rigidPostIntegrate.baseline`
+- `bodies.collisions.gpuOnly` / `bodies.collisions.baseline`
+- `bodies.postCollisionRecovery.gpuOnly` / `bodies.postCollisionRecovery.baseline` / `bodies.postCollisionRecovery.disabled`
+- `bodies.softRestRecovery.gpuOnly` / `bodies.softRestRecovery.baseline` / `bodies.softRestRecovery.disabled`
+- `bodies.softDeformation.gpuOnly` / `bodies.softDeformation.baseline`
+- `bodies.bodyFluidInjection.gpuOnly` / `bodies.bodyFluidInjection.baseline`
+- `bodies.metricsPack`
+
+### 13.3 Existing module-native substage timing still available
+The above keys are top-level orchestration timers. For substage internals, keep using existing module timing payloads (especially rigid-soft broadphase/probe/response timings) in `rigidSoftRuntime` status fields.
+
+**Citations:** `sim-server/public/gpu-lab.js` (timing recorder helpers near `stepBodiesAndInject`, frame loop instrumentation in `stepAndRender`, and status export in `window.__gpuLabApi.getStatus`).

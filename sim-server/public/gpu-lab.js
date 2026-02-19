@@ -3969,7 +3969,79 @@ function stabilizeSeverelyDeformedSoftClusters(sim, s, loops, deform) {
   }
 }
 
+function ensureFramePipelineTiming(sim) {
+  if (!sim) return null;
+  const frame = Number(sim.frame) || 0;
+  const solverPath = normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath);
+  const pipelineMode = normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, solverPath);
+  if (!sim.pipelineTimingFrame || Number(sim.pipelineTimingFrame.frame) !== frame) {
+    sim.pipelineTimingFrame = {
+      frame,
+      solverPath,
+      pipelineMode,
+      startedAtMs: performance.now(),
+      spans: Object.create(null),
+      counts: Object.create(null),
+      events: [],
+    };
+  } else {
+    sim.pipelineTimingFrame.solverPath = solverPath;
+    sim.pipelineTimingFrame.pipelineMode = pipelineMode;
+  }
+  return sim.pipelineTimingFrame;
+}
+
+function recordPipelineTiming(sim, key, ms, meta = null) {
+  const timing = ensureFramePipelineTiming(sim);
+  if (!timing || !key) return;
+  const dur = Math.max(0, Number(ms) || 0);
+  timing.spans[key] = (Number(timing.spans[key]) || 0) + dur;
+  timing.counts[key] = (Number(timing.counts[key]) || 0) + 1;
+  timing.events.push({ key, ms: dur, ...(meta && typeof meta === 'object' ? meta : null) });
+}
+
+function measurePipelineSync(sim, key, fn, meta = null) {
+  const startMs = performance.now();
+  try {
+    return fn();
+  } finally {
+    recordPipelineTiming(sim, key, performance.now() - startMs, meta);
+  }
+}
+
+async function measurePipelineAsync(sim, key, fn, meta = null) {
+  const startMs = performance.now();
+  try {
+    return await fn();
+  } finally {
+    recordPipelineTiming(sim, key, performance.now() - startMs, meta);
+  }
+}
+
+function finalizeFramePipelineTiming(sim) {
+  const timing = sim?.pipelineTimingFrame;
+  if (!timing) return null;
+  const finalized = {
+    frame: Number(timing.frame) || 0,
+    solverPath: timing.solverPath || 'baseline',
+    pipelineMode: timing.pipelineMode || 'standard',
+    totalMs: Math.max(0, performance.now() - (Number(timing.startedAtMs) || performance.now())),
+    spans: { ...(timing.spans || {}) },
+    counts: { ...(timing.counts || {}) },
+    events: Array.isArray(timing.events) ? timing.events.slice(-400) : [],
+  };
+  sim.pipelineTimingLast = finalized;
+  sim.pipelineTimingHistory = Array.isArray(sim.pipelineTimingHistory) ? sim.pipelineTimingHistory : [];
+  sim.pipelineTimingHistory.push(finalized);
+  if (sim.pipelineTimingHistory.length > 240) {
+    sim.pipelineTimingHistory.splice(0, sim.pipelineTimingHistory.length - 240);
+  }
+  return finalized;
+}
+
 async function stepBodiesAndInject(sim, vxField, vyField) {
+  ensureFramePipelineTiming(sim);
+  const preambleStartMs = performance.now();
   const n = sim.controls.n;
   const dtRaw = Number(sim.controls.dt) || 0.01;
   const dt = Math.max(0.001, Math.min(0.02, dtRaw));
@@ -4070,6 +4142,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   let rigidCarryTransfer = 0;
   let softCarryTransfer = 0;
 
+  recordPipelineTiming(sim, 'bodies.preamble', performance.now() - preambleStartMs);
+  const rigidStageStartMs = performance.now();
   if (solverPath === 'gpu-only') {
     rigidCarryTransfer = await stepRigidBodiesGpuOnly({
       sim,
@@ -4195,8 +4269,10 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       applyBounceBoundary(b, n, 0.84);
     }
   }
+  recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.rigid.gpuOnly' : 'bodies.rigid.baseline', performance.now() - rigidStageStartMs);
 
   const softMembraneClusterSet = ensureSoftMembraneClusterSet(sim);
+  const softFluidStageStartMs = performance.now();
   if (solverPath === 'gpu-only') {
     const softFluidResult = applySoftFluidCouplingGpuOnly({
       sim,
@@ -4415,6 +4491,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     });
   }
 
+  recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.softFluidCoupling.gpuOnly' : 'bodies.softFluidCoupling.baseline', performance.now() - softFluidStageStartMs);
+
   const dtPos = Math.max(1e-4, dt * SOFT_INTEGRATION_SCALE);
   const softSpringStiffness = normalizeSoftSpringStiffness(sim.controls?.softSpringStiffness);
   const softSpringBaseCompliance = normalizeCompliance(sim.controls?.softSpringBaseCompliance, SOFT_XPBD_BASE_COMPLIANCE);
@@ -4432,6 +4510,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     }
   }
 
+  const softSpringXpbdStageStartMs = performance.now();
   if (solverPath === 'gpu-only') {
     applySoftSpringsXPBDVelocityGpuOnly({
       soft: s,
@@ -4456,10 +4535,12 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       softXpbdIters: SOFT_XPBD_ITERS,
     });
   }
+  recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.softSpringXpbd.gpuOnly' : 'bodies.softSpringXpbd.baseline', performance.now() - softSpringXpbdStageStartMs);
 
   const softClusterLoops = buildSoftClusterBoundaryLoops(s.nodes, s.springs, {
     blockMode: EDGE_BODY_MODE.BLOCK,
   });
+  const membraneConstraintStageStartMs = performance.now();
   const membraneBoundaryClusters = membraneBoundaryXpbdOn
     ? (solverPath === 'gpu-only'
       ? await applySoftMembraneBoundaryXPBDVelocityGpuOnly({
@@ -4522,7 +4603,10 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       })
       : applySoftMembraneShapeMemoryVelocity(sim, s, softClusterLoops, dtPos))
     : 0;
+  recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.membraneConstraints.gpuOnly' : 'bodies.membraneConstraints.baseline', performance.now() - membraneConstraintStageStartMs);
+
   ensureSoftAreaRestState(sim, s, softClusterLoops, dtPos);
+  const softAreaXpbdStageStartMs = performance.now();
   if (solverPath === 'gpu-only') {
     applySoftAreaXPBDVelocityGpuOnly({
       sim,
@@ -4545,6 +4629,9 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       softAreaXpbdIters: SOFT_AREA_XPBD_ITERS,
     });
   }
+  recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.softAreaXpbd.gpuOnly' : 'bodies.softAreaXpbd.baseline', performance.now() - softAreaXpbdStageStartMs);
+
+  const membranePressureStageStartMs = performance.now();
   const membranePressureClusters = membranePressureOn
     ? (solverPath === 'gpu-only'
       ? applySoftMembraneCellPressureGpuOnly({
@@ -4565,7 +4652,10 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       : applySoftMembraneCellPressure(sim, s, softClusterLoops, dtPos))
     : 0;
 
+  recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.membranePressure.gpuOnly' : 'bodies.membranePressure.baseline', performance.now() - membranePressureStageStartMs);
+
   const hybridNodeVCap = 3.2;
+  const softIntegrateStageStartMs = performance.now();
   if (solverPath === 'gpu-only') {
     const softIntegrateRuntime = await integrateSoftBodiesGpuOnly({
       soft: s,
@@ -4595,6 +4685,9 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     sim.softIntegrateRuntime = { mode: 'cpu-baseline', reason: 'baseline-path' };
   }
 
+  recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.softIntegrate.gpuOnly' : 'bodies.softIntegrate.baseline', performance.now() - softIntegrateStageStartMs);
+
+  const rigidPostIntegrateStageStartMs = performance.now();
   if (solverPath === 'gpu-only') {
     const rigidPostIntegrateRuntime = await stabilizeRigidPostIntegrateGpuOnly({
       rigidBodies: bodies.rigid,
@@ -4620,8 +4713,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     }
   }
 
+  recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.rigidPostIntegrate.gpuOnly' : 'bodies.rigidPostIntegrate.baseline', performance.now() - rigidPostIntegrateStageStartMs);
+
   const rigidContactDebug = [];
 
+  const collisionStageStartMs = performance.now();
   if (solverPath === 'gpu-only') {
     const collisionResult = await runCollisionIterationsGpuOnly({
       rigidBodies: bodies.rigid,
@@ -4737,10 +4833,13 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     }
   }
 
+  recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.collisions.gpuOnly' : 'bodies.collisions.baseline', performance.now() - collisionStageStartMs);
+
   // After collision impulses, optionally redistribute linear/angular momentum
   // across each soft cluster and run inside-correction recovery passes.
   let rigidInsideCorrections = 0;
   let membraneInsideCorrections = 0;
+  const postCollisionRecoveryStageStartMs = performance.now();
   const postCollisionRecoveryOn = sim.controls?.enablePostCollisionRecovery !== false;
   if (postCollisionRecoveryOn) {
     if (solverPath === 'gpu-only') {
@@ -4797,11 +4896,16 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     }
   }
 
+  recordPipelineTiming(sim, postCollisionRecoveryOn
+    ? (solverPath === 'gpu-only' ? 'bodies.postCollisionRecovery.gpuOnly' : 'bodies.postCollisionRecovery.baseline')
+    : 'bodies.postCollisionRecovery.disabled', performance.now() - postCollisionRecoveryStageStartMs);
+
   sim.lastRigidContacts = rigidContactDebug.length > 64 ? rigidContactDebug.slice(0, 64) : rigidContactDebug;
 
   const warningInterventionsOn = sim.controls?.enableWarningDeformInterventions !== false;
   const severeInterventionsOn = sim.controls?.enableSevereDeformInterventions !== false;
 
+  const deformationStageStartMs = performance.now();
   let deform;
   if (solverPath === 'gpu-only') {
     deform = await applySoftDeformationInterventionsGpuOnly({
@@ -4838,6 +4942,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     }
   }
 
+  const restRecoveryStageStartMs = performance.now();
   if (softSpringRestRecoveryOn && sim.softSpringRestBaseline && sim.softSpringRestBaseline.length === s.springs.length) {
     if (solverPath === 'gpu-only') {
       applySoftRestRecoveryGpuOnly({
@@ -4887,7 +4992,15 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       });
     }
   }
+  recordPipelineTiming(sim,
+    (softSpringRestRecoveryOn && sim.softSpringRestBaseline && sim.softSpringRestBaseline.length === s.springs.length)
+      ? (solverPath === 'gpu-only' ? 'bodies.softRestRecovery.gpuOnly' : 'bodies.softRestRecovery.baseline')
+      : 'bodies.softRestRecovery.disabled',
+    performance.now() - restRecoveryStageStartMs,
+  );
+
   sim.softDeformationState = deform;
+  recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.softDeformation.gpuOnly' : 'bodies.softDeformation.baseline', performance.now() - deformationStageStartMs);
 
   const previousSevere = sim.softDeformationPrevSevereSet || new Set();
   const newlySevere = deform.severeClusters.filter((cid) => !previousSevere.has(cid));
@@ -4918,6 +5031,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
 
   let injectedMomentum = 0;
   let softClusterForInjection;
+  const bodyFluidInjectionStageStartMs = performance.now();
   if (solverPath === 'gpu-only') {
     const fluidInjectionResult = await applyBodyFluidInjectionGpuOnly({
       sim,
@@ -5038,6 +5152,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     }
   }
 
+  recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.bodyFluidInjection.gpuOnly' : 'bodies.bodyFluidInjection.baseline', performance.now() - bodyFluidInjectionStageStartMs);
+
   const softCentroidAfter = computeSoftCentroid(s.nodes);
   const rigidCenterAfter = computeRigidCenter(bodies.rigid);
 
@@ -5054,6 +5170,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     softClusterAngularEnergy += 0.5 * inertia * omega * omega;
   }
 
+  const metricsBuildStartMs = performance.now();
   const metrics = {
     rigidCenterDelta: Math.hypot(rigidCenterAfter.x - rigidCenterBefore.x, rigidCenterAfter.y - rigidCenterBefore.y),
     softCentroidDelta: Math.hypot(softCentroidAfter.x - softCentroidBefore.x, softCentroidAfter.y - softCentroidBefore.y),
@@ -5083,6 +5200,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   sim.couplingTelemetry = sim.couplingTelemetry || [];
   sim.couplingTelemetry.push(metrics);
   if (sim.couplingTelemetry.length > 120) sim.couplingTelemetry.shift();
+  recordPipelineTiming(sim, 'bodies.metricsPack', performance.now() - metricsBuildStartMs);
 
   // Ping-pong feedback fields: next frame samples this frame's injected momentum
   // so we can suppress self-induced wake bias during flow->body coupling reads.
@@ -6169,6 +6287,9 @@ async function initSim() {
     disableDefaultInject: false,
     camera: { x: controls.n * 0.5, y: controls.n * 0.5, zoom: controls.n >= 1024 ? 1.8 : 1.0 },
     couplingTelemetry: [],
+    pipelineTimingFrame: null,
+    pipelineTimingLast: null,
+    pipelineTimingHistory: [],
     lastFluidObstacleStats: { rigidBlockedEdges: 0, softBlockedEdges: 0, blockedEdgeCount: 0, blockedCells: 0, sweptCells: 0 },
     lastDyeMaskStats: { rigidEdges: 0, softEdges: 0, nonPassCells: 0 },
     lastSweptDyeTransportStats: { touchedCells: 0, movedMass: 0, deletedMass: 0, eatenMass: 0 },
@@ -6233,6 +6354,8 @@ async function readFastFluidHealthStats(sim) {
 async function stepAndRender() {
   if (!running || !sim) return;
   const s = sim;
+  ensureFramePipelineTiming(s);
+  const frameStageStartMs = performance.now();
   const uiControls = readControls();
 
   // Grid-size changes require full GPU buffer reallocation; hot-swapping n causes dimension mismatches.
@@ -6282,7 +6405,9 @@ async function stepAndRender() {
   if (s.dyeModeMaskGpu && s.dyeModeMaskCpu) {
     s.device.queue.writeBuffer(s.dyeModeMaskGpu, 0, s.dyeModeMaskCpu);
   }
+  recordPipelineTiming(s, 'frame.controlsAndMaskStamp', performance.now() - frameStageStartMs);
 
+  const fluidEncodeStartMs = performance.now();
   const enc = s.device.createCommandEncoder();
 
   let pass = null;
@@ -6382,6 +6507,8 @@ async function stepAndRender() {
     enc.copyBufferToBuffer(s.fastFluidHealthStats, 0, s.fastFluidHealthReadback, 0, 16);
   }
 
+  recordPipelineTiming(s, 'fluid.encodeDispatch', performance.now() - fluidEncodeStartMs);
+  const submitAndHealthStartMs = performance.now();
   s.device.queue.submit([enc.finish()]);
 
   let healthStats = { nonFiniteCount: 0, velocitySpikeCount: 0, dyeSpikeCount: 0 };
@@ -6395,6 +6522,7 @@ async function stepAndRender() {
   const dyeExplosive = (healthStats.dyeSpikeCount || 0) >= explosiveDyeSpikeCount;
   const healthAnomaly = fastMode
     && ((healthStats.nonFiniteCount > 0) || velocityExplosive || dyeExplosive);
+  recordPipelineTiming(s, 'fluid.submitAndHealth', performance.now() - submitAndHealthStartMs);
 
   let doReadback = !fastMode || cadenceDue || fallbackAnomaly || healthAnomaly || !hasFastShadow;
   let readbackReason = !fastMode
@@ -6407,6 +6535,7 @@ async function stepAndRender() {
           ? 'fast-health-anomaly'
           : (cadenceDue ? 'fast-cadence' : 'fast-resident-skip'))));
 
+  const readbackStageStartMs = performance.now();
   if (fastMode && doReadback) {
     const copyEnc = s.device.createCommandEncoder();
     enqueueFullFluidReadbackCopies(s, copyEnc);
@@ -6420,8 +6549,13 @@ async function stepAndRender() {
   } else {
     fields = s.fastShadowFields;
   }
+  recordPipelineTiming(s, doReadback ? 'fluid.readback.fullMap' : 'fluid.readback.shadowReuse', performance.now() - readbackStageStartMs, {
+    reason: readbackReason,
+  });
 
   if (!fields) {
+    recordPipelineTiming(s, 'frame.abort.noFields', 0, { reason: 'no-fields-after-readback-decision' });
+    finalizeFramePipelineTiming(s);
     s.frame += 1;
     if (running) requestAnimationFrame(() => stepAndRender());
     return;
@@ -6456,7 +6590,11 @@ async function stepAndRender() {
   const vy = fields.vy;
 
   // Rigid + soft coupling: carry/drag from flow + two-way pushback/swim impulses.
+  const bodiesStageStartMs = performance.now();
   const couplingInstant = await stepBodiesAndInject(s, vx, vy);
+  recordPipelineTiming(s, 'frame.stepBodiesAndInject.total', performance.now() - bodiesStageStartMs);
+
+    const postCouplingCpuStartMs = performance.now();
     applyEmitters(s, r, g, b, vx, vy);
     const obstacleEdgesNow = Number(s?.lastFluidObstacleStats?.blockedEdgeCount) || 0;
     applyDigestiveCapture(s, r, g, b);
@@ -6473,7 +6611,9 @@ async function stepAndRender() {
       vx[i] = clampFluidComponent(vxi, couplingLimit);
       vy[i] = clampFluidComponent(vyi, couplingLimit);
     }
+    recordPipelineTiming(s, 'frame.postCouplingCpu', performance.now() - postCouplingCpuStartMs);
 
+    const writebackStartMs = performance.now();
     if (doReadback) {
       s.device.queue.writeBuffer(s.vx0, 0, vx);
       s.device.queue.writeBuffer(s.vy0, 0, vy);
@@ -6482,6 +6622,9 @@ async function stepAndRender() {
       s.device.queue.writeBuffer(s.bb0, 0, b);
     }
 
+    recordPipelineTiming(s, doReadback ? 'frame.gpuWriteback.updatedFields' : 'frame.gpuWriteback.skipped', performance.now() - writebackStartMs);
+
+    const renderStageStartMs = performance.now();
     const n = s.controls.n;
     const img = ctx.createImageData(n, n);
     const px = img.data;
@@ -6514,7 +6657,9 @@ async function stepAndRender() {
     ctx.drawImage(tmp, view.x, view.y, view.w, view.h, 0, 0, canvas.width, canvas.height);
     if (!showViscEl || showViscEl.checked) drawViscosityOverlay();
     drawBodiesOverlay(s);
+    recordPipelineTiming(s, 'frame.renderCompose', performance.now() - renderStageStartMs);
 
+    const hudStageStartMs = performance.now();
     const elapsed = (performance.now() - s.t0) / 1000;
     const fpsNow = +(s.frame / Math.max(1e-6, elapsed)).toFixed(1);
     if (fpsHud) fpsHud.textContent = `FPS: ${fpsNow}`;
@@ -6604,6 +6749,8 @@ async function stepAndRender() {
         },
       });
     }
+    recordPipelineTiming(s, 'frame.hudAndStatus', performance.now() - hudStageStartMs);
+    finalizeFramePipelineTiming(s);
 
   s.frame += 1;
   if (running) requestAnimationFrame(() => stepAndRender());
@@ -6884,6 +7031,25 @@ window.__gpuLabApi = {
         lastReason: sim?.fastReadbackPolicy?.lastReason || null,
         lastHealth: sim?.fastReadbackPolicy?.lastHealth || null,
         lastHealthAnomaly: sim?.fastReadbackPolicy?.lastHealthAnomaly || null,
+      },
+      pipelineTiming: {
+        last: sim?.pipelineTimingLast
+          ? {
+            ...sim.pipelineTimingLast,
+            events: Array.isArray(sim?.pipelineTimingLast?.events)
+              ? sim.pipelineTimingLast.events.slice(-160)
+              : [],
+          }
+          : null,
+        recentFrames: Array.isArray(sim?.pipelineTimingHistory)
+          ? sim.pipelineTimingHistory.slice(-16).map((entry) => ({
+            frame: Number(entry?.frame) || 0,
+            solverPath: entry?.solverPath || 'baseline',
+            pipelineMode: entry?.pipelineMode || 'standard',
+            totalMs: Number(entry?.totalMs) || 0,
+            spans: entry?.spans ? { ...entry.spans } : {},
+          }))
+          : [],
       },
       fallbackHud: sim?.fallbackHudSummary || {
         active: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath) === 'gpu-only',

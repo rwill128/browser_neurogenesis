@@ -6971,6 +6971,21 @@ window.__gpuLabApi = {
         lastEdgeBroadphaseDispatchHitCount: Number(sim?.rigidSoftCollisionWgslState?.lastEdgeBroadphaseDispatchHitCount) || 0,
         lastRigidSoftBroadphaseCadenceDue: !!sim?.rigidSoftCollisionWgslState?.lastRigidSoftBroadphaseCadenceDue,
         lastRigidSoftBroadphaseInterval: Number(sim?.rigidSoftCollisionWgslState?.lastRigidSoftBroadphaseInterval) || 0,
+        lastNodeBroadphaseTiming: sim?.rigidSoftCollisionWgslState?.lastNodeBroadphaseTiming
+          ? { ...sim.rigidSoftCollisionWgslState.lastNodeBroadphaseTiming }
+          : null,
+        lastEdgeBroadphaseTiming: sim?.rigidSoftCollisionWgslState?.lastEdgeBroadphaseTiming
+          ? { ...sim.rigidSoftCollisionWgslState.lastEdgeBroadphaseTiming }
+          : null,
+        lastNodeNarrowphaseAabbProbeTiming: sim?.rigidSoftCollisionWgslState?.lastNodeNarrowphaseAabbProbeTiming
+          ? { ...sim.rigidSoftCollisionWgslState.lastNodeNarrowphaseAabbProbeTiming }
+          : null,
+        lastEdgeNarrowphaseAabbProbeTiming: sim?.rigidSoftCollisionWgslState?.lastEdgeNarrowphaseAabbProbeTiming
+          ? { ...sim.rigidSoftCollisionWgslState.lastEdgeNarrowphaseAabbProbeTiming }
+          : null,
+        lastRigidSoftResponseTiming: sim?.rigidSoftCollisionWgslState?.lastRigidSoftResponseTiming
+          ? { ...sim.rigidSoftCollisionWgslState.lastRigidSoftResponseTiming }
+          : null,
       },
     };
   },

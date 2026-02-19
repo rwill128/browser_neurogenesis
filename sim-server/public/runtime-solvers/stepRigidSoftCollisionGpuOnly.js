@@ -2356,17 +2356,10 @@ async function dispatchRigidSoftResponseWgsl({
     return null;
   }
 
-  const mkReadF32 = async (buf, bytes) => {
+  const mkReadBytes = async (buf, bytes) => {
     safeUnmapBuffer(buf);
     await buf.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
-    const out = new Float32Array(buf.getMappedRange(0, bytes).slice(0));
-    safeUnmapBuffer(buf);
-    return out;
-  };
-  const mkReadU32 = async (buf, bytes) => {
-    safeUnmapBuffer(buf);
-    await buf.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
-    const out = new Uint32Array(buf.getMappedRange(0, bytes).slice(0));
+    const out = buf.getMappedRange(0, bytes).slice(0);
     safeUnmapBuffer(buf);
     return out;
   };
@@ -2382,7 +2375,6 @@ async function dispatchRigidSoftResponseWgsl({
     const bytes = Math.max(4, count * 4);
     return {
       gpu: device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.STORAGE | globalThis.GPUBufferUsage.COPY_SRC }),
-      read: device.createBuffer({ size: bytes, usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ }),
       bytes,
       isU32,
     };
@@ -2494,7 +2486,7 @@ async function dispatchRigidSoftResponseWgsl({
         rigidDeltaA: mkOut(nodePairCount * 4),
         rigidDeltaB: mkOut(nodePairCount * 2),
       };
-      Object.values(outs).forEach((o) => { keep(o.gpu); keep(o.read); });
+      Object.values(outs).forEach((o) => { keep(o.gpu); });
 
       const bindGroup = device.createBindGroup({
         layout: nodePipeline.getBindGroupLayout(0),
@@ -2503,6 +2495,12 @@ async function dispatchRigidSoftResponseWgsl({
       });
       timing.nodeBuildMs += Math.max(0, performance.now() - nodeBuildStartMs);
 
+      const nodeReadbackPackedBytes = outs.nodeDelta.bytes + outs.rigidDeltaA.bytes + outs.rigidDeltaB.bytes;
+      const nodeReadbackPacked = keep(device.createBuffer({
+        size: nodeReadbackPackedBytes,
+        usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
+      }));
+
       const nodeDispatchSubmitStartMs = performance.now();
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginComputePass();
@@ -2510,16 +2508,23 @@ async function dispatchRigidSoftResponseWgsl({
       pass.setBindGroup(0, bindGroup);
       pass.dispatchWorkgroups(Math.max(1, Math.ceil(nodePairCount / WGSL_WORKGROUP_SIZE)));
       pass.end();
-      Object.values(outs).forEach((o) => encoder.copyBufferToBuffer(o.gpu, 0, o.read, 0, o.bytes));
+      let nodeReadOffset = 0;
+      encoder.copyBufferToBuffer(outs.nodeDelta.gpu, 0, nodeReadbackPacked, nodeReadOffset, outs.nodeDelta.bytes);
+      nodeReadOffset += outs.nodeDelta.bytes;
+      encoder.copyBufferToBuffer(outs.rigidDeltaA.gpu, 0, nodeReadbackPacked, nodeReadOffset, outs.rigidDeltaA.bytes);
+      nodeReadOffset += outs.rigidDeltaA.bytes;
+      encoder.copyBufferToBuffer(outs.rigidDeltaB.gpu, 0, nodeReadbackPacked, nodeReadOffset, outs.rigidDeltaB.bytes);
       device.queue.submit([encoder.finish()]);
       timing.nodeDispatchSubmitMs += Math.max(0, performance.now() - nodeDispatchSubmitStartMs);
 
       const nodeReadbackStartMs = performance.now();
-      const [nodeDelta, rigidDeltaA, rigidDeltaB] = await Promise.all([
-        mkReadF32(outs.nodeDelta.read, outs.nodeDelta.bytes),
-        mkReadF32(outs.rigidDeltaA.read, outs.rigidDeltaA.bytes),
-        mkReadF32(outs.rigidDeltaB.read, outs.rigidDeltaB.bytes),
-      ]);
+      const packedNodeBytes = await mkReadBytes(nodeReadbackPacked, nodeReadbackPackedBytes);
+      let nodePackedOffset = 0;
+      const nodeDelta = new Float32Array(packedNodeBytes, nodePackedOffset, outs.nodeDelta.bytes / 4).slice(0);
+      nodePackedOffset += outs.nodeDelta.bytes;
+      const rigidDeltaA = new Float32Array(packedNodeBytes, nodePackedOffset, outs.rigidDeltaA.bytes / 4).slice(0);
+      nodePackedOffset += outs.rigidDeltaA.bytes;
+      const rigidDeltaB = new Float32Array(packedNodeBytes, nodePackedOffset, outs.rigidDeltaB.bytes / 4).slice(0);
       timing.nodeReadbackMs += Math.max(0, performance.now() - nodeReadbackStartMs);
 
       const nodeDecodeStartMs = performance.now();
@@ -2598,7 +2603,7 @@ async function dispatchRigidSoftResponseWgsl({
         rigidDeltaA: mkOut(edgePairCount * 4),
         rigidDeltaB: mkOut(edgePairCount * 2),
       };
-      Object.values(outs).forEach((o) => { keep(o.gpu); keep(o.read); });
+      Object.values(outs).forEach((o) => { keep(o.gpu); });
 
       const bindGroup = device.createBindGroup({
         layout: edgePipeline.getBindGroupLayout(0),
@@ -2606,6 +2611,11 @@ async function dispatchRigidSoftResponseWgsl({
           .map((buffer, binding) => ({ binding, resource: { buffer } })),
       });
       timing.edgeBuildMs += Math.max(0, performance.now() - edgeBuildStartMs);
+      const edgeReadbackPackedBytes = outs.rigidDeltaA.bytes + outs.rigidDeltaB.bytes;
+      const edgeReadbackPacked = keep(device.createBuffer({
+        size: edgeReadbackPackedBytes,
+        usage: globalThis.GPUBufferUsage.COPY_DST | globalThis.GPUBufferUsage.MAP_READ,
+      }));
       const edgeDispatchSubmitStartMs = performance.now();
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginComputePass();
@@ -2613,15 +2623,17 @@ async function dispatchRigidSoftResponseWgsl({
       pass.setBindGroup(0, bindGroup);
       pass.dispatchWorkgroups(Math.max(1, Math.ceil(edgePairCount / WGSL_WORKGROUP_SIZE)));
       pass.end();
-      Object.values(outs).forEach((o) => encoder.copyBufferToBuffer(o.gpu, 0, o.read, 0, o.bytes));
+      let edgeReadOffset = 0;
+      encoder.copyBufferToBuffer(outs.rigidDeltaA.gpu, 0, edgeReadbackPacked, edgeReadOffset, outs.rigidDeltaA.bytes);
+      edgeReadOffset += outs.rigidDeltaA.bytes;
+      encoder.copyBufferToBuffer(outs.rigidDeltaB.gpu, 0, edgeReadbackPacked, edgeReadOffset, outs.rigidDeltaB.bytes);
       device.queue.submit([encoder.finish()]);
       timing.edgeDispatchSubmitMs += Math.max(0, performance.now() - edgeDispatchSubmitStartMs);
 
       const edgeReadbackStartMs = performance.now();
-      const [rigidDeltaA, rigidDeltaB] = await Promise.all([
-        mkReadF32(outs.rigidDeltaA.read, outs.rigidDeltaA.bytes),
-        mkReadF32(outs.rigidDeltaB.read, outs.rigidDeltaB.bytes),
-      ]);
+      const packedEdgeBytes = await mkReadBytes(edgeReadbackPacked, edgeReadbackPackedBytes);
+      const rigidDeltaA = new Float32Array(packedEdgeBytes, 0, outs.rigidDeltaA.bytes / 4).slice(0);
+      const rigidDeltaB = new Float32Array(packedEdgeBytes, outs.rigidDeltaA.bytes, outs.rigidDeltaB.bytes / 4).slice(0);
       timing.edgeReadbackMs += Math.max(0, performance.now() - edgeReadbackStartMs);
 
       const edgeDecodeStartMs = performance.now();

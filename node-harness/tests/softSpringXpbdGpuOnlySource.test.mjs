@@ -101,7 +101,7 @@ test('soft spring gpu-only fast mode chains WGSL lambda buffer directly into vel
 test('soft spring gpu-only path can promote cached WGSL velocity proposal to authoritative node/lambda apply when signature + contribution parity match', () => {
   assert.match(
     source,
-    /computeSoftSpringVelocityProposalSignature\([\s\S]*lastPreparedProposalSignature = proposalSignature[\s\S]*enableAuthoritativeVelocityDelta === true[\s\S]*lastVelocityDeltaProposalSignature === proposalSignature[\s\S]*lastContributionCountParity\?\.mismatchCount === 0[\s\S]*applySoftSpringWgslAuthoritativeProposal\([\s\S]*lastMode = fastMode \? 'wgsl-velocity-authoritative-fast' : 'wgsl-velocity-authoritative-validated'[\s\S]*lastSourceRoute = fastMode/,
+    /computeSoftSpringVelocityProposalSignature\([\s\S]*lastPreparedProposalSignature = proposalSignature[\s\S]*const signatureMatch = wgslOffload\.state\.lastVelocityDeltaProposalSignature === proposalSignature;[\s\S]*const fastProposalMatch = fastMode \? \(signatureMatch \|\| fastEpochReplayEligible\) : signatureMatch;[\s\S]*enableAuthoritativeVelocityDelta === true[\s\S]*lastContributionCountParity\?\.mismatchCount === 0[\s\S]*applySoftSpringWgslAuthoritativeProposal\([\s\S]*lastMode = fastMode \? 'wgsl-velocity-authoritative-fast' : 'wgsl-velocity-authoritative-validated'[\s\S]*lastSourceRoute = fastMode/,
     'expected soft spring gpu-only branch to gate authoritative WGSL node/lambda replay on deterministic input signature + node-contribution parity',
   );
 });
@@ -155,7 +155,7 @@ test('soft spring gpu-only fast mode also skips node contribution-count readback
 test('soft spring gpu-only fast mode authoritative replay skips residual cpu XPBD iterations after finite-checked WGSL node reduction', () => {
   assert.match(
     source,
-    /cachedProposalReady[\s\S]*const authoritativeCpuIterStart = fastMode \? softXpbdIters : 1;[\s\S]*xpbdIterStart = authoritativeCpuIterStart;[\s\S]*lastAuthoritativeProposalSource = wgslOffload\.state\.lastVelocityDeltaProposalSource \|\| \(fastMode \? 'wgsl-node-reduction-fast' : 'wgsl-node-reduction'\)[\s\S]*lastAuthoritativeResidualCpuIters/,
+    /cachedProposalReady[\s\S]*const authoritativeCpuIterStart = fastMode \? softXpbdIters : 1;[\s\S]*xpbdIterStart = authoritativeCpuIterStart;[\s\S]*const fastEpochReplayUsed = fastMode && !signatureMatch && fastEpochReplayEligible;[\s\S]*lastAuthoritativeProposalSource = fastEpochReplayUsed[\s\S]*lastAuthoritativeResidualCpuIters/,
     'expected fast-mode authoritative replay to cut shadow CPU spring iterations while preserving explicit source-route and residual-iteration telemetry',
   );
 });

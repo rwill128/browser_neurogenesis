@@ -579,33 +579,43 @@ async function dispatchSoftSpringWgslVelocityDeltaProposal({
   }
   device.queue.submit([encoder.finish()]);
 
+  const mapPromises = [
+    state.velocityNodeDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes),
+    state.velocityNodeDeltaVYReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes),
+  ];
+  if (includeEndpointTelemetry) {
+    mapPromises.push(
+      state.velocityEndpointDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, endpointBytes),
+      state.velocityEndpointDeltaVYReadback.mapAsync(globalThis.GPUMapMode.READ, 0, endpointBytes),
+    );
+  }
+  if (includeContributionCountTelemetry) {
+    mapPromises.push(state.velocityNodeContributionCountReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes));
+  }
+  await Promise.all(mapPromises);
+
   let endpointDeltaVX = null;
   let endpointDeltaVY = null;
   if (includeEndpointTelemetry) {
-    await state.velocityEndpointDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, endpointBytes);
     const mappedVX = state.velocityEndpointDeltaVXReadback.getMappedRange(0, endpointBytes);
     endpointDeltaVX = new Float32Array(mappedVX.slice(0));
     state.velocityEndpointDeltaVXReadback.unmap();
 
-    await state.velocityEndpointDeltaVYReadback.mapAsync(globalThis.GPUMapMode.READ, 0, endpointBytes);
     const mappedVY = state.velocityEndpointDeltaVYReadback.getMappedRange(0, endpointBytes);
     endpointDeltaVY = new Float32Array(mappedVY.slice(0));
     state.velocityEndpointDeltaVYReadback.unmap();
   }
 
-  await state.velocityNodeDeltaVXReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
   const mappedNodeVX = state.velocityNodeDeltaVXReadback.getMappedRange(0, nodeBytes);
   const nodeDeltaVx = new Float32Array(mappedNodeVX.slice(0));
   state.velocityNodeDeltaVXReadback.unmap();
 
-  await state.velocityNodeDeltaVYReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
   const mappedNodeVY = state.velocityNodeDeltaVYReadback.getMappedRange(0, nodeBytes);
   const nodeDeltaVy = new Float32Array(mappedNodeVY.slice(0));
   state.velocityNodeDeltaVYReadback.unmap();
 
   let nodeContributionCount = null;
   if (includeContributionCountTelemetry) {
-    await state.velocityNodeContributionCountReadback.mapAsync(globalThis.GPUMapMode.READ, 0, nodeBytes);
     const mappedNodeCounts = state.velocityNodeContributionCountReadback.getMappedRange(0, nodeBytes);
     nodeContributionCount = new Uint32Array(mappedNodeCounts.slice(0));
     state.velocityNodeContributionCountReadback.unmap();
@@ -801,15 +811,21 @@ async function dispatchSoftSpringWgslLambdaProposal({
   encoder.copyBufferToBuffer(state.lambdaNextOut, 0, state.lambdaNextReadback, 0, bytes);
   device.queue.submit([encoder.finish()]);
 
+  const lambdaReadPromises = [
+    state.lambdaNextReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes),
+  ];
+  if (includeDeltaTelemetry) {
+    lambdaReadPromises.push(state.deltaLambdaReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes));
+  }
+  await Promise.all(lambdaReadPromises);
+
   let deltaByColor = null;
   if (includeDeltaTelemetry) {
-    await state.deltaLambdaReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
     const mappedDelta = state.deltaLambdaReadback.getMappedRange(0, bytes);
     deltaByColor = new Float32Array(mappedDelta.slice(0));
     state.deltaLambdaReadback.unmap();
   }
 
-  await state.lambdaNextReadback.mapAsync(globalThis.GPUMapMode.READ, 0, bytes);
   const mappedNext = state.lambdaNextReadback.getMappedRange(0, bytes);
   const lambdaNextByColor = new Float32Array(mappedNext.slice(0));
   state.lambdaNextReadback.unmap();
@@ -1376,13 +1392,21 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
         dtPos,
         alpha,
       });
+      const proposalEpoch = (Number(wgslOffload.state.lastPreparedProposalEpoch) || 0) + 1;
+      wgslOffload.state.lastPreparedProposalEpoch = proposalEpoch;
       wgslOffload.state.lastPreparedProposalSignature = proposalSignature;
+
+      const signatureMatch = wgslOffload.state.lastVelocityDeltaProposalSignature === proposalSignature;
+      const proposalEpochDelta = Math.max(0, proposalEpoch - (Number(wgslOffload.state.lastVelocityDeltaProposalEpoch) || 0));
+      const fastEpochReplayEligible = fastMode && proposalEpochDelta <= 1;
+      const fastProposalMatch = fastMode ? (signatureMatch || fastEpochReplayEligible) : signatureMatch;
 
       // Concrete WGSL soft-spring stage: consume prior deterministic WGSL velocity
       // reduction as authoritative node/lambda update when the current frame input
-      // signature matches and parity remains within tolerance.
+      // signature matches (validated), or in fast mode when the proposal is fresh
+      // enough (<=1-frame old) and finite.
       const cachedProposalReady = wgslOffload.state.enableAuthoritativeVelocityDelta === true
-      && wgslOffload.state.lastVelocityDeltaProposalSignature === proposalSignature
+      && fastProposalMatch
       && (
         wgslOffload.state.lastVelocityDeltaProposalSource === 'wgsl-node-reduction'
         || wgslOffload.state.lastVelocityDeltaProposalSource === 'wgsl-node-reduction-fast'
@@ -1424,8 +1448,12 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
       });
       const authoritativeCpuIterStart = fastMode ? softXpbdIters : 1;
       xpbdIterStart = authoritativeCpuIterStart;
+      const fastEpochReplayUsed = fastMode && !signatureMatch && fastEpochReplayEligible;
       wgslOffload.state.lastAuthoritativeProposalSignature = proposalSignature;
-      wgslOffload.state.lastAuthoritativeProposalSource = wgslOffload.state.lastVelocityDeltaProposalSource || (fastMode ? 'wgsl-node-reduction-fast' : 'wgsl-node-reduction');
+      wgslOffload.state.lastAuthoritativeProposalSource = fastEpochReplayUsed
+        ? 'wgsl-node-reduction-fast-epoch-replay'
+        : (wgslOffload.state.lastVelocityDeltaProposalSource || (fastMode ? 'wgsl-node-reduction-fast' : 'wgsl-node-reduction'));
+      wgslOffload.state.lastAuthoritativeProposalEpochDelta = proposalEpochDelta;
       wgslOffload.state.lastAuthoritativeCpuIterStart = authoritativeCpuIterStart;
       wgslOffload.state.lastAuthoritativeResidualCpuIters = Math.max(0, (Number(softXpbdIters) || 0) - authoritativeCpuIterStart);
       wgslOffload.state.lastMode = fastMode ? 'wgsl-velocity-authoritative-fast' : 'wgsl-velocity-authoritative-validated';
@@ -1557,6 +1585,7 @@ export function applySoftSpringsXPBDVelocityGpuOnly({
                 };
               }
               wgslOffload.state.lastVelocityDeltaProposalSignature = proposalSignature;
+              wgslOffload.state.lastVelocityDeltaProposalEpoch = proposalEpoch;
             }
             if (probeRan || proposalRan) {
               if (probeRan) {

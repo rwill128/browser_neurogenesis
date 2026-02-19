@@ -6385,8 +6385,12 @@ async function stepAndRender() {
     healthStats = await readFastFluidHealthStats(s);
   }
 
+  const explosiveVelocitySpikeCount = Math.max(4096, Math.floor(s.cells * 0.5));
+  const explosiveDyeSpikeCount = Math.max(4096, Math.floor(s.cells * 0.5));
+  const velocityExplosive = (healthStats.velocitySpikeCount || 0) >= explosiveVelocitySpikeCount;
+  const dyeExplosive = (healthStats.dyeSpikeCount || 0) >= explosiveDyeSpikeCount;
   const healthAnomaly = fastMode
-    && ((healthStats.nonFiniteCount > 0) || (healthStats.velocitySpikeCount > 0) || (healthStats.dyeSpikeCount > 0));
+    && ((healthStats.nonFiniteCount > 0) || velocityExplosive || dyeExplosive);
 
   let doReadback = !fastMode || cadenceDue || fallbackAnomaly || healthAnomaly || !hasFastShadow;
   let readbackReason = !fastMode
@@ -6425,6 +6429,13 @@ async function stepAndRender() {
   s.fastReadbackPolicy.enabled = true;
   s.fastReadbackPolicy.intervalFrames = fastReadbackInterval;
   s.fastReadbackPolicy.lastHealth = healthStats;
+  s.fastReadbackPolicy.lastHealthAnomaly = {
+    healthAnomaly,
+    velocityExplosive,
+    dyeExplosive,
+    explosiveVelocitySpikeCount,
+    explosiveDyeSpikeCount,
+  };
   s.fastReadbackPolicy.lastDecision = doReadback ? 'full-readback' : 'gpu-resident-skip';
   s.fastReadbackPolicy.lastReason = readbackReason;
   if (doReadback) {
@@ -6868,6 +6879,7 @@ window.__gpuLabApi = {
         lastDecision: sim?.fastReadbackPolicy?.lastDecision || null,
         lastReason: sim?.fastReadbackPolicy?.lastReason || null,
         lastHealth: sim?.fastReadbackPolicy?.lastHealth || null,
+        lastHealthAnomaly: sim?.fastReadbackPolicy?.lastHealthAnomaly || null,
       },
       fallbackHud: sim?.fallbackHudSummary || {
         active: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath) === 'gpu-only',

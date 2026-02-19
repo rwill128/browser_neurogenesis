@@ -707,6 +707,185 @@ export function buildRigidRigidSpatialHashCandidates(rigidBodies, options = {}) 
   };
 }
 
+export function buildRigidSoftSpatialHashCandidates(rigidBodies, softNodes, softSprings, options = {}) {
+  const bodies = Array.isArray(rigidBodies) ? rigidBodies : [];
+  const nodes = Array.isArray(softNodes) ? softNodes : [];
+  const springs = Array.isArray(softSprings) ? softSprings : [];
+  const rigidCount = bodies.length;
+  const nodeCount = nodes.length;
+
+  const rawCellSize = Number(options.cellSize);
+  const cellSize = Number.isFinite(rawCellSize) ? Math.max(0.25, rawCellSize) : 12;
+  const edgeBodyModeBlock = Number.isFinite(Number(options.edgeBodyModeBlock))
+    ? Number(options.edgeBodyModeBlock)
+    : 1;
+  const nodePad = Number.isFinite(Number(options.nodePad)) ? Math.max(0, Number(options.nodePad)) : 0.8;
+  const edgePad = Number.isFinite(Number(options.edgePad)) ? Math.max(0, Number(options.edgePad)) : 0.8;
+
+  const nodeCells = new Map();
+  let nodeWrites = 0;
+  let maxNodesPerCell = 0;
+  let maxSoftNodeRadius = 0;
+  for (let ni = 0; ni < nodeCount; ni++) {
+    const node = nodes[ni];
+    if (!node) continue;
+    const x = Number(node.x);
+    const y = Number(node.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    const radius = Math.max(0.2, finiteOr(node.r, 1));
+    if (radius > maxSoftNodeRadius) maxSoftNodeRadius = radius;
+    const cx = Math.floor(x / cellSize);
+    const cy = Math.floor(y / cellSize);
+    const key = packSpatialCellKey(cx, cy);
+    if (key == null) continue;
+    let bucket = nodeCells.get(key);
+    if (!bucket) {
+      bucket = [];
+      nodeCells.set(key, bucket);
+    }
+    bucket.push(ni);
+    nodeWrites += 1;
+    if (bucket.length > maxNodesPerCell) maxNodesPerCell = bucket.length;
+  }
+
+  const edgeCells = new Map();
+  let edgeWrites = 0;
+  let maxEdgesPerCell = 0;
+  let blockedEdgeCount = 0;
+  for (let si = 0; si < springs.length; si++) {
+    const sp = springs[si];
+    if (!Array.isArray(sp)) continue;
+    const bodyMode = Number(sp?.[3]);
+    if (bodyMode !== edgeBodyModeBlock) continue;
+
+    const ai = Number(sp?.[0]) | 0;
+    const bi = Number(sp?.[1]) | 0;
+    if (ai < 0 || bi < 0 || ai >= nodeCount || bi >= nodeCount) continue;
+    const a = nodes[ai];
+    const b = nodes[bi];
+    if (!a || !b) continue;
+
+    const ax = Number(a.x);
+    const ay = Number(a.y);
+    const bx = Number(b.x);
+    const by = Number(b.y);
+    if (![ax, ay, bx, by].every(Number.isFinite)) continue;
+
+    blockedEdgeCount += 1;
+    const minCx = Math.floor(Math.min(ax, bx) / cellSize);
+    const maxCx = Math.floor(Math.max(ax, bx) / cellSize);
+    const minCy = Math.floor(Math.min(ay, by) / cellSize);
+    const maxCy = Math.floor(Math.max(ay, by) / cellSize);
+
+    for (let cy = minCy; cy <= maxCy; cy++) {
+      for (let cx = minCx; cx <= maxCx; cx++) {
+        const key = packSpatialCellKey(cx, cy);
+        if (key == null) continue;
+        let bucket = edgeCells.get(key);
+        if (!bucket) {
+          bucket = [];
+          edgeCells.set(key, bucket);
+        }
+        bucket.push(si);
+        edgeWrites += 1;
+        if (bucket.length > maxEdgesPerCell) maxEdgesPerCell = bucket.length;
+      }
+    }
+  }
+
+  const nodeCandidatesByRigid = new Array(rigidCount);
+  const edgeCandidatesByRigid = new Array(rigidCount);
+  let candidateNodeChecks = 0;
+  let candidateEdgeChecks = 0;
+  let maxRigidRadius = 0;
+
+  for (let rbi = 0; rbi < rigidCount; rbi++) {
+    const rb = bodies[rbi];
+    if (!rb) {
+      nodeCandidatesByRigid[rbi] = [];
+      edgeCandidatesByRigid[rbi] = [];
+      continue;
+    }
+
+    const bx = finiteOr(rb.x, 0);
+    const by = finiteOr(rb.y, 0);
+    const rigidRadius = Math.max(0.5, getRigidBroadphaseRadius(rb));
+    if (rigidRadius > maxRigidRadius) maxRigidRadius = rigidRadius;
+
+    const nodeReach = rigidRadius + maxSoftNodeRadius + nodePad;
+    const nodeSet = new Set();
+    const nodeMinCx = Math.floor((bx - nodeReach) / cellSize);
+    const nodeMaxCx = Math.floor((bx + nodeReach) / cellSize);
+    const nodeMinCy = Math.floor((by - nodeReach) / cellSize);
+    const nodeMaxCy = Math.floor((by + nodeReach) / cellSize);
+    for (let cy = nodeMinCy; cy <= nodeMaxCy; cy++) {
+      for (let cx = nodeMinCx; cx <= nodeMaxCx; cx++) {
+        const key = packSpatialCellKey(cx, cy);
+        if (key == null) continue;
+        const bucket = nodeCells.get(key);
+        if (!bucket) continue;
+        for (const ni of bucket) nodeSet.add(ni);
+      }
+    }
+    const nodeCandidates = Array.from(nodeSet).sort((a, b) => a - b);
+    nodeCandidatesByRigid[rbi] = nodeCandidates;
+    candidateNodeChecks += nodeCandidates.length;
+
+    const edgeReach = rigidRadius + edgePad;
+    const edgeSet = new Set();
+    const edgeMinCx = Math.floor((bx - edgeReach) / cellSize);
+    const edgeMaxCx = Math.floor((bx + edgeReach) / cellSize);
+    const edgeMinCy = Math.floor((by - edgeReach) / cellSize);
+    const edgeMaxCy = Math.floor((by + edgeReach) / cellSize);
+    for (let cy = edgeMinCy; cy <= edgeMaxCy; cy++) {
+      for (let cx = edgeMinCx; cx <= edgeMaxCx; cx++) {
+        const key = packSpatialCellKey(cx, cy);
+        if (key == null) continue;
+        const bucket = edgeCells.get(key);
+        if (!bucket) continue;
+        for (const si of bucket) edgeSet.add(si);
+      }
+    }
+    const edgeCandidates = Array.from(edgeSet).sort((a, b) => a - b);
+    edgeCandidatesByRigid[rbi] = edgeCandidates;
+    candidateEdgeChecks += edgeCandidates.length;
+  }
+
+  const rawNodeChecks = rigidCount * nodeCount;
+  const rawEdgeChecks = rigidCount * blockedEdgeCount;
+  const prunedNodeChecks = Math.max(0, rawNodeChecks - candidateNodeChecks);
+  const prunedEdgeChecks = Math.max(0, rawEdgeChecks - candidateEdgeChecks);
+
+  return {
+    nodeCandidatesByRigid,
+    edgeCandidatesByRigid,
+    stats: {
+      rigidCount,
+      nodeCount,
+      blockedEdgeCount,
+      rawNodeChecks,
+      candidateNodeChecks,
+      prunedNodeChecks,
+      nodeReductionPct: rawNodeChecks > 0 ? (prunedNodeChecks / rawNodeChecks) * 100 : 0,
+      rawEdgeChecks,
+      candidateEdgeChecks,
+      prunedEdgeChecks,
+      edgeReductionPct: rawEdgeChecks > 0 ? (prunedEdgeChecks / rawEdgeChecks) * 100 : 0,
+      cellSize,
+      nodeOccupiedCells: nodeCells.size,
+      edgeOccupiedCells: edgeCells.size,
+      nodeWrites,
+      edgeWrites,
+      maxNodesPerCell,
+      maxEdgesPerCell,
+      maxRigidRadius,
+      maxSoftNodeRadius,
+      nodePad,
+      edgePad,
+    },
+  };
+}
+
 function polygonCenter(poly) {
   let sx = 0;
   let sy = 0;
@@ -787,9 +966,9 @@ function supportPoint(poly, nx, ny) {
   return best;
 }
 
-export function resolveRigidVsRigidPolygonCollision(a, b, restitution = 0.3, debugInfo = null) {
-  const polysA = getRigidCollisionPolysWorld(a);
-  const polysB = getRigidCollisionPolysWorld(b);
+export function resolveRigidVsRigidPolygonCollision(a, b, restitution = 0.3, debugInfo = null, cached = null) {
+  const polysA = Array.isArray(cached?.polysA) ? cached.polysA : getRigidCollisionPolysWorld(a);
+  const polysB = Array.isArray(cached?.polysB) ? cached.polysB : getRigidCollisionPolysWorld(b);
   if (!polysA.length || !polysB.length) return false;
 
   let best = null;

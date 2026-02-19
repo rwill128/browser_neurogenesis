@@ -1,0 +1,2721 @@
+{
+  "capturedAt": "2026-02-19T20:09:51.320Z",
+  "repoRoot": "/Users/richardwilliams/browser_neurogenesis",
+  "port": 8793,
+  "aggregate": {
+    "rounds": [
+      {
+        "round": 1,
+        "frame": 72,
+        "rendererFingerprint": {
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.0.0 Safari/537.36",
+          "webglVendor": "Google Inc. (Google)",
+          "webglRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0) (0x0000C0DE)), SwiftShader driver)",
+          "isSwiftShader": true,
+          "webgpuAdapter": null
+        },
+        "recentSampleCount": 16,
+        "avgFrameMs": 447.1624999977648,
+        "avgStepBodiesMs": 28.131250005215406,
+        "avgCollisionMs": 19.349999997764826,
+        "avgReadbackMs": 403.54374999925494,
+        "rigidRigidBroadphaseRuntime": {
+          "enabled": true,
+          "reason": null,
+          "cellSize": 12,
+          "totalBruteForcePairs": 7996000,
+          "totalCheckedPairs": 64540,
+          "totalPrunedPairs": 7931460,
+          "reductionPct": 99.1928464232116,
+          "phases": [
+            {
+              "phase": "pre-soft",
+              "iter": 0,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16135,
+              "prunedPairs": 1982865,
+              "reductionPct": 99.1928464232116,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.473684210526315
+            },
+            {
+              "phase": "post-soft",
+              "iter": 0,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16135,
+              "prunedPairs": 1982865,
+              "reductionPct": 99.1928464232116,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.473684210526315
+            },
+            {
+              "phase": "pre-soft",
+              "iter": 1,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16135,
+              "prunedPairs": 1982865,
+              "reductionPct": 99.1928464232116,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.473684210526315
+            },
+            {
+              "phase": "post-soft",
+              "iter": 1,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16135,
+              "prunedPairs": 1982865,
+              "reductionPct": 99.1928464232116,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.473684210526315
+            }
+          ]
+        },
+        "rigidSoftBroadphaseRuntime": {
+          "enabled": true,
+          "reason": null,
+          "cellSize": 12,
+          "totalRawNodeChecks": 184000,
+          "totalCandidateNodeChecks": 864,
+          "totalPrunedNodeChecks": 183136,
+          "nodeReductionPct": 99.5304347826087,
+          "totalRawEdgeChecks": 184000,
+          "totalCandidateEdgeChecks": 658,
+          "totalPrunedEdgeChecks": 183342,
+          "edgeReductionPct": 99.64239130434783,
+          "totalBlockedEdges": 92,
+          "phases": [
+            {
+              "iter": 0,
+              "rigidCount": 2000,
+              "nodeCount": 46,
+              "blockedEdgeCount": 46,
+              "rawNodeChecks": 92000,
+              "candidateNodeChecks": 432,
+              "prunedNodeChecks": 91568,
+              "nodeReductionPct": 99.5304347826087,
+              "rawEdgeChecks": 92000,
+              "candidateEdgeChecks": 329,
+              "prunedEdgeChecks": 91671,
+              "edgeReductionPct": 99.64239130434783
+            },
+            {
+              "iter": 1,
+              "rigidCount": 2000,
+              "nodeCount": 46,
+              "blockedEdgeCount": 46,
+              "rawNodeChecks": 92000,
+              "candidateNodeChecks": 432,
+              "prunedNodeChecks": 91568,
+              "nodeReductionPct": 99.5304347826087,
+              "rawEdgeChecks": 92000,
+              "candidateEdgeChecks": 329,
+              "prunedEdgeChecks": 91671,
+              "edgeReductionPct": 99.64239130434783
+            }
+          ]
+        },
+        "collisionCpuRuntime": {
+          "enabled": true,
+          "reason": null,
+          "collisionIterations": 2,
+          "stageMs": {
+            "rigidRigidPre": 7.999999940395355,
+            "rigidSoft": 2.400000035762787,
+            "softSoftNode": 0,
+            "softSoftEdge": 0.09999996423721313,
+            "rigidRigidPost": 7.5,
+            "total": 17.999999940395355
+          },
+          "checks": {
+            "rigidRigidPairs": 64540,
+            "rigidSoftNodeRaw": 184000,
+            "rigidSoftNode": 864,
+            "rigidSoftNodeCandidate": 864,
+            "rigidSoftEdgeRaw": 184000,
+            "rigidSoftEdge": 658,
+            "rigidSoftEdgeCandidate": 658,
+            "softSoftNode": 2070,
+            "softSoftEdge": 3152
+          },
+          "hits": {
+            "rigidRigidPairs": 0,
+            "rigidSoftNode": 2,
+            "rigidSoftEdge": 2,
+            "softSoftNode": 34,
+            "softSoftEdge": 0
+          },
+          "hitRatesPct": {
+            "rigidRigidPairs": 0,
+            "rigidSoftNode": 0.23148148148148145,
+            "rigidSoftEdge": 0.303951367781155,
+            "rigidSoftNodeCandidate": 0.23148148148148145,
+            "rigidSoftEdgeCandidate": 0.303951367781155,
+            "softSoftNode": 1.6425120772946862,
+            "softSoftEdge": 0
+          },
+          "polyCache": {
+            "lookups": 129080,
+            "hits": 121080,
+            "misses": 8000,
+            "rebuilds": 8000
+          }
+        }
+      },
+      {
+        "round": 2,
+        "frame": 72,
+        "rendererFingerprint": {
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.0.0 Safari/537.36",
+          "webglVendor": "Google Inc. (Google)",
+          "webglRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0) (0x0000C0DE)), SwiftShader driver)",
+          "isSwiftShader": true,
+          "webgpuAdapter": null
+        },
+        "recentSampleCount": 16,
+        "avgFrameMs": 450.3062499947846,
+        "avgStepBodiesMs": 28.268749997019768,
+        "avgCollisionMs": 18.912499994039536,
+        "avgReadbackMs": 406.80000000447035,
+        "rigidRigidBroadphaseRuntime": {
+          "enabled": true,
+          "reason": null,
+          "cellSize": 12,
+          "totalBruteForcePairs": 7996000,
+          "totalCheckedPairs": 66476,
+          "totalPrunedPairs": 7929524,
+          "reductionPct": 99.16863431715858,
+          "phases": [
+            {
+              "phase": "pre-soft",
+              "iter": 0,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16619,
+              "prunedPairs": 1982381,
+              "reductionPct": 99.16863431715858,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.622291021671826
+            },
+            {
+              "phase": "post-soft",
+              "iter": 0,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16619,
+              "prunedPairs": 1982381,
+              "reductionPct": 99.16863431715858,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.622291021671826
+            },
+            {
+              "phase": "pre-soft",
+              "iter": 1,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16619,
+              "prunedPairs": 1982381,
+              "reductionPct": 99.16863431715858,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.622291021671826
+            },
+            {
+              "phase": "post-soft",
+              "iter": 1,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16619,
+              "prunedPairs": 1982381,
+              "reductionPct": 99.16863431715858,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.622291021671826
+            }
+          ]
+        },
+        "rigidSoftBroadphaseRuntime": {
+          "enabled": true,
+          "reason": null,
+          "cellSize": 12,
+          "totalRawNodeChecks": 184000,
+          "totalCandidateNodeChecks": 826,
+          "totalPrunedNodeChecks": 183174,
+          "nodeReductionPct": 99.55108695652174,
+          "totalRawEdgeChecks": 184000,
+          "totalCandidateEdgeChecks": 678,
+          "totalPrunedEdgeChecks": 183322,
+          "edgeReductionPct": 99.63152173913043,
+          "totalBlockedEdges": 92,
+          "phases": [
+            {
+              "iter": 0,
+              "rigidCount": 2000,
+              "nodeCount": 46,
+              "blockedEdgeCount": 46,
+              "rawNodeChecks": 92000,
+              "candidateNodeChecks": 413,
+              "prunedNodeChecks": 91587,
+              "nodeReductionPct": 99.55108695652174,
+              "rawEdgeChecks": 92000,
+              "candidateEdgeChecks": 339,
+              "prunedEdgeChecks": 91661,
+              "edgeReductionPct": 99.63152173913043
+            },
+            {
+              "iter": 1,
+              "rigidCount": 2000,
+              "nodeCount": 46,
+              "blockedEdgeCount": 46,
+              "rawNodeChecks": 92000,
+              "candidateNodeChecks": 413,
+              "prunedNodeChecks": 91587,
+              "nodeReductionPct": 99.55108695652174,
+              "rawEdgeChecks": 92000,
+              "candidateEdgeChecks": 339,
+              "prunedEdgeChecks": 91661,
+              "edgeReductionPct": 99.63152173913043
+            }
+          ]
+        },
+        "collisionCpuRuntime": {
+          "enabled": true,
+          "reason": null,
+          "collisionIterations": 2,
+          "stageMs": {
+            "rigidRigidPre": 7.499999940395355,
+            "rigidSoft": 2.900000035762787,
+            "softSoftNode": 0,
+            "softSoftEdge": 0,
+            "rigidRigidPost": 7.5,
+            "total": 17.899999976158142
+          },
+          "checks": {
+            "rigidRigidPairs": 66476,
+            "rigidSoftNodeRaw": 184000,
+            "rigidSoftNode": 826,
+            "rigidSoftNodeCandidate": 826,
+            "rigidSoftEdgeRaw": 184000,
+            "rigidSoftEdge": 678,
+            "rigidSoftEdgeCandidate": 678,
+            "softSoftNode": 2070,
+            "softSoftEdge": 3152
+          },
+          "hits": {
+            "rigidRigidPairs": 2,
+            "rigidSoftNode": 4,
+            "rigidSoftEdge": 2,
+            "softSoftNode": 31,
+            "softSoftEdge": 2
+          },
+          "hitRatesPct": {
+            "rigidRigidPairs": 0.0030086046091822613,
+            "rigidSoftNode": 0.48426150121065376,
+            "rigidSoftEdge": 0.2949852507374631,
+            "rigidSoftNodeCandidate": 0.48426150121065376,
+            "rigidSoftEdgeCandidate": 0.2949852507374631,
+            "softSoftNode": 1.497584541062802,
+            "softSoftEdge": 0.06345177664974619
+          },
+          "polyCache": {
+            "lookups": 132952,
+            "hits": 124949,
+            "misses": 8003,
+            "rebuilds": 8003
+          }
+        }
+      }
+    ],
+    "mean": {
+      "avgFrameMs": 448.7343749962747,
+      "avgStepBodiesMs": 28.200000001117587,
+      "avgCollisionMs": 19.13124999590218,
+      "avgReadbackMs": 405.17187500186265
+    }
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "summary": {
+        "frame": 72,
+        "rendererFingerprint": {
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.0.0 Safari/537.36",
+          "webglVendor": "Google Inc. (Google)",
+          "webglRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0) (0x0000C0DE)), SwiftShader driver)",
+          "isSwiftShader": true,
+          "webgpuAdapter": null
+        },
+        "recentSampleCount": 16,
+        "avgFrameMs": 447.1624999977648,
+        "avgStepBodiesMs": 28.131250005215406,
+        "avgCollisionMs": 19.349999997764826,
+        "avgReadbackMs": 403.54374999925494,
+        "rigidRigidBroadphaseRuntime": {
+          "enabled": true,
+          "reason": null,
+          "cellSize": 12,
+          "totalBruteForcePairs": 7996000,
+          "totalCheckedPairs": 64540,
+          "totalPrunedPairs": 7931460,
+          "reductionPct": 99.1928464232116,
+          "phases": [
+            {
+              "phase": "pre-soft",
+              "iter": 0,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16135,
+              "prunedPairs": 1982865,
+              "reductionPct": 99.1928464232116,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.473684210526315
+            },
+            {
+              "phase": "post-soft",
+              "iter": 0,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16135,
+              "prunedPairs": 1982865,
+              "reductionPct": 99.1928464232116,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.473684210526315
+            },
+            {
+              "phase": "pre-soft",
+              "iter": 1,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16135,
+              "prunedPairs": 1982865,
+              "reductionPct": 99.1928464232116,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.473684210526315
+            },
+            {
+              "phase": "post-soft",
+              "iter": 1,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16135,
+              "prunedPairs": 1982865,
+              "reductionPct": 99.1928464232116,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.473684210526315
+            }
+          ]
+        },
+        "rigidSoftBroadphaseRuntime": {
+          "enabled": true,
+          "reason": null,
+          "cellSize": 12,
+          "totalRawNodeChecks": 184000,
+          "totalCandidateNodeChecks": 864,
+          "totalPrunedNodeChecks": 183136,
+          "nodeReductionPct": 99.5304347826087,
+          "totalRawEdgeChecks": 184000,
+          "totalCandidateEdgeChecks": 658,
+          "totalPrunedEdgeChecks": 183342,
+          "edgeReductionPct": 99.64239130434783,
+          "totalBlockedEdges": 92,
+          "phases": [
+            {
+              "iter": 0,
+              "rigidCount": 2000,
+              "nodeCount": 46,
+              "blockedEdgeCount": 46,
+              "rawNodeChecks": 92000,
+              "candidateNodeChecks": 432,
+              "prunedNodeChecks": 91568,
+              "nodeReductionPct": 99.5304347826087,
+              "rawEdgeChecks": 92000,
+              "candidateEdgeChecks": 329,
+              "prunedEdgeChecks": 91671,
+              "edgeReductionPct": 99.64239130434783
+            },
+            {
+              "iter": 1,
+              "rigidCount": 2000,
+              "nodeCount": 46,
+              "blockedEdgeCount": 46,
+              "rawNodeChecks": 92000,
+              "candidateNodeChecks": 432,
+              "prunedNodeChecks": 91568,
+              "nodeReductionPct": 99.5304347826087,
+              "rawEdgeChecks": 92000,
+              "candidateEdgeChecks": 329,
+              "prunedEdgeChecks": 91671,
+              "edgeReductionPct": 99.64239130434783
+            }
+          ]
+        },
+        "collisionCpuRuntime": {
+          "enabled": true,
+          "reason": null,
+          "collisionIterations": 2,
+          "stageMs": {
+            "rigidRigidPre": 7.999999940395355,
+            "rigidSoft": 2.400000035762787,
+            "softSoftNode": 0,
+            "softSoftEdge": 0.09999996423721313,
+            "rigidRigidPost": 7.5,
+            "total": 17.999999940395355
+          },
+          "checks": {
+            "rigidRigidPairs": 64540,
+            "rigidSoftNodeRaw": 184000,
+            "rigidSoftNode": 864,
+            "rigidSoftNodeCandidate": 864,
+            "rigidSoftEdgeRaw": 184000,
+            "rigidSoftEdge": 658,
+            "rigidSoftEdgeCandidate": 658,
+            "softSoftNode": 2070,
+            "softSoftEdge": 3152
+          },
+          "hits": {
+            "rigidRigidPairs": 0,
+            "rigidSoftNode": 2,
+            "rigidSoftEdge": 2,
+            "softSoftNode": 34,
+            "softSoftEdge": 0
+          },
+          "hitRatesPct": {
+            "rigidRigidPairs": 0,
+            "rigidSoftNode": 0.23148148148148145,
+            "rigidSoftEdge": 0.303951367781155,
+            "rigidSoftNodeCandidate": 0.23148148148148145,
+            "rigidSoftEdgeCandidate": 0.303951367781155,
+            "softSoftNode": 1.6425120772946862,
+            "softSoftEdge": 0
+          },
+          "polyCache": {
+            "lookups": 129080,
+            "hits": 121080,
+            "misses": 8000,
+            "rebuilds": 8000
+          }
+        }
+      },
+      "status": {
+        "ok": true,
+        "running": true,
+        "frame": 72,
+        "grid": 256,
+        "runtimeSolverPath": "baseline",
+        "runtimePipelineMode": "standard",
+        "allowPassEdgeFlowPush": false,
+        "enableCouplingLagFrame": false,
+        "rendererFingerprint": {
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.0.0 Safari/537.36",
+          "webglVendor": "Google Inc. (Google)",
+          "webglRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0) (0x0000C0DE)), SwiftShader driver)",
+          "isSwiftShader": true,
+          "webgpuAdapter": null
+        },
+        "fastReadbackRuntime": {
+          "enabled": true,
+          "intervalFrames": 6,
+          "configuredIntervalFrames": 6,
+          "skippedFramesSinceFull": 0,
+          "lastFullReadbackFrame": 71,
+          "lastDecision": "full-readback",
+          "lastReason": "non-fast-mode",
+          "lastHealth": {
+            "nonFiniteCount": 0,
+            "velocitySpikeCount": 0,
+            "dyeSpikeCount": 0
+          },
+          "lastHealthAnomaly": {
+            "healthAnomaly": false,
+            "velocityExplosive": false,
+            "dyeExplosive": false,
+            "explosiveVelocitySpikeCount": 32768,
+            "explosiveDyeSpikeCount": 32768
+          }
+        },
+        "couplingLagRuntime": {
+          "enabled": false,
+          "active": false,
+          "lagFrames": 0,
+          "bootstrapFrames": 0,
+          "reusedFrames": 0,
+          "lastMode": "disabled",
+          "lastReadbackWaitMs": 0
+        },
+        "pipelineTiming": {
+          "last": {
+            "frame": 71,
+            "solverPath": "baseline",
+            "pipelineMode": "standard",
+            "totalMs": 446.5999999642372,
+            "spans": {
+              "frame.controlsAndMaskStamp": 9.599999964237213,
+              "fluid.encodeDispatch": 0.10000002384185791,
+              "fluid.submitAndHealth": 0,
+              "fluid.readback.fullMap": 404.60000002384186,
+              "bodies.preamble": 0.09999996423721313,
+              "bodies.rigid.baseline": 2.900000035762787,
+              "bodies.softFluidCoupling.baseline": 0.09999996423721313,
+              "bodies.softSpringXpbd.baseline": 0,
+              "bodies.membraneConstraints.baseline": 0.10000002384185791,
+              "bodies.softAreaXpbd.baseline": 0,
+              "bodies.membranePressure.baseline": 0,
+              "bodies.softIntegrate.baseline": 0,
+              "bodies.rigidPostIntegrate.baseline": 0,
+              "bodies.collisions.baseline": 18.599999964237213,
+              "bodies.postCollisionRecovery.baseline": 3.800000011920929,
+              "bodies.softRestRecovery.baseline": 0,
+              "bodies.softDeformation.baseline": 0,
+              "bodies.bodyFluidInjection.baseline": 1.100000023841858,
+              "bodies.metricsPack": 0,
+              "frame.stepBodiesAndInject.total": 26.799999952316284,
+              "frame.postCouplingCpu": 1.100000023841858,
+              "frame.gpuWriteback.updatedFields": 0.10000002384185791,
+              "frame.renderCompose": 4.299999952316284,
+              "frame.hudAndStatus": 0
+            },
+            "counts": {
+              "frame.controlsAndMaskStamp": 1,
+              "fluid.encodeDispatch": 1,
+              "fluid.submitAndHealth": 1,
+              "fluid.readback.fullMap": 1,
+              "bodies.preamble": 1,
+              "bodies.rigid.baseline": 1,
+              "bodies.softFluidCoupling.baseline": 1,
+              "bodies.softSpringXpbd.baseline": 1,
+              "bodies.membraneConstraints.baseline": 1,
+              "bodies.softAreaXpbd.baseline": 1,
+              "bodies.membranePressure.baseline": 1,
+              "bodies.softIntegrate.baseline": 1,
+              "bodies.rigidPostIntegrate.baseline": 1,
+              "bodies.collisions.baseline": 1,
+              "bodies.postCollisionRecovery.baseline": 1,
+              "bodies.softRestRecovery.baseline": 1,
+              "bodies.softDeformation.baseline": 1,
+              "bodies.bodyFluidInjection.baseline": 1,
+              "bodies.metricsPack": 1,
+              "frame.stepBodiesAndInject.total": 1,
+              "frame.postCouplingCpu": 1,
+              "frame.gpuWriteback.updatedFields": 1,
+              "frame.renderCompose": 1,
+              "frame.hudAndStatus": 1
+            },
+            "events": [
+              {
+                "key": "frame.controlsAndMaskStamp",
+                "ms": 9.599999964237213
+              },
+              {
+                "key": "fluid.encodeDispatch",
+                "ms": 0.10000002384185791
+              },
+              {
+                "key": "fluid.submitAndHealth",
+                "ms": 0
+              },
+              {
+                "key": "fluid.readback.fullMap",
+                "ms": 404.60000002384186,
+                "reason": "non-fast-mode"
+              },
+              {
+                "key": "bodies.preamble",
+                "ms": 0.09999996423721313
+              },
+              {
+                "key": "bodies.rigid.baseline",
+                "ms": 2.900000035762787
+              },
+              {
+                "key": "bodies.softFluidCoupling.baseline",
+                "ms": 0.09999996423721313
+              },
+              {
+                "key": "bodies.softSpringXpbd.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.membraneConstraints.baseline",
+                "ms": 0.10000002384185791
+              },
+              {
+                "key": "bodies.softAreaXpbd.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.membranePressure.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.softIntegrate.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.rigidPostIntegrate.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.collisions.baseline",
+                "ms": 18.599999964237213
+              },
+              {
+                "key": "bodies.postCollisionRecovery.baseline",
+                "ms": 3.800000011920929
+              },
+              {
+                "key": "bodies.softRestRecovery.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.softDeformation.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.bodyFluidInjection.baseline",
+                "ms": 1.100000023841858
+              },
+              {
+                "key": "bodies.metricsPack",
+                "ms": 0
+              },
+              {
+                "key": "frame.stepBodiesAndInject.total",
+                "ms": 26.799999952316284
+              },
+              {
+                "key": "frame.postCouplingCpu",
+                "ms": 1.100000023841858
+              },
+              {
+                "key": "frame.gpuWriteback.updatedFields",
+                "ms": 0.10000002384185791
+              },
+              {
+                "key": "frame.renderCompose",
+                "ms": 4.299999952316284
+              },
+              {
+                "key": "frame.hudAndStatus",
+                "ms": 0
+              }
+            ]
+          },
+          "recentFrames": [
+            {
+              "frame": 56,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 446.10000002384186,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.5,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 404.69999998807907,
+                "bodies.preamble": 0,
+                "bodies.rigid.baseline": 2.900000035762787,
+                "bodies.softFluidCoupling.baseline": 0,
+                "bodies.softSpringXpbd.baseline": 0.09999996423721313,
+                "bodies.membraneConstraints.baseline": 0.10000002384185791,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.399999976158142,
+                "bodies.postCollisionRecovery.baseline": 3.600000023841858,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1.100000023841858,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.30000001192093,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0.10000002384185791,
+                "frame.renderCompose": 4.100000023841858,
+                "frame.hudAndStatus": 0.19999998807907104
+              }
+            },
+            {
+              "frame": 57,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 457.60000002384186,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.600000023841858,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 411.0999999642372,
+                "bodies.preamble": 0.10000002384185791,
+                "bodies.rigid.baseline": 2.800000011920929,
+                "bodies.softFluidCoupling.baseline": 0.09999996423721313,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 21.19999998807907,
+                "bodies.postCollisionRecovery.baseline": 3.5,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0.10000002384185791,
+                "bodies.bodyFluidInjection.baseline": 3.199999988079071,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 31.200000047683716,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0.09999996423721313,
+                "frame.renderCompose": 4.300000011920929,
+                "frame.hudAndStatus": 0.10000002384185791
+              }
+            },
+            {
+              "frame": 58,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 436.19999998807907,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.599999964237213,
+                "fluid.encodeDispatch": 0.10000002384185791,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 394.10000002384186,
+                "bodies.preamble": 0.09999996423721313,
+                "bodies.rigid.baseline": 2.900000035762787,
+                "bodies.softFluidCoupling.baseline": 0,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.5,
+                "bodies.postCollisionRecovery.baseline": 3.5,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1.5,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.69999998807907,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0.10000002384185791,
+                "frame.renderCompose": 4.199999988079071,
+                "frame.hudAndStatus": 0.19999998807907104
+              }
+            },
+            {
+              "frame": 59,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 443.30000001192093,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.600000023841858,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 401.80000001192093,
+                "bodies.preamble": 0.09999996423721313,
+                "bodies.rigid.baseline": 2.900000035762787,
+                "bodies.softFluidCoupling.baseline": 0.09999996423721313,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.600000023841858,
+                "bodies.postCollisionRecovery.baseline": 3.600000023841858,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.30000001192093,
+                "frame.postCouplingCpu": 1.2999999523162842,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.200000047683716,
+                "frame.hudAndStatus": 0.09999996423721313
+              }
+            },
+            {
+              "frame": 60,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 456.4000000357628,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.600000023841858,
+                "fluid.encodeDispatch": 0.09999996423721313,
+                "fluid.submitAndHealth": 0.10000002384185791,
+                "fluid.readback.fullMap": 409.39999997615814,
+                "bodies.preamble": 0.10000002384185791,
+                "bodies.rigid.baseline": 2.800000011920929,
+                "bodies.softFluidCoupling.baseline": 0.19999998807907104,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0.10000002384185791,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 21.19999998807907,
+                "bodies.postCollisionRecovery.baseline": 3.599999964237213,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0.10000002384185791,
+                "bodies.bodyFluidInjection.baseline": 3.300000011920929,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 31.5,
+                "frame.postCouplingCpu": 1.2000000476837158,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.399999976158142,
+                "frame.hudAndStatus": 0.10000002384185791
+              }
+            },
+            {
+              "frame": 61,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 448.80000001192093,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.5,
+                "fluid.encodeDispatch": 0.10000002384185791,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 406.69999998807907,
+                "bodies.preamble": 0.10000002384185791,
+                "bodies.rigid.baseline": 2.899999976158142,
+                "bodies.softFluidCoupling.baseline": 0,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.19999998807907104,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.400000035762787,
+                "bodies.postCollisionRecovery.baseline": 3.599999964237213,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0.10000002384185791,
+                "bodies.bodyFluidInjection.baseline": 1.5,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.80000001192093,
+                "frame.postCouplingCpu": 1.300000011920929,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.299999952316284,
+                "frame.hudAndStatus": 0.10000002384185791
+              }
+            },
+            {
+              "frame": 62,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 449.80000001192093,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.600000023841858,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 408.30000001192093,
+                "bodies.preamble": 0,
+                "bodies.rigid.baseline": 3,
+                "bodies.softFluidCoupling.baseline": 0,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.600000023841858,
+                "bodies.postCollisionRecovery.baseline": 3.600000023841858,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1.0999999642372131,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.5,
+                "frame.postCouplingCpu": 1.0999999642372131,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.200000047683716,
+                "frame.hudAndStatus": 0.09999996423721313
+              }
+            },
+            {
+              "frame": 63,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 450,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.599999964237213,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0.10000002384185791,
+                "fluid.readback.fullMap": 402.5999999642372,
+                "bodies.preamble": 0.10000002384185791,
+                "bodies.rigid.baseline": 2.899999976158142,
+                "bodies.softFluidCoupling.baseline": 0.10000002384185791,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0.10000002384185791,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 21.399999976158142,
+                "bodies.postCollisionRecovery.baseline": 3.699999988079071,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 3.300000011920929,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 31.600000023841858,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.800000011920929,
+                "frame.hudAndStatus": 0.10000002384185791
+              }
+            },
+            {
+              "frame": 64,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 444.2999999523163,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.699999988079071,
+                "fluid.encodeDispatch": 0.09999996423721313,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 402.30000001192093,
+                "bodies.preamble": 0.19999998807907104,
+                "bodies.rigid.baseline": 2.900000035762787,
+                "bodies.softFluidCoupling.baseline": 0,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0.10000002384185791,
+                "bodies.collisions.baseline": 18.100000023841858,
+                "bodies.postCollisionRecovery.baseline": 3.599999964237213,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1.5,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.600000023841858,
+                "frame.postCouplingCpu": 1.300000011920929,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.299999952316284,
+                "frame.hudAndStatus": 0
+              }
+            },
+            {
+              "frame": 65,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 448.4000000357628,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.400000035762787,
+                "fluid.encodeDispatch": 0.19999998807907104,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 406.89999997615814,
+                "bodies.preamble": 0,
+                "bodies.rigid.baseline": 3,
+                "bodies.softFluidCoupling.baseline": 0,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.10000002384185791,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0.10000002384185791,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.5,
+                "bodies.postCollisionRecovery.baseline": 3.5,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1.0999999642372131,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.30000001192093,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.300000011920929,
+                "frame.hudAndStatus": 0.10000002384185791
+              }
+            },
+            {
+              "frame": 66,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 444.0999999642372,
+              "spans": {
+                "frame.controlsAndMaskStamp": 10.099999964237213,
+                "fluid.encodeDispatch": 0.10000002384185791,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 396.60000002384186,
+                "bodies.preamble": 0,
+                "bodies.rigid.baseline": 3,
+                "bodies.softFluidCoupling.baseline": 0.09999996423721313,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.10000002384185791,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 21.599999964237213,
+                "bodies.postCollisionRecovery.baseline": 3.5,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 3.300000011920929,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 31.799999952316284,
+                "frame.postCouplingCpu": 1.2000000476837158,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.199999988079071,
+                "frame.hudAndStatus": 0.09999996423721313
+              }
+            },
+            {
+              "frame": 67,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 446.80000001192093,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.599999964237213,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 404.10000002384186,
+                "bodies.preamble": 0.10000002384185791,
+                "bodies.rigid.baseline": 2.899999976158142,
+                "bodies.softFluidCoupling.baseline": 0.10000002384185791,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.09999996423721313,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.69999998807907,
+                "bodies.postCollisionRecovery.baseline": 3.700000047683716,
+                "bodies.softRestRecovery.baseline": 0.09999996423721313,
+                "bodies.softDeformation.baseline": 0.09999996423721313,
+                "bodies.bodyFluidInjection.baseline": 1.600000023841858,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 27.30000001192093,
+                "frame.postCouplingCpu": 1.300000011920929,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.399999976158142,
+                "frame.hudAndStatus": 0.10000002384185791
+              }
+            },
+            {
+              "frame": 68,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 447.19999998807907,
+              "spans": {
+                "frame.controlsAndMaskStamp": 10.099999964237213,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 405,
+                "bodies.preamble": 0.10000002384185791,
+                "bodies.rigid.baseline": 2.800000011920929,
+                "bodies.softFluidCoupling.baseline": 0.19999998807907104,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0.09999996423721313,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.600000023841858,
+                "bodies.postCollisionRecovery.baseline": 3.699999988079071,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.5,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.300000011920929,
+                "frame.hudAndStatus": 0
+              }
+            },
+            {
+              "frame": 69,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 452.39999997615814,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.699999988079071,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 405.80000001192093,
+                "bodies.preamble": 0.09999996423721313,
+                "bodies.rigid.baseline": 2.900000035762787,
+                "bodies.softFluidCoupling.baseline": 0,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.10000002384185791,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 21.19999998807907,
+                "bodies.postCollisionRecovery.baseline": 3.600000023841858,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 3.300000011920929,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 31.30000001192093,
+                "frame.postCouplingCpu": 1.2999999523162842,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.200000047683716,
+                "frame.hudAndStatus": 0.09999996423721313
+              }
+            },
+            {
+              "frame": 70,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 436.5999999642372,
+              "spans": {
+                "frame.controlsAndMaskStamp": 11.5,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0.10000002384185791,
+                "fluid.readback.fullMap": 392.69999998807907,
+                "bodies.preamble": 0.10000002384185791,
+                "bodies.rigid.baseline": 3,
+                "bodies.softFluidCoupling.baseline": 0,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0.10000002384185791,
+                "bodies.collisions.baseline": 18,
+                "bodies.postCollisionRecovery.baseline": 3.600000023841858,
+                "bodies.softRestRecovery.baseline": 0.09999996423721313,
+                "bodies.softDeformation.baseline": 0.09999996423721313,
+                "bodies.bodyFluidInjection.baseline": 1.5,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.600000023841858,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.300000011920929,
+                "frame.hudAndStatus": 0.09999996423721313
+              }
+            },
+            {
+              "frame": 71,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 446.5999999642372,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.599999964237213,
+                "fluid.encodeDispatch": 0.10000002384185791,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 404.60000002384186,
+                "bodies.preamble": 0.09999996423721313,
+                "bodies.rigid.baseline": 2.900000035762787,
+                "bodies.softFluidCoupling.baseline": 0.09999996423721313,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.10000002384185791,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.599999964237213,
+                "bodies.postCollisionRecovery.baseline": 3.800000011920929,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1.100000023841858,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.799999952316284,
+                "frame.postCouplingCpu": 1.100000023841858,
+                "frame.gpuWriteback.updatedFields": 0.10000002384185791,
+                "frame.renderCompose": 4.299999952316284,
+                "frame.hudAndStatus": 0
+              }
+            }
+          ]
+        },
+        "fallbackHud": {
+          "active": false,
+          "currentCount": 0,
+          "hasRecent": false,
+          "lastFallbackFrame": null,
+          "currentStages": [],
+          "recentStages": [],
+          "currentEntries": [],
+          "recentEntries": [],
+          "reportText": "Fallback tracker is active only while runtime solver is set to gpu-only."
+        },
+        "rigidBodies": 2000,
+        "softNodes": 46,
+        "interactionLab": null,
+        "fluidObstacle": {
+          "blockedCells": 40130,
+          "sweptCells": 40130
+        },
+        "sweptDyeTransport": {
+          "touchedCells": 65,
+          "movedMass": 827.9371910095215,
+          "deletedMass": 10620.327838897705,
+          "eatenMass": 0
+        },
+        "rigidStepRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastRigidStepAuthoritativeSource": null,
+          "lastRigidStepAuthoritativeSignature": null,
+          "lastRigidStepProposalSource": null,
+          "lastRigidStepProposalError": null,
+          "lastRigidStepProposalLayoutBytes": 0,
+          "lastRigidStepProposalSignature": null,
+          "lastRigidStepProposalSignaturePrepared": null,
+          "lastRigidStepProposalVxLen": 0,
+          "lastRigidStepProposalVyLen": 0,
+          "lastRigidStepProposalOmegaLen": 0,
+          "lastRigidStepProposalXLen": 0,
+          "lastRigidStepProposalYLen": 0,
+          "lastRigidStepProposalThetaLen": 0,
+          "lastRigidStepProposalCarryLen": 0,
+          "lastTiming": null
+        },
+        "rigidRigidBroadphaseRuntime": {
+          "enabled": true,
+          "reason": null,
+          "cellSize": 12,
+          "totalBruteForcePairs": 7996000,
+          "totalCheckedPairs": 64540,
+          "totalPrunedPairs": 7931460,
+          "reductionPct": 99.1928464232116,
+          "phases": [
+            {
+              "phase": "pre-soft",
+              "iter": 0,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16135,
+              "prunedPairs": 1982865,
+              "reductionPct": 99.1928464232116,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.473684210526315
+            },
+            {
+              "phase": "post-soft",
+              "iter": 0,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16135,
+              "prunedPairs": 1982865,
+              "reductionPct": 99.1928464232116,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.473684210526315
+            },
+            {
+              "phase": "pre-soft",
+              "iter": 1,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16135,
+              "prunedPairs": 1982865,
+              "reductionPct": 99.1928464232116,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.473684210526315
+            },
+            {
+              "phase": "post-soft",
+              "iter": 1,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16135,
+              "prunedPairs": 1982865,
+              "reductionPct": 99.1928464232116,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.473684210526315
+            }
+          ]
+        },
+        "rigidSoftBroadphaseRuntime": {
+          "enabled": true,
+          "reason": null,
+          "cellSize": 12,
+          "totalRawNodeChecks": 184000,
+          "totalCandidateNodeChecks": 864,
+          "totalPrunedNodeChecks": 183136,
+          "nodeReductionPct": 99.5304347826087,
+          "totalRawEdgeChecks": 184000,
+          "totalCandidateEdgeChecks": 658,
+          "totalPrunedEdgeChecks": 183342,
+          "edgeReductionPct": 99.64239130434783,
+          "totalBlockedEdges": 92,
+          "phases": [
+            {
+              "iter": 0,
+              "rigidCount": 2000,
+              "nodeCount": 46,
+              "blockedEdgeCount": 46,
+              "rawNodeChecks": 92000,
+              "candidateNodeChecks": 432,
+              "prunedNodeChecks": 91568,
+              "nodeReductionPct": 99.5304347826087,
+              "rawEdgeChecks": 92000,
+              "candidateEdgeChecks": 329,
+              "prunedEdgeChecks": 91671,
+              "edgeReductionPct": 99.64239130434783
+            },
+            {
+              "iter": 1,
+              "rigidCount": 2000,
+              "nodeCount": 46,
+              "blockedEdgeCount": 46,
+              "rawNodeChecks": 92000,
+              "candidateNodeChecks": 432,
+              "prunedNodeChecks": 91568,
+              "nodeReductionPct": 99.5304347826087,
+              "rawEdgeChecks": 92000,
+              "candidateEdgeChecks": 329,
+              "prunedEdgeChecks": 91671,
+              "edgeReductionPct": 99.64239130434783
+            }
+          ]
+        },
+        "collisionCpuRuntime": {
+          "enabled": true,
+          "reason": null,
+          "collisionIterations": 2,
+          "stageMs": {
+            "rigidRigidPre": 7.999999940395355,
+            "rigidSoft": 2.400000035762787,
+            "softSoftNode": 0,
+            "softSoftEdge": 0.09999996423721313,
+            "rigidRigidPost": 7.5,
+            "total": 17.999999940395355
+          },
+          "checks": {
+            "rigidRigidPairs": 64540,
+            "rigidSoftNodeRaw": 184000,
+            "rigidSoftNode": 864,
+            "rigidSoftNodeCandidate": 864,
+            "rigidSoftEdgeRaw": 184000,
+            "rigidSoftEdge": 658,
+            "rigidSoftEdgeCandidate": 658,
+            "softSoftNode": 2070,
+            "softSoftEdge": 3152
+          },
+          "hits": {
+            "rigidRigidPairs": 0,
+            "rigidSoftNode": 2,
+            "rigidSoftEdge": 2,
+            "softSoftNode": 34,
+            "softSoftEdge": 0
+          },
+          "hitRatesPct": {
+            "rigidRigidPairs": 0,
+            "rigidSoftNode": 0.23148148148148145,
+            "rigidSoftEdge": 0.303951367781155,
+            "rigidSoftNodeCandidate": 0.23148148148148145,
+            "rigidSoftEdgeCandidate": 0.303951367781155,
+            "softSoftNode": 1.6425120772946862,
+            "softSoftEdge": 0
+          },
+          "polyCache": {
+            "lookups": 129080,
+            "hits": 121080,
+            "misses": 8000,
+            "rebuilds": 8000
+          }
+        },
+        "softFluidCouplingRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastAuthoritativeCarrySource": null,
+          "lastAuthoritativeClusterLoadSource": null,
+          "lastTiming": null
+        },
+        "softSpringRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastAuthoritativeProposalSource": null,
+          "lastTiming": null
+        },
+        "softAreaRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastAuthoritativeProposalSource": null,
+          "lastTiming": null
+        },
+        "membranePressureRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastVelocityProposalSource": null,
+          "lastTiming": null
+        },
+        "softIntegrateRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastError": null,
+          "lastTiming": null
+        },
+        "rigidPostIntegrateRuntime": {
+          "lastMode": null,
+          "lastError": null,
+          "lastTiming": null
+        },
+        "membraneBoundaryRuntime": {
+          "lastMode": null,
+          "lastMembraneBoundaryEdgeAuthoritativeSource": null,
+          "lastMembraneBendAuthoritativeSource": null,
+          "lastTiming": null
+        },
+        "membraneShapeMemoryRuntime": {
+          "lastMode": null,
+          "lastShapeMemoryAuthoritativeSource": null,
+          "lastTiming": null
+        },
+        "softRestRecoveryRuntime": {
+          "lastMode": null,
+          "lastProbeSource": null,
+          "lastProposalSource": null,
+          "lastTiming": null
+        },
+        "softDeformationRuntime": {
+          "lastMode": null,
+          "lastSourceRoute": null,
+          "lastSoftDeformationWgslMetricsSource": null,
+          "lastTiming": null
+        },
+        "bodyFluidInjectionRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastAuthoritativeGatherSource": null,
+          "lastTiming": null
+        },
+        "rigidSoftRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastError": null,
+          "lastWgslUnavailableReason": null,
+          "lastRigidSoftResponseAuthoritativeSource": null,
+          "lastRigidSoftResponseOwnership": null,
+          "lastRigidSoftResponseOwnershipDetailed": null,
+          "lastRigidSoftResponseRoute": null,
+          "lastRigidSoftResponseFallbackReason": null,
+          "lastPreparedNodePairCount": 0,
+          "lastPreparedEdgePairCount": 0,
+          "lastPreparedNodeNarrowphasePairCount": 0,
+          "lastPreparedEdgeNarrowphasePairCount": 0,
+          "lastPreparedNarrowphaseImpulseSeedNodePairCount": 0,
+          "lastPreparedNarrowphaseImpulseSeedEdgePairCount": 0,
+          "lastNodeBroadphaseReadbackCount": 0,
+          "lastEdgeBroadphaseReadbackCount": 0,
+          "lastNodeBroadphaseCandidatePairCount": 0,
+          "lastEdgeBroadphaseCandidatePairCount": 0,
+          "lastNodeBroadphaseActivePairCount": 0,
+          "lastEdgeBroadphaseActivePairCount": 0,
+          "lastNodeNarrowphaseDroppedPairCount": 0,
+          "lastNodeBroadphaseReason": null,
+          "lastEdgeBroadphaseReason": null,
+          "lastNodeBroadphaseAuthoritativeSource": null,
+          "lastEdgeBroadphaseAuthoritativeSource": null,
+          "lastNodeBroadphaseReadbackSourceRoute": null,
+          "lastEdgeBroadphaseReadbackSourceRoute": null,
+          "lastNodeBroadphaseReplayEpochDelta": 0,
+          "lastEdgeBroadphaseReplayEpochDelta": 0,
+          "lastNodeBroadphaseReplayHitCount": 0,
+          "lastNodeBroadphaseDispatchHitCount": 0,
+          "lastEdgeBroadphaseReplayHitCount": 0,
+          "lastEdgeBroadphaseDispatchHitCount": 0,
+          "lastRigidSoftBroadphaseCadenceDue": false,
+          "lastRigidSoftBroadphaseInterval": 0,
+          "lastNodeBroadphaseTiming": null,
+          "lastEdgeBroadphaseTiming": null,
+          "lastNodeNarrowphaseAabbProbeTiming": null,
+          "lastEdgeNarrowphaseAabbProbeTiming": null,
+          "lastRigidSoftResponseTiming": null
+        }
+      }
+    },
+    {
+      "round": 2,
+      "summary": {
+        "frame": 72,
+        "rendererFingerprint": {
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.0.0 Safari/537.36",
+          "webglVendor": "Google Inc. (Google)",
+          "webglRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0) (0x0000C0DE)), SwiftShader driver)",
+          "isSwiftShader": true,
+          "webgpuAdapter": null
+        },
+        "recentSampleCount": 16,
+        "avgFrameMs": 450.3062499947846,
+        "avgStepBodiesMs": 28.268749997019768,
+        "avgCollisionMs": 18.912499994039536,
+        "avgReadbackMs": 406.80000000447035,
+        "rigidRigidBroadphaseRuntime": {
+          "enabled": true,
+          "reason": null,
+          "cellSize": 12,
+          "totalBruteForcePairs": 7996000,
+          "totalCheckedPairs": 66476,
+          "totalPrunedPairs": 7929524,
+          "reductionPct": 99.16863431715858,
+          "phases": [
+            {
+              "phase": "pre-soft",
+              "iter": 0,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16619,
+              "prunedPairs": 1982381,
+              "reductionPct": 99.16863431715858,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.622291021671826
+            },
+            {
+              "phase": "post-soft",
+              "iter": 0,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16619,
+              "prunedPairs": 1982381,
+              "reductionPct": 99.16863431715858,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.622291021671826
+            },
+            {
+              "phase": "pre-soft",
+              "iter": 1,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16619,
+              "prunedPairs": 1982381,
+              "reductionPct": 99.16863431715858,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.622291021671826
+            },
+            {
+              "phase": "post-soft",
+              "iter": 1,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16619,
+              "prunedPairs": 1982381,
+              "reductionPct": 99.16863431715858,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.622291021671826
+            }
+          ]
+        },
+        "rigidSoftBroadphaseRuntime": {
+          "enabled": true,
+          "reason": null,
+          "cellSize": 12,
+          "totalRawNodeChecks": 184000,
+          "totalCandidateNodeChecks": 826,
+          "totalPrunedNodeChecks": 183174,
+          "nodeReductionPct": 99.55108695652174,
+          "totalRawEdgeChecks": 184000,
+          "totalCandidateEdgeChecks": 678,
+          "totalPrunedEdgeChecks": 183322,
+          "edgeReductionPct": 99.63152173913043,
+          "totalBlockedEdges": 92,
+          "phases": [
+            {
+              "iter": 0,
+              "rigidCount": 2000,
+              "nodeCount": 46,
+              "blockedEdgeCount": 46,
+              "rawNodeChecks": 92000,
+              "candidateNodeChecks": 413,
+              "prunedNodeChecks": 91587,
+              "nodeReductionPct": 99.55108695652174,
+              "rawEdgeChecks": 92000,
+              "candidateEdgeChecks": 339,
+              "prunedEdgeChecks": 91661,
+              "edgeReductionPct": 99.63152173913043
+            },
+            {
+              "iter": 1,
+              "rigidCount": 2000,
+              "nodeCount": 46,
+              "blockedEdgeCount": 46,
+              "rawNodeChecks": 92000,
+              "candidateNodeChecks": 413,
+              "prunedNodeChecks": 91587,
+              "nodeReductionPct": 99.55108695652174,
+              "rawEdgeChecks": 92000,
+              "candidateEdgeChecks": 339,
+              "prunedEdgeChecks": 91661,
+              "edgeReductionPct": 99.63152173913043
+            }
+          ]
+        },
+        "collisionCpuRuntime": {
+          "enabled": true,
+          "reason": null,
+          "collisionIterations": 2,
+          "stageMs": {
+            "rigidRigidPre": 7.499999940395355,
+            "rigidSoft": 2.900000035762787,
+            "softSoftNode": 0,
+            "softSoftEdge": 0,
+            "rigidRigidPost": 7.5,
+            "total": 17.899999976158142
+          },
+          "checks": {
+            "rigidRigidPairs": 66476,
+            "rigidSoftNodeRaw": 184000,
+            "rigidSoftNode": 826,
+            "rigidSoftNodeCandidate": 826,
+            "rigidSoftEdgeRaw": 184000,
+            "rigidSoftEdge": 678,
+            "rigidSoftEdgeCandidate": 678,
+            "softSoftNode": 2070,
+            "softSoftEdge": 3152
+          },
+          "hits": {
+            "rigidRigidPairs": 2,
+            "rigidSoftNode": 4,
+            "rigidSoftEdge": 2,
+            "softSoftNode": 31,
+            "softSoftEdge": 2
+          },
+          "hitRatesPct": {
+            "rigidRigidPairs": 0.0030086046091822613,
+            "rigidSoftNode": 0.48426150121065376,
+            "rigidSoftEdge": 0.2949852507374631,
+            "rigidSoftNodeCandidate": 0.48426150121065376,
+            "rigidSoftEdgeCandidate": 0.2949852507374631,
+            "softSoftNode": 1.497584541062802,
+            "softSoftEdge": 0.06345177664974619
+          },
+          "polyCache": {
+            "lookups": 132952,
+            "hits": 124949,
+            "misses": 8003,
+            "rebuilds": 8003
+          }
+        }
+      },
+      "status": {
+        "ok": true,
+        "running": true,
+        "frame": 72,
+        "grid": 256,
+        "runtimeSolverPath": "baseline",
+        "runtimePipelineMode": "standard",
+        "allowPassEdgeFlowPush": false,
+        "enableCouplingLagFrame": false,
+        "rendererFingerprint": {
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/145.0.0.0 Safari/537.36",
+          "webglVendor": "Google Inc. (Google)",
+          "webglRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0) (0x0000C0DE)), SwiftShader driver)",
+          "isSwiftShader": true,
+          "webgpuAdapter": null
+        },
+        "fastReadbackRuntime": {
+          "enabled": true,
+          "intervalFrames": 6,
+          "configuredIntervalFrames": 6,
+          "skippedFramesSinceFull": 0,
+          "lastFullReadbackFrame": 71,
+          "lastDecision": "full-readback",
+          "lastReason": "non-fast-mode",
+          "lastHealth": {
+            "nonFiniteCount": 0,
+            "velocitySpikeCount": 0,
+            "dyeSpikeCount": 0
+          },
+          "lastHealthAnomaly": {
+            "healthAnomaly": false,
+            "velocityExplosive": false,
+            "dyeExplosive": false,
+            "explosiveVelocitySpikeCount": 32768,
+            "explosiveDyeSpikeCount": 32768
+          }
+        },
+        "couplingLagRuntime": {
+          "enabled": false,
+          "active": false,
+          "lagFrames": 0,
+          "bootstrapFrames": 0,
+          "reusedFrames": 0,
+          "lastMode": "disabled",
+          "lastReadbackWaitMs": 0
+        },
+        "pipelineTiming": {
+          "last": {
+            "frame": 71,
+            "solverPath": "baseline",
+            "pipelineMode": "standard",
+            "totalMs": 448.69999998807907,
+            "spans": {
+              "frame.controlsAndMaskStamp": 9.600000023841858,
+              "fluid.encodeDispatch": 0.09999996423721313,
+              "fluid.submitAndHealth": 0.10000002384185791,
+              "fluid.readback.fullMap": 406.30000001192093,
+              "bodies.preamble": 0.09999996423721313,
+              "bodies.rigid.baseline": 2.900000035762787,
+              "bodies.softFluidCoupling.baseline": 0,
+              "bodies.softSpringXpbd.baseline": 0,
+              "bodies.membraneConstraints.baseline": 0.10000002384185791,
+              "bodies.softAreaXpbd.baseline": 0,
+              "bodies.membranePressure.baseline": 0,
+              "bodies.softIntegrate.baseline": 0,
+              "bodies.rigidPostIntegrate.baseline": 0,
+              "bodies.collisions.baseline": 18.19999998807907,
+              "bodies.postCollisionRecovery.baseline": 4,
+              "bodies.softRestRecovery.baseline": 0,
+              "bodies.softDeformation.baseline": 0,
+              "bodies.bodyFluidInjection.baseline": 1.5,
+              "bodies.metricsPack": 0,
+              "frame.stepBodiesAndInject.total": 26.899999976158142,
+              "frame.postCouplingCpu": 1.300000011920929,
+              "frame.gpuWriteback.updatedFields": 0,
+              "frame.renderCompose": 4.300000011920929,
+              "frame.hudAndStatus": 0.09999996423721313
+            },
+            "counts": {
+              "frame.controlsAndMaskStamp": 1,
+              "fluid.encodeDispatch": 1,
+              "fluid.submitAndHealth": 1,
+              "fluid.readback.fullMap": 1,
+              "bodies.preamble": 1,
+              "bodies.rigid.baseline": 1,
+              "bodies.softFluidCoupling.baseline": 1,
+              "bodies.softSpringXpbd.baseline": 1,
+              "bodies.membraneConstraints.baseline": 1,
+              "bodies.softAreaXpbd.baseline": 1,
+              "bodies.membranePressure.baseline": 1,
+              "bodies.softIntegrate.baseline": 1,
+              "bodies.rigidPostIntegrate.baseline": 1,
+              "bodies.collisions.baseline": 1,
+              "bodies.postCollisionRecovery.baseline": 1,
+              "bodies.softRestRecovery.baseline": 1,
+              "bodies.softDeformation.baseline": 1,
+              "bodies.bodyFluidInjection.baseline": 1,
+              "bodies.metricsPack": 1,
+              "frame.stepBodiesAndInject.total": 1,
+              "frame.postCouplingCpu": 1,
+              "frame.gpuWriteback.updatedFields": 1,
+              "frame.renderCompose": 1,
+              "frame.hudAndStatus": 1
+            },
+            "events": [
+              {
+                "key": "frame.controlsAndMaskStamp",
+                "ms": 9.600000023841858
+              },
+              {
+                "key": "fluid.encodeDispatch",
+                "ms": 0.09999996423721313
+              },
+              {
+                "key": "fluid.submitAndHealth",
+                "ms": 0.10000002384185791
+              },
+              {
+                "key": "fluid.readback.fullMap",
+                "ms": 406.30000001192093,
+                "reason": "non-fast-mode"
+              },
+              {
+                "key": "bodies.preamble",
+                "ms": 0.09999996423721313
+              },
+              {
+                "key": "bodies.rigid.baseline",
+                "ms": 2.900000035762787
+              },
+              {
+                "key": "bodies.softFluidCoupling.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.softSpringXpbd.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.membraneConstraints.baseline",
+                "ms": 0.10000002384185791
+              },
+              {
+                "key": "bodies.softAreaXpbd.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.membranePressure.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.softIntegrate.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.rigidPostIntegrate.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.collisions.baseline",
+                "ms": 18.19999998807907
+              },
+              {
+                "key": "bodies.postCollisionRecovery.baseline",
+                "ms": 4
+              },
+              {
+                "key": "bodies.softRestRecovery.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.softDeformation.baseline",
+                "ms": 0
+              },
+              {
+                "key": "bodies.bodyFluidInjection.baseline",
+                "ms": 1.5
+              },
+              {
+                "key": "bodies.metricsPack",
+                "ms": 0
+              },
+              {
+                "key": "frame.stepBodiesAndInject.total",
+                "ms": 26.899999976158142
+              },
+              {
+                "key": "frame.postCouplingCpu",
+                "ms": 1.300000011920929
+              },
+              {
+                "key": "frame.gpuWriteback.updatedFields",
+                "ms": 0
+              },
+              {
+                "key": "frame.renderCompose",
+                "ms": 4.300000011920929
+              },
+              {
+                "key": "frame.hudAndStatus",
+                "ms": 0.09999996423721313
+              }
+            ]
+          },
+          "recentFrames": [
+            {
+              "frame": 56,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 448.39999997615814,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.599999964237213,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 406,
+                "bodies.preamble": 0.10000002384185791,
+                "bodies.rigid.baseline": 3.100000023841858,
+                "bodies.softFluidCoupling.baseline": 0,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.30000001192093,
+                "bodies.postCollisionRecovery.baseline": 4,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1.600000023841858,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 27.200000047683716,
+                "frame.postCouplingCpu": 1.2999999523162842,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.200000047683716,
+                "frame.hudAndStatus": 0.09999996423721313
+              }
+            },
+            {
+              "frame": 57,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 450.5,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.600000023841858,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 408.30000001192093,
+                "bodies.preamble": 0,
+                "bodies.rigid.baseline": 3,
+                "bodies.softFluidCoupling.baseline": 0.09999996423721313,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.10000002384185791,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0.5999999642372131,
+                "bodies.collisions.baseline": 18.100000023841858,
+                "bodies.postCollisionRecovery.baseline": 4,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1.100000023841858,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 27.099999964237213,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.200000047683716,
+                "frame.hudAndStatus": 0.09999996423721313
+              }
+            },
+            {
+              "frame": 58,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 453.0999999642372,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.5,
+                "fluid.encodeDispatch": 0.09999996423721313,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 405.9000000357628,
+                "bodies.preamble": 0.09999996423721313,
+                "bodies.rigid.baseline": 3,
+                "bodies.softFluidCoupling.baseline": 0,
+                "bodies.softSpringXpbd.baseline": 0.10000002384185791,
+                "bodies.membraneConstraints.baseline": 0.10000002384185791,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 21.19999998807907,
+                "bodies.postCollisionRecovery.baseline": 4,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 3.399999976158142,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 32,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.300000011920929,
+                "frame.hudAndStatus": 0.09999996423721313
+              }
+            },
+            {
+              "frame": 59,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 447.19999998807907,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.5,
+                "fluid.encodeDispatch": 0.09999996423721313,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 405,
+                "bodies.preamble": 0.20000004768371582,
+                "bodies.rigid.baseline": 2.899999976158142,
+                "bodies.softFluidCoupling.baseline": 0.10000002384185791,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.09999996423721313,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18,
+                "bodies.postCollisionRecovery.baseline": 4,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1.5,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.900000035762787,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0.10000002384185791,
+                "frame.renderCompose": 4.399999976158142,
+                "frame.hudAndStatus": 0
+              }
+            },
+            {
+              "frame": 60,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 447.5999999642372,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.699999988079071,
+                "fluid.encodeDispatch": 0.09999996423721313,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 405.4000000357628,
+                "bodies.preamble": 0.09999996423721313,
+                "bodies.rigid.baseline": 2.900000035762787,
+                "bodies.softFluidCoupling.baseline": 0,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0.6000000238418579,
+                "bodies.collisions.baseline": 18,
+                "bodies.postCollisionRecovery.baseline": 4.100000023841858,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.899999976158142,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.300000011920929,
+                "frame.hudAndStatus": 0
+              }
+            },
+            {
+              "frame": 61,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 453.30000001192093,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.699999988079071,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 408,
+                "bodies.preamble": 0.10000002384185791,
+                "bodies.rigid.baseline": 2.899999976158142,
+                "bodies.softFluidCoupling.baseline": 0.10000002384185791,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.09999996423721313,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 19.5,
+                "bodies.postCollisionRecovery.baseline": 3.800000011920929,
+                "bodies.softRestRecovery.baseline": 0.10000002384185791,
+                "bodies.softDeformation.baseline": 0.10000002384185791,
+                "bodies.bodyFluidInjection.baseline": 3.299999952316284,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 30,
+                "frame.postCouplingCpu": 1.2000000476837158,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.299999952316284,
+                "frame.hudAndStatus": 0.10000002384185791
+              }
+            },
+            {
+              "frame": 62,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 450,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.600000023841858,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 407.5999999642372,
+                "bodies.preamble": 0.19999998807907104,
+                "bodies.rigid.baseline": 2.900000035762787,
+                "bodies.softFluidCoupling.baseline": 0.09999996423721313,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.10000002384185791,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.19999998807907,
+                "bodies.postCollisionRecovery.baseline": 4,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0.10000002384185791,
+                "bodies.bodyFluidInjection.baseline": 1.399999976158142,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 27.100000023841858,
+                "frame.postCouplingCpu": 1.300000011920929,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.299999952316284,
+                "frame.hudAndStatus": 0.10000002384185791
+              }
+            },
+            {
+              "frame": 63,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 445.5,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.600000023841858,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 403,
+                "bodies.preamble": 0.10000002384185791,
+                "bodies.rigid.baseline": 3,
+                "bodies.softFluidCoupling.baseline": 0.09999996423721313,
+                "bodies.softSpringXpbd.baseline": 0.10000002384185791,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0.5,
+                "bodies.collisions.baseline": 18.30000001192093,
+                "bodies.postCollisionRecovery.baseline": 3.899999976158142,
+                "bodies.softRestRecovery.baseline": 0.10000002384185791,
+                "bodies.softDeformation.baseline": 0.10000002384185791,
+                "bodies.bodyFluidInjection.baseline": 1,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 27.19999998807907,
+                "frame.postCouplingCpu": 1.300000011920929,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.300000011920929,
+                "frame.hudAndStatus": 0.09999996423721313
+              }
+            },
+            {
+              "frame": 64,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 454.30000001192093,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.600000023841858,
+                "fluid.encodeDispatch": 0.10000002384185791,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 407.5999999642372,
+                "bodies.preamble": 0.10000002384185791,
+                "bodies.rigid.baseline": 2.900000035762787,
+                "bodies.softFluidCoupling.baseline": 0.09999996423721313,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.10000002384185791,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 20.899999976158142,
+                "bodies.postCollisionRecovery.baseline": 3.900000035762787,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0.09999996423721313,
+                "bodies.bodyFluidInjection.baseline": 3.300000011920929,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 31.5,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.300000011920929,
+                "frame.hudAndStatus": 0
+              }
+            },
+            {
+              "frame": 65,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 451.60000002384186,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.5,
+                "fluid.encodeDispatch": 0.10000002384185791,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 409.69999998807907,
+                "bodies.preamble": 0,
+                "bodies.rigid.baseline": 3,
+                "bodies.softFluidCoupling.baseline": 0.10000002384185791,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0.09999996423721313,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.100000023841858,
+                "bodies.postCollisionRecovery.baseline": 3.899999976158142,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1.600000023841858,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.80000001192093,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.199999988079071,
+                "frame.hudAndStatus": 0.10000002384185791
+              }
+            },
+            {
+              "frame": 66,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 446.60000002384186,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.5,
+                "fluid.encodeDispatch": 0.10000002384185791,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 404.30000001192093,
+                "bodies.preamble": 0.09999996423721313,
+                "bodies.rigid.baseline": 3,
+                "bodies.softFluidCoupling.baseline": 0.10000002384185791,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.799999952316284,
+                "bodies.postCollisionRecovery.baseline": 4,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0.10000002384185791,
+                "bodies.bodyFluidInjection.baseline": 1,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 27.19999998807907,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.300000011920929,
+                "frame.hudAndStatus": 0
+              }
+            },
+            {
+              "frame": 67,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 452.69999998807907,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.5,
+                "fluid.encodeDispatch": 0.09999996423721313,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 407.80000001192093,
+                "bodies.preamble": 0.10000002384185791,
+                "bodies.rigid.baseline": 3,
+                "bodies.softFluidCoupling.baseline": 0,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.19999998807907104,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 19.099999964237213,
+                "bodies.postCollisionRecovery.baseline": 3.900000035762787,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 3.300000011920929,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 29.69999998807907,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.100000023841858,
+                "frame.hudAndStatus": 0.19999998807907104
+              }
+            },
+            {
+              "frame": 68,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 451.69999998807907,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.5,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 409.19999998807907,
+                "bodies.preamble": 0.10000002384185791,
+                "bodies.rigid.baseline": 2.899999976158142,
+                "bodies.softFluidCoupling.baseline": 0.10000002384185791,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.09999996423721313,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.30000001192093,
+                "bodies.postCollisionRecovery.baseline": 4,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1.600000023841858,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 27.19999998807907,
+                "frame.postCouplingCpu": 1.199999988079071,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.300000011920929,
+                "frame.hudAndStatus": 0.19999998807907104
+              }
+            },
+            {
+              "frame": 69,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 447.80000001192093,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.599999964237213,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 405.7000000476837,
+                "bodies.preamble": 0,
+                "bodies.rigid.baseline": 3.099999964237213,
+                "bodies.softFluidCoupling.baseline": 0,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.10000002384185791,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.599999964237213,
+                "bodies.postCollisionRecovery.baseline": 4,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1.100000023841858,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.899999976158142,
+                "frame.postCouplingCpu": 1.300000011920929,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.199999988079071,
+                "frame.hudAndStatus": 0.10000002384185791
+              }
+            },
+            {
+              "frame": 70,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 455.89999997615814,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.599999964237213,
+                "fluid.encodeDispatch": 0,
+                "fluid.submitAndHealth": 0,
+                "fluid.readback.fullMap": 409,
+                "bodies.preamble": 0.10000002384185791,
+                "bodies.rigid.baseline": 3,
+                "bodies.softFluidCoupling.baseline": 0.09999996423721313,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 21,
+                "bodies.postCollisionRecovery.baseline": 4,
+                "bodies.softRestRecovery.baseline": 0.10000002384185791,
+                "bodies.softDeformation.baseline": 0.10000002384185791,
+                "bodies.bodyFluidInjection.baseline": 3.299999952316284,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 31.69999998807907,
+                "frame.postCouplingCpu": 1.2000000476837158,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.399999976158142,
+                "frame.hudAndStatus": 0
+              }
+            },
+            {
+              "frame": 71,
+              "solverPath": "baseline",
+              "pipelineMode": "standard",
+              "totalMs": 448.69999998807907,
+              "spans": {
+                "frame.controlsAndMaskStamp": 9.600000023841858,
+                "fluid.encodeDispatch": 0.09999996423721313,
+                "fluid.submitAndHealth": 0.10000002384185791,
+                "fluid.readback.fullMap": 406.30000001192093,
+                "bodies.preamble": 0.09999996423721313,
+                "bodies.rigid.baseline": 2.900000035762787,
+                "bodies.softFluidCoupling.baseline": 0,
+                "bodies.softSpringXpbd.baseline": 0,
+                "bodies.membraneConstraints.baseline": 0.10000002384185791,
+                "bodies.softAreaXpbd.baseline": 0,
+                "bodies.membranePressure.baseline": 0,
+                "bodies.softIntegrate.baseline": 0,
+                "bodies.rigidPostIntegrate.baseline": 0,
+                "bodies.collisions.baseline": 18.19999998807907,
+                "bodies.postCollisionRecovery.baseline": 4,
+                "bodies.softRestRecovery.baseline": 0,
+                "bodies.softDeformation.baseline": 0,
+                "bodies.bodyFluidInjection.baseline": 1.5,
+                "bodies.metricsPack": 0,
+                "frame.stepBodiesAndInject.total": 26.899999976158142,
+                "frame.postCouplingCpu": 1.300000011920929,
+                "frame.gpuWriteback.updatedFields": 0,
+                "frame.renderCompose": 4.300000011920929,
+                "frame.hudAndStatus": 0.09999996423721313
+              }
+            }
+          ]
+        },
+        "fallbackHud": {
+          "active": false,
+          "currentCount": 0,
+          "hasRecent": false,
+          "lastFallbackFrame": null,
+          "currentStages": [],
+          "recentStages": [],
+          "currentEntries": [],
+          "recentEntries": [],
+          "reportText": "Fallback tracker is active only while runtime solver is set to gpu-only."
+        },
+        "rigidBodies": 2000,
+        "softNodes": 46,
+        "interactionLab": null,
+        "fluidObstacle": {
+          "blockedCells": 40179,
+          "sweptCells": 40179
+        },
+        "sweptDyeTransport": {
+          "touchedCells": 70,
+          "movedMass": 794.9204788208008,
+          "deletedMass": 9743.150508880615,
+          "eatenMass": 0
+        },
+        "rigidStepRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastRigidStepAuthoritativeSource": null,
+          "lastRigidStepAuthoritativeSignature": null,
+          "lastRigidStepProposalSource": null,
+          "lastRigidStepProposalError": null,
+          "lastRigidStepProposalLayoutBytes": 0,
+          "lastRigidStepProposalSignature": null,
+          "lastRigidStepProposalSignaturePrepared": null,
+          "lastRigidStepProposalVxLen": 0,
+          "lastRigidStepProposalVyLen": 0,
+          "lastRigidStepProposalOmegaLen": 0,
+          "lastRigidStepProposalXLen": 0,
+          "lastRigidStepProposalYLen": 0,
+          "lastRigidStepProposalThetaLen": 0,
+          "lastRigidStepProposalCarryLen": 0,
+          "lastTiming": null
+        },
+        "rigidRigidBroadphaseRuntime": {
+          "enabled": true,
+          "reason": null,
+          "cellSize": 12,
+          "totalBruteForcePairs": 7996000,
+          "totalCheckedPairs": 66476,
+          "totalPrunedPairs": 7929524,
+          "reductionPct": 99.16863431715858,
+          "phases": [
+            {
+              "phase": "pre-soft",
+              "iter": 0,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16619,
+              "prunedPairs": 1982381,
+              "reductionPct": 99.16863431715858,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.622291021671826
+            },
+            {
+              "phase": "post-soft",
+              "iter": 0,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16619,
+              "prunedPairs": 1982381,
+              "reductionPct": 99.16863431715858,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.622291021671826
+            },
+            {
+              "phase": "pre-soft",
+              "iter": 1,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16619,
+              "prunedPairs": 1982381,
+              "reductionPct": 99.16863431715858,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.622291021671826
+            },
+            {
+              "phase": "post-soft",
+              "iter": 1,
+              "bodyCount": 2000,
+              "bruteForcePairs": 1999000,
+              "checkedPairs": 16619,
+              "prunedPairs": 1982381,
+              "reductionPct": 99.16863431715858,
+              "occupiedCells": 323,
+              "maxBodiesPerCell": 16,
+              "avgBodiesPerCell": 10.622291021671826
+            }
+          ]
+        },
+        "rigidSoftBroadphaseRuntime": {
+          "enabled": true,
+          "reason": null,
+          "cellSize": 12,
+          "totalRawNodeChecks": 184000,
+          "totalCandidateNodeChecks": 826,
+          "totalPrunedNodeChecks": 183174,
+          "nodeReductionPct": 99.55108695652174,
+          "totalRawEdgeChecks": 184000,
+          "totalCandidateEdgeChecks": 678,
+          "totalPrunedEdgeChecks": 183322,
+          "edgeReductionPct": 99.63152173913043,
+          "totalBlockedEdges": 92,
+          "phases": [
+            {
+              "iter": 0,
+              "rigidCount": 2000,
+              "nodeCount": 46,
+              "blockedEdgeCount": 46,
+              "rawNodeChecks": 92000,
+              "candidateNodeChecks": 413,
+              "prunedNodeChecks": 91587,
+              "nodeReductionPct": 99.55108695652174,
+              "rawEdgeChecks": 92000,
+              "candidateEdgeChecks": 339,
+              "prunedEdgeChecks": 91661,
+              "edgeReductionPct": 99.63152173913043
+            },
+            {
+              "iter": 1,
+              "rigidCount": 2000,
+              "nodeCount": 46,
+              "blockedEdgeCount": 46,
+              "rawNodeChecks": 92000,
+              "candidateNodeChecks": 413,
+              "prunedNodeChecks": 91587,
+              "nodeReductionPct": 99.55108695652174,
+              "rawEdgeChecks": 92000,
+              "candidateEdgeChecks": 339,
+              "prunedEdgeChecks": 91661,
+              "edgeReductionPct": 99.63152173913043
+            }
+          ]
+        },
+        "collisionCpuRuntime": {
+          "enabled": true,
+          "reason": null,
+          "collisionIterations": 2,
+          "stageMs": {
+            "rigidRigidPre": 7.499999940395355,
+            "rigidSoft": 2.900000035762787,
+            "softSoftNode": 0,
+            "softSoftEdge": 0,
+            "rigidRigidPost": 7.5,
+            "total": 17.899999976158142
+          },
+          "checks": {
+            "rigidRigidPairs": 66476,
+            "rigidSoftNodeRaw": 184000,
+            "rigidSoftNode": 826,
+            "rigidSoftNodeCandidate": 826,
+            "rigidSoftEdgeRaw": 184000,
+            "rigidSoftEdge": 678,
+            "rigidSoftEdgeCandidate": 678,
+            "softSoftNode": 2070,
+            "softSoftEdge": 3152
+          },
+          "hits": {
+            "rigidRigidPairs": 2,
+            "rigidSoftNode": 4,
+            "rigidSoftEdge": 2,
+            "softSoftNode": 31,
+            "softSoftEdge": 2
+          },
+          "hitRatesPct": {
+            "rigidRigidPairs": 0.0030086046091822613,
+            "rigidSoftNode": 0.48426150121065376,
+            "rigidSoftEdge": 0.2949852507374631,
+            "rigidSoftNodeCandidate": 0.48426150121065376,
+            "rigidSoftEdgeCandidate": 0.2949852507374631,
+            "softSoftNode": 1.497584541062802,
+            "softSoftEdge": 0.06345177664974619
+          },
+          "polyCache": {
+            "lookups": 132952,
+            "hits": 124949,
+            "misses": 8003,
+            "rebuilds": 8003
+          }
+        },
+        "softFluidCouplingRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastAuthoritativeCarrySource": null,
+          "lastAuthoritativeClusterLoadSource": null,
+          "lastTiming": null
+        },
+        "softSpringRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastAuthoritativeProposalSource": null,
+          "lastTiming": null
+        },
+        "softAreaRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastAuthoritativeProposalSource": null,
+          "lastTiming": null
+        },
+        "membranePressureRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastVelocityProposalSource": null,
+          "lastTiming": null
+        },
+        "softIntegrateRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastError": null,
+          "lastTiming": null
+        },
+        "rigidPostIntegrateRuntime": {
+          "lastMode": null,
+          "lastError": null,
+          "lastTiming": null
+        },
+        "membraneBoundaryRuntime": {
+          "lastMode": null,
+          "lastMembraneBoundaryEdgeAuthoritativeSource": null,
+          "lastMembraneBendAuthoritativeSource": null,
+          "lastTiming": null
+        },
+        "membraneShapeMemoryRuntime": {
+          "lastMode": null,
+          "lastShapeMemoryAuthoritativeSource": null,
+          "lastTiming": null
+        },
+        "softRestRecoveryRuntime": {
+          "lastMode": null,
+          "lastProbeSource": null,
+          "lastProposalSource": null,
+          "lastTiming": null
+        },
+        "softDeformationRuntime": {
+          "lastMode": null,
+          "lastSourceRoute": null,
+          "lastSoftDeformationWgslMetricsSource": null,
+          "lastTiming": null
+        },
+        "bodyFluidInjectionRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastAuthoritativeGatherSource": null,
+          "lastTiming": null
+        },
+        "rigidSoftRuntime": {
+          "lastSourceRoute": null,
+          "lastMode": null,
+          "lastError": null,
+          "lastWgslUnavailableReason": null,
+          "lastRigidSoftResponseAuthoritativeSource": null,
+          "lastRigidSoftResponseOwnership": null,
+          "lastRigidSoftResponseOwnershipDetailed": null,
+          "lastRigidSoftResponseRoute": null,
+          "lastRigidSoftResponseFallbackReason": null,
+          "lastPreparedNodePairCount": 0,
+          "lastPreparedEdgePairCount": 0,
+          "lastPreparedNodeNarrowphasePairCount": 0,
+          "lastPreparedEdgeNarrowphasePairCount": 0,
+          "lastPreparedNarrowphaseImpulseSeedNodePairCount": 0,
+          "lastPreparedNarrowphaseImpulseSeedEdgePairCount": 0,
+          "lastNodeBroadphaseReadbackCount": 0,
+          "lastEdgeBroadphaseReadbackCount": 0,
+          "lastNodeBroadphaseCandidatePairCount": 0,
+          "lastEdgeBroadphaseCandidatePairCount": 0,
+          "lastNodeBroadphaseActivePairCount": 0,
+          "lastEdgeBroadphaseActivePairCount": 0,
+          "lastNodeNarrowphaseDroppedPairCount": 0,
+          "lastNodeBroadphaseReason": null,
+          "lastEdgeBroadphaseReason": null,
+          "lastNodeBroadphaseAuthoritativeSource": null,
+          "lastEdgeBroadphaseAuthoritativeSource": null,
+          "lastNodeBroadphaseReadbackSourceRoute": null,
+          "lastEdgeBroadphaseReadbackSourceRoute": null,
+          "lastNodeBroadphaseReplayEpochDelta": 0,
+          "lastEdgeBroadphaseReplayEpochDelta": 0,
+          "lastNodeBroadphaseReplayHitCount": 0,
+          "lastNodeBroadphaseDispatchHitCount": 0,
+          "lastEdgeBroadphaseReplayHitCount": 0,
+          "lastEdgeBroadphaseDispatchHitCount": 0,
+          "lastRigidSoftBroadphaseCadenceDue": false,
+          "lastRigidSoftBroadphaseInterval": 0,
+          "lastNodeBroadphaseTiming": null,
+          "lastEdgeBroadphaseTiming": null,
+          "lastNodeNarrowphaseAabbProbeTiming": null,
+          "lastEdgeNarrowphaseAabbProbeTiming": null,
+          "lastRigidSoftResponseTiming": null
+        }
+      }
+    }
+  ]
+}

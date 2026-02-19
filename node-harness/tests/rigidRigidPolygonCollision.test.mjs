@@ -7,6 +7,7 @@ import {
   pointInPolygonInclusive,
   buildRigidRigidSpatialHashCandidates,
   buildRigidSoftNodeCollisionCache,
+  buildRigidSoftSpatialHashCandidates,
 } from '../../sim-server/public/rigid-collision.js';
 
 function makeConcaveL(x, y) {
@@ -296,6 +297,72 @@ test('rigid-rigid spatial hash broadphase candidate order is deterministic', () 
   assert.deepEqual(a.pairs, b.pairs, 'candidate pair ordering should be stable across identical runs');
   assert.deepEqual(a.stats.checkedPairs, b.stats.checkedPairs);
   assert.deepEqual(a.stats.prunedPairs, b.stats.prunedPairs);
+});
+
+test('rigid-soft spatial hash broadphase prunes rigid-soft checks while preserving near candidates', () => {
+  const rigids = [
+    makeBox(20, 20, 3),
+    makeBox(110, 110, 3),
+    makeBox(220, 40, 3),
+  ];
+  const nodes = [
+    { x: 22, y: 20, r: 1.2 },
+    { x: 18, y: 21, r: 1.2 },
+    { x: 108, y: 110, r: 1.2 },
+    { x: 210, y: 200, r: 1.2 },
+    { x: 240, y: 220, r: 1.2 },
+  ];
+  const springs = [
+    [0, 1, 1, 1],
+    [2, 3, 1, 1],
+    [3, 4, 1, 0],
+  ];
+
+  const result = buildRigidSoftSpatialHashCandidates(rigids, nodes, springs, {
+    cellSize: 12,
+    edgeBodyModeBlock: 1,
+  });
+
+  assert.equal(result.stats.rigidCount, 3);
+  assert.equal(result.stats.nodeCount, 5);
+  assert.equal(result.stats.blockedEdgeCount, 2);
+  assert.equal(result.stats.rawNodeChecks, 15);
+  assert.equal(result.stats.rawEdgeChecks, 6);
+  assert.ok(result.stats.candidateNodeChecks < result.stats.rawNodeChecks, 'node candidates should be pruned');
+  assert.ok(result.stats.candidateEdgeChecks < result.stats.rawEdgeChecks, 'edge candidates should be pruned');
+
+  const rigid0Nodes = result.nodeCandidatesByRigid[0] || [];
+  assert.ok(rigid0Nodes.includes(0), 'near node candidate should survive for rigid[0]');
+  assert.ok(rigid0Nodes.includes(1), 'second near node candidate should survive for rigid[0]');
+  assert.ok(!rigid0Nodes.includes(4), 'far node should be pruned for rigid[0]');
+
+  const rigid2Edges = result.edgeCandidatesByRigid[2] || [];
+  assert.ok(!rigid2Edges.includes(0), 'far blocked edge should not be a candidate for rigid[2]');
+});
+
+test('rigid-soft spatial hash broadphase candidate order is deterministic', () => {
+  const rigids = [
+    makeBox(24, 24, 3),
+    makeBox(56, 24, 3),
+  ];
+  const nodes = [
+    { x: 25, y: 24, r: 1.2 },
+    { x: 27, y: 24, r: 1.2 },
+    { x: 55, y: 24, r: 1.2 },
+    { x: 57, y: 24, r: 1.2 },
+  ];
+  const springs = [
+    [0, 1, 1, 1],
+    [2, 3, 1, 1],
+  ];
+
+  const a = buildRigidSoftSpatialHashCandidates(rigids, nodes, springs, { cellSize: 10, edgeBodyModeBlock: 1 });
+  const b = buildRigidSoftSpatialHashCandidates(rigids, nodes, springs, { cellSize: 10, edgeBodyModeBlock: 1 });
+
+  assert.deepEqual(a.nodeCandidatesByRigid, b.nodeCandidatesByRigid, 'node candidate ordering should be stable');
+  assert.deepEqual(a.edgeCandidatesByRigid, b.edgeCandidatesByRigid, 'edge candidate ordering should be stable');
+  assert.equal(a.stats.candidateNodeChecks, b.stats.candidateNodeChecks);
+  assert.equal(a.stats.candidateEdgeChecks, b.stats.candidateEdgeChecks);
 });
 
 test('rigid-soft node cache build returns stable finite edge metadata', () => {

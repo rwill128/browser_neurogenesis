@@ -7,6 +7,7 @@ import {
   pointInPolygonInclusive,
   buildRigidRigidSpatialHashCandidates,
   buildRigidSoftNodeCollisionCache,
+  buildRigidSoftSpatialHashCandidates,
 } from '/rigid-collision.js';
 import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops, recoverSoftSpringRests } from '/soft-xpbd.js';
 import { computeVectorRms, computeRigidAlignedPoseResidual } from '/soft-deformation-metrics.js';
@@ -134,6 +135,7 @@ const SOFT_CLUSTER_FLUID_INJECT_BLEND = 0.55; // blend node velocity with cluste
 const SOFT_XPBD_ITERS = 10;
 const SOFT_XPBD_BASE_COMPLIANCE = 0.0012;
 const RIGID_RIGID_SPATIAL_HASH_CELL_SIZE = 12;
+const RIGID_SOFT_SPATIAL_HASH_CELL_SIZE = 12;
 const SOFT_AREA_XPBD_ITERS = 6;
 const SOFT_AREA_BASE_COMPLIANCE = 0.0009;
 const SOFT_INTEGRATION_SCALE = 24;
@@ -166,9 +168,44 @@ const MEMBRANE_BEND_XPBD_ITERS = 4;
 const MEMBRANE_BEND_BASE_COMPLIANCE = 0.0022;
 const RIGID_INSIDE_CORRECTION_ITERS = 2;
 const RIGID_INSIDE_CORRECTION_SLOP = 0.04;
+const WORLD_SCALE_MIN = 1.0;
+const WORLD_SCALE_MAX = 2.0;
+const WORLD_SCALE_START_RIGID = 200;
+const WORLD_SCALE_FULL_RIGID = 2000;
 
 function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
+}
+
+function normalizeWorldScale(raw) {
+  const v = Number(raw);
+  if (!Number.isFinite(v)) return null;
+  return clamp(v, WORLD_SCALE_MIN, WORLD_SCALE_MAX);
+}
+
+function readWorldScaleFromUrl() {
+  if (typeof window === 'undefined') return null;
+  const raw = new URLSearchParams(window.location.search || '').get('worldScale');
+  if (raw == null || raw === '') return null;
+  return normalizeWorldScale(raw);
+}
+
+function deriveWorldScale(rigidCount, override = null) {
+  const forced = normalizeWorldScale(override);
+  if (Number.isFinite(forced)) return forced;
+  const count = Math.max(1, Number(rigidCount) || 1);
+  const denom = Math.max(1, WORLD_SCALE_FULL_RIGID - WORLD_SCALE_START_RIGID);
+  const t = clamp((count - WORLD_SCALE_START_RIGID) / denom, 0, 1);
+  return WORLD_SCALE_MIN + t * (WORLD_SCALE_MAX - WORLD_SCALE_MIN);
+}
+
+function getWorldScale(controls) {
+  const resolved = normalizeWorldScale(controls?.worldScale);
+  return Number.isFinite(resolved) ? resolved : WORLD_SCALE_MIN;
+}
+
+function getWorldSize(controls) {
+  return (Number(controls?.n) || 0) * getWorldScale(controls);
 }
 
 function normalizeFluidVelocityCap(raw) {
@@ -376,6 +413,8 @@ async function readWebGpuAdapterFingerprint(adapter) {
 }
 
 function readControls() {
+  const rigidBodyCount = Math.max(1, Math.min(2000, Math.round(Number(rigidBodyCountEl?.value) || 10)));
+  const worldScale = deriveWorldScale(rigidBodyCount, readWorldScaleFromUrl());
   return {
     n: Math.max(32, Number(gridEl.value) || 256),
     dt: Number(dtEl.value) || 0.01,
@@ -387,7 +426,8 @@ function readControls() {
     massLight: Math.max(0.05, Number(massLightEl.value) || 1.2),
     massHeavy: Math.max(0.05, Number(massHeavyEl.value) || 5.0),
     massSoft: Math.max(0.02, Number(massSoftEl.value) || 0.6),
-    rigidBodyCount: Math.max(1, Math.min(2000, Math.round(Number(rigidBodyCountEl?.value) || 10))),
+    rigidBodyCount,
+    worldScale,
     bodyDrag: Math.max(0, Number(bodyDragEl.value) || 0.55),
     bodyFeedback: Math.max(0, Number(bodyFeedbackEl.value) || 0.012),
     fluidCouplingComponentLimit: normalizeFluidCouplingComponentLimit(fluidCouplingComponentLimitEl?.value),
@@ -1261,23 +1301,23 @@ function resetViscMap() {
 }
 
 function clampCamera(s) {
-  const n = s.controls.n;
+  const worldSize = getWorldSize(s.controls);
   const cam = s.camera;
   const minZoom = 1;
-  const maxZoom = Math.max(1, n / 64);
+  const maxZoom = Math.max(1, worldSize / 64);
   cam.zoom = Math.max(minZoom, Math.min(maxZoom, cam.zoom));
-  const halfW = n / (2 * cam.zoom);
-  const halfH = n / (2 * cam.zoom);
-  cam.x = Math.max(halfW, Math.min(n - halfW, cam.x));
-  cam.y = Math.max(halfH, Math.min(n - halfH, cam.y));
+  const halfW = worldSize / (2 * cam.zoom);
+  const halfH = worldSize / (2 * cam.zoom);
+  cam.x = Math.max(halfW, Math.min(worldSize - halfW, cam.x));
+  cam.y = Math.max(halfH, Math.min(worldSize - halfH, cam.y));
 }
 
 function getCameraView(s) {
   clampCamera(s);
-  const n = s.controls.n;
+  const worldSize = getWorldSize(s.controls);
   const cam = s.camera;
-  const vw = n / cam.zoom;
-  const vh = n / cam.zoom;
+  const vw = worldSize / cam.zoom;
+  const vh = worldSize / cam.zoom;
   return { x: cam.x - vw * 0.5, y: cam.y - vh * 0.5, w: vw, h: vh };
 }
 
@@ -1307,19 +1347,23 @@ function paintAt(clientX, clientY, erase = false) {
   const view = getCameraView(sim);
   const r = Math.max(1, Number(brushSizeEl.value) || 12) * (view.w / canvas.width);
   const value = erase ? 0.05 : Math.max(0, Math.min(1, Number(paintValueEl.value) || 0.85));
+  const worldScale = getWorldScale(sim.controls);
+  const gx = x / worldScale;
+  const gy = y / worldScale;
+  const gr = r / worldScale;
 
-  const minX = Math.max(0, Math.floor(x - r));
-  const maxX = Math.min(sim.controls.n - 1, Math.ceil(x + r));
-  const minY = Math.max(0, Math.floor(y - r));
-  const maxY = Math.min(sim.controls.n - 1, Math.ceil(y + r));
+  const minX = Math.max(0, Math.floor(gx - gr));
+  const maxX = Math.min(sim.controls.n - 1, Math.ceil(gx + gr));
+  const minY = Math.max(0, Math.floor(gy - gr));
+  const maxY = Math.min(sim.controls.n - 1, Math.ceil(gy + gr));
 
   for (let yy = minY; yy <= maxY; yy++) {
     for (let xx = minX; xx <= maxX; xx++) {
-      const dx = xx - x;
-      const dy = yy - y;
+      const dx = xx - gx;
+      const dy = yy - gy;
       const d = Math.sqrt(dx * dx + dy * dy);
-      if (d > r) continue;
-      const t = 1 - d / r;
+      if (d > gr) continue;
+      const t = 1 - d / gr;
       const idx = yy * sim.controls.n + xx;
       const current = sim.viscMapCpu[idx];
       sim.viscMapCpu[idx] = current * (1 - t) + value * t;
@@ -1371,9 +1415,12 @@ canvas.addEventListener('wheel', (e) => {
   clampCamera(sim);
 }, { passive: false });
 
-function sampleFieldBilinear(field, n, x, y) {
-  const cx = Math.max(0, Math.min(n - 1.001, x));
-  const cy = Math.max(0, Math.min(n - 1.001, y));
+function sampleFieldBilinear(field, n, x, y, worldScale = 1) {
+  const scale = Math.max(1e-6, Number(worldScale) || 1);
+  const gx = Number(x) / scale;
+  const gy = Number(y) / scale;
+  const cx = Math.max(0, Math.min(n - 1.001, gx));
+  const cy = Math.max(0, Math.min(n - 1.001, gy));
   const x0 = Math.floor(cx), y0 = Math.floor(cy);
   const x1 = Math.min(n - 1, x0 + 1), y1 = Math.min(n - 1, y0 + 1);
   const sx = cx - x0, sy = cy - y0;
@@ -1391,10 +1438,13 @@ function sampleFieldBilinear(field, n, x, y) {
   return clampFluidComponent(out, sim?.controls?.fluidCouplingComponentLimit);
 }
 
-function sampleObstacleMaskNearest(mask, n, x, y) {
+function sampleObstacleMaskNearest(mask, n, x, y, worldScale = 1) {
   if (!(mask instanceof Float32Array) || mask.length !== n * n) return 0;
-  const xi = Math.max(0, Math.min(n - 1, Math.round(Number(x) || 0)));
-  const yi = Math.max(0, Math.min(n - 1, Math.round(Number(y) || 0)));
+  const scale = Math.max(1e-6, Number(worldScale) || 1);
+  const gx = Number(x) / scale;
+  const gy = Number(y) / scale;
+  const xi = Math.max(0, Math.min(n - 1, Math.round(gx)));
+  const yi = Math.max(0, Math.min(n - 1, Math.round(gy)));
   return Number(mask[yi * n + xi]) || 0;
 }
 
@@ -1410,19 +1460,20 @@ function sampleFluidForBodyCoupling(
   selfFeedbackSuppression = 0,
 ) {
   const suppress = Math.max(0, Math.min(1, Number(selfFeedbackSuppression) || 0));
+  const worldScale = getWorldScale(sim?.controls);
   const sampleCouplingField = (sx, sy) => {
-    const base = sampleFieldBilinear(field, n, sx, sy);
+    const base = sampleFieldBilinear(field, n, sx, sy, worldScale);
     if (!(selfFeedbackField instanceof Float32Array) || selfFeedbackField.length !== n * n || suppress <= 0) {
       return base;
     }
-    const own = sampleFieldBilinear(selfFeedbackField, n, sx, sy);
+    const own = sampleFieldBilinear(selfFeedbackField, n, sx, sy, worldScale);
     const v = base - own * suppress;
     if (!Number.isFinite(v)) return 0;
     return clampFluidComponent(v, sim?.controls?.fluidCouplingComponentLimit);
   };
 
   const samples = [];
-  const baseBlocked = sampleObstacleMaskNearest(obstacleMask, n, x, y) > 0.5;
+  const baseBlocked = sampleObstacleMaskNearest(obstacleMask, n, x, y, worldScale) > 0.5;
   if (!baseBlocked) {
     samples.push({ value: sampleCouplingField(x, y), off: 0 });
   }
@@ -1441,7 +1492,7 @@ function sampleFluidForBodyCoupling(
   for (const off of offsets) {
     const sx = x + nx * off;
     const sy = y + ny * off;
-    if (sampleObstacleMaskNearest(obstacleMask, n, sx, sy) > 0.5) continue;
+    if (sampleObstacleMaskNearest(obstacleMask, n, sx, sy, worldScale) > 0.5) continue;
     samples.push({ value: sampleCouplingField(sx, sy), off });
   }
 
@@ -1571,10 +1622,12 @@ function pushMembraneCellCluster({
   };
 }
 
-function initBodies(n, controls) {
+function initBodies(n, controls, worldSizeOverride = null) {
   const scale = n / 256;
   const bigMode = n >= 1024;
   const bodyScale = bigMode ? 0.5 : 1.0;
+  const worldScale = getWorldScale(controls);
+  const worldSize = Number(worldSizeOverride) || (n * worldScale);
   // Keep the same primitive catalog across 128/256/512/1024+ so
   // deformation differences are easier to attribute to fluid resolution.
   const rigidCount = (controls?.seedRigidBodies === false)
@@ -1590,10 +1643,10 @@ function initBodies(n, controls) {
 
   // High body counts (especially on 1024/2048 grids) need structured placement
   // and adaptive sizing so rigid/soft/membrane seeds don't begin in dense clumps.
-  const spawnMinX = n * 0.08;
-  const spawnMaxX = n * 0.92;
-  const spawnMinY = n * 0.12;
-  const spawnMaxY = n * 0.88;
+  const spawnMinX = worldSize * 0.08;
+  const spawnMaxX = worldSize * 0.92;
+  const spawnMinY = worldSize * 0.12;
+  const spawnMaxY = worldSize * 0.88;
   const spawnW = Math.max(1, spawnMaxX - spawnMinX);
   const spawnH = Math.max(1, spawnMaxY - spawnMinY);
   const spawnAspect = spawnW / spawnH;
@@ -2176,27 +2229,30 @@ function applyScenarioPreset(sim, preset) {
     return;
   }
 
-  sim.emitters = buildPresetEmitters(sim.controls.n, p);
+  const worldSize = getWorldSize(sim.controls);
+  sim.emitters = buildPresetEmitters(worldSize, p);
   applyPresetViscosityTerrain(sim, p);
-  sim.camera.x = sim.controls.n * 0.5;
-  sim.camera.y = sim.controls.n * 0.5;
-  sim.camera.zoom = sim.controls.n >= 1024 ? 1.8 : 1.0;
+  sim.camera.x = worldSize * 0.5;
+  sim.camera.y = worldSize * 0.5;
+  sim.camera.zoom = worldSize >= 1024 ? 1.8 : 1.0;
 }
 
 function applyEmitters(sim, r, g, b, vx, vy) {
   const n = sim.controls.n;
+  const worldScale = getWorldScale(sim.controls);
+  const worldSize = getWorldSize(sim.controls);
   for (const e of sim.emitters || []) {
     const lockedPosition = !!e.lockPosition;
     if (!lockedPosition) {
       e.x += e.vx;
       e.y += e.vy;
-      if (e.x < e.r || e.x > n - e.r) e.vx *= -1;
-      if (e.y < e.r || e.y > n - e.r) e.vy *= -1;
-      e.x = Math.max(e.r, Math.min(n - e.r, e.x));
-      e.y = Math.max(e.r, Math.min(n - e.r, e.y));
+      if (e.x < e.r || e.x > worldSize - e.r) e.vx *= -1;
+      if (e.y < e.r || e.y > worldSize - e.r) e.vy *= -1;
+      e.x = Math.max(e.r, Math.min(worldSize - e.r, e.x));
+      e.y = Math.max(e.r, Math.min(worldSize - e.r, e.y));
     } else {
-      e.x = Math.max(e.r, Math.min(n - e.r, Number(e.x) || (n * 0.5)));
-      e.y = Math.max(e.r, Math.min(n - e.r, Number(e.y) || (n * 0.12)));
+      e.x = Math.max(e.r, Math.min(worldSize - e.r, Number(e.x) || (worldSize * 0.5)));
+      e.y = Math.max(e.r, Math.min(worldSize - e.r, Number(e.y) || (worldSize * 0.12)));
     }
 
     const wobbleAmpRaw = Number.isFinite(Number(e.wobbleAmp)) ? Number(e.wobbleAmp) : 0;
@@ -2205,19 +2261,22 @@ function applyEmitters(sim, r, g, b, vx, vy) {
     const wobblePhase = sim.frame * wobbleFreq + (Number(e.swirlJitter) || 0);
     const ex = e.x + Math.cos(wobblePhase * 1.31) * wobbleAmp;
     const ey = e.y + Math.sin(wobblePhase * 1.73) * wobbleAmp;
+    const exGrid = ex / worldScale;
+    const eyGrid = ey / worldScale;
+    const rGrid = Math.max(1e-6, Number(e.r) / worldScale);
 
-    const minX = Math.max(0, Math.floor(ex - e.r));
-    const maxX = Math.min(n - 1, Math.ceil(ex + e.r));
-    const minY = Math.max(0, Math.floor(ey - e.r));
-    const maxY = Math.min(n - 1, Math.ceil(ey + e.r));
+    const minX = Math.max(0, Math.floor(exGrid - rGrid));
+    const maxX = Math.min(n - 1, Math.ceil(exGrid + rGrid));
+    const minY = Math.max(0, Math.floor(eyGrid - rGrid));
+    const maxY = Math.min(n - 1, Math.ceil(eyGrid + rGrid));
     const pulse = 0.75 + 0.25 * Math.sin(sim.frame * 0.03 + e.swirlJitter);
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
-        const dx = x - ex;
-        const dy = y - ey;
+        const dx = x - exGrid;
+        const dy = y - eyGrid;
         const d = Math.hypot(dx, dy);
-        if (d > e.r) continue;
-        const nd = d / Math.max(1e-6, e.r);
+        if (d > rGrid) continue;
+        const nd = d / Math.max(1e-6, rGrid);
         const w = (1 - nd) * e.strength * pulse;
         const i = y * n + x;
         r[i] = Math.min(255, r[i] + e.cr * 0.03 * w);
@@ -2292,9 +2351,9 @@ function resolveCircleCollision(a, b, restitution = 0.35) {
   if (d2 <= 1e-10) {
     const jitter = 0.01;
     a.x -= jitter; b.x += jitter;
-    return;
+    return true;
   }
-  if (d2 >= minDist * minDist) return;
+  if (d2 >= minDist * minDist) return false;
 
   const d = Math.sqrt(d2);
   const nx = dx / d;
@@ -2318,7 +2377,7 @@ function resolveCircleCollision(a, b, restitution = 0.35) {
   const rvx = b.vx - a.vx;
   const rvy = b.vy - a.vy;
   const vn = rvx * nx + rvy * ny;
-  if (vn > 0) return;
+  if (vn > 0) return true;
   const j = (-(1 + restitution) * vn) / Math.max(1e-6, invSum);
   const ix = j * nx;
   const iy = j * ny;
@@ -2326,6 +2385,7 @@ function resolveCircleCollision(a, b, restitution = 0.35) {
   a.vy -= iy * invA;
   b.vx += ix * invB;
   b.vy += iy * invB;
+  return true;
 }
 
 function closestPointOnSegment(px, py, ax, ay, bx, by) {
@@ -2345,7 +2405,7 @@ function resolveRigidVsSoftEdgeCollision(rigid, a, b, restitution = 0.28) {
   let ny = rigid.y - cp.y;
   let dist = Math.hypot(nx, ny);
   const minDist = Math.max(0.8, rigid.r || 1);
-  if (dist >= minDist) return;
+  if (dist >= minDist) return false;
 
   if (dist < 1e-6) {
     const invLen = 1 / Math.max(1e-6, Math.hypot(-cp.aby, cp.abx));
@@ -2371,6 +2431,7 @@ function resolveRigidVsSoftEdgeCollision(rigid, a, b, restitution = 0.28) {
     rigid.vx += nx * j;
     rigid.vy += ny * j;
   }
+  return true;
 }
 
 function resolveSoftNodeVsSoftEdgeCollision(node, a, b, restitution = 0.12) {
@@ -2379,7 +2440,7 @@ function resolveSoftNodeVsSoftEdgeCollision(node, a, b, restitution = 0.12) {
   let ny = node.y - cp.y;
   let dist = Math.hypot(nx, ny);
   const minDist = Math.max(0.4, node.r || 1.0);
-  if (dist >= minDist) return;
+  if (dist >= minDist) return false;
 
   if (dist < 1e-6) {
     const invLen = 1 / Math.max(1e-6, Math.hypot(-cp.aby, cp.abx));
@@ -2409,6 +2470,35 @@ function resolveSoftNodeVsSoftEdgeCollision(node, a, b, restitution = 0.12) {
     node.vx += nx * j;
     node.vy += ny * j;
   }
+  return true;
+}
+
+function createRigidWorldPolyPhaseCache(rigidBodies, stats = null) {
+  const cache = new Array(Array.isArray(rigidBodies) ? rigidBodies.length : 0);
+  return (index) => {
+    if (!Array.isArray(rigidBodies) || index < 0 || index >= rigidBodies.length) return [];
+    const rb = rigidBodies[index];
+    if (!rb) return [];
+    if (stats) stats.polyCacheLookups = (Number(stats.polyCacheLookups) || 0) + 1;
+
+    const x = Number(rb.x) || 0;
+    const y = Number(rb.y) || 0;
+    const theta = Number(rb.theta) || 0;
+
+    const prev = cache[index];
+    if (prev && prev.rb === rb && prev.x === x && prev.y === y && prev.theta === theta) {
+      if (stats) stats.polyCacheHits = (Number(stats.polyCacheHits) || 0) + 1;
+      return prev.polys;
+    }
+
+    if (stats) {
+      stats.polyCacheMisses = (Number(stats.polyCacheMisses) || 0) + 1;
+      stats.polyCacheRebuilds = (Number(stats.polyCacheRebuilds) || 0) + 1;
+    }
+    const polys = getRigidCollisionPolysWorld(rb);
+    cache[index] = { rb, x, y, theta, polys };
+    return polys;
+  };
 }
 
 function resolveRigidInsideProjection(rb, node, poly) {
@@ -2806,8 +2896,11 @@ function stampPerChannelDyeMask(sim) {
   }
 
   mask.fill(0);
+  const worldScale = getWorldScale(sim?.controls);
   const softThickness = Math.max(1.2, 1.1 * (n / 256));
   const rigidThickness = Math.max(1.4, 1.2 * (n / 256));
+  const softThicknessGrid = softThickness / worldScale;
+  const rigidThicknessGrid = rigidThickness / worldScale;
 
   let rigidEdges = 0;
   for (const rb of sim?.bodies?.rigid || []) {
@@ -2826,8 +2919,12 @@ function stampPerChannelDyeMask(sim) {
       if (!a || !b) continue;
       const ax = Number(a.x), ay = Number(a.y), bx = Number(b.x), by = Number(b.y);
       if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
+      const axGrid = ax / worldScale;
+      const ayGrid = ay / worldScale;
+      const bxGrid = bx / worldScale;
+      const byGrid = by / worldScale;
 
-      stampSegmentDyeMask(mask, n, ax, ay, bx, by, rigidThickness, modeRGB);
+      stampSegmentDyeMask(mask, n, axGrid, ayGrid, bxGrid, byGrid, rigidThicknessGrid, modeRGB);
       rigidEdges += 1;
     }
   }
@@ -2841,7 +2938,11 @@ function stampPerChannelDyeMask(sim) {
     if (!a || !b) continue;
     const ax = Number(a.x), ay = Number(a.y), bx = Number(b.x), by = Number(b.y);
     if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
-    stampSegmentDyeMask(mask, n, ax, ay, bx, by, softThickness, modeRGB);
+    const axGrid = ax / worldScale;
+    const ayGrid = ay / worldScale;
+    const bxGrid = bx / worldScale;
+    const byGrid = by / worldScale;
+    stampSegmentDyeMask(mask, n, axGrid, ayGrid, bxGrid, byGrid, softThicknessGrid, modeRGB);
     softEdges += 1;
   }
 
@@ -2887,8 +2988,11 @@ function stampBodyObstacleMask(sim) {
   };
 
   mask.fill(0);
+  const worldScale = getWorldScale(sim?.controls);
   const rigidThickness = Math.max(1.4, 1.2 * (n / 256));
   const softThickness = Math.max(1.5, 1.35 + 1.15 * (n / 256));
+  const rigidThicknessGrid = rigidThickness / worldScale;
+  const softThicknessGrid = softThickness / worldScale;
 
   let rigidBlockedEdges = 0;
   for (const rb of sim?.bodies?.rigid || []) {
@@ -2916,15 +3020,23 @@ function stampBodyObstacleMask(sim) {
       const bx = Number(b.x);
       const by = Number(b.y);
       if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
+      const axGrid = ax / worldScale;
+      const ayGrid = ay / worldScale;
+      const bxGrid = bx / worldScale;
+      const byGrid = by / worldScale;
 
-      stampSegmentObstacleMask(mask, n, ax, ay, bx, by, rigidThickness);
+      stampSegmentObstacleMask(mask, n, axGrid, ayGrid, bxGrid, byGrid, rigidThicknessGrid);
 
       // Swept stamping bridges previous->current rigid edge pose so fast-moving
       // boundaries don't leave single-frame gaps for fluid transport.
       if (prevVerts) {
         const pa = prevVerts[ei];
         const pb = prevVerts[(ei + 1) % sides];
-        stampSweptSegmentObstacleMask(mask, n, pa, pb, a, b, rigidThickness, sweepTransport);
+        const paGrid = { x: Number(pa?.x) / worldScale, y: Number(pa?.y) / worldScale };
+        const pbGrid = { x: Number(pb?.x) / worldScale, y: Number(pb?.y) / worldScale };
+        const aGrid = { x: axGrid, y: ayGrid };
+        const bGrid = { x: bxGrid, y: byGrid };
+        stampSweptSegmentObstacleMask(mask, n, paGrid, pbGrid, aGrid, bGrid, rigidThicknessGrid, sweepTransport);
       }
 
       rigidBlockedEdges += 1;
@@ -2959,14 +3071,22 @@ function stampBodyObstacleMask(sim) {
     const bx = Number(b.x);
     const by = Number(b.y);
     if (!Number.isFinite(ax) || !Number.isFinite(ay) || !Number.isFinite(bx) || !Number.isFinite(by)) continue;
+    const axGrid = ax / worldScale;
+    const ayGrid = ay / worldScale;
+    const bxGrid = bx / worldScale;
+    const byGrid = by / worldScale;
 
-    stampSegmentObstacleMask(mask, n, ax, ay, bx, by, softThickness);
+    stampSegmentObstacleMask(mask, n, axGrid, ayGrid, bxGrid, byGrid, softThicknessGrid);
 
     if (prevSoftNodes) {
       const pa = prevSoftNodes[ai];
       const pb = prevSoftNodes[bi];
       if (pa && pb) {
-        stampSweptSegmentObstacleMask(mask, n, pa, pb, a, b, softThickness, sweepTransport);
+        const paGrid = { x: Number(pa?.x) / worldScale, y: Number(pa?.y) / worldScale };
+        const pbGrid = { x: Number(pb?.x) / worldScale, y: Number(pb?.y) / worldScale };
+        const aGrid = { x: axGrid, y: ayGrid };
+        const bGrid = { x: bxGrid, y: byGrid };
+        stampSweptSegmentObstacleMask(mask, n, paGrid, pbGrid, aGrid, bGrid, softThicknessGrid, sweepTransport);
       }
     }
 
@@ -4099,6 +4219,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   ensureFramePipelineTiming(sim);
   const preambleStartMs = performance.now();
   const n = sim.controls.n;
+  const worldScale = getWorldScale(sim.controls);
   const dtRaw = Number(sim.controls.dt) || 0.01;
   const dt = Math.max(0.001, Math.min(0.02, dtRaw));
   const dtNorm = Math.max(0.2, Math.min(1.5, (dt * 60) || 1));
@@ -4128,7 +4249,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   const viscMap = sim.viscMapCpu;
 
   const localHoneyDrag = (x, y) => {
-    const v = sampleFieldBilinear(viscMap, n, x, y);
+    const v = sampleFieldBilinear(viscMap, n, x, y, worldScale);
     // Unified viscosity response curve for both rigid and soft bodies.
     return 1.0 + Math.pow(Math.max(0, Math.min(1, v)), 2.2) * 14.0;
   };
@@ -4783,6 +4904,50 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     totalPrunedPairs: 0,
     reductionPct: 0,
   };
+  const rigidSoftBroadphaseRuntime = {
+    enabled: solverPath !== 'gpu-only',
+    cellSize: RIGID_SOFT_SPATIAL_HASH_CELL_SIZE,
+    phases: [],
+    totalRawNodeChecks: 0,
+    totalCandidateNodeChecks: 0,
+    totalPrunedNodeChecks: 0,
+    nodeReductionPct: 0,
+    totalRawEdgeChecks: 0,
+    totalCandidateEdgeChecks: 0,
+    totalPrunedEdgeChecks: 0,
+    edgeReductionPct: 0,
+    totalBlockedEdges: 0,
+  };
+  const collisionCpuRuntime = {
+    enabled: solverPath !== 'gpu-only',
+    reason: solverPath === 'gpu-only' ? 'gpu-only-collision-path' : null,
+    collisionIterations: 2,
+    stageMs: {
+      rigidRigidPre: 0,
+      rigidSoft: 0,
+      softSoftNode: 0,
+      softSoftEdge: 0,
+      rigidRigidPost: 0,
+    },
+    rigidRigidPairChecks: 0,
+    rigidRigidPairHits: 0,
+    rigidSoftNodeRawChecks: 0,
+    rigidSoftNodeChecks: 0,
+    rigidSoftNodeCandidateChecks: 0,
+    rigidSoftNodeHits: 0,
+    rigidSoftEdgeRawChecks: 0,
+    rigidSoftEdgeChecks: 0,
+    rigidSoftEdgeCandidateChecks: 0,
+    rigidSoftEdgeHits: 0,
+    softSoftNodeChecks: 0,
+    softSoftNodeHits: 0,
+    softSoftEdgeChecks: 0,
+    softSoftEdgeHits: 0,
+    polyCacheLookups: 0,
+    polyCacheHits: 0,
+    polyCacheMisses: 0,
+    polyCacheRebuilds: 0,
+  };
   if (solverPath === 'gpu-only') {
     const collisionResult = await runCollisionIterationsGpuOnly({
       rigidBodies: bodies.rigid,
@@ -4834,11 +4999,16 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     sim.collisionBoundaryRuntime = collisionResult.boundaryRuntime || { mode: 'cpu-fallback', reason: 'unknown' };
     rigidRigidBroadphaseRuntime.enabled = false;
     rigidRigidBroadphaseRuntime.reason = 'gpu-only-collision-path';
+    rigidSoftBroadphaseRuntime.enabled = false;
+    rigidSoftBroadphaseRuntime.reason = 'gpu-only-collision-path';
+    collisionCpuRuntime.enabled = false;
+    collisionCpuRuntime.reason = 'gpu-only-collision-path';
   } else {
     sim.collisionBoundaryRuntime = { mode: 'cpu-baseline', reason: 'baseline-path' };
 
     // Body-body collisions: rigid↔rigid, rigid↔soft, soft↔soft
     for (let iter = 0; iter < 2; iter++) {
+      const rigidRigidPreStartMs = performance.now();
       const preBroadphase = buildRigidRigidSpatialHashCandidates(bodies.rigid, {
         cellSize: RIGID_RIGID_SPATIAL_HASH_CELL_SIZE,
       });
@@ -4850,37 +5020,97 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       rigidRigidBroadphaseRuntime.totalBruteForcePairs += Number(preBroadphase.stats?.bruteForcePairs) || 0;
       rigidRigidBroadphaseRuntime.totalCheckedPairs += Number(preBroadphase.stats?.checkedPairs) || 0;
       rigidRigidBroadphaseRuntime.totalPrunedPairs += Number(preBroadphase.stats?.prunedPairs) || 0;
+      const getPreRigidWorldPolys = createRigidWorldPolyPhaseCache(bodies.rigid, collisionCpuRuntime);
       for (const [i, j] of preBroadphase.pairs) {
-        resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
+        collisionCpuRuntime.rigidRigidPairChecks += 1;
+        const hit = resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
           contacts: rigidContactDebug,
           aIndex: i,
           bIndex: j,
           iter,
           phase: 'pre-soft',
+        }, {
+          polysA: getPreRigidWorldPolys(i),
+          polysB: getPreRigidWorldPolys(j),
         });
+        if (hit) collisionCpuRuntime.rigidRigidPairHits += 1;
       }
+      collisionCpuRuntime.stageMs.rigidRigidPre += performance.now() - rigidRigidPreStartMs;
+
+      const rigidSoftStartMs = performance.now();
+      const rigidSoftBroadphase = buildRigidSoftSpatialHashCandidates(
+        bodies.rigid,
+        s.nodes,
+        s.springs,
+        {
+          cellSize: RIGID_SOFT_SPATIAL_HASH_CELL_SIZE,
+          edgeBodyModeBlock: EDGE_BODY_MODE.BLOCK,
+          nodePad: 0.8,
+          edgePad: 0.8,
+        },
+      );
+      rigidSoftBroadphaseRuntime.phases.push({
+        iter,
+        ...rigidSoftBroadphase.stats,
+      });
+      rigidSoftBroadphaseRuntime.totalRawNodeChecks += Number(rigidSoftBroadphase.stats?.rawNodeChecks) || 0;
+      rigidSoftBroadphaseRuntime.totalCandidateNodeChecks += Number(rigidSoftBroadphase.stats?.candidateNodeChecks) || 0;
+      rigidSoftBroadphaseRuntime.totalPrunedNodeChecks += Number(rigidSoftBroadphase.stats?.prunedNodeChecks) || 0;
+      rigidSoftBroadphaseRuntime.totalRawEdgeChecks += Number(rigidSoftBroadphase.stats?.rawEdgeChecks) || 0;
+      rigidSoftBroadphaseRuntime.totalCandidateEdgeChecks += Number(rigidSoftBroadphase.stats?.candidateEdgeChecks) || 0;
+      rigidSoftBroadphaseRuntime.totalPrunedEdgeChecks += Number(rigidSoftBroadphase.stats?.prunedEdgeChecks) || 0;
+      rigidSoftBroadphaseRuntime.totalBlockedEdges += Number(rigidSoftBroadphase.stats?.blockedEdgeCount) || 0;
+      collisionCpuRuntime.rigidSoftNodeRawChecks += Number(rigidSoftBroadphase.stats?.rawNodeChecks) || 0;
+      collisionCpuRuntime.rigidSoftEdgeRawChecks += Number(rigidSoftBroadphase.stats?.rawEdgeChecks) || 0;
 
       for (let rbi = 0; rbi < bodies.rigid.length; rbi++) {
         const rb = bodies.rigid[rbi];
         // Build per-rigid cache once per collision iteration so node contacts
         // don't repeatedly sanitize/recompute world polygon edge normals.
         const rigidSoftNodeCache = buildRigidSoftNodeCollisionCache(rb, null);
-        for (let ni = 0; ni < s.nodes.length; ni++) {
+
+        const nodeCandidates = rigidSoftBroadphase.nodeCandidatesByRigid?.[rbi] || [];
+        collisionCpuRuntime.rigidSoftNodeCandidateChecks += nodeCandidates.length;
+        for (const ni of nodeCandidates) {
           const sn = s.nodes[ni];
-          resolveRigidVsSoftNodeCollision(rb, sn, rigidSoftNodeCache, 0.18);
+          if (!sn) continue;
+          collisionCpuRuntime.rigidSoftNodeChecks += 1;
+          if (resolveRigidVsSoftNodeCollision(rb, sn, rigidSoftNodeCache, 0.18)) {
+            collisionCpuRuntime.rigidSoftNodeHits += 1;
+          }
         }
-        for (const [i, j, _rest, edgeBodyMode] of s.springs) {
+
+        const edgeCandidates = rigidSoftBroadphase.edgeCandidatesByRigid?.[rbi] || [];
+        collisionCpuRuntime.rigidSoftEdgeCandidateChecks += edgeCandidates.length;
+        for (const si of edgeCandidates) {
+          const sp = s.springs?.[si];
+          if (!Array.isArray(sp)) continue;
+          const i = Number(sp[0]) | 0;
+          const j = Number(sp[1]) | 0;
+          const edgeBodyMode = Number(sp[3]);
           if (edgeBodyMode !== EDGE_BODY_MODE.BLOCK) continue;
-          resolveRigidVsSoftEdgeCollision(rb, s.nodes[i], s.nodes[j], 0.16);
+          if (i < 0 || j < 0 || i >= s.nodes.length || j >= s.nodes.length) continue;
+          collisionCpuRuntime.rigidSoftEdgeChecks += 1;
+          if (resolveRigidVsSoftEdgeCollision(rb, s.nodes[i], s.nodes[j], 0.16)) {
+            collisionCpuRuntime.rigidSoftEdgeHits += 1;
+          }
         }
       }
+      collisionCpuRuntime.stageMs.rigidSoft += performance.now() - rigidSoftStartMs;
 
+      const softSoftNodeStartMs = performance.now();
       for (let i = 0; i < s.nodes.length; i++) {
         for (let j = i + 1; j < s.nodes.length; j++) {
-          resolveCircleCollision(s.nodes[i], s.nodes[j], 0.22);
+          collisionCpuRuntime.softSoftNodeChecks += 1;
+          if (resolveCircleCollision(s.nodes[i], s.nodes[j], 0.22)) {
+            collisionCpuRuntime.softSoftNodeHits += 1;
+          }
         }
       }
+      collisionCpuRuntime.stageMs.softSoftNode += performance.now() - softSoftNodeStartMs;
+
       // Soft-node vs foreign soft-edge blocking for solid edges.
+      const softSoftEdgeStartMs = performance.now();
       for (let ni = 0; ni < s.nodes.length; ni++) {
         const node = s.nodes[ni];
         for (const [i, j, _rest, edgeBodyMode] of s.springs) {
@@ -4888,11 +5118,16 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           if (i === ni || j === ni) continue;
           const a = s.nodes[i], b = s.nodes[j];
           if (a.clusterId === node.clusterId && b.clusterId === node.clusterId) continue;
-          resolveSoftNodeVsSoftEdgeCollision(node, a, b, 0.12);
+          collisionCpuRuntime.softSoftEdgeChecks += 1;
+          if (resolveSoftNodeVsSoftEdgeCollision(node, a, b, 0.12)) {
+            collisionCpuRuntime.softSoftEdgeHits += 1;
+          }
         }
       }
+      collisionCpuRuntime.stageMs.softSoftEdge += performance.now() - softSoftEdgeStartMs;
 
       // Re-run rigid-rigid contacts after rigid-soft pushes to avoid late interpenetration.
+      const rigidRigidPostStartMs = performance.now();
       const postBroadphase = buildRigidRigidSpatialHashCandidates(bodies.rigid, {
         cellSize: RIGID_RIGID_SPATIAL_HASH_CELL_SIZE,
       });
@@ -4904,15 +5139,22 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       rigidRigidBroadphaseRuntime.totalBruteForcePairs += Number(postBroadphase.stats?.bruteForcePairs) || 0;
       rigidRigidBroadphaseRuntime.totalCheckedPairs += Number(postBroadphase.stats?.checkedPairs) || 0;
       rigidRigidBroadphaseRuntime.totalPrunedPairs += Number(postBroadphase.stats?.prunedPairs) || 0;
+      const getPostRigidWorldPolys = createRigidWorldPolyPhaseCache(bodies.rigid, collisionCpuRuntime);
       for (const [i, j] of postBroadphase.pairs) {
-        resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
+        collisionCpuRuntime.rigidRigidPairChecks += 1;
+        const hit = resolveRigidVsRigidPolygonCollision(bodies.rigid[i], bodies.rigid[j], 0.32, {
           contacts: rigidContactDebug,
           aIndex: i,
           bIndex: j,
           iter,
           phase: 'post-soft',
+        }, {
+          polysA: getPostRigidWorldPolys(i),
+          polysB: getPostRigidWorldPolys(j),
         });
+        if (hit) collisionCpuRuntime.rigidRigidPairHits += 1;
       }
+      collisionCpuRuntime.stageMs.rigidRigidPost += performance.now() - rigidRigidPostStartMs;
 
       for (const rb of bodies.rigid) applyBounceBoundary(rb, n, 0.84);
       for (const sn of s.nodes) applyBounceBoundary(sn, n, 0.78);
@@ -4921,7 +5163,44 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   rigidRigidBroadphaseRuntime.reductionPct = rigidRigidBroadphaseRuntime.totalBruteForcePairs > 0
     ? (rigidRigidBroadphaseRuntime.totalPrunedPairs / rigidRigidBroadphaseRuntime.totalBruteForcePairs) * 100
     : 0;
+  rigidSoftBroadphaseRuntime.nodeReductionPct = rigidSoftBroadphaseRuntime.totalRawNodeChecks > 0
+    ? (rigidSoftBroadphaseRuntime.totalPrunedNodeChecks / rigidSoftBroadphaseRuntime.totalRawNodeChecks) * 100
+    : 0;
+  rigidSoftBroadphaseRuntime.edgeReductionPct = rigidSoftBroadphaseRuntime.totalRawEdgeChecks > 0
+    ? (rigidSoftBroadphaseRuntime.totalPrunedEdgeChecks / rigidSoftBroadphaseRuntime.totalRawEdgeChecks) * 100
+    : 0;
+
+  collisionCpuRuntime.rigidRigidPairHitRatePct = collisionCpuRuntime.rigidRigidPairChecks > 0
+    ? (collisionCpuRuntime.rigidRigidPairHits / collisionCpuRuntime.rigidRigidPairChecks) * 100
+    : 0;
+  collisionCpuRuntime.rigidSoftNodeHitRatePct = collisionCpuRuntime.rigidSoftNodeChecks > 0
+    ? (collisionCpuRuntime.rigidSoftNodeHits / collisionCpuRuntime.rigidSoftNodeChecks) * 100
+    : 0;
+  collisionCpuRuntime.rigidSoftEdgeHitRatePct = collisionCpuRuntime.rigidSoftEdgeChecks > 0
+    ? (collisionCpuRuntime.rigidSoftEdgeHits / collisionCpuRuntime.rigidSoftEdgeChecks) * 100
+    : 0;
+  collisionCpuRuntime.rigidSoftNodeCandidateHitRatePct = collisionCpuRuntime.rigidSoftNodeCandidateChecks > 0
+    ? (collisionCpuRuntime.rigidSoftNodeHits / collisionCpuRuntime.rigidSoftNodeCandidateChecks) * 100
+    : 0;
+  collisionCpuRuntime.rigidSoftEdgeCandidateHitRatePct = collisionCpuRuntime.rigidSoftEdgeCandidateChecks > 0
+    ? (collisionCpuRuntime.rigidSoftEdgeHits / collisionCpuRuntime.rigidSoftEdgeCandidateChecks) * 100
+    : 0;
+  collisionCpuRuntime.softSoftNodeHitRatePct = collisionCpuRuntime.softSoftNodeChecks > 0
+    ? (collisionCpuRuntime.softSoftNodeHits / collisionCpuRuntime.softSoftNodeChecks) * 100
+    : 0;
+  collisionCpuRuntime.softSoftEdgeHitRatePct = collisionCpuRuntime.softSoftEdgeChecks > 0
+    ? (collisionCpuRuntime.softSoftEdgeHits / collisionCpuRuntime.softSoftEdgeChecks) * 100
+    : 0;
+  collisionCpuRuntime.stageMs.total =
+    (collisionCpuRuntime.stageMs.rigidRigidPre || 0)
+    + (collisionCpuRuntime.stageMs.rigidSoft || 0)
+    + (collisionCpuRuntime.stageMs.softSoftNode || 0)
+    + (collisionCpuRuntime.stageMs.softSoftEdge || 0)
+    + (collisionCpuRuntime.stageMs.rigidRigidPost || 0);
+
   sim.rigidRigidBroadphaseRuntime = rigidRigidBroadphaseRuntime;
+  sim.rigidSoftBroadphaseRuntime = rigidSoftBroadphaseRuntime;
+  sim.collisionCpuRuntime = collisionCpuRuntime;
 
   recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.collisions.gpuOnly' : 'bodies.collisions.baseline', performance.now() - collisionStageStartMs);
 
@@ -5152,10 +5431,13 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     const injectPoint = (px, py, pvx, pvy, localFluidX, localFluidY, mass, rad=3.0, swimInjectX = 0, swimInjectY = 0, momentumScale = 1) => {
       if (!Number.isFinite(px) || !Number.isFinite(py)) return;
       const radius = Math.max(0.4, Number.isFinite(rad) ? rad : 3.0);
-      const minX = Math.max(0, Math.floor(px - radius));
-      const maxX = Math.min(n - 1, Math.ceil(px + radius));
-      const minY = Math.max(0, Math.floor(py - radius));
-      const maxY = Math.min(n - 1, Math.ceil(py + radius));
+      const pxGrid = px / worldScale;
+      const pyGrid = py / worldScale;
+      const radiusGrid = radius / worldScale;
+      const minX = Math.max(0, Math.floor(pxGrid - radiusGrid));
+      const maxX = Math.min(n - 1, Math.ceil(pxGrid + radiusGrid));
+      const minY = Math.max(0, Math.floor(pyGrid - radiusGrid));
+      const maxY = Math.min(n - 1, Math.ceil(pyGrid + radiusGrid));
       const couplingLimit = normalizeFluidCouplingComponentLimit(sim?.controls?.fluidCouplingComponentLimit);
       const relXRaw = pvx - localFluidX + swimInjectX;
       const relYRaw = pvy - localFluidY + swimInjectY;
@@ -5167,10 +5449,10 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
 
       for (let y = minY; y <= maxY; y++) {
         for (let x = minX; x <= maxX; x++) {
-          const dx = x - px, dy = y - py;
+          const dx = x - pxGrid, dy = y - pyGrid;
           const d = Math.hypot(dx, dy);
-          if (d > radius) continue;
-          const w = 1 - d / radius;
+          if (d > radiusGrid) continue;
+          const w = 1 - d / radiusGrid;
           const idx = y * n + x;
           const jxRaw = relX * scale * w;
           const jyRaw = relY * scale * w;
@@ -5189,8 +5471,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
 
     for (let bi = 0; bi < bodies.rigid.length; bi++) {
       const b = bodies.rigid[bi];
-      const fx = sampleFieldBilinear(vxField, n, b.x, b.y);
-      const fy = sampleFieldBilinear(vyField, n, b.x, b.y);
+      const fx = sampleFieldBilinear(vxField, n, b.x, b.y, worldScale);
+      const fy = sampleFieldBilinear(vyField, n, b.x, b.y, worldScale);
       const swimPhase = sim.frame * 0.08 + bi * 2.1;
       injectPoint(
         b.x,
@@ -5209,8 +5491,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     softClusterForInjection = computeSoftClusterKinematics(s.nodes);
     for (let i = 0; i < s.nodes.length; i++) {
       const node = s.nodes[i];
-      const fx = sampleFieldBilinear(vxField, n, node.x, node.y);
-      const fy = sampleFieldBilinear(vyField, n, node.x, node.y);
+      const fx = sampleFieldBilinear(vxField, n, node.x, node.y, worldScale);
+      const fy = sampleFieldBilinear(vyField, n, node.x, node.y, worldScale);
       const cid = node.clusterId ?? 0;
       const c = softClusterForInjection.get(cid);
       const cx = Number.isFinite(Number(c?.x)) ? Number(c.x) : node.x;
@@ -5693,13 +5975,13 @@ function translateBodies(bodies, dx, dy) {
   }
 }
 
-function centerBodiesInWorld(bodies, n, targetSpanFraction = 0.42) {
+function centerBodiesInWorld(bodies, worldSize, targetSpanFraction = 0.42) {
   if (!bodies) return;
   const bounds = getBodiesBounds(bodies);
   if (!bounds) return;
 
   const span = Math.max(1e-6, Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY));
-  const target = Math.max(6, Math.min(n * 0.8, n * Math.max(0.12, Number(targetSpanFraction) || 0.42)));
+  const target = Math.max(6, Math.min(worldSize * 0.8, worldSize * Math.max(0.12, Number(targetSpanFraction) || 0.42)));
   const scale = target / span;
   if (Number.isFinite(scale) && Math.abs(scale - 1) > 1e-4) {
     scaleImportedBodies(bodies, scale);
@@ -5707,7 +5989,7 @@ function centerBodiesInWorld(bodies, n, targetSpanFraction = 0.42) {
 
   const recentered = getBodiesBounds(bodies);
   if (!recentered) return;
-  translateBodies(bodies, n * 0.5 - recentered.cx, n * 0.5 - recentered.cy);
+  translateBodies(bodies, worldSize * 0.5 - recentered.cx, worldSize * 0.5 - recentered.cy);
 }
 
 function configureInteractionLab(sim, options = {}) {
@@ -5720,10 +6002,11 @@ function configureInteractionLab(sim, options = {}) {
   const targetType = String(cfg.targetType || 'rigid').toLowerCase() === 'soft' ? 'soft' : 'rigid';
   const mode = String(cfg.mode || 'pinned').toLowerCase() === 'circle' ? 'circle' : 'pinned';
   const dt = Math.max(1e-4, Number(sim?.controls?.dt) || 0.01);
+  const worldSize = getWorldSize(sim.controls);
 
-  const defaultRigid = sim?.bodies?.rigid?.[0] || { x: sim.controls.n * 0.5, y: sim.controls.n * 0.5, theta: 0 };
-  const anchorX = Number.isFinite(Number(cfg.anchorX)) ? Number(cfg.anchorX) : (Number(defaultRigid.x) || sim.controls.n * 0.5);
-  const anchorY = Number.isFinite(Number(cfg.anchorY)) ? Number(cfg.anchorY) : (Number(defaultRigid.y) || sim.controls.n * 0.5);
+  const defaultRigid = sim?.bodies?.rigid?.[0] || { x: worldSize * 0.5, y: worldSize * 0.5, theta: 0 };
+  const anchorX = Number.isFinite(Number(cfg.anchorX)) ? Number(cfg.anchorX) : (Number(defaultRigid.x) || worldSize * 0.5);
+  const anchorY = Number.isFinite(Number(cfg.anchorY)) ? Number(cfg.anchorY) : (Number(defaultRigid.y) || worldSize * 0.5);
   const anchorTheta = Number.isFinite(Number(cfg.anchorTheta)) ? Number(cfg.anchorTheta) : (Number(defaultRigid.theta) || 0);
 
   const circleCenterX = Number.isFinite(Number(cfg.circleCenterX)) ? Number(cfg.circleCenterX) : anchorX;
@@ -5902,23 +6185,24 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
   const imported = buildBodiesFromCreatureSpec(spec, sim.controls.n, sim.controls);
   imported.hybrid = [];
   scaleImportedBodies(imported, importScale);
-  centerBodiesInWorld(imported, sim.controls.n, targetSpanFraction);
+  centerBodiesInWorld(imported, getWorldSize(sim.controls), targetSpanFraction);
   mergeBodiesIntoSim(sim.bodies, imported);
   configureInteractionLab(sim, options);
 
   sim.overlayShowSegmentIds = options?.overlayShowSegmentIds === true;
   sim.overlayShowExtraVisuals = options?.overlayShowExtraVisuals !== false;
 
-  sim.emitters = [buildWindTunnelEmitter(sim.controls.n, {
+  const worldSize = getWorldSize(sim.controls);
+  sim.emitters = [buildWindTunnelEmitter(worldSize, {
     strength: Number(options?.emitterStrength) || 3.8,
-    radius: Number(options?.emitterRadius) || Math.max(7, sim.controls.n / 13),
+    radius: Number(options?.emitterRadius) || Math.max(7, worldSize / 13),
     yFraction: Number(options?.emitterYFraction) || 0.12,
     // Embed wind-tunnel: fixed top emitter with strong downward jet + moderate turbulence.
     spin: Number(options?.emitterSpin) || 1.55,
     curlGain: Number(options?.emitterCurlGain) || 1.95,
     driftGain: Number(options?.emitterDriftGain) || 0.22,
     chaosGain: Number(options?.emitterChaosGain) || 1.45,
-    wobbleAmp: Number(options?.emitterWobbleAmp) || Math.max(1.4, sim.controls.n * 0.02),
+    wobbleAmp: Number(options?.emitterWobbleAmp) || Math.max(1.4, worldSize * 0.02),
     wobbleFreq: Number(options?.emitterWobbleFreq) || 0.11,
     swirlJitter: Number(options?.emitterSwirlJitter) || 1.17,
     jetVy: Number(options?.emitterJetVy) || 1.35,
@@ -5928,8 +6212,8 @@ async function resetEmbedWindTunnelFromSpec(specInput, options = {}) {
     lockPosition: options?.emitterLockPosition !== false,
   })];
 
-  sim.camera.x = sim.controls.n * 0.5;
-  sim.camera.y = sim.controls.n * 0.5;
+  sim.camera.x = worldSize * 0.5;
+  sim.camera.y = worldSize * 0.5;
   sim.camera.zoom = 1.0;
   clampCamera(sim);
 
@@ -6386,10 +6670,10 @@ async function initSim() {
       lastMode: 'disabled',
       lastReadbackWaitMs: 0,
     },
-    bodies: initBodies(controls.n, controls),
-    emitters: initEmitters(controls.n),
+    bodies: initBodies(controls.n, controls, getWorldSize(controls)),
+    emitters: initEmitters(getWorldSize(controls)),
     disableDefaultInject: false,
-    camera: { x: controls.n * 0.5, y: controls.n * 0.5, zoom: controls.n >= 1024 ? 1.8 : 1.0 },
+    camera: { x: getWorldSize(controls) * 0.5, y: getWorldSize(controls) * 0.5, zoom: getWorldSize(controls) >= 1024 ? 1.8 : 1.0 },
     couplingTelemetry: [],
     pipelineTimingFrame: null,
     pipelineTimingLast: null,
@@ -7336,6 +7620,127 @@ window.__gpuLabApi = {
           totalPrunedPairs: 0,
           reductionPct: 0,
           phases: [],
+        },
+      rigidSoftBroadphaseRuntime: sim?.rigidSoftBroadphaseRuntime
+        ? {
+          enabled: sim.rigidSoftBroadphaseRuntime.enabled !== false,
+          reason: sim.rigidSoftBroadphaseRuntime.reason || null,
+          cellSize: Number(sim.rigidSoftBroadphaseRuntime.cellSize) || RIGID_SOFT_SPATIAL_HASH_CELL_SIZE,
+          totalRawNodeChecks: Number(sim.rigidSoftBroadphaseRuntime.totalRawNodeChecks) || 0,
+          totalCandidateNodeChecks: Number(sim.rigidSoftBroadphaseRuntime.totalCandidateNodeChecks) || 0,
+          totalPrunedNodeChecks: Number(sim.rigidSoftBroadphaseRuntime.totalPrunedNodeChecks) || 0,
+          nodeReductionPct: Number(sim.rigidSoftBroadphaseRuntime.nodeReductionPct) || 0,
+          totalRawEdgeChecks: Number(sim.rigidSoftBroadphaseRuntime.totalRawEdgeChecks) || 0,
+          totalCandidateEdgeChecks: Number(sim.rigidSoftBroadphaseRuntime.totalCandidateEdgeChecks) || 0,
+          totalPrunedEdgeChecks: Number(sim.rigidSoftBroadphaseRuntime.totalPrunedEdgeChecks) || 0,
+          edgeReductionPct: Number(sim.rigidSoftBroadphaseRuntime.edgeReductionPct) || 0,
+          totalBlockedEdges: Number(sim.rigidSoftBroadphaseRuntime.totalBlockedEdges) || 0,
+          phases: Array.isArray(sim?.rigidSoftBroadphaseRuntime?.phases)
+            ? sim.rigidSoftBroadphaseRuntime.phases.slice(-8).map((entry) => ({
+              iter: Number(entry?.iter) || 0,
+              rigidCount: Number(entry?.rigidCount) || 0,
+              nodeCount: Number(entry?.nodeCount) || 0,
+              blockedEdgeCount: Number(entry?.blockedEdgeCount) || 0,
+              rawNodeChecks: Number(entry?.rawNodeChecks) || 0,
+              candidateNodeChecks: Number(entry?.candidateNodeChecks) || 0,
+              prunedNodeChecks: Number(entry?.prunedNodeChecks) || 0,
+              nodeReductionPct: Number(entry?.nodeReductionPct) || 0,
+              rawEdgeChecks: Number(entry?.rawEdgeChecks) || 0,
+              candidateEdgeChecks: Number(entry?.candidateEdgeChecks) || 0,
+              prunedEdgeChecks: Number(entry?.prunedEdgeChecks) || 0,
+              edgeReductionPct: Number(entry?.edgeReductionPct) || 0,
+            }))
+            : [],
+        }
+        : {
+          enabled: false,
+          reason: 'uninitialized',
+          cellSize: RIGID_SOFT_SPATIAL_HASH_CELL_SIZE,
+          totalRawNodeChecks: 0,
+          totalCandidateNodeChecks: 0,
+          totalPrunedNodeChecks: 0,
+          nodeReductionPct: 0,
+          totalRawEdgeChecks: 0,
+          totalCandidateEdgeChecks: 0,
+          totalPrunedEdgeChecks: 0,
+          edgeReductionPct: 0,
+          totalBlockedEdges: 0,
+          phases: [],
+        },
+      collisionCpuRuntime: sim?.collisionCpuRuntime
+        ? {
+          enabled: sim.collisionCpuRuntime.enabled !== false,
+          reason: sim.collisionCpuRuntime.reason || null,
+          collisionIterations: Number(sim.collisionCpuRuntime.collisionIterations) || 0,
+          stageMs: {
+            rigidRigidPre: Number(sim?.collisionCpuRuntime?.stageMs?.rigidRigidPre) || 0,
+            rigidSoft: Number(sim?.collisionCpuRuntime?.stageMs?.rigidSoft) || 0,
+            softSoftNode: Number(sim?.collisionCpuRuntime?.stageMs?.softSoftNode) || 0,
+            softSoftEdge: Number(sim?.collisionCpuRuntime?.stageMs?.softSoftEdge) || 0,
+            rigidRigidPost: Number(sim?.collisionCpuRuntime?.stageMs?.rigidRigidPost) || 0,
+            total: Number(sim?.collisionCpuRuntime?.stageMs?.total) || 0,
+          },
+          checks: {
+            rigidRigidPairs: Number(sim.collisionCpuRuntime.rigidRigidPairChecks) || 0,
+            rigidSoftNodeRaw: Number(sim.collisionCpuRuntime.rigidSoftNodeRawChecks) || 0,
+            rigidSoftNode: Number(sim.collisionCpuRuntime.rigidSoftNodeChecks) || 0,
+            rigidSoftNodeCandidate: Number(sim.collisionCpuRuntime.rigidSoftNodeCandidateChecks) || 0,
+            rigidSoftEdgeRaw: Number(sim.collisionCpuRuntime.rigidSoftEdgeRawChecks) || 0,
+            rigidSoftEdge: Number(sim.collisionCpuRuntime.rigidSoftEdgeChecks) || 0,
+            rigidSoftEdgeCandidate: Number(sim.collisionCpuRuntime.rigidSoftEdgeCandidateChecks) || 0,
+            softSoftNode: Number(sim.collisionCpuRuntime.softSoftNodeChecks) || 0,
+            softSoftEdge: Number(sim.collisionCpuRuntime.softSoftEdgeChecks) || 0,
+          },
+          hits: {
+            rigidRigidPairs: Number(sim.collisionCpuRuntime.rigidRigidPairHits) || 0,
+            rigidSoftNode: Number(sim.collisionCpuRuntime.rigidSoftNodeHits) || 0,
+            rigidSoftEdge: Number(sim.collisionCpuRuntime.rigidSoftEdgeHits) || 0,
+            softSoftNode: Number(sim.collisionCpuRuntime.softSoftNodeHits) || 0,
+            softSoftEdge: Number(sim.collisionCpuRuntime.softSoftEdgeHits) || 0,
+          },
+          hitRatesPct: {
+            rigidRigidPairs: Number(sim.collisionCpuRuntime.rigidRigidPairHitRatePct) || 0,
+            rigidSoftNode: Number(sim.collisionCpuRuntime.rigidSoftNodeHitRatePct) || 0,
+            rigidSoftEdge: Number(sim.collisionCpuRuntime.rigidSoftEdgeHitRatePct) || 0,
+            rigidSoftNodeCandidate: Number(sim.collisionCpuRuntime.rigidSoftNodeCandidateHitRatePct) || 0,
+            rigidSoftEdgeCandidate: Number(sim.collisionCpuRuntime.rigidSoftEdgeCandidateHitRatePct) || 0,
+            softSoftNode: Number(sim.collisionCpuRuntime.softSoftNodeHitRatePct) || 0,
+            softSoftEdge: Number(sim.collisionCpuRuntime.softSoftEdgeHitRatePct) || 0,
+          },
+          polyCache: {
+            lookups: Number(sim.collisionCpuRuntime.polyCacheLookups) || 0,
+            hits: Number(sim.collisionCpuRuntime.polyCacheHits) || 0,
+            misses: Number(sim.collisionCpuRuntime.polyCacheMisses) || 0,
+            rebuilds: Number(sim.collisionCpuRuntime.polyCacheRebuilds) || 0,
+          },
+        }
+        : {
+          enabled: false,
+          reason: 'uninitialized',
+          collisionIterations: 0,
+          stageMs: { rigidRigidPre: 0, rigidSoft: 0, softSoftNode: 0, softSoftEdge: 0, rigidRigidPost: 0, total: 0 },
+          checks: {
+            rigidRigidPairs: 0,
+            rigidSoftNodeRaw: 0,
+            rigidSoftNode: 0,
+            rigidSoftNodeCandidate: 0,
+            rigidSoftEdgeRaw: 0,
+            rigidSoftEdge: 0,
+            rigidSoftEdgeCandidate: 0,
+            softSoftNode: 0,
+            softSoftEdge: 0,
+          },
+          hits: { rigidRigidPairs: 0, rigidSoftNode: 0, rigidSoftEdge: 0, softSoftNode: 0, softSoftEdge: 0 },
+          hitRatesPct: {
+            rigidRigidPairs: 0,
+            rigidSoftNode: 0,
+            rigidSoftEdge: 0,
+            rigidSoftNodeCandidate: 0,
+            rigidSoftEdgeCandidate: 0,
+            softSoftNode: 0,
+            softSoftEdge: 0,
+          },
+          polyCache: { lookups: 0, hits: 0, misses: 0, rebuilds: 0 },
         },
       softFluidCouplingRuntime: {
         lastSourceRoute: sim?.softFluidCouplingWgslState?.lastSourceRoute || null,

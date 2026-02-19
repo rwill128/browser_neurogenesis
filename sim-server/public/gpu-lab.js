@@ -4988,6 +4988,20 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       softSoftEdge: 0,
       rigidRigidPost: 0,
     },
+    substageMs: {
+      candidateBuildPre: 0,
+      candidateBuildPost: 0,
+      candidateBuildTotal: 0,
+      rigidRigidNarrowphasePre: 0,
+      rigidSoftNarrowphase: 0,
+      softSoftNodeNarrowphase: 0,
+      softSoftEdgeNarrowphase: 0,
+      rigidRigidNarrowphasePost: 0,
+      narrowphaseTotal: 0,
+      boundaryApply: 0,
+      applyTotal: 0,
+      total: 0,
+    },
     rigidRigidPairChecks: 0,
     rigidRigidPairHits: 0,
     rigidRigidProxyPairChecks: 0,
@@ -5080,6 +5094,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     // Body-body collisions: rigid↔rigid, rigid↔soft, soft↔soft
     for (let iter = 0; iter < 2; iter++) {
       const rigidRigidPreStartMs = performance.now();
+      const preSceneBuildStartMs = performance.now();
       const phaseScene = buildCollisionPhaseSceneCache(
         bodies.rigid,
         s.nodes,
@@ -5094,6 +5109,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           rigidRigidReuseCache,
         },
       );
+      collisionCpuRuntime.substageMs.candidateBuildPre += performance.now() - preSceneBuildStartMs;
 
       const preBroadphase = phaseScene.rigidRigid;
       rigidRigidBroadphaseRuntime.phases.push({
@@ -5113,6 +5129,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       rigidRigidBroadphaseRuntime.emitAttempts += Number(preBroadphase.stats?.emitAttempts) || 0;
       rigidRigidBroadphaseRuntime.duplicatesRejected += Number(preBroadphase.stats?.duplicatesRejected) || 0;
       rigidRigidBroadphaseRuntime.pairsOut += Number(preBroadphase.stats?.pairsOut) || 0;
+      const preRigidNarrowphaseStartMs = performance.now();
       const getPreRigidWorldPolys = createRigidWorldPolyPhaseCache(bodies.rigid, collisionCpuRuntime);
       for (const [i, j] of preBroadphase.pairs) {
         collisionCpuRuntime.rigidRigidPairChecks += 1;
@@ -5133,6 +5150,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         });
         if (hit) collisionCpuRuntime.rigidRigidPairHits += 1;
       }
+      collisionCpuRuntime.substageMs.rigidRigidNarrowphasePre += performance.now() - preRigidNarrowphaseStartMs;
       collisionCpuRuntime.stageMs.rigidRigidPre += performance.now() - rigidRigidPreStartMs;
 
       const rigidSoftStartMs = performance.now();
@@ -5151,6 +5169,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       collisionCpuRuntime.rigidSoftNodeRawChecks += Number(rigidSoftBroadphase.stats?.rawNodeChecks) || 0;
       collisionCpuRuntime.rigidSoftEdgeRawChecks += Number(rigidSoftBroadphase.stats?.rawEdgeChecks) || 0;
 
+      const rigidSoftNarrowphaseStartMs = performance.now();
       for (let rbi = 0; rbi < bodies.rigid.length; rbi++) {
         const rb = bodies.rigid[rbi];
         // Build per-rigid cache once per collision iteration so node contacts
@@ -5184,6 +5203,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           }
         }
       }
+      collisionCpuRuntime.substageMs.rigidSoftNarrowphase += performance.now() - rigidSoftNarrowphaseStartMs;
       collisionCpuRuntime.stageMs.rigidSoft += performance.now() - rigidSoftStartMs;
 
       const softSoftNodeStartMs = performance.now();
@@ -5195,6 +5215,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           }
         }
       }
+      collisionCpuRuntime.substageMs.softSoftNodeNarrowphase += performance.now() - softSoftNodeStartMs;
       collisionCpuRuntime.stageMs.softSoftNode += performance.now() - softSoftNodeStartMs;
 
       // Soft-node vs foreign soft-edge blocking for solid edges.
@@ -5212,10 +5233,12 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           }
         }
       }
+      collisionCpuRuntime.substageMs.softSoftEdgeNarrowphase += performance.now() - softSoftEdgeStartMs;
       collisionCpuRuntime.stageMs.softSoftEdge += performance.now() - softSoftEdgeStartMs;
 
       // Re-run rigid-rigid contacts after rigid-soft pushes to avoid late interpenetration.
       const rigidRigidPostStartMs = performance.now();
+      const postSceneBuildStartMs = performance.now();
       const postScene = buildCollisionPhaseSceneCache(
         bodies.rigid,
         s.nodes,
@@ -5228,6 +5251,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           rigidRigidReuseCache,
         },
       );
+      collisionCpuRuntime.substageMs.candidateBuildPost += performance.now() - postSceneBuildStartMs;
       const postBroadphase = postScene.rigidRigid;
       rigidRigidBroadphaseRuntime.phases.push({
         phase: 'post-soft',
@@ -5246,6 +5270,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       rigidRigidBroadphaseRuntime.emitAttempts += Number(postBroadphase.stats?.emitAttempts) || 0;
       rigidRigidBroadphaseRuntime.duplicatesRejected += Number(postBroadphase.stats?.duplicatesRejected) || 0;
       rigidRigidBroadphaseRuntime.pairsOut += Number(postBroadphase.stats?.pairsOut) || 0;
+      const postRigidNarrowphaseStartMs = performance.now();
       const getPostRigidWorldPolys = createRigidWorldPolyPhaseCache(bodies.rigid, collisionCpuRuntime);
       for (const [i, j] of postBroadphase.pairs) {
         collisionCpuRuntime.rigidRigidPairChecks += 1;
@@ -5266,10 +5291,13 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         });
         if (hit) collisionCpuRuntime.rigidRigidPairHits += 1;
       }
+      collisionCpuRuntime.substageMs.rigidRigidNarrowphasePost += performance.now() - postRigidNarrowphaseStartMs;
       collisionCpuRuntime.stageMs.rigidRigidPost += performance.now() - rigidRigidPostStartMs;
 
+      const boundaryApplyStartMs = performance.now();
       for (const rb of bodies.rigid) applyBounceBoundary(rb, worldSize, 0.84);
       for (const sn of s.nodes) applyBounceBoundary(sn, worldSize, 0.78);
+      collisionCpuRuntime.substageMs.boundaryApply += performance.now() - boundaryApplyStartMs;
     }
   }
   rigidRigidBroadphaseRuntime.reductionPct = rigidRigidBroadphaseRuntime.totalBruteForcePairs > 0
@@ -5321,6 +5349,21 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     + (collisionCpuRuntime.stageMs.softSoftNode || 0)
     + (collisionCpuRuntime.stageMs.softSoftEdge || 0)
     + (collisionCpuRuntime.stageMs.rigidRigidPost || 0);
+
+  collisionCpuRuntime.substageMs.candidateBuildTotal =
+    (collisionCpuRuntime.substageMs.candidateBuildPre || 0)
+    + (collisionCpuRuntime.substageMs.candidateBuildPost || 0);
+  collisionCpuRuntime.substageMs.narrowphaseTotal =
+    (collisionCpuRuntime.substageMs.rigidRigidNarrowphasePre || 0)
+    + (collisionCpuRuntime.substageMs.rigidSoftNarrowphase || 0)
+    + (collisionCpuRuntime.substageMs.softSoftNodeNarrowphase || 0)
+    + (collisionCpuRuntime.substageMs.softSoftEdgeNarrowphase || 0)
+    + (collisionCpuRuntime.substageMs.rigidRigidNarrowphasePost || 0);
+  collisionCpuRuntime.substageMs.applyTotal = collisionCpuRuntime.substageMs.boundaryApply || 0;
+  collisionCpuRuntime.substageMs.total =
+    (collisionCpuRuntime.substageMs.candidateBuildTotal || 0)
+    + (collisionCpuRuntime.substageMs.narrowphaseTotal || 0)
+    + (collisionCpuRuntime.substageMs.applyTotal || 0);
 
   sim.rigidRigidBroadphaseRuntime = rigidRigidBroadphaseRuntime;
   sim.rigidSoftBroadphaseRuntime = rigidSoftBroadphaseRuntime;
@@ -7834,6 +7877,20 @@ window.__gpuLabApi = {
             rigidRigidPost: Number(sim?.collisionCpuRuntime?.stageMs?.rigidRigidPost) || 0,
             total: Number(sim?.collisionCpuRuntime?.stageMs?.total) || 0,
           },
+          substageMs: {
+            candidateBuildPre: Number(sim?.collisionCpuRuntime?.substageMs?.candidateBuildPre) || 0,
+            candidateBuildPost: Number(sim?.collisionCpuRuntime?.substageMs?.candidateBuildPost) || 0,
+            candidateBuildTotal: Number(sim?.collisionCpuRuntime?.substageMs?.candidateBuildTotal) || 0,
+            rigidRigidNarrowphasePre: Number(sim?.collisionCpuRuntime?.substageMs?.rigidRigidNarrowphasePre) || 0,
+            rigidSoftNarrowphase: Number(sim?.collisionCpuRuntime?.substageMs?.rigidSoftNarrowphase) || 0,
+            softSoftNodeNarrowphase: Number(sim?.collisionCpuRuntime?.substageMs?.softSoftNodeNarrowphase) || 0,
+            softSoftEdgeNarrowphase: Number(sim?.collisionCpuRuntime?.substageMs?.softSoftEdgeNarrowphase) || 0,
+            rigidRigidNarrowphasePost: Number(sim?.collisionCpuRuntime?.substageMs?.rigidRigidNarrowphasePost) || 0,
+            narrowphaseTotal: Number(sim?.collisionCpuRuntime?.substageMs?.narrowphaseTotal) || 0,
+            boundaryApply: Number(sim?.collisionCpuRuntime?.substageMs?.boundaryApply) || 0,
+            applyTotal: Number(sim?.collisionCpuRuntime?.substageMs?.applyTotal) || 0,
+            total: Number(sim?.collisionCpuRuntime?.substageMs?.total) || 0,
+          },
           checks: {
             rigidRigidPairs: Number(sim.collisionCpuRuntime.rigidRigidPairChecks) || 0,
             rigidRigidProxyPairs: Number(sim.collisionCpuRuntime.rigidRigidProxyPairChecks) || 0,
@@ -7883,6 +7940,20 @@ window.__gpuLabApi = {
           reason: 'uninitialized',
           collisionIterations: 0,
           stageMs: { rigidRigidPre: 0, rigidSoft: 0, softSoftNode: 0, softSoftEdge: 0, rigidRigidPost: 0, total: 0 },
+          substageMs: {
+            candidateBuildPre: 0,
+            candidateBuildPost: 0,
+            candidateBuildTotal: 0,
+            rigidRigidNarrowphasePre: 0,
+            rigidSoftNarrowphase: 0,
+            softSoftNodeNarrowphase: 0,
+            softSoftEdgeNarrowphase: 0,
+            rigidRigidNarrowphasePost: 0,
+            narrowphaseTotal: 0,
+            boundaryApply: 0,
+            applyTotal: 0,
+            total: 0,
+          },
           checks: {
             rigidRigidPairs: 0,
             rigidRigidProxyPairs: 0,

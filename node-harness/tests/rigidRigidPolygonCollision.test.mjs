@@ -312,6 +312,67 @@ test('rigid-rigid spatial hash broadphase candidate order is deterministic', () 
   }
 });
 
+test('phase scene cache accepts pluggable rigid-rigid candidate backend (wasm bridge contract)', () => {
+  const rigids = [
+    makeBox(20, 20, 3),
+    makeBox(24.5, 20, 3),
+    makeBox(120, 120, 3),
+  ];
+  let calls = 0;
+  const backend = {
+    label: 'wasm-stub',
+    buildCandidates: (state) => {
+      calls += 1;
+      assert.equal(state.bodyCount, 3);
+      return {
+        pairs: [[0, 1]],
+        stats: {
+          emitAttempts: 1,
+          duplicatesRejected: 0,
+          dedupeMs: 0.05,
+          sortMs: 0,
+          totalBuildMs: 0.05,
+        },
+      };
+    },
+  };
+
+  const scene = buildCollisionPhaseSceneCache(rigids, [], [], {
+    cellSize: 12,
+    includeRigidRigid: true,
+    includeRigidSoft: false,
+    rigidRigidCandidateBackend: backend,
+  });
+
+  assert.equal(calls, 1, 'backend should be invoked exactly once');
+  assert.deepEqual(scene.rigidRigid.pairs, [[0, 1]], 'backend candidate list should be used');
+  assert.equal(scene.rigidRigid.stats.backend, 'wasm-stub');
+  assert.equal(Number(scene.rigidRigid.stats.checkedPairs) || 0, 1);
+  assert.equal(Number(scene.rigidRigid.stats.pairsOut) || 0, 1);
+});
+
+test('phase scene cache falls back to JS candidate builder when backend throws', () => {
+  const rigids = [
+    makeBox(20, 20, 3),
+    makeBox(24.5, 20, 3),
+    makeBox(120, 120, 3),
+  ];
+  const scene = buildCollisionPhaseSceneCache(rigids, [], [], {
+    cellSize: 12,
+    includeRigidRigid: true,
+    includeRigidSoft: false,
+    rigidRigidCandidateBackend: {
+      label: 'wasm-stub',
+      buildCandidates: () => {
+        throw new Error('boom');
+      },
+    },
+  });
+
+  assert.equal(scene.rigidRigid.stats.backend, 'js', 'throwing backend should transparently fall back to JS path');
+  assert.ok((Number(scene.rigidRigid.stats.checkedPairs) || 0) >= 1, 'JS fallback should still produce candidates');
+});
+
 test('phase scene cache reuses shared rigid broadphase state for rigid-rigid and rigid-soft candidate sets', () => {
   const rigids = [
     makeBox(20, 20, 3),

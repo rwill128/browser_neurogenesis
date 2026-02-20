@@ -732,14 +732,80 @@ function rigidCellSpansEqual(a, b) {
   return true;
 }
 
-function deriveRigidRigidCandidatesFromState(state) {
+function resolveRigidRigidCandidateBackend(rawBackend) {
+  if (!rawBackend) return null;
+  if (typeof rawBackend === 'function') {
+    return { label: rawBackend.name || 'custom', buildCandidates: rawBackend };
+  }
+  if (typeof rawBackend === 'object' && typeof rawBackend.buildCandidates === 'function') {
+    return {
+      label: typeof rawBackend.label === 'string' && rawBackend.label.length > 0
+        ? rawBackend.label
+        : 'custom',
+      buildCandidates: rawBackend.buildCandidates,
+    };
+  }
+  return null;
+}
+
+function deriveRigidRigidCandidatesFromState(state, options = {}) {
+  const bodyCount = Number(state?.bodyCount) | 0;
+  const backend = resolveRigidRigidCandidateBackend(options?.backend);
+
+  if (backend) {
+    try {
+      const backendResult = backend.buildCandidates(state, options);
+      const backendPairs = Array.isArray(backendResult?.pairs) ? backendResult.pairs : null;
+      if (backendPairs) {
+        const checkedPairs = backendPairs.length;
+        const prunedPairs = Math.max(0, state.bruteForcePairs - checkedPairs);
+        const reductionPct = state.bruteForcePairs > 0
+          ? (prunedPairs / state.bruteForcePairs) * 100
+          : 0;
+        const backendStats = backendResult?.stats && typeof backendResult.stats === 'object'
+          ? backendResult.stats
+          : {};
+        const dedupeMs = Number(backendStats.dedupeMs) || 0;
+        const sortMs = Number(backendStats.sortMs) || 0;
+        const totalBuildMs = Number(backendStats.totalBuildMs) || (dedupeMs + sortMs);
+
+        return {
+          pairs: backendPairs,
+          stats: {
+            bodyCount: state.bodyCount,
+            bruteForcePairs: state.bruteForcePairs,
+            checkedPairs,
+            prunedPairs,
+            reductionPct,
+            cellSize: state.cellSize,
+            occupiedCells: state.sortedKeys.length,
+            occupiedBodyWrites: state.occupiedBodyWrites,
+            maxBodiesPerCell: state.maxBodiesPerCell,
+            avgBodiesPerCell: state.sortedKeys.length > 0 ? (state.occupiedBodyWrites / state.sortedKeys.length) : 0,
+            emitAttempts: Number(backendStats.emitAttempts) || 0,
+            duplicatesRejected: Number(backendStats.duplicatesRejected) || 0,
+            pairsOut: checkedPairs,
+            dedupeMs,
+            sortMs,
+            totalBuildMs,
+            cellSpanSignature: state.cellSpanSignature,
+            backend: backend.label,
+            reuseHit: false,
+            reuseMiss: false,
+          },
+        };
+      }
+    } catch {
+      // Fall back to JS candidate builder if backend throws.
+    }
+  }
+
   const candidatePairs = [];
   let emitAttempts = 0;
   let duplicatesRejected = 0;
   let dedupeMs = 0;
   let sortMs = 0;
 
-  const bodyCount = Number(state?.bodyCount) | 0;
   const cells = state?.cells;
   const bodyCellKeys = Array.isArray(state?.bodyCellKeys) ? state.bodyCellKeys : [];
   const seenStamp = new Int32Array(Math.max(0, bodyCount));
@@ -809,6 +875,7 @@ function deriveRigidRigidCandidatesFromState(state) {
       sortMs,
       totalBuildMs: dedupeMs + sortMs,
       cellSpanSignature: state.cellSpanSignature,
+      backend: 'js',
       reuseHit: false,
       reuseMiss: false,
     },
@@ -1069,7 +1136,9 @@ export function buildCollisionPhaseSceneCache(rigidBodies, softNodes, softSpring
         },
       };
     } else {
-      rigidRigid = deriveRigidRigidCandidatesFromState(rigidState);
+      rigidRigid = deriveRigidRigidCandidatesFromState(rigidState, {
+        backend: options?.rigidRigidCandidateBackend,
+      });
       if (rigidRigidReuseCache) {
         rigidRigid.stats.reuseMiss = true;
         rigidRigidReuseCache.lastBodyCount = rigidState.bodyCount;

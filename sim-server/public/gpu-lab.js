@@ -9,6 +9,7 @@ import {
   buildCollisionPhaseSceneCache,
 } from '/rigid-collision.js';
 import { loadRigidRigidCandidateBackendWasm } from '/rigid-rigid-candidate-wasm.js';
+import { loadSoftClusterProjectionBackendWasm } from '/soft-cluster-projection-wasm.js';
 import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops, recoverSoftSpringRests } from '/soft-xpbd.js';
 import { computeVectorRms, computeRigidAlignedPoseResidual } from '/soft-deformation-metrics.js';
 import { computeSoftClusterKinematics, projectNodesTowardClusterRigidMotion } from '/soft-cluster-kinematics.js';
@@ -227,6 +228,17 @@ function getRigidRigidCandidateBackendMode() {
   return normalizeRigidRigidCandidateBackendMode(
     rigidRigidCandidateBackendEl?.value ?? readRigidRigidCandidateBackendModeFromUrl(),
   );
+}
+
+function normalizeSoftClusterProjectionBackendMode(raw) {
+  const mode = String(raw || '').trim().toLowerCase();
+  return mode === 'wasm' ? 'wasm' : 'js';
+}
+
+function readSoftClusterProjectionBackendModeFromUrl() {
+  if (typeof window === 'undefined') return 'js';
+  const raw = new URLSearchParams(window.location.search || '').get('postCollisionProjectionBackend');
+  return normalizeSoftClusterProjectionBackendMode(raw);
 }
 
 function setRigidRigidCandidateBackendMode(mode, { syncUrl = false } = {}) {
@@ -498,6 +510,7 @@ function readControls() {
     runtimeSolverPath: getRuntimeSolverPath(),
     runtimePipelineMode: getRuntimePipelineMode(),
     rigidRigidCandidateBackendMode: getRigidRigidCandidateBackendMode(),
+    postCollisionProjectionBackendMode: readSoftClusterProjectionBackendModeFromUrl(),
   };
 }
 
@@ -5566,6 +5579,15 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   let membraneInsideCorrections = 0;
   const postCollisionRecoveryStageStartMs = performance.now();
   const postCollisionRecoveryOn = sim.controls?.enablePostCollisionRecovery !== false;
+  sim.postCollisionProjectionRuntime = {
+    mode: 'inactive',
+    reason: postCollisionRecoveryOn ? 'pending' : 'disabled',
+    projectedNodes: 0,
+    meanDelta: 0,
+    jsMarshalMs: 0,
+    backendComputeMs: 0,
+    totalMs: 0,
+  };
   if (postCollisionRecoveryOn) {
     if (solverPath === 'gpu-only') {
       const postCollisionRecovery = await applyPostCollisionRecoveryGpuOnly({
@@ -5605,14 +5627,76 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       });
       rigidInsideCorrections = postCollisionRecovery.rigidInsideCorrections;
       membraneInsideCorrections = postCollisionRecovery.membraneInsideCorrections;
+      sim.postCollisionProjectionRuntime = {
+        mode: 'gpu-only-path',
+        reason: 'handled-in-gpu-only-recovery',
+        projectedNodes: 0,
+        meanDelta: 0,
+        jsMarshalMs: 0,
+        backendComputeMs: 0,
+        totalMs: 0,
+      };
     } else {
       const postCollisionClusterKinematics = computeSoftClusterKinematics(s.nodes);
-      projectNodesTowardClusterRigidMotion(s.nodes, postCollisionClusterKinematics, {
-        linearGain: SOFT_CLUSTER_COLLISION_LINEAR_PROJECTION * dtNorm,
-        angularGain: softClusterCollisionAngularProjection * dtNorm,
-        membraneClusterSet: softMembraneClusterSet,
-        membraneGainScale: 0.72,
-      });
+      const projectionLinearGain = SOFT_CLUSTER_COLLISION_LINEAR_PROJECTION * dtNorm;
+      const projectionAngularGain = softClusterCollisionAngularProjection * dtNorm;
+
+      if (sim?.postCollisionProjectionBackend) {
+        try {
+          const wasmProjection = sim.postCollisionProjectionBackend.project({
+            nodes: s.nodes,
+            clusterKinematics: postCollisionClusterKinematics,
+            linearGain: projectionLinearGain,
+            angularGain: projectionAngularGain,
+            membraneClusterSet: softMembraneClusterSet,
+            membraneGainScale: 0.72,
+          });
+          if (wasmProjection?.ok === false) {
+            throw new Error(String(wasmProjection?.reason || 'projection-rejected'));
+          }
+          sim.postCollisionProjectionRuntime = {
+            mode: 'wasm',
+            reason: sim?.postCollisionProjectionBackend?.label || 'wasm',
+            projectedNodes: Number(wasmProjection?.projectedNodes) || 0,
+            meanDelta: Number(wasmProjection?.meanDelta) || 0,
+            jsMarshalMs: Number(wasmProjection?.jsMarshalMs) || 0,
+            backendComputeMs: Number(wasmProjection?.backendComputeMs) || 0,
+            totalMs: Number(wasmProjection?.totalMs) || 0,
+          };
+        } catch (err) {
+          const fallbackProjection = projectNodesTowardClusterRigidMotion(s.nodes, postCollisionClusterKinematics, {
+            linearGain: projectionLinearGain,
+            angularGain: projectionAngularGain,
+            membraneClusterSet: softMembraneClusterSet,
+            membraneGainScale: 0.72,
+          });
+          sim.postCollisionProjectionRuntime = {
+            mode: 'cpu-fallback',
+            reason: `wasm-error:${String(err?.message || err)}`,
+            projectedNodes: Number(fallbackProjection?.projectedNodes) || 0,
+            meanDelta: Number(fallbackProjection?.meanDelta) || 0,
+            jsMarshalMs: 0,
+            backendComputeMs: 0,
+            totalMs: 0,
+          };
+        }
+      } else {
+        const fallbackProjection = projectNodesTowardClusterRigidMotion(s.nodes, postCollisionClusterKinematics, {
+          linearGain: projectionLinearGain,
+          angularGain: projectionAngularGain,
+          membraneClusterSet: softMembraneClusterSet,
+          membraneGainScale: 0.72,
+        });
+        sim.postCollisionProjectionRuntime = {
+          mode: 'cpu-baseline',
+          reason: 'backend-disabled',
+          projectedNodes: Number(fallbackProjection?.projectedNodes) || 0,
+          meanDelta: Number(fallbackProjection?.meanDelta) || 0,
+          jsMarshalMs: 0,
+          backendComputeMs: 0,
+          totalMs: 0,
+        };
+      }
 
       rigidInsideCorrections = applyRigidInsideCorrectionPass(bodies, s);
       membraneInsideCorrections = applyMembraneInsideCorrectionPass(sim, s, softClusterLoops);
@@ -7012,6 +7096,25 @@ async function initSim() {
     }
   }
 
+  let postCollisionProjectionBackend = null;
+  let postCollisionProjectionBackendMode = controls.postCollisionProjectionBackendMode || 'js';
+  let postCollisionProjectionBackendReason = postCollisionProjectionBackendMode === 'wasm'
+    ? 'loading'
+    : 'disabled';
+  if (postCollisionProjectionBackendMode === 'wasm') {
+    try {
+      postCollisionProjectionBackend = await loadSoftClusterProjectionBackendWasm();
+      postCollisionProjectionBackendReason = 'loaded';
+    } catch (err) {
+      postCollisionProjectionBackend = null;
+      postCollisionProjectionBackendMode = 'js';
+      postCollisionProjectionBackendReason = `load-failed:${String(err?.message || err)}`;
+      console.warn('[gpu-lab] post-collision projection wasm backend unavailable; using JS path', {
+        error: String(err?.message || err),
+      });
+    }
+  }
+
   return {
     controls, cells, bytes,
     device, uniform,
@@ -7019,6 +7122,9 @@ async function initSim() {
     rigidRigidCandidateBackend,
     rigidRigidCandidateBackendMode,
     rigidRigidCandidateBackendReason,
+    postCollisionProjectionBackend,
+    postCollisionProjectionBackendMode,
+    postCollisionProjectionBackendReason,
     inject, advVel, divPipe, jacobiP, project, advDye,
     vx0: vxA, vx1: vxB, vy0: vyA, vy1: vyB,
     pr0: pA, pr1: pB,
@@ -7067,6 +7173,7 @@ async function initSim() {
     highlightSegmentId: null,
     highlightUntilFrame: 0,
     softIntegrateRuntime: { mode: 'cpu-baseline', reason: 'init' },
+    postCollisionProjectionRuntime: { mode: 'cpu-baseline', reason: 'init', projectedNodes: 0, meanDelta: 0, jsMarshalMs: 0, backendComputeMs: 0, totalMs: 0 },
     frame: 0, t0: performance.now(),
   };
 }
@@ -7861,6 +7968,10 @@ window.__gpuLabApi = {
         mode: sim?.rigidRigidCandidateBackendMode || 'js',
         reason: sim?.rigidRigidCandidateBackendReason || null,
       },
+      postCollisionProjectionBackend: {
+        mode: sim?.postCollisionProjectionBackendMode || 'js',
+        reason: sim?.postCollisionProjectionBackendReason || null,
+      },
       allowPassEdgeFlowPush: sim?.controls?.allowPassEdgeFlowPush === true,
       enableCouplingLagFrame: sim?.controls?.enableCouplingLagFrame === true,
       rendererFingerprint: sim?.rendererFingerprint
@@ -7983,6 +8094,15 @@ window.__gpuLabApi = {
         lastRigidStepProposalThetaLen: Number(sim?.rigidStepWgslState?.lastRigidStepProposalTheta?.length) || 0,
         lastRigidStepProposalCarryLen: Number(sim?.rigidStepWgslState?.lastRigidStepProposalCarry?.length) || 0,
         lastTiming: sim?.rigidStepWgslState?.lastTiming ? { ...sim.rigidStepWgslState.lastTiming } : null,
+      },
+      postCollisionProjectionRuntime: {
+        mode: sim?.postCollisionProjectionRuntime?.mode || 'uninitialized',
+        reason: sim?.postCollisionProjectionRuntime?.reason || null,
+        projectedNodes: Number(sim?.postCollisionProjectionRuntime?.projectedNodes) || 0,
+        meanDelta: Number(sim?.postCollisionProjectionRuntime?.meanDelta) || 0,
+        jsMarshalMs: Number(sim?.postCollisionProjectionRuntime?.jsMarshalMs) || 0,
+        backendComputeMs: Number(sim?.postCollisionProjectionRuntime?.backendComputeMs) || 0,
+        totalMs: Number(sim?.postCollisionProjectionRuntime?.totalMs) || 0,
       },
       rigidRigidBroadphaseRuntime: sim?.rigidRigidBroadphaseRuntime
         ? {

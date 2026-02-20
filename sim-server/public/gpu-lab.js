@@ -8,6 +8,7 @@ import {
   buildRigidSoftNodeCollisionCache,
   buildCollisionPhaseSceneCache,
 } from '/rigid-collision.js';
+import { loadRigidRigidCandidateBackendWasm } from '/rigid-rigid-candidate-wasm.js';
 import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops, recoverSoftSpringRests } from '/soft-xpbd.js';
 import { computeVectorRms, computeRigidAlignedPoseResidual } from '/soft-deformation-metrics.js';
 import { computeSoftClusterKinematics, projectNodesTowardClusterRigidMotion } from '/soft-cluster-kinematics.js';
@@ -206,6 +207,14 @@ function getWorldScale(controls) {
 
 function getWorldSize(controls) {
   return (Number(controls?.n) || 0) * getWorldScale(controls);
+}
+
+function readRigidRigidCandidateBackendModeFromUrl() {
+  if (typeof window === 'undefined') return 'js';
+  const raw = new URLSearchParams(window.location.search || '').get('rigidRigidCandidateBackend');
+  const mode = String(raw || '').trim().toLowerCase();
+  if (mode === 'wasm' || mode === 'wasm-rr' || mode === 'wasm-v1') return 'wasm';
+  return 'js';
 }
 
 function normalizeFluidVelocityCap(raw) {
@@ -457,6 +466,7 @@ function readControls() {
     fastReadbackInterval: readFastReadbackIntervalFromUrl(),
     runtimeSolverPath: getRuntimeSolverPath(),
     runtimePipelineMode: getRuntimePipelineMode(),
+    rigidRigidCandidateBackendMode: readRigidRigidCandidateBackendModeFromUrl(),
   };
 }
 
@@ -5014,6 +5024,9 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   const rigidRigidBroadphaseRuntime = {
     enabled: solverPath !== 'gpu-only',
     cellSize: RIGID_RIGID_SPATIAL_HASH_CELL_SIZE,
+    backendMode: sim?.rigidRigidCandidateBackendMode || 'js',
+    backendReason: sim?.rigidRigidCandidateBackendReason || null,
+    backendLabel: null,
     phases: [],
     totalBruteForcePairs: 0,
     totalCheckedPairs: 0,
@@ -5187,11 +5200,15 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           includeRigidRigid: true,
           includeRigidSoft: true,
           rigidRigidReuseCache,
+          rigidRigidCandidateBackend: sim?.rigidRigidCandidateBackend || null,
         },
       );
       collisionCpuRuntime.substageMs.candidateBuildPre += performance.now() - preSceneBuildStartMs;
 
       const preBroadphase = phaseScene.rigidRigid;
+      if (!rigidRigidBroadphaseRuntime.backendLabel && preBroadphase?.stats?.backend) {
+        rigidRigidBroadphaseRuntime.backendLabel = String(preBroadphase.stats.backend);
+      }
       rigidRigidBroadphaseRuntime.phases.push({
         phase: 'pre-soft',
         iter,
@@ -5353,10 +5370,14 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
             includeRigidRigid: true,
             includeRigidSoft: false,
             rigidRigidReuseCache,
+            rigidRigidCandidateBackend: sim?.rigidRigidCandidateBackend || null,
           },
         );
         collisionCpuRuntime.substageMs.candidateBuildPost += performance.now() - postSceneBuildStartMs;
         const postBroadphase = postScene.rigidRigid;
+        if (!rigidRigidBroadphaseRuntime.backendLabel && postBroadphase?.stats?.backend) {
+          rigidRigidBroadphaseRuntime.backendLabel = String(postBroadphase.stats.backend);
+        }
         rigidRigidBroadphaseRuntime.phases.push({
           phase: 'post-soft',
           iter,
@@ -6935,10 +6956,32 @@ async function initSim() {
     usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
   });
 
+  let rigidRigidCandidateBackend = null;
+  let rigidRigidCandidateBackendMode = controls.rigidRigidCandidateBackendMode || 'js';
+  let rigidRigidCandidateBackendReason = rigidRigidCandidateBackendMode === 'wasm'
+    ? 'loading'
+    : 'disabled';
+  if (rigidRigidCandidateBackendMode === 'wasm') {
+    try {
+      rigidRigidCandidateBackend = await loadRigidRigidCandidateBackendWasm();
+      rigidRigidCandidateBackendReason = 'loaded';
+    } catch (err) {
+      rigidRigidCandidateBackend = null;
+      rigidRigidCandidateBackendMode = 'js';
+      rigidRigidCandidateBackendReason = `load-failed:${String(err?.message || err)}`;
+      console.warn('[gpu-lab] rigid-rigid wasm candidate backend unavailable; using JS path', {
+        error: String(err?.message || err),
+      });
+    }
+  }
+
   return {
     controls, cells, bytes,
     device, uniform,
     rendererFingerprint,
+    rigidRigidCandidateBackend,
+    rigidRigidCandidateBackendMode,
+    rigidRigidCandidateBackendReason,
     inject, advVel, divPipe, jacobiP, project, advDye,
     vx0: vxA, vx1: vxB, vy0: vyA, vy1: vyB,
     pr0: pA, pr1: pB,
@@ -7768,6 +7811,10 @@ window.__gpuLabApi = {
       worldSize: getWorldSize(sim?.controls),
       runtimeSolverPath: normalizeRuntimeSolverPath(sim?.controls?.runtimeSolverPath),
       runtimePipelineMode: normalizeRuntimePipelineMode(sim?.controls?.runtimePipelineMode, sim?.controls?.runtimeSolverPath),
+      rigidRigidCandidateBackend: {
+        mode: sim?.rigidRigidCandidateBackendMode || 'js',
+        reason: sim?.rigidRigidCandidateBackendReason || null,
+      },
       allowPassEdgeFlowPush: sim?.controls?.allowPassEdgeFlowPush === true,
       enableCouplingLagFrame: sim?.controls?.enableCouplingLagFrame === true,
       rendererFingerprint: sim?.rendererFingerprint
@@ -7896,6 +7943,9 @@ window.__gpuLabApi = {
           enabled: sim.rigidRigidBroadphaseRuntime.enabled !== false,
           reason: sim.rigidRigidBroadphaseRuntime.reason || null,
           cellSize: Number(sim.rigidRigidBroadphaseRuntime.cellSize) || RIGID_RIGID_SPATIAL_HASH_CELL_SIZE,
+          backendMode: sim.rigidRigidBroadphaseRuntime.backendMode || 'js',
+          backendReason: sim.rigidRigidBroadphaseRuntime.backendReason || null,
+          backendLabel: sim.rigidRigidBroadphaseRuntime.backendLabel || null,
           totalBruteForcePairs: Number(sim.rigidRigidBroadphaseRuntime.totalBruteForcePairs) || 0,
           totalCheckedPairs: Number(sim.rigidRigidBroadphaseRuntime.totalCheckedPairs) || 0,
           totalPrunedPairs: Number(sim.rigidRigidBroadphaseRuntime.totalPrunedPairs) || 0,
@@ -7929,6 +7979,7 @@ window.__gpuLabApi = {
               dedupeMs: Number(entry?.dedupeMs) || 0,
               sortMs: Number(entry?.sortMs) || 0,
               totalBuildMs: Number(entry?.totalBuildMs) || 0,
+              backend: entry?.backend || 'js',
               reuseHit: entry?.reuseHit === true,
               reuseMiss: entry?.reuseMiss === true,
             }))
@@ -7938,6 +7989,9 @@ window.__gpuLabApi = {
           enabled: false,
           reason: 'uninitialized',
           cellSize: RIGID_RIGID_SPATIAL_HASH_CELL_SIZE,
+          backendMode: 'js',
+          backendReason: null,
+          backendLabel: null,
           totalBruteForcePairs: 0,
           totalCheckedPairs: 0,
           totalPrunedPairs: 0,

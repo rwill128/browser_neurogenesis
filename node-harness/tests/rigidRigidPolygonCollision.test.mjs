@@ -321,9 +321,14 @@ test('phase scene cache accepts pluggable rigid-rigid candidate backend (wasm br
   let calls = 0;
   const backend = {
     label: 'wasm-stub',
+    prepareWasmCandidateState: true,
     buildCandidates: (state) => {
       calls += 1;
       assert.equal(state.bodyCount, 3);
+      assert.ok(state?.wasmCandidateState?.cellOffsets instanceof Int32Array, 'expected precomputed wasm cell offsets');
+      assert.ok(state?.wasmCandidateState?.cellBodyIds instanceof Int32Array, 'expected precomputed wasm cell body ids');
+      assert.ok(state?.wasmCandidateState?.bodyCellOffsets instanceof Int32Array, 'expected precomputed wasm body-cell offsets');
+      assert.ok(state?.wasmCandidateState?.bodyCellIndices instanceof Int32Array, 'expected precomputed wasm body-cell indices');
       return {
         pairs: [[0, 1]],
         stats: {

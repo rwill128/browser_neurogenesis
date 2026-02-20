@@ -36,27 +36,35 @@ pub extern "C" fn rr_alloc(bytes: U32) -> U32 {
     }
 }
 
+unsafe fn clear_seen(seen: *mut I32, body_count: U32) {
+    let mut i: U32 = 0;
+    while i < body_count {
+        *seen.add(i as usize) = 0;
+        i += 1;
+    }
+}
+
 #[no_mangle]
-pub extern "C" fn rr_build_pairs(
+pub extern "C" fn rr_build_pairs_from_cells(
     body_count: U32,
-    offsets_ptr: U32,
-    neighbors_ptr: U32,
+    body_cell_offsets_ptr: U32,
+    body_cell_indices_ptr: U32,
+    cell_offsets_ptr: U32,
+    cell_body_ids_ptr: U32,
     seen_ptr: U32,
     pairs_ptr: U32,
     stats_ptr: U32,
 ) -> U32 {
     unsafe {
-        let offsets = offsets_ptr as *const I32;
-        let neighbors = neighbors_ptr as *const I32;
+        let body_cell_offsets = body_cell_offsets_ptr as *const I32;
+        let body_cell_indices = body_cell_indices_ptr as *const I32;
+        let cell_offsets = cell_offsets_ptr as *const I32;
+        let cell_body_ids = cell_body_ids_ptr as *const I32;
         let seen = seen_ptr as *mut I32;
         let pairs = pairs_ptr as *mut I32;
         let stats = stats_ptr as *mut I32;
 
-        let mut i: U32 = 0;
-        while i < body_count {
-            *seen.add(i as usize) = 0;
-            i += 1;
-        }
+        clear_seen(seen, body_count);
 
         let mut emit_attempts: I32 = 0;
         let mut duplicates_rejected: I32 = 0;
@@ -68,32 +76,39 @@ pub extern "C" fn rr_build_pairs(
             let mut stamp = stamp_token;
             stamp_token += 1;
             if stamp <= 0 {
-                let mut k: U32 = 0;
-                while k < body_count {
-                    *seen.add(k as usize) = 0;
-                    k += 1;
-                }
+                clear_seen(seen, body_count);
                 stamp_token = 2;
                 stamp = 1;
             }
 
-            let start = *offsets.add(bi as usize);
-            let end = *offsets.add((bi + 1) as usize);
-            let mut idx = start;
-            while idx < end {
-                emit_attempts += 1;
-                let j = *neighbors.add(idx as usize);
-                if j <= bi as I32 || j < 0 || j >= body_count as I32 {
-                    duplicates_rejected += 1;
-                } else {
-                    let seen_j = seen.add(j as usize);
-                    if *seen_j == stamp {
-                        duplicates_rejected += 1;
-                    } else {
-                        *seen_j = stamp;
+            let body_cells_start = *body_cell_offsets.add(bi as usize);
+            let body_cells_end = *body_cell_offsets.add((bi + 1) as usize);
+
+            let mut bci = body_cells_start;
+            while bci < body_cells_end {
+                let cell_index = *body_cell_indices.add(bci as usize);
+                if cell_index >= 0 {
+                    let cell_start = *cell_offsets.add(cell_index as usize);
+                    let cell_end = *cell_offsets.add((cell_index as usize) + 1);
+
+                    let mut ci = cell_start;
+                    while ci < cell_end {
+                        emit_attempts += 1;
+                        let j = *cell_body_ids.add(ci as usize);
+                        if j <= bi as I32 || j < 0 || j >= body_count as I32 {
+                            duplicates_rejected += 1;
+                        } else {
+                            let seen_j = seen.add(j as usize);
+                            if *seen_j == stamp {
+                                duplicates_rejected += 1;
+                            } else {
+                                *seen_j = stamp;
+                            }
+                        }
+                        ci += 1;
                     }
                 }
-                idx += 1;
+                bci += 1;
             }
 
             let mut bj = bi + 1;

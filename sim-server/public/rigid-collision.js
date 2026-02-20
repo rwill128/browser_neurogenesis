@@ -622,7 +622,7 @@ function packSpatialCellKey(cx, cy) {
   return (cx + SPATIAL_KEY_BIAS) * SPATIAL_KEY_STRIDE + (cy + SPATIAL_KEY_BIAS);
 }
 
-function buildRigidSpatialHashState(rigidBodies, cellSize) {
+function buildRigidSpatialHashState(rigidBodies, cellSize, options = {}) {
   const bodies = Array.isArray(rigidBodies) ? rigidBodies : [];
   const bodyCount = bodies.length;
   const bruteForcePairs = bodyCount > 1 ? (bodyCount * (bodyCount - 1)) / 2 : 0;
@@ -701,6 +701,59 @@ function buildRigidSpatialHashState(rigidBodies, cellSize) {
     if (ids.length > maxBodiesPerCell) maxBodiesPerCell = ids.length;
   }
 
+  let wasmCandidateState = null;
+  if (options?.prepareWasmCandidateState === true) {
+    const cellKeys = Array.from(cells.keys());
+    const cellKeyToIndex = new Map();
+    for (let ci = 0; ci < cellKeys.length; ci++) {
+      cellKeyToIndex.set(cellKeys[ci], ci);
+    }
+
+    const cellOffsets = new Int32Array(cellKeys.length + 1);
+    let cellBodiesTotal = 0;
+    for (let ci = 0; ci < cellKeys.length; ci++) {
+      cellOffsets[ci] = cellBodiesTotal;
+      const ids = cells.get(cellKeys[ci]) || [];
+      cellBodiesTotal += ids.length;
+    }
+    cellOffsets[cellKeys.length] = cellBodiesTotal;
+
+    const cellBodyIds = new Int32Array(cellBodiesTotal);
+    let cellWrite = 0;
+    for (let ci = 0; ci < cellKeys.length; ci++) {
+      const ids = cells.get(cellKeys[ci]) || [];
+      for (let k = 0; k < ids.length; k++) {
+        cellBodyIds[cellWrite++] = Number(ids[k]) | 0;
+      }
+    }
+
+    const bodyCellOffsets = new Int32Array(bodyCount + 1);
+    let bodyCellsTotal = 0;
+    for (let i = 0; i < bodyCount; i++) {
+      bodyCellOffsets[i] = bodyCellsTotal;
+      const keys = bodyCellKeys[i] || [];
+      bodyCellsTotal += keys.length;
+    }
+    bodyCellOffsets[bodyCount] = bodyCellsTotal;
+
+    const bodyCellIndices = new Int32Array(bodyCellsTotal);
+    let bodyWrite = 0;
+    for (let i = 0; i < bodyCount; i++) {
+      const keys = bodyCellKeys[i] || [];
+      for (let k = 0; k < keys.length; k++) {
+        const idx = cellKeyToIndex.get(keys[k]);
+        bodyCellIndices[bodyWrite++] = Number.isFinite(Number(idx)) ? (Number(idx) | 0) : -1;
+      }
+    }
+
+    wasmCandidateState = {
+      cellOffsets,
+      cellBodyIds,
+      bodyCellOffsets,
+      bodyCellIndices,
+    };
+  }
+
   return {
     bodies,
     bodyCount,
@@ -714,6 +767,7 @@ function buildRigidSpatialHashState(rigidBodies, cellSize) {
     maxBodiesPerCell,
     cellSpans,
     cellSpanSignature,
+    wasmCandidateState,
   };
 }
 
@@ -735,7 +789,11 @@ function rigidCellSpansEqual(a, b) {
 function resolveRigidRigidCandidateBackend(rawBackend) {
   if (!rawBackend) return null;
   if (typeof rawBackend === 'function') {
-    return { label: rawBackend.name || 'custom', buildCandidates: rawBackend };
+    return {
+      label: rawBackend.name || 'custom',
+      buildCandidates: rawBackend,
+      prepareWasmCandidateState: false,
+    };
   }
   if (typeof rawBackend === 'object' && typeof rawBackend.buildCandidates === 'function') {
     return {
@@ -743,6 +801,7 @@ function resolveRigidRigidCandidateBackend(rawBackend) {
         ? rawBackend.label
         : 'custom',
       buildCandidates: rawBackend.buildCandidates,
+      prepareWasmCandidateState: rawBackend.prepareWasmCandidateState === true,
     };
   }
   return null;
@@ -1075,8 +1134,11 @@ export function buildCollisionPhaseSceneCache(rigidBodies, softNodes, softSpring
   const edgeBodyModeBlock = Number.isFinite(Number(options.edgeBodyModeBlock))
     ? Number(options.edgeBodyModeBlock)
     : 1;
+  const resolvedRigidRigidBackend = resolveRigidRigidCandidateBackend(options?.rigidRigidCandidateBackend);
 
-  const rigidState = buildRigidSpatialHashState(rigidBodies, cellSize);
+  const rigidState = buildRigidSpatialHashState(rigidBodies, cellSize, {
+    prepareWasmCandidateState: resolvedRigidRigidBackend?.prepareWasmCandidateState === true,
+  });
   const rigidRigidReuseCache = options?.rigidRigidReuseCache && typeof options.rigidRigidReuseCache === 'object'
     ? options.rigidRigidReuseCache
     : null;
@@ -1137,7 +1199,7 @@ export function buildCollisionPhaseSceneCache(rigidBodies, softNodes, softSpring
       };
     } else {
       rigidRigid = deriveRigidRigidCandidatesFromState(rigidState, {
-        backend: options?.rigidRigidCandidateBackend,
+        backend: resolvedRigidRigidBackend,
       });
       if (rigidRigidReuseCache) {
         rigidRigid.stats.reuseMiss = true;

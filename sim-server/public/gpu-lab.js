@@ -4625,6 +4625,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     jsMarshalMs: 0,
     backendComputeMs: 0,
     totalMs: 0,
+    topologyCacheHit: false,
+    wasmBufferReuse: null,
   };
   if (solverPath === 'gpu-only') {
     rigidCarryTransfer = await stepRigidBodiesGpuOnly({
@@ -4720,6 +4722,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           jsMarshalMs: Number(wasmRigid?.jsMarshalMs) || 0,
           backendComputeMs: Number(wasmRigid?.backendComputeMs) || 0,
           totalMs: Number(wasmRigid?.totalMs) || 0,
+          topologyCacheHit: wasmRigid?.topologyCacheHit === true,
+          wasmBufferReuse: wasmRigid?.wasmBufferReuse || null,
         };
       } catch (err) {
         rigidCarryTransfer = runRigidBaselineCpu();
@@ -4731,6 +4735,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           jsMarshalMs: 0,
           backendComputeMs: 0,
           totalMs: 0,
+          topologyCacheHit: false,
+          wasmBufferReuse: null,
         };
       }
     } else {
@@ -4743,6 +4749,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         jsMarshalMs: 0,
         backendComputeMs: 0,
         totalMs: 0,
+        topologyCacheHit: false,
+        wasmBufferReuse: null,
       };
     }
   }
@@ -7326,7 +7334,7 @@ async function initSim() {
     highlightSegmentId: null,
     highlightUntilFrame: 0,
     softIntegrateRuntime: { mode: 'cpu-baseline', reason: 'init' },
-    rigidStepBaselineRuntime: { mode: 'cpu-baseline', reason: 'init', processedBodies: 0, sampleCount: 0, jsMarshalMs: 0, backendComputeMs: 0, totalMs: 0 },
+    rigidStepBaselineRuntime: { mode: 'cpu-baseline', reason: 'init', processedBodies: 0, sampleCount: 0, jsMarshalMs: 0, backendComputeMs: 0, totalMs: 0, topologyCacheHit: false, wasmBufferReuse: null },
     postCollisionProjectionRuntime: { mode: 'cpu-baseline', reason: 'init', projectedNodes: 0, meanDelta: 0, jsMarshalMs: 0, backendComputeMs: 0, totalMs: 0 },
     frame: 0, t0: performance.now(),
   };
@@ -8261,6 +8269,8 @@ window.__gpuLabApi = {
         jsMarshalMs: Number(sim?.rigidStepBaselineRuntime?.jsMarshalMs) || 0,
         backendComputeMs: Number(sim?.rigidStepBaselineRuntime?.backendComputeMs) || 0,
         totalMs: Number(sim?.rigidStepBaselineRuntime?.totalMs) || 0,
+        topologyCacheHit: sim?.rigidStepBaselineRuntime?.topologyCacheHit === true,
+        wasmBufferReuse: sim?.rigidStepBaselineRuntime?.wasmBufferReuse || null,
       },
       postCollisionProjectionRuntime: {
         mode: sim?.postCollisionProjectionRuntime?.mode || 'uninitialized',

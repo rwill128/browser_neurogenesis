@@ -1,4 +1,4 @@
-const WASM_URL = '/wasm/rigid-step-baseline.wasm?v=20260219a';
+const WASM_URL = '/wasm/rigid-step-baseline.wasm?v=20260219b';
 const DEFAULT_HEAP_BASE = 65536;
 
 let runtimePromise = null;
@@ -49,7 +49,42 @@ async function getRuntime() {
       const heapBase = typeof exports.rsb_heap_base === 'function'
         ? (Number(exports.rsb_heap_base()) || DEFAULT_HEAP_BASE)
         : DEFAULT_HEAP_BASE;
-      return { instance, exports, memory, heapBase };
+      return {
+        instance,
+        exports,
+        memory,
+        heapBase,
+        topology: {
+          signature: null,
+          bodyCount: 0,
+          sampleCount: 0,
+          counts: new Int32Array(0),
+        },
+        frameBuffers: {
+          bodyCapacity: 0,
+          sampleCapacity: 0,
+          bodyVx: new Float32Array(0),
+          bodyVy: new Float32Array(0),
+          bodyOmega: new Float32Array(0),
+          bodyX: new Float32Array(0),
+          bodyY: new Float32Array(0),
+          bodyTheta: new Float32Array(0),
+          bodyMass: new Float32Array(0),
+          bodyInertia: new Float32Array(0),
+          bodyEdgeMomentum: new Float32Array(0),
+          bodyCenterHoney: new Float32Array(0),
+          bodySwimX: new Float32Array(0),
+          bodySwimY: new Float32Array(0),
+          bodySwimTorque: new Float32Array(0),
+          sampleOffsets: new Int32Array(0),
+          sampleRx: new Float32Array(0),
+          sampleRy: new Float32Array(0),
+          sampleFx: new Float32Array(0),
+          sampleFy: new Float32Array(0),
+          sampleHoney: new Float32Array(0),
+        },
+        wasmLayout: null,
+      };
     })();
   }
   return runtimePromise;
@@ -104,7 +139,104 @@ function finiteOr(v, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function buildRigidStepState({
+function getRigidBodySampleCount(body) {
+  if (Array.isArray(body?.verticesLocal) && body.verticesLocal.length >= 3) {
+    return body.verticesLocal.length;
+  }
+  return Math.max(3, Number(body?.sides) || 3);
+}
+
+function ensureTopologyCounts(runtime, bodyCount) {
+  const topology = runtime.topology;
+  if ((topology.counts?.length || 0) >= bodyCount) return topology.counts;
+  const nextLen = Math.max(bodyCount, Math.ceil((topology.counts?.length || 0) * 1.5), 64);
+  topology.counts = new Int32Array(nextLen);
+  return topology.counts;
+}
+
+function ensureFrameBuffers(runtime, bodyCount, sampleCount) {
+  const fb = runtime.frameBuffers;
+  const needBody = Math.max(1, bodyCount);
+  const needSample = Math.max(1, sampleCount);
+  const growBody = fb.bodyCapacity < needBody;
+  const growSample = fb.sampleCapacity < needSample;
+
+  if (!growBody && !growSample) return fb;
+
+  const nextBodyCapacity = growBody
+    ? Math.max(needBody, Math.ceil(fb.bodyCapacity * 1.5), 64)
+    : fb.bodyCapacity;
+  const nextSampleCapacity = growSample
+    ? Math.max(needSample, Math.ceil(fb.sampleCapacity * 1.5), 256)
+    : fb.sampleCapacity;
+
+  runtime.frameBuffers = {
+    bodyCapacity: nextBodyCapacity,
+    sampleCapacity: nextSampleCapacity,
+    bodyVx: new Float32Array(nextBodyCapacity),
+    bodyVy: new Float32Array(nextBodyCapacity),
+    bodyOmega: new Float32Array(nextBodyCapacity),
+    bodyX: new Float32Array(nextBodyCapacity),
+    bodyY: new Float32Array(nextBodyCapacity),
+    bodyTheta: new Float32Array(nextBodyCapacity),
+    bodyMass: new Float32Array(nextBodyCapacity),
+    bodyInertia: new Float32Array(nextBodyCapacity),
+    bodyEdgeMomentum: new Float32Array(nextBodyCapacity),
+    bodyCenterHoney: new Float32Array(nextBodyCapacity),
+    bodySwimX: new Float32Array(nextBodyCapacity),
+    bodySwimY: new Float32Array(nextBodyCapacity),
+    bodySwimTorque: new Float32Array(nextBodyCapacity),
+    sampleOffsets: new Int32Array(nextBodyCapacity + 1),
+    sampleRx: new Float32Array(nextSampleCapacity),
+    sampleRy: new Float32Array(nextSampleCapacity),
+    sampleFx: new Float32Array(nextSampleCapacity),
+    sampleFy: new Float32Array(nextSampleCapacity),
+    sampleHoney: new Float32Array(nextSampleCapacity),
+  };
+
+  return runtime.frameBuffers;
+}
+
+function buildRigidTopology(runtime, rigidBodies) {
+  const bodyCount = rigidBodies.length;
+  const counts = ensureTopologyCounts(runtime, bodyCount);
+
+  let sampleCount = 0;
+  let hash = (bodyCount * 2654435761) >>> 0;
+  for (let i = 0; i < bodyCount; i++) {
+    const c = getRigidBodySampleCount(rigidBodies[i]);
+    counts[i] = c;
+    sampleCount += c;
+    hash = (Math.imul(hash ^ (c + i + 1), 2246822519) + 3266489917) >>> 0;
+  }
+
+  const signature = `${bodyCount}:${sampleCount}:${hash}`;
+  return { bodyCount, sampleCount, signature, counts };
+}
+
+function ensureSampleOffsets(runtime, frameBuffers, topology) {
+  const topoState = runtime.topology;
+  const cacheHit = topoState.signature === topology.signature
+    && topoState.bodyCount === topology.bodyCount
+    && topoState.sampleCount === topology.sampleCount;
+
+  if (!cacheHit) {
+    let offset = 0;
+    for (let i = 0; i < topology.bodyCount; i++) {
+      frameBuffers.sampleOffsets[i] = offset;
+      offset += topology.counts[i] | 0;
+    }
+    frameBuffers.sampleOffsets[topology.bodyCount] = offset;
+
+    topoState.signature = topology.signature;
+    topoState.bodyCount = topology.bodyCount;
+    topoState.sampleCount = topology.sampleCount;
+  }
+
+  return cacheHit;
+}
+
+function buildRigidStepState(runtime, {
   sim,
   bodies,
   vxField,
@@ -117,128 +249,233 @@ function buildRigidStepState({
   bodyFeedbackPrevVx,
   bodyFeedbackPrevVy,
   selfFeedbackSuppression,
-  rigidVerticesWorld,
   sampleFluidForBodyCoupling,
   localHoneyDrag,
   allowPassEdgeFlowPush,
 }) {
   const rigidBodies = Array.isArray(bodies?.rigid) ? bodies.rigid : [];
-  const bodyCount = rigidBodies.length;
+  const topology = buildRigidTopology(runtime, rigidBodies);
+  const frameBuffers = ensureFrameBuffers(runtime, topology.bodyCount, topology.sampleCount);
+  const topologyCacheHit = ensureSampleOffsets(runtime, frameBuffers, topology);
 
-  const bodyVx = new Float32Array(bodyCount);
-  const bodyVy = new Float32Array(bodyCount);
-  const bodyOmega = new Float32Array(bodyCount);
-  const bodyX = new Float32Array(bodyCount);
-  const bodyY = new Float32Array(bodyCount);
-  const bodyTheta = new Float32Array(bodyCount);
-  const bodyMass = new Float32Array(bodyCount);
-  const bodyInertia = new Float32Array(bodyCount);
-  const bodyEdgeMomentum = new Float32Array(bodyCount);
-  const bodyCenterHoney = new Float32Array(bodyCount);
-  const bodySwimX = new Float32Array(bodyCount);
-  const bodySwimY = new Float32Array(bodyCount);
-  const bodySwimTorque = new Float32Array(bodyCount);
-  const sampleOffsets = new Int32Array(bodyCount + 1);
-
-  const sampleRx = [];
-  const sampleRy = [];
-  const sampleFx = [];
-  const sampleFy = [];
-  const sampleHoney = [];
+  const bodyCount = topology.bodyCount;
+  const sampleCount = topology.sampleCount;
 
   for (let bi = 0; bi < bodyCount; bi++) {
     const b = rigidBodies[bi];
-    sampleOffsets[bi] = sampleRx.length;
 
     const mass = Math.max(0.05, finiteOr(b?.mass, 1));
     const inertia = Math.max(0.05, finiteOr(b?.inertia, 1));
     const invMass = 1 / mass;
     const swimPhase = finiteOr(sim?.frame, 0) * 0.08 + bi * 2.1;
 
-    bodyVx[bi] = finiteOr(b?.vx, 0);
-    bodyVy[bi] = finiteOr(b?.vy, 0);
-    bodyOmega[bi] = finiteOr(b?.omega, 0);
-    bodyX[bi] = finiteOr(b?.x, 0);
-    bodyY[bi] = finiteOr(b?.y, 0);
-    bodyTheta[bi] = finiteOr(b?.theta, 0);
-    bodyMass[bi] = mass;
-    bodyInertia[bi] = inertia;
-    bodyEdgeMomentum[bi] = rigidEdgeMomentumScale(b, allowPassEdgeFlowPush);
-    bodyCenterHoney[bi] = finiteOr(localHoneyDrag(bodyX[bi], bodyY[bi]), 1);
-    bodySwimX[bi] = swimGain * Math.cos(swimPhase) * 0.012 * invMass;
-    bodySwimY[bi] = swimGain * Math.sin(swimPhase * 1.6) * 0.009 * invMass;
-    bodySwimTorque[bi] = swimGain * Math.sin(swimPhase * 1.1) * 0.0025;
+    const bx = finiteOr(b?.x, 0);
+    const by = finiteOr(b?.y, 0);
+    const theta = finiteOr(b?.theta, 0);
 
-    const sampleVerts = rigidVerticesWorld(b);
-    for (let si = 0; si < sampleVerts.length; si++) {
-      const sx = finiteOr(sampleVerts[si]?.x, bodyX[bi]);
-      const sy = finiteOr(sampleVerts[si]?.y, bodyY[bi]);
-      const rx = sx - bodyX[bi];
-      const ry = sy - bodyY[bi];
-      const fx = sampleFluidForBodyCoupling(
-        vxField,
-        n,
-        sx,
-        sy,
-        rx,
-        ry,
-        obstacleMask,
-        bodyFeedbackPrevVx,
-        selfFeedbackSuppression,
-      );
-      const fy = sampleFluidForBodyCoupling(
-        vyField,
-        n,
-        sx,
-        sy,
-        rx,
-        ry,
-        obstacleMask,
-        bodyFeedbackPrevVy,
-        selfFeedbackSuppression,
-      );
-      sampleRx.push(finiteOr(rx, 0));
-      sampleRy.push(finiteOr(ry, 0));
-      sampleFx.push(finiteOr(fx, 0));
-      sampleFy.push(finiteOr(fy, 0));
-      sampleHoney.push(finiteOr(localHoneyDrag(sx, sy), 1));
+    frameBuffers.bodyVx[bi] = finiteOr(b?.vx, 0);
+    frameBuffers.bodyVy[bi] = finiteOr(b?.vy, 0);
+    frameBuffers.bodyOmega[bi] = finiteOr(b?.omega, 0);
+    frameBuffers.bodyX[bi] = bx;
+    frameBuffers.bodyY[bi] = by;
+    frameBuffers.bodyTheta[bi] = theta;
+    frameBuffers.bodyMass[bi] = mass;
+    frameBuffers.bodyInertia[bi] = inertia;
+    frameBuffers.bodyEdgeMomentum[bi] = rigidEdgeMomentumScale(b, allowPassEdgeFlowPush);
+    frameBuffers.bodyCenterHoney[bi] = finiteOr(localHoneyDrag(bx, by), 1);
+    frameBuffers.bodySwimX[bi] = swimGain * Math.cos(swimPhase) * 0.012 * invMass;
+    frameBuffers.bodySwimY[bi] = swimGain * Math.sin(swimPhase * 1.6) * 0.009 * invMass;
+    frameBuffers.bodySwimTorque[bi] = swimGain * Math.sin(swimPhase * 1.1) * 0.0025;
+
+    let write = frameBuffers.sampleOffsets[bi] | 0;
+
+    if (Array.isArray(b?.verticesLocal) && b.verticesLocal.length >= 3) {
+      const verts = b.verticesLocal;
+      const c = Math.cos(theta);
+      const s = Math.sin(theta);
+      for (let vi = 0; vi < verts.length; vi++) {
+        const lv = verts[vi] || {};
+        const lx = finiteOr(lv.x, 0);
+        const ly = finiteOr(lv.y, 0);
+        const sx = bx + lx * c - ly * s;
+        const sy = by + lx * s + ly * c;
+        const rx = sx - bx;
+        const ry = sy - by;
+
+        const fx = sampleFluidForBodyCoupling(
+          vxField,
+          n,
+          sx,
+          sy,
+          rx,
+          ry,
+          obstacleMask,
+          bodyFeedbackPrevVx,
+          selfFeedbackSuppression,
+        );
+        const fy = sampleFluidForBodyCoupling(
+          vyField,
+          n,
+          sx,
+          sy,
+          rx,
+          ry,
+          obstacleMask,
+          bodyFeedbackPrevVy,
+          selfFeedbackSuppression,
+        );
+
+        frameBuffers.sampleRx[write] = finiteOr(rx, 0);
+        frameBuffers.sampleRy[write] = finiteOr(ry, 0);
+        frameBuffers.sampleFx[write] = finiteOr(fx, 0);
+        frameBuffers.sampleFy[write] = finiteOr(fy, 0);
+        frameBuffers.sampleHoney[write] = finiteOr(localHoneyDrag(sx, sy), 1);
+        write += 1;
+      }
+    } else {
+      const sides = Math.max(3, Number(b?.sides) || 3);
+      const r = finiteOr(b?.r, 0);
+      const rot = theta + (sides === 3 ? -Math.PI * 0.5 : Math.PI * 0.25);
+      for (let vi = 0; vi < sides; vi++) {
+        const a = rot + (vi / sides) * Math.PI * 2;
+        const sx = bx + Math.cos(a) * r;
+        const sy = by + Math.sin(a) * r;
+        const rx = sx - bx;
+        const ry = sy - by;
+
+        const fx = sampleFluidForBodyCoupling(
+          vxField,
+          n,
+          sx,
+          sy,
+          rx,
+          ry,
+          obstacleMask,
+          bodyFeedbackPrevVx,
+          selfFeedbackSuppression,
+        );
+        const fy = sampleFluidForBodyCoupling(
+          vyField,
+          n,
+          sx,
+          sy,
+          rx,
+          ry,
+          obstacleMask,
+          bodyFeedbackPrevVy,
+          selfFeedbackSuppression,
+        );
+
+        frameBuffers.sampleRx[write] = finiteOr(rx, 0);
+        frameBuffers.sampleRy[write] = finiteOr(ry, 0);
+        frameBuffers.sampleFx[write] = finiteOr(fx, 0);
+        frameBuffers.sampleFy[write] = finiteOr(fy, 0);
+        frameBuffers.sampleHoney[write] = finiteOr(localHoneyDrag(sx, sy), 1);
+        write += 1;
+      }
     }
   }
-  sampleOffsets[bodyCount] = sampleRx.length;
 
   return {
+    rigidBodies,
     bodyCount,
-    bodyVx,
-    bodyVy,
-    bodyOmega,
-    bodyX,
-    bodyY,
-    bodyTheta,
-    bodyMass,
-    bodyInertia,
-    bodyEdgeMomentum,
-    bodyCenterHoney,
-    bodySwimX,
-    bodySwimY,
-    bodySwimTorque,
-    sampleOffsets,
-    sampleRx: Float32Array.from(sampleRx),
-    sampleRy: Float32Array.from(sampleRy),
-    sampleFx: Float32Array.from(sampleFx),
-    sampleFy: Float32Array.from(sampleFy),
-    sampleHoney: Float32Array.from(sampleHoney),
+    sampleCount,
+    bodyVx: frameBuffers.bodyVx,
+    bodyVy: frameBuffers.bodyVy,
+    bodyOmega: frameBuffers.bodyOmega,
+    bodyX: frameBuffers.bodyX,
+    bodyY: frameBuffers.bodyY,
+    bodyTheta: frameBuffers.bodyTheta,
+    bodyMass: frameBuffers.bodyMass,
+    bodyInertia: frameBuffers.bodyInertia,
+    bodyEdgeMomentum: frameBuffers.bodyEdgeMomentum,
+    bodyCenterHoney: frameBuffers.bodyCenterHoney,
+    bodySwimX: frameBuffers.bodySwimX,
+    bodySwimY: frameBuffers.bodySwimY,
+    bodySwimTorque: frameBuffers.bodySwimTorque,
+    sampleOffsets: frameBuffers.sampleOffsets,
+    sampleRx: frameBuffers.sampleRx,
+    sampleRy: frameBuffers.sampleRy,
+    sampleFx: frameBuffers.sampleFx,
+    sampleFy: frameBuffers.sampleFy,
+    sampleHoney: frameBuffers.sampleHoney,
     dt: finiteOr(dt, 0.01),
     dtNorm: finiteOr(dtNorm, 1),
+    topologyCacheHit,
   };
+}
+
+function ensureWasmLayout(runtime, bodyCount, sampleCount) {
+  const prev = runtime.wasmLayout;
+  const needBody = Math.max(1, bodyCount);
+  const needSample = Math.max(1, sampleCount);
+
+  if (prev && prev.bodyCapacity >= needBody && prev.sampleCapacity >= needSample) {
+    return { layout: prev, wasmBufferReuse: 'reused' };
+  }
+
+  const bodyCapacity = Math.max(
+    needBody,
+    prev ? Math.ceil(prev.bodyCapacity * 1.5) : 0,
+    64,
+  );
+  const sampleCapacity = Math.max(
+    needSample,
+    prev ? Math.ceil(prev.sampleCapacity * 1.5) : 0,
+    256,
+  );
+
+  const bodyBytes = bodyCapacity * Float32Array.BYTES_PER_ELEMENT;
+  const sampleBytes = sampleCapacity * Float32Array.BYTES_PER_ELEMENT;
+  const sampleOffsetBytes = (bodyCapacity + 1) * Int32Array.BYTES_PER_ELEMENT;
+  const bytesStats = 3 * Float32Array.BYTES_PER_ELEMENT;
+
+  const bytesTotal =
+    (bodyBytes * 13)
+    + sampleOffsetBytes
+    + (sampleBytes * 5)
+    + bytesStats
+    + 128;
+
+  ensureMemoryCapacity(runtime, runtime.heapBase + bytesTotal);
+  runtime.exports.rsb_reset_heap();
+  const alloc = (size) => Number(runtime.exports.rsb_alloc(size));
+
+  const layout = {
+    bodyCapacity,
+    sampleCapacity,
+    bodyVxPtr: alloc(bodyBytes),
+    bodyVyPtr: alloc(bodyBytes),
+    bodyOmegaPtr: alloc(bodyBytes),
+    bodyXPtr: alloc(bodyBytes),
+    bodyYPtr: alloc(bodyBytes),
+    bodyThetaPtr: alloc(bodyBytes),
+    bodyMassPtr: alloc(bodyBytes),
+    bodyInertiaPtr: alloc(bodyBytes),
+    bodyEdgeMomentumPtr: alloc(bodyBytes),
+    bodyCenterHoneyPtr: alloc(bodyBytes),
+    bodySwimXPtr: alloc(bodyBytes),
+    bodySwimYPtr: alloc(bodyBytes),
+    bodySwimTorquePtr: alloc(bodyBytes),
+    sampleOffsetsPtr: alloc(sampleOffsetBytes),
+    sampleRxPtr: alloc(sampleBytes),
+    sampleRyPtr: alloc(sampleBytes),
+    sampleFxPtr: alloc(sampleBytes),
+    sampleFyPtr: alloc(sampleBytes),
+    sampleHoneyPtr: alloc(sampleBytes),
+    statsPtr: alloc(bytesStats),
+  };
+
+  runtime.wasmLayout = layout;
+  return { layout, wasmBufferReuse: prev ? 'resized' : 'init' };
 }
 
 function stepWithRuntime(runtime, args) {
   const totalStartMs = nowMs();
   const marshalStartMs = nowMs();
-  const state = buildRigidStepState(args);
+  const state = buildRigidStepState(runtime, args);
   const jsMarshalMs = nowMs() - marshalStartMs;
 
-  const rigidBodies = Array.isArray(args?.bodies?.rigid) ? args.bodies.rigid : [];
   if (state.bodyCount === 0) {
     return {
       ok: true,
@@ -248,123 +485,78 @@ function stepWithRuntime(runtime, args) {
       jsMarshalMs,
       backendComputeMs: 0,
       totalMs: jsMarshalMs,
+      topologyCacheHit: state.topologyCacheHit,
+      wasmBufferReuse: 'reused',
     };
   }
 
-  const bytes = [
-    state.bodyVx,
-    state.bodyVy,
-    state.bodyOmega,
-    state.bodyX,
-    state.bodyY,
-    state.bodyTheta,
-    state.bodyMass,
-    state.bodyInertia,
-    state.bodyEdgeMomentum,
-    state.bodyCenterHoney,
-    state.bodySwimX,
-    state.bodySwimY,
-    state.bodySwimTorque,
-    state.sampleOffsets,
-    state.sampleRx,
-    state.sampleRy,
-    state.sampleFx,
-    state.sampleFy,
-    state.sampleHoney,
-  ].reduce((sum, arr) => sum + arr.byteLength, 0);
-
-  const bytesStats = 3 * Float32Array.BYTES_PER_ELEMENT;
-  ensureMemoryCapacity(runtime, runtime.heapBase + bytes + bytesStats + 64);
-  runtime.exports.rsb_reset_heap();
-
-  const alloc = (size) => Number(runtime.exports.rsb_alloc(size));
-
-  const bodyVxPtr = alloc(state.bodyVx.byteLength);
-  const bodyVyPtr = alloc(state.bodyVy.byteLength);
-  const bodyOmegaPtr = alloc(state.bodyOmega.byteLength);
-  const bodyXPtr = alloc(state.bodyX.byteLength);
-  const bodyYPtr = alloc(state.bodyY.byteLength);
-  const bodyThetaPtr = alloc(state.bodyTheta.byteLength);
-  const bodyMassPtr = alloc(state.bodyMass.byteLength);
-  const bodyInertiaPtr = alloc(state.bodyInertia.byteLength);
-  const bodyEdgeMomentumPtr = alloc(state.bodyEdgeMomentum.byteLength);
-  const bodyCenterHoneyPtr = alloc(state.bodyCenterHoney.byteLength);
-  const bodySwimXPtr = alloc(state.bodySwimX.byteLength);
-  const bodySwimYPtr = alloc(state.bodySwimY.byteLength);
-  const bodySwimTorquePtr = alloc(state.bodySwimTorque.byteLength);
-
-  const sampleOffsetsPtr = alloc(state.sampleOffsets.byteLength);
-  const sampleRxPtr = alloc(state.sampleRx.byteLength);
-  const sampleRyPtr = alloc(state.sampleRy.byteLength);
-  const sampleFxPtr = alloc(state.sampleFx.byteLength);
-  const sampleFyPtr = alloc(state.sampleFy.byteLength);
-  const sampleHoneyPtr = alloc(state.sampleHoney.byteLength);
-
-  const statsPtr = alloc(bytesStats);
-
+  const { layout, wasmBufferReuse } = ensureWasmLayout(runtime, state.bodyCount, state.sampleCount);
   const memF32 = new Float32Array(runtime.memory.buffer);
   const memI32 = new Int32Array(runtime.memory.buffer);
 
-  memF32.set(state.bodyVx, bodyVxPtr >> 2);
-  memF32.set(state.bodyVy, bodyVyPtr >> 2);
-  memF32.set(state.bodyOmega, bodyOmegaPtr >> 2);
-  memF32.set(state.bodyX, bodyXPtr >> 2);
-  memF32.set(state.bodyY, bodyYPtr >> 2);
-  memF32.set(state.bodyTheta, bodyThetaPtr >> 2);
-  memF32.set(state.bodyMass, bodyMassPtr >> 2);
-  memF32.set(state.bodyInertia, bodyInertiaPtr >> 2);
-  memF32.set(state.bodyEdgeMomentum, bodyEdgeMomentumPtr >> 2);
-  memF32.set(state.bodyCenterHoney, bodyCenterHoneyPtr >> 2);
-  memF32.set(state.bodySwimX, bodySwimXPtr >> 2);
-  memF32.set(state.bodySwimY, bodySwimYPtr >> 2);
-  memF32.set(state.bodySwimTorque, bodySwimTorquePtr >> 2);
+  const bodyCount = state.bodyCount;
+  const sampleCount = state.sampleCount;
 
-  memI32.set(state.sampleOffsets, sampleOffsetsPtr >> 2);
-  memF32.set(state.sampleRx, sampleRxPtr >> 2);
-  memF32.set(state.sampleRy, sampleRyPtr >> 2);
-  memF32.set(state.sampleFx, sampleFxPtr >> 2);
-  memF32.set(state.sampleFy, sampleFyPtr >> 2);
-  memF32.set(state.sampleHoney, sampleHoneyPtr >> 2);
+  memF32.set(state.bodyVx.subarray(0, bodyCount), layout.bodyVxPtr >> 2);
+  memF32.set(state.bodyVy.subarray(0, bodyCount), layout.bodyVyPtr >> 2);
+  memF32.set(state.bodyOmega.subarray(0, bodyCount), layout.bodyOmegaPtr >> 2);
+  memF32.set(state.bodyX.subarray(0, bodyCount), layout.bodyXPtr >> 2);
+  memF32.set(state.bodyY.subarray(0, bodyCount), layout.bodyYPtr >> 2);
+  memF32.set(state.bodyTheta.subarray(0, bodyCount), layout.bodyThetaPtr >> 2);
+  memF32.set(state.bodyMass.subarray(0, bodyCount), layout.bodyMassPtr >> 2);
+  memF32.set(state.bodyInertia.subarray(0, bodyCount), layout.bodyInertiaPtr >> 2);
+  memF32.set(state.bodyEdgeMomentum.subarray(0, bodyCount), layout.bodyEdgeMomentumPtr >> 2);
+  memF32.set(state.bodyCenterHoney.subarray(0, bodyCount), layout.bodyCenterHoneyPtr >> 2);
+  memF32.set(state.bodySwimX.subarray(0, bodyCount), layout.bodySwimXPtr >> 2);
+  memF32.set(state.bodySwimY.subarray(0, bodyCount), layout.bodySwimYPtr >> 2);
+  memF32.set(state.bodySwimTorque.subarray(0, bodyCount), layout.bodySwimTorquePtr >> 2);
+
+  memI32.set(state.sampleOffsets.subarray(0, bodyCount + 1), layout.sampleOffsetsPtr >> 2);
+  memF32.set(state.sampleRx.subarray(0, sampleCount), layout.sampleRxPtr >> 2);
+  memF32.set(state.sampleRy.subarray(0, sampleCount), layout.sampleRyPtr >> 2);
+  memF32.set(state.sampleFx.subarray(0, sampleCount), layout.sampleFxPtr >> 2);
+  memF32.set(state.sampleFy.subarray(0, sampleCount), layout.sampleFyPtr >> 2);
+  memF32.set(state.sampleHoney.subarray(0, sampleCount), layout.sampleHoneyPtr >> 2);
 
   const backendStartMs = nowMs();
   const processedBodies = Number(runtime.exports.rsb_step_bodies(
-    state.bodyCount,
-    bodyVxPtr,
-    bodyVyPtr,
-    bodyOmegaPtr,
-    bodyXPtr,
-    bodyYPtr,
-    bodyThetaPtr,
-    bodyMassPtr,
-    bodyInertiaPtr,
-    bodyEdgeMomentumPtr,
-    bodyCenterHoneyPtr,
-    bodySwimXPtr,
-    bodySwimYPtr,
-    bodySwimTorquePtr,
-    sampleOffsetsPtr,
-    sampleRxPtr,
-    sampleRyPtr,
-    sampleFxPtr,
-    sampleFyPtr,
-    sampleHoneyPtr,
+    bodyCount,
+    layout.bodyVxPtr,
+    layout.bodyVyPtr,
+    layout.bodyOmegaPtr,
+    layout.bodyXPtr,
+    layout.bodyYPtr,
+    layout.bodyThetaPtr,
+    layout.bodyMassPtr,
+    layout.bodyInertiaPtr,
+    layout.bodyEdgeMomentumPtr,
+    layout.bodyCenterHoneyPtr,
+    layout.bodySwimXPtr,
+    layout.bodySwimYPtr,
+    layout.bodySwimTorquePtr,
+    layout.sampleOffsetsPtr,
+    layout.sampleRxPtr,
+    layout.sampleRyPtr,
+    layout.sampleFxPtr,
+    layout.sampleFyPtr,
+    layout.sampleHoneyPtr,
     state.dt,
     state.dtNorm,
     finiteOr(args?.dragK, 0),
     finiteOr(args?.worldSize, finiteOr(args?.n, 0)),
-    statsPtr,
+    layout.statsPtr,
   )) | 0;
   const backendComputeMs = nowMs() - backendStartMs;
 
-  const outVx = memF32.subarray(bodyVxPtr >> 2, (bodyVxPtr >> 2) + state.bodyCount);
-  const outVy = memF32.subarray(bodyVyPtr >> 2, (bodyVyPtr >> 2) + state.bodyCount);
-  const outOmega = memF32.subarray(bodyOmegaPtr >> 2, (bodyOmegaPtr >> 2) + state.bodyCount);
-  const outX = memF32.subarray(bodyXPtr >> 2, (bodyXPtr >> 2) + state.bodyCount);
-  const outY = memF32.subarray(bodyYPtr >> 2, (bodyYPtr >> 2) + state.bodyCount);
-  const outTheta = memF32.subarray(bodyThetaPtr >> 2, (bodyThetaPtr >> 2) + state.bodyCount);
+  const outVx = memF32.subarray(layout.bodyVxPtr >> 2, (layout.bodyVxPtr >> 2) + bodyCount);
+  const outVy = memF32.subarray(layout.bodyVyPtr >> 2, (layout.bodyVyPtr >> 2) + bodyCount);
+  const outOmega = memF32.subarray(layout.bodyOmegaPtr >> 2, (layout.bodyOmegaPtr >> 2) + bodyCount);
+  const outX = memF32.subarray(layout.bodyXPtr >> 2, (layout.bodyXPtr >> 2) + bodyCount);
+  const outY = memF32.subarray(layout.bodyYPtr >> 2, (layout.bodyYPtr >> 2) + bodyCount);
+  const outTheta = memF32.subarray(layout.bodyThetaPtr >> 2, (layout.bodyThetaPtr >> 2) + bodyCount);
 
-  for (let i = 0; i < state.bodyCount; i++) {
-    const b = rigidBodies[i];
+  for (let i = 0; i < bodyCount; i++) {
+    const b = state.rigidBodies[i];
     if (!b) continue;
     b.vx = finiteOr(outVx[i], 0);
     b.vy = finiteOr(outVy[i], 0);
@@ -374,25 +566,27 @@ function stepWithRuntime(runtime, args) {
     b.theta = finiteOr(outTheta[i], 0);
   }
 
-  const statsIndex = statsPtr >> 2;
+  const statsIndex = layout.statsPtr >> 2;
   const rigidCarryTransfer = finiteOr(memF32[statsIndex], 0);
-  const sampleCount = Math.max(0, Math.round(finiteOr(memF32[statsIndex + 1], 0)));
+  const outSampleCount = Math.max(0, Math.round(finiteOr(memF32[statsIndex + 1], 0)));
 
   return {
     ok: true,
     rigidCarryTransfer,
     processedBodies,
-    sampleCount,
+    sampleCount: outSampleCount,
     jsMarshalMs,
     backendComputeMs,
     totalMs: nowMs() - totalStartMs,
+    topologyCacheHit: state.topologyCacheHit,
+    wasmBufferReuse,
   };
 }
 
 export async function loadRigidStepBaselineBackendWasm() {
   const runtime = await getRuntime();
   return {
-    label: 'wasm-rigid-step-v1',
+    label: 'wasm-rigid-step-v2',
     stepBodies: (args) => stepWithRuntime(runtime, args),
   };
 }

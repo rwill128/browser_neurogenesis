@@ -10,6 +10,7 @@ import {
 } from '/rigid-collision.js';
 import { loadRigidRigidCandidateBackendWasm } from '/rigid-rigid-candidate-wasm.js';
 import { loadSoftClusterProjectionBackendWasm } from '/soft-cluster-projection-wasm.js';
+import { loadRigidStepBaselineBackendWasm } from '/rigid-step-baseline-wasm.js';
 import { sanitizeSoftSprings, ensureLambdaCacheSize, buildSoftClusterBoundaryLoops, recoverSoftSpringRests } from '/soft-xpbd.js';
 import { computeVectorRms, computeRigidAlignedPoseResidual } from '/soft-deformation-metrics.js';
 import { computeSoftClusterKinematics, projectNodesTowardClusterRigidMotion } from '/soft-cluster-kinematics.js';
@@ -241,6 +242,17 @@ function readSoftClusterProjectionBackendModeFromUrl() {
   return normalizeSoftClusterProjectionBackendMode(raw);
 }
 
+function normalizeRigidStepBaselineBackendMode(raw) {
+  const mode = String(raw || '').trim().toLowerCase();
+  return mode === 'wasm' ? 'wasm' : 'js';
+}
+
+function readRigidStepBaselineBackendModeFromUrl() {
+  if (typeof window === 'undefined') return 'js';
+  const raw = new URLSearchParams(window.location.search || '').get('rigidStepBaselineBackend');
+  return normalizeRigidStepBaselineBackendMode(raw);
+}
+
 function setRigidRigidCandidateBackendMode(mode, { syncUrl = false } = {}) {
   const normalized = normalizeRigidRigidCandidateBackendMode(mode);
   if (rigidRigidCandidateBackendEl) {
@@ -334,8 +346,9 @@ function normalizeRuntimeSolverPath(raw) {
 
 function normalizeRuntimePipelineMode(raw, solverPath = null) {
   const normalizedSolverPath = normalizeRuntimeSolverPath(solverPath ?? getRuntimeSolverPath());
-  if (normalizedSolverPath !== 'gpu-only') return 'standard';
   const mode = String(raw || '').trim().toLowerCase();
+  if (mode === 'standard') return 'standard';
+  if (normalizedSolverPath !== 'gpu-only') return 'standard';
   if (mode === 'gpu-only-fast') return 'gpu-only-fast';
   if (mode === 'gpu-only-validated') return 'gpu-only-validated';
   return 'gpu-only-validated';
@@ -511,6 +524,7 @@ function readControls() {
     runtimePipelineMode: getRuntimePipelineMode(),
     rigidRigidCandidateBackendMode: getRigidRigidCandidateBackendMode(),
     postCollisionProjectionBackendMode: readSoftClusterProjectionBackendModeFromUrl(),
+    rigidStepBaselineBackendMode: readRigidStepBaselineBackendModeFromUrl(),
   };
 }
 
@@ -1603,6 +1617,120 @@ function rigidVerticesWorld(b) {
     verts.push({ x: b.x + Math.cos(a) * b.r, y: b.y + Math.sin(a) * b.r });
   }
   return verts;
+}
+
+function stepRigidBodiesBaselineCpu({
+  sim,
+  bodies,
+  vxField,
+  vyField,
+  n,
+  worldSize,
+  dt,
+  dtNorm,
+  dragK,
+  swimGain,
+  localHoneyDrag,
+  viscosityMotionResponse,
+  obstacleMask,
+  bodyFeedbackPrevVx,
+  bodyFeedbackPrevVy,
+  selfFeedbackSuppression,
+  rigidVerticesWorld,
+  sampleFluidForBodyCoupling,
+  applyBounceBoundary,
+  allowPassEdgeFlowPush,
+}) {
+  let rigidCarryTransfer = 0;
+  for (let bi = 0; bi < bodies.rigid.length; bi++) {
+    const b = bodies.rigid[bi];
+    const edgeMomentumScale = rigidEdgeMomentumScale(b, allowPassEdgeFlowPush);
+
+    const invMass = 1 / Math.max(0.05, b.mass);
+    const invInertia = 1 / Math.max(0.05, b.inertia || 1);
+    const sampleVerts = rigidVerticesWorld(b);
+    const sampleCount = Math.max(1, sampleVerts.length);
+    let forceX = 0;
+    let forceY = 0;
+    let torque = 0;
+
+    for (let si = 0; si < sampleCount; si++) {
+      const sx = sampleVerts[si].x;
+      const sy = sampleVerts[si].y;
+      const rx = sx - b.x;
+      const ry = sy - b.y;
+      const fx = sampleFluidForBodyCoupling(
+        vxField,
+        n,
+        sx,
+        sy,
+        rx,
+        ry,
+        obstacleMask,
+        bodyFeedbackPrevVx,
+        selfFeedbackSuppression,
+      );
+      const fy = sampleFluidForBodyCoupling(
+        vyField,
+        n,
+        sx,
+        sy,
+        rx,
+        ry,
+        obstacleMask,
+        bodyFeedbackPrevVy,
+        selfFeedbackSuppression,
+      );
+      const localVx = b.vx + (-(b.omega || 0) * ry);
+      const localVy = b.vy + ((b.omega || 0) * rx);
+      const relX = fx - localVx;
+      const relY = fy - localVy;
+      const honey = localHoneyDrag(sx, sy);
+      const fpx = relX * dragK * honey * edgeMomentumScale;
+      const fpy = relY * dragK * honey * edgeMomentumScale;
+      forceX += fpx;
+      forceY += fpy;
+      torque += rx * fpy - ry * fpx;
+    }
+
+    forceX /= sampleCount;
+    forceY /= sampleCount;
+    torque /= sampleCount;
+
+    const ax = forceX * invMass;
+    const ay = forceY * invMass;
+    const alpha = torque * invInertia;
+
+    const swimPhase = sim.frame * 0.08 + bi * 2.1;
+    const swimX = swimGain * Math.cos(swimPhase) * 0.012 * invMass;
+    const swimY = swimGain * Math.sin(swimPhase * 1.6) * 0.009 * invMass;
+    const swimTorque = swimGain * Math.sin(swimPhase * 1.1) * 0.0025;
+
+    b.vx += ax * dt * 60 + swimX * dtNorm;
+    b.vy += ay * dt * 60 + swimY * dtNorm;
+    b.omega = (b.omega || 0) + alpha * dt * 60 + swimTorque * dtNorm;
+
+    const centerHoney = localHoneyDrag(b.x, b.y);
+    const rigidVisc = viscosityMotionResponse(centerHoney, 3.2);
+    b.vx *= rigidVisc.damp;
+    b.vy *= rigidVisc.damp;
+    b.omega *= Math.max(0.72, 0.99 - 0.01 * centerHoney);
+
+    const bMax = rigidVisc.vmax;
+    const bMag = Math.hypot(b.vx, b.vy);
+    if (bMag > bMax) {
+      b.vx = (b.vx / bMag) * bMax;
+      b.vy = (b.vy / bMag) * bMax;
+    }
+    b.omega = Math.max(-0.25, Math.min(0.25, b.omega));
+
+    rigidCarryTransfer += Math.hypot(ax, ay);
+    b.x = b.x + b.vx * dt * 22;
+    b.y = b.y + b.vy * dt * 28;
+    b.theta = (b.theta || 0) + b.omega * dt * 60;
+    applyBounceBoundary(b, worldSize, 0.84);
+  }
+  return rigidCarryTransfer;
 }
 
 function rigidVertexWorld(b, vertexIndex) {
@@ -4489,6 +4617,15 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
 
   recordPipelineTiming(sim, 'bodies.preamble', performance.now() - preambleStartMs);
   const rigidStageStartMs = performance.now();
+  sim.rigidStepBaselineRuntime = {
+    mode: solverPath === 'gpu-only' ? 'gpu-only-path' : 'pending',
+    reason: solverPath === 'gpu-only' ? 'handled-in-gpu-only-step' : 'pending',
+    processedBodies: 0,
+    sampleCount: 0,
+    jsMarshalMs: 0,
+    backendComputeMs: 0,
+    totalMs: 0,
+  };
   if (solverPath === 'gpu-only') {
     rigidCarryTransfer = await stepRigidBodiesGpuOnly({
       sim,
@@ -4526,93 +4663,87 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       },
     });
   } else {
-    for (let bi = 0; bi < bodies.rigid.length; bi++) {
-      const b = bodies.rigid[bi];
-      const edgeMomentumScale = rigidEdgeMomentumScale(b, allowPassEdgeFlowPush);
+    const runRigidBaselineCpu = () => stepRigidBodiesBaselineCpu({
+      sim,
+      bodies,
+      vxField,
+      vyField,
+      n,
+      worldSize,
+      dt,
+      dtNorm,
+      dragK,
+      swimGain,
+      localHoneyDrag,
+      viscosityMotionResponse,
+      obstacleMask,
+      bodyFeedbackPrevVx,
+      bodyFeedbackPrevVy,
+      selfFeedbackSuppression: SELF_FEEDBACK_SUPPRESSION,
+      rigidVerticesWorld,
+      sampleFluidForBodyCoupling,
+      applyBounceBoundary,
+      allowPassEdgeFlowPush,
+    });
 
-      const invMass = 1 / Math.max(0.05, b.mass);
-      const invInertia = 1 / Math.max(0.05, b.inertia || 1);
-      const sampleVerts = rigidVerticesWorld(b);
-      const sampleCount = Math.max(1, sampleVerts.length);
-      let forceX = 0;
-      let forceY = 0;
-      let torque = 0;
-
-      for (let si = 0; si < sampleCount; si++) {
-        const sx = sampleVerts[si].x;
-        const sy = sampleVerts[si].y;
-        const rx = sx - b.x;
-        const ry = sy - b.y;
-        const fx = sampleFluidForBodyCoupling(
+    if (sim?.rigidStepBaselineBackend) {
+      try {
+        const wasmRigid = sim.rigidStepBaselineBackend.stepBodies({
+          sim,
+          bodies,
           vxField,
-          n,
-          sx,
-          sy,
-          rx,
-          ry,
-          obstacleMask,
-          bodyFeedbackPrevVx,
-          SELF_FEEDBACK_SUPPRESSION,
-        );
-        const fy = sampleFluidForBodyCoupling(
           vyField,
           n,
-          sx,
-          sy,
-          rx,
-          ry,
+          worldSize,
+          dt,
+          dtNorm,
+          dragK,
+          swimGain,
           obstacleMask,
+          bodyFeedbackPrevVx,
           bodyFeedbackPrevVy,
-          SELF_FEEDBACK_SUPPRESSION,
-        );
-        const localVx = b.vx + (-(b.omega || 0) * ry);
-        const localVy = b.vy + ((b.omega || 0) * rx);
-        const relX = fx - localVx;
-        const relY = fy - localVy;
-        const honey = localHoneyDrag(sx, sy);
-        const fpx = relX * dragK * honey * edgeMomentumScale;
-        const fpy = relY * dragK * honey * edgeMomentumScale;
-        forceX += fpx;
-        forceY += fpy;
-        torque += rx * fpy - ry * fpx;
+          selfFeedbackSuppression: SELF_FEEDBACK_SUPPRESSION,
+          rigidVerticesWorld,
+          sampleFluidForBodyCoupling,
+          localHoneyDrag,
+          allowPassEdgeFlowPush,
+        });
+        if (wasmRigid?.ok === false) {
+          throw new Error(String(wasmRigid?.reason || 'rigid-step-rejected'));
+        }
+        rigidCarryTransfer = Number(wasmRigid?.rigidCarryTransfer) || 0;
+        sim.rigidStepBaselineRuntime = {
+          mode: 'wasm',
+          reason: sim?.rigidStepBaselineBackend?.label || 'wasm',
+          processedBodies: Number(wasmRigid?.processedBodies) || 0,
+          sampleCount: Number(wasmRigid?.sampleCount) || 0,
+          jsMarshalMs: Number(wasmRigid?.jsMarshalMs) || 0,
+          backendComputeMs: Number(wasmRigid?.backendComputeMs) || 0,
+          totalMs: Number(wasmRigid?.totalMs) || 0,
+        };
+      } catch (err) {
+        rigidCarryTransfer = runRigidBaselineCpu();
+        sim.rigidStepBaselineRuntime = {
+          mode: 'cpu-fallback',
+          reason: `wasm-error:${String(err?.message || err)}`,
+          processedBodies: Number(bodies?.rigid?.length) || 0,
+          sampleCount: 0,
+          jsMarshalMs: 0,
+          backendComputeMs: 0,
+          totalMs: 0,
+        };
       }
-
-      forceX /= sampleCount;
-      forceY /= sampleCount;
-      torque /= sampleCount;
-
-      const ax = forceX * invMass;
-      const ay = forceY * invMass;
-      const alpha = torque * invInertia;
-
-      const swimPhase = sim.frame * 0.08 + bi * 2.1;
-      const swimX = swimGain * Math.cos(swimPhase) * 0.012 * invMass;
-      const swimY = swimGain * Math.sin(swimPhase * 1.6) * 0.009 * invMass;
-      const swimTorque = swimGain * Math.sin(swimPhase * 1.1) * 0.0025;
-
-      b.vx += ax * dt * 60 + swimX * dtNorm;
-      b.vy += ay * dt * 60 + swimY * dtNorm;
-      b.omega = (b.omega || 0) + alpha * dt * 60 + swimTorque * dtNorm;
-
-      const centerHoney = localHoneyDrag(b.x, b.y);
-      const rigidVisc = viscosityMotionResponse(centerHoney, 3.2);
-      b.vx *= rigidVisc.damp;
-      b.vy *= rigidVisc.damp;
-      b.omega *= Math.max(0.72, 0.99 - 0.01 * centerHoney);
-
-      const bMax = rigidVisc.vmax;
-      const bMag = Math.hypot(b.vx, b.vy);
-      if (bMag > bMax) {
-        b.vx = (b.vx / bMag) * bMax;
-        b.vy = (b.vy / bMag) * bMax;
-      }
-      b.omega = Math.max(-0.25, Math.min(0.25, b.omega));
-
-      rigidCarryTransfer += Math.hypot(ax, ay);
-      b.x = b.x + b.vx * dt * 22;
-      b.y = b.y + b.vy * dt * 28;
-      b.theta = (b.theta || 0) + b.omega * dt * 60;
-      applyBounceBoundary(b, worldSize, 0.84);
+    } else {
+      rigidCarryTransfer = runRigidBaselineCpu();
+      sim.rigidStepBaselineRuntime = {
+        mode: 'cpu-baseline',
+        reason: 'backend-disabled',
+        processedBodies: Number(bodies?.rigid?.length) || 0,
+        sampleCount: 0,
+        jsMarshalMs: 0,
+        backendComputeMs: 0,
+        totalMs: 0,
+      };
     }
   }
   recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.rigid.gpuOnly' : 'bodies.rigid.baseline', performance.now() - rigidStageStartMs);
@@ -7115,6 +7246,25 @@ async function initSim() {
     }
   }
 
+  let rigidStepBaselineBackend = null;
+  let rigidStepBaselineBackendMode = controls.rigidStepBaselineBackendMode || 'js';
+  let rigidStepBaselineBackendReason = rigidStepBaselineBackendMode === 'wasm'
+    ? 'loading'
+    : 'disabled';
+  if (rigidStepBaselineBackendMode === 'wasm') {
+    try {
+      rigidStepBaselineBackend = await loadRigidStepBaselineBackendWasm();
+      rigidStepBaselineBackendReason = 'loaded';
+    } catch (err) {
+      rigidStepBaselineBackend = null;
+      rigidStepBaselineBackendMode = 'js';
+      rigidStepBaselineBackendReason = `load-failed:${String(err?.message || err)}`;
+      console.warn('[gpu-lab] rigid baseline step wasm backend unavailable; using JS path', {
+        error: String(err?.message || err),
+      });
+    }
+  }
+
   return {
     controls, cells, bytes,
     device, uniform,
@@ -7125,6 +7275,9 @@ async function initSim() {
     postCollisionProjectionBackend,
     postCollisionProjectionBackendMode,
     postCollisionProjectionBackendReason,
+    rigidStepBaselineBackend,
+    rigidStepBaselineBackendMode,
+    rigidStepBaselineBackendReason,
     inject, advVel, divPipe, jacobiP, project, advDye,
     vx0: vxA, vx1: vxB, vy0: vyA, vy1: vyB,
     pr0: pA, pr1: pB,
@@ -7173,6 +7326,7 @@ async function initSim() {
     highlightSegmentId: null,
     highlightUntilFrame: 0,
     softIntegrateRuntime: { mode: 'cpu-baseline', reason: 'init' },
+    rigidStepBaselineRuntime: { mode: 'cpu-baseline', reason: 'init', processedBodies: 0, sampleCount: 0, jsMarshalMs: 0, backendComputeMs: 0, totalMs: 0 },
     postCollisionProjectionRuntime: { mode: 'cpu-baseline', reason: 'init', projectedNodes: 0, meanDelta: 0, jsMarshalMs: 0, backendComputeMs: 0, totalMs: 0 },
     frame: 0, t0: performance.now(),
   };
@@ -7972,6 +8126,10 @@ window.__gpuLabApi = {
         mode: sim?.postCollisionProjectionBackendMode || 'js',
         reason: sim?.postCollisionProjectionBackendReason || null,
       },
+      rigidStepBaselineBackend: {
+        mode: sim?.rigidStepBaselineBackendMode || 'js',
+        reason: sim?.rigidStepBaselineBackendReason || null,
+      },
       allowPassEdgeFlowPush: sim?.controls?.allowPassEdgeFlowPush === true,
       enableCouplingLagFrame: sim?.controls?.enableCouplingLagFrame === true,
       rendererFingerprint: sim?.rendererFingerprint
@@ -8094,6 +8252,15 @@ window.__gpuLabApi = {
         lastRigidStepProposalThetaLen: Number(sim?.rigidStepWgslState?.lastRigidStepProposalTheta?.length) || 0,
         lastRigidStepProposalCarryLen: Number(sim?.rigidStepWgslState?.lastRigidStepProposalCarry?.length) || 0,
         lastTiming: sim?.rigidStepWgslState?.lastTiming ? { ...sim.rigidStepWgslState.lastTiming } : null,
+      },
+      rigidStepBaselineRuntime: {
+        mode: sim?.rigidStepBaselineRuntime?.mode || 'uninitialized',
+        reason: sim?.rigidStepBaselineRuntime?.reason || null,
+        processedBodies: Number(sim?.rigidStepBaselineRuntime?.processedBodies) || 0,
+        sampleCount: Number(sim?.rigidStepBaselineRuntime?.sampleCount) || 0,
+        jsMarshalMs: Number(sim?.rigidStepBaselineRuntime?.jsMarshalMs) || 0,
+        backendComputeMs: Number(sim?.rigidStepBaselineRuntime?.backendComputeMs) || 0,
+        totalMs: Number(sim?.rigidStepBaselineRuntime?.totalMs) || 0,
       },
       postCollisionProjectionRuntime: {
         mode: sim?.postCollisionProjectionRuntime?.mode || 'uninitialized',

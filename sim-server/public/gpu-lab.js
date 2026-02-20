@@ -5070,6 +5070,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     dedupeMs: 0,
     sortMs: 0,
     totalBuildMs: 0,
+    jsMarshalMs: 0,
+    backendComputeMs: 0,
     emitAttempts: 0,
     duplicatesRejected: 0,
     pairsOut: 0,
@@ -5254,6 +5256,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       rigidRigidBroadphaseRuntime.dedupeMs += Number(preBroadphase.stats?.dedupeMs) || 0;
       rigidRigidBroadphaseRuntime.sortMs += Number(preBroadphase.stats?.sortMs) || 0;
       rigidRigidBroadphaseRuntime.totalBuildMs += Number(preBroadphase.stats?.totalBuildMs) || 0;
+      rigidRigidBroadphaseRuntime.jsMarshalMs += Number(preBroadphase.stats?.jsMarshalMs) || 0;
+      rigidRigidBroadphaseRuntime.backendComputeMs += Number(preBroadphase.stats?.backendComputeMs) || 0;
       rigidRigidBroadphaseRuntime.emitAttempts += Number(preBroadphase.stats?.emitAttempts) || 0;
       rigidRigidBroadphaseRuntime.duplicatesRejected += Number(preBroadphase.stats?.duplicatesRejected) || 0;
       rigidRigidBroadphaseRuntime.pairsOut += Number(preBroadphase.stats?.pairsOut) || 0;
@@ -5423,6 +5427,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         rigidRigidBroadphaseRuntime.dedupeMs += Number(postBroadphase.stats?.dedupeMs) || 0;
         rigidRigidBroadphaseRuntime.sortMs += Number(postBroadphase.stats?.sortMs) || 0;
         rigidRigidBroadphaseRuntime.totalBuildMs += Number(postBroadphase.stats?.totalBuildMs) || 0;
+        rigidRigidBroadphaseRuntime.jsMarshalMs += Number(postBroadphase.stats?.jsMarshalMs) || 0;
+        rigidRigidBroadphaseRuntime.backendComputeMs += Number(postBroadphase.stats?.backendComputeMs) || 0;
         rigidRigidBroadphaseRuntime.emitAttempts += Number(postBroadphase.stats?.emitAttempts) || 0;
         rigidRigidBroadphaseRuntime.duplicatesRejected += Number(postBroadphase.stats?.duplicatesRejected) || 0;
         rigidRigidBroadphaseRuntime.pairsOut += Number(postBroadphase.stats?.pairsOut) || 0;
@@ -7997,6 +8003,8 @@ window.__gpuLabApi = {
           dedupeMs: Number(sim.rigidRigidBroadphaseRuntime.dedupeMs) || 0,
           sortMs: Number(sim.rigidRigidBroadphaseRuntime.sortMs) || 0,
           totalBuildMs: Number(sim.rigidRigidBroadphaseRuntime.totalBuildMs) || 0,
+          jsMarshalMs: Number(sim.rigidRigidBroadphaseRuntime.jsMarshalMs) || 0,
+          backendComputeMs: Number(sim.rigidRigidBroadphaseRuntime.backendComputeMs) || 0,
           emitAttempts: Number(sim.rigidRigidBroadphaseRuntime.emitAttempts) || 0,
           duplicatesRejected: Number(sim.rigidRigidBroadphaseRuntime.duplicatesRejected) || 0,
           pairsOut: Number(sim.rigidRigidBroadphaseRuntime.pairsOut) || 0,
@@ -8019,6 +8027,9 @@ window.__gpuLabApi = {
               dedupeMs: Number(entry?.dedupeMs) || 0,
               sortMs: Number(entry?.sortMs) || 0,
               totalBuildMs: Number(entry?.totalBuildMs) || 0,
+              jsMarshalMs: Number(entry?.jsMarshalMs) || 0,
+              backendComputeMs: Number(entry?.backendComputeMs) || 0,
+              backendMarshalPath: entry?.backendMarshalPath || null,
               backend: entry?.backend || 'js',
               reuseHit: entry?.reuseHit === true,
               reuseMiss: entry?.reuseMiss === true,
@@ -8043,6 +8054,8 @@ window.__gpuLabApi = {
           dedupeMs: 0,
           sortMs: 0,
           totalBuildMs: 0,
+          jsMarshalMs: 0,
+          backendComputeMs: 0,
           emitAttempts: 0,
           duplicatesRejected: 0,
           pairsOut: 0,

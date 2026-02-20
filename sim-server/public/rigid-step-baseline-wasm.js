@@ -1,4 +1,4 @@
-const WASM_URL = '/wasm/rigid-step-baseline.wasm?v=20260219b';
+const WASM_URL = '/wasm/rigid-step-baseline.wasm?v=20260219c';
 const DEFAULT_HEAP_BASE = 65536;
 
 let runtimePromise = null;
@@ -60,6 +60,7 @@ async function getRuntime() {
           sampleCount: 0,
           counts: new Int32Array(0),
         },
+        pendingSync: null,
         frameBuffers: {
           bodyCapacity: 0,
           sampleCapacity: 0,
@@ -470,6 +471,56 @@ function ensureWasmLayout(runtime, bodyCount, sampleCount) {
   return { layout, wasmBufferReuse: prev ? 'resized' : 'init' };
 }
 
+function syncBodiesToJsWithRuntime(runtime, rigidBodies) {
+  const pending = runtime?.pendingSync;
+  if (!pending) {
+    return {
+      ok: true,
+      syncedBodies: 0,
+      syncCount: 0,
+      syncBytes: 0,
+      syncReason: null,
+      syncMs: 0,
+      pending: false,
+    };
+  }
+
+  const syncStartMs = nowMs();
+  const bodyCount = Math.max(0, Number(pending.bodyCount) || 0);
+  const layout = pending.layout;
+  const memF32 = new Float32Array(runtime.memory.buffer);
+
+  const outVx = memF32.subarray(layout.bodyVxPtr >> 2, (layout.bodyVxPtr >> 2) + bodyCount);
+  const outVy = memF32.subarray(layout.bodyVyPtr >> 2, (layout.bodyVyPtr >> 2) + bodyCount);
+  const outOmega = memF32.subarray(layout.bodyOmegaPtr >> 2, (layout.bodyOmegaPtr >> 2) + bodyCount);
+  const outX = memF32.subarray(layout.bodyXPtr >> 2, (layout.bodyXPtr >> 2) + bodyCount);
+  const outY = memF32.subarray(layout.bodyYPtr >> 2, (layout.bodyYPtr >> 2) + bodyCount);
+  const outTheta = memF32.subarray(layout.bodyThetaPtr >> 2, (layout.bodyThetaPtr >> 2) + bodyCount);
+
+  for (let i = 0; i < bodyCount; i++) {
+    const b = rigidBodies?.[i];
+    if (!b) continue;
+    b.vx = finiteOr(outVx[i], 0);
+    b.vy = finiteOr(outVy[i], 0);
+    b.omega = finiteOr(outOmega[i], 0);
+    b.x = finiteOr(outX[i], 0);
+    b.y = finiteOr(outY[i], 0);
+    b.theta = finiteOr(outTheta[i], 0);
+  }
+
+  const syncMs = nowMs() - syncStartMs;
+  runtime.pendingSync = null;
+  return {
+    ok: true,
+    syncedBodies: bodyCount,
+    syncCount: 1,
+    syncBytes: bodyCount * 6 * Float32Array.BYTES_PER_ELEMENT,
+    syncReason: String(pending.syncReason || 'collision-boundary'),
+    syncMs,
+    pending: false,
+  };
+}
+
 function stepWithRuntime(runtime, args) {
   const totalStartMs = nowMs();
   const marshalStartMs = nowMs();
@@ -563,29 +614,39 @@ function stepWithRuntime(runtime, args) {
   )) | 0;
   const backendComputeMs = nowMs() - backendStartMs;
 
-  const outVx = memF32.subarray(layout.bodyVxPtr >> 2, (layout.bodyVxPtr >> 2) + bodyCount);
-  const outVy = memF32.subarray(layout.bodyVyPtr >> 2, (layout.bodyVyPtr >> 2) + bodyCount);
-  const outOmega = memF32.subarray(layout.bodyOmegaPtr >> 2, (layout.bodyOmegaPtr >> 2) + bodyCount);
-  const outX = memF32.subarray(layout.bodyXPtr >> 2, (layout.bodyXPtr >> 2) + bodyCount);
-  const outY = memF32.subarray(layout.bodyYPtr >> 2, (layout.bodyYPtr >> 2) + bodyCount);
-  const outTheta = memF32.subarray(layout.bodyThetaPtr >> 2, (layout.bodyThetaPtr >> 2) + bodyCount);
-
-  for (let i = 0; i < bodyCount; i++) {
-    const b = state.rigidBodies[i];
-    if (!b) continue;
-    b.vx = finiteOr(outVx[i], 0);
-    b.vy = finiteOr(outVy[i], 0);
-    b.omega = finiteOr(outOmega[i], 0);
-    b.x = finiteOr(outX[i], 0);
-    b.y = finiteOr(outY[i], 0);
-    b.theta = finiteOr(outTheta[i], 0);
-  }
-
   const statsIndex = layout.statsPtr >> 2;
   const rigidCarryTransfer = finiteOr(memF32[statsIndex], 0);
   const outSampleCount = Math.max(0, Math.round(finiteOr(memF32[statsIndex + 1], 0)));
 
   const copyOutBytes = bodyCount * 6 * Float32Array.BYTES_PER_ELEMENT;
+  const deferSyncToJs = args?.deferSyncToJs === true;
+
+  if (deferSyncToJs) {
+    runtime.pendingSync = {
+      layout,
+      bodyCount,
+      syncReason: String(args?.syncReason || 'collision-boundary'),
+    };
+  } else {
+    runtime.pendingSync = null;
+    const outVx = memF32.subarray(layout.bodyVxPtr >> 2, (layout.bodyVxPtr >> 2) + bodyCount);
+    const outVy = memF32.subarray(layout.bodyVyPtr >> 2, (layout.bodyVyPtr >> 2) + bodyCount);
+    const outOmega = memF32.subarray(layout.bodyOmegaPtr >> 2, (layout.bodyOmegaPtr >> 2) + bodyCount);
+    const outX = memF32.subarray(layout.bodyXPtr >> 2, (layout.bodyXPtr >> 2) + bodyCount);
+    const outY = memF32.subarray(layout.bodyYPtr >> 2, (layout.bodyYPtr >> 2) + bodyCount);
+    const outTheta = memF32.subarray(layout.bodyThetaPtr >> 2, (layout.bodyThetaPtr >> 2) + bodyCount);
+
+    for (let i = 0; i < bodyCount; i++) {
+      const b = state.rigidBodies[i];
+      if (!b) continue;
+      b.vx = finiteOr(outVx[i], 0);
+      b.vy = finiteOr(outVy[i], 0);
+      b.omega = finiteOr(outOmega[i], 0);
+      b.x = finiteOr(outX[i], 0);
+      b.y = finiteOr(outY[i], 0);
+      b.theta = finiteOr(outTheta[i], 0);
+    }
+  }
 
   return {
     ok: true,
@@ -598,10 +659,11 @@ function stepWithRuntime(runtime, args) {
     topologyCacheHit: state.topologyCacheHit,
     wasmBufferReuse,
     includesPostIntegrate: true,
-    syncCount: 1,
-    syncBytes: copyOutBytes,
-    syncReason: 'collision-boundary',
+    syncCount: deferSyncToJs ? 0 : 1,
+    syncBytes: deferSyncToJs ? 0 : copyOutBytes,
+    syncReason: deferSyncToJs ? null : 'post-step-immediate',
     copyInBytes,
+    pendingSync: deferSyncToJs,
   };
 }
 
@@ -610,5 +672,14 @@ export async function loadRigidStepBaselineBackendWasm() {
   return {
     label: 'wasm-rigid-step-v3',
     stepBodies: (args) => stepWithRuntime(runtime, args),
+    syncBodiesToJs: ({ bodies, reason } = {}) => {
+      if (runtime?.pendingSync && reason) {
+        runtime.pendingSync.syncReason = String(reason);
+      }
+      const rigidBodies = Array.isArray(bodies?.rigid)
+        ? bodies.rigid
+        : (Array.isArray(bodies) ? bodies : []);
+      return syncBodiesToJsWithRuntime(runtime, rigidBodies);
+    },
   };
 }

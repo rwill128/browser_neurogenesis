@@ -4632,6 +4632,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     syncBytes: 0,
     syncReason: null,
     copyInBytes: 0,
+    pendingSync: false,
   };
   if (solverPath === 'gpu-only') {
     rigidCarryTransfer = await stepRigidBodiesGpuOnly({
@@ -4716,6 +4717,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           allowPassEdgeFlowPush,
           postVelocityCap: 4.0,
           postOmegaCap: 0.22,
+          deferSyncToJs: true,
+          syncReason: 'collision-boundary',
         });
         if (wasmRigid?.ok === false) {
           throw new Error(String(wasmRigid?.reason || 'rigid-step-rejected'));
@@ -4736,6 +4739,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           syncBytes: Number(wasmRigid?.syncBytes) || 0,
           syncReason: wasmRigid?.syncReason || null,
           copyInBytes: Number(wasmRigid?.copyInBytes) || 0,
+          pendingSync: wasmRigid?.pendingSync === true,
         };
       } catch (err) {
         rigidCarryTransfer = runRigidBaselineCpu();
@@ -4754,6 +4758,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           syncBytes: 0,
           syncReason: null,
           copyInBytes: 0,
+          pendingSync: false,
         };
       }
     } else {
@@ -4773,6 +4778,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         syncBytes: 0,
         syncReason: null,
         copyInBytes: 0,
+        pendingSync: false,
       };
     }
   }
@@ -5231,6 +5237,30 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
   }
 
   recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.rigidPostIntegrate.gpuOnly' : 'bodies.rigidPostIntegrate.baseline', performance.now() - rigidPostIntegrateStageStartMs);
+
+  if (
+    solverPath !== 'gpu-only'
+    && sim?.rigidStepBaselineRuntime?.mode === 'wasm'
+    && sim?.rigidStepBaselineRuntime?.pendingSync === true
+    && sim?.rigidStepBaselineBackend
+    && typeof sim.rigidStepBaselineBackend.syncBodiesToJs === 'function'
+  ) {
+    try {
+      const sync = sim.rigidStepBaselineBackend.syncBodiesToJs({
+        bodies,
+        reason: 'collision-boundary',
+      });
+      sim.rigidStepBaselineRuntime.syncCount = Number(sync?.syncCount) || 0;
+      sim.rigidStepBaselineRuntime.syncBytes = Number(sync?.syncBytes) || 0;
+      sim.rigidStepBaselineRuntime.syncReason = sync?.syncReason || 'collision-boundary';
+      sim.rigidStepBaselineRuntime.pendingSync = sync?.pending === true;
+    } catch (err) {
+      sim.rigidStepBaselineRuntime.syncCount = 0;
+      sim.rigidStepBaselineRuntime.syncBytes = 0;
+      sim.rigidStepBaselineRuntime.syncReason = `sync-error:${String(err?.message || err)}`;
+      sim.rigidStepBaselineRuntime.pendingSync = true;
+    }
+  }
 
   const rigidContactDebug = [];
 
@@ -7365,7 +7395,7 @@ async function initSim() {
     highlightSegmentId: null,
     highlightUntilFrame: 0,
     softIntegrateRuntime: { mode: 'cpu-baseline', reason: 'init' },
-    rigidStepBaselineRuntime: { mode: 'cpu-baseline', reason: 'init', processedBodies: 0, sampleCount: 0, jsMarshalMs: 0, backendComputeMs: 0, totalMs: 0, topologyCacheHit: false, wasmBufferReuse: null, includesPostIntegrate: false, syncCount: 0, syncBytes: 0, syncReason: null, copyInBytes: 0 },
+    rigidStepBaselineRuntime: { mode: 'cpu-baseline', reason: 'init', processedBodies: 0, sampleCount: 0, jsMarshalMs: 0, backendComputeMs: 0, totalMs: 0, topologyCacheHit: false, wasmBufferReuse: null, includesPostIntegrate: false, syncCount: 0, syncBytes: 0, syncReason: null, copyInBytes: 0, pendingSync: false },
     postCollisionProjectionRuntime: { mode: 'cpu-baseline', reason: 'init', projectedNodes: 0, meanDelta: 0, jsMarshalMs: 0, backendComputeMs: 0, totalMs: 0 },
     frame: 0, t0: performance.now(),
   };
@@ -8307,6 +8337,7 @@ window.__gpuLabApi = {
         syncBytes: Number(sim?.rigidStepBaselineRuntime?.syncBytes) || 0,
         syncReason: sim?.rigidStepBaselineRuntime?.syncReason || null,
         copyInBytes: Number(sim?.rigidStepBaselineRuntime?.copyInBytes) || 0,
+        pendingSync: sim?.rigidStepBaselineRuntime?.pendingSync === true,
       },
       postCollisionProjectionRuntime: {
         mode: sim?.postCollisionProjectionRuntime?.mode || 'uninitialized',

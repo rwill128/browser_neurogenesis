@@ -487,6 +487,10 @@ function stepWithRuntime(runtime, args) {
       totalMs: jsMarshalMs,
       topologyCacheHit: state.topologyCacheHit,
       wasmBufferReuse: 'reused',
+      includesPostIntegrate: true,
+      syncCount: 0,
+      syncBytes: 0,
+      syncReason: null,
     };
   }
 
@@ -518,6 +522,15 @@ function stepWithRuntime(runtime, args) {
   memF32.set(state.sampleFy.subarray(0, sampleCount), layout.sampleFyPtr >> 2);
   memF32.set(state.sampleHoney.subarray(0, sampleCount), layout.sampleHoneyPtr >> 2);
 
+  const copyInBytes = (
+    (bodyCount * 13 * Float32Array.BYTES_PER_ELEMENT)
+    + ((bodyCount + 1) * Int32Array.BYTES_PER_ELEMENT)
+    + (sampleCount * 5 * Float32Array.BYTES_PER_ELEMENT)
+  );
+
+  const postVelocityCap = finiteOr(args?.postVelocityCap, 4.0);
+  const postOmegaCap = finiteOr(args?.postOmegaCap, 0.22);
+
   const backendStartMs = nowMs();
   const processedBodies = Number(runtime.exports.rsb_step_bodies(
     bodyCount,
@@ -544,6 +557,8 @@ function stepWithRuntime(runtime, args) {
     state.dtNorm,
     finiteOr(args?.dragK, 0),
     finiteOr(args?.worldSize, finiteOr(args?.n, 0)),
+    postVelocityCap,
+    postOmegaCap,
     layout.statsPtr,
   )) | 0;
   const backendComputeMs = nowMs() - backendStartMs;
@@ -570,6 +585,8 @@ function stepWithRuntime(runtime, args) {
   const rigidCarryTransfer = finiteOr(memF32[statsIndex], 0);
   const outSampleCount = Math.max(0, Math.round(finiteOr(memF32[statsIndex + 1], 0)));
 
+  const copyOutBytes = bodyCount * 6 * Float32Array.BYTES_PER_ELEMENT;
+
   return {
     ok: true,
     rigidCarryTransfer,
@@ -580,13 +597,18 @@ function stepWithRuntime(runtime, args) {
     totalMs: nowMs() - totalStartMs,
     topologyCacheHit: state.topologyCacheHit,
     wasmBufferReuse,
+    includesPostIntegrate: true,
+    syncCount: 1,
+    syncBytes: copyOutBytes,
+    syncReason: 'collision-boundary',
+    copyInBytes,
   };
 }
 
 export async function loadRigidStepBaselineBackendWasm() {
   const runtime = await getRuntime();
   return {
-    label: 'wasm-rigid-step-v2',
+    label: 'wasm-rigid-step-v3',
     stepBodies: (args) => stepWithRuntime(runtime, args),
   };
 }

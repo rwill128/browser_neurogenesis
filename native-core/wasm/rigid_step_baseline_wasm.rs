@@ -96,6 +96,8 @@ pub extern "C" fn rsb_step_bodies(
     dt_norm: f32,
     drag_k: f32,
     world_size: f32,
+    post_velocity_cap: f32,
+    post_omega_cap: f32,
     stats_ptr: U32,
 ) -> U32 {
     unsafe {
@@ -246,6 +248,25 @@ pub extern "C" fn rsb_step_bodies(
                 y = boundary_edge;
                 vy = -vy.abs() * e;
             }
+
+            let velocity_cap = if post_velocity_cap.is_finite() {
+                clamp(post_velocity_cap, 0.1, 1.0e9)
+            } else {
+                4.0
+            };
+            let post_omega_cap_abs = if post_omega_cap.is_finite() {
+                clamp(post_omega_cap.abs(), 0.01, 10.0)
+            } else {
+                0.22
+            };
+
+            let post_vmag = sqrt_approx(vx * vx + vy * vy);
+            if post_vmag > velocity_cap && velocity_cap > 1.0e-8 {
+                let inv_mag = 1.0 / if post_vmag > 1.0e-9 { post_vmag } else { 1.0e-9 };
+                vx = vx * inv_mag * velocity_cap;
+                vy = vy * inv_mag * velocity_cap;
+            }
+            omega = clamp(omega, -post_omega_cap_abs, post_omega_cap_abs);
 
             *body_vx.add(idx) = finite_or(vx, 0.0);
             *body_vy.add(idx) = finite_or(vy, 0.0);

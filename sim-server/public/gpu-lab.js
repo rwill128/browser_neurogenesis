@@ -4627,6 +4627,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     totalMs: 0,
     topologyCacheHit: false,
     wasmBufferReuse: null,
+    includesPostIntegrate: false,
+    syncCount: 0,
+    syncBytes: 0,
+    syncReason: null,
+    copyInBytes: 0,
   };
   if (solverPath === 'gpu-only') {
     rigidCarryTransfer = await stepRigidBodiesGpuOnly({
@@ -4709,6 +4714,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           sampleFluidForBodyCoupling,
           localHoneyDrag,
           allowPassEdgeFlowPush,
+          postVelocityCap: 4.0,
+          postOmegaCap: 0.22,
         });
         if (wasmRigid?.ok === false) {
           throw new Error(String(wasmRigid?.reason || 'rigid-step-rejected'));
@@ -4724,6 +4731,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           totalMs: Number(wasmRigid?.totalMs) || 0,
           topologyCacheHit: wasmRigid?.topologyCacheHit === true,
           wasmBufferReuse: wasmRigid?.wasmBufferReuse || null,
+          includesPostIntegrate: wasmRigid?.includesPostIntegrate === true,
+          syncCount: Number(wasmRigid?.syncCount) || 0,
+          syncBytes: Number(wasmRigid?.syncBytes) || 0,
+          syncReason: wasmRigid?.syncReason || null,
+          copyInBytes: Number(wasmRigid?.copyInBytes) || 0,
         };
       } catch (err) {
         rigidCarryTransfer = runRigidBaselineCpu();
@@ -4737,6 +4749,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           totalMs: 0,
           topologyCacheHit: false,
           wasmBufferReuse: null,
+          includesPostIntegrate: false,
+          syncCount: 0,
+          syncBytes: 0,
+          syncReason: null,
+          copyInBytes: 0,
         };
       }
     } else {
@@ -4751,6 +4768,11 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         totalMs: 0,
         topologyCacheHit: false,
         wasmBufferReuse: null,
+        includesPostIntegrate: false,
+        syncCount: 0,
+        syncBytes: 0,
+        syncReason: null,
+        copyInBytes: 0,
       };
     }
   }
@@ -5187,15 +5209,24 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
     });
     sim.rigidPostIntegrateRuntime = rigidPostIntegrateRuntime || { mode: 'cpu-fallback', reason: 'unknown' };
   } else {
-    sim.rigidPostIntegrateRuntime = { mode: 'cpu-baseline', reason: 'baseline-path' };
-    for (const rb of bodies.rigid) {
-      const vmag = Math.hypot(rb.vx, rb.vy);
-      const vcap = 4.0;
-      if (vmag > vcap) {
-        rb.vx = (rb.vx / vmag) * vcap;
-        rb.vy = (rb.vy / vmag) * vcap;
+    const rigidPostIntegrateChainedInWasm = sim?.rigidStepBaselineRuntime?.mode === 'wasm'
+      && sim?.rigidStepBaselineRuntime?.includesPostIntegrate === true;
+    if (rigidPostIntegrateChainedInWasm) {
+      sim.rigidPostIntegrateRuntime = {
+        mode: 'wasm-chained',
+        reason: sim?.rigidStepBaselineRuntime?.reason || 'wasm-rigid-step-chained',
+      };
+    } else {
+      sim.rigidPostIntegrateRuntime = { mode: 'cpu-baseline', reason: 'baseline-path' };
+      for (const rb of bodies.rigid) {
+        const vmag = Math.hypot(rb.vx, rb.vy);
+        const vcap = 4.0;
+        if (vmag > vcap) {
+          rb.vx = (rb.vx / vmag) * vcap;
+          rb.vy = (rb.vy / vmag) * vcap;
+        }
+        rb.omega = Math.max(-0.22, Math.min(0.22, rb.omega || 0));
       }
-      rb.omega = Math.max(-0.22, Math.min(0.22, rb.omega || 0));
     }
   }
 
@@ -7334,7 +7365,7 @@ async function initSim() {
     highlightSegmentId: null,
     highlightUntilFrame: 0,
     softIntegrateRuntime: { mode: 'cpu-baseline', reason: 'init' },
-    rigidStepBaselineRuntime: { mode: 'cpu-baseline', reason: 'init', processedBodies: 0, sampleCount: 0, jsMarshalMs: 0, backendComputeMs: 0, totalMs: 0, topologyCacheHit: false, wasmBufferReuse: null },
+    rigidStepBaselineRuntime: { mode: 'cpu-baseline', reason: 'init', processedBodies: 0, sampleCount: 0, jsMarshalMs: 0, backendComputeMs: 0, totalMs: 0, topologyCacheHit: false, wasmBufferReuse: null, includesPostIntegrate: false, syncCount: 0, syncBytes: 0, syncReason: null, copyInBytes: 0 },
     postCollisionProjectionRuntime: { mode: 'cpu-baseline', reason: 'init', projectedNodes: 0, meanDelta: 0, jsMarshalMs: 0, backendComputeMs: 0, totalMs: 0 },
     frame: 0, t0: performance.now(),
   };
@@ -8271,6 +8302,11 @@ window.__gpuLabApi = {
         totalMs: Number(sim?.rigidStepBaselineRuntime?.totalMs) || 0,
         topologyCacheHit: sim?.rigidStepBaselineRuntime?.topologyCacheHit === true,
         wasmBufferReuse: sim?.rigidStepBaselineRuntime?.wasmBufferReuse || null,
+        includesPostIntegrate: sim?.rigidStepBaselineRuntime?.includesPostIntegrate === true,
+        syncCount: Number(sim?.rigidStepBaselineRuntime?.syncCount) || 0,
+        syncBytes: Number(sim?.rigidStepBaselineRuntime?.syncBytes) || 0,
+        syncReason: sim?.rigidStepBaselineRuntime?.syncReason || null,
+        copyInBytes: Number(sim?.rigidStepBaselineRuntime?.copyInBytes) || 0,
       },
       postCollisionProjectionRuntime: {
         mode: sim?.postCollisionProjectionRuntime?.mode || 'uninitialized',

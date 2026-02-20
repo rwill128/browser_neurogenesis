@@ -95,6 +95,7 @@ const enableMembraneShapeMemoryEl = document.getElementById('enableMembraneShape
 const enableMembranePressureEl = document.getElementById('enableMembranePressure');
 const runtimeSolverPathEls = Array.from(document.querySelectorAll('input[name="runtimeSolverPath"]'));
 const runtimePipelineModeEls = Array.from(document.querySelectorAll('input[name="runtimePipelineMode"]'));
+const rigidRigidCandidateBackendEl = document.getElementById('rigidRigidCandidateBackend');
 
 const GENERATED_MINI_SCENARIOS_URL = '/generated-mini-scenarios.json';
 let generatedMiniScenarios = new Map();
@@ -111,6 +112,7 @@ const EMBED_MODE = (
 );
 setRuntimeSolverPath(urlParams.get('solverPath'), { syncUrl: false });
 setRuntimePipelineMode(urlParams.get('pipelineMode'), { syncUrl: false });
+setRigidRigidCandidateBackendMode(urlParams.get('rigidRigidCandidateBackend'), { syncUrl: false });
 if (EMBED_MODE) {
   document.body.classList.add('embed-mode');
 }
@@ -209,12 +211,41 @@ function getWorldSize(controls) {
   return (Number(controls?.n) || 0) * getWorldScale(controls);
 }
 
-function readRigidRigidCandidateBackendModeFromUrl() {
-  if (typeof window === 'undefined') return 'js';
-  const raw = new URLSearchParams(window.location.search || '').get('rigidRigidCandidateBackend');
+function normalizeRigidRigidCandidateBackendMode(raw) {
   const mode = String(raw || '').trim().toLowerCase();
   if (mode === 'wasm' || mode === 'wasm-rr' || mode === 'wasm-v1') return 'wasm';
   return 'js';
+}
+
+function readRigidRigidCandidateBackendModeFromUrl() {
+  if (typeof window === 'undefined') return 'js';
+  const raw = new URLSearchParams(window.location.search || '').get('rigidRigidCandidateBackend');
+  return normalizeRigidRigidCandidateBackendMode(raw);
+}
+
+function getRigidRigidCandidateBackendMode() {
+  return normalizeRigidRigidCandidateBackendMode(
+    rigidRigidCandidateBackendEl?.value ?? readRigidRigidCandidateBackendModeFromUrl(),
+  );
+}
+
+function setRigidRigidCandidateBackendMode(mode, { syncUrl = false } = {}) {
+  const normalized = normalizeRigidRigidCandidateBackendMode(mode);
+  if (rigidRigidCandidateBackendEl) {
+    rigidRigidCandidateBackendEl.value = normalized;
+  }
+  if (syncUrl && window?.history?.replaceState) {
+    const params = new URLSearchParams(window.location.search || '');
+    if (normalized === 'js') {
+      params.delete('rigidRigidCandidateBackend');
+    } else {
+      params.set('rigidRigidCandidateBackend', normalized);
+    }
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash || ''}`;
+    window.history.replaceState({}, '', nextUrl);
+  }
+  return normalized;
 }
 
 function normalizeFluidVelocityCap(raw) {
@@ -466,7 +497,7 @@ function readControls() {
     fastReadbackInterval: readFastReadbackIntervalFromUrl(),
     runtimeSolverPath: getRuntimeSolverPath(),
     runtimePipelineMode: getRuntimePipelineMode(),
-    rigidRigidCandidateBackendMode: readRigidRigidCandidateBackendModeFromUrl(),
+    rigidRigidCandidateBackendMode: getRigidRigidCandidateBackendMode(),
   };
 }
 
@@ -7626,6 +7657,15 @@ for (const pipelineEl of runtimePipelineModeEls) {
     await start();
   });
 }
+
+rigidRigidCandidateBackendEl?.addEventListener('change', async () => {
+  const selectedBackend = setRigidRigidCandidateBackendMode(rigidRigidCandidateBackendEl.value, { syncUrl: true });
+  if (sim?.controls) sim.controls.rigidRigidCandidateBackendMode = selectedBackend;
+  if (!running || !sim) return;
+  running = false;
+  sim = null;
+  await start();
+});
 
 runBtn.addEventListener('click', () => start().catch((e) => log({ ok: false, error: String(e) })));
 stopBtn.addEventListener('click', stop);

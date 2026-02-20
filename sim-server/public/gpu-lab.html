@@ -171,6 +171,15 @@
   </div>
 
   <div class="row">
+    <label title="Backend used for baseline rigid-rigid candidate building (JS default, WASM experimental).">Rigid-rigid candidate backend
+      <select id="rigidRigidCandidateBackend">
+        <option value="js" selected>JS (default)</option>
+        <option value="wasm">WASM (experimental)</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="row">
     <button id="runBtn">Start GPU fluid sim</button>
     <button id="stopBtn">Stop</button>
     <button id="clearViscBtn">Reset viscosity map</button>
@@ -334,6 +343,6 @@
   </div>
 
   <pre id="out">idle</pre>
-  <script type="module" src="/gpu-lab.js?v=20260219a"></script>
+  <script type="module" src="/gpu-lab.js?v=20260219b"></script>
 </body>
 </html>

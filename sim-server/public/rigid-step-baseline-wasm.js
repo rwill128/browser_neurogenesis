@@ -521,6 +521,24 @@ function syncBodiesToJsWithRuntime(runtime, rigidBodies) {
   };
 }
 
+function getRigidStateViewWithRuntime(runtime) {
+  const pending = runtime?.pendingSync;
+  if (!pending?.layout) return null;
+  const layout = pending.layout;
+  const bodyCount = Math.max(0, Number(pending.bodyCount) || 0);
+  const memF32 = new Float32Array(runtime.memory.buffer);
+  return {
+    bodyCount,
+    x: memF32.subarray(layout.bodyXPtr >> 2, (layout.bodyXPtr >> 2) + bodyCount),
+    y: memF32.subarray(layout.bodyYPtr >> 2, (layout.bodyYPtr >> 2) + bodyCount),
+    theta: memF32.subarray(layout.bodyThetaPtr >> 2, (layout.bodyThetaPtr >> 2) + bodyCount),
+    vx: memF32.subarray(layout.bodyVxPtr >> 2, (layout.bodyVxPtr >> 2) + bodyCount),
+    vy: memF32.subarray(layout.bodyVyPtr >> 2, (layout.bodyVyPtr >> 2) + bodyCount),
+    omega: memF32.subarray(layout.bodyOmegaPtr >> 2, (layout.bodyOmegaPtr >> 2) + bodyCount),
+    source: 'wasm-pending',
+  };
+}
+
 function stepWithRuntime(runtime, args) {
   const totalStartMs = nowMs();
   const marshalStartMs = nowMs();
@@ -672,6 +690,7 @@ export async function loadRigidStepBaselineBackendWasm() {
   return {
     label: 'wasm-rigid-step-v3',
     stepBodies: (args) => stepWithRuntime(runtime, args),
+    getRigidStateView: () => getRigidStateViewWithRuntime(runtime),
     syncBodiesToJs: ({ bodies, reason } = {}) => {
       if (runtime?.pendingSync && reason) {
         runtime.pendingSync.syncReason = String(reason);

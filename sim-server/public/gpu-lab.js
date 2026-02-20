@@ -5238,27 +5238,36 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
 
   recordPipelineTiming(sim, solverPath === 'gpu-only' ? 'bodies.rigidPostIntegrate.gpuOnly' : 'bodies.rigidPostIntegrate.baseline', performance.now() - rigidPostIntegrateStageStartMs);
 
+  let pendingRigidStateView = null;
   if (
     solverPath !== 'gpu-only'
     && sim?.rigidStepBaselineRuntime?.mode === 'wasm'
     && sim?.rigidStepBaselineRuntime?.pendingSync === true
     && sim?.rigidStepBaselineBackend
-    && typeof sim.rigidStepBaselineBackend.syncBodiesToJs === 'function'
+    && typeof sim.rigidStepBaselineBackend.getRigidStateView === 'function'
   ) {
     try {
-      const sync = sim.rigidStepBaselineBackend.syncBodiesToJs({
-        bodies,
-        reason: 'collision-boundary',
-      });
-      sim.rigidStepBaselineRuntime.syncCount = Number(sync?.syncCount) || 0;
-      sim.rigidStepBaselineRuntime.syncBytes = Number(sync?.syncBytes) || 0;
-      sim.rigidStepBaselineRuntime.syncReason = sync?.syncReason || 'collision-boundary';
-      sim.rigidStepBaselineRuntime.pendingSync = sync?.pending === true;
-    } catch (err) {
-      sim.rigidStepBaselineRuntime.syncCount = 0;
-      sim.rigidStepBaselineRuntime.syncBytes = 0;
-      sim.rigidStepBaselineRuntime.syncReason = `sync-error:${String(err?.message || err)}`;
-      sim.rigidStepBaselineRuntime.pendingSync = true;
+      pendingRigidStateView = sim.rigidStepBaselineBackend.getRigidStateView() || null;
+    } catch {
+      pendingRigidStateView = null;
+    }
+
+    if (!pendingRigidStateView && typeof sim.rigidStepBaselineBackend.syncBodiesToJs === 'function') {
+      try {
+        const sync = sim.rigidStepBaselineBackend.syncBodiesToJs({
+          bodies,
+          reason: 'pre-collision-fallback',
+        });
+        sim.rigidStepBaselineRuntime.syncCount = Number(sync?.syncCount) || 0;
+        sim.rigidStepBaselineRuntime.syncBytes = Number(sync?.syncBytes) || 0;
+        sim.rigidStepBaselineRuntime.syncReason = sync?.syncReason || 'pre-collision-fallback';
+        sim.rigidStepBaselineRuntime.pendingSync = sync?.pending === true;
+      } catch (err) {
+        sim.rigidStepBaselineRuntime.syncCount = 0;
+        sim.rigidStepBaselineRuntime.syncBytes = 0;
+        sim.rigidStepBaselineRuntime.syncReason = `sync-error:${String(err?.message || err)}`;
+        sim.rigidStepBaselineRuntime.pendingSync = true;
+      }
     }
   }
 
@@ -5447,6 +5456,7 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
           includeRigidSoft: true,
           rigidRigidReuseCache,
           rigidRigidCandidateBackend: sim?.rigidRigidCandidateBackend || null,
+          rigidStateView: pendingRigidStateView,
         },
       );
       collisionCpuRuntime.substageMs.candidateBuildPre += performance.now() - preSceneBuildStartMs;
@@ -5474,6 +5484,31 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       rigidRigidBroadphaseRuntime.emitAttempts += Number(preBroadphase.stats?.emitAttempts) || 0;
       rigidRigidBroadphaseRuntime.duplicatesRejected += Number(preBroadphase.stats?.duplicatesRejected) || 0;
       rigidRigidBroadphaseRuntime.pairsOut += Number(preBroadphase.stats?.pairsOut) || 0;
+
+      if (
+        pendingRigidStateView
+        && sim?.rigidStepBaselineRuntime?.pendingSync === true
+        && sim?.rigidStepBaselineBackend
+        && typeof sim.rigidStepBaselineBackend.syncBodiesToJs === 'function'
+      ) {
+        try {
+          const sync = sim.rigidStepBaselineBackend.syncBodiesToJs({
+            bodies,
+            reason: 'narrowphase-boundary',
+          });
+          sim.rigidStepBaselineRuntime.syncCount = Number(sync?.syncCount) || 0;
+          sim.rigidStepBaselineRuntime.syncBytes = Number(sync?.syncBytes) || 0;
+          sim.rigidStepBaselineRuntime.syncReason = sync?.syncReason || 'narrowphase-boundary';
+          sim.rigidStepBaselineRuntime.pendingSync = sync?.pending === true;
+          pendingRigidStateView = null;
+        } catch (err) {
+          sim.rigidStepBaselineRuntime.syncCount = 0;
+          sim.rigidStepBaselineRuntime.syncBytes = 0;
+          sim.rigidStepBaselineRuntime.syncReason = `sync-error:${String(err?.message || err)}`;
+          sim.rigidStepBaselineRuntime.pendingSync = true;
+        }
+      }
+
       const preRigidNarrowphaseStartMs = performance.now();
       const preRigidMeta = Array.isArray(phaseScene?.rigidMeta) ? phaseScene.rigidMeta : [];
       const getPreRigidWorldPolys = createRigidWorldPolyPhaseCache(bodies.rigid, collisionCpuRuntime, rigidWorldPolyReuseCache);

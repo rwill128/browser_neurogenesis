@@ -627,6 +627,10 @@ function buildRigidSpatialHashState(rigidBodies, cellSize, options = {}) {
   const bodyCount = bodies.length;
   const bruteForcePairs = bodyCount > 1 ? (bodyCount * (bodyCount - 1)) / 2 : 0;
 
+  const rigidStateView = options?.rigidStateView || null;
+  const rigidStateX = rigidStateView?.x;
+  const rigidStateY = rigidStateView?.y;
+
   const cells = new Map();
   const rigidMeta = new Array(bodyCount);
   const bodyCellKeys = new Array(bodyCount);
@@ -657,8 +661,14 @@ function buildRigidSpatialHashState(rigidBodies, cellSize, options = {}) {
         radius: 0.5,
       };
     } else {
-      const bx = finiteOr(rb.x, 0);
-      const by = finiteOr(rb.y, 0);
+      const bxSource = (rigidStateX instanceof Float32Array && i < rigidStateX.length)
+        ? rigidStateX[i]
+        : rb.x;
+      const bySource = (rigidStateY instanceof Float32Array && i < rigidStateY.length)
+        ? rigidStateY[i]
+        : rb.y;
+      const bx = finiteOr(bxSource, 0);
+      const by = finiteOr(bySource, 0);
       const radius = Math.max(0.5, getRigidBroadphaseRadius(rb));
       rigidMeta[i] = { bx, by, radius };
 
@@ -1138,6 +1148,7 @@ export function buildCollisionPhaseSceneCache(rigidBodies, softNodes, softSpring
 
   const rigidState = buildRigidSpatialHashState(rigidBodies, cellSize, {
     prepareWasmCandidateState: resolvedRigidRigidBackend?.prepareWasmCandidateState === true,
+    rigidStateView: options?.rigidStateView || null,
   });
   const rigidRigidReuseCache = options?.rigidRigidReuseCache && typeof options.rigidRigidReuseCache === 'object'
     ? options.rigidRigidReuseCache

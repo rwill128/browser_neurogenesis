@@ -471,7 +471,7 @@ function ensureWasmLayout(runtime, bodyCount, sampleCount) {
   return { layout, wasmBufferReuse: prev ? 'resized' : 'init' };
 }
 
-function syncBodiesToJsWithRuntime(runtime, rigidBodies) {
+function syncBodiesToJsWithRuntime(runtime, rigidBodies, bodyIndices = null) {
   const pending = runtime?.pendingSync;
   if (!pending) {
     return {
@@ -497,24 +497,55 @@ function syncBodiesToJsWithRuntime(runtime, rigidBodies) {
   const outY = memF32.subarray(layout.bodyYPtr >> 2, (layout.bodyYPtr >> 2) + bodyCount);
   const outTheta = memF32.subarray(layout.bodyThetaPtr >> 2, (layout.bodyThetaPtr >> 2) + bodyCount);
 
-  for (let i = 0; i < bodyCount; i++) {
-    const b = rigidBodies?.[i];
-    if (!b) continue;
-    b.vx = finiteOr(outVx[i], 0);
-    b.vy = finiteOr(outVy[i], 0);
-    b.omega = finiteOr(outOmega[i], 0);
-    b.x = finiteOr(outX[i], 0);
-    b.y = finiteOr(outY[i], 0);
-    b.theta = finiteOr(outTheta[i], 0);
+  let syncIndices = null;
+  if (Array.isArray(bodyIndices) && bodyIndices.length > 0) {
+    const uniq = new Set();
+    for (const raw of bodyIndices) {
+      const idx = Number(raw) | 0;
+      if (idx < 0 || idx >= bodyCount) continue;
+      uniq.add(idx);
+    }
+    if (uniq.size > 0) {
+      syncIndices = Array.from(uniq.values());
+      syncIndices.sort((a, b) => a - b);
+    }
+  }
+
+  let syncedBodies = 0;
+  if (syncIndices) {
+    for (let k = 0; k < syncIndices.length; k++) {
+      const i = syncIndices[k];
+      const b = rigidBodies?.[i];
+      if (!b) continue;
+      b.vx = finiteOr(outVx[i], 0);
+      b.vy = finiteOr(outVy[i], 0);
+      b.omega = finiteOr(outOmega[i], 0);
+      b.x = finiteOr(outX[i], 0);
+      b.y = finiteOr(outY[i], 0);
+      b.theta = finiteOr(outTheta[i], 0);
+      syncedBodies += 1;
+    }
+  } else {
+    for (let i = 0; i < bodyCount; i++) {
+      const b = rigidBodies?.[i];
+      if (!b) continue;
+      b.vx = finiteOr(outVx[i], 0);
+      b.vy = finiteOr(outVy[i], 0);
+      b.omega = finiteOr(outOmega[i], 0);
+      b.x = finiteOr(outX[i], 0);
+      b.y = finiteOr(outY[i], 0);
+      b.theta = finiteOr(outTheta[i], 0);
+      syncedBodies += 1;
+    }
   }
 
   const syncMs = nowMs() - syncStartMs;
   runtime.pendingSync = null;
   return {
     ok: true,
-    syncedBodies: bodyCount,
-    syncCount: 1,
-    syncBytes: bodyCount * 6 * Float32Array.BYTES_PER_ELEMENT,
+    syncedBodies,
+    syncCount: syncedBodies > 0 ? 1 : 0,
+    syncBytes: syncedBodies * 6 * Float32Array.BYTES_PER_ELEMENT,
     syncReason: String(pending.syncReason || 'collision-boundary'),
     syncMs,
     pending: false,
@@ -691,14 +722,14 @@ export async function loadRigidStepBaselineBackendWasm() {
     label: 'wasm-rigid-step-v3',
     stepBodies: (args) => stepWithRuntime(runtime, args),
     getRigidStateView: () => getRigidStateViewWithRuntime(runtime),
-    syncBodiesToJs: ({ bodies, reason } = {}) => {
+    syncBodiesToJs: ({ bodies, reason, bodyIndices } = {}) => {
       if (runtime?.pendingSync && reason) {
         runtime.pendingSync.syncReason = String(reason);
       }
       const rigidBodies = Array.isArray(bodies?.rigid)
         ? bodies.rigid
         : (Array.isArray(bodies) ? bodies : []);
-      return syncBodiesToJsWithRuntime(runtime, rigidBodies);
+      return syncBodiesToJsWithRuntime(runtime, rigidBodies, bodyIndices);
     },
   };
 }

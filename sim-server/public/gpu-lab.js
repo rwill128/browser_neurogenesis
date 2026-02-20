@@ -5485,6 +5485,8 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       rigidRigidBroadphaseRuntime.duplicatesRejected += Number(preBroadphase.stats?.duplicatesRejected) || 0;
       rigidRigidBroadphaseRuntime.pairsOut += Number(preBroadphase.stats?.pairsOut) || 0;
 
+      const rigidSoftBroadphase = phaseScene.rigidSoft;
+
       if (
         pendingRigidStateView
         && sim?.rigidStepBaselineRuntime?.pendingSync === true
@@ -5492,9 +5494,27 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
         && typeof sim.rigidStepBaselineBackend.syncBodiesToJs === 'function'
       ) {
         try {
+          const syncRigidIndices = new Set();
+          for (const pair of (preBroadphase?.pairs || [])) {
+            const i = Number(pair?.[0]) | 0;
+            const j = Number(pair?.[1]) | 0;
+            if (i >= 0 && i < bodies.rigid.length) syncRigidIndices.add(i);
+            if (j >= 0 && j < bodies.rigid.length) syncRigidIndices.add(j);
+          }
+          const nodeCandidatesByRigid = rigidSoftBroadphase?.nodeCandidatesByRigid || [];
+          const edgeCandidatesByRigid = rigidSoftBroadphase?.edgeCandidatesByRigid || [];
+          for (let rbi = 0; rbi < bodies.rigid.length; rbi++) {
+            const nodeCount = (nodeCandidatesByRigid?.[rbi]?.length) || 0;
+            const edgeCount = (edgeCandidatesByRigid?.[rbi]?.length) || 0;
+            if (nodeCount > 0 || edgeCount > 0) {
+              syncRigidIndices.add(rbi);
+            }
+          }
+
           const sync = sim.rigidStepBaselineBackend.syncBodiesToJs({
             bodies,
             reason: 'narrowphase-boundary',
+            bodyIndices: Array.from(syncRigidIndices.values()),
           });
           sim.rigidStepBaselineRuntime.syncCount = Number(sync?.syncCount) || 0;
           sim.rigidStepBaselineRuntime.syncBytes = Number(sync?.syncBytes) || 0;
@@ -5551,7 +5571,6 @@ async function stepBodiesAndInject(sim, vxField, vyField) {
       collisionCpuRuntime.stageMs.rigidRigidPre += performance.now() - rigidRigidPreStartMs;
 
       const rigidSoftStartMs = performance.now();
-      const rigidSoftBroadphase = phaseScene.rigidSoft;
       rigidSoftBroadphaseRuntime.phases.push({
         iter,
         ...rigidSoftBroadphase.stats,

@@ -54,9 +54,24 @@ for (const filePath of walk(outDir)) {
 }
 
 const indexPath = resolve(outDir, 'index.html');
-if (!statSync(indexPath, { throwIfNoEntry: false })) {
-  writeFileSync(indexPath, '<!doctype html><meta http-equiv="refresh" content="0; url=./gpu-lab.html" />\n', 'utf8');
-}
+writeFileSync(
+  indexPath,
+  `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Browser Neurogenesis: an interactive artificial-life simulation running in WebGPU." />
+  <meta http-equiv="refresh" content="0; url=./gpu-lab.html" />
+  <title>Browser Neurogenesis</title>
+</head>
+<body>
+  <p><a href="./gpu-lab.html">Open Browser Neurogenesis</a></p>
+</body>
+</html>
+`,
+  'utf8',
+);
 
 console.log(`[build-lab-pages] copied ${srcDir} -> ${outDir}`);
 console.log(`[build-lab-pages] rewrote ${rewritten.length} files`);

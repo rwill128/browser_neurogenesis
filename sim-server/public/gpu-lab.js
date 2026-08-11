@@ -8001,6 +8001,13 @@ async function start() {
   });
 }
 
+function startWithErrorHandling() {
+  return start().catch((e) => {
+    running = false;
+    log({ ok: false, error: String(e) });
+  });
+}
+
 function stop() {
   running = false;
   if (fpsHud) fpsHud.textContent = 'FPS: --';
@@ -8057,7 +8064,7 @@ rigidRigidCandidateBackendEl?.addEventListener('change', async () => {
   await start();
 });
 
-runBtn.addEventListener('click', () => start().catch((e) => log({ ok: false, error: String(e) })));
+runBtn.addEventListener('click', startWithErrorHandling);
 stopBtn.addEventListener('click', stop);
 clearViscBtn.addEventListener('click', resetViscMap);
 if (scenarioPresetEl) {
@@ -8847,7 +8854,7 @@ if (EMBED_MODE) {
 
   log('embed ready: awaiting mesh-lab compiled spec');
 } else {
-  loadGeneratedMiniScenarios().finally(() => {
-    log('ready: choose scenario, paint, then Start');
-  });
+  loadGeneratedMiniScenarios()
+    .catch((e) => log({ ok: false, error: String(e) }))
+    .finally(startWithErrorHandling);
 }

@@ -1,149 +1,60 @@
 # Browser Neurogenesis
 
-*A living world where structure, flow, and adaptation co-evolve in real time.*
+Browser Neurogenesis is an experimental artificial-life simulation where fluid dynamics, physical embodiment, and evolutionary morphology interact in real time.
 
-Browser Neurogenesis is an experimental artificial-life simulation that blends **rigid-body constraints**, **soft-body deformation**, **fluid dynamics**, and **particle ecology** into one continuous system. Creatures are not pre-scripted sprites — they are physically embodied, energy-constrained, and mutation-driven organisms that survive (or fail) inside a dynamic environment.
+**[Launch Browser Neurogenesis](https://rwill128.github.io/browser_neurogenesis/)**
 
-## Core features
+The simulation runs directly in a WebGPU-capable desktop browser. It begins paused so you can choose a scenario and solver configuration before starting it.
 
-### 1) Hybrid body physics (rigid + soft)
-- Soft bodies made from points + springs
-- Rigid-constraint projection for true rigid edge behavior where required
-- Stability guardrails to prevent runaway stretch/explosion
+## What You Can Explore
 
-### 2) Fluid dynamics + viscosity landscapes
-- Grid-based fluid field with tunable solver iterations
-- Spatially varying viscosity landscapes
-- Dye emitters and flow-coupled visual/ecological feedback
+- WebGPU fluid simulation with tunable viscosity, flow, and obstacle fields
+- Rigid and deformable soft bodies coupled to the fluid environment
+- Energy-constrained creatures with heritable body structures
+- Mutation and reproduction systems for evolving morphology
+- Multiple collision, stabilization, and solver configurations
+- Runtime telemetry for performance, stability, and fallback behavior
+- CreatureSpec import/export for moving structures between tools
 
-### 3) Particle and energy ecology
-- Photosynthesis + local field effects
-- Energy costs per node/function type
-- Resource and density-gated reproduction controls
+## Live Experiments
 
-### 4) Evolutionary morphology
-- Heritable blueprints and phenotype persistence
-- Mutation pipeline focused on stable structure formation
-- Triangle-primitive mutation paradigm for controlled structural exploration
+- **[GPU Lab](https://rwill128.github.io/browser_neurogenesis/gpu-lab.html)** - Run the primary fluid, physics, and artificial-life simulation.
+- **[Mesh Lab](https://rwill128.github.io/browser_neurogenesis/mesh-lab.html)** - Design and inspect creature geometry.
+- **[Interaction Lab](https://rwill128.github.io/browser_neurogenesis/interaction-lab.html)** - Exercise focused body and environment interaction scenarios.
 
-### 5) Real-time observability and capture
-- World status + telemetry endpoints
-- Snapshot and frame timeline APIs
-- Random creature portraits + short creature MP4 clips (with neighbors/fluid context)
+## How It Works
 
-### 6) Multi-world sim server
-- Long-running worker-thread worlds
-- Live browser rendering against active worlds
-- Checkpoint/save/restore support via SQLite
+The runtime combines a grid-based fluid field with rigid-body and soft-body solvers. Creatures are represented as physical structures rather than animated sprites: their geometry, material behavior, energy use, and control systems determine how they move and survive.
 
----
+The project includes JavaScript reference implementations, WebGPU solver paths, selected WebAssembly acceleration, deterministic scenarios, and a Node-based regression harness. The browser UI exposes solver choices and instrumentation so behavior can be compared rather than treated as a black box.
 
-## Architecture at a glance
+## Repository Map
 
-This repo now has two explicit tracks:
+- `sim-server/public/` - Static browser labs and runtime modules
+- `sim-server/public/runtime-solvers/` - GPU-only runtime solver stages
+- `sim-server/public/wasm/` - WebAssembly acceleration modules
+- `node-harness/` - Deterministic simulations, fixtures, benchmarks, and regression tests
+- `native-core/` - Native physics experiments and WebAssembly source
+- `docs/` - Design notes, profiling results, and technical specifications
+- `scripts/build-lab-pages.mjs` - GitHub Pages bundle builder
 
-### Legacy simulation track
-- `js/` — browser runtime, simulation engine, UI, config
-- `js/engine/` — shared world-step core and runtime helpers
-- `js/classes/` — core physical/biological classes (SoftBody, Brain, etc.)
-- `index.html`
+## Local Development
 
-### GPU track (new)
-- `sim-server/public/gpu-lab.html` + `gpu-lab.js` — GPU Lab runtime (fluid + rigid/soft coupling)
-- `sim-server/public/mesh-lab.html` + `mesh-lab.js` — Mesh Lab authoring UI
-- `sim-server/public/field-to-structure-core.js` — field→mesh compiler
-- `sim-server/public/creature-spec.js` — export/import schema contract
+The hosted labs are static and do not require the simulation server.
 
-Shared infra:
-- `sim-server/` — server + API + static hosting for labs and app
-- `node-harness/` — deterministic scenario runs, regressions, tests
+```bash
+node scripts/build-lab-pages.mjs
+npx serve dist/labs
+```
 
-Specification docs:
-- `docs/CHEMOFLUID_ENERGY_BIOLOGY_SPEC.md` — ecosystem/energy model
-- `docs/CREATURE_GEOMETRY_EVOLVABILITY.md` — body/edge/vertex trait contract and mutation-ready knobs
-
-See `WORKSTREAMS.md` for strict scope boundaries and test split commands.
-
-### Geometry/evolvability quick map (implementation-adjacent)
-
-Project morphology is intentionally encoded as **data-first trait surfaces** that can be mutated later without runtime/editor side channels:
-
-- **Body traits** (`rigidBodies[]`, `softBodies[]` scalars)
-  - Scope: coarse behavior (`solverMode`, pressure/shape gains, correction toggles)
-  - Implementation rollout note: when enabling mutability, start with scalar coefficients/modes before topology edits
-- **Segment/line traits** (edge arrays + spring tuple slots)
-  - Scope: collision + transport semantics (`edgeBodyMode`, `edgeDyeMode`, `edgePermeabilityRGB`)
-  - Implementation rollout note: then add sparse per-edge edits with deterministic importer backfill/clamping
-- **Vertex traits** (`softBodies[].nodes[].shapeMemoryWeight`)
-  - Scope: localized deformability/tissue heterogeneity
-  - Implementation rollout note: per-node maps first, then new vertex traits once contract-normalized
-
-Deterministic contract checks for these trait levels live in:
-- `node-harness/tests/creatureSpecV2Contract.test.mjs`
-
-Run the focused contract suite:
+Run the standalone CreatureSpec contract tests with:
 
 ```bash
 node --test node-harness/tests/creatureSpecV2Contract.test.mjs
 ```
 
----
+The GitHub Pages workflow rebuilds and deploys the static bundle when relevant files are pushed to `main`.
 
-## Quick start
+## Current Focus
 
-### Browser mode
-Open `index.html` in a browser (or run from your local static server setup).
-
-### Sim server mode
-```bash
-cd sim-server
-npm install
-node server.mjs --port 8787 --scenario browser_default_big --seed 23
-```
-
-Then open:
-- Legacy app: http://localhost:8787/
-- GPU Lab: http://localhost:8787/gpu-lab.html
-- Mesh Lab: http://localhost:8787/mesh-lab.html
-
----
-
-## API examples
-
-```bash
-# world status
-curl -s http://localhost:8787/api/worlds/w0/status
-
-# lightweight telemetry snapshot
-curl -s "http://localhost:8787/api/worlds/w0/snapshot?mode=lite"
-
-# capture a 5s creature clip with context
-curl -s -X POST http://localhost:8787/api/worlds/w0/capture/creatureClip \
-  -H 'content-type: application/json' \
-  -d '{"durationSec":5,"zoomOutFactor":10,"includeFluid":true,"includeNeighbors":true}'
-```
-
----
-
-## Screenshots
-
-> Current captures from active local runs.
-
-### Creature portrait (context + fluid)
-![Creature portrait](sim-server/data/captures/creature-w0-292-tick24900-1770953582142.png)
-
-### Creature portrait (early-run morphology)
-![Creature portrait 2](sim-server/data/captures/creature-w0-74-tick1994-1770949784964.png)
-
----
-
-## Vision
-
-The long-term vision is a **high-fidelity, evolvable synthetic ecology** that stays interactive and inspectable:
-- stable enough for long-duration runs,
-- expressive enough for surprising emergent diversity,
-- instrumented enough for scientific debugging,
-- and visual enough to remain emotionally compelling.
-
-This is not just a simulation to watch.
-It is a world to shape, stress, measure, and learn from.
+This is an active research project rather than a finished game. Current work focuses on stable fluid-body coupling, evolvable creature geometry, deterministic evaluation, and keeping increasingly complex simulated organisms observable and debuggable.

@@ -1,6 +1,6 @@
 # Browser Neurogenesis
 
-Browser Neurogenesis is an experimental artificial-life simulation where fluid dynamics, physical embodiment, and evolutionary morphology interact in real time.
+Browser Neurogenesis is a research project exploring the building blocks of browser-based artificial life: real-time fluid dynamics, physical embodiment, deformable structures, and morphology authoring.
 
 **[Launch Browser Neurogenesis](https://rwill128.github.io/browser_neurogenesis/)**
 
@@ -10,8 +10,8 @@ The simulation runs directly in a WebGPU-capable desktop browser. It begins paus
 
 - WebGPU fluid simulation with tunable viscosity, flow, and obstacle fields
 - Rigid and deformable soft bodies coupled to the fluid environment
-- Energy-constrained creatures with heritable body structures
-- Mutation and reproduction systems for evolving morphology
+- Adjustable body-fluid momentum and rotational coupling
+- Deterministic scenarios for comparing runtime behavior
 - Multiple collision, stabilization, and solver configurations
 - Runtime telemetry for performance, stability, and fallback behavior
 - CreatureSpec import/export for moving structures between tools
@@ -24,7 +24,7 @@ The simulation runs directly in a WebGPU-capable desktop browser. It begins paus
 
 ## How It Works
 
-The runtime combines a grid-based fluid field with rigid-body and soft-body solvers. Creatures are represented as physical structures rather than animated sprites: their geometry, material behavior, energy use, and control systems determine how they move and survive.
+The runtime combines a grid-based fluid field with rigid-body and soft-body solvers. Creature structures are physical geometry rather than animated sprites: their shape, material behavior, constraints, and solver configuration determine how they move and deform.
 
 The project includes JavaScript reference implementations, WebGPU solver paths, selected WebAssembly acceleration, deterministic scenarios, and a Node-based regression harness. The browser UI exposes solver choices and instrumentation so behavior can be compared rather than treated as a black box.
 
@@ -57,4 +57,4 @@ The GitHub Pages workflow rebuilds and deploys the static bundle when relevant f
 
 ## Current Focus
 
-This is an active research project rather than a finished game. Current work focuses on stable fluid-body coupling, evolvable creature geometry, deterministic evaluation, and keeping increasingly complex simulated organisms observable and debuggable.
+This is an active research project rather than a finished game. Current work focuses on stable fluid-body coupling, deterministic evaluation, and morphology representations that can support future evolution experiments while remaining observable and debuggable.

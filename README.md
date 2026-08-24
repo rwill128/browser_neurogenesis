@@ -2,9 +2,9 @@
 
 Browser Neurogenesis is a research project exploring the building blocks of browser-based artificial life: real-time fluid dynamics, physical embodiment, deformable structures, and morphology authoring.
 
-**[Launch Browser Neurogenesis](https://rwill128.github.io/browser_neurogenesis/)**
+**[Launch the Full Simulation](https://rwill128.github.io/browser_neurogenesis/full-sim/?mode=default)**
 
-The simulation runs directly in a WebGPU-capable desktop browser. It begins paused so you can choose a scenario and solver configuration before starting it.
+The full simulation runs directly in a desktop browser and starts with the default large world. The focused GPU experiments remain available separately.
 
 ## What You Can Explore
 
@@ -18,7 +18,8 @@ The simulation runs directly in a WebGPU-capable desktop browser. It begins paus
 
 ## Live Experiments
 
-- **[GPU Lab](https://rwill128.github.io/browser_neurogenesis/gpu-lab.html)** - Run the primary fluid, physics, and artificial-life simulation.
+- **[Full Simulation](https://rwill128.github.io/browser_neurogenesis/full-sim/?mode=default)** - Run the full-size evolving world with creatures, environmental fields, configurable dynamics, and inspection tools.
+- **[GPU Lab](https://rwill128.github.io/browser_neurogenesis/gpu-lab.html)** - Experiment with body shapes, dimensions, fluid coupling, collision behavior, and solver settings.
 - **[Mesh Lab](https://rwill128.github.io/browser_neurogenesis/mesh-lab.html)** - Design and inspect creature geometry.
 - **[Interaction Lab](https://rwill128.github.io/browser_neurogenesis/interaction-lab.html)** - Exercise focused body and environment interaction scenarios.
 
@@ -31,6 +32,7 @@ The project includes JavaScript reference implementations, WebGPU solver paths, 
 ## Repository Map
 
 - `sim-server/public/` - Static browser labs and runtime modules
+- `sim-server/public/full-sim/` - Published snapshot of the full artificial-life simulation
 - `sim-server/public/runtime-solvers/` - GPU-only runtime solver stages
 - `sim-server/public/wasm/` - WebAssembly acceleration modules
 - `node-harness/` - Deterministic simulations, fixtures, benchmarks, and regression tests

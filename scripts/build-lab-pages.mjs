@@ -61,12 +61,12 @@ writeFileSync(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Browser Neurogenesis: an interactive artificial-life simulation running in WebGPU." />
-  <meta http-equiv="refresh" content="0; url=./gpu-lab.html" />
+  <meta name="description" content="Browser Neurogenesis: an interactive artificial-life and evolution simulation running in the browser." />
+  <meta http-equiv="refresh" content="0; url=./full-sim/?mode=default" />
   <title>Browser Neurogenesis</title>
 </head>
 <body>
-  <p><a href="./gpu-lab.html">Open Browser Neurogenesis</a></p>
+  <p><a href="./full-sim/?mode=default">Open Browser Neurogenesis</a></p>
 </body>
 </html>
 `,

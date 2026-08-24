@@ -1,0 +1,532 @@
+// --- Config Object ---
+const config = {
+    // --- Viewport and World Dimensions ---
+    WORLD_WIDTH: 20000,
+    WORLD_HEIGHT: 16000,
+    VIEW_PAN_SPEED: 80,
+    ZOOM_SENSITIVITY: 0.02,
+    MIN_ZOOM: 0.1,
+    MAX_ZOOM: 8.0,
+    isRightDragging: false,
+
+    // Spatial Grid for optimization
+    GRID_CELL_SIZE: 100,
+
+    // Moved these critical constants higher up
+    NEURON_CHANCE: 0.1,
+    MAX_PIXELS_PER_FRAME_DISPLACEMENT: 300,
+    MAX_SPRING_STRETCH_FACTOR: 20.0,
+    MAX_SPAN_PER_POINT_FACTOR: 300, // GRID_CELL_SIZE * 3
+    SPRING_OVERSTRETCH_KILL_ENABLED: false,
+    // Experiment toggle: force every spring/edge to rigid physics (overrides per-edge type).
+    FORCE_ALL_SPRINGS_RIGID: true,
+
+    // Motion guardrails: clamp extreme acceleration/implicit velocity before declaring instability.
+    PHYSICS_MOTION_GUARD_ENABLED: true,
+    PHYSICS_NONFINITE_FORCE_ZERO: true,
+    PHYSICS_MAX_ACCELERATION_MAGNITUDE: 120000,
+    PHYSICS_MAX_IMPLICIT_VELOCITY_PER_STEP: 240,
+    // Hard geometric guardrail: projection-style spring length cap before instability checks.
+    EDGE_LENGTH_HARD_CAP_ENABLED: true,
+    EDGE_LENGTH_HARD_CAP_FACTOR: 6.0,
+
+    // Edge-length telemetry (current simulated lengths, not rest lengths).
+    EDGE_LENGTH_TELEMETRY_ENABLED: true,
+    EDGE_LENGTH_TELEMETRY_SAMPLE_EVERY_N_STEPS: 10,
+    EDGE_LENGTH_TELEMETRY_MODE_BIN_SIZE: 0.01,
+    EDGE_LENGTH_TELEMETRY_HUGE_OUTLIER_IQR_MULTIPLIER: 3.0,
+    EDGE_LENGTH_TELEMETRY_HISTORY_MAX_SAMPLES: 120,
+    EDGE_LENGTH_TELEMETRY_MAX_RECORDED_OUTLIERS: 24,
+
+    // Instability policy: keep creatures in-bounds via correction instead of instant death.
+    KILL_ON_OUT_OF_BOUNDS: false,
+    // Sample high-fidelity instability diagnostics to logs every N removals (per reason).
+    INSTABILITY_DIAGNOSTIC_EVERY_N: 100,
+    INSTABILITY_DIAGNOSTIC_REASONS: ['physics_invalid_motion', 'physics_nan_position', 'physics_non_finite_position'],
+    DYE_PULL_RATE: 0.05,
+
+    // Dye ecology (new): heritable color receptors + soft gating/buffs by local fluid dye niche.
+    DYE_ECOLOGY_ENABLED: true,
+    DYE_RECEPTOR_HUE_TOLERANCE_MIN: 0.04,
+    DYE_RECEPTOR_HUE_TOLERANCE_MAX: 0.35,
+    DYE_RECEPTOR_RESPONSE_GAIN_MIN: 0.25,
+    DYE_RECEPTOR_RESPONSE_GAIN_MAX: 1.5,
+    DYE_RECEPTOR_MUTATION_CHANCE: 0.12,
+    DYE_RECEPTOR_MUTATION_MAGNITUDE: 0.22,
+    DYE_EFFECT_MIN_SCALE: 0.35,
+    DYE_EFFECT_MAX_SCALE: 1.9,
+    DYE_GROWTH_EFFECT_WEIGHT: 0.7,
+    DYE_REPRO_EFFECT_WEIGHT: 0.7,
+    DYE_EATER_EFFECT_WEIGHT: 0.65,
+    DYE_PREDATOR_EFFECT_WEIGHT: 0.65,
+    DYE_PHOTOSYNTHESIS_EFFECT_WEIGHT: 0.55,
+    DYE_SWIMMER_EFFECT_WEIGHT: 0.35,
+    DYE_JET_EFFECT_WEIGHT: 0.35,
+    DYE_EMITTER_EFFECT_WEIGHT: 0.4,
+    DYE_EMITTER_SELF_INHIBITION_THRESHOLD: 0.6,
+    DYE_EMITTER_SELF_INHIBITION_STRENGTH: 0.55,
+    DYE_OVEREXPOSURE_THRESHOLD: 0.82,
+    DYE_OVEREXPOSURE_ENERGY_DRAIN: 1.0,
+
+    // Rigid Spring Properties (New)
+    RIGID_SPRING_STIFFNESS: 500000,
+    RIGID_SPRING_DAMPING: 150,
+    // Enforce rigid edges with a post-integration distance-constraint projection pass.
+    RIGID_CONSTRAINT_PROJECTION_ENABLED: true,
+    RIGID_CONSTRAINT_PROJECTION_ITERATIONS: 8,
+    RIGID_CONSTRAINT_MAX_RELATIVE_ERROR: 0.001,
+    CHANCE_FOR_RIGID_SPRING: 0.5,
+
+    // Newborn spawn stabilization (new): world/dt-aware spring clamps for tiny worlds.
+    NEWBORN_STIFFNESS_CLAMP_ENABLED: true,
+    NEWBORN_STIFFNESS_WORLD_REF_DIM: 1200,
+    NEWBORN_STIFFNESS_DT_REF: 1 / 30,
+    NEWBORN_STIFFNESS_DT_EXPONENT: 2.0,
+    NEWBORN_RIGID_STIFFNESS_WORLD_EXPONENT: 2.0,
+    NEWBORN_NON_RIGID_STIFFNESS_WORLD_EXPONENT: 1.0,
+    NEWBORN_RIGID_STIFFNESS_MIN_SCALE: 0.005,
+    NEWBORN_NON_RIGID_STIFFNESS_MIN_SCALE: 0.05,
+    NEWBORN_NON_RIGID_STIFFNESS_BASE_CAP: 10000,
+    NEWBORN_NON_RIGID_DAMPING_BASE_CAP: 80,
+
+    // Spring Mutation Constants (New)
+    SPRING_DELETION_CHANCE: 0.02,
+    SPRING_ADDITION_CHANCE: 0.02,
+    SPRING_PROP_MUTATION_MAGNITUDE: 0.1,
+    MIN_SPRINGS_PER_NEW_NODE: 1,
+    MAX_SPRINGS_PER_NEW_NODE: 3,
+    NEW_SPRING_REST_LENGTH_VARIATION: 0.12,
+    NEW_SPRING_REST_LENGTH_BIAS: 0.88,
+    NEW_SPRING_REST_LENGTH_MAX: 14,
+    NEW_EDGE_STIFFNESS_MIN: 900,
+    NEW_EDGE_STIFFNESS_MAX: 3600,
+    NEW_EDGE_DAMPING_MIN: 8,
+    NEW_EDGE_DAMPING_MAX: 30,
+    INITIAL_BODY_POINT_DISTANCE_MIN: 3.5,
+    INITIAL_BODY_POINT_DISTANCE_MAX: 5.5,
+    INITIAL_SPRING_CONNECTION_RADIUS_MIN: 24,
+    INITIAL_SPRING_CONNECTION_RADIUS_MAX: 56,
+    SPRING_CONNECTION_RADIUS_MIN: 10,
+    SPRING_CONNECTION_RADIUS_MAX: 90,
+
+    // Stable initial body primitives (new): build first-gen creatures as triangle meshes
+    // with shared edges and uniform edge lengths.
+    INITIAL_TRIANGULATED_PRIMITIVES_ENABLED: true,
+    INITIAL_TRI_MESH_EDGE_RIGID_CHANCE: 0.0,
+    INITIAL_TRI_TEMPLATE_WEIGHT_TRIANGLE: 0.25,
+    INITIAL_TRI_TEMPLATE_WEIGHT_DIAMOND: 0.35,
+    INITIAL_TRI_TEMPLATE_WEIGHT_HEXAGON: 0.4,
+
+    // Body Scale Mutation Constants (New)
+    BODY_SCALE_MUTATION_CHANCE: 0.03,
+    BODY_SCALE_MUTATION_MAGNITUDE: 0.1,
+
+    // Spring Subdivision Mutation (New)
+    SPRING_SUBDIVISION_MUTATION_CHANCE: 0.02,
+
+    // Segment Duplication Mutation (New)
+    SEGMENT_DUPLICATION_CHANCE: 0.01,
+    MIN_SEGMENT_LENGTH_FOR_DUPLICATION: 3,
+    MAX_SEGMENT_LENGTH_FOR_DUPLICATION: 7,
+    SEGMENT_DUPLICATION_OFFSET_SCALE: 1.0,
+
+    // Original Radius Multipliers (will become base values)
+    EATING_RADIUS_MULTIPLIER_BASE: 0.1,
+    PREDATION_RADIUS_MULTIPLIER_BASE: 0.1,
+
+    // Exertion Bonuses for Radius Multipliers
+    EATING_RADIUS_MULTIPLIER_MAX_BONUS: 15.0,
+    PREDATION_RADIUS_MULTIPLIER_MAX_BONUS: 12.5,
+    ATTRACTION_RADIUS_MULTIPLIER_BASE: 0.1,
+    ATTRACTION_RADIUS_MULTIPLIER_MAX_BONUS: 20.0,
+    REPULSION_RADIUS_MULTIPLIER_BASE: 0.1,
+    REPULSION_RADIUS_MULTIPLIER_MAX_BONUS: 20.0,
+
+    ENERGY_PER_PARTICLE: 25,
+    ENERGY_SAPPED_PER_PREDATION_BASE: 3,
+    ENERGY_SAPPED_PER_PREDATION_MAX_BONUS: 7,
+    PREDATOR_RADIUS_GENE_MIN: 0.2,
+    PREDATOR_RADIUS_GENE_MAX: 14.0,
+    PREDATOR_RADIUS_GENE_MUTATION_CHANCE: 0.12,
+    PREDATOR_RADIUS_GENE_MUTATION_MAGNITUDE: 0.25,
+    PREDATOR_SELF_DAMAGE_BASE: 2.0,
+    PREDATOR_SELF_DAMAGE_MAX_BONUS: 6.0,
+    PREDATOR_SELF_DAMAGE_MAX_OVERLAPS_PER_TICK: 6,
+
+    // Dynamic Max Energy per Creature (New)
+    BASE_MAX_CREATURE_ENERGY: 100,
+    ENERGY_PER_MASS_POINT_BONUS: 25,
+    OFFSPRING_INITIAL_ENERGY_SHARE: 0.25,
+    REPRODUCTION_ADDITIONAL_COST_FACTOR: 0.1,
+    OFFSPRING_PLACEMENT_ATTEMPTS: 10,
+    OFFSPRING_PLACEMENT_CLEARANCE_RADIUS: 50,
+
+    // Growth/development controls (new): enables time-step body growth when energy+space permit.
+    GROWTH_ENABLED: true,
+    // Growth topology mode: attach growth nodes as triangles over existing edges.
+    GROWTH_TRIANGULATED_PRIMITIVES_ENABLED: true,
+    GROWTH_ENERGY_COST_SCALAR: 1.0,
+    GROWTH_COST_PER_NODE: 6.0,
+    GROWTH_COST_PER_EDGE: 2.0,
+    GROWTH_COST_PER_EDGE_LENGTH: 0.03,
+    GROWTH_PLACEMENT_ATTEMPTS_PER_NODE: 12,
+    GROWTH_MIN_POINT_CLEARANCE_FACTOR: 1.4,
+    GROWTH_MAX_POINTS_PER_CREATURE: 80,
+    // Scaled down (~1/3): keep newly grown node placements and edge lengths much tighter.
+    GROWTH_DISTANCE_MIN: 2,
+    GROWTH_DISTANCE_MID: 7,
+    GROWTH_DISTANCE_MAX: 20,
+    GROWTH_BASE_CHANCE_MIN: 0.01,
+    GROWTH_BASE_CHANCE_MAX: 0.06,
+    GROWTH_MIN_ENERGY_RATIO_MIN: 0.45,
+    GROWTH_MIN_ENERGY_RATIO_MAX: 0.9,
+    GROWTH_COOLDOWN_MIN: 6,
+    GROWTH_COOLDOWN_MAX: 45,
+    GROWTH_GENE_MUTATION_CHANCE: 0.12,
+    GROWTH_GENE_MUTATION_MAGNITUDE: 0.25,
+    GROWTH_STAGE_GENETICS_ENABLED: true,
+    GROWTH_STAGE_COUNT_MIN: 2,
+    GROWTH_STAGE_COUNT_MAX: 4,
+    GROWTH_MIN_WEIGHT: 0.05,
+
+    // Growth guardrails (new): keep ecology from exploding while preserving adaptation.
+    GROWTH_POP_SOFT_LIMIT_MULTIPLIER: 2.0,
+    GROWTH_POP_HARD_LIMIT_MULTIPLIER: 4.0,
+    GROWTH_MIN_THROTTLE_SCALE: 0.05,
+    GROWTH_SIZE_COST_EXPONENT: 1.15,
+    GROWTH_SIZE_COST_MAX_MULTIPLIER: 4.0,
+
+    // Actuation throttling (new): heritable per-node interval genes + type multipliers.
+    ACTUATION_INTERVAL_GENE_MIN: 1,
+    ACTUATION_INTERVAL_GENE_MAX: 8,
+    ACTUATION_INTERVAL_GENE_MUTATION_CHANCE: 0.15,
+    ACTUATION_INTERVAL_GENE_MUTATION_STEP: 1,
+    ACTUATION_COOLDOWN_MULTIPLIER_DEFAULT: 1.0,
+    ACTUATION_COOLDOWN_MULTIPLIER_EMITTER: 2.0,
+    ACTUATION_COOLDOWN_MULTIPLIER_SWIMMER: 1.0,
+    ACTUATION_COOLDOWN_MULTIPLIER_EATER: 1.5,
+    ACTUATION_COOLDOWN_MULTIPLIER_PREDATOR: 1.5,
+    ACTUATION_COOLDOWN_MULTIPLIER_JET: 1.0,
+    ACTUATION_COOLDOWN_MULTIPLIER_ATTRACTOR: 2.0,
+    ACTUATION_COOLDOWN_MULTIPLIER_REPULSOR: 2.0,
+    ACTUATION_COOLDOWN_MULTIPLIER_GRABBER: 1.5,
+    ACTUATION_COOLDOWN_MULTIPLIER_DEFAULT_PATTERN: 1.25,
+
+    // Cost split for exertion-driven nodes: small upkeep every tick + activation event cost.
+    ACTUATION_UPKEEP_COST_FRACTION: 0.2,
+    ACTUATION_ACTIVATION_COST_MULTIPLIER: 0.8,
+
+    // Creature update execution planning (distributed-compute foundation).
+    // - legacy_reverse: historical reverse-order loop
+    // - islands_deterministic: connected components from broad-phase grid, serial deterministic order
+    // - islands_shuffled: same components but randomized serial order (seeded RNG-aware)
+    CREATURE_EXECUTION_MODE: 'legacy_reverse',
+    CREATURE_ISLAND_NEIGHBOR_RADIUS_CELLS: null,
+    CREATURE_SHUFFLE_WITHIN_ISLAND: false,
+
+    MUTATION_RATE_PERCENT: 0.1,
+    MUTATION_CHANCE_BOOL: 0.05,
+    // Mutation strategy: triangle-stable topology with outward boundary-edge extrusion.
+    TRIANGLE_EXTRUSION_MUTATION_CHANCE_MULTIPLIER: 1.0,
+    MUTATION_CHANCE_NODE_TYPE: 0.1,
+    MUTATION_CHANCE_REASSIGN_NEURON_LINK: 0.02,
+    ADD_POINT_MUTATION_CHANCE: 0.03,
+
+    // Offspring viability guardrails (new): reject/fallback severely non-functional mutated blueprints.
+    OFFSPRING_MIN_BLUEPRINT_POINTS: 3,
+    OFFSPRING_MIN_NODE_TYPE_DIVERSITY: 2,
+    OFFSPRING_MIN_SPRING_TO_POINT_RATIO: 1.0,
+    OFFSPRING_REQUIRE_HARVESTER_NODE: true,
+    OFFSPRING_REQUIRE_ACTUATOR_NODE: true,
+    OFFSPRING_MAX_BLUEPRINT_RADIUS_WORLD_FRACTION: 0.45,
+
+    // Donor-module graft (HGT-like) mutation (new): copy connected donor module into offspring blueprint.
+    HGT_GRAFT_MUTATION_CHANCE: 0.04,
+    HGT_GRAFT_DONOR_SEARCH_RADIUS: 1200,
+    HGT_GRAFT_MIN_POINTS: 2,
+    HGT_GRAFT_MAX_POINTS: 6,
+    HGT_GRAFT_MAX_TOTAL_POINTS: 96,
+    HGT_GRAFT_ATTACHMENT_SPRINGS: 2,
+    NEW_POINT_OFFSET_RADIUS: 15,
+    isAnySoftBodyUnstable: false,
+    RED_DYE_POISON_STRENGTH: 0.5,
+    JET_MAX_VELOCITY_GENE_DEFAULT: 2.0,
+
+    // Cooldown for failed reproduction attempts
+    FAILED_REPRODUCTION_COOLDOWN_TICKS: 100,
+
+    // Initial reproduction cooldown gene range for newly generated creatures.
+    INITIAL_REPRODUCTION_COOLDOWN_GENE_MIN: 100,
+    INITIAL_REPRODUCTION_COOLDOWN_GENE_MAX: 5000,
+
+    // Reproduction control (new): density-weighted fertility + local resource coupling.
+    REPRO_FERTILITY_GLOBAL_SOFT_MULTIPLIER: 2.0,
+    REPRO_FERTILITY_GLOBAL_HARD_MULTIPLIER: 4.0,
+    REPRO_FERTILITY_GLOBAL_MIN_SCALE: 0.1,
+    REPRO_LOCAL_DENSITY_RADIUS: 450,
+    REPRO_FERTILITY_LOCAL_SOFT_NEIGHBORS: 6,
+    REPRO_FERTILITY_LOCAL_HARD_NEIGHBORS: 18,
+    REPRO_FERTILITY_LOCAL_MIN_SCALE: 0.2,
+    REPRO_MIN_FERTILITY_SCALE: 0.05,
+    REPRO_RESOURCE_MIN_NUTRIENT: 0.55,
+    REPRO_RESOURCE_MIN_LIGHT: 0.35,
+    REPRO_RESOURCE_NUTRIENT_DEBIT_PER_OFFSPRING: 0.03,
+    REPRO_RESOURCE_LIGHT_DEBIT_PER_OFFSPRING: 0.015,
+    REPRO_RESOURCE_FIELD_MIN_CLAMP: 0,
+
+    MAX_CREATURE_AGE_TICKS: 10000,
+    // Per-node aging model (new): nodes die individually when max age is reached.
+    NODE_MAX_AGE_TICKS_MIN: 5000,
+    NODE_MAX_AGE_TICKS_MAX: 30000,
+
+    // --- Global Variables & Constants (with initial hardcoded defaults) ---
+    CREATURE_POPULATION_FLOOR: 100,
+    CREATURE_POPULATION_CEILING: 10000,
+    PARTICLE_POPULATION_FLOOR: 0,
+    PARTICLE_POPULATION_CEILING: 0,
+    canCreaturesReproduceGlobally: true,
+
+    BODY_FLUID_ENTRAINMENT_FACTOR: 0.485,
+    // Fluid->body carry coupling gates: FLOATING nodes use full carry, NEUTRAL nodes use a reduced carry factor.
+    BODY_FLUID_CARRY_NEUTRAL_FACTOR: 0.18,
+    // Rigid-linked points receive a mild carry gain to keep rigid frame advection visible in strong currents.
+    BODY_FLUID_CARRY_RIGID_BOOST: 0.35,
+    // Optional stability guardrail: cap fluid carry displacement contribution per point per step (world units).
+    // Set <= 0 (or non-finite) to disable and preserve legacy behavior.
+    BODY_FLUID_CARRY_MAX_DISPLACEMENT_PER_STEP: null,
+    // Coupling guardrails: component-wise clamp before body->fluid impulse injection.
+    // Defaults track fluid max velocity so extreme forces are bounded without flattening regular dynamics.
+    BODY_FLUID_IMPULSE_COMPONENT_CAP: 10.0,
+    SWIMMER_TO_FLUID_IMPULSE_COMPONENT_CAP: 10.0,
+    JET_TO_FLUID_IMPULSE_COMPONENT_CAP: 10.0,
+    BODY_FLUID_MIN_IMPULSE_EPSILON: 0.0001,
+    FLUID_CURRENT_STRENGTH_ON_BODY: 19.7,
+    SOFT_BODY_PUSH_STRENGTH: 0.10,
+    BODY_REPULSION_STRENGTH: 100.0,
+    BODY_REPULSION_RADIUS_FACTOR: 5.0,
+    INTRA_BODY_REPULSION_ENABLED: true,
+    INTRA_BODY_REPULSION_STRENGTH: 10.0,
+    INTRA_BODY_REPULSION_RADIUS_FACTOR: 1.2,
+    INTRA_BODY_REPULSION_SKIP_CONNECTED: true,
+    GLOBAL_MUTATION_RATE_MODIFIER: 0.25,
+    MAX_DELTA_TIME_MS: 10,
+    IS_SIMULATION_PAUSED: false,
+    IS_EMITTER_EDIT_MODE: false,
+    EMITTER_STRENGTH: 3.0,
+    EMITTER_MOUSE_DRAG_SCALE: 0.1,
+    FLUID_MOUSE_DRAG_VELOCITY_SCALE: 0.1,
+
+    BASE_NODE_EXISTENCE_COST: 0.0,
+    EMITTER_NODE_ENERGY_COST: 0.0,
+    EATER_NODE_ENERGY_COST: 0.0,
+    PREDATOR_NODE_ENERGY_COST: 0.0,
+    NEURON_NODE_ENERGY_COST: 0.0,
+    SWIMMER_NODE_ENERGY_COST: 0.0,
+    PHOTOSYNTHETIC_NODE_ENERGY_COST: 0.0,
+    GRABBING_NODE_ENERGY_COST: 0.0,
+    EYE_NODE_ENERGY_COST: 0.0,
+    JET_NODE_ENERGY_COST: 0.0,
+    ATTRACTOR_NODE_ENERGY_COST: 0.0,
+    REPULSOR_NODE_ENERGY_COST: 0.0,
+    PHOTOSYNTHESIS_EFFICIENCY: 420.0,
+    // Photosynth topology constraints (relaxed by default to avoid over-penalizing photosynth lineages).
+    PHOTOSYNTH_FORCE_RIGID_CONNECTED_SPRINGS: false,
+    PHOTOSYNTH_NEUTRALIZE_NON_PHOTOSYNTH_NEIGHBORS: false,
+
+    // Eye Detection Radius (New)
+    EYE_DETECTION_RADIUS: 300,
+
+    FLUID_GRID_SIZE_CONTROL: 128,
+    FLUID_DIFFUSION: 0.00047,
+    FLUID_VISCOSITY: 0.0005,
+    // Field-specific linear-solver iteration controls (performance/quality tradeoff).
+    FLUID_SOLVER_ITERATIONS_VELOCITY: 4,
+    FLUID_SOLVER_ITERATIONS_PRESSURE: 3,
+    FLUID_SOLVER_ITERATIONS_DENSITY: 2,
+    // Multi-rate fluid stepping: run fluid solver every N world ticks.
+    FLUID_STEP_EVERY_N_TICKS: 1,
+    FLUID_FORCE_FULL_DOMAIN: false,
+    // Active-tile tracking scaffold (phase 1 sparse-fluid architecture).
+    FLUID_ACTIVE_TILE_SIZE_CELLS: 1,
+    FLUID_ACTIVE_TILE_HALO_TILES: 1,
+    FLUID_ACTIVE_TILE_TTL_STEPS: 12,
+    FLUID_MOMENTUM_ONLY_STEP_EVERY_N_TICKS: 10,
+    FLUID_EMPTY_STEP_EVERY_N_TICKS: 24,
+    FLUID_MOMENTUM_ACTIVITY_SPEED_THRESHOLD: 0.002,
+    FLUID_FADE_RATE: 0.005,
+    MAX_FLUID_VELOCITY_COMPONENT: 10.0,
+    LANDSCAPE_DYE_EMITTERS_ENABLED: false,
+    LANDSCAPE_DYE_EMITTER_COUNT: 0,
+    LANDSCAPE_DYE_EMITTER_STRENGTH_MIN: 8,
+    LANDSCAPE_DYE_EMITTER_STRENGTH_MAX: 18,
+    LANDSCAPE_DYE_EMITTER_RADIUS_CELLS: 1,
+    LANDSCAPE_DYE_EMITTER_PULSE_HZ_MIN: 0.02,
+    LANDSCAPE_DYE_EMITTER_PULSE_HZ_MAX: 0.09,
+    LANDSCAPE_VELOCITY_EMITTERS_ENABLED: false,
+    LANDSCAPE_VELOCITY_EMITTER_COUNT: 0,
+    LANDSCAPE_VELOCITY_EMITTER_STRENGTH_MIN: 0.4,
+    LANDSCAPE_VELOCITY_EMITTER_STRENGTH_MAX: 1.6,
+    LANDSCAPE_VELOCITY_EMITTER_RADIUS_CELLS: 2,
+    LANDSCAPE_VELOCITY_EMITTER_PULSE_HZ_MIN: 0.01,
+    LANDSCAPE_VELOCITY_EMITTER_PULSE_HZ_MAX: 0.05,
+    LANDSCAPE_VELOCITY_EMITTER_LOCAL_SPEED_CAP: 0.8,
+    LANDSCAPE_VELOCITY_EMITTER_BUDGET_MAX: 2.4,
+    LANDSCAPE_VELOCITY_EMITTER_BUDGET_REFILL_PER_SEC: 0.45,
+    IS_WORLD_WRAPPING: false,
+    PARTICLES_PER_SECOND: 0,
+    PARTICLE_FLUID_INFLUENCE: 0.9,
+    PARTICLE_BASE_LIFE_DECAY: 0.001,
+    IS_PARTICLE_LIFE_INFINITE: false,
+    PARTICLE_LIFE_DECAY_RANDOM_FACTOR: 0.002,
+    particleEmissionDebt: 0,
+    SHOW_FLUID_VELOCITY: false,
+
+    IS_NUTRIENT_EDIT_MODE: false,
+    SHOW_NUTRIENT_MAP: false,
+
+    NUTRIENT_BRUSH_VALUE: 1.0,
+    NUTRIENT_BRUSH_SIZE: 5,
+    NUTRIENT_BRUSH_STRENGTH: 0.1,
+    MIN_NUTRIENT_VALUE: 0.1,
+    MAX_NUTRIENT_VALUE: 2.0,
+    isPaintingNutrients: false,
+
+    IS_LIGHT_EDIT_MODE: false,
+    SHOW_LIGHT_MAP: false,
+    LIGHT_BRUSH_VALUE: 0.5,
+    LIGHT_BRUSH_SIZE: 5,
+    LIGHT_BRUSH_STRENGTH: 0.1,
+    MIN_LIGHT_VALUE: 0.0,
+    MAX_LIGHT_VALUE: 1.0,
+    isPaintingLight: false,
+
+    IS_VISCOSITY_EDIT_MODE: false,
+    SHOW_VISCOSITY_MAP: false,
+    VISCOSITY_BRUSH_VALUE: 1.0,
+    VISCOSITY_BRUSH_SIZE: 5,
+    VISCOSITY_BRUSH_STRENGTH: 0.1,
+    MIN_VISCOSITY_MULTIPLIER: 0.2,
+    MAX_VISCOSITY_MULTIPLIER: 10.0,
+    VISCOSITY_LANDSCAPE_NOISE_SCALE: 0.03,
+    VISCOSITY_LANDSCAPE_OCTAVES: 4,
+    VISCOSITY_LANDSCAPE_LACUNARITY: 2.0,
+    VISCOSITY_LANDSCAPE_GAIN: 0.55,
+    VISCOSITY_LANDSCAPE_CONTRAST: 0.75,
+    VISCOSITY_LANDSCAPE_BANDS: 10,
+    isPaintingViscosity: false,
+
+    totalSimulationTime: 0.0,
+    nutrientCyclePeriodSeconds: 300,
+    nutrientCycleBaseAmplitude: 0.65,
+    nutrientCycleWaveAmplitude: 0.35,
+    lightCyclePeriodSeconds: 480,
+    globalNutrientMultiplier: 1.0,
+    globalLightMultiplier: 1.0,
+
+    INITIAL_POPULATION_SIZE: 0, // Set in main.js based on floor
+
+    velocityEmitters: [],
+    currentEmitterPreview: null,
+    emitterDragStartCell: null,
+    selectedInspectBody: null,
+    selectedInspectPoint: null,
+    selectedInspectPointIndex: -1,
+    AUTO_FOLLOW_CREATURE: true,
+    AUTO_FOLLOW_ZOOM_MIN: 0.35,
+    AUTO_FOLLOW_ZOOM_MAX: 2.5,
+    isRightDragging: false,
+    lastPanMouseX: 0,
+    lastPanMouseY: 0,
+
+    // --- Neural Network Constants ---
+    NEURAL_INPUT_SIZE_BASE: 10,
+    NEURAL_INPUTS_PER_SPRING_SENSOR: 1,
+    NEURAL_OUTPUTS_PER_PREDATOR: 2,
+    NEURAL_OUTPUTS_PER_EATER: 2,
+    NEURAL_OUTPUTS_PER_ATTRACTOR: 2,
+    NEURAL_OUTPUTS_PER_REPULSOR: 2,
+    NEURAL_OUTPUTS_PER_EMITTER: 8,
+    NEURAL_OUTPUTS_PER_SWIMMER: 4,
+    NEURAL_OUTPUTS_PER_JET: 4,
+    NEURAL_OUTPUTS_PER_GRABBER_TOGGLE: 2,
+    NEURAL_INPUTS_PER_FLUID_SENSOR: 2,
+    NEURAL_INPUTS_PER_EYE: 3,
+
+    DEFAULT_HIDDEN_LAYER_SIZE_MIN: 5,
+    DEFAULT_HIDDEN_LAYER_SIZE_MAX: 30,
+    MAX_SWIMMER_OUTPUT_MAGNITUDE: 1.0,
+    MAX_JET_OUTPUT_MAGNITUDE: 2.0,
+    ATTRACTOR_MAX_FORCE: 5.0,
+    REPULSOR_MAX_FORCE: 5.0,
+    MAX_NEURAL_EMISSION_PULL_STRENGTH: 1.0,
+
+    // --- RL Training Constants ---
+    LEARNING_RATE: 0.001,
+    DISCOUNT_FACTOR_GAMMA: 0.99,
+    TRAINING_INTERVAL_FRAMES: 10,
+
+    DyeChannel: {
+        RED: 0,
+        GREEN: 1,
+        BLUE: 2,
+        AVERAGE: 3
+    },
+    DYE_COLORS: {
+        RED: [200, 50, 50],
+        GREEN: [50, 200, 50],
+        BLUE: [50, 50, 200]
+    },
+
+    // Subgraph Translocation Mutation (New - Complex)
+    SUBGRAPH_TRANSLOCATION_CHANCE: 0.15,
+    MIN_SUBGRAPH_SIZE_FOR_TRANSLOCATION: 3,
+    MAX_SUBGRAPH_SIZE_FOR_TRANSLOCATION: 8,
+
+    // Symmetrical Subgraph Duplication along an Edge (New - Complex)
+    SYMMETRIC_SUBGRAPH_DUPLICATION_CHANCE: 0.2,
+    MIN_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP: 3,
+    MAX_SUBGRAPH_SIZE_FOR_SYMMETRIC_DUP: 7,
+
+    // Whole-Body Symmetrical Duplication along an Edge (New - Very Complex)
+    SYMMETRICAL_BODY_DUPLICATION_CHANCE: 0.25,
+
+    // Heritable Reward Weights & Related (New)
+    REWARD_WEIGHT_MUTATION_CHANCE: 0.1,
+    REWARD_WEIGHT_MUTATION_MAGNITUDE: 0.2,
+    REWARD_WEIGHT_MIN: 0.0,
+    REWARD_WEIGHT_MAX: 2.0,
+    REPRODUCTION_REWARD_VALUE: 50.0,
+    DEFAULT_SURVIVAL_REWARD_WEIGHT: 0.01,
+
+    RLRewardStrategy_MUTATION_CHANCE: 0.05,
+    PARTICLE_PROXIMITY_REWARD_SCALE: 10.0,
+    ENERGY_SECOND_DERIVATIVE_REWARD_SCALE: 5.0,
+    CREATURE_PROXIMITY_REWARD_SCALE: 5.0,
+    CREATURE_DISTANCE_REWARD_SCALE: 5.0,
+
+    // New constant for Grabber Gene Mutation
+    GRABBER_GENE_MUTATION_CHANCE: 0.03,
+
+    // New: Chance for an Eye node to change its target type (particle vs. foreign body point)
+    EYE_TARGET_TYPE_MUTATION_CHANCE: 0.05,
+
+    // Default Activation Pattern for Brainless/Non-NN Controlled Nodes (New)
+    ActivationPatternType: {
+        FLAT: 0,
+        SINE: 1,
+        PULSE: 2
+    },
+    ACTIVATION_PATTERN_MUTATION_CHANCE: 0.05,
+    ACTIVATION_PARAM_MUTATION_MAGNITUDE: 0.2,
+    DEFAULT_ACTIVATION_LEVEL_MIN: 0.1,
+    DEFAULT_ACTIVATION_LEVEL_MAX: 0.7,
+    DEFAULT_ACTIVATION_PERIOD_MIN_TICKS: 50,
+    DEFAULT_ACTIVATION_PERIOD_MAX_TICKS: 300,
+
+    IS_HEADLESS_MODE: false,
+    USE_GPU_FLUID_SIMULATION: false,
+    IS_CREATURE_IMPORT_MODE: false,
+    IMPORTED_CREATURE_DATA: null,
+};
+
+export default config;
